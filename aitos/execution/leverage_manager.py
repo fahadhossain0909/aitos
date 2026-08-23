@@ -23,8 +23,8 @@ async def configure_session_leverage(
     an unexpected leverage setting.
     """
     leverage = int(configured_max_leverage)
-    if leverage < 1:
-        raise ValueError("configured leverage must be at least 1")
+    if configured_max_leverage != leverage or leverage < 1:
+        raise ValueError("configured leverage must be a positive integer")
 
     for symbol in symbols:
         response = await executor.set_leverage(symbol, leverage)
