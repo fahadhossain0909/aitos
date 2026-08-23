@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Iterable
+from urllib.parse import urlparse
 
 from .dataset_layout import DatasetLayout
 from .dataset_policy import DatasetGate
@@ -73,6 +74,12 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
         for block in iter(lambda: handle.read(chunk_size), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _validate_download_url(url: str) -> None:
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise ValueError(f"unsupported download URL scheme: {scheme or '<missing>'}")
 
 
 class CanonicalDataIndex:
@@ -141,6 +148,7 @@ class IncrementalDownloader:
             if not overwrite and self.manifest.valid(key, item.destination):
                 continue
 
+            _validate_download_url(item.url)
             item.destination.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 dir=item.destination.parent, delete=False
@@ -187,6 +195,7 @@ class IncrementalDownloader:
                 continue
             if not overwrite and self.manifest.valid(key, destination):
                 continue
+            _validate_download_url(url)
             destination.parent.mkdir(parents=True, exist_ok=True)
             with tempfile.NamedTemporaryFile(
                 dir=destination.parent, delete=False
