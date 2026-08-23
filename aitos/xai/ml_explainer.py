@@ -117,7 +117,7 @@ class TradeOutcomeClassifier:
         if not target.exists():
             return False
         with target.open("rb") as handle:
-            state = pickle.load(handle)
+            state = pickle.load(handle)  # nosec B301 - state is generated and stored locally by AITOS
         self._model = state["model"]
         self._n_samples_seen = int(state.get("n_samples_seen", 0))
         self._classes_seen = set(state.get("classes_seen", set()))
