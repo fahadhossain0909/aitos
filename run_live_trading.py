@@ -122,9 +122,7 @@ async def main() -> None:
 
     leverage_tier = float(os.getenv("AITOS_LEVERAGE_TIER", "1"))
     risk_limits = RiskLimits(max_leverage=leverage_tier)
-    await configure_session_leverage(
-        order_executor, SYMBOLS, risk_limits.max_leverage
-    )
+    await configure_session_leverage(order_executor, SYMBOLS, risk_limits.max_leverage)
     symbol_filter_refresher = SymbolFilterCacheRefresher(
         order_executor, SYMBOLS, ttl_seconds=24 * 60 * 60
     )
@@ -154,9 +152,7 @@ async def main() -> None:
         use_exchange_side_stops=True,
     )
     await initialize_all(components)
-    experience_recorder = LearningExperienceRecorder(
-        event_bus, market_repo, source="live"
-    )
+    experience_recorder = LearningExperienceRecorder(event_bus, market_repo, source="live")
     await experience_recorder.initialize({})
 
     drawdown_store = PersistentDrawdownStore(
