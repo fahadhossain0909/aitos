@@ -80,7 +80,7 @@ class ContinualLearningWorker:
           AND timestamp >= {{start:DateTime64(3)}}
         ORDER BY timestamp ASC
         LIMIT {{limit:UInt32}}
-        """
+        """  # nosec B608 - database is trusted configuration, query values are parameterized
         result = self.client.query(
             sql, parameters={"start": start, "limit": self.batch_limit}
         )
