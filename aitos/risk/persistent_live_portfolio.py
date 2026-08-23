@@ -55,7 +55,9 @@ class PersistentDrawdownStore:
 
     async def load_peak_equity(self) -> Optional[float]:
         if self._client is None:
-            raise RuntimeError("PersistentDrawdownStore.initialize() must be called first")
+            raise RuntimeError(
+                "PersistentDrawdownStore.initialize() must be called first"
+            )
         result = await self._client.query(
             """
             SELECT max(peak_equity_usd) AS peak_equity_usd
@@ -70,17 +72,27 @@ class PersistentDrawdownStore:
 
     async def record(self, equity_usd: float, peak_equity_usd: float) -> None:
         if self._client is None:
-            raise RuntimeError("PersistentDrawdownStore.initialize() must be called first")
+            raise RuntimeError(
+                "PersistentDrawdownStore.initialize() must be called first"
+            )
         await self._client.insert(
             "drawdown_tracking",
-            [[
-                datetime.now(timezone.utc),
-                self._account,
-                self._asset,
-                float(equity_usd),
-                float(peak_equity_usd),
-            ]],
-            column_names=["time", "account", "asset", "equity_usd", "peak_equity_usd"],
+            [
+                [
+                    datetime.now(timezone.utc),
+                    self._account,
+                    self._asset,
+                    float(equity_usd),
+                    float(peak_equity_usd),
+                ]
+            ],
+            column_names=[
+                "time",
+                "account",
+                "asset",
+                "equity_usd",
+                "peak_equity_usd",
+            ],
         )
 
     async def close(self) -> None:
@@ -92,7 +104,9 @@ class PersistentDrawdownStore:
 class PersistentLivePortfolioTracker:
     """Live tracker whose high-water mark survives process restarts."""
 
-    def __init__(self, order_executor, store: PersistentDrawdownStore, asset: str = "USDT"):
+    def __init__(
+        self, order_executor, store: PersistentDrawdownStore, asset: str = "USDT"
+    ):
         self._order_executor = order_executor
         self._store = store
         self._asset = asset
