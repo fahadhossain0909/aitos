@@ -28,7 +28,9 @@ class HealthServer:
         self._host = host
         self._port = port
         self._runner: Optional[web.AppRunner] = None
-        self._alert_webhook_url = alert_webhook_url or os.getenv("AITOS_ALERT_WEBHOOK_URL")
+        self._alert_webhook_url = alert_webhook_url or os.getenv(
+            "AITOS_ALERT_WEBHOOK_URL"
+        )
         self._alert_cooldown_seconds = alert_cooldown_seconds
         self._last_alert_at: dict[str, float] = {}
 
