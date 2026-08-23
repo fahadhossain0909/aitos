@@ -27,7 +27,7 @@ class ClickHouseMarketEventSource:
         host: str = "localhost",
         port: int = 8123,
         username: str = "default",
-        password: str = "",
+        password: str = "",  # nosec B107 - empty default is overridden by deployment config
         database: str = "aitos",
     ) -> None:
         self.client = clickhouse_connect.get_client(
@@ -66,14 +66,14 @@ class ClickHouseMarketEventSource:
         trade = self.client.query(
             "SELECT time, price, quantity, side, trade_id, is_buyer_maker "
             "FROM trade_ticks WHERE "
-            + where
+            + where  # nosec B608 - where contains only fixed parameterized predicates
             + " ORDER BY time, trade_id LIMIT {limit:UInt32}",
             parameters=params,
         )
         book = self.client.query(
             "SELECT time, bid_levels, ask_levels, last_update_id "
             "FROM order_book_snapshots WHERE "
-            + where
+            + where  # nosec B608 - where contains only fixed parameterized predicates
             + " ORDER BY time, last_update_id LIMIT {limit:UInt32}",
             parameters=params,
         )
