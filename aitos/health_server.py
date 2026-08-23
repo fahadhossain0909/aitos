@@ -1,18 +1,11 @@
-"""HealthServer — a small aiohttp-based HTTP server exposing ``/health``
-(JSON, one entry per module) and ``/metrics`` (Prometheus text format),
-so a process supervisor (systemd, Kubernetes, a load balancer) or a
-monitoring stack has something real to poll instead of just watching logs.
-
-Deliberately minimal: no auth, no TLS, no histogram/summary metric types
-— just per-module status and a handful of counters already sitting in
-each module's ``health_check()`` output. Bind it to localhost or behind a
-reverse proxy in any real deployment.
-"""
+"""HealthServer with JSON health, Prometheus metrics, and optional alerts."""
 
 from __future__ import annotations
 
+import os
 from typing import Iterable, List, Optional
 
+import aiohttp
 from aiohttp import web
 
 from aitos.core.contracts import AITOSModule, ModuleStatus
@@ -23,12 +16,20 @@ logger = get_logger("aitos.health_server")
 
 class HealthServer:
     def __init__(
-        self, modules: Iterable[AITOSModule], host: str = "127.0.0.1", port: int = 8090
+        self,
+        modules: Iterable[AITOSModule],
+        host: str = "127.0.0.1",
+        port: int = 8090,
+        alert_webhook_url: Optional[str] = None,
+        alert_cooldown_seconds: float = 900.0,
     ) -> None:
         self._modules: List[AITOSModule] = list(modules)
         self._host = host
         self._port = port
         self._runner: Optional[web.AppRunner] = None
+        self._alert_webhook_url = alert_webhook_url or os.getenv("AITOS_ALERT_WEBHOOK_URL")
+        self._alert_cooldown_seconds = alert_cooldown_seconds
+        self._last_alert_at: dict[str, float] = {}
 
     async def start(self) -> None:
         app = self._build_app()
@@ -55,10 +56,12 @@ class HealthServer:
     async def _handle_health(self, request: web.Request) -> web.Response:
         results = []
         overall_healthy = True
+        degraded_modules = []
         for module in self._modules:
             health = await module.health_check()
             if health.status != ModuleStatus.HEALTHY:
                 overall_healthy = False
+                degraded_modules.append(health.module_id)
             results.append(
                 {
                     "module_id": health.module_id,
@@ -68,11 +71,40 @@ class HealthServer:
                     "details": health.details,
                 }
             )
+
+        if degraded_modules:
+            await self._maybe_alert(degraded_modules)
+
         payload = {
             "status": "healthy" if overall_healthy else "degraded",
             "modules": results,
         }
         return web.json_response(payload, status=200 if overall_healthy else 503)
+
+    async def _maybe_alert(self, degraded_modules: List[str]) -> None:
+        if not self._alert_webhook_url:
+            return
+        import time
+
+        now = time.monotonic()
+        key = ",".join(sorted(degraded_modules))
+        if now - self._last_alert_at.get(key, 0.0) < self._alert_cooldown_seconds:
+            return
+        self._last_alert_at[key] = now
+        message = "AITOS health alert: degraded modules: " + ", ".join(degraded_modules)
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self._alert_webhook_url,
+                    json={"text": message},
+                    timeout=aiohttp.ClientTimeout(total=5),
+                ) as response:
+                    if response.status >= 400:
+                        logger.warning(
+                            "health alert webhook returned HTTP %s", response.status
+                        )
+        except Exception as exc:
+            logger.warning("health alert webhook failed: %s", exc)
 
     async def _handle_metrics(self, request: web.Request) -> web.Response:
         lines = [
