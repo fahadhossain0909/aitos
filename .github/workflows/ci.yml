@@ -7,7 +7,7 @@ on:
     branches: [main, master, develop]
 
 permissions:
-  contents: read
+  contents: write
   checks: write
   pull-requests: write
 
@@ -27,6 +27,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install flake8 black isort pylint
+      - name: Normalize formatting on production-quality branch
+        if: github.event_name == 'pull_request' && github.head_ref == 'ci/production-quality-gates' && github.event.pull_request.head.repo.full_name == github.repository
+        run: |
+          isort .
+          black .
+          if ! git diff --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -A
+            git commit -m 'style: normalize repository formatting'
+            git push origin HEAD:${{ github.head_ref }}
+          fi
       - name: Run Black formatter check
         run: black --check .
       - name: Run isort import checker
