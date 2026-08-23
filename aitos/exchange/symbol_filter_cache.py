@@ -32,9 +32,7 @@ class SymbolFilterCacheRefresher:
     async def start(self) -> None:
         await self._refresh()
         self._stopped.clear()
-        self._task = asyncio.create_task(
-            self._run(), name="binance-symbol-filter-refresh"
-        )
+        self._task = asyncio.create_task(self._run(), name="binance-symbol-filter-refresh")
 
     async def _refresh(self) -> Dict[str, SymbolFilters]:
         try:
