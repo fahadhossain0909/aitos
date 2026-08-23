@@ -17,6 +17,7 @@ from aitos.app import (
     shutdown_all,
 )
 from aitos.config.settings import get_settings
+from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.health_server import HealthServer
@@ -131,14 +132,14 @@ async def main() -> None:
         use_exchange_side_stops=True,
     )
     await initialize_all(components)
+    market_os_persistence = MarketOSPersistence(event_bus, market_repo)
+    await market_os_persistence.initialize({})
     experience_recorder = LearningExperienceRecorder(
         event_bus, market_repo, source="live"
     )
     await experience_recorder.initialize({})
-    # The container publishes 127.0.0.1:8091 to the host. Bind inside the
-    # container to all interfaces so Docker's port-forward can reach it.
     health_server = HealthServer(
-        components.all_modules() + [experience_recorder],
+        components.all_modules() + [experience_recorder, market_os_persistence],
         host="0.0.0.0",  # nosec B104 - required for Docker port forwarding
         port=HEALTH_SERVER_PORT,
     )
@@ -162,9 +163,7 @@ async def main() -> None:
                     extra={
                         "aitos_extra": {
                             "submitted": submitted,
-                            "open_trades": len(
-                                components.trade_lifecycle.get_open_trades()
-                            ),
+                            "open_trades": len(components.trade_lifecycle.get_open_trades()),
                             "account_equity_usd": tracker._last_known_equity_usd,
                             "rl_samples": rl_scorer.n_samples_seen,
                             "ml_samples": outcome_classifier.n_samples_seen,
@@ -186,6 +185,7 @@ async def main() -> None:
         save_attention_model(attention_explainer, attention_path)
         await health_server.stop()
         await experience_recorder.shutdown()
+        await market_os_persistence.shutdown()
         await shutdown_all(components)
         await order_executor.close()
         if market_repo is not None:
