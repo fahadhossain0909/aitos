@@ -9,306 +9,343 @@
   <img src="https://img.shields.io/badge/status-active%20development-blue?style=flat-square" alt="Active development">
 </p>
 
-# AITOS
+# AITOS — AI Trading Operating System
 
-AITOS is an AI Trading Operating System for Binance USDT-M Futures, with event-driven architecture, Redis Streams, ClickHouse persistence, optional Neo4j knowledge graph, paper trading, guarded live execution, backtesting, continual learning, risk controls, XAI/journaling, and Docker-based deployment.
+AITOS is an event-driven trading system for Binance USDT-M Futures. The repository currently combines market-data ingestion, Redis Streams, ClickHouse persistence, optional Neo4j knowledge-graph support, risk controls, opportunity scanning, paper trading, guarded live execution, XAI/journaling, continual learning, backtesting, health/metrics endpoints, and Docker-based deployment.
 
-> **Authoritative documentation:** this README combines the project overview with the audited Operations Manual. Operational claims below are based on the actual repository code/configuration rather than stale README claims.
+> **Canonical documentation:** this README is the consolidated project guide. Older standalone setup/deployment/CI documents contained duplicated material, generic templates, stale test counts, or configuration that no longer matches the current repository and are intentionally not treated as authoritative.
 
 ## Quick start
 
-### Paper trading
+### Local paper trading
 
 ```bash
-docker compose up -d redis clickhouse neo4j
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-python3 run_paper_trading.py
-```
-
-Health: `http://localhost:8090/health`
-
-### Test suite
-
-```bash
-PYTHONPATH=. pytest -v
-```
-
-The repository currently contains substantially more than the old `291 tests` claim; the old badge/count has intentionally been removed from this merged README.
-
-## Architecture
-
-```text
-Binance REST/WebSocket
-        │
-        ▼
-Redis Streams Event Bus
-        │
-        ├── Risk Engine ── Opportunity Scanner ── Trade Lifecycle
-        │                                      │
-        │                                      ▼
-        │                              Paper / Live Execution
-        │                                      │
-        ├── Journal / XAI ◄───────────────────┘
-        ├── RL feedback / continual learning
-        └── Neo4j Knowledge Graph (optional)
-
-ClickHouse = canonical long-term market history, journal and learning experience
-Redis      = real-time Event Bus
-Neo4j      = optional knowledge graph
-```
-
-## Core capabilities
-
-- Event-driven module contracts and Redis Streams Event Bus with consumer groups, DLQ, replay and request/reply.
-- Binance USDT-M Futures REST/WebSocket market-data adapter with rate limiting and reconnect handling.
-- Risk scoring, circuit breaker, hard/soft limits, sector exposure guard, position sizing and adaptive leverage.
-- Opportunity scanning using trend, volatility, CVD/order-flow, auction context, liquidity, funding, open interest, lead-lag and RL confidence.
-- Paper trading and separately guarded live trading.
-- Exchange-side stop-loss/take-profit orders and automatic reconciliation for live execution.
-- ExchangeInfo-based quantity/price filters and optional Binance hedge-mode support.
-- ClickHouse market-data/journal persistence, optional Neo4j knowledge graph, continual-learning worker and storage-maintenance worker.
-- XAI trade explanations, counterfactuals, online outcome classification and attention-based explanations.
-- Health/metrics endpoints, structured JSON logging, Docker Compose and GitHub Actions CI/CD.
-- Deterministic/lightweight and full L2/futures replay backtesting.
-
-## Important safety note
-
-`run_live_trading.py` places real orders. Live execution requires Binance credentials, explicit human session approval, matching hedge-mode configuration, and testnet verification first. Never grant withdrawal permission to the API key.
-
----
-
-# Operations Manual
-
-## 0. প্রজেক্ট এক নজরে
-
-চারটা runnable entrypoint:
-
-| Script | কাজ | Health port |
-|---|---|---|
-| `run_paper_trading.py` | Live Binance data, paper-traded (real order না) | 8090 |
-| `run_live_trading.py` | Real order, Binance testnet/mainnet | 8091 |
-| `run_continual_learning.py` | Backtest experience থেকে RL model train করে (background worker) | — |
-| `python3 -m aitos.backtest.cli` / `rich_cli` | Historical backtest (দুই mode) | — |
-
-Data layer: **Redis** (Event Bus, real-time), **ClickHouse** (দীর্ঘমেয়াদী market history + journal + learning experience), **Neo4j** (knowledge graph, optional)।
-
----
-
-## 1. PC (Local Development) Setup
-
-### 1.1 প্রয়োজনীয় জিনিস
-- Python 3.12 (3.10/3.11-ও CI-তে test হয়, কিন্তু Docker image 3.12 ব্যবহার করে)
-- Docker + Docker Compose plugin
-- Git
-
-### 1.2 Clone ও venv
-```bash
-git clone https://github.com/fahadhossain0909/aitos.git aitos
+git clone https://github.com/fahadhossain0909/aitos.git
 cd aitos
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-```
-শুধু backtest নিয়ে কাজ করলে হালকা dependency set:
-```bash
-pip install -r requirements-backtest.txt
-```
-
-### 1.3 Infra চালু করা (শুধু dependencies, app না)
-```bash
-docker compose up -d redis clickhouse neo4j
-```
-Redis **required** (Event Bus)। ClickHouse/Neo4j optional — না থাকলেও `run_paper_trading.py` চলবে, শুধু persistence/knowledge-graph অংশ skip হবে (log-এ warning আসবে)।
-
-### 1.4 Config
-```bash
 cp .env.example .env
+docker compose up -d redis clickhouse neo4j
+python3 run_paper_trading.py
 ```
-Local/paper-এর জন্য default values ঠিক আছে — Binance credential লাগবে না।
 
-### 1.5 Test suite চালানো
+Health endpoint:
+
+```text
+http://localhost:8090/health
+```
+
+Redis is the real-time Event Bus and is required by the application. ClickHouse and Neo4j are optional for components that can operate without persistence/graph storage.
+
+### Tests
+
 ```bash
 PYTHONPATH=. pytest -v
 ```
-এটা `fakeredis` আর mock দিয়ে চলে — Docker চালু না থাকলেও কাজ করবে, দ্রুত। বর্তমানে repo-তে backtest/learning/storage মডিউলসহ **~300+ test file/function** আছে (README-এ লেখা "291 tests" এখন পুরনো সংখ্যা — কোডবেস এরপর অনেক বেড়েছে: backtest engine, continual learning, order-flow/footprint/AMT engine, sector-exposure guard যোগ হয়েছে)।
 
-Backtest-specific test শুধু:
+Backtest-only tests:
+
 ```bash
 python -m pytest -q tests/backtest
 ```
 
-### 1.6 Local paper trading (venv-এ সরাসরি, Docker ছাড়া app)
+The repository has grown beyond the old `291 tests` documentation claim; no fixed test count is maintained here.
+
+## Architecture
+
+```text
+Binance REST / WebSocket
+          │
+          ▼
+   Redis Streams Event Bus
+          │
+    ┌─────┼───────────────────────────┐
+    ▼     ▼                           ▼
+  Risk  Opportunity Scanner       Data/Journaling
+  Engine       │                     │
+    │          ▼                     ▼
+    └────► Trade Lifecycle       ClickHouse
+               │
+          ┌────┴────┐
+          ▼         ▼
+       Paper      Live
+      Execution  Execution
+
+Neo4j Knowledge Graph = optional
+Continual Learning    = background worker
+XAI / Journal         = explanations + trade records
+```
+
+### Main capabilities
+
+- Binance USDT-M Futures REST/WebSocket market-data adapter with rate limiting and reconnect handling.
+- Redis Streams Event Bus with consumer groups, acknowledgements, replay/request-reply and DLQ handling.
+- Risk scoring, circuit breaker, hard/soft limits, sector exposure protection, position sizing and adaptive leverage.
+- Opportunity scoring using market structure, volatility, CVD/order flow, auction context, liquidity, funding, open interest, lead-lag and RL signals.
+- Paper trading and separately guarded live execution.
+- Exchange-side protection/reconciliation for live orders where configured.
+- ClickHouse market-data, journal and learning-experience persistence.
+- Optional Neo4j knowledge graph.
+- XAI explanations, counterfactuals and attention-based explanations.
+- Continual-learning worker and online RL/ML feedback components.
+- Lightweight and full L2/futures historical replay backtesting.
+- Health/metrics endpoints, structured JSON logging and Docker Compose deployment.
+
+## Runnable entrypoints
+
+| Entrypoint | Purpose | Health |
+|---|---|---:|
+| `run_paper_trading.py` | Live Binance public data with simulated orders | `8090` |
+| `run_live_trading.py` | Guarded real/testnet execution | `8091` |
+| `run_continual_learning.py` | Background continual-learning worker | — |
+| `python3 -m aitos.backtest.cli` | Historical backtesting | — |
+| `python3 -m aitos.backtest.rich_cli` | Rich L2/futures historical replay | — |
+
+## Local development
+
+### Requirements
+
+- Python 3.10–3.12; Python 3.12 is the primary project/Docker version.
+- Docker and Docker Compose.
+- Git.
+
+### Backtest dependencies
+
+For a lighter backtesting environment:
+
+```bash
+pip install -r requirements-backtest.txt
+```
+
+### Infrastructure
+
+```bash
+docker compose up -d redis clickhouse neo4j
+```
+
+### Configuration
+
+```bash
+cp .env.example .env
+```
+
+Paper trading does not require Binance API credentials because it uses public market data and simulated execution.
+
+## Backtesting
+
+Two backtesting paths are available:
+
+```bash
+python3 -m aitos.backtest.cli --help
+python3 -m aitos.backtest.rich_cli --help
+```
+
+The rich runner supports historical trade/order-book events, L2 execution, queue lifecycle simulation, futures margin, funding and configurable decision strategies. The canonical runner implementation is `aitos/backtest/aitos_runner.py`.
+
+## Paper trading
+
 ```bash
 python3 run_paper_trading.py
 ```
-এটা live Binance public data নিয়ে paper trade করবে, Ctrl-C-তে graceful shutdown। `http://localhost:8090/health` চেক করুন।
 
----
+Paper trading consumes live Binance market data but does not submit real exchange orders. It can run with local Redis and optionally ClickHouse/Neo4j. Use the health endpoint and structured logs to verify operation.
 
-## 2. VPS Setup (Production Deployment)
+## Live trading — safety critical
 
-### 2.1 Docker install
+`run_live_trading.py` can place real orders. Before enabling it:
+
+1. Configure Binance API credentials only when required.
+2. Use Binance testnet first.
+3. Verify `BINANCE_HEDGE_MODE` matches the account position mode.
+4. Keep human approval enabled for production actions.
+5. Never grant withdrawal permission to the API key.
+
+The Docker Compose live profile is intentionally separate from the default paper stack.
+
+## Production/VPS deployment
+
+### Install Docker
+
 ```bash
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
 newgrp docker
 docker compose version
 ```
-Oracle Cloud ARM (Ampere A1)-এ automatic arm64 build হয়ে যাবে — আলাদা কিছু করা লাগে না। কিন্তু `shap`-এর jonyalচcompiled wheel না থাকায় ARM-এ প্রথম `docker compose build` অনেক সময় নেবে (Dockerfile-এ তাই `build-essential`/`gcc`/`g++` রাখা আছে)।
 
-### 2.2 Clone
+### Clone
+
 ```bash
-git clone https://github.com/fahadhossain0909/aitos.git aitos
+git clone https://github.com/fahadhossain0909/aitos.git
 cd aitos
 ```
 
-### 2.3 Production `.env` — অবশ্যই বদলাতে হবে এই মানগুলো
-`.env.example` কপি করে **সব secret** নিজে generate করুন, default/blank রাখবেন না:
+### Configure secrets
 
 ```bash
 cp .env.example .env
-openssl rand -hex 32   # প্রতিটা secret-এর জন্য আলাদা করে চালান
+chmod 600 .env
 ```
 
-| Variable | কেন জরুরি |
-|---|---|
-| `REDIS_PASSWORD` | blank রাখলে Redis unauthenticated থাকে |
-| `CLICKHOUSE_PASSWORD` | default blank — production-এ অবশ্যই সেট করুন |
-| `NEO4J_PASSWORD` | default `changeme` — অবশ্যই বদলান |
-| `BINANCE_API_KEY` / `BINANCE_API_SECRET` | শুধু live trading-এর জন্য; **withdrawal permission কখনো দেবেন না** |
-| `BINANCE_TESTNET` | live trading যাচাই করা পর্যন্ত `true` রাখুন |
-| `BINANCE_HEDGE_MODE` | আপনার Binance account-এর position mode-এর সাথে মিলতে হবে, নাহলে `run_live_trading.py` startup-এই বন্ধ হয়ে যাবে |
+Production must use non-default secrets, especially:
 
-⚠️ **Audit finding**: `SETUP_GUIDE.md` এবং `.github/workflows/cd.yml`-এ যে secret list (`DATABASE_URL`, `API_KEY`, `SECRET_KEY`, `DEBUG`) দেখানো আছে, সেগুলো generic Django-স্টাইল template থেকে রয়ে গেছে — এই প্রজেক্টের actual কোড এগুলোর একটাও ব্যবহার করে না। CD workflow-এর "Create .env file on deployment server" ধাপটি `REDIS_PASSWORD`, `CLICKHOUSE_PASSWORD`, `NEO4J_PASSWORD`, `BINANCE_*` — এগুলোর কোনোটাই লেখে না, ফলে GitHub Actions দিয়ে auto-deploy করলে VPS-এর `.env`-এ real credential গুলো **অনুপস্থিত** থাকবে। যতক্ষণ `cd.yml` ঠিক না হচ্ছে, ততক্ষণ VPS-এ SSH করে `.env` ম্যানুয়ালি বসাতে হবে অথবা `cd.yml`-এর `.env` block-টা settings.py-র actual variable list দিয়ে rewrite করা দরকার।
+- `REDIS_PASSWORD`
+- `CLICKHOUSE_PASSWORD`
+- `NEO4J_PASSWORD`
+- `BINANCE_API_KEY` / `BINANCE_API_SECRET` when live execution is enabled
 
-### 2.4 চালু করা
+Do not commit `.env`.
+
+### Start
+
 ```bash
 docker compose up -d --build
-```
-এটা build করবে, Redis/ClickHouse/Neo4j healthcheck-এর জন্য অপেক্ষা করবে, তারপর `aitos-paper` অটো-স্টার্ট হবে (কোনো profile gate নেই)। `aitos-learning` আর `aitos-storage-maintenance`-ও একসাথে চালু হয়ে যাবে (এদেরও কোনো profile নেই — শুধু `backtest` আর `live` profile-gated)।
-
-যাচাই:
-```bash
 docker compose ps
 docker compose logs -f aitos-paper
 curl http://localhost:8090/health
 ```
 
-### 2.5 Firewall / নেটওয়ার্ক নিরাপত্তা
-`docker-compose.yml`-এ সব port (`6379`, `8123`, `9000`, `7474`, `7687`, `8090`, `8091`) ইতিমধ্যে `127.0.0.1:` তে bind করা — বাইরে থেকে expose হয় না, এটা ভালো ডিফল্ট। VPS নিজের firewall (ufw/iptables) থেকেও শুধু SSH port খোলা রাখুন। Health/metrics দেখতে চাইলে SSH tunnel ব্যবহার করুন:
-```bash
-ssh -L 8090:localhost:8090 your-vps
-```
+### Live profile
 
-### 2.6 আপডেট করা
+Live execution is intentionally not started by the normal `docker compose up -d` path. When explicitly required, use the guarded live profile/entrypoint and follow the human-approval requirements above.
+
+### Update
+
 ```bash
-git pull
+git pull --ff-only
 docker compose up -d --build
 ```
 
-### 2.7 বন্ধ করা
+### Stop
+
 ```bash
-docker compose down       # container বন্ধ, volume (data) থাকবে
-docker compose down -v    # volume-ও মুছে যাবে — এটা irreversible, রুটিন কাজে কখনো না
+docker compose down
 ```
 
-### 2.8 systemd দিয়ে (Docker Compose-এর বদলে চাইলে)
-`deploy/aitos-paper.service` / `deploy/aitos-live.service` আছে — কিন্তু এগুলো venv ধরে লেখা (`ExecStart=/opt/aitos/.venv/bin/python3 ...`), Docker না। Compose-কে systemd দিয়ে supervise করতে চাইলে আলাদা unit লিখতে হবে।
+`docker compose down -v` also removes persistent volumes and therefore can destroy stored data; use it only deliberately.
 
----
+### Network security
 
-## 3. Backtesting
+The current Compose configuration binds service ports to localhost where appropriate. Keep Redis, ClickHouse and Neo4j off the public internet. For remote health/metrics access, prefer an SSH tunnel, for example:
 
-### 3.1 Lightweight deterministic replay
 ```bash
-python3 -m aitos.backtest.cli --help
-```
-এই mode event replay করে strategy সিদ্ধান্তের উপর execution simulate করে।
-
-### 3.2 Full L2/futures replay (`aitos.backtest` historical runner — order-flow, footprint, liquidity, auction, L2 execution, margin/liquidation simulation সহ)
-এই mode-এর runner historical market state, L2 book, queue lifecycle, fees, funding এবং futures margin/liquidation একসাথে simulate করে।
-
----
-
-## 4. Paper Trading
-
-Paper mode real Binance market data consume করে কিন্তু real order পাঠায় না। এটি production deployment-এর default trading mode এবং live execution-এর আগে verification-এর জন্য ব্যবহার করা উচিত।
-
----
-
-## 5. Live Trading Safety
-
-Live mode চালু করার আগে:
-
-1. Binance API key-তে **withdrawal permission বন্ধ** রাখুন।
-2. `BINANCE_TESTNET=true` দিয়ে testnet যাচাই করুন।
-3. `BINANCE_HEDGE_MODE` account configuration-এর সাথে মিলিয়ে নিন।
-4. Risk limits ও circuit breaker যাচাই করুন।
-5. Startup logs এবং `/health` endpoint যাচাই করুন।
-6. তারপরই mainnet credentials ব্যবহার করুন।
-
----
-
-## 6. Continual Learning
-
-`run_continual_learning.py` historical/backtest experience থেকে RL model training worker চালায়। Training output ও learning experience ClickHouse-এ persistence করা হয়। Production-এ learning worker-কে live execution থেকে আলাদা করে monitor করা উচিত।
-
----
-
-## 7. Storage Maintenance
-
-Storage-maintenance worker ClickHouse/Redis-related housekeeping ও retention tasks পরিচালনা করে। VPS disk/RAM usage পর্যবেক্ষণ করুন এবং log/data growth-এর জন্য retention policy প্রয়োগ করুন।
-
----
-
-## 8. CI/CD
-
-GitHub Actions workflows:
-
-- `.github/workflows/ci.yml` — tests/checks
-- `.github/workflows/cd.yml` — deployment
-- `.github/workflows/backtest.yml` — backtest validation
-- `.github/workflows/production-audit.yml` — production audit
-
-Deployment environment এবং secrets repository-এর actual production configuration-এর সাথে মিলিয়ে রাখতে হবে। বিশেষ করে `REDIS_PASSWORD`, `CLICKHOUSE_PASSWORD`, `NEO4J_PASSWORD` এবং deployment SSH credentials GitHub Secrets/Environment থেকে আসতে হবে।
-
----
-
-## 9. Troubleshooting
-
-### Redis
-```bash
-docker compose logs redis
-docker compose ps redis
+ssh -L 8090:localhost:8090 user@your-vps
 ```
 
-### ClickHouse
-```bash
-docker compose logs clickhouse
-docker compose ps clickhouse
+### ARM VPS
+
+The Docker build includes native build tooling for dependencies that may not provide an ARM64 wheel. The first build on ARM can therefore take longer than on x86.
+
+## CI/CD
+
+The authoritative workflows are:
+
+- `.github/workflows/ci.yml`
+- `.github/workflows/cd.yml`
+
+### CI
+
+CI runs on pushes and pull requests targeting `main`, `master` and `develop`. It currently includes:
+
+- Code-quality checks with Black, isort and Flake8.
+- Unit/integration tests on Python 3.10, 3.11 and 3.12.
+- A ClickHouse service for tests that need database integration.
+- Coverage/test-result artifacts.
+- Bandit and dependency security checks.
+- Docker Compose validation and Docker image build validation.
+- A final CI-results job that reports the combined status.
+
+The test job also performs explicit source/import diagnostics before pytest; these checks are useful when investigating checkout or import-path regressions.
+
+### CD
+
+CD runs for pushes to `main`/`master`, version tags, and manual workflow dispatch. It:
+
+1. Builds the Docker image.
+2. Pushes the image to GHCR.
+3. Uses the `papertrade` GitHub Environment for deployment.
+4. Verifies required deployment/database secrets.
+5. Connects to the VPS through SSH.
+6. Maintains the deployment at `~/aitos`.
+7. Generates a protected production `.env` from GitHub Secrets.
+8. Validates Docker Compose configuration.
+9. Pulls/builds and starts the stack.
+10. Waits for ClickHouse health and prints diagnostics if it fails.
+
+The deployment uses `COMPOSE_PROJECT_NAME=aitos` and the repository's current `${{ github.repository }}` path, so the old repository name is not part of the deployment contract.
+
+### Required CD secrets
+
+The current workflow explicitly requires:
+
+```text
+DEPLOY_HOST
+DEPLOY_USER
+DEPLOY_SSH_KEY
+REDIS_PASSWORD
+CLICKHOUSE_PASSWORD
+NEO4J_PASSWORD
 ```
 
-### Neo4j
-```bash
-docker compose logs neo4j
-docker compose ps neo4j
-```
+Optional/conditional values include Binance credentials and related deployment settings. Binance credentials are intentionally not required for paper/testnet operation; when `BINANCE_TESTNET=false`, the workflow requires both Binance API credentials.
 
-### AITOS paper service
-```bash
-docker compose logs -f aitos-paper
-curl http://localhost:8090/health
-```
+> Older setup documentation listed generic `DATABASE_URL`, `API_KEY`, `SECRET_KEY` and `DEBUG` values as if they were the primary deployment configuration. Those generic/Django-style instructions are not authoritative for the current project and are not repeated here.
 
-### Full container/resource status
+## Monitoring and troubleshooting
+
+### Container status
+
 ```bash
-docker compose ps
+docker compose ps --all
 docker stats --no-stream
 ```
 
----
+### Logs
 
-## 10. Naming / Migration
+```bash
+docker compose logs --tail=200 aitos-paper
+docker compose logs --tail=200 aitos-clickhouse
+docker compose logs --tail=200 redis
+```
 
-The GitHub repository is now `fahadhossain0909/aitos`. Use `aitos` for all new documentation, deployment commands, URLs, Docker service references, CI/CD configuration, and scripts. The former repository name must not be reintroduced into active configuration or documentation.
+### Health
+
+```bash
+curl http://localhost:8090/health
+```
+
+If ClickHouse is unhealthy, inspect its logs and health status before restarting the whole stack. Avoid repeatedly rebuilding containers without first identifying the failing healthcheck or configuration.
+
+### Disk/RAM pressure
+
+```bash
+df -h
+docker system df
+docker stats --no-stream
+```
+
+Preserve database volumes unless data deletion is intentional. Review container logs and storage-maintenance behavior before deleting anything.
+
+## Storage model
+
+- **Redis:** real-time Event Bus/state required by the application.
+- **ClickHouse:** canonical long-term market history, journal and learning experience.
+- **Neo4j:** optional knowledge graph.
+
+Keep persistent data on named Docker volumes and avoid `docker compose down -v` during normal maintenance.
+
+## Repository conventions
+
+- Canonical repository name: `aitos`.
+- Use `aitos` in code, imports, filenames, Docker/Compose names, deployment paths and documentation.
+- Do not introduce legacy project-name references.
+- Keep secrets out of source control.
+- Treat `README.md` as the canonical operational/documentation entry point.
+
+## Current implementation boundaries
+
+The project is actively developed. Documentation should describe only behavior that exists in the current source/configuration. Historical plans, obsolete setup templates, old test counts, generic CI/CD examples and superseded deployment instructions are intentionally excluded from this README to avoid misleading operators.
+
+## License
+
+See the repository license file for the applicable terms.
