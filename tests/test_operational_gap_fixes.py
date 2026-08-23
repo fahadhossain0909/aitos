@@ -46,10 +46,9 @@ async def test_persistent_tracker_restores_and_updates_peak():
 
     assert tracker.peak_equity_usd == 12_000.0
     assert store.records[-1] == (11_000.0, 12_000.0)
-    assert (
-        tracker.build_portfolio_state(FakeLifecycle()).current_drawdown_pct
-        == pytest.approx(8.3333333333)
-    )
+    assert tracker.build_portfolio_state(
+        FakeLifecycle()
+    ).current_drawdown_pct == pytest.approx(8.3333333333)
 
 
 @pytest.mark.asyncio
