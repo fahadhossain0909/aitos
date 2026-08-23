@@ -1,4 +1,4 @@
-"""CLI for the full ProjectAlpha L2/futures historical replay engine."""
+"""CLI for the full AITOS L2/futures historical replay engine."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
-from aitos.backtest.projectalpha_runner import HistoricalDecision, ProjectAlphaHistoricalRunner
+from aitos.backtest.aitos_runner import HistoricalDecision, AITOSHistoricalRunner
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
@@ -91,7 +91,7 @@ def read_market_events(path: str | Path, fmt: str = "auto") -> Iterator[TradeTic
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the full ProjectAlpha L2/futures historical replay")
+    parser = argparse.ArgumentParser(description="Run the full AITOS L2/futures historical replay")
     parser.add_argument("--source", choices=("clickhouse", "file"), default="clickhouse")
     parser.add_argument("--data")
     parser.add_argument("--format", choices=("auto", "jsonl", "parquet"), default="auto")
@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--data is required when --source=file")
         events = read_market_events(args.data, args.format)
 
-    runner = ProjectAlphaHistoricalRunner(
+    runner = AITOSHistoricalRunner(
         symbol=args.symbol,
         tick_size=args.tick_size,
         initial_cash=args.initial_cash,
@@ -149,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
         if source is not None:
             source.close()
     payload = {
-        "engine": "projectalpha_l2_futures",
+        "engine": "aitos_l2_futures",
         "source": args.source,
         "symbol": args.symbol,
         "decision_strategy": args.decision_strategy,
