@@ -15,21 +15,37 @@ AITOS is an event-driven trading system for Binance USDT-M Futures. The current 
 
 > **Canonical documentation:** this README is the single consolidated project guide. It is intentionally focused on behavior and configuration that match the current repository; obsolete setup templates, duplicate deployment instructions, historical test counts, and superseded CI/CD examples are excluded.
 
-## Contents
+## 🧭 Interactive Index
+
+Click any topic below to jump directly to that section.
+
+### 🚀 Getting Started
 
 - [System at a glance](#system-at-a-glance)
 - [Current capabilities](#current-capabilities)
 - [Quick start](#quick-start)
 - [Configuration](#configuration)
+- [Runnable entrypoints](#runnable-entrypoints)
+
+### 📈 Trading & Research
+
 - [Backtesting](#backtesting)
 - [Paper trading](#paper-trading)
 - [Live trading](#live-trading)
+
+### 🏗️ Deployment & Operations
+
 - [Docker and VPS deployment](#docker-and-vps-deployment)
 - [CI/CD](#cicd)
 - [Operations and troubleshooting](#operations-and-troubleshooting)
 - [Storage and maintenance](#storage-and-maintenance)
+
+### 📚 Reference
+
 - [Project structure](#project-structure)
 - [Safety boundaries](#safety-boundaries)
+
+---
 
 ## System at a glance
 
@@ -62,6 +78,8 @@ AITOS is an event-driven trading system for Binance USDT-M Futures. The current 
 
 The core application is event-driven: components communicate through the Event Bus rather than relying on broad direct coupling. Production actions are additionally protected by risk controls and human-approval governance.
 
+[↑ Back to Index](#-interactive-index)
+
 ## Current capabilities
 
 | Area | Current implementation |
@@ -79,6 +97,8 @@ The core application is event-driven: components communicate through the Event B
 | Backtesting | Lightweight historical runner and richer L2/futures replay path |
 | Operations | Health/metrics endpoints, structured JSON logging, Docker Compose |
 | Deployment | GitHub Actions CI/CD with Docker and SSH-based VPS deployment |
+
+[↑ Back to Index](#-interactive-index)
 
 ## Quick start
 
@@ -129,6 +149,8 @@ python -m pytest -q tests/backtest
 
 No fixed test count is documented because the suite changes as the project evolves.
 
+[↑ Back to Index](#-interactive-index)
+
 ## Configuration
 
 The tracked template is `.env.example`. Copy it to `.env` and keep the real file out of Git.
@@ -160,6 +182,8 @@ Keep `BINANCE_TESTNET=true` until live execution is deliberately enabled. Never 
 - `COMPOSE_PROJECT_NAME` is `aitos`.
 - `BACKTEST_DATA_DIR` is used for optional local/historical replay data and cache.
 
+[↑ Back to Index](#-interactive-index)
+
 ## Runnable entrypoints
 
 | Command | Purpose | Endpoint |
@@ -169,6 +193,8 @@ Keep `BINANCE_TESTNET=true` until live execution is deliberately enabled. Never 
 | `python3 run_continual_learning.py` | Continual-learning worker | — |
 | `python3 -m aitos.backtest.cli` | Historical backtesting | — |
 | `python3 -m aitos.backtest.rich_cli` | L2/futures historical replay | — |
+
+[↑ Back to Index](#-interactive-index)
 
 ## Backtesting
 
@@ -193,6 +219,8 @@ The Docker Compose backtest service is profile-gated:
 docker compose --profile backtest run --rm aitos-backtest --help
 ```
 
+[↑ Back to Index](#-interactive-index)
+
 ## Paper trading
 
 ```bash
@@ -211,6 +239,8 @@ docker compose logs -f aitos-paper
 ```
 
 The default Compose paper service waits for Redis, ClickHouse and Neo4j health checks before starting.
+
+[↑ Back to Index](#-interactive-index)
 
 ## Live trading
 
@@ -231,6 +261,8 @@ docker compose --profile live run --rm aitos-live
 ```
 
 Do not use the live profile as a substitute for understanding the live-trading entrypoint and its approval flow.
+
+[↑ Back to Index](#-interactive-index)
 
 ## Docker and VPS deployment
 
@@ -291,6 +323,8 @@ ssh -L 8090:localhost:8090 user@your-vps
 ### Resource-aware services
 
 The continual-learning worker is explicitly capped at 0.5 CPU / 512 MB RAM. The backtest service is capped at 2 CPU / 3 GB RAM. Storage maintenance has explicit ClickHouse/cache budgets. These limits are intended to reduce resource contention on a VPS.
+
+[↑ Back to Index](#-interactive-index)
 
 ## CI/CD
 
@@ -357,6 +391,8 @@ Other optional deployment values include `CLICKHOUSE_USER`, `NEO4J_USER`, `DEPLO
 
 The current CD workflow publishes an image to GHCR but also runs `docker compose up -d --build` on the VPS. Therefore the deployment currently performs a local build on the server rather than relying exclusively on the published GHCR image. This is a known operational characteristic of the current workflow and should not be confused with a pure image-pull deployment.
 
+[↑ Back to Index](#-interactive-index)
+
 ## Operations and troubleshooting
 
 ### Container status
@@ -406,6 +442,8 @@ docker system df
 
 Pay particular attention to ClickHouse storage, container logs, historical/backtest data and model volumes. Preserve database volumes during normal cleanup.
 
+[↑ Back to Index](#-interactive-index)
+
 ## Storage and maintenance
 
 ### Storage roles
@@ -421,6 +459,8 @@ Pay particular attention to ClickHouse storage, container logs, historical/backt
 `aitos-storage-maintenance` runs `aitos.storage.maintenance` and is configured by Compose with explicit storage/cache budgets. It is intended to prevent historical/backtest storage from growing without bounds.
 
 Before manually deleting data, inspect the maintenance configuration and current disk usage. Never use `docker compose down -v` as a routine cleanup command.
+
+[↑ Back to Index](#-interactive-index)
 
 ## Project structure
 
@@ -454,6 +494,8 @@ aitos/
 └── requirements-backtest.txt # lighter backtest dependencies
 ```
 
+[↑ Back to Index](#-interactive-index)
+
 ## Safety boundaries
 
 AITOS is an actively developed trading system, not a guarantee of trading performance.
@@ -463,15 +505,7 @@ AITOS is an actively developed trading system, not a guarantee of trading perfor
 - Risk controls are part of the execution path, but operators remain responsible for configuration and exchange permissions.
 - Testnet and production credentials must be kept separate.
 - Do not expose Redis, ClickHouse or Neo4j directly to the internet.
-- Do not commit credentials or `.env` files.
-- Treat destructive storage commands as irreversible operations.
+- Do not grant withdrawal permission to trading API keys.
+- Treat automated learning as bounded by the project's configured governance and deployment controls.
 
-## Documentation policy
-
-`README.md` is the canonical high-level and operational guide. Focused documents under `docs/` may contain deeper technical detail, but they should not contradict the current source/configuration.
-
-When behavior changes, update the relevant source/configuration and then update this README if the change affects setup, runtime behavior, deployment, safety, operations or supported interfaces.
-
-## License
-
-See the repository license file for the applicable terms.
+[↑ Back to Index](#-interactive-index)
