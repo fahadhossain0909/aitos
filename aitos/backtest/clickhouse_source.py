@@ -68,19 +68,25 @@ class ClickHouseHistoricalSource:
             parameters["timeframe"] = timeframe
             sql = (
                 "SELECT time, open, high, low, close, volume, quote_volume, trades_count FROM market_ohlcv WHERE "
-                + " AND ".join(filters)  # nosec B608 - filters are fixed parameterized predicates
+                + " AND ".join(
+                    filters
+                )  # nosec B608 - filters are fixed parameterized predicates
                 + " ORDER BY time LIMIT {limit:UInt32}"
             )
         elif table == "trades":
             sql = (
                 "SELECT time, price, quantity, side, trade_id, is_buyer_maker FROM trade_ticks WHERE "
-                + " AND ".join(filters)  # nosec B608 - filters are fixed parameterized predicates
+                + " AND ".join(
+                    filters
+                )  # nosec B608 - filters are fixed parameterized predicates
                 + " ORDER BY time LIMIT {limit:UInt32}"
             )
         else:
             sql = (
                 "SELECT time, bid_levels, ask_levels, spread, depth_ratio, last_update_id FROM order_book_snapshots WHERE "
-                + " AND ".join(filters)  # nosec B608 - filters are fixed parameterized predicates
+                + " AND ".join(
+                    filters
+                )  # nosec B608 - filters are fixed parameterized predicates
                 + " ORDER BY time LIMIT {limit:UInt32}"
             )
         result = self.client.query(sql, parameters=parameters)
