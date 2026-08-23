@@ -4,16 +4,17 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
-from typing import Optional
 
 from redis.asyncio import Redis
 
-from aitos.app import (LivePortfolioTracker, build_system, initialize_all,
-                       run_scan_and_trade_cycle, shutdown_all)
+from aitos.app import build_system, initialize_all, run_scan_and_trade_cycle, shutdown_all
 from aitos.config.settings import get_settings
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
+from aitos.exchange.symbol_filter_cache import SymbolFilterCacheRefresher
+from aitos.execution.leverage_manager import configure_session_leverage
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.journal.repository import JournalRepository
@@ -22,6 +23,11 @@ from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.live_trading import confirm_live_trading, prepare_live_executor
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
+from aitos.risk.models import RiskLimits
+from aitos.risk.persistent_live_portfolio import (
+    PersistentDrawdownStore,
+    PersistentLivePortfolioTracker,
+)
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
@@ -101,8 +107,20 @@ async def main() -> None:
     event_bus = EventBus(redis_client=redis_client)
     await event_bus.initialize({})
     market_repo, journal_repo = await try_connect_clickhouse_repositories(settings)
+    if market_repo is None:
+        raise RuntimeError("ClickHouse is required for persistent live drawdown tracking")
+
     graph_driver = await try_connect_neo4j(settings)
     order_executor = await prepare_live_executor(settings, SYMBOLS)
+
+    leverage_tier = float(os.getenv("AITOS_LEVERAGE_TIER", "1"))
+    risk_limits = RiskLimits(max_leverage=leverage_tier)
+    await configure_session_leverage(order_executor, SYMBOLS, risk_limits.max_leverage)
+    symbol_filter_refresher = SymbolFilterCacheRefresher(
+        order_executor, SYMBOLS, ttl_seconds=24 * 60 * 60
+    )
+    await symbol_filter_refresher.start()
+
     rl_scorer = DeepValueRLScorer()
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
@@ -119,6 +137,7 @@ async def main() -> None:
         market_data_repository=market_repo,
         journal_repository=journal_repo,
         graph_driver=graph_driver,
+        risk_limits=risk_limits,
         kernel=AIKernel(event_bus=event_bus, require_human_approval_for_prod=True),
         rl_scorer=rl_scorer,
         outcome_classifier=outcome_classifier,
@@ -130,6 +149,24 @@ async def main() -> None:
         event_bus, market_repo, source="live"
     )
     await experience_recorder.initialize({})
+
+    drawdown_store = PersistentDrawdownStore(
+        host=settings.clickhouse.host,
+        port=settings.clickhouse.port,
+        username=settings.clickhouse.user,
+        password=settings.clickhouse.password,
+        database=settings.clickhouse.database,
+        account=os.getenv("AITOS_ACCOUNT_ID", "default"),
+        asset="USDT",
+    )
+    await drawdown_store.initialize()
+    tracker = PersistentLivePortfolioTracker(order_executor, drawdown_store)
+    await tracker.initialize()
+    logger.info(
+        "persistent drawdown tracker initialized",
+        extra={"aitos_extra": {"peak_equity_usd": tracker.peak_equity_usd}},
+    )
+
     # The container publishes 127.0.0.1:8091 to the host. Bind inside the
     # container to all interfaces so Docker's port-forward can reach it.
     health_server = HealthServer(
@@ -138,7 +175,6 @@ async def main() -> None:
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
-    tracker = LivePortfolioTracker(order_executor=order_executor)
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -161,6 +197,7 @@ async def main() -> None:
                                 components.trade_lifecycle.get_open_trades()
                             ),
                             "account_equity_usd": tracker._last_known_equity_usd,
+                            "peak_equity_usd": tracker.peak_equity_usd,
                             "rl_samples": rl_scorer.n_samples_seen,
                             "ml_samples": outcome_classifier.n_samples_seen,
                             "attention_samples": attention_explainer.n_samples_seen,
@@ -182,6 +219,8 @@ async def main() -> None:
         await health_server.stop()
         await experience_recorder.shutdown()
         await shutdown_all(components)
+        await symbol_filter_refresher.stop()
+        await drawdown_store.close()
         await order_executor.close()
         if market_repo is not None:
             await market_repo.shutdown()
