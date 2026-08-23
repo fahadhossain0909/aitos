@@ -1,5 +1,3 @@
-from types import SimpleNamespace
-
 import pytest
 
 from aitos.execution.leverage_manager import configure_session_leverage
