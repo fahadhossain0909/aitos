@@ -29,13 +29,10 @@ jobs:
           pip install flake8 black isort pylint
       - name: Run Black formatter check
         run: black --check .
-        continue-on-error: true
       - name: Run isort import checker
         run: isort --check-only .
-        continue-on-error: true
       - name: Run Flake8 linter
         run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-        continue-on-error: true
 
   test:
     runs-on: ubuntu-latest
@@ -67,29 +64,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
-      - name: Verify decision_fusion.py immediately after checkout
-        run: |
-          set -euxo pipefail
-          git rev-parse HEAD
-          git status --short
-          sha256sum aitos/kernel/decision_fusion.py
-          git hash-object aitos/kernel/decision_fusion.py
-          git show HEAD:aitos/kernel/decision_fusion.py | sha256sum
-          python3 -m py_compile aitos/kernel/decision_fusion.py
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: 'pip'
-      - name: Verify decision_fusion.py after setup-python cache restore
-        run: |
-          set -euxo pipefail
-          git rev-parse HEAD
-          git status --short
-          sha256sum aitos/kernel/decision_fusion.py
-          git hash-object aitos/kernel/decision_fusion.py
-          git show HEAD:aitos/kernel/decision_fusion.py | sha256sum
-          python -m py_compile aitos/kernel/decision_fusion.py
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -103,16 +82,6 @@ jobs:
             sleep 1
           done
           curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" 'http://127.0.0.1:8123/' --data-binary 'CREATE DATABASE IF NOT EXISTS aitos'
-      - name: Verify decision_fusion.py before pytest
-        run: |
-          set -euxo pipefail
-          git rev-parse HEAD
-          git status --short
-          sha256sum aitos/kernel/decision_fusion.py
-          git hash-object aitos/kernel/decision_fusion.py
-          git show HEAD:aitos/kernel/decision_fusion.py | sha256sum
-          nl -ba aitos/kernel/decision_fusion.py | sed -n '115,150p'
-          python -m py_compile aitos/kernel/decision_fusion.py
       - name: Create .env file from secrets for tests
         run: |
           cat > .env << EOF
@@ -127,42 +96,6 @@ jobs:
           CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD
           CLICKHOUSE_DATABASE=$CLICKHOUSE_DATABASE
           EOF
-      - name: Diagnose decision_fusion import path
-        env:
-          PYTHONPATH: .
-        run: |
-          set -euxo pipefail
-          python --version
-          python - <<'PY'
-          from pathlib import Path
-          import ast
-          import hashlib
-          import importlib.util
-          import sys
-          path = Path("aitos/kernel/decision_fusion.py").resolve()
-          data = path.read_bytes()
-          source = data.decode("utf-8")
-          print("PYTHON:", sys.executable)
-          print("PATH:", path)
-          print("BYTES:", len(data))
-          print("SHA256:", hashlib.sha256(data).hexdigest())
-          print("LINE_COUNT:", len(source.splitlines()))
-          ast.parse(source, filename=str(path))
-          print("AST_PARSE: OK")
-          module_name = "decision_fusion_direct"
-          spec = importlib.util.spec_from_file_location(module_name, path)
-          if spec is None or spec.loader is None:
-              raise RuntimeError("Could not construct import spec")
-          module = importlib.util.module_from_spec(spec)
-          sys.modules[module_name] = module
-          try:
-              spec.loader.exec_module(module)
-          finally:
-              sys.modules.pop(module_name, None)
-          print("DIRECT_IMPORT: OK")
-          print("MODULE_FILE:", getattr(module, "__file__", None))
-          print("ENGINE:", module.DecisionFusionEngine)
-          PY
       - name: Run tests with pytest
         env:
           PYTHONPATH: .
@@ -198,10 +131,8 @@ jobs:
           pip install bandit safety
       - name: Run Bandit security scan
         run: bandit -r . -f json -o bandit-report.json
-        continue-on-error: true
       - name: Check dependencies for vulnerabilities
         run: safety check --json
-        continue-on-error: true
       - name: Upload security reports
         uses: actions/upload-artifact@v7.0.1
         if: always()
@@ -244,10 +175,10 @@ jobs:
       - name: Determine CI status
         id: ci-status
         run: |
-          if [ "${{ needs.lint.result }}" == "failure" ] || \
-             [ "${{ needs.test.result }}" == "failure" ] || \
-             [ "${{ needs.security.result }}" == "failure" ] || \
-             [ "${{ needs.docker-validate.result }}" == "failure" ]; then
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.security.result }}" != "success" ] || \
+             [ "${{ needs.docker-validate.result }}" != "success" ]; then
             echo "status=failed" >> $GITHUB_OUTPUT
             echo "emoji=❌" >> $GITHUB_OUTPUT
             exit 1
