@@ -9,8 +9,13 @@ from typing import Optional
 
 from redis.asyncio import Redis
 
-from aitos.app import (LivePortfolioTracker, build_system, initialize_all,
-                       run_scan_and_trade_cycle, shutdown_all)
+from aitos.app import (
+    LivePortfolioTracker,
+    build_system,
+    initialize_all,
+    run_scan_and_trade_cycle,
+    shutdown_all,
+)
 from aitos.config.settings import get_settings
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
@@ -134,7 +139,7 @@ async def main() -> None:
     # container to all interfaces so Docker's port-forward can reach it.
     health_server = HealthServer(
         components.all_modules() + [experience_recorder],
-        host="0.0.0.0",
+        host="0.0.0.0",  # nosec B104 - required for Docker port forwarding
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
