@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 import clickhouse_connect
 
-from aitos.models.trade import TradeLifecycleState
 from aitos.risk.models import PortfolioState, PositionExposure
 
 
