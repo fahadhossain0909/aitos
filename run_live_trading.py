@@ -9,7 +9,12 @@ import signal
 
 from redis.asyncio import Redis
 
-from aitos.app import build_system, initialize_all, run_scan_and_trade_cycle, shutdown_all
+from aitos.app import (
+    build_system,
+    initialize_all,
+    run_scan_and_trade_cycle,
+    shutdown_all,
+)
 from aitos.config.settings import get_settings
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
@@ -108,14 +113,18 @@ async def main() -> None:
     await event_bus.initialize({})
     market_repo, journal_repo = await try_connect_clickhouse_repositories(settings)
     if market_repo is None:
-        raise RuntimeError("ClickHouse is required for persistent live drawdown tracking")
+        raise RuntimeError(
+            "ClickHouse is required for persistent live drawdown tracking"
+        )
 
     graph_driver = await try_connect_neo4j(settings)
     order_executor = await prepare_live_executor(settings, SYMBOLS)
 
     leverage_tier = float(os.getenv("AITOS_LEVERAGE_TIER", "1"))
     risk_limits = RiskLimits(max_leverage=leverage_tier)
-    await configure_session_leverage(order_executor, SYMBOLS, risk_limits.max_leverage)
+    await configure_session_leverage(
+        order_executor, SYMBOLS, risk_limits.max_leverage
+    )
     symbol_filter_refresher = SymbolFilterCacheRefresher(
         order_executor, SYMBOLS, ttl_seconds=24 * 60 * 60
     )
@@ -209,7 +218,9 @@ async def main() -> None:
             except Exception as exc:
                 logger.error("scan/trade cycle failed: %s", exc)
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
+                await asyncio.wait_for(
+                    stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS
+                )
             except asyncio.TimeoutError:
                 pass
     finally:
