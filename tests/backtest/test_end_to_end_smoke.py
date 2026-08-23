@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from aitos.backtest.end_to_end import ProjectAlphaReplay
+from aitos.backtest.end_to_end import AITOSReplay
 from aitos.data.schema import CanonicalBookEvent, CanonicalTrade
 
 
@@ -8,7 +8,7 @@ def test_canonical_trade_and_l2_replay_smoke():
     trades = []
     books = []
     states = []
-    replay = ProjectAlphaReplay(on_trade=trades.append, on_book=books.append, on_book_state=states.append)
+    replay = AITOSReplay(on_trade=trades.append, on_book=books.append, on_book_state=states.append)
 
     ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
     events = [
@@ -29,7 +29,7 @@ def test_canonical_trade_and_l2_replay_smoke():
 
 def test_stale_l2_update_is_not_forwarded():
     forwarded = []
-    replay = ProjectAlphaReplay(on_book=forwarded.append)
+    replay = AITOSReplay(on_book=forwarded.append)
     ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
     assert replay.feed_book(CanonicalBookEvent("binance", "futures_um", "BTCUSDT", 10, ts, "buy", 100, 1))
