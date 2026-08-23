@@ -6,8 +6,14 @@ from aitos.data.schema import CanonicalBookEvent
 
 def event(update_id, side, price, quantity):
     return CanonicalBookEvent(
-        "binance", "futures_um", "BTCUSDT", update_id,
-        datetime(2026, 1, 1, tzinfo=timezone.utc), side, price, quantity
+        "binance",
+        "futures_um",
+        "BTCUSDT",
+        update_id,
+        datetime(2026, 1, 1, tzinfo=timezone.utc),
+        side,
+        price,
+        quantity,
     )
 
 

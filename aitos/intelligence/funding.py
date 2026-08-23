@@ -21,5 +21,7 @@ def funding_rate_score(funding: FundingRate, side: TradeSide) -> float:
     rate = funding.funding_rate
     # Longs are paid when funding is negative; shorts are paid when funding is positive.
     signed_for_side = -rate if side == TradeSide.LONG else rate
-    normalized = signed_for_side / STRONG_FUNDING_RATE  # roughly -1..1 for typical rates
+    normalized = (
+        signed_for_side / STRONG_FUNDING_RATE
+    )  # roughly -1..1 for typical rates
     return round(max(0.0, min(10.0, 5.0 + normalized * 5.0)), 2)

@@ -60,7 +60,11 @@ def calculate_position_size(
     if existing_sector_notional_usd < 0:
         raise ValueError("existing_sector_notional_usd cannot be negative")
 
-    risk_pct = requested_risk_pct if requested_risk_pct is not None else risk_limits.max_risk_per_trade_pct
+    risk_pct = (
+        requested_risk_pct
+        if requested_risk_pct is not None
+        else risk_limits.max_risk_per_trade_pct
+    )
     risk_pct = min(risk_pct, risk_limits.max_risk_per_trade_hard_cap_pct)
 
     kelly_note = ""
@@ -78,7 +82,9 @@ def calculate_position_size(
     units = risk_amount_usd / stop_distance
     position_size_usd = units * entry_price
 
-    leverage = calculate_adaptive_leverage(volatility_percentile, risk_score, risk_limits, base_leverage)
+    leverage = calculate_adaptive_leverage(
+        volatility_percentile, risk_score, risk_limits, base_leverage
+    )
     max_notional_usd = equity_usd * leverage
     capped_by_leverage = position_size_usd > max_notional_usd
     if capped_by_leverage:
@@ -90,7 +96,9 @@ def calculate_position_size(
         if sector_limit_pct <= 0:
             raise ValueError("sector_limit_pct must be positive")
         sector_cap_usd = equity_usd * (sector_limit_pct / 100.0)
-        available_sector_notional_usd = max(0.0, sector_cap_usd - existing_sector_notional_usd)
+        available_sector_notional_usd = max(
+            0.0, sector_cap_usd - existing_sector_notional_usd
+        )
         sector_capped = position_size_usd > available_sector_notional_usd
         if sector_capped:
             position_size_usd = available_sector_notional_usd

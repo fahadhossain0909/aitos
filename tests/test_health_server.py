@@ -1,7 +1,8 @@
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.health_server import HealthServer
 
 
@@ -23,7 +24,13 @@ class FakeModule(AITOSModule):
         pass
 
     async def health_check(self) -> HealthStatus:
-        return HealthStatus(module_id=self._id, status=self._status, latency_ms=1.5, last_event_time=None, details=self._details)
+        return HealthStatus(
+            module_id=self._id,
+            status=self._status,
+            latency_ms=1.5,
+            last_event_time=None,
+            details=self._details,
+        )
 
     async def shutdown(self, grace_period_seconds: float = 30.0):
         pass
@@ -38,7 +45,10 @@ class FakeModule(AITOSModule):
 
 @pytest.mark.asyncio
 async def test_health_endpoint_returns_200_when_all_healthy():
-    modules = [FakeModule("mod-a", ModuleStatus.HEALTHY), FakeModule("mod-b", ModuleStatus.HEALTHY)]
+    modules = [
+        FakeModule("mod-a", ModuleStatus.HEALTHY),
+        FakeModule("mod-b", ModuleStatus.HEALTHY),
+    ]
     server = HealthServer(modules)
     client = TestClient(TestServer(server._build_app()))
     await client.start_server()
@@ -55,7 +65,10 @@ async def test_health_endpoint_returns_200_when_all_healthy():
 
 @pytest.mark.asyncio
 async def test_health_endpoint_returns_503_when_any_module_unhealthy():
-    modules = [FakeModule("mod-a", ModuleStatus.HEALTHY), FakeModule("mod-b", ModuleStatus.UNHEALTHY)]
+    modules = [
+        FakeModule("mod-a", ModuleStatus.HEALTHY),
+        FakeModule("mod-b", ModuleStatus.UNHEALTHY),
+    ]
     server = HealthServer(modules)
     client = TestClient(TestServer(server._build_app()))
     await client.start_server()
@@ -86,7 +99,11 @@ async def test_health_endpoint_includes_module_details():
 
 @pytest.mark.asyncio
 async def test_metrics_endpoint_returns_prometheus_text_format():
-    modules = [FakeModule("mod-a", ModuleStatus.HEALTHY, details={"trades_open": 3, "errors": 0})]
+    modules = [
+        FakeModule(
+            "mod-a", ModuleStatus.HEALTHY, details={"trades_open": 3, "errors": 0}
+        )
+    ]
     server = HealthServer(modules)
     client = TestClient(TestServer(server._build_app()))
     await client.start_server()

@@ -4,12 +4,13 @@ Evolution proposes changes; the canonical backtest/validation stack decides
 whether a proposal is good enough to become a candidate model. No component in
 this module can promote a model to production by itself.
 """
+
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
-import uuid
 
 
 @dataclass(frozen=True)
@@ -27,7 +28,10 @@ class EvolutionProposal:
 class EvolutionEngine:
     """Generate bounded, auditable candidate proposals from experience data."""
 
-    def __init__(self, proposer: Callable[[list[dict[str, Any]]], EvolutionProposal] | None = None) -> None:
+    def __init__(
+        self,
+        proposer: Callable[[list[dict[str, Any]]], EvolutionProposal] | None = None,
+    ) -> None:
         self._proposer = proposer
 
     def propose(self, experiences: list[dict[str, Any]]) -> EvolutionProposal | None:

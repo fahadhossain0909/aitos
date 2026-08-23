@@ -30,7 +30,9 @@ def average_true_range(klines: Sequence[Kline], period: int = 14) -> float:
     return sum(window) / len(window) if window else 0.0
 
 
-def atr_percentile(klines: Sequence[Kline], period: int = 14, lookback: int = 100) -> float:
+def atr_percentile(
+    klines: Sequence[Kline], period: int = 14, lookback: int = 100
+) -> float:
     """Where the current ATR sits (0-100) relative to its own recent history —
     a simple, self-normalizing volatility-regime proxy that needs no
     external calibration."""
@@ -39,7 +41,7 @@ def atr_percentile(klines: Sequence[Kline], period: int = 14, lookback: int = 10
     atrs: List[float] = []
     start = max(1, len(klines) - lookback)
     for end in range(start + period, len(klines) + 1):
-        atrs.append(average_true_range(klines[max(0, end - period - 1):end], period))
+        atrs.append(average_true_range(klines[max(0, end - period - 1) : end], period))
     if not atrs:
         return 50.0
     current = atrs[-1]
@@ -49,7 +51,9 @@ def atr_percentile(klines: Sequence[Kline], period: int = 14, lookback: int = 10
     return round(rank / len(atrs) * 100, 2)
 
 
-def _directional_movement(klines: Sequence[Kline]) -> Tuple[List[float], List[float], List[float]]:
+def _directional_movement(
+    klines: Sequence[Kline],
+) -> Tuple[List[float], List[float], List[float]]:
     plus_dm, minus_dm, trs = [], [], []
     for i in range(1, len(klines)):
         up_move = klines[i].high - klines[i - 1].high
@@ -117,7 +121,9 @@ def cvd_trend_score(klines: Sequence[Kline], lookback: int = 20) -> float:
     return round(max(0.0, min(10.0, 5.0 + normalized * 5.0)), 2)
 
 
-def detect_structure_break(klines: Sequence[Kline], swing_lookback: int = 10) -> Tuple[str, float]:
+def detect_structure_break(
+    klines: Sequence[Kline], swing_lookback: int = 10
+) -> Tuple[str, float]:
     """Very simplified Break-of-Structure (BOS) detector: compares the most
     recent close against the highest high / lowest low of the preceding
     swing window. Returns (direction, strength 0-10).
@@ -129,7 +135,7 @@ def detect_structure_break(klines: Sequence[Kline], swing_lookback: int = 10) ->
     if len(klines) < swing_lookback + 1:
         return "none", 0.0
 
-    swing_window = klines[-(swing_lookback + 1):-1]
+    swing_window = klines[-(swing_lookback + 1) : -1]
     swing_high = max(k.high for k in swing_window)
     swing_low = min(k.low for k in swing_window)
     latest_close = klines[-1].close
@@ -147,7 +153,7 @@ def detect_structure_break(klines: Sequence[Kline], swing_lookback: int = 10) ->
 
 
 def classify_regime(klines: Sequence[Kline], adx_period: int = 14) -> str:
-    """"trending" | "ranging" | "volatile" | "unknown" — spec's Market Regime
+    """ "trending" | "ranging" | "volatile" | "unknown" — spec's Market Regime
     row, computed from ADX (trend strength) and ATR percentile (volatility)."""
     if len(klines) < adx_period + 2:
         return "unknown"
@@ -183,7 +189,9 @@ def returns(klines: Sequence[Kline]) -> List[float]:
     ]
 
 
-def lead_lag_score(symbol_klines: Sequence[Kline], reference_klines: Sequence[Kline], lag: int = 1) -> float:
+def lead_lag_score(
+    symbol_klines: Sequence[Kline], reference_klines: Sequence[Kline], lag: int = 1
+) -> float:
     """0-10 score: how well ``reference``'s past returns predict ``symbol``'s
     current returns (e.g. BTC leading an altcoin). Built on
     ``pearson_correlation`` between the symbol's returns and the

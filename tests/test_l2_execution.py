@@ -3,7 +3,9 @@ from aitos.backtest.l2_execution import BookLevel, L2ExecutionModel
 
 def test_buy_consumes_asks_and_reports_partial_fill():
     model = L2ExecutionModel()
-    result = model.execute("buy", 3.0, [BookLevel(99, 10)], [BookLevel(100, 1), BookLevel(101, 2)])
+    result = model.execute(
+        "buy", 3.0, [BookLevel(99, 10)], [BookLevel(100, 1), BookLevel(101, 2)]
+    )
     assert result.filled_quantity == 3.0
     assert result.remaining_quantity == 0.0
     assert result.average_price == (100 + 202) / 3

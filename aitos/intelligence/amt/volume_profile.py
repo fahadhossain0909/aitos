@@ -5,6 +5,7 @@ step, finds POC, then expands around POC until the requested fraction of total
 volume is represented. It intentionally does not pretend candle volume is
 volume-at-price.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

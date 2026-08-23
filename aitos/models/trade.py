@@ -23,7 +23,7 @@ class TradeLifecycleState(str, Enum):
 
     OPPORTUNITY_DETECTED = "opportunity_detected"
     ENTRY_VALIDATED = "entry_validated"
-    REJECTED = "rejected"          # risk veto / hard limit / governance denial
+    REJECTED = "rejected"  # risk veto / hard limit / governance denial
     ORDER_SUBMITTED = "order_submitted"
     POSITION_OPENED = "position_opened"
     EXIT_TRIGGERED = "exit_triggered"
@@ -65,8 +65,12 @@ class Opportunity:
     is_production: bool = False
     approved_by: Optional[str] = None
     trailing_sl_enabled: bool = False
-    breakeven_at_r_multiple: Optional[float] = 1.0  # move SL to entry after 1R profit by default
-    regime: str = "unknown"  # market regime at scan time (trending/ranging/volatile) — feeds RL/KG consumers
+    breakeven_at_r_multiple: Optional[float] = (
+        1.0  # move SL to entry after 1R profit by default
+    )
+    regime: str = (
+        "unknown"  # market regime at scan time (trending/ranging/volatile) — feeds RL/KG consumers
+    )
     opportunity_id: str = field(default_factory=lambda: f"opp-{uuid.uuid4().hex[:12]}")
     detected_at: str = field(default_factory=_utc_now_iso)
 

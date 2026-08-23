@@ -16,7 +16,11 @@ async def test_publish_and_subscribe_delivers_event(event_bus):
         return None
 
     await event_bus.subscribe("orders.filled", handler, group="test-group")
-    await event_bus.publish(Event(topic="orders.filled", payload={"symbol": "ETHUSDT"}, source_module="test"))
+    await event_bus.publish(
+        Event(
+            topic="orders.filled", payload={"symbol": "ETHUSDT"}, source_module="test"
+        )
+    )
 
     for _ in range(20):
         if received:
@@ -51,8 +55,12 @@ async def test_request_reply_round_trip(event_bus):
 @pytest.mark.asyncio
 async def test_replay_returns_historical_events(event_bus):
     since = datetime.now(timezone.utc) - timedelta(minutes=1)
-    await event_bus.publish(Event(topic="journal.entry", payload={"trade_id": "t1"}, source_module="test"))
-    await event_bus.publish(Event(topic="journal.entry", payload={"trade_id": "t2"}, source_module="test"))
+    await event_bus.publish(
+        Event(topic="journal.entry", payload={"trade_id": "t1"}, source_module="test")
+    )
+    await event_bus.publish(
+        Event(topic="journal.entry", payload={"trade_id": "t2"}, source_module="test")
+    )
 
     replayed = []
 
@@ -76,7 +84,12 @@ async def test_publish_preserves_event_priority_by_default(event_bus):
 
     await event_bus.subscribe("alerts.critical", handler, group="test")
     await event_bus.publish(
-        Event(topic="alerts.critical", payload={}, source_module="test", priority=EventPriority.CRITICAL)
+        Event(
+            topic="alerts.critical",
+            payload={},
+            source_module="test",
+            priority=EventPriority.CRITICAL,
+        )
     )
 
     for _ in range(20):

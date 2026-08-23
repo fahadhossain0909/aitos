@@ -7,13 +7,14 @@ It does not pretend a single snapshot can prove a historical sweep; sweep
 confirmation requires a sequence of snapshots/trades and belongs in the
 streaming/replay layer.
 """
+
 from __future__ import annotations
 
 import math
 from typing import Sequence
 
-from aitos.models.market import OrderBookSnapshot, TradeTick
 from aitos.intelligence.order_flow import delta
+from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
 def _near_depth(book: OrderBookSnapshot, levels: int = 5) -> tuple[float, float]:
@@ -22,7 +23,9 @@ def _near_depth(book: OrderBookSnapshot, levels: int = 5) -> tuple[float, float]
     return bids, asks
 
 
-def liquidity_quality_score(book: OrderBookSnapshot, typical_spread_bps: float = 5.0) -> float:
+def liquidity_quality_score(
+    book: OrderBookSnapshot, typical_spread_bps: float = 5.0
+) -> float:
     """0-10 score combining spread quality and near-touch depth balance."""
     if not book.bids or not book.asks:
         return 0.0
@@ -43,7 +46,11 @@ def depth_imbalance_score(book: OrderBookSnapshot, levels: int = 5) -> float:
     """Directional 0-10 score: 5 balanced, >5 bid-heavy, <5 ask-heavy."""
     bid, ask = _near_depth(book, levels)
     total = bid + ask
-    return 5.0 if total <= 0 else round(max(0.0, min(10.0, 5.0 + 5.0 * (bid - ask) / total)), 2)
+    return (
+        5.0
+        if total <= 0
+        else round(max(0.0, min(10.0, 5.0 + 5.0 * (bid - ask) / total)), 2)
+    )
 
 
 def _max_level_qty(book: OrderBookSnapshot, levels: int = 10) -> tuple[float, float]:
@@ -89,7 +96,9 @@ def sweep_potential_score(book: OrderBookSnapshot, levels: int = 5) -> float:
     return round(max(0.0, min(10.0, 5.0 + cv * 2.0)), 2)
 
 
-def absorption_proxy_score(book: OrderBookSnapshot, trades: Sequence[TradeTick], levels: int = 5) -> float:
+def absorption_proxy_score(
+    book: OrderBookSnapshot, trades: Sequence[TradeTick], levels: int = 5
+) -> float:
     """0-10 proxy for aggressive flow meeting strong resting liquidity.
 
     A single snapshot cannot prove absorption.  This proxy only says whether
@@ -105,12 +114,18 @@ def absorption_proxy_score(book: OrderBookSnapshot, trades: Sequence[TradeTick],
     total = bid + ask
     if total <= 0:
         return 5.0
-    flow_strength = min(1.0, abs(aggressive_delta) / max(sum(abs(t.quantity) for t in trades), 1e-12))
+    flow_strength = min(
+        1.0, abs(aggressive_delta) / max(sum(abs(t.quantity) for t in trades), 1e-12)
+    )
     depth_share = dominant_depth / total
-    return round(max(0.0, min(10.0, 5.0 + (depth_share - 0.5) * 10.0 * flow_strength)), 2)
+    return round(
+        max(0.0, min(10.0, 5.0 + (depth_share - 0.5) * 10.0 * flow_strength)), 2
+    )
 
 
-def liquidity_intelligence_score(book: OrderBookSnapshot, trades: Sequence[TradeTick] = ()) -> float:
+def liquidity_intelligence_score(
+    book: OrderBookSnapshot, trades: Sequence[TradeTick] = ()
+) -> float:
     """Composite liquidity score used by the scanner."""
     scores = (
         liquidity_quality_score(book),

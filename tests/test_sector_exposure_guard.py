@@ -23,10 +23,14 @@ def test_sector_cap_is_reported_as_default_limit_breach():
     portfolio = PortfolioState(
         equity_usd=10_000.0,
         peak_equity_usd=10_000.0,
-        positions=(PositionExposure(symbol="BNBUSDT", notional_usd=2500.0, leverage=10.0),),
+        positions=(
+            PositionExposure(symbol="BNBUSDT", notional_usd=2500.0, leverage=10.0),
+        ),
     )
     breaches = check_limits(portfolio, RiskLimits())
-    sector_breach = next(b for b in breaches if b.limit_name == "max_sector_exposure_pct[exchange-token]")
+    sector_breach = next(
+        b for b in breaches if b.limit_name == "max_sector_exposure_pct[exchange-token]"
+    )
     assert sector_breach.observed_value == pytest.approx(25.0)
     assert sector_breach.is_hard_cap is False
     assert sector_breach.limit_value == pytest.approx(20.0)

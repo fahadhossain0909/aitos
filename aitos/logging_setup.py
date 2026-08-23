@@ -17,7 +17,9 @@ from typing import Any, Dict
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         payload: Dict[str, Any] = {
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+            "timestamp": datetime.fromtimestamp(
+                record.created, tz=timezone.utc
+            ).isoformat(),
             "level": record.levelname,
             "logger": record.name,
             "message": record.getMessage(),
@@ -45,5 +47,7 @@ def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
-def log_with_context(logger: logging.Logger, level: int, message: str, **context: Any) -> None:
+def log_with_context(
+    logger: logging.Logger, level: int, message: str, **context: Any
+) -> None:
     logger.log(level, message, extra={"aitos_extra": context})

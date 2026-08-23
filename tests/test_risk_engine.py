@@ -1,6 +1,7 @@
 import pytest
 
-from aitos.risk.models import PortfolioState, PositionExposure, RiskAction, RiskLimits, RiskScoreBreakdown
+from aitos.risk.models import (PortfolioState, PositionExposure, RiskAction,
+                               RiskLimits, RiskScoreBreakdown)
 from aitos.risk.risk_engine import RiskEngine, _action_for_score, check_limits
 
 
@@ -8,7 +9,14 @@ def make_healthy_portfolio() -> PortfolioState:
     return PortfolioState(
         equity_usd=10_000.0,
         peak_equity_usd=10_000.0,
-        positions=(PositionExposure(symbol="BTCUSDT", notional_usd=1000.0, leverage=3.0, sector="crypto-major"),),
+        positions=(
+            PositionExposure(
+                symbol="BTCUSDT",
+                notional_usd=1000.0,
+                leverage=3.0,
+                sector="crypto-major",
+            ),
+        ),
         daily_pnl_pct=0.5,
         weekly_pnl_pct=1.0,
         volatility_percentile=20.0,
@@ -73,8 +81,12 @@ async def test_veto_true_when_last_assessment_is_no_new_entries(event_bus):
     # Directly install a NO_NEW_ENTRIES assessment to test the veto branch
     # that isn't circuit-breaker-driven, independent of exact score arithmetic.
     engine._last_assessment = RiskScoreBreakdown(
-        position_risk=80, market_risk=90, system_risk=50, portfolio_risk=85,
-        total=88.0, action=RiskAction.NO_NEW_ENTRIES,
+        position_risk=80,
+        market_risk=90,
+        system_risk=50,
+        portfolio_risk=85,
+        total=88.0,
+        action=RiskAction.NO_NEW_ENTRIES,
     )
     should_veto, reason = engine.veto()
     assert should_veto is True
@@ -95,6 +107,7 @@ async def test_assess_publishes_score_update_event(event_bus):
     await engine.assess(make_healthy_portfolio())
 
     import asyncio
+
     for _ in range(20):
         if received:
             break
@@ -121,6 +134,7 @@ async def test_emergency_stop_publishes_critical_event(event_bus):
     await engine.assess(make_hard_breach_portfolio())
 
     import asyncio
+
     for _ in range(20):
         if received:
             break
@@ -132,7 +146,9 @@ async def test_emergency_stop_publishes_critical_event(event_bus):
 
 def test_check_limits_flags_drawdown_breach():
     limits = RiskLimits()
-    portfolio = PortfolioState(equity_usd=8500.0, peak_equity_usd=10_000.0)  # 15% drawdown
+    portfolio = PortfolioState(
+        equity_usd=8500.0, peak_equity_usd=10_000.0
+    )  # 15% drawdown
     breaches = check_limits(portfolio, limits)
     names = [b.limit_name for b in breaches]
     assert "max_drawdown_pct" in names
@@ -142,7 +158,9 @@ def test_check_limits_flags_drawdown_breach():
 
 def test_check_limits_flags_hard_cap_when_exceeded():
     limits = RiskLimits()
-    portfolio = PortfolioState(equity_usd=7000.0, peak_equity_usd=10_000.0)  # 30% drawdown
+    portfolio = PortfolioState(
+        equity_usd=7000.0, peak_equity_usd=10_000.0
+    )  # 30% drawdown
     breaches = check_limits(portfolio, limits)
     dd_breach = next(b for b in breaches if b.limit_name == "max_drawdown_pct")
     assert dd_breach.is_hard_cap is True

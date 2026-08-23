@@ -22,7 +22,9 @@ logger = get_logger("aitos.health_server")
 
 
 class HealthServer:
-    def __init__(self, modules: Iterable[AITOSModule], host: str = "127.0.0.1", port: int = 8090) -> None:
+    def __init__(
+        self, modules: Iterable[AITOSModule], host: str = "127.0.0.1", port: int = 8090
+    ) -> None:
         self._modules: List[AITOSModule] = list(modules)
         self._host = host
         self._port = port
@@ -34,7 +36,10 @@ class HealthServer:
         await self._runner.setup()
         site = web.TCPSite(self._runner, self._host, self._port)
         await site.start()
-        logger.info("health server listening", extra={"aitos_extra": {"host": self._host, "port": self._port}})
+        logger.info(
+            "health server listening",
+            extra={"aitos_extra": {"host": self._host, "port": self._port}},
+        )
 
     def _build_app(self) -> web.Application:
         app = web.Application()
@@ -54,14 +59,19 @@ class HealthServer:
             health = await module.health_check()
             if health.status != ModuleStatus.HEALTHY:
                 overall_healthy = False
-            results.append({
-                "module_id": health.module_id,
-                "status": health.status.value,
-                "latency_ms": health.latency_ms,
-                "last_event_time": health.last_event_time,
-                "details": health.details,
-            })
-        payload = {"status": "healthy" if overall_healthy else "degraded", "modules": results}
+            results.append(
+                {
+                    "module_id": health.module_id,
+                    "status": health.status.value,
+                    "latency_ms": health.latency_ms,
+                    "last_event_time": health.last_event_time,
+                    "details": health.details,
+                }
+            )
+        payload = {
+            "status": "healthy" if overall_healthy else "degraded",
+            "modules": results,
+        }
         return web.json_response(payload, status=200 if overall_healthy else 503)
 
     async def _handle_metrics(self, request: web.Request) -> web.Response:

@@ -4,6 +4,7 @@ Promotion is explicit and guarded by a shadow-evaluation result. This module
 never mutates the live fusion engine implicitly; callers must explicitly
 approve a promotion and persist the resulting active policy.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

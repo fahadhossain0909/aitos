@@ -1,9 +1,17 @@
-from aitos.xai.counterfactual import composite_score, counterfactual_for_threshold
+from aitos.xai.counterfactual import (composite_score,
+                                      counterfactual_for_threshold)
 
 WEIGHTS = {
-    "trend_strength": 0.15, "liquidity_quality": 0.10, "order_flow_bias": 0.15,
-    "auction_context": 0.10, "volatility": 0.05, "market_regime": 0.10,
-    "lead_lag": 0.10, "funding_rate": 0.10, "open_interest_trend": 0.10, "rl_confidence": 0.05,
+    "trend_strength": 0.15,
+    "liquidity_quality": 0.10,
+    "order_flow_bias": 0.15,
+    "auction_context": 0.10,
+    "volatility": 0.05,
+    "market_regime": 0.10,
+    "lead_lag": 0.10,
+    "funding_rate": 0.10,
+    "open_interest_trend": 0.10,
+    "rl_confidence": 0.05,
 }
 
 
@@ -24,7 +32,9 @@ def test_composite_score_reflects_weighted_dimensions():
 
 
 def test_counterfactual_passing_candidate_explains_what_would_flip_it():
-    scores = make_scores(trend_strength=9.0, order_flow_bias=9.0)  # clears a 55 threshold
+    scores = make_scores(
+        trend_strength=9.0, order_flow_bias=9.0
+    )  # clears a 55 threshold
     current = composite_score(scores, WEIGHTS)
     assert current >= 55.0
     messages = counterfactual_for_threshold(scores, WEIGHTS, threshold=55.0)
@@ -44,4 +54,6 @@ def test_counterfactual_failing_candidate_explains_what_would_pass_it():
 def test_counterfactual_no_single_dimension_can_bridge_a_huge_gap():
     scores = make_scores(**{k: 0.0 for k in WEIGHTS})
     messages = counterfactual_for_threshold(scores, WEIGHTS, threshold=99.0)
-    assert messages == []  # no single dimension improving from 0 to 10 can close this gap
+    assert (
+        messages == []
+    )  # no single dimension improving from 0 to 10 can close this gap

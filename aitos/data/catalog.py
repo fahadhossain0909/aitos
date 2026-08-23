@@ -1,4 +1,5 @@
 """Historical public-data URL catalogs for Binance and Bybit."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

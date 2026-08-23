@@ -1,8 +1,12 @@
 """Responsive vs initiative auction classification."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import Enum
+
 from .engine import AMTContext
+
 
 class AuctionIntent(str, Enum):
     RESPONSIVE = "responsive"
@@ -10,11 +14,13 @@ class AuctionIntent(str, Enum):
     MIXED = "mixed"
     UNKNOWN = "unknown"
 
+
 @dataclass(frozen=True)
 class AuctionIntentResult:
     intent: AuctionIntent
     confidence: float
     evidence: tuple[str, ...]
+
 
 def classify_auction_intent(context: AMTContext) -> AuctionIntentResult:
     evidence: list[str] = []
@@ -38,8 +44,16 @@ def classify_auction_intent(context: AMTContext) -> AuctionIntentResult:
     total = initiative + responsive
     if total <= 0:
         return AuctionIntentResult(AuctionIntent.UNKNOWN, 0.0, tuple(evidence))
-    if abs(initiative-responsive) < 0.15:
+    if abs(initiative - responsive) < 0.15:
         intent = AuctionIntent.MIXED
     else:
-        intent = AuctionIntent.INITIATIVE if initiative > responsive else AuctionIntent.RESPONSIVE
-    return AuctionIntentResult(intent, round(min(1.0, abs(initiative-responsive) / max(total, 1e-9)), 4), tuple(evidence))
+        intent = (
+            AuctionIntent.INITIATIVE
+            if initiative > responsive
+            else AuctionIntent.RESPONSIVE
+        )
+    return AuctionIntentResult(
+        intent,
+        round(min(1.0, abs(initiative - responsive) / max(total, 1e-9)), 4),
+        tuple(evidence),
+    )

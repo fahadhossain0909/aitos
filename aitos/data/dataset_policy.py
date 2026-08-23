@@ -1,4 +1,5 @@
 """Dataset-level availability policy used by incremental ingestion."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,14 +22,24 @@ class DatasetGate:
     def __init__(self, layout: DatasetLayout):
         self.layout = layout
 
-    def available(self, dataset: str, exchange: str, market: str, symbol: str, day: date) -> DatasetAvailability:
+    def available(
+        self, dataset: str, exchange: str, market: str, symbol: str, day: date
+    ) -> DatasetAvailability:
         path = self._path(dataset, exchange, market, symbol, day)
-        return DatasetAvailability(dataset, path, self.layout.is_complete_partition(path))
+        return DatasetAvailability(
+            dataset, path, self.layout.is_complete_partition(path)
+        )
 
-    def should_download_raw(self, dataset: str, exchange: str, market: str, symbol: str, day: date) -> bool:
-        return not self.available(dataset, exchange, market, symbol, day).canonical_present
+    def should_download_raw(
+        self, dataset: str, exchange: str, market: str, symbol: str, day: date
+    ) -> bool:
+        return not self.available(
+            dataset, exchange, market, symbol, day
+        ).canonical_present
 
-    def _path(self, dataset: str, exchange: str, market: str, symbol: str, day: date) -> Path:
+    def _path(
+        self, dataset: str, exchange: str, market: str, symbol: str, day: date
+    ) -> Path:
         methods = {
             "trades": self.layout.trades,
             "prices": self.layout.prices,

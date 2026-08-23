@@ -22,7 +22,8 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Dict, List, Optional, Protocol
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.logging_setup import get_logger
@@ -35,7 +36,9 @@ class GraphSession(Protocol):
 
 
 class GraphDriver(Protocol):
-    def session(self) -> Any: ...  # returns an async context manager yielding a GraphSession
+    def session(
+        self,
+    ) -> Any: ...  # returns an async context manager yielding a GraphSession
 
     async def close(self) -> None: ...
 
@@ -95,13 +98,25 @@ class KnowledgeGraphWriter(AITOSModule):
         if self._initialized:
             return
         self._subscriptions.append(
-            await self._event_bus.subscribe("trade.position_opened", self._on_position_opened, group="knowledge-graph")
+            await self._event_bus.subscribe(
+                "trade.position_opened",
+                self._on_position_opened,
+                group="knowledge-graph",
+            )
         )
         self._subscriptions.append(
-            await self._event_bus.subscribe("trade.position_closed", self._on_position_closed, group="knowledge-graph")
+            await self._event_bus.subscribe(
+                "trade.position_closed",
+                self._on_position_closed,
+                group="knowledge-graph",
+            )
         )
         self._subscriptions.append(
-            await self._event_bus.subscribe("journal.mistake_recorded", self._on_mistake_recorded, group="knowledge-graph")
+            await self._event_bus.subscribe(
+                "journal.mistake_recorded",
+                self._on_mistake_recorded,
+                group="knowledge-graph",
+            )
         )
         self._initialized = True
         logger.info("KnowledgeGraphWriter initialized")
@@ -109,7 +124,9 @@ class KnowledgeGraphWriter(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={"writes_applied": self._writes_applied, "errors": self._errors},
@@ -131,12 +148,20 @@ class KnowledgeGraphWriter(AITOSModule):
 
     # -- Public API ---------------------------------------------------------------
 
-    async def update_symbol_correlation(self, symbol_a: str, symbol_b: str, coefficient: float, updated_at: str) -> None:
+    async def update_symbol_correlation(
+        self, symbol_a: str, symbol_b: str, coefficient: float, updated_at: str
+    ) -> None:
         """Direct call (not event-driven) — pearson correlation between two
         symbols isn't a single trade's business, it's computed from market
         data by ``SymbolCorrelationUpdater`` and pushed here."""
         self._require_initialized()
-        await self._run(CORRELATION_QUERY, symbol_a=symbol_a, symbol_b=symbol_b, coefficient=coefficient, updated_at=updated_at)
+        await self._run(
+            CORRELATION_QUERY,
+            symbol_a=symbol_a,
+            symbol_b=symbol_b,
+            coefficient=coefficient,
+            updated_at=updated_at,
+        )
 
     # -- Event handlers -------------------------------------------------------------
 
@@ -177,7 +202,12 @@ class KnowledgeGraphWriter(AITOSModule):
         if not trade_id or not entry.get("mistakes"):
             return None  # daily/weekly review entries have no trade_id to attach to
         for mistake_text in entry["mistakes"]:
-            await self._run(LINK_MISTAKE_QUERY, trade_id=trade_id, mistake_text=mistake_text, created_at=entry.get("created_at", ""))
+            await self._run(
+                LINK_MISTAKE_QUERY,
+                trade_id=trade_id,
+                mistake_text=mistake_text,
+                created_at=entry.get("created_at", ""),
+            )
         self._last_event_time = event.created_at
         return None
 
@@ -190,8 +220,13 @@ class KnowledgeGraphWriter(AITOSModule):
             self._writes_applied += 1
         except Exception as exc:  # noqa: BLE001
             self._errors += 1
-            logger.error("knowledge graph write failed", extra={"aitos_extra": {"error": str(exc)}})
+            logger.error(
+                "knowledge graph write failed",
+                extra={"aitos_extra": {"error": str(exc)}},
+            )
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("KnowledgeGraphWriter.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "KnowledgeGraphWriter.initialize() must be called first"
+            )

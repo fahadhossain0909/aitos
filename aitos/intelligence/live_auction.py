@@ -4,13 +4,18 @@ This is intentionally a proxy, not a true historical volume profile. It uses
 recent executed prices/volume plus the current visible book to estimate
 acceptance, balance and directional extension.
 """
+
 from __future__ import annotations
+
 from collections import defaultdict
 from typing import Iterable
+
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
-def live_auction_score(trades: Iterable[TradeTick], book: OrderBookSnapshot | None, direction: str) -> float:
+def live_auction_score(
+    trades: Iterable[TradeTick], book: OrderBookSnapshot | None, direction: str
+) -> float:
     if direction not in {"long", "short"}:
         return 5.0
     ticks = list(trades)
@@ -29,7 +34,11 @@ def live_auction_score(trades: Iterable[TradeTick], book: OrderBookSnapshot | No
     poc_price = max(volume_by_price, key=volume_by_price.get)
     poc_location = (poc_price - low) / width
     acceptance = max(0.0, 1.0 - abs(location - poc_location) * 2.0)
-    score = 5.0 + (location - 0.5) * 4.0 + acceptance * 1.0 if direction == "long" else 5.0 + (0.5 - location) * 4.0 + acceptance * 1.0
+    score = (
+        5.0 + (location - 0.5) * 4.0 + acceptance * 1.0
+        if direction == "long"
+        else 5.0 + (0.5 - location) * 4.0 + acceptance * 1.0
+    )
     if book is not None:
         bid = sum(q for _, q in book.bids)
         ask = sum(q for _, q in book.asks)

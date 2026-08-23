@@ -11,7 +11,12 @@ def test_attributes_component_outcomes():
                 {"source": "liquidity_quality", "score": 3.0},
             ],
         },
-        {"record_type": "OUTCOME", "decision_id": "d1", "pnl": 100.0, "r_multiple": 1.5},
+        {
+            "record_type": "OUTCOME",
+            "decision_id": "d1",
+            "pnl": 100.0,
+            "r_multiple": 1.5,
+        },
     ]
     result = DecisionEvidenceAttributor.attribute(records)
     assert [item.source for item in result] == ["liquidity_quality", "order_flow_bias"]
@@ -21,8 +26,17 @@ def test_attributes_component_outcomes():
 
 def test_falls_back_to_component_scores():
     records = [
-        {"record_type": "DECISION", "decision_id": "d1", "component_scores": {"amt": 7.0}},
-        {"record_type": "OUTCOME", "decision_id": "d1", "pnl": -20.0, "r_multiple": -0.5},
+        {
+            "record_type": "DECISION",
+            "decision_id": "d1",
+            "component_scores": {"amt": 7.0},
+        },
+        {
+            "record_type": "OUTCOME",
+            "decision_id": "d1",
+            "pnl": -20.0,
+            "r_multiple": -0.5,
+        },
     ]
     result = DecisionEvidenceAttributor.attribute(records)
     assert result[0].source == "amt"
@@ -31,7 +45,11 @@ def test_falls_back_to_component_scores():
 
 def test_ignores_outcomes_without_pnl():
     records = [
-        {"record_type": "DECISION", "decision_id": "d1", "component_scores": {"amt": 7.0}},
+        {
+            "record_type": "DECISION",
+            "decision_id": "d1",
+            "component_scores": {"amt": 7.0},
+        },
         {"record_type": "OUTCOME", "decision_id": "d1", "r_multiple": 1.0},
     ]
     assert DecisionEvidenceAttributor.attribute(records) == []

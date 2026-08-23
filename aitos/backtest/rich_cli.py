@@ -1,4 +1,5 @@
 """CLI for the full AITOS L2/futures historical replay engine."""
+
 from __future__ import annotations
 
 import argparse
@@ -9,7 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
-from aitos.backtest.aitos_runner import HistoricalDecision, AITOSHistoricalRunner
+from aitos.backtest.aitos_runner import (AITOSHistoricalRunner,
+                                         HistoricalDecision)
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
@@ -18,7 +20,9 @@ def _timestamp(value: Any) -> datetime:
         dt = value
     elif isinstance(value, (int, float)):
         number = float(value)
-        dt = datetime.fromtimestamp(number / 1000.0 if abs(number) > 10_000_000_000 else number, tz=timezone.utc)
+        dt = datetime.fromtimestamp(
+            number / 1000.0 if abs(number) > 10_000_000_000 else number, tz=timezone.utc
+        )
     else:
         dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
@@ -61,13 +65,21 @@ def _row_to_event(row: dict[str, Any]) -> TradeTick | OrderBookSnapshot:
         data = dict(row)
         data["timestamp"] = _timestamp(data.get("timestamp", data.get("time")))
         return OrderBookSnapshot.from_dict(data)
-    raise ValueError("Each rich historical row must contain event_type=trade or event_type=orderbook")
+    raise ValueError(
+        "Each rich historical row must contain event_type=trade or event_type=orderbook"
+    )
 
 
-def read_market_events(path: str | Path, fmt: str = "auto") -> Iterator[TradeTick | OrderBookSnapshot]:
+def read_market_events(
+    path: str | Path, fmt: str = "auto"
+) -> Iterator[TradeTick | OrderBookSnapshot]:
     source = Path(path)
     if fmt == "auto":
-        fmt = "parquet" if source.is_dir() or source.suffix.lower() in {".parquet", ".pq"} else "jsonl"
+        fmt = (
+            "parquet"
+            if source.is_dir() or source.suffix.lower() in {".parquet", ".pq"}
+            else "jsonl"
+        )
     if fmt == "jsonl":
         with source.open("r", encoding="utf-8") as handle:
             for line_no, line in enumerate(handle, 1):
@@ -76,14 +88,20 @@ def read_market_events(path: str | Path, fmt: str = "auto") -> Iterator[TradeTic
                 try:
                     yield _row_to_event(json.loads(line))
                 except Exception as exc:
-                    raise ValueError(f"Invalid rich JSONL row at line {line_no}: {exc}") from exc
+                    raise ValueError(
+                        f"Invalid rich JSONL row at line {line_no}: {exc}"
+                    ) from exc
         return
     if fmt == "parquet":
         try:
             import pyarrow.dataset as ds
         except ImportError as exc:
             raise RuntimeError("Parquet input requires pyarrow") from exc
-        for batch in ds.dataset(str(source), format="parquet", partitioning="hive").scanner(batch_size=50_000).to_batches():
+        for batch in (
+            ds.dataset(str(source), format="parquet", partitioning="hive")
+            .scanner(batch_size=50_000)
+            .to_batches()
+        ):
             for row in batch.to_pylist():
                 yield _row_to_event(row)
         return
@@ -91,13 +109,21 @@ def read_market_events(path: str | Path, fmt: str = "auto") -> Iterator[TradeTic
 
 
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run the full AITOS L2/futures historical replay")
-    parser.add_argument("--source", choices=("clickhouse", "file"), default="clickhouse")
+    parser = argparse.ArgumentParser(
+        description="Run the full AITOS L2/futures historical replay"
+    )
+    parser.add_argument(
+        "--source", choices=("clickhouse", "file"), default="clickhouse"
+    )
     parser.add_argument("--data")
-    parser.add_argument("--format", choices=("auto", "jsonl", "parquet"), default="auto")
+    parser.add_argument(
+        "--format", choices=("auto", "jsonl", "parquet"), default="auto"
+    )
     parser.add_argument("--symbol", required=True)
     parser.add_argument("--tick-size", type=float, required=True)
-    parser.add_argument("--decision-strategy", default="aitos.backtest.rich_cli:auction_decision")
+    parser.add_argument(
+        "--decision-strategy", default="aitos.backtest.rich_cli:auction_decision"
+    )
     parser.add_argument("--initial-cash", type=float, default=10_000.0)
     parser.add_argument("--fee-rate", type=float, default=0.0004)
     parser.add_argument("--slippage-bps", type=float, default=0.0)
@@ -107,10 +133,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--end")
     parser.add_argument("--trade-window", type=int, default=500)
     parser.add_argument("--max-book-levels", type=int)
-    parser.add_argument("--clickhouse-host", default=os.getenv("CLICKHOUSE_HOST", "localhost"))
-    parser.add_argument("--clickhouse-port", type=int, default=int(os.getenv("CLICKHOUSE_PORT", "8123")))
-    parser.add_argument("--clickhouse-user", default=os.getenv("CLICKHOUSE_USER", "default"))
-    parser.add_argument("--clickhouse-password", default=os.getenv("CLICKHOUSE_PASSWORD", ""))
+    parser.add_argument(
+        "--clickhouse-host", default=os.getenv("CLICKHOUSE_HOST", "localhost")
+    )
+    parser.add_argument(
+        "--clickhouse-port", type=int, default=int(os.getenv("CLICKHOUSE_PORT", "8123"))
+    )
+    parser.add_argument(
+        "--clickhouse-user", default=os.getenv("CLICKHOUSE_USER", "default")
+    )
+    parser.add_argument(
+        "--clickhouse-password", default=os.getenv("CLICKHOUSE_PASSWORD", "")
+    )
     parser.add_argument("--clickhouse-db", default=os.getenv("CLICKHOUSE_DB", "aitos"))
     return parser
 
@@ -125,8 +159,17 @@ def main(argv: list[str] | None = None) -> int:
     source = None
     if args.source == "clickhouse":
         from .clickhouse_market_source import ClickHouseMarketEventSource
-        source = ClickHouseMarketEventSource(args.clickhouse_host, args.clickhouse_port, args.clickhouse_user, args.clickhouse_password, args.clickhouse_db)
-        events: Iterable[TradeTick | OrderBookSnapshot] = source.events(args.symbol, _parse_optional(args.start), _parse_optional(args.end))
+
+        source = ClickHouseMarketEventSource(
+            args.clickhouse_host,
+            args.clickhouse_port,
+            args.clickhouse_user,
+            args.clickhouse_password,
+            args.clickhouse_db,
+        )
+        events: Iterable[TradeTick | OrderBookSnapshot] = source.events(
+            args.symbol, _parse_optional(args.start), _parse_optional(args.end)
+        )
     else:
         if not args.data:
             raise SystemExit("--data is required when --source=file")

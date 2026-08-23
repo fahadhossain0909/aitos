@@ -1,9 +1,9 @@
 """Exchange-agnostic L2 sequence validation and recovery planning."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Literal
-
 
 GapKind = Literal["none", "duplicate", "stale", "gap"]
 
@@ -73,7 +73,11 @@ class RecoveryRequest:
 class L2RecoveryPlanner:
     """Turn sequence gaps into explicit snapshot-recovery requests."""
 
-    def request(self, exchange: str, symbol: str, market: str, check: SequenceCheck) -> RecoveryRequest | None:
+    def request(
+        self, exchange: str, symbol: str, market: str, check: SequenceCheck
+    ) -> RecoveryRequest | None:
         if not check.requires_recovery:
             return None
-        return RecoveryRequest(exchange, symbol, market, "l2_sequence_gap", check.previous, check.current)
+        return RecoveryRequest(
+            exchange, symbol, market, "l2_sequence_gap", check.previous, check.current
+        )

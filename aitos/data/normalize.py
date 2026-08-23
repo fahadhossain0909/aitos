@@ -1,11 +1,14 @@
 """CSV/JSONL to compressed Parquet normalization utilities."""
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Sequence
 
 
-def normalize_csv_to_parquet(source: str | Path, destination: str | Path, columns: Sequence[str] | None = None) -> Path:
+def normalize_csv_to_parquet(
+    source: str | Path, destination: str | Path, columns: Sequence[str] | None = None
+) -> Path:
     try:
         import pyarrow.csv as pv
         import pyarrow.parquet as pq

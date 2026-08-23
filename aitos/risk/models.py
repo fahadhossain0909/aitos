@@ -45,7 +45,16 @@ class RiskLimits(BaseModel):
 
     @model_validator(mode="after")
     def _defaults_within_hard_caps(self) -> "RiskLimits":
-        pairs = [("max_risk_per_trade_pct", "max_risk_per_trade_hard_cap_pct"), ("max_risk_per_day_pct", "max_risk_per_day_hard_cap_pct"), ("max_risk_per_week_pct", "max_risk_per_week_hard_cap_pct"), ("max_drawdown_pct", "max_drawdown_hard_cap_pct"), ("max_leverage", "max_leverage_hard_cap"), ("max_correlated_exposure_pct", "max_correlated_exposure_hard_cap_pct"), ("max_sector_exposure_pct", "max_sector_exposure_hard_cap_pct"), ("max_open_positions", "max_open_positions_hard_cap")]
+        pairs = [
+            ("max_risk_per_trade_pct", "max_risk_per_trade_hard_cap_pct"),
+            ("max_risk_per_day_pct", "max_risk_per_day_hard_cap_pct"),
+            ("max_risk_per_week_pct", "max_risk_per_week_hard_cap_pct"),
+            ("max_drawdown_pct", "max_drawdown_hard_cap_pct"),
+            ("max_leverage", "max_leverage_hard_cap"),
+            ("max_correlated_exposure_pct", "max_correlated_exposure_hard_cap_pct"),
+            ("max_sector_exposure_pct", "max_sector_exposure_hard_cap_pct"),
+            ("max_open_positions", "max_open_positions_hard_cap"),
+        ]
         for default_field, cap_field in pairs:
             if getattr(self, default_field) > getattr(self, cap_field):
                 raise ValueError(f"{default_field} cannot exceed {cap_field}")
@@ -64,6 +73,7 @@ class PositionExposure:
     def __post_init__(self) -> None:
         if not self.sector or self.sector == "unclassified":
             from aitos.risk.sector import sector_for_symbol
+
             object.__setattr__(self, "sector", sector_for_symbol(self.symbol))
 
 
@@ -81,13 +91,17 @@ class PortfolioState:
     api_latency_ms: float = 0.0
     data_freshness_seconds: float = 0.0
     model_accuracy: float = 0.75
-    timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    timestamp: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     @property
     def current_drawdown_pct(self) -> float:
         if self.peak_equity_usd <= 0:
             return 0.0
-        return max(0.0, (self.peak_equity_usd - self.equity_usd) / self.peak_equity_usd * 100)
+        return max(
+            0.0, (self.peak_equity_usd - self.equity_usd) / self.peak_equity_usd * 100
+        )
 
     @property
     def gross_exposure_usd(self) -> float:
@@ -105,7 +119,10 @@ class PortfolioState:
         for p in self.positions:
             sector = p.sector or "other"
             totals[sector] = totals.get(sector, 0.0) + p.notional_usd
-        return {sector: notional / self.equity_usd * 100 for sector, notional in totals.items()}
+        return {
+            sector: notional / self.equity_usd * 100
+            for sector, notional in totals.items()
+        }
 
 
 @dataclass(frozen=True)
@@ -117,10 +134,21 @@ class RiskScoreBreakdown:
     total: float
     action: RiskAction
     explanation: List[str] = field(default_factory=list)
-    computed_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    computed_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"position_risk": self.position_risk, "market_risk": self.market_risk, "system_risk": self.system_risk, "portfolio_risk": self.portfolio_risk, "total": self.total, "action": self.action.value, "explanation": self.explanation, "computed_at": self.computed_at}
+        return {
+            "position_risk": self.position_risk,
+            "market_risk": self.market_risk,
+            "system_risk": self.system_risk,
+            "portfolio_risk": self.portfolio_risk,
+            "total": self.total,
+            "action": self.action.value,
+            "explanation": self.explanation,
+            "computed_at": self.computed_at,
+        }
 
 
 @dataclass(frozen=True)

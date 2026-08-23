@@ -49,10 +49,17 @@ def test_build_trade_explanation_confidence_score_averages_component_scores():
 
 def test_build_trade_explanation_risk_assessment_adds_risk_context():
     risk_assessment = RiskScoreBreakdown(
-        position_risk=20, market_risk=30, system_risk=10, portfolio_risk=25,
-        total=45.0, action=RiskAction.NORMAL, explanation=["drawdown within limits"],
+        position_risk=20,
+        market_risk=30,
+        system_risk=10,
+        portfolio_risk=25,
+        total=45.0,
+        action=RiskAction.NORMAL,
+        explanation=["drawdown within limits"],
     )
-    explanation = build_trade_explanation(make_trade_dict(), risk_assessment=risk_assessment)
+    explanation = build_trade_explanation(
+        make_trade_dict(), risk_assessment=risk_assessment
+    )
     assert any("45.0" in r for r in explanation.risks)
     assert "drawdown within limits" in explanation.risks
 
@@ -75,7 +82,16 @@ def test_trade_explanation_to_dict_roundtrips_keys():
     explanation = build_trade_explanation(make_trade_dict())
     d = explanation.to_dict()
     assert set(d.keys()) == {
-        "why_trade", "why_now", "why_leverage", "why_sl", "why_tp", "confidence_score",
-        "supporting_evidence", "conflicting_evidence", "risks", "agent_contributions",
-        "market_context", "regime_context",
+        "why_trade",
+        "why_now",
+        "why_leverage",
+        "why_sl",
+        "why_tp",
+        "confidence_score",
+        "supporting_evidence",
+        "conflicting_evidence",
+        "risks",
+        "agent_contributions",
+        "market_context",
+        "regime_context",
     }

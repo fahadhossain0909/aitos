@@ -23,17 +23,13 @@ import os
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Awaitable, Callable, Dict, List, Optional
+from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, List,
+                    Optional)
 
-from aitos.core.contracts import (
-    AITOSModule,
-    Event,
-    EventPriority,
-    EventResponse,
-    HealthStatus,
-    ModuleStatus,
-)
-from aitos.core.exceptions import EventSchemaValidationError, ModuleNotInitializedError
+from aitos.core.contracts import (AITOSModule, Event, EventPriority,
+                                  EventResponse, HealthStatus, ModuleStatus)
+from aitos.core.exceptions import (EventSchemaValidationError,
+                                   ModuleNotInitializedError)
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.eventbus")
@@ -70,10 +66,14 @@ def _stream_maxlen(topic: str) -> Optional[int]:
             try:
                 value = int(raw_value)
             except ValueError:
-                logger.warning("Invalid %s=%r; using default %d", env_name, raw_value, default)
+                logger.warning(
+                    "Invalid %s=%r; using default %d", env_name, raw_value, default
+                )
                 return default
             if value < 1:
-                logger.warning("Invalid %s=%r; using default %d", env_name, raw_value, default)
+                logger.warning(
+                    "Invalid %s=%r; using default %d", env_name, raw_value, default
+                )
                 return default
             return value
     return None
@@ -152,7 +152,10 @@ class EventBus(AITOSModule):
             sub.cancel()
         if self._subscriptions:
             await asyncio.wait(
-                [asyncio.ensure_future(_await_cancelled(s._task)) for s in self._subscriptions],
+                [
+                    asyncio.ensure_future(_await_cancelled(s._task))
+                    for s in self._subscriptions
+                ],
                 timeout=grace_period_seconds,
             )
         self._subscriptions.clear()
@@ -165,7 +168,9 @@ class EventBus(AITOSModule):
     async def handle_event(self, event: Event) -> Optional[EventResponse]:
         return None
 
-    async def publish(self, event: Event, priority: Optional[EventPriority] = None) -> None:
+    async def publish(
+        self, event: Event, priority: Optional[EventPriority] = None
+    ) -> None:
         self._require_initialized()
         validate_event_schema(event)
         effective_priority = priority if priority is not None else event.priority
@@ -191,20 +196,31 @@ class EventBus(AITOSModule):
                 maxlen=maxlen,
                 approximate=True,
             )
-        logger.info("published event", extra={"aitos_extra": {"topic": event.topic, "event_id": event.event_id}})
+        logger.info(
+            "published event",
+            extra={"aitos_extra": {"topic": event.topic, "event_id": event.event_id}},
+        )
 
-        if event.topic.endswith(".reply") and event.correlation_id and event.correlation_id in self._pending_replies:
+        if (
+            event.topic.endswith(".reply")
+            and event.correlation_id
+            and event.correlation_id in self._pending_replies
+        ):
             fut = self._pending_replies.pop(event.correlation_id)
             if not fut.done():
                 fut.set_result(event)
 
-    async def subscribe(self, topic: str, handler: EventHandler, group: str = "default") -> Subscription:
+    async def subscribe(
+        self, topic: str, handler: EventHandler, group: str = "default"
+    ) -> Subscription:
         """Subscribe to a topic (supports ``*`` glob patterns, e.g. ``intel.*``)."""
         self._require_initialized()
         consumer_name = f"{group}-{id(handler)}"
 
         if "*" in topic:
-            resolved_topics = [t for t in self._known_topics if fnmatch.fnmatch(t, topic)]
+            resolved_topics = [
+                t for t in self._known_topics if fnmatch.fnmatch(t, topic)
+            ]
         else:
             resolved_topics = [topic]
             self._known_topics.add(topic)
@@ -213,13 +229,22 @@ class EventBus(AITOSModule):
             await self._ensure_group(_stream_key(t), group)
 
         task = asyncio.create_task(
-            self._consume_loop(topic_pattern=topic, group=group, consumer=consumer_name, handler=handler)
+            self._consume_loop(
+                topic_pattern=topic,
+                group=group,
+                consumer=consumer_name,
+                handler=handler,
+            )
         )
-        sub = Subscription(topic_pattern=topic, group=group, consumer=consumer_name, _task=task)
+        sub = Subscription(
+            topic_pattern=topic, group=group, consumer=consumer_name, _task=task
+        )
         self._subscriptions.append(sub)
         return sub
 
-    async def request_reply(self, event: Event, timeout_ms: float = 5000) -> EventResponse:
+    async def request_reply(
+        self, event: Event, timeout_ms: float = 5000
+    ) -> EventResponse:
         """Publish ``event`` and await a correlated reply within ``timeout_ms``."""
         self._require_initialized()
         correlation_id = event.correlation_id or event.event_id
@@ -239,7 +264,9 @@ class EventBus(AITOSModule):
             reply_event: Event = await asyncio.wait_for(fut, timeout=timeout_ms / 1000)
         except asyncio.TimeoutError as exc:
             self._pending_replies.pop(correlation_id, None)
-            raise TimeoutError(f"request_reply timed out after {timeout_ms}ms for topic {event.topic}") from exc
+            raise TimeoutError(
+                f"request_reply timed out after {timeout_ms}ms for topic {event.topic}"
+            ) from exc
         return EventResponse(
             request_event_id=event.event_id,
             responder_module=reply_event.source_module,
@@ -269,7 +296,11 @@ class EventBus(AITOSModule):
         try:
             while True:
                 if "*" in topic_pattern:
-                    matching = {t for t in self._known_topics if fnmatch.fnmatch(t, topic_pattern)}
+                    matching = {
+                        t
+                        for t in self._known_topics
+                        if fnmatch.fnmatch(t, topic_pattern)
+                    }
                     new_streams = matching - streams_seen
                     for t in new_streams:
                         await self._ensure_group(_stream_key(t), group)
@@ -300,14 +331,25 @@ class EventBus(AITOSModule):
                     continue
 
                 for stream_key, messages in resp:
-                    stream_key = stream_key.decode() if isinstance(stream_key, bytes) else stream_key
+                    stream_key = (
+                        stream_key.decode()
+                        if isinstance(stream_key, bytes)
+                        else stream_key
+                    )
                     for entry_id, fields in messages:
-                        await self._process_message(stream_key, entry_id, fields, group, handler)
+                        await self._process_message(
+                            stream_key, entry_id, fields, group, handler
+                        )
         except asyncio.CancelledError:
             return
 
     async def _process_message(
-        self, stream_key: str, entry_id: Any, fields: Dict[str, Any], group: str, handler: EventHandler
+        self,
+        stream_key: str,
+        entry_id: Any,
+        fields: Dict[str, Any],
+        group: str,
+        handler: EventHandler,
     ) -> None:
         event = Event.from_wire(fields)
         try:
@@ -324,14 +366,30 @@ class EventBus(AITOSModule):
         except Exception as exc:  # noqa: BLE001
             logger.error(
                 "handler failed for event",
-                extra={"aitos_extra": {"topic": event.topic, "event_id": event.event_id, "error": str(exc)}},
+                extra={
+                    "aitos_extra": {
+                        "topic": event.topic,
+                        "event_id": event.event_id,
+                        "error": str(exc),
+                    }
+                },
             )
-            await self._maybe_dead_letter(stream_key, entry_id, fields, group, event, exc)
+            await self._maybe_dead_letter(
+                stream_key, entry_id, fields, group, event, exc
+            )
 
     async def _maybe_dead_letter(
-        self, stream_key: str, entry_id: Any, fields: Dict[str, Any], group: str, event: Event, exc: Exception
+        self,
+        stream_key: str,
+        entry_id: Any,
+        fields: Dict[str, Any],
+        group: str,
+        event: Event,
+        exc: Exception,
     ) -> None:
-        pending = await self._redis.xpending_range(stream_key, group, min="-", max="+", count=1, consumername=None)
+        pending = await self._redis.xpending_range(
+            stream_key, group, min="-", max="+", count=1, consumername=None
+        )
         delivery_count = 1
         for p in pending:
             pid = p.get("message_id") if isinstance(p, dict) else None
@@ -347,12 +405,16 @@ class EventBus(AITOSModule):
             await self._redis.xack(stream_key, group, entry_id)
             logger.error(
                 "event moved to DLQ",
-                extra={"aitos_extra": {"topic": event.topic, "event_id": event.event_id}},
+                extra={
+                    "aitos_extra": {"topic": event.topic, "event_id": event.event_id}
+                },
             )
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("EventBus.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "EventBus.initialize() must be called first"
+            )
 
 
 async def _await_cancelled(task: asyncio.Task) -> None:

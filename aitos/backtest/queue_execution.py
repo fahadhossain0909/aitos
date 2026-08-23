@@ -1,15 +1,19 @@
 """Conservative queue-aware execution primitives for historical L2 replay."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Literal
 
 Side = Literal["buy", "sell"]
+
 
 @dataclass(frozen=True)
 class QueueLevel:
     price: float
     displayed_qty: float
     ahead_qty: float
+
 
 @dataclass(frozen=True)
 class QueueFill:
@@ -20,6 +24,7 @@ class QueueFill:
     average_price: float
     notional: float
 
+
 class QueueAwareExecutionModel:
     """Approximate queue priority using displayed volume ahead of our order.
 
@@ -27,7 +32,10 @@ class QueueAwareExecutionModel:
     historical replay rather than guessed from current liquidity. Hidden
     liquidity and exchange-specific matching rules remain out of scope.
     """
-    def execute(self, side: Side, quantity: float, levels: list[QueueLevel]) -> QueueFill:
+
+    def execute(
+        self, side: Side, quantity: float, levels: list[QueueLevel]
+    ) -> QueueFill:
         if quantity <= 0:
             raise ValueError("quantity must be positive")
         remaining = quantity

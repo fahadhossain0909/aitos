@@ -5,6 +5,7 @@ measures whether individual evidence sources (AMT/order flow/liquidity/etc.)
 were directionally useful on closed decisions and produces bounded statistics
 that a later policy optimizer can consume.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -62,12 +63,16 @@ class DecisionEvidenceAttributor:
                 if not isinstance(pnl, (int, float)):
                     continue
                 r_multiple = outcome.get("r_multiple")
-                r_value = float(r_multiple) if isinstance(r_multiple, (int, float)) else 0.0
+                r_value = (
+                    float(r_multiple) if isinstance(r_multiple, (int, float)) else 0.0
+                )
                 for source, score in contribution_map.items():
                     # A positive normalized contribution means evidence agreed
                     # with the recorded decision direction.
                     aligned = 1.0 if score > 0 else 0.0
-                    buckets.setdefault(source, []).append((float(pnl), r_value * aligned))
+                    buckets.setdefault(source, []).append(
+                        (float(pnl), r_value * aligned)
+                    )
 
         result: List[EvidencePerformance] = []
         for source, values in sorted(buckets.items()):
@@ -76,28 +81,34 @@ class DecisionEvidenceAttributor:
             positive = sum(1 for p in pnls if p > 0)
             negative = sum(1 for p in pnls if p < 0)
             aligned = sum(1 for r in rs if r != 0.0)
-            result.append(EvidencePerformance(
-                source=source,
-                observations=len(values),
-                aligned_observations=aligned,
-                positive_outcomes=positive,
-                negative_outcomes=negative,
-                total_pnl=sum(pnls),
-                average_r_multiple=sum(rs) / len(rs) if rs else 0.0,
-                alignment_rate=aligned / len(values) if values else 0.0,
-                outcome_win_rate=positive / len(pnls) if pnls else 0.0,
-            ))
+            result.append(
+                EvidencePerformance(
+                    source=source,
+                    observations=len(values),
+                    aligned_observations=aligned,
+                    positive_outcomes=positive,
+                    negative_outcomes=negative,
+                    total_pnl=sum(pnls),
+                    average_r_multiple=sum(rs) / len(rs) if rs else 0.0,
+                    alignment_rate=aligned / len(values) if values else 0.0,
+                    outcome_win_rate=positive / len(pnls) if pnls else 0.0,
+                )
+            )
         return result
 
     @staticmethod
     def _contributions(decision: Mapping[str, Any]) -> Dict[str, float]:
-        raw = decision.get("evidence_contributions") or decision.get("fusion_contributions")
+        raw = decision.get("evidence_contributions") or decision.get(
+            "fusion_contributions"
+        )
         if isinstance(raw, Mapping):
             result: Dict[str, float] = {}
             for key, value in raw.items():
                 if isinstance(value, (int, float)):
                     result[str(key)] = float(value)
-                elif isinstance(value, Mapping) and isinstance(value.get("score"), (int, float)):
+                elif isinstance(value, Mapping) and isinstance(
+                    value.get("score"), (int, float)
+                ):
                     result[str(key)] = float(value["score"])
             return result
         if isinstance(raw, list):
@@ -114,5 +125,9 @@ class DecisionEvidenceAttributor:
         # attribution inputs when older decisions lack contribution metadata.
         scores = decision.get("component_scores")
         if isinstance(scores, Mapping):
-            return {str(k): float(v) for k, v in scores.items() if isinstance(v, (int, float))}
+            return {
+                str(k): float(v)
+                for k, v in scores.items()
+                if isinstance(v, (int, float))
+            }
         return {}

@@ -4,6 +4,7 @@ The adapter is intentionally separate from AMT measurement logic. It stores a
 compact JSON representation so the schema can evolve without changing the
 core engine.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,7 +32,9 @@ class AMTClickHouseRepository:
         await self._client.command(CREATE_AMT_SESSIONS)
 
     async def upsert(self, snapshot: SessionSnapshot) -> None:
-        payload = json.dumps(_snapshot_to_dict(snapshot), separators=(",", ":"), default=str)
+        payload = json.dumps(
+            _snapshot_to_dict(snapshot), separators=(",", ":"), default=str
+        )
         await self._client.insert(
             "amt_sessions",
             [[snapshot.session_id, snapshot.start, snapshot.end, payload]],

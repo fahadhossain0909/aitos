@@ -1,13 +1,25 @@
 from datetime import datetime, timedelta, timezone
 
-from aitos.intelligence.amt import build_volume_profile, compute_profile_features
+from aitos.intelligence.amt import (build_volume_profile,
+                                    compute_profile_features)
 from aitos.models.market import TradeSide, TradeTick
 
 
 def _trades(prices, quantities=None):
     quantities = quantities or [1.0] * len(prices)
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    return [TradeTick("BTCUSDT", i, float(p), float(q), TradeSide.BUY, False, start + timedelta(seconds=i)) for i, (p, q) in enumerate(zip(prices, quantities))]
+    return [
+        TradeTick(
+            "BTCUSDT",
+            i,
+            float(p),
+            float(q),
+            TradeSide.BUY,
+            False,
+            start + timedelta(seconds=i),
+        )
+        for i, (p, q) in enumerate(zip(prices, quantities))
+    ]
 
 
 def test_profile_features_expose_developing_poc_and_nodes():

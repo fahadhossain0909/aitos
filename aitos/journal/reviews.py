@@ -35,7 +35,17 @@ def _closed_only(trades: List[Trade]) -> List[Trade]:
 def daily_review(trades: List[Trade], date: str) -> DailyReview:
     closed = _closed_only(trades)
     if not closed:
-        return DailyReview(date=date, total_trades=0, wins=0, losses=0, win_rate=0.0, total_pnl=0.0, avg_r_multiple=0.0, best_trade_pnl=0.0, worst_trade_pnl=0.0)
+        return DailyReview(
+            date=date,
+            total_trades=0,
+            wins=0,
+            losses=0,
+            win_rate=0.0,
+            total_pnl=0.0,
+            avg_r_multiple=0.0,
+            best_trade_pnl=0.0,
+            worst_trade_pnl=0.0,
+        )
 
     pnls = [t.pnl for t in closed]
     wins = sum(1 for p in pnls if p > 0)
@@ -49,7 +59,9 @@ def daily_review(trades: List[Trade], date: str) -> DailyReview:
         losses=losses,
         win_rate=round(wins / len(closed) * 100, 2),
         total_pnl=round(sum(pnls), 2),
-        avg_r_multiple=round(sum(r_multiples) / len(r_multiples), 4) if r_multiples else 0.0,
+        avg_r_multiple=(
+            round(sum(r_multiples) / len(r_multiples), 4) if r_multiples else 0.0
+        ),
         best_trade_pnl=round(max(pnls), 2),
         worst_trade_pnl=round(min(pnls), 2),
     )
@@ -59,14 +71,18 @@ def weekly_review(trades: List[Trade], week_start: str) -> WeeklyReview:
     closed = _closed_only(trades)
     by_strategy: Dict[str, Dict[str, float]] = {}
     for t in closed:
-        bucket = by_strategy.setdefault(t.strategy_id, {"trades": 0, "pnl": 0.0, "wins": 0})
+        bucket = by_strategy.setdefault(
+            t.strategy_id, {"trades": 0, "pnl": 0.0, "wins": 0}
+        )
         bucket["trades"] += 1
         bucket["pnl"] += t.pnl
         if t.pnl > 0:
             bucket["wins"] += 1
 
     for stats in by_strategy.values():
-        stats["win_rate"] = round(stats["wins"] / stats["trades"] * 100, 2) if stats["trades"] else 0.0
+        stats["win_rate"] = (
+            round(stats["wins"] / stats["trades"] * 100, 2) if stats["trades"] else 0.0
+        )
         stats["pnl"] = round(stats["pnl"], 2)
         del stats["wins"]
 
@@ -82,10 +98,19 @@ def weekly_review(trades: List[Trade], week_start: str) -> WeeklyReview:
     )
 
 
-def monthly_review(trades: List[Trade], month: str, starting_equity: float = 10_000.0) -> MonthlyReview:
+def monthly_review(
+    trades: List[Trade], month: str, starting_equity: float = 10_000.0
+) -> MonthlyReview:
     closed = _closed_only(trades)
     if not closed:
-        return MonthlyReview(month=month, total_trades=0, total_pnl=0.0, sharpe_ratio=0.0, max_drawdown_pct=0.0, calmar_ratio=0.0)
+        return MonthlyReview(
+            month=month,
+            total_trades=0,
+            total_pnl=0.0,
+            sharpe_ratio=0.0,
+            max_drawdown_pct=0.0,
+            calmar_ratio=0.0,
+        )
 
     pnls = [t.pnl for t in closed]
     total_pnl = sum(pnls)
@@ -110,7 +135,11 @@ def monthly_review(trades: List[Trade], month: str, starting_equity: float = 10_
             dd = (peak - equity) / peak * 100
             max_dd_pct = max(max_dd_pct, dd)
 
-    calmar = round((total_pnl / starting_equity * 100) / max_dd_pct, 4) if max_dd_pct > 0 else 0.0
+    calmar = (
+        round((total_pnl / starting_equity * 100) / max_dd_pct, 4)
+        if max_dd_pct > 0
+        else 0.0
+    )
 
     return MonthlyReview(
         month=month,

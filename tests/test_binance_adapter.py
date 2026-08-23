@@ -5,21 +5,22 @@ from typing import List
 import pytest
 from aioresponses import aioresponses
 
-from aitos.exchange.binance import REST_BASE_URL, WS_BASE_URL, BinanceFuturesAdapter
-from tests.test_binance_parsing import (
-    SAMPLE_DEPTH_REST,
-    SAMPLE_KLINE_ROW,
-    SAMPLE_OPEN_INTEREST,
-    SAMPLE_PREMIUM_INDEX,
-    SAMPLE_TRADE_REST,
-)
+from aitos.exchange.binance import (REST_BASE_URL, WS_BASE_URL,
+                                    BinanceFuturesAdapter)
+from tests.test_binance_parsing import (SAMPLE_DEPTH_REST, SAMPLE_KLINE_ROW,
+                                        SAMPLE_OPEN_INTEREST,
+                                        SAMPLE_PREMIUM_INDEX,
+                                        SAMPLE_TRADE_REST)
 
 
 @pytest.mark.asyncio
 async def test_fetch_klines_parses_response():
     async with BinanceFuturesAdapter() as adapter:
         with aioresponses() as m:
-            m.get(f"{REST_BASE_URL}/fapi/v1/klines?symbol=BTCUSDT&interval=1m&limit=2", payload=[SAMPLE_KLINE_ROW, SAMPLE_KLINE_ROW])
+            m.get(
+                f"{REST_BASE_URL}/fapi/v1/klines?symbol=BTCUSDT&interval=1m&limit=2",
+                payload=[SAMPLE_KLINE_ROW, SAMPLE_KLINE_ROW],
+            )
             klines = await adapter.fetch_klines("BTCUSDT", "1m", limit=2)
     assert len(klines) == 2
     assert klines[0].symbol == "BTCUSDT"
@@ -30,7 +31,10 @@ async def test_fetch_klines_parses_response():
 async def test_fetch_order_book_parses_response():
     async with BinanceFuturesAdapter() as adapter:
         with aioresponses() as m:
-            m.get(f"{REST_BASE_URL}/fapi/v1/depth?symbol=BTCUSDT&limit=50", payload=SAMPLE_DEPTH_REST)
+            m.get(
+                f"{REST_BASE_URL}/fapi/v1/depth?symbol=BTCUSDT&limit=50",
+                payload=SAMPLE_DEPTH_REST,
+            )
             book = await adapter.fetch_order_book("BTCUSDT", limit=50)
     assert book.last_update_id == 1027024
     assert book.best_bid == 65000.00
@@ -40,7 +44,10 @@ async def test_fetch_order_book_parses_response():
 async def test_fetch_recent_trades_parses_response():
     async with BinanceFuturesAdapter() as adapter:
         with aioresponses() as m:
-            m.get(f"{REST_BASE_URL}/fapi/v1/trades?symbol=BTCUSDT&limit=1", payload=[SAMPLE_TRADE_REST])
+            m.get(
+                f"{REST_BASE_URL}/fapi/v1/trades?symbol=BTCUSDT&limit=1",
+                payload=[SAMPLE_TRADE_REST],
+            )
             trades = await adapter.fetch_recent_trades("BTCUSDT", limit=1)
     assert len(trades) == 1
     assert trades[0].trade_id == 28457
@@ -50,7 +57,10 @@ async def test_fetch_recent_trades_parses_response():
 async def test_fetch_funding_rate_parses_response():
     async with BinanceFuturesAdapter() as adapter:
         with aioresponses() as m:
-            m.get(f"{REST_BASE_URL}/fapi/v1/premiumIndex?symbol=BTCUSDT", payload=SAMPLE_PREMIUM_INDEX)
+            m.get(
+                f"{REST_BASE_URL}/fapi/v1/premiumIndex?symbol=BTCUSDT",
+                payload=SAMPLE_PREMIUM_INDEX,
+            )
             funding = await adapter.fetch_funding_rate("BTCUSDT")
     assert funding.mark_price == 65010.5
 
@@ -59,7 +69,10 @@ async def test_fetch_funding_rate_parses_response():
 async def test_fetch_open_interest_parses_response():
     async with BinanceFuturesAdapter() as adapter:
         with aioresponses() as m:
-            m.get(f"{REST_BASE_URL}/fapi/v1/openInterest?symbol=BTCUSDT", payload=SAMPLE_OPEN_INTEREST)
+            m.get(
+                f"{REST_BASE_URL}/fapi/v1/openInterest?symbol=BTCUSDT",
+                payload=SAMPLE_OPEN_INTEREST,
+            )
             oi = await adapter.fetch_open_interest("BTCUSDT")
     assert oi.open_interest == 45123.456
 
@@ -68,16 +81,26 @@ async def test_fetch_open_interest_parses_response():
 async def test_fetch_exchange_info_parses_and_filters_by_symbol():
     sample = {
         "symbols": [
-            {"symbol": "BTCUSDT", "quantityPrecision": 3, "pricePrecision": 1, "filters": [
-                {"filterType": "LOT_SIZE", "stepSize": "0.001"},
-                {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
-                {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
-            ]},
-            {"symbol": "ETHUSDT", "quantityPrecision": 2, "pricePrecision": 2, "filters": [
-                {"filterType": "LOT_SIZE", "stepSize": "0.01"},
-                {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
-                {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
-            ]},
+            {
+                "symbol": "BTCUSDT",
+                "quantityPrecision": 3,
+                "pricePrecision": 1,
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
+                ],
+            },
+            {
+                "symbol": "ETHUSDT",
+                "quantityPrecision": 2,
+                "pricePrecision": 2,
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.01"},
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
+                ],
+            },
         ]
     }
     async with BinanceFuturesAdapter() as adapter:
@@ -92,12 +115,22 @@ async def test_fetch_exchange_info_parses_and_filters_by_symbol():
 async def test_fetch_exchange_info_narrows_to_requested_symbols():
     sample = {
         "symbols": [
-            {"symbol": "BTCUSDT", "quantityPrecision": 3, "pricePrecision": 1, "filters": [
-                {"filterType": "LOT_SIZE", "stepSize": "0.001"},
-                {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
-                {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
-            ]},
-            {"symbol": "ETHUSDT", "quantityPrecision": 2, "pricePrecision": 2, "filters": []},
+            {
+                "symbol": "BTCUSDT",
+                "quantityPrecision": 3,
+                "pricePrecision": 1,
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
+                ],
+            },
+            {
+                "symbol": "ETHUSDT",
+                "quantityPrecision": 2,
+                "pricePrecision": 2,
+                "filters": [],
+            },
         ]
     }
     async with BinanceFuturesAdapter() as adapter:

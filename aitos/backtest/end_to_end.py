@@ -1,11 +1,12 @@
 """End-to-end bridge from canonical historical events into existing engines."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Any
+from typing import Any, Iterable
 
-from aitos.data.schema import CanonicalBookEvent, CanonicalTrade
 from aitos.data.orderbook_replay import OrderBookReconstructor
+from aitos.data.schema import CanonicalBookEvent, CanonicalTrade
 
 
 @dataclass

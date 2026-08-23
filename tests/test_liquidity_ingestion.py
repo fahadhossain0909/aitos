@@ -59,7 +59,9 @@ def trade(tid, side):
 @pytest.mark.asyncio
 async def test_live_orderbook_handler_publishes_liquidity_event():
     bus = FakeBus()
-    service = DataIngestionService(FakeExchange(), bus, ["BTCUSDT"], repository=FakeRepository())
+    service = DataIngestionService(
+        FakeExchange(), bus, ["BTCUSDT"], repository=FakeRepository()
+    )
     service._recent_trades["BTCUSDT"].append(trade(1, TradeSide.BUY))
 
     await service._handle_order_book(book(1, 100.0, 100.0))

@@ -1,4 +1,5 @@
 """Safe local persistence helpers for the online attention explainer."""
+
 from __future__ import annotations
 
 import pickle

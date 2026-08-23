@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
-from aitos.learning.experience import ExperienceRecord
 from aitos.learning.evolution import EvolutionEngine, EvolutionProposal
+from aitos.learning.experience import ExperienceRecord
 from aitos.learning.model_registry import ModelArtifact, ModelRegistry
 
 

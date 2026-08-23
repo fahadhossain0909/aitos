@@ -3,7 +3,8 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aitos.app import PaperPortfolioTracker, build_system, initialize_all, run_scan_and_trade_cycle, shutdown_all
+from aitos.app import (PaperPortfolioTracker, build_system, initialize_all,
+                       run_scan_and_trade_cycle, shutdown_all)
 from aitos.execution.order_executor import SimulatedOrderExecutor
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.lifecycle import TradeLifecycle
@@ -25,8 +26,11 @@ async def test_build_system_wires_all_core_modules(event_bus):
     exchange = FakeScannerExchange()
     executor = SimulatedOrderExecutor()
     components = await build_system(
-        event_bus=event_bus, exchange=exchange, order_executor=executor,
-        symbols=["BTCUSDT", "ETHUSDT"], min_score_threshold=0.0,
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=executor,
+        symbols=["BTCUSDT", "ETHUSDT"],
+        min_score_threshold=0.0,
     )
 
     assert components.kernel is not None
@@ -50,8 +54,11 @@ async def test_initialize_all_and_shutdown_all_completes_cleanly(event_bus):
     exchange = FakeScannerExchange()
     executor = SimulatedOrderExecutor()
     components = await build_system(
-        event_bus=event_bus, exchange=exchange, order_executor=executor,
-        symbols=["BTCUSDT"], min_score_threshold=0.0,
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=executor,
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
     )
 
     await initialize_all(components)
@@ -66,11 +73,16 @@ async def test_initialize_all_and_shutdown_all_completes_cleanly(event_bus):
 
 @pytest.mark.asyncio
 async def test_scan_and_trade_cycle_opens_a_position_for_the_trending_symbol(event_bus):
-    exchange = FakeScannerExchange()  # BTCUSDT trends, ETHUSDT is choppy (per test_scanner.py's fixture)
+    exchange = (
+        FakeScannerExchange()
+    )  # BTCUSDT trends, ETHUSDT is choppy (per test_scanner.py's fixture)
     executor = SimulatedOrderExecutor()
     components = await build_system(
-        event_bus=event_bus, exchange=exchange, order_executor=executor,
-        symbols=["BTCUSDT", "ETHUSDT"], min_score_threshold=0.0,
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=executor,
+        symbols=["BTCUSDT", "ETHUSDT"],
+        min_score_threshold=0.0,
     )
     await initialize_all(components)
     tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
@@ -86,12 +98,17 @@ async def test_scan_and_trade_cycle_opens_a_position_for_the_trending_symbol(eve
 
 
 @pytest.mark.asyncio
-async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(event_bus):
+async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(
+    event_bus,
+):
     exchange = FakeScannerExchange()
     executor = SimulatedOrderExecutor()
     components = await build_system(
-        event_bus=event_bus, exchange=exchange, order_executor=executor,
-        symbols=["BTCUSDT"], min_score_threshold=0.0,
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=executor,
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
     )
     await initialize_all(components)
     tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
@@ -116,8 +133,11 @@ async def test_price_feed_subscription_auto_updates_open_trades(event_bus):
     exchange = FakeScannerExchange()
     executor = SimulatedOrderExecutor()
     components = await build_system(
-        event_bus=event_bus, exchange=exchange, order_executor=executor,
-        symbols=["BTCUSDT"], min_score_threshold=0.0,
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=executor,
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
     )
     await initialize_all(components)
     tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
@@ -130,15 +150,21 @@ async def test_price_feed_subscription_auto_updates_open_trades(event_bus):
     from aitos.core.contracts import Event
 
     crash_price = trade.sl_price - 1.0
-    await event_bus.publish(Event(
-        topic=f"market.kline.{trade.symbol}.15m",
-        payload={"symbol": trade.symbol, "close": crash_price},
-        source_module="test",
-    ))
+    await event_bus.publish(
+        Event(
+            topic=f"market.kline.{trade.symbol}.15m",
+            payload={"symbol": trade.symbol, "close": crash_price},
+            source_module="test",
+        )
+    )
 
-    closed = await _wait_for(lambda: len(components.trade_lifecycle.get_open_trades()) == 0)
+    closed = await _wait_for(
+        lambda: len(components.trade_lifecycle.get_open_trades()) == 0
+    )
     assert closed is True
-    assert components.trade_lifecycle.get_closed_trades()[0].exit_reason == "sl_triggered"
+    assert (
+        components.trade_lifecycle.get_closed_trades()[0].exit_reason == "sl_triggered"
+    )
 
     await shutdown_all(components)
 
@@ -151,10 +177,24 @@ def test_paper_portfolio_tracker_computes_equity_from_closed_trades():
         def get_closed_trades(self):
             return [
                 Trade(
-                    trade_id="t1", symbol="BTCUSDT", side=TradeSide.LONG, entry_price=100.0, quantity=1.0,
-                    leverage=5.0, position_size_usd=1000.0, risk_amount_usd=100.0, strategy_id="s",
-                    agent_consensus={}, explanation="", sl_price=98.0, tp_price=104.0,
-                    state=TradeLifecycleState.POSITION_CLOSED, entry_time=now, pnl=250.0, pnl_percent=25.0, exit_time=now,
+                    trade_id="t1",
+                    symbol="BTCUSDT",
+                    side=TradeSide.LONG,
+                    entry_price=100.0,
+                    quantity=1.0,
+                    leverage=5.0,
+                    position_size_usd=1000.0,
+                    risk_amount_usd=100.0,
+                    strategy_id="s",
+                    agent_consensus={},
+                    explanation="",
+                    sl_price=98.0,
+                    tp_price=104.0,
+                    state=TradeLifecycleState.POSITION_CLOSED,
+                    entry_time=now,
+                    pnl=250.0,
+                    pnl_percent=25.0,
+                    exit_time=now,
                 )
             ]
 
@@ -172,10 +212,24 @@ def test_paper_portfolio_tracker_tracks_drawdown_from_peak():
 
     def make_trade(trade_id, pnl):
         return Trade(
-            trade_id=trade_id, symbol="BTCUSDT", side=TradeSide.LONG, entry_price=100.0, quantity=1.0,
-            leverage=5.0, position_size_usd=1000.0, risk_amount_usd=100.0, strategy_id="s",
-            agent_consensus={}, explanation="", sl_price=98.0, tp_price=104.0,
-            state=TradeLifecycleState.POSITION_CLOSED, entry_time=now, pnl=pnl, pnl_percent=pnl / 10, exit_time=now,
+            trade_id=trade_id,
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            entry_price=100.0,
+            quantity=1.0,
+            leverage=5.0,
+            position_size_usd=1000.0,
+            risk_amount_usd=100.0,
+            strategy_id="s",
+            agent_consensus={},
+            explanation="",
+            sl_price=98.0,
+            tp_price=104.0,
+            state=TradeLifecycleState.POSITION_CLOSED,
+            entry_time=now,
+            pnl=pnl,
+            pnl_percent=pnl / 10,
+            exit_time=now,
         )
 
     class FakeLifecycle:
@@ -190,7 +244,9 @@ def test_paper_portfolio_tracker_tracks_drawdown_from_peak():
 
     # First: up to 10,500 (new peak). Then: back down to 10,000 -> 500/10,500 drawdown.
     tracker.build_portfolio_state(FakeLifecycle([make_trade("t1", 500.0)]))
-    portfolio = tracker.build_portfolio_state(FakeLifecycle([make_trade("t1", 500.0), make_trade("t2", -500.0)]))
+    portfolio = tracker.build_portfolio_state(
+        FakeLifecycle([make_trade("t1", 500.0), make_trade("t2", -500.0)])
+    )
 
     assert portfolio.equity_usd == 10_000.0
     assert portfolio.current_drawdown_pct == pytest.approx(500 / 10_500 * 100)
@@ -235,12 +291,17 @@ async def test_live_portfolio_tracker_queries_real_account_balance():
 
 
 @pytest.mark.asyncio
-async def test_scan_and_trade_cycle_calls_refresh_equity_when_tracker_supports_it(event_bus):
+async def test_scan_and_trade_cycle_calls_refresh_equity_when_tracker_supports_it(
+    event_bus,
+):
     exchange = FakeScannerExchange()
     executor = SimulatedOrderExecutor()
     components = await build_system(
-        event_bus=event_bus, exchange=exchange, order_executor=executor,
-        symbols=["BTCUSDT"], min_score_threshold=0.0,
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=executor,
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
     )
     await initialize_all(components)
 
@@ -256,32 +317,45 @@ async def test_scan_and_trade_cycle_calls_refresh_equity_when_tracker_supports_i
 
         def build_portfolio_state(self, trade_lifecycle):
             from aitos.risk.models import PortfolioState
+
             return PortfolioState(equity_usd=self.equity, peak_equity_usd=self.equity)
 
     await run_scan_and_trade_cycle(components, TrackerWithRefresh())
 
-    assert len(refresh_calls) >= 1  # called at least once per cycle (twice, per current implementation)
+    assert (
+        len(refresh_calls) >= 1
+    )  # called at least once per cycle (twice, per current implementation)
 
     await shutdown_all(components)
 
 
 @pytest.mark.asyncio
-async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(event_bus, kernel):
+async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
+    event_bus, kernel
+):
     """Governance regression test: is_production/approved_by must actually
     reach AIKernel.enforce_governance via the submitted Opportunity."""
     exchange = FakeScannerExchange()
     executor = SimulatedOrderExecutor()
     components = await build_system(
-        event_bus=event_bus, exchange=exchange, order_executor=executor,
-        symbols=["BTCUSDT"], min_score_threshold=0.0, kernel=kernel,
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=executor,
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
+        kernel=kernel,
     )
     await initialize_all(components)
     tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
 
     # No approved_by -> governance should reject every production opportunity.
-    await run_scan_and_trade_cycle(components, tracker, is_production=True, approved_by=None)
+    await run_scan_and_trade_cycle(
+        components, tracker, is_production=True, approved_by=None
+    )
     assert components.trade_lifecycle.get_open_trades() == []
-    rejected = components.trade_lifecycle.get_closed_trades()  # rejected trades aren't tracked as "closed" though
+    rejected = (
+        components.trade_lifecycle.get_closed_trades()
+    )  # rejected trades aren't tracked as "closed" though
     # Rejected trades don't appear in open or closed lists (they're REJECTED state, never stored) —
     # the real proof is simply that nothing opened despite a valid trending symbol being available.
 

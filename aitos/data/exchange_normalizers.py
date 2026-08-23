@@ -1,4 +1,5 @@
 """Normalize common Binance/Bybit trade CSV layouts into canonical events."""
+
 from __future__ import annotations
 
 import csv
@@ -30,7 +31,9 @@ def _side_from_maker_flag(value: str) -> tuple[str, bool]:
     return ("sell" if maker else "buy", maker)
 
 
-def iter_binance_aggtrades(path: str | Path, symbol: str, exchange: str = "binance", market: str = "futures_um") -> Iterator[CanonicalTrade]:
+def iter_binance_aggtrades(
+    path: str | Path, symbol: str, exchange: str = "binance", market: str = "futures_um"
+) -> Iterator[CanonicalTrade]:
     """Read Binance aggTrades CSV with or without a header."""
     path = Path(path)
     with path.open("r", encoding="utf-8", newline="") as handle:
@@ -46,30 +49,83 @@ def iter_binance_aggtrades(path: str | Path, symbol: str, exchange: str = "binan
             get = lambda row, *names: row[next(index[n] for n in names if n in index)]
         else:
             rows = iter([first], reader)
-            get = lambda row, *names: row[{"agg_trade_id": 0, "price": 1, "qty": 2, "quantity": 2, "first_trade_id": 3, "last_trade_id": 4, "timestamp": 5, "is_buyer_maker": 6}[next(names)] ]
+            get = lambda row, *names: row[
+                {
+                    "agg_trade_id": 0,
+                    "price": 1,
+                    "qty": 2,
+                    "quantity": 2,
+                    "first_trade_id": 3,
+                    "last_trade_id": 4,
+                    "timestamp": 5,
+                    "is_buyer_maker": 6,
+                }[next(names)]
+            ]
 
         for row in rows:
             trade_id = get(row, "agg_trade_id", "trade_id")
             price = _number(get(row, "price"))
             quantity = _number(get(row, "qty", "quantity"))
             ts = _timestamp(get(row, "timestamp", "time"))
-            side, maker = _side_from_maker_flag(get(row, "is_buyer_maker", "buyer_maker"))
-            yield CanonicalTrade(exchange, market, symbol.upper(), str(trade_id), ts, price, quantity, side, maker)
+            side, maker = _side_from_maker_flag(
+                get(row, "is_buyer_maker", "buyer_maker")
+            )
+            yield CanonicalTrade(
+                exchange,
+                market,
+                symbol.upper(),
+                str(trade_id),
+                ts,
+                price,
+                quantity,
+                side,
+                maker,
+            )
 
 
-def iter_bybit_trades(path: str | Path, symbol: str, exchange: str = "bybit", market: str = "spot") -> Iterator[CanonicalTrade]:
+def iter_bybit_trades(
+    path: str | Path, symbol: str, exchange: str = "bybit", market: str = "spot"
+) -> Iterator[CanonicalTrade]:
     """Read common Bybit public trade CSV variants by column name."""
     path = Path(path)
     with path.open("r", encoding="utf-8", newline="") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
-            normalized = {str(k).strip().lower(): str(v).strip() for k, v in row.items() if k is not None}
-            trade_id = normalized.get("tradeid") or normalized.get("trade_id") or normalized.get("id") or ""
+            normalized = {
+                str(k).strip().lower(): str(v).strip()
+                for k, v in row.items()
+                if k is not None
+            }
+            trade_id = (
+                normalized.get("tradeid")
+                or normalized.get("trade_id")
+                or normalized.get("id")
+                or ""
+            )
             price = _number(normalized.get("price", "0"))
-            quantity = _number(normalized.get("size") or normalized.get("qty") or normalized.get("quantity") or "0")
+            quantity = _number(
+                normalized.get("size")
+                or normalized.get("qty")
+                or normalized.get("quantity")
+                or "0"
+            )
             raw_side = (normalized.get("side") or "").lower()
             side = "buy" if raw_side in {"buy", "b"} else "sell"
-            raw_ts = normalized.get("timestamp") or normalized.get("time") or normalized.get("ts")
+            raw_ts = (
+                normalized.get("timestamp")
+                or normalized.get("time")
+                or normalized.get("ts")
+            )
             if raw_ts is None:
                 raise ValueError("Bybit trade row has no timestamp column")
-            yield CanonicalTrade(exchange, market, symbol.upper(), trade_id, _timestamp(raw_ts), price, quantity, side, None)
+            yield CanonicalTrade(
+                exchange,
+                market,
+                symbol.upper(),
+                trade_id,
+                _timestamp(raw_ts),
+                price,
+                quantity,
+                side,
+                None,
+            )

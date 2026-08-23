@@ -1,4 +1,5 @@
 """Deterministic replay primitives for historical market events."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

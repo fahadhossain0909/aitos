@@ -27,6 +27,10 @@ def test_session_store_keeps_previous_and_recent():
         ]
         contexts.append(engine.analyze(trades, session_start=base + timedelta(days=i)))
     store.upsert(SessionSnapshot("s1", base, base + timedelta(days=1), contexts[0]))
-    store.upsert(SessionSnapshot("s2", base + timedelta(days=1), base + timedelta(days=2), contexts[1]))
+    store.upsert(
+        SessionSnapshot(
+            "s2", base + timedelta(days=1), base + timedelta(days=2), contexts[1]
+        )
+    )
     assert store.previous("s2").session_id == "s1"
     assert store.recent(1)[0].session_id == "s2"

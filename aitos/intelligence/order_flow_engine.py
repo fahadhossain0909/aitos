@@ -4,6 +4,7 @@ The same engine can consume live WebSocket TradeTick objects or historical
 TradeTick batches. It keeps a bounded rolling window and emits normalized
 features suitable for the scanner/decision-fusion layer.
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -11,12 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Deque, Sequence
 
-from aitos.intelligence.order_flow import (
-    aggression_ratio,
-    buy_volume_ratio,
-    delta,
-    imbalance_score,
-)
+from aitos.intelligence.order_flow import (aggression_ratio, buy_volume_ratio,
+                                           delta, imbalance_score)
 from aitos.models.market import TradeSide, TradeTick
 
 
@@ -82,15 +79,23 @@ class OrderFlowEngine:
     def features(self) -> OrderFlowFeatures:
         trades = tuple(self._trades)
         if not trades:
-            return OrderFlowFeatures(0, 0.0, 0.0, 0.0, self._cvd, 0.5, 0.0, 5.0, 0.0, 0.0, "neutral", None)
+            return OrderFlowFeatures(
+                0, 0.0, 0.0, 0.0, self._cvd, 0.5, 0.0, 5.0, 0.0, 0.0, "neutral", None
+            )
         buy = sum(abs(t.quantity) for t in trades if self._signed(t) > 0)
         sell = sum(abs(t.quantity) for t in trades if self._signed(t) < 0)
         total = buy + sell
-        vwap = sum(t.price * abs(t.quantity) for t in trades) / total if total else trades[-1].price
+        vwap = (
+            sum(t.price * abs(t.quantity) for t in trades) / total
+            if total
+            else trades[-1].price
+        )
         buy_ratio = buy_volume_ratio(trades)
         aggr = aggression_ratio(trades)
         bias = imbalance_score(trades)
-        direction = "long" if buy_ratio > 0.55 else "short" if buy_ratio < 0.45 else "neutral"
+        direction = (
+            "long" if buy_ratio > 0.55 else "short" if buy_ratio < 0.45 else "neutral"
+        )
         return OrderFlowFeatures(
             trade_count=len(trades),
             buy_volume=buy,

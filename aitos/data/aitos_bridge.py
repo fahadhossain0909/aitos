@@ -1,4 +1,5 @@
 """Bridge canonical historical events into AITOS domain models."""
+
 from __future__ import annotations
 
 from aitos.data.schema import CanonicalBookEvent, CanonicalTrade
@@ -10,19 +11,27 @@ def canonical_trade_to_domain(event: CanonicalTrade) -> TradeTick:
     try:
         trade_id = int(event.trade_id)
     except (TypeError, ValueError):
-        trade_id = abs(hash((event.exchange, event.market, event.symbol, event.trade_id)))
+        trade_id = abs(
+            hash((event.exchange, event.market, event.symbol, event.trade_id))
+        )
     return TradeTick(
         symbol=event.symbol,
         trade_id=trade_id,
         price=float(event.price),
         quantity=float(event.quantity),
         side=TradeSide(event.side),
-        is_buyer_maker=bool(event.is_buyer_maker) if event.is_buyer_maker is not None else event.side == "sell",
+        is_buyer_maker=(
+            bool(event.is_buyer_maker)
+            if event.is_buyer_maker is not None
+            else event.side == "sell"
+        ),
         timestamp=event.timestamp,
     )
 
 
-def book_events_to_snapshot(events: list[CanonicalBookEvent]) -> OrderBookSnapshot | None:
+def book_events_to_snapshot(
+    events: list[CanonicalBookEvent],
+) -> OrderBookSnapshot | None:
     """Apply a batch of absolute L2 updates and emit the existing snapshot model."""
     if not events:
         return None

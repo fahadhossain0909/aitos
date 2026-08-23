@@ -1,16 +1,20 @@
 """Historical market-event adapter for the shared AITOS intelligence pipeline."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Iterable
 
-from aitos.models.market import TradeTick, OrderBookSnapshot
-from aitos.intelligence.order_flow_engine import OrderFlowEngine
 from aitos.intelligence.footprint import FootprintEngine
-from aitos.intelligence.footprint_signals import FootprintSignalEngine, FootprintSignals
-from aitos.intelligence.liquidity_tracker import LiquidityTracker, LiquidityEvent
-from aitos.intelligence.orderflow_liquidity_interaction import FlowLiquidityInteractionEngine, FlowLiquiditySignal
+from aitos.intelligence.footprint_signals import (FootprintSignalEngine,
+                                                  FootprintSignals)
+from aitos.intelligence.liquidity_tracker import (LiquidityEvent,
+                                                  LiquidityTracker)
 from aitos.intelligence.live_auction import live_auction_score
+from aitos.intelligence.order_flow_engine import OrderFlowEngine
+from aitos.intelligence.orderflow_liquidity_interaction import (
+    FlowLiquidityInteractionEngine, FlowLiquiditySignal)
+from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
 @dataclass(frozen=True)
@@ -52,9 +56,13 @@ class HistoricalMarketAdapter:
         if len(self._trades) > self.order_flow.max_trades:
             self._trades.pop(0)
         self._latest_trade = trade
-        self._last_signals = self.footprint_signals.evaluate(self.footprint.build(self._trades))
+        self._last_signals = self.footprint_signals.evaluate(
+            self.footprint.build(self._trades)
+        )
         if self._last_signals and self._liquidity_events:
-            self._interaction_signal = self.interaction.evaluate(self._last_signals, self._liquidity_events)
+            self._interaction_signal = self.interaction.evaluate(
+                self._last_signals, self._liquidity_events
+            )
 
     def on_order_book(self, book: OrderBookSnapshot) -> None:
         if book.symbol != self.symbol:
@@ -64,7 +72,9 @@ class HistoricalMarketAdapter:
         self._liquidity_events.extend(events)
         self._liquidity_events = self._liquidity_events[-200:]
         if self._last_signals:
-            self._interaction_signal = self.interaction.evaluate(self._last_signals, self._liquidity_events)
+            self._interaction_signal = self.interaction.evaluate(
+                self._last_signals, self._liquidity_events
+            )
 
     def state(self) -> HistoricalMarketState:
         return HistoricalMarketState(
@@ -74,11 +84,17 @@ class HistoricalMarketAdapter:
             footprint_signals=self._last_signals,
             liquidity_events=tuple(self._liquidity_events),
             flow_liquidity_signal=self._interaction_signal,
-            auction_long_score=live_auction_score(self._trades, self._latest_book, "long"),
-            auction_short_score=live_auction_score(self._trades, self._latest_book, "short"),
+            auction_long_score=live_auction_score(
+                self._trades, self._latest_book, "long"
+            ),
+            auction_short_score=live_auction_score(
+                self._trades, self._latest_book, "short"
+            ),
         )
 
-    def feed(self, events: Iterable[TradeTick | OrderBookSnapshot]) -> HistoricalMarketState:
+    def feed(
+        self, events: Iterable[TradeTick | OrderBookSnapshot]
+    ) -> HistoricalMarketState:
         for event in sorted(events, key=lambda item: item.timestamp):
             if isinstance(event, TradeTick):
                 self.on_trade(event)

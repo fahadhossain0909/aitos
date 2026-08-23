@@ -1,4 +1,5 @@
 """Bounded storage maintenance for ClickHouse and the backtest cache."""
+
 from __future__ import annotations
 
 import os
@@ -27,8 +28,18 @@ EVICTABLE_TABLES = {
 # Extra safeguard: even if a future table is accidentally added to the
 # evictable list, names containing these tokens remain protected.
 PROTECTED_TABLE_TOKENS = (
-    "trade", "order", "fill", "position", "decision", "risk", "model",
-    "experience", "journal", "strategy", "execution", "portfolio",
+    "trade",
+    "order",
+    "fill",
+    "position",
+    "decision",
+    "risk",
+    "model",
+    "experience",
+    "journal",
+    "strategy",
+    "execution",
+    "portfolio",
 )
 PROTECTED_CACHE_NAMES = {"manifest.json", "download_manifest.json", ".gitkeep"}
 
@@ -44,16 +55,25 @@ class StorageConfig:
     @classmethod
     def from_env(cls) -> "StorageConfig":
         return cls(
-            clickhouse_budget_gb=float(os.getenv("CLICKHOUSE_STORAGE_BUDGET_GB", DEFAULT_BUDGET_GB)),
-            clickhouse_target_gb=float(os.getenv("CLICKHOUSE_STORAGE_TARGET_GB", DEFAULT_TARGET_GB)),
-            backtest_cache_gb=float(os.getenv("BACKTEST_CACHE_MAX_GB", DEFAULT_CACHE_GB)),
-            interval_seconds=int(os.getenv("STORAGE_MAINTENANCE_INTERVAL_SECONDS", 86400)),
-            dry_run=os.getenv("STORAGE_MAINTENANCE_DRY_RUN", "false").lower() in {"1", "true", "yes"},
+            clickhouse_budget_gb=float(
+                os.getenv("CLICKHOUSE_STORAGE_BUDGET_GB", DEFAULT_BUDGET_GB)
+            ),
+            clickhouse_target_gb=float(
+                os.getenv("CLICKHOUSE_STORAGE_TARGET_GB", DEFAULT_TARGET_GB)
+            ),
+            backtest_cache_gb=float(
+                os.getenv("BACKTEST_CACHE_MAX_GB", DEFAULT_CACHE_GB)
+            ),
+            interval_seconds=int(
+                os.getenv("STORAGE_MAINTENANCE_INTERVAL_SECONDS", 86400)
+            ),
+            dry_run=os.getenv("STORAGE_MAINTENANCE_DRY_RUN", "false").lower()
+            in {"1", "true", "yes"},
         )
 
 
 def _gb(value: int | float) -> float:
-    return float(value) / (1024 ** 3)
+    return float(value) / (1024**3)
 
 
 def _protected(table: str) -> bool:
@@ -61,7 +81,9 @@ def _protected(table: str) -> bool:
     return any(token in name for token in PROTECTED_TABLE_TOKENS)
 
 
-def choose_retention_days(current_gb: float, target_gb: float, evictable_daily_gb: float) -> int:
+def choose_retention_days(
+    current_gb: float, target_gb: float, evictable_daily_gb: float
+) -> int:
     """Choose the longest configured retention window that fits the budget."""
     if current_gb <= target_gb or evictable_daily_gb <= 0:
         return RETENTION_LADDER[0]
@@ -71,7 +93,9 @@ def choose_retention_days(current_gb: float, target_gb: float, evictable_daily_g
     return RETENTION_LADDER[-1]
 
 
-def _table_inventory(client, database: str) -> list[tuple[str, int, datetime | None, datetime | None]]:
+def _table_inventory(
+    client, database: str
+) -> list[tuple[str, int, datetime | None, datetime | None]]:
     rows = client.query(
         """
         SELECT table, sum(bytes_on_disk) AS bytes,
@@ -86,10 +110,16 @@ def _table_inventory(client, database: str) -> list[tuple[str, int, datetime | N
     return [(str(row[0]), int(row[1] or 0), row[2], row[3]) for row in rows]
 
 
-def enforce_clickhouse(client, config: StorageConfig, database: str = DEFAULT_DB) -> dict:
+def enforce_clickhouse(
+    client, config: StorageConfig, database: str = DEFAULT_DB
+) -> dict:
     inventory = _table_inventory(client, database)
     total_bytes = sum(row[1] for row in inventory)
-    evictable = [row for row in inventory if row[0] in EVICTABLE_TABLES and not _protected(row[0])]
+    evictable = [
+        row
+        for row in inventory
+        if row[0] in EVICTABLE_TABLES and not _protected(row[0])
+    ]
     evictable_bytes = sum(row[1] for row in evictable)
     protected_bytes = max(0, total_bytes - evictable_bytes)
 
@@ -109,7 +139,7 @@ def enforce_clickhouse(client, config: StorageConfig, database: str = DEFAULT_DB
             span_days = max(1.0, (max_time - min_time).total_seconds() / 86400.0)
             daily_bytes += size / span_days
 
-    target_bytes = config.clickhouse_target_gb * (1024 ** 3)
+    target_bytes = config.clickhouse_target_gb * (1024**3)
     available_evictable_bytes = max(0.0, target_bytes - protected_bytes)
     retention = choose_retention_days(
         _gb(evictable_bytes),
@@ -157,7 +187,7 @@ def enforce_backtest_cache(root: Path, max_gb: float, dry_run: bool = False) -> 
     files.sort(key=lambda path: path.stat().st_mtime if path.exists() else 0)
     total = sum(path.stat().st_size for path in files if path.exists())
     removed: list[str] = []
-    limit = max_gb * (1024 ** 3)
+    limit = max_gb * (1024**3)
 
     while total > limit and files:
         path = files.pop(0)
@@ -169,7 +199,12 @@ def enforce_backtest_cache(root: Path, max_gb: float, dry_run: bool = False) -> 
         total -= size
         removed.append(str(path))
 
-    return {"cache_gb": _gb(total), "max_gb": max_gb, "removed": removed, "dry_run": dry_run}
+    return {
+        "cache_gb": _gb(total),
+        "max_gb": max_gb,
+        "removed": removed,
+        "dry_run": dry_run,
+    }
 
 
 def run_once(config: StorageConfig) -> dict:
@@ -181,7 +216,9 @@ def run_once(config: StorageConfig) -> dict:
         database=os.getenv("CLICKHOUSE_DB", DEFAULT_DB),
     )
     try:
-        clickhouse_result = enforce_clickhouse(client, config, os.getenv("CLICKHOUSE_DB", DEFAULT_DB))
+        clickhouse_result = enforce_clickhouse(
+            client, config, os.getenv("CLICKHOUSE_DB", DEFAULT_DB)
+        )
     finally:
         client.close()
 

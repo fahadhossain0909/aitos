@@ -30,7 +30,9 @@ async def test_retries_and_eventually_succeeds():
             raise ConnectionError("not yet")
         return "recovered"
 
-    result = await retry_with_backoff(flaky, max_attempts=5, base_delay_seconds=0.01, max_delay_seconds=0.02)
+    result = await retry_with_backoff(
+        flaky, max_attempts=5, base_delay_seconds=0.01, max_delay_seconds=0.02
+    )
     assert result == "recovered"
     assert call_count == 3
 
@@ -45,7 +47,12 @@ async def test_raises_retry_exhausted_after_max_attempts():
         raise ConnectionError("permanently down")
 
     with pytest.raises(RetryExhaustedError) as exc_info:
-        await retry_with_backoff(always_fails, max_attempts=3, base_delay_seconds=0.01, max_delay_seconds=0.02)
+        await retry_with_backoff(
+            always_fails,
+            max_attempts=3,
+            base_delay_seconds=0.01,
+            max_delay_seconds=0.02,
+        )
 
     assert call_count == 3
     assert exc_info.value.attempts == 3
@@ -62,7 +69,9 @@ async def test_non_matching_exception_propagates_immediately_without_retry():
         raise ValueError("not the exception type we retry on")
 
     with pytest.raises(ValueError):
-        await retry_with_backoff(raises_wrong_type, max_attempts=5, exceptions=(ConnectionError,))
+        await retry_with_backoff(
+            raises_wrong_type, max_attempts=5, exceptions=(ConnectionError,)
+        )
 
     assert call_count == 1  # no retries — ValueError isn't in the retry set
 
@@ -78,7 +87,12 @@ async def test_backoff_delay_increases_and_respects_max():
 
     start = time.monotonic()
     with pytest.raises(RetryExhaustedError):
-        await retry_with_backoff(always_fails, max_attempts=4, base_delay_seconds=0.02, max_delay_seconds=0.05)
+        await retry_with_backoff(
+            always_fails,
+            max_attempts=4,
+            base_delay_seconds=0.02,
+            max_delay_seconds=0.05,
+        )
     elapsed = time.monotonic() - start
 
     # 3 waits between 4 attempts, each capped at max_delay + 25% jitter (~0.0625s) -> well under 1s total

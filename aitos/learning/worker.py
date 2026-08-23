@@ -4,6 +4,7 @@ Paper/live trades update the same persistent neural scorer through the event-dri
 feedback loop. The scorer serializes read-modify-write updates so historical and
 online learning cannot overwrite one another.
 """
+
 from __future__ import annotations
 
 import json
@@ -34,7 +35,9 @@ class ContinualLearningWorker:
         batch_limit: int = 5000,
         poll_seconds: int = 60,
     ) -> None:
-        self.client = clickhouse_connect.get_client(host=host, port=port, username=user, password=password, database=database)
+        self.client = clickhouse_connect.get_client(
+            host=host, port=port, username=user, password=password, database=database
+        )
         self.database = database
         self.state_path = Path(state_path)
         self.batch_limit = batch_limit
@@ -78,13 +81,19 @@ class ContinualLearningWorker:
         ORDER BY timestamp ASC
         LIMIT {{limit:UInt32}}
         """
-        result = self.client.query(sql, parameters={"start": start, "limit": self.batch_limit})
+        result = self.client.query(
+            sql, parameters={"start": start, "limit": self.batch_limit}
+        )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
     @staticmethod
     def _numeric_features(features: Any) -> dict[str, float]:
         try:
-            value = json.loads(features or "{}") if not isinstance(features, dict) else features
+            value = (
+                json.loads(features or "{}")
+                if not isinstance(features, dict)
+                else features
+            )
         except (TypeError, ValueError):
             return {}
         if not isinstance(value, dict):

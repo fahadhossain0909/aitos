@@ -39,7 +39,8 @@ from urllib.parse import urlencode
 import aiohttp
 
 from aitos.exchange.symbol_filters import SymbolFilters
-from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
+from aitos.execution.order_executor import (OrderExecutor, OrderRequest,
+                                            OrderResult)
 from aitos.logging_setup import get_logger
 from aitos.models.trade import TradeSide
 
@@ -54,7 +55,7 @@ def round_step(value: float, precision: int) -> float:
     callers without full ``SymbolFilters`` data; prefer
     ``SymbolFilters.round_quantity``/``round_price`` when available, since
     Binance's actual step size isn't always a clean power of ten."""
-    factor = 10 ** precision
+    factor = 10**precision
     return int(value * factor) / factor
 
 
@@ -70,7 +71,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         hedge_mode: bool = False,
     ) -> None:
         if not api_key or not api_secret:
-            raise ValueError("api_key and api_secret are required for live order execution")
+            raise ValueError(
+                "api_key and api_secret are required for live order execution"
+            )
         self._api_key = api_key
         self._api_secret = api_secret
         self._base_url = TESTNET_URL if testnet else MAINNET_URL
@@ -80,7 +83,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         self._symbol_filters: Dict[str, SymbolFilters] = dict(symbol_filters or {})
         self._hedge_mode = hedge_mode
         if not testnet:
-            logger.warning("BinanceFuturesOrderExecutor initialized against MAINNET — live orders will place real trades")
+            logger.warning(
+                "BinanceFuturesOrderExecutor initialized against MAINNET — live orders will place real trades"
+            )
 
     @property
     def hedge_mode(self) -> bool:
@@ -100,7 +105,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         or orders on the account. Also updates this instance's own
         ``hedge_mode`` flag so subsequent orders match."""
         await self._signed_request(
-            "POST", "/fapi/v1/positionSide/dual", {"dualSidePosition": "true" if hedge_mode else "false"}
+            "POST",
+            "/fapi/v1/positionSide/dual",
+            {"dualSidePosition": "true" if hedge_mode else "false"},
         )
         self._hedge_mode = hedge_mode
 
@@ -120,7 +127,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             await self._session.close()
 
     async def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
-        return await self._signed_request("POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage})
+        return await self._signed_request(
+            "POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage}
+        )
 
     async def get_account_balance(self, asset: str = "USDT") -> float:
         """GET /fapi/v2/balance (signed) — the actual live account balance,
@@ -133,9 +142,15 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return 0.0
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
-        quantity, filters = self._apply_quantity_precision(request.symbol, request.quantity)
-        if filters is not None and not filters.meets_min_notional(request.reference_price, quantity):
-            return self._min_notional_failure(request.symbol, request.side, filters, request.reference_price, quantity)
+        quantity, filters = self._apply_quantity_precision(
+            request.symbol, request.quantity
+        )
+        if filters is not None and not filters.meets_min_notional(
+            request.reference_price, quantity
+        ):
+            return self._min_notional_failure(
+                request.symbol, request.side, filters, request.reference_price, quantity
+            )
 
         client_order_id = request.client_order_id or f"aitos-{uuid.uuid4().hex[:20]}"
         params = {
@@ -149,16 +164,30 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         try:
             response = await self._signed_request("POST", "/fapi/v1/order", params)
         except BinanceAPIError as exc:
-            logger.error("order submission failed", extra={"aitos_extra": {"symbol": request.symbol, "error": str(exc)}})
+            logger.error(
+                "order submission failed",
+                extra={"aitos_extra": {"symbol": request.symbol, "error": str(exc)}},
+            )
             return OrderResult(
-                order_id=client_order_id, symbol=request.symbol, side=request.side,
-                filled_quantity=0.0, fill_price=0.0, success=False, error=str(exc),
+                order_id=client_order_id,
+                symbol=request.symbol,
+                side=request.side,
+                filled_quantity=0.0,
+                fill_price=0.0,
+                success=False,
+                error=str(exc),
             )
 
         filled_qty = float(response.get("executedQty", 0.0) or 0.0)
-        avg_price = float(response.get("avgPrice", 0.0) or 0.0) or request.reference_price
+        avg_price = (
+            float(response.get("avgPrice", 0.0) or 0.0) or request.reference_price
+        )
         status = response.get("status", "UNKNOWN")
-        success = status in ("FILLED", "PARTIALLY_FILLED", "NEW")  # NEW: accepted, fill confirmation may lag
+        success = status in (
+            "FILLED",
+            "PARTIALLY_FILLED",
+            "NEW",
+        )  # NEW: accepted, fill confirmation may lag
 
         return OrderResult(
             order_id=str(response.get("orderId", client_order_id)),
@@ -171,20 +200,37 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         )
 
     async def get_order_status(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        return await self._signed_request("GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id})
+        return await self._signed_request(
+            "GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
+        )
 
     async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
-        return await self._signed_request("DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id})
+        return await self._signed_request(
+            "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
+        )
 
     @property
     def supports_exchange_side_stops(self) -> bool:
         return True
 
-    async def place_stop_loss_order(self, symbol: str, side: TradeSide, quantity: float, stop_price: float) -> OrderResult:
-        return await self._place_reduce_only_stop(symbol, side, quantity, stop_price, order_type="STOP_MARKET", label="sl")
+    async def place_stop_loss_order(
+        self, symbol: str, side: TradeSide, quantity: float, stop_price: float
+    ) -> OrderResult:
+        return await self._place_reduce_only_stop(
+            symbol, side, quantity, stop_price, order_type="STOP_MARKET", label="sl"
+        )
 
-    async def place_take_profit_order(self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float) -> OrderResult:
-        return await self._place_reduce_only_stop(symbol, side, quantity, take_profit_price, order_type="TAKE_PROFIT_MARKET", label="tp")
+    async def place_take_profit_order(
+        self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float
+    ) -> OrderResult:
+        return await self._place_reduce_only_stop(
+            symbol,
+            side,
+            quantity,
+            take_profit_price,
+            order_type="TAKE_PROFIT_MARKET",
+            label="tp",
+        )
 
     async def cancel_resting_order(self, symbol: str, order_id: str) -> None:
         try:
@@ -194,7 +240,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             # (e.g. the opposite leg triggered first) — not an operational error.
             logger.info("cancel_resting_order: %s", exc)
 
-    async def get_resting_order_status(self, symbol: str, order_id: str) -> Optional[str]:
+    async def get_resting_order_status(
+        self, symbol: str, order_id: str
+    ) -> Optional[str]:
         try:
             status = await self.get_order_status(symbol, order_id)
             return status.get("status")
@@ -203,7 +251,13 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             return None
 
     async def _place_reduce_only_stop(
-        self, symbol: str, position_side: TradeSide, quantity: float, trigger_price: float, order_type: str, label: str
+        self,
+        symbol: str,
+        position_side: TradeSide,
+        quantity: float,
+        trigger_price: float,
+        order_type: str,
+        label: str,
     ) -> OrderResult:
         """STOP_MARKET / TAKE_PROFIT_MARKET orders that only ever reduce the
         existing position. In one-way mode that's via ``reduceOnly``; in
@@ -215,7 +269,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         if filters is not None:
             trigger_price = filters.round_price(trigger_price)
             if not filters.meets_min_notional(trigger_price, quantity):
-                return self._min_notional_failure(symbol, position_side, filters, trigger_price, quantity)
+                return self._min_notional_failure(
+                    symbol, position_side, filters, trigger_price, quantity
+                )
 
         client_order_id = f"aitos-{label}-{uuid.uuid4().hex[:16]}"
         params = {
@@ -230,10 +286,18 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         try:
             response = await self._signed_request("POST", "/fapi/v1/order", params)
         except BinanceAPIError as exc:
-            logger.error(f"{label} order placement failed", extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}})
+            logger.error(
+                f"{label} order placement failed",
+                extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+            )
             return OrderResult(
-                order_id=client_order_id, symbol=symbol, side=position_side,
-                filled_quantity=0.0, fill_price=0.0, success=False, error=str(exc),
+                order_id=client_order_id,
+                symbol=symbol,
+                side=position_side,
+                filled_quantity=0.0,
+                fill_price=0.0,
+                success=False,
+                error=str(exc),
             )
 
         return OrderResult(
@@ -248,7 +312,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
 
     # -- Internals --------------------------------------------------------------
 
-    def _position_params(self, position_side: TradeSide, is_closing_order: bool) -> Dict[str, Any]:
+    def _position_params(
+        self, position_side: TradeSide, is_closing_order: bool
+    ) -> Dict[str, Any]:
         """Build the ``side`` (+ ``positionSide``/``reduceOnly`` as needed)
         parameters for either mode:
 
@@ -266,37 +332,71 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         is_long = position_side == TradeSide.LONG
 
         if self._hedge_mode:
-            side = ("SELL" if is_long else "BUY") if is_closing_order else ("BUY" if is_long else "SELL")
+            side = (
+                ("SELL" if is_long else "BUY")
+                if is_closing_order
+                else ("BUY" if is_long else "SELL")
+            )
             return {"side": side, "positionSide": "LONG" if is_long else "SHORT"}
 
-        side = ("SELL" if is_long else "BUY") if is_closing_order else ("BUY" if is_long else "SELL")
+        side = (
+            ("SELL" if is_long else "BUY")
+            if is_closing_order
+            else ("BUY" if is_long else "SELL")
+        )
         params: Dict[str, Any] = {"side": side}
         if is_closing_order:
             params["reduceOnly"] = "true"
         return params
 
-    def _apply_quantity_precision(self, symbol: str, quantity: float) -> "tuple[float, Optional[SymbolFilters]]":
+    def _apply_quantity_precision(
+        self, symbol: str, quantity: float
+    ) -> "tuple[float, Optional[SymbolFilters]]":
         filters = self._symbol_filters.get(symbol)
         if filters is None:
             return quantity, None
         return filters.round_quantity(quantity), filters
 
-    def _min_notional_failure(self, symbol: str, side: TradeSide, filters: SymbolFilters, price: float, quantity: float) -> OrderResult:
+    def _min_notional_failure(
+        self,
+        symbol: str,
+        side: TradeSide,
+        filters: SymbolFilters,
+        price: float,
+        quantity: float,
+    ) -> OrderResult:
         error = (
             f"order notional {price * quantity:.4f} is below {symbol}'s minimum notional "
             f"{filters.min_notional:.4f} — rejected locally without hitting the API"
         )
-        logger.warning("order below min notional", extra={"aitos_extra": {"symbol": symbol, "notional": price * quantity}})
-        return OrderResult(order_id="", symbol=symbol, side=side, filled_quantity=0.0, fill_price=0.0, success=False, error=error)
+        logger.warning(
+            "order below min notional",
+            extra={"aitos_extra": {"symbol": symbol, "notional": price * quantity}},
+        )
+        return OrderResult(
+            order_id="",
+            symbol=symbol,
+            side=side,
+            filled_quantity=0.0,
+            fill_price=0.0,
+            success=False,
+            error=error,
+        )
 
     def _sign(self, params: Dict[str, Any]) -> str:
         query_string = urlencode(params)
-        signature = hmac.new(self._api_secret.encode(), query_string.encode(), hashlib.sha256).hexdigest()
+        signature = hmac.new(
+            self._api_secret.encode(), query_string.encode(), hashlib.sha256
+        ).hexdigest()
         return f"{query_string}&signature={signature}"
 
-    async def _signed_request(self, method: str, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _signed_request(
+        self, method: str, path: str, params: Dict[str, Any]
+    ) -> Dict[str, Any]:
         if self._session is None:
-            raise RuntimeError("BinanceFuturesOrderExecutor.connect() must be called first")
+            raise RuntimeError(
+                "BinanceFuturesOrderExecutor.connect() must be called first"
+            )
 
         full_params = dict(params)
         full_params["timestamp"] = int(time.time() * 1000)

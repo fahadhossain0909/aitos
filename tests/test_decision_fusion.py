@@ -2,7 +2,6 @@ import pytest
 
 from aitos.kernel.decision_fusion import DecisionFusionEngine
 
-
 FULL_SCORES = {
     "trend_strength": 9.0,
     "liquidity_quality": 8.0,

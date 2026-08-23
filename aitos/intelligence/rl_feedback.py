@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
@@ -36,7 +37,9 @@ class RLFeedbackLoop(AITOSModule):
         if self._initialized:
             return
         self._subscriptions.append(
-            await self._event_bus.subscribe("trade.position_closed", self._on_position_closed, group="rl-feedback")
+            await self._event_bus.subscribe(
+                "trade.position_closed", self._on_position_closed, group="rl-feedback"
+            )
         )
         self._initialized = True
         logger.info("RLFeedbackLoop initialized")
@@ -44,7 +47,9 @@ class RLFeedbackLoop(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={"updates_applied": self._updates_applied},
@@ -86,16 +91,27 @@ class RLFeedbackLoop(AITOSModule):
             # concurrent update cannot overwrite another process's learning.
             self._scorer.update_and_persist(symbol, context, reward_r_multiple)
         else:
-            self._scorer.update(symbol=symbol, context=context, reward_r_multiple=reward_r_multiple)
+            self._scorer.update(
+                symbol=symbol, context=context, reward_r_multiple=reward_r_multiple
+            )
 
         self._updates_applied += 1
         self._last_event_time = event.created_at
         logger.info(
             "RL scorer updated from closed trade",
-            extra={"aitos_extra": {"symbol": symbol, "regime": regime, "direction": direction, "reward_r_multiple": reward_r_multiple}},
+            extra={
+                "aitos_extra": {
+                    "symbol": symbol,
+                    "regime": regime,
+                    "direction": direction,
+                    "reward_r_multiple": reward_r_multiple,
+                }
+            },
         )
         return None
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("RLFeedbackLoop.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "RLFeedbackLoop.initialize() must be called first"
+            )

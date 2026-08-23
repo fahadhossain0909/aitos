@@ -5,10 +5,15 @@ supply the same component scores produced by the live scanner/intelligence
 pipeline for each replay timestamp, making differences in execution measurable
 without silently using a second strategy implementation.
 """
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Any, Mapping
-from aitos.kernel.decision_fusion import DecisionFusionEngine, EvidenceFusionResult
+
+from aitos.kernel.decision_fusion import (DecisionFusionEngine,
+                                          EvidenceFusionResult)
+
 
 @dataclass(frozen=True)
 class ReplayDecision:
@@ -16,6 +21,7 @@ class ReplayDecision:
     confidence: float
     authorized: bool
     fusion: EvidenceFusionResult
+
 
 class AITOSReplayStrategy:
     def __init__(self, fusion: DecisionFusionEngine | None = None) -> None:

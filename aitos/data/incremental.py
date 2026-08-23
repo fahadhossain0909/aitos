@@ -1,14 +1,15 @@
 """Incremental download with dataset-aware canonical Parquet gating."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date
-from pathlib import Path
-from typing import Iterable
 import hashlib
 import json
 import tempfile
 import urllib.request
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import Iterable
 
 from .dataset_layout import DatasetLayout
 from .dataset_policy import DatasetGate
@@ -26,6 +27,7 @@ class FileRecord:
 @dataclass(frozen=True)
 class DownloadItem:
     """A raw source file mapped to one canonical dataset partition."""
+
     dataset: str
     exchange: str
     market: str
@@ -44,9 +46,17 @@ class DownloadManifest:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.records, indent=2, sort_keys=True), encoding="utf-8")
+        self.path.write_text(
+            json.dumps(self.records, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
-    def valid(self, key: str, path: Path, expected_size: int | None = None, sha256: str | None = None) -> bool:
+    def valid(
+        self,
+        key: str,
+        path: Path,
+        expected_size: int | None = None,
+        sha256: str | None = None,
+    ) -> bool:
         rec = self.records.get(key)
         if not rec or not path.exists():
             return False
@@ -117,7 +127,9 @@ class IncrementalDownloader:
     def _manifest_key(item: DownloadItem) -> str:
         return f"{item.dataset}/{item.exchange}/{item.market}/{item.symbol.upper()}/{item.day.isoformat()}"
 
-    def download_items(self, items: Iterable[DownloadItem], overwrite: bool = False) -> list[Path]:
+    def download_items(
+        self, items: Iterable[DownloadItem], overwrite: bool = False
+    ) -> list[Path]:
         downloaded: list[Path] = []
         for item in items:
             key = self._manifest_key(item)
@@ -130,7 +142,9 @@ class IncrementalDownloader:
                 continue
 
             item.destination.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=item.destination.parent, delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(
+                dir=item.destination.parent, delete=False
+            ) as tmp:
                 tmp_path = Path(tmp.name)
             try:
                 urllib.request.urlretrieve(item.url, tmp_path)
@@ -174,14 +188,21 @@ class IncrementalDownloader:
             if not overwrite and self.manifest.valid(key, destination):
                 continue
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(
+                dir=destination.parent, delete=False
+            ) as tmp:
                 tmp_path = Path(tmp.name)
             try:
                 urllib.request.urlretrieve(url, tmp_path)
                 digest = sha256_file(tmp_path)
                 size = tmp_path.stat().st_size
                 tmp_path.replace(destination)
-                self.manifest.records[key] = {"url": url, "path": str(destination), "size": size, "sha256": digest}
+                self.manifest.records[key] = {
+                    "url": url,
+                    "path": str(destination),
+                    "size": size,
+                    "sha256": digest,
+                }
                 self.manifest.save()
                 downloaded.append(destination)
             finally:

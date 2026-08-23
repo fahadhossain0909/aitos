@@ -15,7 +15,8 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
 from aitos.logging_setup import get_logger
@@ -62,7 +63,10 @@ class ReconciliationScheduler(AITOSModule):
             return
         self._task = asyncio.create_task(self._run_loop(), name="reconciliation-loop")
         self._initialized = True
-        logger.info("ReconciliationScheduler initialized", extra={"aitos_extra": {"interval_seconds": self._interval_seconds}})
+        logger.info(
+            "ReconciliationScheduler initialized",
+            extra={"aitos_extra": {"interval_seconds": self._interval_seconds}},
+        )
 
     async def health_check(self) -> HealthStatus:
         task_alive = self._task is not None and not self._task.done()
@@ -116,11 +120,21 @@ class ReconciliationScheduler(AITOSModule):
                     closed_count += 1
                     logger.warning(
                         "reconciliation closed a trade the live loop had missed",
-                        extra={"aitos_extra": {"trade_id": trade.trade_id, "exit_reason": result.exit_reason}},
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "exit_reason": result.exit_reason,
+                            }
+                        },
                     )
             except Exception as exc:  # noqa: BLE001
                 self._errors += 1
-                logger.error("reconciliation failed for trade", extra={"aitos_extra": {"trade_id": trade.trade_id, "error": str(exc)}})
+                logger.error(
+                    "reconciliation failed for trade",
+                    extra={
+                        "aitos_extra": {"trade_id": trade.trade_id, "error": str(exc)}
+                    },
+                )
 
         self._total_runs += 1
         self._last_run_at = datetime.now(timezone.utc).isoformat()
@@ -130,7 +144,10 @@ class ReconciliationScheduler(AITOSModule):
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_RECONCILIATION_RUN,
-                payload={"trades_checked": len(open_trades), "trades_closed": closed_count},
+                payload={
+                    "trades_checked": len(open_trades),
+                    "trades_closed": closed_count,
+                },
                 source_module=self.module_id,
             )
         )
@@ -152,4 +169,6 @@ class ReconciliationScheduler(AITOSModule):
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("ReconciliationScheduler.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "ReconciliationScheduler.initialize() must be called first"
+            )

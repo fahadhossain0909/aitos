@@ -15,7 +15,8 @@ import asyncio
 from itertools import combinations
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence.indicators import pearson_correlation, returns
@@ -63,9 +64,14 @@ class SymbolCorrelationUpdater(AITOSModule):
     async def initialize(self, config: Dict[str, Any]) -> None:
         if self._initialized:
             return
-        self._task = asyncio.create_task(self._run_loop(), name="correlation-update-loop")
+        self._task = asyncio.create_task(
+            self._run_loop(), name="correlation-update-loop"
+        )
         self._initialized = True
-        logger.info("SymbolCorrelationUpdater initialized", extra={"aitos_extra": {"symbols": self._symbols}})
+        logger.info(
+            "SymbolCorrelationUpdater initialized",
+            extra={"aitos_extra": {"symbols": self._symbols}},
+        )
 
     async def health_check(self) -> HealthStatus:
         task_alive = self._task is not None and not self._task.done()
@@ -74,7 +80,10 @@ class SymbolCorrelationUpdater(AITOSModule):
             status=ModuleStatus.HEALTHY if task_alive else ModuleStatus.UNHEALTHY,
             latency_ms=0.0,
             last_event_time=self._last_run_at,
-            details={"pairs_updated_last_run": self._pairs_updated_last_run, "errors": self._errors},
+            details={
+                "pairs_updated_last_run": self._pairs_updated_last_run,
+                "errors": self._errors,
+            },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
@@ -102,10 +111,15 @@ class SymbolCorrelationUpdater(AITOSModule):
         klines_by_symbol = {}
         for symbol in self._symbols:
             try:
-                klines_by_symbol[symbol] = await self._exchange.fetch_klines(symbol, self._timeframe, limit=self._kline_lookback)
+                klines_by_symbol[symbol] = await self._exchange.fetch_klines(
+                    symbol, self._timeframe, limit=self._kline_lookback
+                )
             except Exception as exc:  # noqa: BLE001
                 self._errors += 1
-                logger.error("failed to fetch klines for correlation update", extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}})
+                logger.error(
+                    "failed to fetch klines for correlation update",
+                    extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                )
 
         updated = 0
         now = utc_now_iso()
@@ -114,11 +128,18 @@ class SymbolCorrelationUpdater(AITOSModule):
                 returns_a = returns(klines_by_symbol[symbol_a])
                 returns_b = returns(klines_by_symbol[symbol_b])
                 coefficient = pearson_correlation(returns_a, returns_b)
-                await self._graph_writer.update_symbol_correlation(symbol_a, symbol_b, coefficient, now)
+                await self._graph_writer.update_symbol_correlation(
+                    symbol_a, symbol_b, coefficient, now
+                )
                 updated += 1
             except Exception as exc:  # noqa: BLE001
                 self._errors += 1
-                logger.error("failed to update correlation edge", extra={"aitos_extra": {"pair": (symbol_a, symbol_b), "error": str(exc)}})
+                logger.error(
+                    "failed to update correlation edge",
+                    extra={
+                        "aitos_extra": {"pair": (symbol_a, symbol_b), "error": str(exc)}
+                    },
+                )
 
         self._last_run_at = now
         self._pairs_updated_last_run = updated
@@ -140,4 +161,6 @@ class SymbolCorrelationUpdater(AITOSModule):
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("SymbolCorrelationUpdater.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "SymbolCorrelationUpdater.initialize() must be called first"
+            )

@@ -1,10 +1,11 @@
 """Versioned model registry with explicit candidate/champion states."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict, field
+import json
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
-import json
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class ModelRegistry:
 
     def _save(self, rows: list[dict[str, Any]]) -> None:
         import os
+
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         tmp = f"{self.path}.tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
@@ -52,7 +54,10 @@ class ModelRegistry:
         if artifact.status not in self.VALID_STATUSES:
             raise ValueError("invalid model status")
         rows = self._load()
-        if any(r["name"] == artifact.name and r["version"] == artifact.version for r in rows):
+        if any(
+            r["name"] == artifact.name and r["version"] == artifact.version
+            for r in rows
+        ):
             raise ValueError("model version already registered")
         rows.append(artifact.as_dict())
         self._save(rows)
