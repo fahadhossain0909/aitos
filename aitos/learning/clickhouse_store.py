@@ -101,7 +101,7 @@ class ClickHouseExperienceStore:
         self, symbol: str, start: datetime, end: datetime, limit: int = 1_000_000
     ):
         return self.client.query(
-            f"SELECT * FROM {self.database}.learning_experiences "
+            f"SELECT * FROM {self.database}.learning_experiences "  # nosec B608 - database is trusted configuration, values are parameterized
             "WHERE symbol = {symbol:String} AND timestamp >= {start:DateTime64(3)} "
             "AND timestamp < {end:DateTime64(3)} ORDER BY timestamp LIMIT {limit:UInt32}",
             parameters={"symbol": symbol, "start": start, "end": end, "limit": limit},
