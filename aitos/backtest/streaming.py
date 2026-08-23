@@ -55,7 +55,9 @@ class CheckpointManager:
 
     def load(self) -> Any:
         with self.path.open("rb") as handle:
-            return pickle.load(handle)  # nosec B301 - checkpoint files are local application state
+            return pickle.load(
+                handle
+            )  # nosec B301 - checkpoint files are local application state
 
     def exists(self) -> bool:
         return self.path.exists()

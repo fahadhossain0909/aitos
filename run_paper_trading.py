@@ -9,13 +9,8 @@ from typing import Optional
 
 from redis.asyncio import Redis
 
-from aitos.app import (
-    PaperPortfolioTracker,
-    build_system,
-    initialize_all,
-    run_scan_and_trade_cycle,
-    shutdown_all,
-)
+from aitos.app import (PaperPortfolioTracker, build_system, initialize_all,
+                       run_scan_and_trade_cycle, shutdown_all)
 from aitos.config.settings import get_settings
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
