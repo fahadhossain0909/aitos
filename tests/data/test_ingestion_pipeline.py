@@ -1,4 +1,5 @@
 from datetime import date, datetime, timezone
+from io import BytesIO
 from pathlib import Path
 
 from aitos.data.incremental import (
@@ -17,11 +18,19 @@ def test_pipeline_writes_canonical_partition(tmp_path: Path, monkeypatch):
     manifest = DownloadManifest(tmp_path / "manifest.json")
     downloader = IncrementalDownloader(manifest, parquet_root)
 
-    def fake_urlretrieve(url, destination):
-        Path(destination).write_bytes(raw.read_bytes())
-        return destination, None
+    class FakeResponse(BytesIO):
+        def __enter__(self):
+            return self
 
-    monkeypatch.setattr("urllib.request.urlretrieve", fake_urlretrieve)
+        def __exit__(self, exc_type, exc_value, traceback):
+            self.close()
+
+    def fake_urlopen(url, timeout):
+        assert url == "https://example.invalid/raw.csv"
+        assert timeout == 30
+        return FakeResponse(raw.read_bytes())
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
 
     item = DownloadItem(
         "trades",
