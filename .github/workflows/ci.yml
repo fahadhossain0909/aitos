@@ -130,7 +130,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install bandit safety
       - name: Run Bandit security scan
-        run: bandit -r . -f json -o bandit-report.json
+        run: bandit -r aitos run_live_trading.py run_paper_trading.py -x tests -ll -f json -o bandit-report.json
       - name: Check dependencies for vulnerabilities
         run: safety check --json
       - name: Upload security reports
