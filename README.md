@@ -11,33 +11,111 @@
 
 # AITOS — AI Trading Operating System
 
-AITOS is an event-driven trading system for Binance USDT-M Futures. The repository currently combines market-data ingestion, Redis Streams, ClickHouse persistence, optional Neo4j knowledge-graph support, risk controls, opportunity scanning, paper trading, guarded live execution, XAI/journaling, continual learning, backtesting, health/metrics endpoints, and Docker-based deployment.
+AITOS is an event-driven trading system for Binance USDT-M Futures. The current repository combines market-data ingestion, Redis Streams, ClickHouse persistence, optional Neo4j knowledge-graph support, risk controls, opportunity scanning, paper trading, guarded live execution, XAI/journaling, continual learning, historical replay/backtesting, health/metrics endpoints, and Docker-based deployment.
 
-> **Canonical documentation:** this README is the consolidated project guide. Older standalone setup/deployment/CI documents contained duplicated material, generic templates, stale test counts, or configuration that no longer matches the current repository and are intentionally not treated as authoritative.
+> **Canonical documentation:** this README is the single consolidated project guide. It is intentionally focused on behavior and configuration that match the current repository; obsolete setup templates, duplicate deployment instructions, historical test counts, and superseded CI/CD examples are excluded.
+
+## Contents
+
+- [System at a glance](#system-at-a-glance)
+- [Current capabilities](#current-capabilities)
+- [Quick start](#quick-start)
+- [Configuration](#configuration)
+- [Backtesting](#backtesting)
+- [Paper trading](#paper-trading)
+- [Live trading](#live-trading)
+- [Docker and VPS deployment](#docker-and-vps-deployment)
+- [CI/CD](#cicd)
+- [Operations and troubleshooting](#operations-and-troubleshooting)
+- [Storage and maintenance](#storage-and-maintenance)
+- [Project structure](#project-structure)
+- [Safety boundaries](#safety-boundaries)
+
+## System at a glance
+
+```text
+                 Binance USDT-M Futures
+                   REST / WebSocket
+                          │
+                          ▼
+                 Market-data ingestion
+                          │
+                          ▼
+                 Redis Streams Event Bus
+                          │
+          ┌───────────────┼────────────────┐
+          ▼               ▼                ▼
+      Risk Engine   Opportunity Scanner   Data/Journal
+          │               │                │
+          └───────────────┼────────────────┘
+                          ▼
+                   Trade Lifecycle
+                     │         │
+                     ▼         ▼
+                   Paper      Live
+                  Execution  Execution
+
+   ClickHouse ── market history / journals / learning data
+   Neo4j      ── optional knowledge graph
+   XAI/ML/RL  ── explanations and continual-learning feedback
+```
+
+The core application is event-driven: components communicate through the Event Bus rather than relying on broad direct coupling. Production actions are additionally protected by risk controls and human-approval governance.
+
+## Current capabilities
+
+| Area | Current implementation |
+|---|---|
+| Exchange | Binance USDT-M Futures REST + WebSocket adapter |
+| Streaming | Redis Streams, consumer groups, ACK/DLQ handling, replay/request-reply |
+| Persistence | ClickHouse for market data, journals and learning experience |
+| Knowledge graph | Optional Neo4j integration |
+| Intelligence | Opportunity scoring, market structure, volatility, CVD/order-flow, liquidity, funding, open interest and RL-related signals |
+| Risk | Risk score, hard/soft limits, circuit breaker, correlated/sector exposure checks, position sizing and adaptive leverage |
+| Execution | Simulated paper execution and separately guarded live execution |
+| Live protection | Exchange-side protection/reconciliation where configured |
+| Explainability | Trade explanations, counterfactuals and attention-based XAI |
+| Learning | Online RL/ML feedback and continual-learning worker |
+| Backtesting | Lightweight historical runner and richer L2/futures replay path |
+| Operations | Health/metrics endpoints, structured JSON logging, Docker Compose |
+| Deployment | GitHub Actions CI/CD with Docker and SSH-based VPS deployment |
 
 ## Quick start
 
-### Local paper trading
+### 1. Clone and create the environment
 
 ```bash
 git clone https://github.com/fahadhossain0909/aitos.git
 cd aitos
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
+```
+
+### 2. Start local infrastructure
+
+```bash
 docker compose up -d redis clickhouse neo4j
+```
+
+The default paper-trading Docker service expects all three infrastructure services to become healthy. Redis is required for the Event Bus; ClickHouse and Neo4j are optional only for code paths that explicitly support running without persistence/graph storage.
+
+### 3. Run paper trading locally
+
+```bash
 python3 run_paper_trading.py
 ```
 
-Health endpoint:
+The paper runner consumes public Binance market data and uses simulated execution. Binance API credentials are not required.
 
-```text
-http://localhost:8090/health
+Health check:
+
+```bash
+curl http://localhost:8090/health
 ```
 
-Redis is the real-time Event Bus and is required by the application. ClickHouse and Neo4j are optional for components that can operate without persistence/graph storage.
-
-### Tests
+### 4. Run tests
 
 ```bash
 PYTHONPATH=. pytest -v
@@ -49,98 +127,71 @@ Backtest-only tests:
 python -m pytest -q tests/backtest
 ```
 
-The repository has grown beyond the old `291 tests` documentation claim; no fixed test count is maintained here.
+No fixed test count is documented because the suite changes as the project evolves.
 
-## Architecture
+## Configuration
+
+The tracked template is `.env.example`. Copy it to `.env` and keep the real file out of Git.
+
+Important production values include:
 
 ```text
-Binance REST / WebSocket
-          │
-          ▼
-   Redis Streams Event Bus
-          │
-    ┌─────┼───────────────────────────┐
-    ▼     ▼                           ▼
-  Risk  Opportunity Scanner       Data/Journaling
-  Engine       │                     │
-    │          ▼                     ▼
-    └────► Trade Lifecycle       ClickHouse
-               │
-          ┌────┴────┐
-          ▼         ▼
-       Paper      Live
-      Execution  Execution
-
-Neo4j Knowledge Graph = optional
-Continual Learning    = background worker
-XAI / Journal         = explanations + trade records
+REDIS_PASSWORD
+CLICKHOUSE_PASSWORD
+NEO4J_PASSWORD
 ```
 
-### Main capabilities
+For live execution, also configure:
 
-- Binance USDT-M Futures REST/WebSocket market-data adapter with rate limiting and reconnect handling.
-- Redis Streams Event Bus with consumer groups, acknowledgements, replay/request-reply and DLQ handling.
-- Risk scoring, circuit breaker, hard/soft limits, sector exposure protection, position sizing and adaptive leverage.
-- Opportunity scoring using market structure, volatility, CVD/order flow, auction context, liquidity, funding, open interest, lead-lag and RL signals.
-- Paper trading and separately guarded live execution.
-- Exchange-side protection/reconciliation for live orders where configured.
-- ClickHouse market-data, journal and learning-experience persistence.
-- Optional Neo4j knowledge graph.
-- XAI explanations, counterfactuals and attention-based explanations.
-- Continual-learning worker and online RL/ML feedback components.
-- Lightweight and full L2/futures historical replay backtesting.
-- Health/metrics endpoints, structured JSON logging and Docker Compose deployment.
+```text
+BINANCE_API_KEY
+BINANCE_API_SECRET
+BINANCE_TESTNET=true
+BINANCE_HEDGE_MODE=false
+```
+
+Keep `BINANCE_TESTNET=true` until live execution is deliberately enabled. Never grant withdrawal permission to a trading API key.
+
+### Configuration rules
+
+- Use strong, unique passwords for Redis, ClickHouse and Neo4j.
+- Keep `REQUIRE_HUMAN_APPROVAL_FOR_PROD=true` for production operation.
+- Do not commit `.env` or real credentials.
+- `COMPOSE_PROJECT_NAME` is `aitos`.
+- `BACKTEST_DATA_DIR` is used for optional local/historical replay data and cache.
 
 ## Runnable entrypoints
 
-| Entrypoint | Purpose | Health |
-|---|---|---:|
-| `run_paper_trading.py` | Live Binance public data with simulated orders | `8090` |
-| `run_live_trading.py` | Guarded real/testnet execution | `8091` |
-| `run_continual_learning.py` | Background continual-learning worker | — |
+| Command | Purpose | Endpoint |
+|---|---|---|
+| `python3 run_paper_trading.py` | Live public market data + simulated orders | `8090` |
+| `python3 run_live_trading.py` | Guarded real/testnet execution | `8091` |
+| `python3 run_continual_learning.py` | Continual-learning worker | — |
 | `python3 -m aitos.backtest.cli` | Historical backtesting | — |
-| `python3 -m aitos.backtest.rich_cli` | Rich L2/futures historical replay | — |
-
-## Local development
-
-### Requirements
-
-- Python 3.10–3.12; Python 3.12 is the primary project/Docker version.
-- Docker and Docker Compose.
-- Git.
-
-### Backtest dependencies
-
-For a lighter backtesting environment:
-
-```bash
-pip install -r requirements-backtest.txt
-```
-
-### Infrastructure
-
-```bash
-docker compose up -d redis clickhouse neo4j
-```
-
-### Configuration
-
-```bash
-cp .env.example .env
-```
-
-Paper trading does not require Binance API credentials because it uses public market data and simulated execution.
+| `python3 -m aitos.backtest.rich_cli` | L2/futures historical replay | — |
 
 ## Backtesting
 
-Two backtesting paths are available:
+Two supported interfaces are available:
 
 ```bash
 python3 -m aitos.backtest.cli --help
 python3 -m aitos.backtest.rich_cli --help
 ```
 
-The rich runner supports historical trade/order-book events, L2 execution, queue lifecycle simulation, futures margin, funding and configurable decision strategies. The canonical runner implementation is `aitos/backtest/aitos_runner.py`.
+The richer replay path models historical trade/order-book events and supports L2 execution, queue lifecycle simulation, futures margin, funding and configurable decision strategies. The canonical historical runner implementation is `aitos/backtest/aitos_runner.py`.
+
+For a lighter dependency set:
+
+```bash
+pip install -r requirements-backtest.txt
+```
+
+The Docker Compose backtest service is profile-gated:
+
+```bash
+docker compose --profile backtest run --rm aitos-backtest --help
+```
 
 ## Paper trading
 
@@ -148,21 +199,40 @@ The rich runner supports historical trade/order-book events, L2 execution, queue
 python3 run_paper_trading.py
 ```
 
-Paper trading consumes live Binance market data but does not submit real exchange orders. It can run with local Redis and optionally ClickHouse/Neo4j. Use the health endpoint and structured logs to verify operation.
+Paper trading uses live Binance public market data but does **not** submit real exchange orders. It is the recommended first runtime mode.
 
-## Live trading — safety critical
+When using the Docker service:
 
-`run_live_trading.py` can place real orders. Before enabling it:
+```bash
+docker compose up -d
 
-1. Configure Binance API credentials only when required.
-2. Use Binance testnet first.
-3. Verify `BINANCE_HEDGE_MODE` matches the account position mode.
-4. Keep human approval enabled for production actions.
-5. Never grant withdrawal permission to the API key.
+docker compose ps --all
+docker compose logs -f aitos-paper
+```
 
-The Docker Compose live profile is intentionally separate from the default paper stack.
+The default Compose paper service waits for Redis, ClickHouse and Neo4j health checks before starting.
 
-## Production/VPS deployment
+## Live trading
+
+**Live trading is safety-critical. `run_live_trading.py` can place real orders.**
+
+Before enabling it:
+
+1. Test with Binance testnet first.
+2. Verify API permissions and never enable withdrawals.
+3. Confirm `BINANCE_HEDGE_MODE` matches the account's position mode.
+4. Verify risk limits, circuit-breaker behavior and human approval.
+5. Start only when you explicitly intend to submit orders.
+
+The Docker live service is behind the `live` Compose profile and is not started by the normal default stack:
+
+```bash
+docker compose --profile live run --rm aitos-live
+```
+
+Do not use the live profile as a substitute for understanding the live-trading entrypoint and its approval flow.
+
+## Docker and VPS deployment
 
 ### Install Docker
 
@@ -173,43 +243,29 @@ newgrp docker
 docker compose version
 ```
 
-### Clone
+### Clone and configure
 
 ```bash
 git clone https://github.com/fahadhossain0909/aitos.git
 cd aitos
-```
-
-### Configure secrets
-
-```bash
 cp .env.example .env
 chmod 600 .env
 ```
 
-Production must use non-default secrets, especially:
+For production, replace every secret/example value before startup.
 
-- `REDIS_PASSWORD`
-- `CLICKHOUSE_PASSWORD`
-- `NEO4J_PASSWORD`
-- `BINANCE_API_KEY` / `BINANCE_API_SECRET` when live execution is enabled
-
-Do not commit `.env`.
-
-### Start
+### Start the stack
 
 ```bash
 docker compose up -d --build
-docker compose ps
-docker compose logs -f aitos-paper
+docker compose ps --all
+docker compose logs --tail=200 aitos-paper
 curl http://localhost:8090/health
 ```
 
-### Live profile
+The Compose stack contains Redis, ClickHouse, Neo4j, paper trading, continual learning, storage maintenance, a profile-gated backtester and a profile-gated live trader.
 
-Live execution is intentionally not started by the normal `docker compose up -d` path. When explicitly required, use the guarded live profile/entrypoint and follow the human-approval requirements above.
-
-### Update
+### Update an existing VPS deployment
 
 ```bash
 git pull --ff-only
@@ -222,19 +278,19 @@ docker compose up -d --build
 docker compose down
 ```
 
-`docker compose down -v` also removes persistent volumes and therefore can destroy stored data; use it only deliberately.
+Do **not** use `docker compose down -v` during normal maintenance. It removes persistent volumes and can destroy stored data.
 
-### Network security
+### Network exposure
 
-The current Compose configuration binds service ports to localhost where appropriate. Keep Redis, ClickHouse and Neo4j off the public internet. For remote health/metrics access, prefer an SSH tunnel, for example:
+The Compose configuration binds infrastructure and health/metrics ports to localhost. Keep Redis, ClickHouse and Neo4j inaccessible from the public internet. If remote health access is required, use an SSH tunnel:
 
 ```bash
 ssh -L 8090:localhost:8090 user@your-vps
 ```
 
-### ARM VPS
+### Resource-aware services
 
-The Docker build includes native build tooling for dependencies that may not provide an ARM64 wheel. The first build on ARM can therefore take longer than on x86.
+The continual-learning worker is explicitly capped at 0.5 CPU / 512 MB RAM. The backtest service is capped at 2 CPU / 3 GB RAM. Storage maintenance has explicit ClickHouse/cache budgets. These limits are intended to reduce resource contention on a VPS.
 
 ## CI/CD
 
@@ -243,40 +299,46 @@ The authoritative workflows are:
 - `.github/workflows/ci.yml`
 - `.github/workflows/cd.yml`
 
-### CI
+### CI pipeline
 
-CI runs on pushes and pull requests targeting `main`, `master` and `develop`. It currently includes:
+CI runs on pushes and pull requests targeting `main`, `master` and `develop`.
 
-- Code-quality checks with Black, isort and Flake8.
-- Unit/integration tests on Python 3.10, 3.11 and 3.12.
-- A ClickHouse service for tests that need database integration.
-- Coverage/test-result artifacts.
+It currently includes:
+
+- Black, isort and Flake8 checks.
+- Tests on Python 3.10, 3.11 and 3.12.
+- ClickHouse service integration for tests requiring it.
+- Coverage and JUnit test-result artifacts.
 - Bandit and dependency security checks.
 - Docker Compose validation and Docker image build validation.
-- A final CI-results job that reports the combined status.
+- A final results job that fails when a required job actually fails.
 
-The test job also performs explicit source/import diagnostics before pytest; these checks are useful when investigating checkout or import-path regressions.
+**Important audit note:** the current lint and security commands use `continue-on-error: true`. Therefore lint/security findings can be reported without blocking the workflow; the test and Docker jobs remain blocking through the final results job.
 
-### CD
+The test workflow also contains explicit checkout/import diagnostics around `aitos/kernel/decision_fusion.py`. These are diagnostic safeguards for detecting checkout/import regressions, not application functionality.
 
-CD runs for pushes to `main`/`master`, version tags, and manual workflow dispatch. It:
+### CD pipeline
 
-1. Builds the Docker image.
-2. Pushes the image to GHCR.
-3. Uses the `papertrade` GitHub Environment for deployment.
-4. Verifies required deployment/database secrets.
-5. Connects to the VPS through SSH.
-6. Maintains the deployment at `~/aitos`.
-7. Generates a protected production `.env` from GitHub Secrets.
-8. Validates Docker Compose configuration.
-9. Pulls/builds and starts the stack.
-10. Waits for ClickHouse health and prints diagnostics if it fails.
+CD runs on pushes to `main`/`master`, version tags and manual dispatch.
 
-The deployment uses `COMPOSE_PROJECT_NAME=aitos` and the repository's current `${{ github.repository }}` path, so the old repository name is not part of the deployment contract.
+Current deployment flow:
+
+1. Checkout repository.
+2. Build and publish the Docker image to GHCR.
+3. Use the `papertrade` GitHub Environment for deployment.
+4. Verify required deployment/database secrets.
+5. SSH to the VPS.
+6. Maintain the application at `~/aitos`.
+7. Generate a protected `.env` from GitHub Secrets.
+8. Validate `docker compose` configuration.
+9. Pull/build and start the stack.
+10. Wait for ClickHouse to become healthy and print diagnostics if it does not.
+
+The deployment uses `COMPOSE_PROJECT_NAME=aitos` and `${{ github.repository }}` rather than a hard-coded repository name.
 
 ### Required CD secrets
 
-The current workflow explicitly requires:
+The workflow explicitly requires:
 
 ```text
 DEPLOY_HOST
@@ -287,11 +349,15 @@ CLICKHOUSE_PASSWORD
 NEO4J_PASSWORD
 ```
 
-Optional/conditional values include Binance credentials and related deployment settings. Binance credentials are intentionally not required for paper/testnet operation; when `BINANCE_TESTNET=false`, the workflow requires both Binance API credentials.
+Binance credentials are conditional: they are not required for paper/testnet operation, but both API key and API secret are required when `BINANCE_TESTNET=false`.
 
-> Older setup documentation listed generic `DATABASE_URL`, `API_KEY`, `SECRET_KEY` and `DEBUG` values as if they were the primary deployment configuration. Those generic/Django-style instructions are not authoritative for the current project and are not repeated here.
+Other optional deployment values include `CLICKHOUSE_USER`, `NEO4J_USER`, `DEPLOY_PORT`, `SENTRY_DSN` and `SLACK_WEBHOOK_URL`.
 
-## Monitoring and troubleshooting
+### Deployment caution
+
+The current CD workflow publishes an image to GHCR but also runs `docker compose up -d --build` on the VPS. Therefore the deployment currently performs a local build on the server rather than relying exclusively on the published GHCR image. This is a known operational characteristic of the current workflow and should not be confused with a pure image-pull deployment.
+
+## Operations and troubleshooting
 
 ### Container status
 
@@ -304,6 +370,7 @@ docker stats --no-stream
 
 ```bash
 docker compose logs --tail=200 aitos-paper
+docker compose logs --tail=200 aitos-learning
 docker compose logs --tail=200 aitos-clickhouse
 docker compose logs --tail=200 redis
 ```
@@ -314,37 +381,96 @@ docker compose logs --tail=200 redis
 curl http://localhost:8090/health
 ```
 
-If ClickHouse is unhealthy, inspect its logs and health status before restarting the whole stack. Avoid repeatedly rebuilding containers without first identifying the failing healthcheck or configuration.
+For live health/metrics, use the corresponding `8091` endpoint when the live service is intentionally running.
 
-### Disk/RAM pressure
+### ClickHouse unhealthy
+
+If ClickHouse becomes unhealthy:
 
 ```bash
-df -h
-docker system df
-docker stats --no-stream
+docker compose ps --all
+docker compose logs --tail=300 aitos-clickhouse
+docker inspect --format='{{json .State.Health}}' aitos-clickhouse
 ```
 
-Preserve database volumes unless data deletion is intentional. Review container logs and storage-maintenance behavior before deleting anything.
+Identify the health-check or configuration failure before repeatedly rebuilding or restarting the stack.
 
-## Storage model
+### RAM and disk pressure
 
-- **Redis:** real-time Event Bus/state required by the application.
-- **ClickHouse:** canonical long-term market history, journal and learning experience.
+```bash
+free -h
+df -h
+docker stats --no-stream
+docker system df
+```
+
+Pay particular attention to ClickHouse storage, container logs, historical/backtest data and model volumes. Preserve database volumes during normal cleanup.
+
+## Storage and maintenance
+
+### Storage roles
+
+- **Redis:** real-time Event Bus transport/state; required by the application runtime.
+- **ClickHouse:** long-lived market history, journal data and learning experience.
 - **Neo4j:** optional knowledge graph.
+- **Docker named volumes:** persistent service/model storage.
+- **Backtest data directory:** local/historical replay data and cache.
 
-Keep persistent data on named Docker volumes and avoid `docker compose down -v` during normal maintenance.
+### Maintenance service
 
-## Repository conventions
+`aitos-storage-maintenance` runs `aitos.storage.maintenance` and is configured by Compose with explicit storage/cache budgets. It is intended to prevent historical/backtest storage from growing without bounds.
 
-- Canonical repository name: `aitos`.
-- Use `aitos` in code, imports, filenames, Docker/Compose names, deployment paths and documentation.
-- Do not introduce legacy project-name references.
-- Keep secrets out of source control.
-- Treat `README.md` as the canonical operational/documentation entry point.
+Before manually deleting data, inspect the maintenance configuration and current disk usage. Never use `docker compose down -v` as a routine cleanup command.
 
-## Current implementation boundaries
+## Project structure
 
-The project is actively developed. Documentation should describe only behavior that exists in the current source/configuration. Historical plans, obsolete setup templates, old test counts, generic CI/CD examples and superseded deployment instructions are intentionally excluded from this README to avoid misleading operators.
+```text
+aitos/
+├── aitos/
+│   ├── agents/             # agent framework
+│   ├── backtest/           # historical replay/backtesting
+│   ├── core/               # contracts and core abstractions
+│   ├── data/               # ingestion and historical data
+│   ├── eventbus/           # Redis Streams Event Bus
+│   ├── exchange/           # Binance adapter and exchange utilities
+│   ├── execution/          # paper/live execution
+│   ├── intelligence/       # scanners, indicators, RL/ML signals
+│   ├── journal/             # trade journaling and reviews
+│   ├── kernel/              # AI Kernel and decision fusion
+│   ├── knowledge_graph/     # optional Neo4j integration
+│   ├── learning/            # continual-learning support
+│   ├── risk/                # risk engine and position sizing
+│   ├── storage/             # storage maintenance
+│   ├── trading/             # trade lifecycle/reconciliation
+│   └── xai/                 # explanations and model interpretability
+├── tests/                   # unit/integration/backtest tests
+├── docs/                    # focused technical documentation
+├── deploy/                  # service/deployment assets
+├── .github/workflows/       # CI/CD
+├── docker-compose.yml       # local/VPS service topology
+├── Dockerfile               # application image
+├── .env.example              # tracked configuration template
+├── requirements.txt          # main runtime dependencies
+└── requirements-backtest.txt # lighter backtest dependencies
+```
+
+## Safety boundaries
+
+AITOS is an actively developed trading system, not a guarantee of trading performance.
+
+- Paper trading should be used before real execution.
+- Live execution requires deliberate human approval.
+- Risk controls are part of the execution path, but operators remain responsible for configuration and exchange permissions.
+- Testnet and production credentials must be kept separate.
+- Do not expose Redis, ClickHouse or Neo4j directly to the internet.
+- Do not commit credentials or `.env` files.
+- Treat destructive storage commands as irreversible operations.
+
+## Documentation policy
+
+`README.md` is the canonical high-level and operational guide. Focused documents under `docs/` may contain deeper technical detail, but they should not contradict the current source/configuration.
+
+When behavior changes, update the relevant source/configuration and then update this README if the change affects setup, runtime behavior, deployment, safety, operations or supported interfaces.
 
 ## License
 
