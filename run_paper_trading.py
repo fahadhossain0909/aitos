@@ -15,6 +15,7 @@ from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
+from aitos.execution.order_executor import SimulatedOrderExecutor
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.journal.repository import JournalRepository
@@ -131,8 +132,6 @@ async def main() -> None:
         event_bus, market_repo, source="paper"
     )
     await experience_recorder.initialize({})
-    # The container publishes 127.0.0.1:8090 to the host. Bind inside the
-    # container to all interfaces so Docker's port-forward can reach it.
     health_server = HealthServer(
         components.all_modules() + [experience_recorder, market_os_persistence],
         host="0.0.0.0",  # nosec B104 - required for Docker port forwarding
@@ -156,12 +155,8 @@ async def main() -> None:
                     extra={
                         "aitos_extra": {
                             "submitted": submitted,
-                            "open_trades": len(
-                                components.trade_lifecycle.get_open_trades()
-                            ),
-                            "closed_trades": len(
-                                components.trade_lifecycle.get_closed_trades()
-                            ),
+                            "open_trades": len(components.trade_lifecycle.get_open_trades()),
+                            "closed_trades": len(components.trade_lifecycle.get_closed_trades()),
                             "rl_samples": rl_scorer.n_samples_seen,
                             "ml_samples": outcome_classifier.n_samples_seen,
                             "attention_samples": attention_explainer.n_samples_seen,
