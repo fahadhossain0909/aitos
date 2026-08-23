@@ -82,6 +82,16 @@ def _validate_download_url(url: str) -> None:
         raise ValueError(f"unsupported download URL scheme: {scheme or '<missing>'}")
 
 
+def _download_to_path(url: str, destination: Path) -> None:
+    """Download a validated HTTP(S) URL without enabling local-file schemes."""
+    _validate_download_url(url)
+    # URL scheme validation above intentionally constrains this urlopen call.
+    with urllib.request.urlopen(url, timeout=30) as response:  # nosec B310
+        with destination.open("wb") as handle:
+            while chunk := response.read(1024 * 1024):
+                handle.write(chunk)
+
+
 class CanonicalDataIndex:
     """Backward-compatible index for legacy ``key/url/path`` downloads.
 
@@ -155,7 +165,7 @@ class IncrementalDownloader:
             ) as tmp:
                 tmp_path = Path(tmp.name)
             try:
-                urllib.request.urlretrieve(item.url, tmp_path)
+                _download_to_path(item.url, tmp_path)
                 digest = sha256_file(tmp_path)
                 size = tmp_path.stat().st_size
                 tmp_path.replace(item.destination)
@@ -202,7 +212,7 @@ class IncrementalDownloader:
             ) as tmp:
                 tmp_path = Path(tmp.name)
             try:
-                urllib.request.urlretrieve(url, tmp_path)
+                _download_to_path(url, tmp_path)
                 digest = sha256_file(tmp_path)
                 size = tmp_path.stat().st_size
                 tmp_path.replace(destination)
