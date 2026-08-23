@@ -1,18 +1,27 @@
 from datetime import date, datetime, timezone
 from pathlib import Path
 
-from aitos.data.incremental import (DownloadItem, DownloadManifest,
-                                    IncrementalDownloader)
+from aitos.data.incremental import (
+    DownloadItem,
+    DownloadManifest,
+    IncrementalDownloader,
+)
 from aitos.data.ingestion_pipeline import DatasetIngestionPipeline
 from aitos.data.schema import CanonicalTrade
 
 
-def test_pipeline_writes_canonical_partition(tmp_path: Path):
+def test_pipeline_writes_canonical_partition(tmp_path: Path, monkeypatch):
     raw = tmp_path / "raw.csv"
     raw.write_text("x", encoding="utf-8")
     parquet_root = tmp_path / "normalized"
     manifest = DownloadManifest(tmp_path / "manifest.json")
     downloader = IncrementalDownloader(manifest, parquet_root)
+
+    def fake_urlretrieve(url, destination):
+        Path(destination).write_bytes(raw.read_bytes())
+        return destination, None
+
+    monkeypatch.setattr("urllib.request.urlretrieve", fake_urlretrieve)
 
     item = DownloadItem(
         "trades",
@@ -20,7 +29,7 @@ def test_pipeline_writes_canonical_partition(tmp_path: Path):
         "futures_um",
         "BTCUSDT",
         date(2026, 1, 1),
-        raw.as_uri(),
+        "https://example.invalid/raw.csv",
         tmp_path / "download.csv",
     )
 
