@@ -6,8 +6,8 @@ import asyncio
 from typing import Dict, List, Optional
 
 from aitos.exchange.binance import BinanceFuturesAdapter
-from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
 from aitos.exchange.symbol_filters import SymbolFilters
+from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.exchange.symbol_filter_cache")
@@ -32,7 +32,9 @@ class SymbolFilterCacheRefresher:
     async def start(self) -> None:
         await self._refresh()
         self._stopped.clear()
-        self._task = asyncio.create_task(self._run(), name="binance-symbol-filter-refresh")
+        self._task = asyncio.create_task(
+            self._run(), name="binance-symbol-filter-refresh"
+        )
 
     async def _refresh(self) -> Dict[str, SymbolFilters]:
         try:
@@ -56,7 +58,9 @@ class SymbolFilterCacheRefresher:
     async def _run(self) -> None:
         while not self._stopped.is_set():
             try:
-                await asyncio.wait_for(self._stopped.wait(), timeout=self._ttl_seconds)
+                await asyncio.wait_for(
+                    self._stopped.wait(), timeout=self._ttl_seconds
+                )
             except asyncio.TimeoutError:
                 await self._refresh()
 
