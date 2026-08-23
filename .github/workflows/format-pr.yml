@@ -1,6 +1,8 @@
 name: One-time PR formatter
 
 on:
+  push:
+    branches: [ci/production-quality-gates]
   pull_request:
     types: [opened, synchronize, reopened]
 
@@ -9,13 +11,13 @@ permissions:
 
 jobs:
   format:
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Check out PR branch
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event.pull_request.head.ref }}
+          ref: ${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.head.ref }}
           fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
@@ -37,4 +39,4 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
           git commit -m 'style: apply Black and isort'
-          git push origin HEAD:${{ github.event.pull_request.head.ref }}
+          git push origin HEAD:${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.head.ref }}
