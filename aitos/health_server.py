@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Iterable, List, Optional
 
 import aiohttp
@@ -84,13 +85,12 @@ class HealthServer:
     async def _maybe_alert(self, degraded_modules: List[str]) -> None:
         if not self._alert_webhook_url:
             return
-        import time
 
         now = time.monotonic()
         key = ",".join(sorted(degraded_modules))
         if now - self._last_alert_at.get(key, 0.0) < self._alert_cooldown_seconds:
             return
-        self._last_alert_at[key] = now
+
         message = "AITOS health alert: degraded modules: " + ", ".join(degraded_modules)
         try:
             async with aiohttp.ClientSession() as session:
@@ -103,8 +103,12 @@ class HealthServer:
                         logger.warning(
                             "health alert webhook returned HTTP %s", response.status
                         )
+                        return
         except Exception as exc:
             logger.warning("health alert webhook failed: %s", exc)
+            return
+
+        self._last_alert_at[key] = now
 
     async def _handle_metrics(self, request: web.Request) -> web.Response:
         lines = [
