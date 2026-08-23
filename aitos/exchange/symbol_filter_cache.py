@@ -32,14 +32,14 @@ class SymbolFilterCacheRefresher:
     async def start(self) -> None:
         await self._refresh()
         self._stopped.clear()
-        self._task = asyncio.create_task(self._run(), name="binance-symbol-filter-refresh")
+        self._task = asyncio.create_task(
+            self._run(), name="binance-symbol-filter-refresh"
+        )
 
     async def _refresh(self) -> Dict[str, SymbolFilters]:
         try:
             async with self._adapter:
-                filters = await self._adapter.fetch_exchange_info(
-                    symbols=self._symbols
-                )
+                filters = await self._adapter.fetch_exchange_info(symbols=self._symbols)
             self._executor.load_symbol_filters(filters)
             logger.info(
                 "refreshed Binance exchangeInfo precision",
