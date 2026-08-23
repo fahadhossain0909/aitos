@@ -11,7 +11,9 @@ class StubAgent(BaseAgent):
     """Minimal agent for tests: always votes a fixed direction/confidence."""
 
     def __init__(self, agent_id, event_bus, direction, confidence, weight=1.0):
-        super().__init__(agent_id=agent_id, event_bus=event_bus, consensus_weight=weight)
+        super().__init__(
+            agent_id=agent_id, event_bus=event_bus, consensus_weight=weight
+        )
         self._direction = direction
         self._confidence = confidence
 
@@ -69,7 +71,9 @@ async def test_request_decision_fuses_majority_direction(kernel, event_bus):
 
 @pytest.mark.asyncio
 async def test_governance_blocks_unapproved_production_action(kernel):
-    action = Action(action_type="order.submit", payload={"symbol": "BTCUSDT"}, is_production=True)
+    action = Action(
+        action_type="order.submit", payload={"symbol": "BTCUSDT"}, is_production=True
+    )
     result = await kernel.enforce_governance(action)
     assert result.approved is False
     assert result.requires_human_approval is True

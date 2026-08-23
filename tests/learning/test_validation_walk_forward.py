@@ -7,7 +7,9 @@ from aitos.learning.validation import CandidateValidator, ValidationPolicy
 def _events(days=250):
     base = datetime(2025, 1, 1, tzinfo=timezone.utc)
     return [
-        SimpleNamespace(timestamp=base + timedelta(days=i), value=float(i + 1), fields={})
+        SimpleNamespace(
+            timestamp=base + timedelta(days=i), value=float(i + 1), fields={}
+        )
         for i in range(days)
     ]
 

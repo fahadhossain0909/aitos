@@ -9,7 +9,8 @@ from __future__ import annotations
 
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.logging_setup import get_logger
@@ -39,7 +40,11 @@ class MLExplainerFeedbackLoop(AITOSModule):
         if self._initialized:
             return
         self._subscriptions.append(
-            await self._event_bus.subscribe("trade.position_closed", self._on_position_closed, group="ml-explainer-feedback")
+            await self._event_bus.subscribe(
+                "trade.position_closed",
+                self._on_position_closed,
+                group="ml-explainer-feedback",
+            )
         )
         self._initialized = True
         logger.info("MLExplainerFeedbackLoop initialized")
@@ -47,10 +52,16 @@ class MLExplainerFeedbackLoop(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
-            details={"updates_applied": self._updates_applied, "classifier_ready": self._classifier.is_ready, "samples_seen": self._classifier.n_samples_seen},
+            details={
+                "updates_applied": self._updates_applied,
+                "classifier_ready": self._classifier.is_ready,
+                "samples_seen": self._classifier.n_samples_seen,
+            },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
@@ -82,10 +93,18 @@ class MLExplainerFeedbackLoop(AITOSModule):
         self._last_event_time = event.created_at
         logger.info(
             "outcome classifier updated from closed trade",
-            extra={"aitos_extra": {"won": pnl > 0, "samples_seen": self._classifier.n_samples_seen, "is_ready": self._classifier.is_ready}},
+            extra={
+                "aitos_extra": {
+                    "won": pnl > 0,
+                    "samples_seen": self._classifier.n_samples_seen,
+                    "is_ready": self._classifier.is_ready,
+                }
+            },
         )
         return None
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("MLExplainerFeedbackLoop.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "MLExplainerFeedbackLoop.initialize() must be called first"
+            )

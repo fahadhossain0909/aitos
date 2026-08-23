@@ -4,6 +4,7 @@ High-volume L2 order-book snapshots and incremental updates are kept in
 separate datasets. Other market data has its own logical datasets so readers
 can load only what a backtest needs.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,9 +16,12 @@ from pathlib import Path
 class DatasetLayout:
     root: Path
 
-    def _partition(self, dataset: str, exchange: str, market: str, symbol: str, day: date) -> Path:
+    def _partition(
+        self, dataset: str, exchange: str, market: str, symbol: str, day: date
+    ) -> Path:
         return (
-            self.root / dataset
+            self.root
+            / dataset
             / f"exchange={exchange}"
             / f"market={market}"
             / f"symbol={symbol.upper()}"
@@ -39,10 +43,14 @@ class DatasetLayout:
     def liquidations(self, exchange: str, market: str, symbol: str, day: date) -> Path:
         return self._partition("liquidations", exchange, market, symbol, day)
 
-    def orderbook_snapshots(self, exchange: str, market: str, symbol: str, day: date) -> Path:
+    def orderbook_snapshots(
+        self, exchange: str, market: str, symbol: str, day: date
+    ) -> Path:
         return self._partition("orderbook/snapshots", exchange, market, symbol, day)
 
-    def orderbook_updates(self, exchange: str, market: str, symbol: str, day: date) -> Path:
+    def orderbook_updates(
+        self, exchange: str, market: str, symbol: str, day: date
+    ) -> Path:
         return self._partition("orderbook/updates", exchange, market, symbol, day)
 
     @staticmethod

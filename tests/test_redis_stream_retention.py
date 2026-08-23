@@ -29,15 +29,21 @@ async def test_protected_streams_remain_unbounded() -> None:
     bus = EventBus(redis)
     await bus.initialize({})
 
-    await bus.publish(Event(topic="trade.position_opened", payload={"symbol": "BTCUSDT"}))
-    await bus.publish(Event(topic="journal.decision_recorded", payload={"decision": "hold"}))
+    await bus.publish(
+        Event(topic="trade.position_opened", payload={"symbol": "BTCUSDT"})
+    )
+    await bus.publish(
+        Event(topic="journal.decision_recorded", payload={"decision": "hold"})
+    )
 
     for call in redis.xadd.await_args_list:
         assert "maxlen" not in call.kwargs
         assert "approximate" not in call.kwargs
 
 
-def test_retention_can_be_overridden_per_stream_family(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retention_can_be_overridden_per_stream_family(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("REDIS_STREAM_MAXLEN_MARKET_ORDERBOOK", "5000")
     monkeypatch.setenv("REDIS_STREAM_MAXLEN_MARKET_LIQUIDITY", "20000")
     monkeypatch.setenv("REDIS_STREAM_MAXLEN_MARKET_LIVE_STATE", "5000")

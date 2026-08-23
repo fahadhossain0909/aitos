@@ -16,7 +16,8 @@ from typing import Any, Dict, List, Optional
 
 import clickhouse_connect
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.journal.models import JournalEntry
 from aitos.logging_setup import get_logger
@@ -83,7 +84,13 @@ class JournalRepository(AITOSModule):
         password: str = "",
         database: str = "aitos",
     ) -> None:
-        self._conn_params = dict(host=host, port=port, username=username, password=password, database=database)
+        self._conn_params = dict(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            database=database,
+        )
         self._client = None
         self._initialized = False
         self._last_event_time: Optional[str] = None
@@ -115,7 +122,13 @@ class JournalRepository(AITOSModule):
             latency_ms = (time.monotonic() - start) * 1000
             status = ModuleStatus.UNHEALTHY
             logger.error("journal repository health check failed: %s", exc)
-        return HealthStatus(module_id=self.module_id, status=status, latency_ms=latency_ms, last_event_time=self._last_event_time, details={})
+        return HealthStatus(
+            module_id=self.module_id,
+            status=status,
+            latency_ms=latency_ms,
+            last_event_time=self._last_event_time,
+            details={},
+        )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         if self._client is not None:
@@ -135,19 +148,51 @@ class JournalRepository(AITOSModule):
         self._require_initialized()
         await self._client.insert(
             "trades",
-            [[
-                trade_dict.get("trade_id", ""), trade_dict.get("symbol", ""), trade_dict.get("side", ""),
-                trade_dict.get("entry_price", 0.0), trade_dict.get("quantity", 0.0), trade_dict.get("leverage", 0.0),
-                trade_dict.get("position_size_usd", 0.0), trade_dict.get("risk_amount_usd", 0.0),
-                trade_dict.get("strategy_id", ""), trade_dict.get("sl_price", 0.0), trade_dict.get("tp_price", 0.0),
-                trade_dict.get("state", ""), trade_dict.get("entry_time", ""), trade_dict.get("exit_price"),
-                trade_dict.get("exit_time"), trade_dict.get("exit_reason"), trade_dict.get("pnl"),
-                trade_dict.get("pnl_percent"), trade_dict.get("rejection_reason"), json.dumps(trade_dict, default=str),
-            ]],
+            [
+                [
+                    trade_dict.get("trade_id", ""),
+                    trade_dict.get("symbol", ""),
+                    trade_dict.get("side", ""),
+                    trade_dict.get("entry_price", 0.0),
+                    trade_dict.get("quantity", 0.0),
+                    trade_dict.get("leverage", 0.0),
+                    trade_dict.get("position_size_usd", 0.0),
+                    trade_dict.get("risk_amount_usd", 0.0),
+                    trade_dict.get("strategy_id", ""),
+                    trade_dict.get("sl_price", 0.0),
+                    trade_dict.get("tp_price", 0.0),
+                    trade_dict.get("state", ""),
+                    trade_dict.get("entry_time", ""),
+                    trade_dict.get("exit_price"),
+                    trade_dict.get("exit_time"),
+                    trade_dict.get("exit_reason"),
+                    trade_dict.get("pnl"),
+                    trade_dict.get("pnl_percent"),
+                    trade_dict.get("rejection_reason"),
+                    json.dumps(trade_dict, default=str),
+                ]
+            ],
             column_names=[
-                "trade_id", "symbol", "side", "entry_price", "quantity", "leverage", "position_size_usd",
-                "risk_amount_usd", "strategy_id", "sl_price", "tp_price", "state", "entry_time", "exit_price",
-                "exit_time", "exit_reason", "pnl", "pnl_percent", "rejection_reason", "payload",
+                "trade_id",
+                "symbol",
+                "side",
+                "entry_price",
+                "quantity",
+                "leverage",
+                "position_size_usd",
+                "risk_amount_usd",
+                "strategy_id",
+                "sl_price",
+                "tp_price",
+                "state",
+                "entry_time",
+                "exit_price",
+                "exit_time",
+                "exit_reason",
+                "pnl",
+                "pnl_percent",
+                "rejection_reason",
+                "payload",
             ],
         )
 
@@ -155,22 +200,43 @@ class JournalRepository(AITOSModule):
         self._require_initialized()
         await self._client.insert(
             "journal_entries",
-            [[
-                entry.entry_id, entry.trade_id, entry.entry_type.value, json.dumps(entry.market_context, default=str),
-                entry.confidence_score, json.dumps(entry.order_flow_observations, default=str),
-                json.dumps(entry.liquidity_observations, default=str), json.dumps(entry.amt_observations, default=str),
-                json.dumps(entry.lead_lag_observations, default=str), entry.mistakes, entry.lessons, entry.improvements,
-            ]],
+            [
+                [
+                    entry.entry_id,
+                    entry.trade_id,
+                    entry.entry_type.value,
+                    json.dumps(entry.market_context, default=str),
+                    entry.confidence_score,
+                    json.dumps(entry.order_flow_observations, default=str),
+                    json.dumps(entry.liquidity_observations, default=str),
+                    json.dumps(entry.amt_observations, default=str),
+                    json.dumps(entry.lead_lag_observations, default=str),
+                    entry.mistakes,
+                    entry.lessons,
+                    entry.improvements,
+                ]
+            ],
             column_names=[
-                "entry_id", "trade_id", "entry_type", "market_context", "confidence_score",
-                "order_flow_observations", "liquidity_observations", "amt_observations", "lead_lag_observations",
-                "mistakes", "lessons", "improvements",
+                "entry_id",
+                "trade_id",
+                "entry_type",
+                "market_context",
+                "confidence_score",
+                "order_flow_observations",
+                "liquidity_observations",
+                "amt_observations",
+                "lead_lag_observations",
+                "mistakes",
+                "lessons",
+                "improvements",
             ],
         )
 
     # -- Reads --------------------------------------------------------------------
 
-    async def get_journal_entries_for_trade(self, trade_id: str) -> List[Dict[str, Any]]:
+    async def get_journal_entries_for_trade(
+        self, trade_id: str
+    ) -> List[Dict[str, Any]]:
         self._require_initialized()
         result = await self._client.query(
             "SELECT * FROM journal_entries WHERE trade_id = {trade_id:String} ORDER BY created_at",
@@ -180,4 +246,6 @@ class JournalRepository(AITOSModule):
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("JournalRepository.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "JournalRepository.initialize() must be called first"
+            )

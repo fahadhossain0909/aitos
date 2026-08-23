@@ -46,7 +46,10 @@ class CircuitBreaker:
         """New entries are only allowed when CLOSED. HALF_OPEN allows probing
         (callers should size any HALF_OPEN trade down themselves); OPEN allows
         neither."""
-        return self._state in (CircuitBreakerState.CLOSED, CircuitBreakerState.HALF_OPEN)
+        return self._state in (
+            CircuitBreakerState.CLOSED,
+            CircuitBreakerState.HALF_OPEN,
+        )
 
     def trip(self, reason: str) -> None:
         """Force to OPEN from any state (e.g. drawdown breach, flash crash)."""
@@ -64,7 +67,11 @@ class CircuitBreaker:
         whether the transition happened."""
         if self._state == CircuitBreakerState.OPEN and self.cooldown_elapsed():
             self._state = CircuitBreakerState.HALF_OPEN
-            self._history.append(CircuitBreakerEvent(self._state, "cooldown elapsed, probing", time.monotonic()))
+            self._history.append(
+                CircuitBreakerEvent(
+                    self._state, "cooldown elapsed, probing", time.monotonic()
+                )
+            )
             return True
         return False
 
@@ -76,14 +83,24 @@ class CircuitBreaker:
         if success:
             self._state = CircuitBreakerState.CLOSED
             self._tripped_at = None
-            self._history.append(CircuitBreakerEvent(self._state, reason or "probe succeeded", time.monotonic()))
+            self._history.append(
+                CircuitBreakerEvent(
+                    self._state, reason or "probe succeeded", time.monotonic()
+                )
+            )
         else:
             self._state = CircuitBreakerState.OPEN
             self._tripped_at = time.monotonic()
-            self._history.append(CircuitBreakerEvent(self._state, reason or "probe failed", self._tripped_at))
+            self._history.append(
+                CircuitBreakerEvent(
+                    self._state, reason or "probe failed", self._tripped_at
+                )
+            )
 
     def reset(self) -> None:
         """Manual override back to CLOSED (e.g. human-approved recovery)."""
         self._state = CircuitBreakerState.CLOSED
         self._tripped_at = None
-        self._history.append(CircuitBreakerEvent(self._state, "manual reset", time.monotonic()))
+        self._history.append(
+            CircuitBreakerEvent(self._state, "manual reset", time.monotonic())
+        )

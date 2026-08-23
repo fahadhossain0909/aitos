@@ -44,7 +44,9 @@ class TabularBanditRLScorer(RLPolicyScorer):
     ``trade.position_closed`` events; nothing calls it on its own.
     """
 
-    def __init__(self, reward_scale_r_multiples: float = 2.0, min_samples_for_confidence: int = 5) -> None:
+    def __init__(
+        self, reward_scale_r_multiples: float = 2.0, min_samples_for_confidence: int = 5
+    ) -> None:
         """``reward_scale_r_multiples`` sets how many R of average reward
         maps to the extreme ends of the 0-10 scale (e.g. 2.0 means an
         average of +2R maps to ~10, -2R maps to ~0). Buckets with fewer
@@ -59,7 +61,9 @@ class TabularBanditRLScorer(RLPolicyScorer):
     def _key(self, symbol: str, regime: str, direction: str) -> Tuple[str, str, str]:
         return (symbol, regime, direction)
 
-    def update(self, symbol: str, context: Dict[str, Any], reward_r_multiple: float) -> None:
+    def update(
+        self, symbol: str, context: Dict[str, Any], reward_r_multiple: float
+    ) -> None:
         """Incorporate one real trade outcome. Uses Welford's incremental
         mean update — no need to store the full history per bucket.
         ``context`` must contain ``regime`` and ``direction`` (same shape

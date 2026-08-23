@@ -51,7 +51,9 @@ async def test_learns_a_real_pattern_and_generalizes_to_unseen_but_similar_conte
 
     for _ in range(300):
         trend = rng.uniform(0, 10)
-        reward = 2.0 if trend > 7.0 else (-2.0 if trend < 3.0 else rng.uniform(-0.5, 0.5))
+        reward = (
+            2.0 if trend > 7.0 else (-2.0 if trend < 3.0 else rng.uniform(-0.5, 0.5))
+        )
         context = make_context(trend_strength=trend)
         scorer.update("BTCUSDT", context, reward_r_multiple=reward)
 
@@ -71,6 +73,8 @@ async def test_learns_a_real_pattern_and_generalizes_to_unseen_but_similar_conte
 async def test_score_always_within_valid_range():
     scorer = DeepValueRLScorer(min_samples_for_confidence=1)
     for _ in range(20):
-        scorer.update("BTCUSDT", make_context(), reward_r_multiple=random.uniform(-50, 50))
+        scorer.update(
+            "BTCUSDT", make_context(), reward_r_multiple=random.uniform(-50, 50)
+        )
     score = await scorer.score("BTCUSDT", make_context())
     assert 0.0 <= score <= 10.0

@@ -1,11 +1,13 @@
 """DataIngestionService — the glue between exchange streams and AITOS."""
+
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventPriority, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventPriority,
+                                  EventResponse, HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus
@@ -58,7 +60,11 @@ class DataIngestionService(AITOSModule):
         orderbook_levels: int = 20,
         liquidity_trade_window: int = 500,
     ) -> None:
-        self._exchange, self._event_bus, self._repository = exchange, event_bus, repository
+        self._exchange, self._event_bus, self._repository = (
+            exchange,
+            event_bus,
+            repository,
+        )
         self._symbols, self._kline_timeframe = symbols, kline_timeframe
         self._orderbook_levels = orderbook_levels
         self._liquidity_trade_window = max(50, liquidity_trade_window)
@@ -76,7 +82,9 @@ class DataIngestionService(AITOSModule):
         self._trade_stream_idle_timeouts = 0
         self._trade_stream_messages_received = 0
         self._last_trade_event_time: Optional[str] = None
-        self._live_state = LiveMarketStateStore(max_trades=max(5000, self._liquidity_trade_window))
+        self._live_state = LiveMarketStateStore(
+            max_trades=max(5000, self._liquidity_trade_window)
+        )
         self._recent_trades = self._live_state.trades
 
     @property
@@ -98,7 +106,9 @@ class DataIngestionService(AITOSModule):
         self._tasks = [
             asyncio.create_task(self._run_kline_stream(), name="aitos-kline-stream"),
             asyncio.create_task(self._run_trade_stream(), name="aitos-trade-stream"),
-            asyncio.create_task(self._run_orderbook_stream(), name="aitos-orderbook-stream"),
+            asyncio.create_task(
+                self._run_orderbook_stream(), name="aitos-orderbook-stream"
+            ),
         ]
         self._initialized = True
 
@@ -107,9 +117,11 @@ class DataIngestionService(AITOSModule):
         status = (
             ModuleStatus.UNHEALTHY
             if self._errors
-            else ModuleStatus.HEALTHY
-            if alive == len(self._tasks)
-            else ModuleStatus.DEGRADED
+            else (
+                ModuleStatus.HEALTHY
+                if alive == len(self._tasks)
+                else ModuleStatus.DEGRADED
+            )
         )
         return HealthStatus(
             module_id=self.module_id,
@@ -146,7 +158,9 @@ class DataIngestionService(AITOSModule):
     async def handle_event(self, event: Event) -> Optional[EventResponse]:
         return None
 
-    async def backfill_klines(self, symbol: str, timeframe: str, limit: int = 500) -> int:
+    async def backfill_klines(
+        self, symbol: str, timeframe: str, limit: int = 500
+    ) -> int:
         self._require_initialized()
         klines = await self._exchange.fetch_klines(symbol, timeframe, limit=limit)
         for kline in klines:
@@ -155,7 +169,9 @@ class DataIngestionService(AITOSModule):
 
     async def _run_kline_stream(self) -> None:
         try:
-            async for kline in self._exchange.stream_klines(self._symbols, self._kline_timeframe):
+            async for kline in self._exchange.stream_klines(
+                self._symbols, self._kline_timeframe
+            ):
                 await self._handle_kline(kline)
         except asyncio.CancelledError:
             return
@@ -173,22 +189,29 @@ class DataIngestionService(AITOSModule):
         """
         while True:
             producer_task: Optional[asyncio.Task] = None
-            queue: asyncio.Queue[TradeTick] = asyncio.Queue(maxsize=TRADE_STREAM_QUEUE_SIZE)
+            queue: asyncio.Queue[TradeTick] = asyncio.Queue(
+                maxsize=TRADE_STREAM_QUEUE_SIZE
+            )
             try:
+
                 async def producer() -> None:
                     async for trade in self._exchange.stream_trades(self._symbols):
                         try:
                             queue.put_nowait(trade)
                         except asyncio.QueueFull:
                             self._trade_stream_errors += 1
-                            logger.error("trade stream queue overflow; dropping oldest trade")
+                            logger.error(
+                                "trade stream queue overflow; dropping oldest trade"
+                            )
                             try:
                                 queue.get_nowait()
                             except asyncio.QueueEmpty:
                                 pass
                             queue.put_nowait(trade)
 
-                producer_task = asyncio.create_task(producer(), name="aitos-trade-stream-producer")
+                producer_task = asyncio.create_task(
+                    producer(), name="aitos-trade-stream-producer"
+                )
                 while True:
                     try:
                         trade = await asyncio.wait_for(
@@ -228,7 +251,9 @@ class DataIngestionService(AITOSModule):
                 logger.error(
                     "trade stream loop crashed; restarting: %s",
                     exc,
-                    extra={"aitos_extra": {"restart_count": self._trade_stream_restarts}},
+                    extra={
+                        "aitos_extra": {"restart_count": self._trade_stream_restarts}
+                    },
                 )
                 if producer_task is not None:
                     producer_task.cancel()
@@ -237,7 +262,9 @@ class DataIngestionService(AITOSModule):
 
     async def _run_orderbook_stream(self) -> None:
         try:
-            async for book in self._exchange.stream_order_book(self._symbols, self._orderbook_levels):
+            async for book in self._exchange.stream_order_book(
+                self._symbols, self._orderbook_levels
+            ):
                 await self._handle_order_book(book)
         except asyncio.CancelledError:
             return
@@ -288,7 +315,11 @@ class DataIngestionService(AITOSModule):
                         "vwap": features.vwap,
                         "last_price": features.last_price,
                         "direction": features.direction,
-                        "timestamp": features.timestamp.isoformat() if features.timestamp else None,
+                        "timestamp": (
+                            features.timestamp.isoformat()
+                            if features.timestamp
+                            else None
+                        ),
                     },
                     source_module=self.module_id,
                     priority=EventPriority.NORMAL,
@@ -327,7 +358,11 @@ class DataIngestionService(AITOSModule):
                         "last_update_id": book.last_update_id,
                     },
                     source_module=self.module_id,
-                    priority=EventPriority.HIGH if event.kind == "sweep" else EventPriority.NORMAL,
+                    priority=(
+                        EventPriority.HIGH
+                        if event.kind == "sweep"
+                        else EventPriority.NORMAL
+                    ),
                 )
             )
             self._liquidity_events += 1
@@ -342,11 +377,23 @@ class DataIngestionService(AITOSModule):
                     topic=live_state_topic(symbol),
                     payload={
                         "trade_count": state.trade_count,
-                        "order_flow": state.order_flow.__dict__ if state.order_flow else None,
-                        "liquidity_events": [e.__dict__ for e in state.liquidity_events[-20:]],
-                        "best_bid": state.order_book.best_bid if state.order_book else None,
-                        "best_ask": state.order_book.best_ask if state.order_book else None,
-                        "timestamp": state.order_book.timestamp.isoformat() if state.order_book else None,
+                        "order_flow": (
+                            state.order_flow.__dict__ if state.order_flow else None
+                        ),
+                        "liquidity_events": [
+                            e.__dict__ for e in state.liquidity_events[-20:]
+                        ],
+                        "best_bid": (
+                            state.order_book.best_bid if state.order_book else None
+                        ),
+                        "best_ask": (
+                            state.order_book.best_ask if state.order_book else None
+                        ),
+                        "timestamp": (
+                            state.order_book.timestamp.isoformat()
+                            if state.order_book
+                            else None
+                        ),
                     },
                     source_module=self.module_id,
                     priority=EventPriority.NORMAL,
@@ -360,4 +407,6 @@ class DataIngestionService(AITOSModule):
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("DataIngestionService.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "DataIngestionService.initialize() must be called first"
+            )

@@ -1,4 +1,5 @@
 """Deterministic L2 order-book reconstruction from snapshots and updates."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -73,7 +74,9 @@ class OrderBookReconstructor:
     def best_ask(self) -> tuple[float, float] | None:
         return min(self.asks.items(), key=lambda item: item[0]) if self.asks else None
 
-    def depth(self, levels: int = 10) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
+    def depth(
+        self, levels: int = 10
+    ) -> tuple[list[tuple[float, float]], list[tuple[float, float]]]:
         if levels <= 0:
             return [], []
         bids = sorted(self.bids.items(), reverse=True)[:levels]
@@ -82,7 +85,9 @@ class OrderBookReconstructor:
 
 
 def replay_snapshot_then_updates(
-    snapshot: tuple[Iterable[tuple[float, float]], Iterable[tuple[float, float]], int | str | None],
+    snapshot: tuple[
+        Iterable[tuple[float, float]], Iterable[tuple[float, float]], int | str | None
+    ],
     updates: Iterable[CanonicalBookEvent],
 ) -> Iterator[BookState]:
     """Yield book state after the snapshot and after each accepted update."""

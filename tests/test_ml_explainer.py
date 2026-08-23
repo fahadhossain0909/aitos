@@ -2,12 +2,16 @@ import random
 
 import pytest
 
-from aitos.xai.ml_explainer import DEFAULT_MIN_SAMPLES, FEATURE_ORDER, TradeOutcomeClassifier
+from aitos.xai.ml_explainer import (DEFAULT_MIN_SAMPLES, FEATURE_ORDER,
+                                    TradeOutcomeClassifier)
 
 
 def make_scores(bias=0.0, seed=None):
     rng = random.Random(seed)
-    return {f: max(0.0, min(10.0, 5.0 + bias + rng.uniform(-1.0, 1.0))) for f in FEATURE_ORDER}
+    return {
+        f: max(0.0, min(10.0, 5.0 + bias + rng.uniform(-1.0, 1.0)))
+        for f in FEATURE_ORDER
+    }
 
 
 def test_not_ready_before_min_samples():
@@ -21,7 +25,9 @@ def test_not_ready_before_min_samples():
 def test_not_ready_if_only_one_class_seen():
     clf = TradeOutcomeClassifier(min_samples_for_ready=3)
     for i in range(5):
-        clf.partial_fit(make_scores(seed=i), won=True)  # always "won" — SGDClassifier can't do proba with 1 class
+        clf.partial_fit(
+            make_scores(seed=i), won=True
+        )  # always "won" — SGDClassifier can't do proba with 1 class
     assert clf.is_ready is False
 
 
@@ -69,7 +75,9 @@ def test_learns_a_real_pattern_winning_bias_predicts_higher_win_probability():
     low_trend = {f: 5.0 for f in FEATURE_ORDER}
     low_trend["trend_strength"] = 1.0
 
-    assert clf.predict_win_probability(high_trend) > clf.predict_win_probability(low_trend)
+    assert clf.predict_win_probability(high_trend) > clf.predict_win_probability(
+        low_trend
+    )
 
 
 def test_explain_empty_when_not_ready():
@@ -87,7 +95,9 @@ def test_explain_returns_shap_values_per_feature_when_ready():
         scores["order_flow_bias"] = 8.0 if won else 2.0
         clf.partial_fit(scores, won=won)
 
-    shap_values = clf.explain({f: 5.0 for f in FEATURE_ORDER} | {"order_flow_bias": 9.0})
+    shap_values = clf.explain(
+        {f: 5.0 for f in FEATURE_ORDER} | {"order_flow_bias": 9.0}
+    )
     assert set(shap_values.keys()) == set(FEATURE_ORDER)
     assert all(isinstance(v, float) for v in shap_values.values())
     # the feature that actually drives the label should have a non-trivial contribution
@@ -95,4 +105,6 @@ def test_explain_returns_shap_values_per_feature_when_ready():
 
 
 def test_default_min_samples_is_reasonable():
-    assert DEFAULT_MIN_SAMPLES >= 10  # sanity: shouldn't claim confidence from a tiny sample
+    assert (
+        DEFAULT_MIN_SAMPLES >= 10
+    )  # sanity: shouldn't claim confidence from a tiny sample

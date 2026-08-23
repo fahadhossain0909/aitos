@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.journal.decision_repository import DecisionJournalRepository
 
 
@@ -102,7 +103,9 @@ class DecisionPerformanceEvaluator(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=None,
             details={"has_report": self._last_report is not None},
@@ -129,7 +132,9 @@ class DecisionPerformanceEvaluator(AITOSModule):
         outcomes = [r for r in records if r.get("record_type") == "OUTCOME"]
 
         pnl_values = [float(r["pnl"]) for r in outcomes if r.get("pnl") is not None]
-        r_values = [float(r["r_multiple"]) for r in outcomes if r.get("r_multiple") is not None]
+        r_values = [
+            float(r["r_multiple"]) for r in outcomes if r.get("r_multiple") is not None
+        ]
         wins = sum(1 for value in pnl_values if value > 0)
         losses = sum(1 for value in pnl_values if value < 0)
         report = PerformanceReport(
@@ -156,18 +161,24 @@ class DecisionPerformanceEvaluator(AITOSModule):
         result: List[PerformanceSlice] = []
         for (key, value), records in sorted(buckets.items()):
             pnl = [float(r["pnl"]) for r in records if r.get("pnl") is not None]
-            rs = [float(r["r_multiple"]) for r in records if r.get("r_multiple") is not None]
+            rs = [
+                float(r["r_multiple"])
+                for r in records
+                if r.get("r_multiple") is not None
+            ]
             wins = sum(1 for p in pnl if p > 0)
             losses = sum(1 for p in pnl if p < 0)
-            result.append(PerformanceSlice(
-                key=key,
-                value=value,
-                trades=len(pnl),
-                wins=wins,
-                losses=losses,
-                total_pnl=sum(pnl),
-                average_pnl=sum(pnl) / len(pnl) if pnl else 0.0,
-                average_r_multiple=sum(rs) / len(rs) if rs else 0.0,
-                win_rate=wins / len(pnl) if pnl else 0.0,
-            ))
+            result.append(
+                PerformanceSlice(
+                    key=key,
+                    value=value,
+                    trades=len(pnl),
+                    wins=wins,
+                    losses=losses,
+                    total_pnl=sum(pnl),
+                    average_pnl=sum(pnl) / len(pnl) if pnl else 0.0,
+                    average_r_multiple=sum(rs) / len(rs) if rs else 0.0,
+                    win_rate=wins / len(pnl) if pnl else 0.0,
+                )
+            )
         return result

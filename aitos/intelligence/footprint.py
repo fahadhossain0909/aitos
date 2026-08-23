@@ -4,12 +4,13 @@ Aggregates TradeTick records into bid/ask volume per price bucket. This is a
 trade-based footprint, not a full exchange order-book footprint: it represents
 executed aggression and does not infer hidden/iceberg liquidity.
 """
+
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from collections import defaultdict
-from typing import Iterable, Dict
+from typing import Dict, Iterable
 
 from aitos.models.market import TradeSide, TradeTick
 

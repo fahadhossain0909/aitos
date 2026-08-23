@@ -65,7 +65,9 @@ def _vectorize(context: Dict[str, Any]) -> np.ndarray:
     # scaling to [0, 1] instead left every "neutral" feature still contributing
     # a nonzero baseline term that diluted the signal from the features that
     # actually mattered (verified empirically to make training far slower).
-    return np.array([(float(context.get(f, 5.0)) - 5.0) / 5.0 for f in FEATURE_ORDER], dtype=float)
+    return np.array(
+        [(float(context.get(f, 5.0)) - 5.0) / 5.0 for f in FEATURE_ORDER], dtype=float
+    )
 
 
 class AttentionExplainer:
@@ -92,7 +94,9 @@ class AttentionExplainer:
         self._params: Dict[str, np.ndarray] = {
             "W_embed": self._rng.normal(0, scale, (N_FEATURES, d_model)),
             "b_embed": self._rng.normal(0, scale, (N_FEATURES, d_model)),
-            "q_cls": self._rng.normal(0, scale, (d_model,)),  # single learned query (CLS-token style)
+            "q_cls": self._rng.normal(
+                0, scale, (d_model,)
+            ),  # single learned query (CLS-token style)
             "W_k": self._rng.normal(0, scale, (d_model, d_model)),
             "W_v": self._rng.normal(0, scale, (d_model, d_model)),
             "W_out": self._rng.normal(0, scale, (d_model,)),
@@ -106,16 +110,25 @@ class AttentionExplainer:
 
     @property
     def is_ready(self) -> bool:
-        return self._n_samples_seen >= self._min_samples and self._classes_seen == {0, 1}
+        return self._n_samples_seen >= self._min_samples and self._classes_seen == {
+            0,
+            1,
+        }
 
     # -- Forward pass -------------------------------------------------------------
 
-    def _forward(self, x: np.ndarray, params: Dict[str, np.ndarray]) -> Tuple[float, np.ndarray]:
+    def _forward(
+        self, x: np.ndarray, params: Dict[str, np.ndarray]
+    ) -> Tuple[float, np.ndarray]:
         tokens = x[:, None] * params["W_embed"] + params["b_embed"]  # (N, d)
         K = tokens @ params["W_k"]
         V = tokens @ params["W_v"]
-        scores = (params["q_cls"] @ K.T) / np.sqrt(self._d_model)  # (N,) — one query against every key
-        attn = _softmax(scores, axis=-1)  # (N,) — single distribution over the 10 feature tokens
+        scores = (params["q_cls"] @ K.T) / np.sqrt(
+            self._d_model
+        )  # (N,) — one query against every key
+        attn = _softmax(
+            scores, axis=-1
+        )  # (N,) — single distribution over the 10 feature tokens
         pooled = attn @ V  # (d,) — weighted sum, no further pooling/dilution
         logit = float(pooled @ params["W_out"] + params["b_out"][0])
         return _sigmoid(logit), attn
@@ -149,10 +162,14 @@ class AttentionExplainer:
             self._replay_buffer.pop(0)
 
         batch_size = min(self._batch_size, len(self._replay_buffer))
-        batch_indices = self._rng.choice(len(self._replay_buffer), size=batch_size, replace=False)
+        batch_indices = self._rng.choice(
+            len(self._replay_buffer), size=batch_size, replace=False
+        )
         batch = [self._replay_buffer[i] for i in batch_indices]
 
-        averaged_grads = {key: np.zeros_like(self._params[key]) for key in self._param_keys}
+        averaged_grads = {
+            key: np.zeros_like(self._params[key]) for key in self._param_keys
+        }
         for sample_x, sample_y in batch:
             sample_grads = self._numerical_gradient(sample_x, sample_y)
             for key in self._param_keys:

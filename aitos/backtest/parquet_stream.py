@@ -1,4 +1,5 @@
 """Memory-bounded Parquet reader for historical backtests."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -37,7 +38,9 @@ class ParquetChunkReader:
         for index, (start, end) in enumerate(planner.windows()):
             start_s = start.isoformat()
             end_s = end.isoformat()
-            predicate = (ds.field("timestamp") >= start_s) & (ds.field("timestamp") < end_s)
+            predicate = (ds.field("timestamp") >= start_s) & (
+                ds.field("timestamp") < end_s
+            )
             table = self.dataset.to_table(filter=predicate, columns=self.columns)
             events = tuple(self.parser(row) for row in table.to_pylist())
             yield BacktestChunk(index, start, end, events)
@@ -47,8 +50,12 @@ class ParquetChunkReader:
         start: datetime,
         end: datetime,
     ) -> Iterator[Any]:
-        predicate = (ds.field("timestamp") >= start.isoformat()) & (ds.field("timestamp") < end.isoformat())
-        scanner = self.dataset.scanner(filter=predicate, columns=self.columns, batch_size=50_000)
+        predicate = (ds.field("timestamp") >= start.isoformat()) & (
+            ds.field("timestamp") < end.isoformat()
+        )
+        scanner = self.dataset.scanner(
+            filter=predicate, columns=self.columns, batch_size=50_000
+        )
         for batch in scanner.to_batches():
             for row in batch.to_pylist():
                 yield self.parser(row)

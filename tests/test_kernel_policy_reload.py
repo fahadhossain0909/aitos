@@ -24,4 +24,5 @@ def test_kernel_loads_persisted_policy_on_initialize(tmp_path):
         finally:
             await bus.shutdown(grace_period_seconds=1.0)
             await redis.aclose()
+
     asyncio.run(run())

@@ -4,11 +4,11 @@ The module intentionally contains no API-key dependency. It only builds the
 public archive URLs and maps archive types to ProjectAlpha datasets; the
 existing incremental downloader performs the actual HTTP transfer.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-
 
 PUBLIC_BASE = "https://data.binance.vision/data"
 
@@ -41,7 +41,9 @@ def agg_trade_archive(symbol: str, market: str, day: date) -> BinanceArchive:
     return BinanceArchive("trades", url, name)
 
 
-def book_depth_archive(symbol: str, market: str, day: date, interval: str = "100ms") -> BinanceArchive:
+def book_depth_archive(
+    symbol: str, market: str, day: date, interval: str = "100ms"
+) -> BinanceArchive:
     """Return the Binance depth archive descriptor.
 
     This is kept separate from normalized L2 snapshots/updates because the

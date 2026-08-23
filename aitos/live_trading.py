@@ -18,7 +18,9 @@ logger = get_logger("aitos.live_trading")
 CONFIRMATION_PHRASE = "I APPROVE LIVE TRADING"
 
 
-def confirm_live_trading(symbols: List[str], testnet: bool, input_fn: Callable[[str], str] = input) -> str:
+def confirm_live_trading(
+    symbols: List[str], testnet: bool, input_fn: Callable[[str], str] = input
+) -> str:
     """Interactive, session-level human approval gate. Returns the
     operator's identifier to use as every opportunity's ``approved_by``
     for the run. Exits the process (via ``sys.exit(1)``) on any failed
@@ -33,12 +35,16 @@ def confirm_live_trading(symbols: List[str], testnet: bool, input_fn: Callable[[
     print("Real orders will be placed on your account.")
     print("=" * 70)
 
-    operator = input_fn("Type your name/identifier to approve this session (or Ctrl-C to abort): ").strip()
+    operator = input_fn(
+        "Type your name/identifier to approve this session (or Ctrl-C to abort): "
+    ).strip()
     if not operator:
         print("No identifier entered — aborting.")
         sys.exit(1)
 
-    confirmation = input_fn(f"Type EXACTLY '{CONFIRMATION_PHRASE}' to proceed as '{operator}': ").strip()
+    confirmation = input_fn(
+        f"Type EXACTLY '{CONFIRMATION_PHRASE}' to proceed as '{operator}': "
+    ).strip()
     if confirmation != CONFIRMATION_PHRASE:
         print("Confirmation text did not match — aborting.")
         sys.exit(1)
@@ -46,7 +52,9 @@ def confirm_live_trading(symbols: List[str], testnet: bool, input_fn: Callable[[
     return operator
 
 
-async def prepare_live_executor(settings, symbols: List[str]) -> BinanceFuturesOrderExecutor:
+async def prepare_live_executor(
+    settings, symbols: List[str]
+) -> BinanceFuturesOrderExecutor:
     """Construct, connect, and fully prepare a live executor: verifies
     credentials exist, verifies the account's actual hedge-mode setting
     matches configuration (refusing to trade on a mismatched assumption
@@ -54,7 +62,9 @@ async def prepare_live_executor(settings, symbols: List[str]) -> BinanceFuturesO
     ``/fapi/v1/exchangeInfo`` before returning.
     """
     if not settings.binance.api_key or not settings.binance.api_secret:
-        logger.error("BINANCE_API_KEY/BINANCE_API_SECRET are not set — cannot trade live")
+        logger.error(
+            "BINANCE_API_KEY/BINANCE_API_SECRET are not set — cannot trade live"
+        )
         sys.exit(1)
 
     executor = BinanceFuturesOrderExecutor(
@@ -70,7 +80,8 @@ async def prepare_live_executor(settings, symbols: List[str]) -> BinanceFuturesO
     if account_hedge_mode != settings.binance.hedge_mode:
         logger.error(
             "BINANCE_HEDGE_MODE (%s) does not match the account's actual setting (%s) — refusing to trade with mismatched assumptions",
-            settings.binance.hedge_mode, account_hedge_mode,
+            settings.binance.hedge_mode,
+            account_hedge_mode,
         )
         await executor.close()
         sys.exit(1)
@@ -79,6 +90,9 @@ async def prepare_live_executor(settings, symbols: List[str]) -> BinanceFuturesO
     async with info_adapter:
         symbol_filters = await info_adapter.fetch_exchange_info(symbols=symbols)
     executor.load_symbol_filters(symbol_filters)
-    logger.info("loaded exchangeInfo precision", extra={"aitos_extra": {"symbols": list(symbol_filters.keys())}})
+    logger.info(
+        "loaded exchangeInfo precision",
+        extra={"aitos_extra": {"symbols": list(symbol_filters.keys())}},
+    )
 
     return executor

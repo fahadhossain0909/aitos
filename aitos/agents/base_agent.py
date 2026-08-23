@@ -14,7 +14,8 @@ from abc import abstractmethod
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
 from aitos.logging_setup import get_logger
@@ -38,7 +39,9 @@ class AgentMemory:
         self._long_term: Dict[str, Any] = {}
 
     def remember_short_term(self, item: Dict[str, Any]) -> None:
-        self._short_term.append({**item, "_recorded_at": datetime.now(timezone.utc).isoformat()})
+        self._short_term.append(
+            {**item, "_recorded_at": datetime.now(timezone.utc).isoformat()}
+        )
         if len(self._short_term) > self._short_term_capacity:
             self._short_term.pop(0)
 
@@ -55,7 +58,14 @@ class AgentMemory:
 class AgentDecision:
     """Standard shape for an agent's contribution to the Decision Fusion Engine."""
 
-    __slots__ = ("agent_id", "confidence", "direction", "rationale", "evidence", "metadata")
+    __slots__ = (
+        "agent_id",
+        "confidence",
+        "direction",
+        "rationale",
+        "evidence",
+        "metadata",
+    )
 
     def __init__(
         self,
@@ -96,7 +106,9 @@ class BaseAgent(AITOSModule):
     - Consensus participation via ``contribute_decision``
     """
 
-    def __init__(self, agent_id: str, event_bus: EventBus, consensus_weight: float = 1.0) -> None:
+    def __init__(
+        self, agent_id: str, event_bus: EventBus, consensus_weight: float = 1.0
+    ) -> None:
         self._agent_id = agent_id
         self._event_bus = event_bus
         self._consensus_weight = consensus_weight
@@ -123,12 +135,16 @@ class BaseAgent(AITOSModule):
             return
         await self.on_initialize(config)
         self._initialized = True
-        logger.info("agent initialized", extra={"aitos_extra": {"agent_id": self.module_id}})
+        logger.info(
+            "agent initialized", extra={"aitos_extra": {"agent_id": self.module_id}}
+        )
 
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={"consensus_weight": self._consensus_weight},
@@ -136,7 +152,9 @@ class BaseAgent(AITOSModule):
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         await self.on_shutdown(grace_period_seconds)
-        logger.info("agent shut down", extra={"aitos_extra": {"agent_id": self.module_id}})
+        logger.info(
+            "agent shut down", extra={"aitos_extra": {"agent_id": self.module_id}}
+        )
 
     async def emit_events(self) -> AsyncIterator[Event]:
         async for event in self.on_emit_events():
@@ -147,7 +165,9 @@ class BaseAgent(AITOSModule):
         if not self._initialized:
             raise ModuleNotInitializedError(f"Agent {self.module_id} not initialized")
         self._last_event_time = datetime.now(timezone.utc).isoformat()
-        self.memory.remember_short_term({"event_topic": event.topic, "event_id": event.event_id})
+        self.memory.remember_short_term(
+            {"event_topic": event.topic, "event_id": event.event_id}
+        )
         start = time.monotonic()
         try:
             return await self.on_handle_event(event)
@@ -155,7 +175,13 @@ class BaseAgent(AITOSModule):
             elapsed_ms = (time.monotonic() - start) * 1000
             logger.debug(
                 "event handled",
-                extra={"aitos_extra": {"agent_id": self.module_id, "topic": event.topic, "elapsed_ms": elapsed_ms}},
+                extra={
+                    "aitos_extra": {
+                        "agent_id": self.module_id,
+                        "topic": event.topic,
+                        "elapsed_ms": elapsed_ms,
+                    }
+                },
             )
 
     # -- Consensus participation --------------------------------------------

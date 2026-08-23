@@ -1,6 +1,7 @@
 from aitos.intelligence.footprint_signals import FootprintSignals
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
-from aitos.intelligence.orderflow_liquidity_interaction import FlowLiquidityInteractionEngine
+from aitos.intelligence.orderflow_liquidity_interaction import \
+    FlowLiquidityInteractionEngine
 
 
 def fp(delta=8.0, imbalance=8.0, absorption=0.0, bias="bullish"):

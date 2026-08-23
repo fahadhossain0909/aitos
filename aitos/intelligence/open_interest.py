@@ -16,14 +16,21 @@ FLAT_THRESHOLD_PCT = 1.0
 STRONG_CHANGE_PCT = 10.0
 
 
-def oi_trend_score(current: OpenInterest, previous: Optional[OpenInterest], side: TradeSide, price_moved_up: bool) -> float:
+def oi_trend_score(
+    current: OpenInterest,
+    previous: Optional[OpenInterest],
+    side: TradeSide,
+    price_moved_up: bool,
+) -> float:
     """0-10: rising OI that agrees with the recent price direction (and
     with the proposed trade side) scores highest; rising OI that
     contradicts it scores lowest. Flat or unknown OI is neutral (5.0)."""
     if previous is None or previous.open_interest <= 0:
         return 5.0
 
-    pct_change = (current.open_interest - previous.open_interest) / previous.open_interest * 100
+    pct_change = (
+        (current.open_interest - previous.open_interest) / previous.open_interest * 100
+    )
     if abs(pct_change) < FLAT_THRESHOLD_PCT:
         return 5.0
 

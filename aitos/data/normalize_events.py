@@ -1,4 +1,5 @@
 """Convert exchange-specific rows into the canonical event schema."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -6,7 +7,9 @@ from typing import Any
 from .schema import CanonicalTrade, normalize_timestamp
 
 
-def normalize_binance_aggtrade(row: dict[str, Any], symbol: str, market: str = "futures_um") -> CanonicalTrade:
+def normalize_binance_aggtrade(
+    row: dict[str, Any], symbol: str, market: str = "futures_um"
+) -> CanonicalTrade:
     """Normalize a Binance aggTrade row represented as a mapping."""
     return CanonicalTrade(
         exchange="binance",
@@ -21,7 +24,9 @@ def normalize_binance_aggtrade(row: dict[str, Any], symbol: str, market: str = "
     )
 
 
-def normalize_bybit_trade(row: dict[str, Any], symbol: str, market: str = "spot") -> CanonicalTrade:
+def normalize_bybit_trade(
+    row: dict[str, Any], symbol: str, market: str = "spot"
+) -> CanonicalTrade:
     """Normalize a Bybit trade row represented as a mapping."""
     side = str(row.get("side", "")).lower()
     if side not in {"buy", "sell"}:

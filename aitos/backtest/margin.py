@@ -1,6 +1,9 @@
 """Deterministic perpetual-futures margin, funding and liquidation model."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 
 @dataclass(frozen=True)
 class MarginSnapshot:
@@ -17,8 +20,14 @@ class MarginSnapshot:
     liquidation_price: float | None
     liquidated: bool
 
+
 class PerpetualMarginModel:
-    def __init__(self, wallet_balance: float, leverage: float = 1.0, maintenance_rate: float = 0.005) -> None:
+    def __init__(
+        self,
+        wallet_balance: float,
+        leverage: float = 1.0,
+        maintenance_rate: float = 0.005,
+    ) -> None:
         if wallet_balance <= 0 or leverage <= 0 or maintenance_rate < 0:
             raise ValueError("invalid margin configuration")
         self.wallet_balance = wallet_balance
@@ -35,7 +44,9 @@ class PerpetualMarginModel:
         old = self.position_qty
         new = old + signed_qty
         if old == 0 or (old > 0 and signed_qty > 0) or (old < 0 and signed_qty < 0):
-            self.entry_price = ((abs(old) * self.entry_price) + (abs(signed_qty) * price)) / abs(new)
+            self.entry_price = (
+                (abs(old) * self.entry_price) + (abs(signed_qty) * price)
+            ) / abs(new)
         else:
             close = min(abs(old), abs(signed_qty))
             direction = 1 if old > 0 else -1
@@ -58,17 +69,36 @@ class PerpetualMarginModel:
         if mark_price <= 0:
             raise ValueError("mark_price must be positive")
         notional = abs(self.position_qty) * mark_price
-        initial_margin = abs(self.position_qty) * self.entry_price / self.leverage if self.position_qty else 0.0
+        initial_margin = (
+            abs(self.position_qty) * self.entry_price / self.leverage
+            if self.position_qty
+            else 0.0
+        )
         maintenance = notional * self.maintenance_rate
         unrealized = self.position_qty * (mark_price - self.entry_price)
         equity = self.wallet_balance + unrealized
         liq = None
         if self.position_qty:
             direction = 1 if self.position_qty > 0 else -1
-            buffer = max(0.0, self.wallet_balance - maintenance) / abs(self.position_qty)
+            buffer = max(0.0, self.wallet_balance - maintenance) / abs(
+                self.position_qty
+            )
             liq = self.entry_price - direction * buffer
         liquidated = bool(self.position_qty and equity <= maintenance)
-        return MarginSnapshot(self.wallet_balance, self.position_qty, self.entry_price, mark_price, self.leverage, initial_margin, maintenance, unrealized, self.funding_paid, equity, liq, liquidated)
+        return MarginSnapshot(
+            self.wallet_balance,
+            self.position_qty,
+            self.entry_price,
+            mark_price,
+            self.leverage,
+            initial_margin,
+            maintenance,
+            unrealized,
+            self.funding_paid,
+            equity,
+            liq,
+            liquidated,
+        )
 
     def check_liquidation(self, mark_price: float) -> bool:
         snap = self.snapshot(mark_price)

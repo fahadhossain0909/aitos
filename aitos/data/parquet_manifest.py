@@ -1,10 +1,11 @@
 """Manifest and deduplication index for normalized Parquet partitions."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from pathlib import Path
 import hashlib
 import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,9 @@ class ParquetManifest:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(self.records, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(self.records, indent=2, sort_keys=True), encoding="utf-8"
+        )
         tmp.replace(self.path)
 
     def contains(self, key: str, sha256: str | None = None) -> bool:

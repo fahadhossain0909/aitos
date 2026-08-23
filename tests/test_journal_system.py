@@ -19,7 +19,11 @@ def make_opportunity(**overrides):
         confidence=0.8,
         strategy_id="test-strategy",
         rationale="test rationale",
-        agent_consensus={"trend_strength": 8.0, "order_flow_bias": 7.0, "liquidity_quality": 2.0},
+        agent_consensus={
+            "trend_strength": 8.0,
+            "order_flow_bias": 7.0,
+            "liquidity_quality": 2.0,
+        },
     )
     defaults.update(overrides)
     return Opportunity(**defaults)
@@ -42,7 +46,9 @@ async def _wait_for(predicate, timeout=3.0, interval=0.1):
 
 
 @pytest.mark.asyncio
-async def test_journal_auto_records_pre_trade_entry_on_position_opened(event_bus, risk_engine):
+async def test_journal_auto_records_pre_trade_entry_on_position_opened(
+    event_bus, risk_engine
+):
     journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
     await journal.initialize({})
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
@@ -54,11 +60,15 @@ async def test_journal_auto_records_pre_trade_entry_on_position_opened(event_bus
 
     explanation = journal.get_explanation(trade.trade_id)
     assert "LONG BTCUSDT" in explanation.why_trade
-    assert any(e.entry_type == JournalEntryType.PRE_TRADE for e in journal.get_entries())
+    assert any(
+        e.entry_type == JournalEntryType.PRE_TRADE for e in journal.get_entries()
+    )
 
 
 @pytest.mark.asyncio
-async def test_journal_auto_records_post_trade_entry_on_position_closed(event_bus, risk_engine):
+async def test_journal_auto_records_post_trade_entry_on_position_closed(
+    event_bus, risk_engine
+):
     journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
     await journal.initialize({})
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
@@ -68,10 +78,14 @@ async def test_journal_auto_records_post_trade_entry_on_position_closed(event_bu
     await lifecycle.update_price(trade.trade_id, 105.0)  # hits TP, closes
 
     def has_post_trade():
-        return any(e.entry_type == JournalEntryType.POST_TRADE for e in journal.get_entries())
+        return any(
+            e.entry_type == JournalEntryType.POST_TRADE for e in journal.get_entries()
+        )
 
     assert await _wait_for(has_post_trade)
-    post_entry = next(e for e in journal.get_entries() if e.entry_type == JournalEntryType.POST_TRADE)
+    post_entry = next(
+        e for e in journal.get_entries() if e.entry_type == JournalEntryType.POST_TRADE
+    )
     assert post_entry.market_context["exit_reason"] == "tp_triggered"
     assert post_entry.market_context["pnl"] > 0
 
@@ -97,7 +111,12 @@ async def test_record_mistake_creates_mistake_entry(event_bus, risk_engine):
     journal = JournalSystem(event_bus=event_bus)
     await journal.initialize({})
 
-    entry = await journal.record_mistake("trade-123", "Entered too early before confirmation", lesson="Wait for structure confirmation", improvement="Add confirmation candle rule")
+    entry = await journal.record_mistake(
+        "trade-123",
+        "Entered too early before confirmation",
+        lesson="Wait for structure confirmation",
+        improvement="Add confirmation candle rule",
+    )
 
     assert entry.entry_type == JournalEntryType.MISTAKE
     assert entry.mistakes == ["Entered too early before confirmation"]
@@ -107,8 +126,9 @@ async def test_record_mistake_creates_mistake_entry(event_bus, risk_engine):
 
 @pytest.mark.asyncio
 async def test_generate_daily_review_persists_and_publishes(event_bus):
-    from aitos.models.trade import Trade, TradeLifecycleState
     from datetime import datetime, timezone
+
+    from aitos.models.trade import Trade, TradeLifecycleState
 
     journal = JournalSystem(event_bus=event_bus)
     await journal.initialize({})
@@ -123,10 +143,23 @@ async def test_generate_daily_review_persists_and_publishes(event_bus):
     now = datetime.now(timezone.utc).isoformat()
     trades = [
         Trade(
-            trade_id="t1", symbol="BTCUSDT", side=TradeSide.LONG, entry_price=100.0, quantity=1.0,
-            leverage=5.0, position_size_usd=1000.0, risk_amount_usd=100.0, strategy_id="s1",
-            agent_consensus={}, explanation="", sl_price=98.0, tp_price=104.0,
-            state=TradeLifecycleState.POSITION_CLOSED, entry_time=now, pnl=150.0, pnl_percent=15.0,
+            trade_id="t1",
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            entry_price=100.0,
+            quantity=1.0,
+            leverage=5.0,
+            position_size_usd=1000.0,
+            risk_amount_usd=100.0,
+            strategy_id="s1",
+            agent_consensus={},
+            explanation="",
+            sl_price=98.0,
+            tp_price=104.0,
+            state=TradeLifecycleState.POSITION_CLOSED,
+            entry_time=now,
+            pnl=150.0,
+            pnl_percent=15.0,
         )
     ]
 

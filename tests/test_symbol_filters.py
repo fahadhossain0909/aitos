@@ -27,30 +27,65 @@ SAMPLE_EXCHANGE_INFO = {
 
 
 def test_round_quantity_rounds_down_to_step():
-    filters = SymbolFilters(symbol="BTCUSDT", step_size=0.001, tick_size=0.1, min_notional=5.0, quantity_precision=3, price_precision=1)
+    filters = SymbolFilters(
+        symbol="BTCUSDT",
+        step_size=0.001,
+        tick_size=0.1,
+        min_notional=5.0,
+        quantity_precision=3,
+        price_precision=1,
+    )
     assert filters.round_quantity(1.23456) == 1.234
     assert filters.round_quantity(1.999999) == 1.999
 
 
 def test_round_quantity_handles_small_step_sizes_without_float_error():
-    filters = SymbolFilters(symbol="1000SHIBUSDT", step_size=1.0, tick_size=0.000001, min_notional=5.0, quantity_precision=0, price_precision=6)
+    filters = SymbolFilters(
+        symbol="1000SHIBUSDT",
+        step_size=1.0,
+        tick_size=0.000001,
+        min_notional=5.0,
+        quantity_precision=0,
+        price_precision=6,
+    )
     assert filters.round_quantity(1234.9) == 1234.0
 
 
 def test_round_price_rounds_down_to_tick():
-    filters = SymbolFilters(symbol="BTCUSDT", step_size=0.001, tick_size=0.1, min_notional=5.0, quantity_precision=3, price_precision=1)
+    filters = SymbolFilters(
+        symbol="BTCUSDT",
+        step_size=0.001,
+        tick_size=0.1,
+        min_notional=5.0,
+        quantity_precision=3,
+        price_precision=1,
+    )
     assert filters.round_price(100.37) == 100.3
 
 
 def test_round_step_with_zero_step_returns_original_value():
-    filters = SymbolFilters(symbol="X", step_size=0.0, tick_size=0.0, min_notional=0.0, quantity_precision=0, price_precision=0)
+    filters = SymbolFilters(
+        symbol="X",
+        step_size=0.0,
+        tick_size=0.0,
+        min_notional=0.0,
+        quantity_precision=0,
+        price_precision=0,
+    )
     assert filters.round_quantity(1.23456) == 1.23456
     assert filters.round_price(100.789) == 100.789
 
 
 def test_meets_min_notional_true_and_false():
-    filters = SymbolFilters(symbol="BTCUSDT", step_size=0.001, tick_size=0.1, min_notional=10.0, quantity_precision=3, price_precision=1)
-    assert filters.meets_min_notional(price=100.0, quantity=0.2) is True   # 20.0 >= 10.0
+    filters = SymbolFilters(
+        symbol="BTCUSDT",
+        step_size=0.001,
+        tick_size=0.1,
+        min_notional=10.0,
+        quantity_precision=3,
+        price_precision=1,
+    )
+    assert filters.meets_min_notional(price=100.0, quantity=0.2) is True  # 20.0 >= 10.0
     assert filters.meets_min_notional(price=100.0, quantity=0.05) is False  # 5.0 < 10.0
 
 
@@ -70,7 +105,16 @@ def test_parse_exchange_info_extracts_correct_filter_values():
 
 
 def test_parse_exchange_info_handles_missing_filters_gracefully():
-    raw = {"symbols": [{"symbol": "NEWCOIN", "quantityPrecision": 0, "pricePrecision": 0, "filters": []}]}
+    raw = {
+        "symbols": [
+            {
+                "symbol": "NEWCOIN",
+                "quantityPrecision": 0,
+                "pricePrecision": 0,
+                "filters": [],
+            }
+        ]
+    }
     parsed = parse_exchange_info(raw)
     assert parsed["NEWCOIN"].step_size == 0.0
     assert parsed["NEWCOIN"].tick_size == 0.0

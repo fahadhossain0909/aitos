@@ -28,9 +28,9 @@ def _round_to_step(value: float, step: float) -> float:
 @dataclass(frozen=True)
 class SymbolFilters:
     symbol: str
-    step_size: float          # LOT_SIZE
-    tick_size: float          # PRICE_FILTER
-    min_notional: float       # MIN_NOTIONAL
+    step_size: float  # LOT_SIZE
+    tick_size: float  # PRICE_FILTER
+    min_notional: float  # MIN_NOTIONAL
     quantity_precision: int
     price_precision: int
 

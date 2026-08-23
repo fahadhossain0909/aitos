@@ -1,13 +1,21 @@
 from datetime import datetime, timezone
 
-from aitos.backtest.engine import BacktestEngine
 from aitos.backtest.cli import HistoricalEvent
+from aitos.backtest.engine import BacktestEngine
 
 
 def test_backtest_result_contains_realized_trade_outcome():
     events = [
-        HistoricalEvent(datetime(2026, 1, 1, tzinfo=timezone.utc), 100.0, {"symbol": "BTCUSDT", "trend_strength": 8}),
-        HistoricalEvent(datetime(2026, 1, 2, tzinfo=timezone.utc), 110.0, {"symbol": "BTCUSDT", "trend_strength": 9}),
+        HistoricalEvent(
+            datetime(2026, 1, 1, tzinfo=timezone.utc),
+            100.0,
+            {"symbol": "BTCUSDT", "trend_strength": 8},
+        ),
+        HistoricalEvent(
+            datetime(2026, 1, 2, tzinfo=timezone.utc),
+            110.0,
+            {"symbol": "BTCUSDT", "trend_strength": 9},
+        ),
     ]
 
     def strategy(event, execution):

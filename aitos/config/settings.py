@@ -63,7 +63,9 @@ class BinanceSettings(BaseSettings):
 
 
 class AITOSSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     environment: str = Field(default="dev", description="dev | staging | production")
     log_level: str = "INFO"

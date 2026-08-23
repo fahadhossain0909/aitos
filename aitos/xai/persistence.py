@@ -1,4 +1,5 @@
 """Safe local persistence helpers for the online attention explainer."""
+
 from __future__ import annotations
 
 import pickle
@@ -20,4 +21,6 @@ def load_attention_model(path: str) -> Any | None:
     if not target.exists():
         return None
     with target.open("rb") as handle:
-        return pickle.load(handle)
+        return pickle.load(
+            handle
+        )  # nosec B301 - state is generated and stored locally by AITOS

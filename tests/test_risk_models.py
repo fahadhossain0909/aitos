@@ -38,20 +38,32 @@ def test_portfolio_state_no_drawdown_when_at_peak():
 
 def test_portfolio_state_gross_exposure_and_max_leverage():
     positions = (
-        PositionExposure(symbol="BTCUSDT", notional_usd=5000.0, leverage=5.0, sector="crypto-major"),
-        PositionExposure(symbol="ETHUSDT", notional_usd=3000.0, leverage=8.0, sector="crypto-major"),
+        PositionExposure(
+            symbol="BTCUSDT", notional_usd=5000.0, leverage=5.0, sector="crypto-major"
+        ),
+        PositionExposure(
+            symbol="ETHUSDT", notional_usd=3000.0, leverage=8.0, sector="crypto-major"
+        ),
     )
-    portfolio = PortfolioState(equity_usd=10000.0, peak_equity_usd=10000.0, positions=positions)
+    portfolio = PortfolioState(
+        equity_usd=10000.0, peak_equity_usd=10000.0, positions=positions
+    )
     assert portfolio.gross_exposure_usd == 8000.0
     assert portfolio.max_position_leverage == 8.0
 
 
 def test_portfolio_state_sector_exposure_pct():
     positions = (
-        PositionExposure(symbol="BTCUSDT", notional_usd=2000.0, leverage=5.0, sector="crypto-major"),
-        PositionExposure(symbol="LINKUSDT", notional_usd=1000.0, leverage=5.0, sector="crypto-alt"),
+        PositionExposure(
+            symbol="BTCUSDT", notional_usd=2000.0, leverage=5.0, sector="crypto-major"
+        ),
+        PositionExposure(
+            symbol="LINKUSDT", notional_usd=1000.0, leverage=5.0, sector="crypto-alt"
+        ),
     )
-    portfolio = PortfolioState(equity_usd=10000.0, peak_equity_usd=10000.0, positions=positions)
+    portfolio = PortfolioState(
+        equity_usd=10000.0, peak_equity_usd=10000.0, positions=positions
+    )
     exposures = portfolio.sector_exposure_pct
     assert exposures["crypto-major"] == pytest.approx(20.0)
     assert exposures["crypto-alt"] == pytest.approx(10.0)

@@ -1,4 +1,5 @@
 """Exchange-specific L2 sequence policies."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,7 +32,12 @@ class ExchangeL2Adapter:
 
 class BinanceL2Adapter(ExchangeL2Adapter):
     def __init__(self, symbol: str, market: str = "futures_um"):
-        super().__init__("binance", market, symbol.upper(), L2SequenceValidator(require_contiguous=True))
+        super().__init__(
+            "binance",
+            market,
+            symbol.upper(),
+            L2SequenceValidator(require_contiguous=True),
+        )
 
 
 class BybitL2Adapter(ExchangeL2Adapter):
@@ -39,4 +45,9 @@ class BybitL2Adapter(ExchangeL2Adapter):
         # Bybit's public order-book streams expose sequence identifiers, but
         # their exact semantics vary by stream/version; recovery is therefore
         # driven by an explicit adapter policy rather than hidden assumptions.
-        super().__init__("bybit", market, symbol.upper(), L2SequenceValidator(require_contiguous=True))
+        super().__init__(
+            "bybit",
+            market,
+            symbol.upper(),
+            L2SequenceValidator(require_contiguous=True),
+        )

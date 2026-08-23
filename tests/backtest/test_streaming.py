@@ -1,6 +1,8 @@
 from datetime import datetime, timedelta
 
-from aitos.backtest.streaming import ChunkPlanner, CheckpointManager, JsonlChunkReader, StreamingBacktestEngine
+from aitos.backtest.streaming import (CheckpointManager, ChunkPlanner,
+                                      JsonlChunkReader,
+                                      StreamingBacktestEngine)
 
 
 def test_chunk_planner_preserves_contiguous_windows():
@@ -17,7 +19,9 @@ def test_streaming_engine_preserves_state_and_checkpoint(tmp_path):
         state["count"] += event
 
     checkpoint = CheckpointManager(tmp_path / "state.pkl")
-    engine = StreamingBacktestEngine(process, lambda: dict(state), lambda value: state.update(value), checkpoint)
+    engine = StreamingBacktestEngine(
+        process, lambda: dict(state), lambda value: state.update(value), checkpoint
+    )
     chunks = [
         type("Chunk", (), {"index": 0, "events": (1, 2)})(),
         type("Chunk", (), {"index": 1, "events": (3,)})(),
@@ -35,6 +39,8 @@ def test_jsonl_reader_chunks_events(tmp_path):
         '{"timestamp":"2024-01-01T00:00:03","value":3}\n',
         encoding="utf-8",
     )
-    planner = ChunkPlanner(datetime(2024, 1, 1), datetime(2024, 1, 1, 0, 0, 4), timedelta(seconds=2))
+    planner = ChunkPlanner(
+        datetime(2024, 1, 1), datetime(2024, 1, 1, 0, 0, 4), timedelta(seconds=2)
+    )
     chunks = list(JsonlChunkReader(path).iter_chunks(planner))
     assert [len(chunk.events) for chunk in chunks] == [1, 2]

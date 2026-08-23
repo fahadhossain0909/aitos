@@ -6,17 +6,28 @@ from aitos.models.market import Kline
 BASE_TIME = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
-def make_klines(closes, high_offset=0.5, low_offset=0.5, taker_buy_ratio=0.5, volume=100.0):
+def make_klines(
+    closes, high_offset=0.5, low_offset=0.5, taker_buy_ratio=0.5, volume=100.0
+):
     klines = []
     for i, close in enumerate(closes):
         open_price = closes[i - 1] if i > 0 else close
         t = BASE_TIME + timedelta(minutes=i)
         klines.append(
             Kline(
-                symbol="TEST", timeframe="1m", open_time=t, close_time=t + timedelta(minutes=1),
-                open=open_price, high=max(open_price, close) + high_offset, low=min(open_price, close) - low_offset,
-                close=close, volume=volume, quote_volume=volume * close, trades_count=10,
-                taker_buy_volume=volume * taker_buy_ratio, taker_buy_quote_volume=volume * close * taker_buy_ratio,
+                symbol="TEST",
+                timeframe="1m",
+                open_time=t,
+                close_time=t + timedelta(minutes=1),
+                open=open_price,
+                high=max(open_price, close) + high_offset,
+                low=min(open_price, close) - low_offset,
+                close=close,
+                volume=volume,
+                quote_volume=volume * close,
+                trades_count=10,
+                taker_buy_volume=volume * taker_buy_ratio,
+                taker_buy_quote_volume=volume * close * taker_buy_ratio,
             )
         )
     return klines
@@ -28,7 +39,10 @@ def make_trending_up_klines(n=40, start=100.0, step=1.0):
 
 def make_ranging_klines(n=40, base=100.0, amplitude=1.0):
     import math
-    return make_klines([base + amplitude * math.sin(i / 3.0) for i in range(n)], taker_buy_ratio=0.5)
+
+    return make_klines(
+        [base + amplitude * math.sin(i / 3.0) for i in range(n)], taker_buy_ratio=0.5
+    )
 
 
 def test_average_true_range_positive_for_moving_prices():
@@ -71,7 +85,18 @@ def test_cvd_trend_score_neutral_for_empty_input():
 
 
 def test_detect_structure_break_bullish_breakout():
-    closes = [100.0] * 10 + [95.0, 105.0, 95.0, 100.0, 98.0, 102.0, 99.0, 101.0, 100.0, 130.0]
+    closes = [100.0] * 10 + [
+        95.0,
+        105.0,
+        95.0,
+        100.0,
+        98.0,
+        102.0,
+        99.0,
+        101.0,
+        100.0,
+        130.0,
+    ]
     klines = make_klines(closes)
     direction, strength = indicators.detect_structure_break(klines, swing_lookback=10)
     assert direction == "bullish_bos"
@@ -79,7 +104,18 @@ def test_detect_structure_break_bullish_breakout():
 
 
 def test_detect_structure_break_bearish_breakout():
-    closes = [100.0] * 10 + [95.0, 105.0, 95.0, 100.0, 98.0, 102.0, 99.0, 101.0, 100.0, 60.0]
+    closes = [100.0] * 10 + [
+        95.0,
+        105.0,
+        95.0,
+        100.0,
+        98.0,
+        102.0,
+        99.0,
+        101.0,
+        100.0,
+        60.0,
+    ]
     klines = make_klines(closes)
     direction, strength = indicators.detect_structure_break(klines, swing_lookback=10)
     assert direction == "bearish_bos"

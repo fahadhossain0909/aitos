@@ -10,15 +10,23 @@ from tests.test_exchange_side_stops import FakeExchangeCapableExecutor
 
 
 def make_portfolio(**overrides):
-    defaults = dict(equity_usd=10_000.0, peak_equity_usd=10_000.0, volatility_percentile=30.0)
+    defaults = dict(
+        equity_usd=10_000.0, peak_equity_usd=10_000.0, volatility_percentile=30.0
+    )
     defaults.update(overrides)
     return PortfolioState(**defaults)
 
 
 def make_opportunity(**overrides):
     defaults = dict(
-        symbol="BTCUSDT", side=TradeSide.LONG, entry_price=100.0, stop_loss_price=98.0,
-        take_profit_levels=[104.0], confidence=0.8, strategy_id="test-strategy", rationale="test",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        stop_loss_price=98.0,
+        take_profit_levels=[104.0],
+        confidence=0.8,
+        strategy_id="test-strategy",
+        rationale="test",
         breakeven_at_r_multiple=None,
     )
     defaults.update(overrides)
@@ -38,9 +46,16 @@ async def _wait_for(predicate, timeout=3.0, interval=0.05):
 @pytest.mark.asyncio
 async def test_run_once_with_no_open_trades(event_bus, risk_engine):
     executor = FakeExchangeCapableExecutor()
-    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine, order_executor=executor, use_exchange_side_stops=True)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
     await lifecycle.initialize({})
-    scheduler = ReconciliationScheduler(trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000)
+    scheduler = ReconciliationScheduler(
+        trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000
+    )
     await scheduler.initialize({})
 
     closed = await scheduler.run_once()
@@ -56,9 +71,16 @@ async def test_run_once_with_no_open_trades(event_bus, risk_engine):
 @pytest.mark.asyncio
 async def test_run_once_closes_trade_with_filled_exchange_stop(event_bus, risk_engine):
     executor = FakeExchangeCapableExecutor()
-    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine, order_executor=executor, use_exchange_side_stops=True)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
     await lifecycle.initialize({})
-    scheduler = ReconciliationScheduler(trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000)
+    scheduler = ReconciliationScheduler(
+        trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000
+    )
     await scheduler.initialize({})
 
     trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
@@ -77,9 +99,16 @@ async def test_run_once_closes_trade_with_filled_exchange_stop(event_bus, risk_e
 @pytest.mark.asyncio
 async def test_run_once_leaves_healthy_trades_open(event_bus, risk_engine):
     executor = FakeExchangeCapableExecutor()
-    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine, order_executor=executor, use_exchange_side_stops=True)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
     await lifecycle.initialize({})
-    scheduler = ReconciliationScheduler(trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000)
+    scheduler = ReconciliationScheduler(
+        trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000
+    )
     await scheduler.initialize({})
 
     trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
@@ -94,9 +123,16 @@ async def test_run_once_leaves_healthy_trades_open(event_bus, risk_engine):
 @pytest.mark.asyncio
 async def test_run_once_publishes_summary_event(event_bus, risk_engine):
     executor = FakeExchangeCapableExecutor()
-    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine, order_executor=executor, use_exchange_side_stops=True)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
     await lifecycle.initialize({})
-    scheduler = ReconciliationScheduler(trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000)
+    scheduler = ReconciliationScheduler(
+        trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000
+    )
     await scheduler.initialize({})
 
     received = []
@@ -120,15 +156,24 @@ async def test_run_once_publishes_summary_event(event_bus, risk_engine):
 @pytest.mark.asyncio
 async def test_background_loop_automatically_reconciles(event_bus, risk_engine):
     executor = FakeExchangeCapableExecutor()
-    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine, order_executor=executor, use_exchange_side_stops=True)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
     await lifecycle.initialize({})
-    scheduler = ReconciliationScheduler(trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=0.05)
+    scheduler = ReconciliationScheduler(
+        trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=0.05
+    )
     await scheduler.initialize({})
 
     trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
     executor.mark_filled(trade.sl_order_id)
 
-    closed = await _wait_for(lambda: trade.state == TradeLifecycleState.POSITION_CLOSED, timeout=3.0)
+    closed = await _wait_for(
+        lambda: trade.state == TradeLifecycleState.POSITION_CLOSED, timeout=3.0
+    )
 
     assert closed is True
     await scheduler.shutdown()
@@ -137,9 +182,16 @@ async def test_background_loop_automatically_reconciles(event_bus, risk_engine):
 @pytest.mark.asyncio
 async def test_health_check_reports_unhealthy_after_shutdown(event_bus, risk_engine):
     executor = FakeExchangeCapableExecutor()
-    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine, order_executor=executor, use_exchange_side_stops=True)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
     await lifecycle.initialize({})
-    scheduler = ReconciliationScheduler(trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000)
+    scheduler = ReconciliationScheduler(
+        trade_lifecycle=lifecycle, event_bus=event_bus, interval_seconds=1000
+    )
     await scheduler.initialize({})
 
     healthy = await scheduler.health_check()
@@ -155,7 +207,12 @@ async def test_run_once_before_initialize_raises(event_bus, risk_engine):
     from aitos.core.exceptions import ModuleNotInitializedError
 
     executor = FakeExchangeCapableExecutor()
-    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine, order_executor=executor, use_exchange_side_stops=True)
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
     await lifecycle.initialize({})
     scheduler = ReconciliationScheduler(trade_lifecycle=lifecycle, event_bus=event_bus)
 

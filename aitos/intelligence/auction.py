@@ -4,12 +4,17 @@ This is an honest OHLCV approximation: without intrabar volume-at-price we
 cannot claim a true footprint/volume-profile value area. It measures balance,
 range location, acceptance and breakout extension instead.
 """
+
 from __future__ import annotations
+
 from typing import Sequence, Tuple
+
 from aitos.models.market import Kline
 
 
-def auction_context_score(klines: Sequence[Kline], direction: str, lookback: int = 20) -> float:
+def auction_context_score(
+    klines: Sequence[Kline], direction: str, lookback: int = 20
+) -> float:
     if len(klines) < 5 or direction not in {"long", "short"}:
         return 5.0
     window = list(klines[-lookback:])
@@ -44,4 +49,6 @@ def balance_score(klines: Sequence[Kline], lookback: int = 20) -> float:
     avg_range = sum(ranges) / len(ranges)
     if avg_range <= 0:
         return 10.0
-    return round(max(0.0, min(10.0, 10.0 - (price_range / (avg_range * len(window))) * 10.0)), 2)
+    return round(
+        max(0.0, min(10.0, 10.0 - (price_range / (avg_range * len(window))) * 10.0)), 2
+    )

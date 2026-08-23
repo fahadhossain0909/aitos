@@ -5,7 +5,13 @@ from aitos.intelligence.footprint_signals import FootprintSignalEngine
 
 
 def make_fp(levels):
-    return Footprint("BTCUSDT", datetime.now(timezone.utc), datetime.now(timezone.utc), 1.0, tuple(levels))
+    return Footprint(
+        "BTCUSDT",
+        datetime.now(timezone.utc),
+        datetime.now(timezone.utc),
+        1.0,
+        tuple(levels),
+    )
 
 
 def test_empty_is_neutral():

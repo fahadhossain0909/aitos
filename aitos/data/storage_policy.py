@@ -3,11 +3,12 @@
 Parquet/ZSTD is the long-term canonical format. Raw archives and extracted
 intermediate files are temporary unless explicitly retained.
 """
+
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
-import shutil
 
 
 @dataclass(frozen=True)
@@ -25,12 +26,20 @@ class StorageLifecycle:
     def _has_parquet(root: Path) -> bool:
         return any(root.rglob("*.parquet"))
 
-    def cleanup(self, raw_archive: str | Path | None, extracted_dir: str | Path | None,
-                parquet_root: str | Path) -> list[Path]:
+    def cleanup(
+        self,
+        raw_archive: str | Path | None,
+        extracted_dir: str | Path | None,
+        parquet_root: str | Path,
+    ) -> list[Path]:
         """Remove temporary ingestion files after canonical data exists."""
         parquet_root = Path(parquet_root)
-        if self.policy.require_parquet_before_cleanup and not self._has_parquet(parquet_root):
-            raise RuntimeError("Refusing cleanup: no canonical Parquet output was found")
+        if self.policy.require_parquet_before_cleanup and not self._has_parquet(
+            parquet_root
+        ):
+            raise RuntimeError(
+                "Refusing cleanup: no canonical Parquet output was found"
+            )
 
         removed: list[Path] = []
         if not self.policy.keep_extracted and extracted_dir:

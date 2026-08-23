@@ -1,4 +1,5 @@
 """AI Kernel — central orchestrator of AITOS."""
+
 from __future__ import annotations
 
 import os
@@ -7,11 +8,16 @@ from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from aitos.agents.base_agent import AgentDecision, BaseAgent
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
-from aitos.core.exceptions import AgentNotRegisteredError, DecisionFusionError, GovernanceViolationError, ModuleNotInitializedError
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
+from aitos.core.exceptions import (AgentNotRegisteredError,
+                                   DecisionFusionError,
+                                   GovernanceViolationError,
+                                   ModuleNotInitializedError)
 from aitos.eventbus.redis_bus import EventBus
-from aitos.kernel.decision_fusion import DEFAULT_EVIDENCE_WEIGHTS, DecisionFusionEngine
 from aitos.journal.policy_registry import PolicyRegistry
+from aitos.kernel.decision_fusion import (DEFAULT_EVIDENCE_WEIGHTS,
+                                          DecisionFusionEngine)
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.kernel")
@@ -19,7 +25,9 @@ logger = get_logger("aitos.kernel")
 
 @dataclass
 class WorldState:
-    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
     active_symbols: List[str] = field(default_factory=list)
     open_positions: Dict[str, Any] = field(default_factory=dict)
     risk_score: float = 0.0
@@ -31,7 +39,9 @@ class WorldState:
 class DecisionContext:
     symbol: str
     context: Dict[str, Any] = field(default_factory=dict)
-    requested_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    requested_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 @dataclass
@@ -41,7 +51,9 @@ class FusedDecision:
     confidence: float
     contributions: List[Dict[str, Any]]
     conflicting_evidence: List[str]
-    fused_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    fused_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -115,19 +127,28 @@ class AIKernel(AITOSModule):
             return
         self._initialized = True
         self.reload_active_policy()
-        logger.info("AIKernel initialized", extra={"aitos_extra": {"policy_version": self._policy_version}})
+        logger.info(
+            "AIKernel initialized",
+            extra={"aitos_extra": {"policy_version": self._policy_version}},
+        )
 
     def reload_active_policy(self) -> Any:
         """Load the already-governed active policy into the live fusion engine."""
         policy = self._policy_registry.active
-        self._fusion_engine = DecisionFusionEngine(weights=policy.weights, min_confidence=policy.min_confidence)
+        self._fusion_engine = DecisionFusionEngine(
+            weights=policy.weights, min_confidence=policy.min_confidence
+        )
         self._policy_version = policy.version
         return policy
 
     def apply_policy(self, policy: Any) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("AIKernel.initialize() must be called first")
-        self._fusion_engine = DecisionFusionEngine(weights=policy.weights, min_confidence=policy.min_confidence)
+            raise ModuleNotInitializedError(
+                "AIKernel.initialize() must be called first"
+            )
+        self._fusion_engine = DecisionFusionEngine(
+            weights=policy.weights, min_confidence=policy.min_confidence
+        )
         self._policy_version = policy.version
         logger.info(
             "AIKernel policy activated",
@@ -143,7 +164,9 @@ class AIKernel(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={
@@ -190,9 +213,16 @@ class AIKernel(AITOSModule):
         self._require_initialized()
         evidence = self._fusion_engine.fuse_context(context.context)
         if evidence is not None:
-            contributions = [contribution.to_dict() for contribution in evidence.contributions]
+            contributions = [
+                contribution.to_dict() for contribution in evidence.contributions
+            ]
             if evidence.missing_components:
-                contributions.append({"source": "missing_components", "components": list(evidence.missing_components)})
+                contributions.append(
+                    {
+                        "source": "missing_components",
+                        "components": list(evidence.missing_components),
+                    }
+                )
             return FusedDecision(
                 symbol=context.symbol,
                 direction=evidence.direction,
@@ -206,15 +236,23 @@ class AIKernel(AITOSModule):
             )
 
         if not self._agents:
-            raise DecisionFusionError("No agents registered and no component evidence supplied")
+            raise DecisionFusionError(
+                "No agents registered and no component evidence supplied"
+            )
         decisions: List[AgentDecision] = []
         for agent in self._agents.values():
             try:
-                decisions.append(await agent.contribute_decision(context.context | {"symbol": context.symbol}))
+                decisions.append(
+                    await agent.contribute_decision(
+                        context.context | {"symbol": context.symbol}
+                    )
+                )
             except Exception as exc:
                 logger.error(
                     "agent failed to contribute decision",
-                    extra={"aitos_extra": {"agent_id": agent.module_id, "error": str(exc)}},
+                    extra={
+                        "aitos_extra": {"agent_id": agent.module_id, "error": str(exc)}
+                    },
                 )
         if not decisions:
             raise DecisionFusionError("All agents failed to contribute a decision")
@@ -223,10 +261,17 @@ class AIKernel(AITOSModule):
         total_weight = 0.0
         for decision in decisions:
             agent = self._agents[decision.agent_id]
-            direction_scores[decision.direction] = direction_scores.get(decision.direction, 0.0) + agent.consensus_weight * decision.confidence
+            direction_scores[decision.direction] = (
+                direction_scores.get(decision.direction, 0.0)
+                + agent.consensus_weight * decision.confidence
+            )
             total_weight += agent.consensus_weight
         fused_direction = max(direction_scores, key=direction_scores.get)
-        fused_confidence = direction_scores[fused_direction] / total_weight if total_weight > 0 else 0.0
+        fused_confidence = (
+            direction_scores[fused_direction] / total_weight
+            if total_weight > 0
+            else 0.0
+        )
         conflicting = [
             f"{decision.agent_id} voted {decision.direction} ({decision.confidence:.2f}): {decision.rationale}"
             for decision in decisions
@@ -242,7 +287,11 @@ class AIKernel(AITOSModule):
 
     async def enforce_governance(self, action: Action) -> GovernanceResult:
         self._require_initialized()
-        if action.is_production and self._require_human_approval_for_prod and not action.approved_by:
+        if (
+            action.is_production
+            and self._require_human_approval_for_prod
+            and not action.approved_by
+        ):
             return GovernanceResult(
                 False,
                 "Production action requires explicit human approval (approved_by is empty).",
@@ -260,11 +309,17 @@ class AIKernel(AITOSModule):
         symbol = event.payload.get("symbol")
         if symbol and symbol not in self._world_state.active_symbols:
             self._world_state.active_symbols.append(symbol)
-        if event.topic.startswith("risk.score") and isinstance(event.payload.get("score"), (int, float)):
+        if event.topic.startswith("risk.score") and isinstance(
+            event.payload.get("score"), (int, float)
+        ):
             self._world_state.risk_score = float(event.payload["score"])
-        if event.topic.startswith("regime.") and isinstance(event.payload.get("regime"), str):
+        if event.topic.startswith("regime.") and isinstance(
+            event.payload.get("regime"), str
+        ):
             self._world_state.regime = event.payload["regime"]
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("AIKernel.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "AIKernel.initialize() must be called first"
+            )

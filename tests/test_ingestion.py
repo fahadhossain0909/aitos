@@ -5,22 +5,45 @@ from typing import AsyncIterator, List
 import pytest
 
 from aitos.core.contracts import Event
-from aitos.data.ingestion import DataIngestionService, kline_topic, orderbook_topic, trade_topic
+from aitos.data.ingestion import (DataIngestionService, kline_topic,
+                                  orderbook_topic, trade_topic)
 from aitos.exchange.base import ExchangeAdapter
-from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot, TradeSide, TradeTick
+from aitos.models.market import (FundingRate, Kline, OpenInterest,
+                                 OrderBookSnapshot, TradeSide, TradeTick)
 
 NOW = datetime.now(timezone.utc)
 
 SAMPLE_KLINE = Kline(
-    symbol="BTCUSDT", timeframe="1m", open_time=NOW, close_time=NOW,
-    open=100.0, high=101.0, low=99.0, close=100.5, volume=5.0,
-    quote_volume=500.0, trades_count=10, taker_buy_volume=2.0, taker_buy_quote_volume=200.0,
+    symbol="BTCUSDT",
+    timeframe="1m",
+    open_time=NOW,
+    close_time=NOW,
+    open=100.0,
+    high=101.0,
+    low=99.0,
+    close=100.5,
+    volume=5.0,
+    quote_volume=500.0,
+    trades_count=10,
+    taker_buy_volume=2.0,
+    taker_buy_quote_volume=200.0,
 )
 SAMPLE_TRADE = TradeTick(
-    symbol="BTCUSDT", trade_id=1, price=100.0, quantity=1.0,
-    side=TradeSide.BUY, is_buyer_maker=False, timestamp=NOW,
+    symbol="BTCUSDT",
+    trade_id=1,
+    price=100.0,
+    quantity=1.0,
+    side=TradeSide.BUY,
+    is_buyer_maker=False,
+    timestamp=NOW,
 )
-SAMPLE_BOOK = OrderBookSnapshot(symbol="BTCUSDT", bids=((99.5, 1.0),), asks=((100.5, 1.0),), last_update_id=1, timestamp=NOW)
+SAMPLE_BOOK = OrderBookSnapshot(
+    symbol="BTCUSDT",
+    bids=((99.5, 1.0),),
+    asks=((100.5, 1.0),),
+    last_update_id=1,
+    timestamp=NOW,
+)
 
 
 class FakeExchangeAdapter(ExchangeAdapter):
@@ -59,7 +82,9 @@ class FakeExchangeAdapter(ExchangeAdapter):
         yield SAMPLE_TRADE
         await asyncio.sleep(3600)
 
-    async def stream_order_book(self, symbols, levels=20) -> AsyncIterator[OrderBookSnapshot]:
+    async def stream_order_book(
+        self, symbols, levels=20
+    ) -> AsyncIterator[OrderBookSnapshot]:
         yield SAMPLE_BOOK
         await asyncio.sleep(3600)
 
@@ -85,7 +110,11 @@ async def test_ingestion_publishes_events_and_persists(event_bus):
     exchange = FakeExchangeAdapter()
     repository = FakeRepository()
     service = DataIngestionService(
-        exchange=exchange, event_bus=event_bus, symbols=["BTCUSDT"], kline_timeframe="1m", repository=repository
+        exchange=exchange,
+        event_bus=event_bus,
+        symbols=["BTCUSDT"],
+        kline_timeframe="1m",
+        repository=repository,
     )
 
     received_topics = []
@@ -100,7 +129,12 @@ async def test_ingestion_publishes_events_and_persists(event_bus):
     await service.initialize({})
 
     for _ in range(30):
-        if len(received_topics) >= 3 and len(repository.klines) and len(repository.trades) and len(repository.books):
+        if (
+            len(received_topics) >= 3
+            and len(repository.klines)
+            and len(repository.trades)
+            and len(repository.books)
+        ):
             break
         await asyncio.sleep(0.1)
 
@@ -129,7 +163,10 @@ async def test_backfill_klines_publishes_and_persists_history(event_bus):
     exchange = FakeExchangeAdapter()
     repository = FakeRepository()
     service = DataIngestionService(
-        exchange=exchange, event_bus=event_bus, symbols=["BTCUSDT"], repository=repository
+        exchange=exchange,
+        event_bus=event_bus,
+        symbols=["BTCUSDT"],
+        repository=repository,
     )
     await service.initialize({})
 

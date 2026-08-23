@@ -6,9 +6,10 @@ import pytest
 
 from aitos.exchange.base import ExchangeAdapter
 from aitos.knowledge_graph.correlation_updater import SymbolCorrelationUpdater
-from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot
-from tests.test_knowledge_graph_writer import FakeDriver
 from aitos.knowledge_graph.writer import KnowledgeGraphWriter
+from aitos.models.market import (FundingRate, Kline, OpenInterest,
+                                 OrderBookSnapshot)
+from tests.test_knowledge_graph_writer import FakeDriver
 
 NOW = datetime.now(timezone.utc)
 
@@ -17,11 +18,23 @@ def make_klines(closes):
     klines = []
     for i, close in enumerate(closes):
         t = NOW + timedelta(hours=i)
-        klines.append(Kline(
-            symbol="X", timeframe="1h", open_time=t, close_time=t + timedelta(hours=1),
-            open=close, high=close + 1, low=close - 1, close=close, volume=100.0,
-            quote_volume=100.0 * close, trades_count=10, taker_buy_volume=50.0, taker_buy_quote_volume=50.0 * close,
-        ))
+        klines.append(
+            Kline(
+                symbol="X",
+                timeframe="1h",
+                open_time=t,
+                close_time=t + timedelta(hours=1),
+                open=close,
+                high=close + 1,
+                low=close - 1,
+                close=close,
+                volume=100.0,
+                quote_volume=100.0 * close,
+                trades_count=10,
+                taker_buy_volume=50.0,
+                taker_buy_quote_volume=50.0 * close,
+            )
+        )
     return klines
 
 
@@ -44,7 +57,9 @@ class FakeCorrelationExchange(ExchangeAdapter):
         if symbol == "BTCUSDT":
             return make_klines(base)
         if symbol == "ETHUSDT":
-            return make_klines([b * 2 for b in base])  # scaled but same direction -> correlation 1.0
+            return make_klines(
+                [b * 2 for b in base]
+            )  # scaled but same direction -> correlation 1.0
         if symbol == "XRPUSDT":
             # Construct XRP's returns to be the exact negative of BTC's returns at
             # each step (multiplicatively) — this is the only way to guarantee an
@@ -90,17 +105,25 @@ async def test_run_once_computes_and_pushes_correlations(event_bus):
     await writer.initialize({})
 
     updater = SymbolCorrelationUpdater(
-        exchange=exchange, graph_writer=writer, symbols=["BTCUSDT", "ETHUSDT", "XRPUSDT"], interval_seconds=1000
+        exchange=exchange,
+        graph_writer=writer,
+        symbols=["BTCUSDT", "ETHUSDT", "XRPUSDT"],
+        interval_seconds=1000,
     )
     await updater.initialize({})
 
     updated = await updater.run_once()
 
     assert updated == 3  # 3 choose 2 pairs
-    correlation_calls = [c for c in driver.calls if c[0].strip().startswith("MERGE (a:Symbol")]
+    correlation_calls = [
+        c for c in driver.calls if c[0].strip().startswith("MERGE (a:Symbol")
+    ]
     assert len(correlation_calls) == 3
 
-    pairs = {(c[1]["symbol_a"], c[1]["symbol_b"]): c[1]["coefficient"] for c in correlation_calls}
+    pairs = {
+        (c[1]["symbol_a"], c[1]["symbol_b"]): c[1]["coefficient"]
+        for c in correlation_calls
+    }
     btc_eth = pairs.get(("BTCUSDT", "ETHUSDT"))
     btc_xrp = pairs.get(("BTCUSDT", "XRPUSDT"))
     assert btc_eth == pytest.approx(1.0, abs=1e-6)
@@ -125,7 +148,12 @@ async def test_run_once_isolates_per_symbol_fetch_failures(event_bus):
     writer = KnowledgeGraphWriter(event_bus=event_bus, driver=driver)
     await writer.initialize({})
 
-    updater = SymbolCorrelationUpdater(exchange=exchange, graph_writer=writer, symbols=["BTCUSDT", "ETHUSDT", "BADSYMBOL"], interval_seconds=1000)
+    updater = SymbolCorrelationUpdater(
+        exchange=exchange,
+        graph_writer=writer,
+        symbols=["BTCUSDT", "ETHUSDT", "BADSYMBOL"],
+        interval_seconds=1000,
+    )
     await updater.initialize({})
 
     updated = await updater.run_once()
@@ -144,7 +172,12 @@ async def test_background_loop_runs_automatically(event_bus):
     writer = KnowledgeGraphWriter(event_bus=event_bus, driver=driver)
     await writer.initialize({})
 
-    updater = SymbolCorrelationUpdater(exchange=exchange, graph_writer=writer, symbols=["BTCUSDT", "ETHUSDT"], interval_seconds=0.05)
+    updater = SymbolCorrelationUpdater(
+        exchange=exchange,
+        graph_writer=writer,
+        symbols=["BTCUSDT", "ETHUSDT"],
+        interval_seconds=0.05,
+    )
     await updater.initialize({})
 
     for _ in range(40):

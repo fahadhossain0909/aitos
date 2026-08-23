@@ -68,7 +68,9 @@ async def test_learns_to_discriminate_a_real_pattern():
     predicting the outcome, confirm the model separates high/low inputs
     in its predicted probability -- not just that training runs without
     crashing."""
-    explainer = AttentionExplainer(min_samples_for_ready=20, learning_rate=2.0, batch_size=8, random_state=1)
+    explainer = AttentionExplainer(
+        min_samples_for_ready=20, learning_rate=2.0, batch_size=8, random_state=1
+    )
     rng = random.Random(101)
 
     for _ in range(70):
@@ -101,7 +103,9 @@ async def test_attention_responds_to_the_informative_feature_value():
     at the deciding feature" pattern. So the test checks *responsiveness*
     (variance across values), not a specific direction.
     """
-    explainer = AttentionExplainer(min_samples_for_ready=20, learning_rate=2.0, batch_size=8, random_state=2)
+    explainer = AttentionExplainer(
+        min_samples_for_ready=20, learning_rate=2.0, batch_size=8, random_state=2
+    )
     rng = random.Random(202)
 
     for _ in range(60):
@@ -110,14 +114,18 @@ async def test_attention_responds_to_the_informative_feature_value():
         explainer.partial_fit(make_context(order_flow_bias=order_flow), won=won)
 
     informative_attn_by_value = [
-        explainer.attention_weights(make_context(order_flow_bias=v))["order_flow_bias"] for v in (1.0, 5.0, 9.0)
+        explainer.attention_weights(make_context(order_flow_bias=v))["order_flow_bias"]
+        for v in (1.0, 5.0, 9.0)
     ]
     uninformative_attn_by_value = [
-        explainer.attention_weights(make_context(order_flow_bias=v))["volatility"] for v in (1.0, 5.0, 9.0)
+        explainer.attention_weights(make_context(order_flow_bias=v))["volatility"]
+        for v in (1.0, 5.0, 9.0)
     ]
 
     informative_range = max(informative_attn_by_value) - min(informative_attn_by_value)
-    uninformative_range = max(uninformative_attn_by_value) - min(uninformative_attn_by_value)
+    uninformative_range = max(uninformative_attn_by_value) - min(
+        uninformative_attn_by_value
+    )
 
     assert informative_range > uninformative_range
     assert informative_range > 0.5  # a large, unmistakable swing, not noise

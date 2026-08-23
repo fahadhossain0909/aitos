@@ -100,9 +100,15 @@ def build_trade_explanation(
     agent_consensus: Dict[str, float] = trade_dict.get("agent_consensus", {}) or {}
     rationale = trade_dict.get("explanation", "") or ""
 
-    why_trade = f"{side} {symbol} selected by strategy '{strategy_id}'. {rationale}".strip()
+    why_trade = (
+        f"{side} {symbol} selected by strategy '{strategy_id}'. {rationale}".strip()
+    )
 
-    triggering_signals = [k.replace("_", " ") for k, v in agent_consensus.items() if v >= SUPPORTING_THRESHOLD]
+    triggering_signals = [
+        k.replace("_", " ")
+        for k, v in agent_consensus.items()
+        if v >= SUPPORTING_THRESHOLD
+    ]
     why_now = (
         f"Entry triggered on confluence of: {', '.join(triggering_signals)}."
         if triggering_signals
@@ -130,21 +136,35 @@ def build_trade_explanation(
         else "No take-profit levels were set for this trade."
     )
 
-    supporting_evidence = [f"{k.replace('_', ' ')} favorable ({v:.1f}/10)" for k, v in agent_consensus.items() if v >= SUPPORTING_THRESHOLD]
-    conflicting_evidence = [f"{k.replace('_', ' ')} unfavorable ({v:.1f}/10)" for k, v in agent_consensus.items() if v <= CONFLICTING_THRESHOLD]
+    supporting_evidence = [
+        f"{k.replace('_', ' ')} favorable ({v:.1f}/10)"
+        for k, v in agent_consensus.items()
+        if v >= SUPPORTING_THRESHOLD
+    ]
+    conflicting_evidence = [
+        f"{k.replace('_', ' ')} unfavorable ({v:.1f}/10)"
+        for k, v in agent_consensus.items()
+        if v <= CONFLICTING_THRESHOLD
+    ]
 
     risks: List[str] = []
     risk_amount = trade_dict.get("risk_amount_usd", 0.0)
     position_size = trade_dict.get("position_size_usd", 0.0)
     if position_size:
-        risks.append(f"Risking ${risk_amount:.2f} ({risk_amount / position_size * 100:.2f}% of position notional) if stop is hit")
+        risks.append(
+            f"Risking ${risk_amount:.2f} ({risk_amount / position_size * 100:.2f}% of position notional) if stop is hit"
+        )
     if risk_assessment is not None:
         risks.extend(risk_assessment.explanation)
-        risks.append(f"Portfolio risk score at entry: {risk_assessment.total:.1f}/100 ({risk_assessment.action.value})")
+        risks.append(
+            f"Portfolio risk score at entry: {risk_assessment.total:.1f}/100 ({risk_assessment.action.value})"
+        )
 
     confidence = 0.0
     if agent_consensus:
-        confidence = round(sum(agent_consensus.values()) / (len(agent_consensus) * 10), 4)
+        confidence = round(
+            sum(agent_consensus.values()) / (len(agent_consensus) * 10), 4
+        )
 
     agent_contributions = {k: f"{v:.1f}/10" for k, v in agent_consensus.items()}
 

@@ -10,7 +10,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, List, Optional
 
-from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot, TradeTick
+from aitos.models.market import (FundingRate, Kline, OpenInterest,
+                                 OrderBookSnapshot, TradeTick)
 
 
 class ExchangeAdapter(ABC):
@@ -34,7 +35,9 @@ class ExchangeAdapter(ABC):
     # -- REST (point-in-time / backfill) --------------------------------------
 
     @abstractmethod
-    async def fetch_klines(self, symbol: str, timeframe: str, limit: int = 500) -> List[Kline]:
+    async def fetch_klines(
+        self, symbol: str, timeframe: str, limit: int = 500
+    ) -> List[Kline]:
         """Fetch the most recent ``limit`` closed candles for symbol/timeframe."""
 
     @abstractmethod
@@ -42,7 +45,9 @@ class ExchangeAdapter(ABC):
         """Fetch a current order book depth snapshot."""
 
     @abstractmethod
-    async def fetch_recent_trades(self, symbol: str, limit: int = 500) -> List[TradeTick]:
+    async def fetch_recent_trades(
+        self, symbol: str, limit: int = 500
+    ) -> List[TradeTick]:
         """Fetch the most recent executed trades."""
 
     @abstractmethod
@@ -58,7 +63,9 @@ class ExchangeAdapter(ABC):
         minimum notional). Concrete (not abstract) with a default that
         raises, since not every adapter/test double needs to support it —
         override in adapters that do (e.g. ``BinanceFuturesAdapter``)."""
-        raise NotImplementedError(f"{type(self).__name__} does not support fetch_exchange_info")
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support fetch_exchange_info"
+        )
 
     # -- Streaming (live) -------------------------------------------------------
 

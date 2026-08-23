@@ -1,8 +1,9 @@
-from pathlib import Path
 import os
 import time
+from pathlib import Path
 
-from aitos.storage.maintenance import choose_retention_days, enforce_backtest_cache
+from aitos.storage.maintenance import (choose_retention_days,
+                                       enforce_backtest_cache)
 
 
 def test_retention_ladder_prefers_longest_window_that_fits():
@@ -23,7 +24,7 @@ def test_cache_removes_oldest_files_first(tmp_path: Path):
     os.utime(old, (now - 100, now - 100))
     os.utime(new, (now, now))
 
-    result = enforce_backtest_cache(tmp_path, max_gb=15 / (1024 ** 3))
+    result = enforce_backtest_cache(tmp_path, max_gb=15 / (1024**3))
 
     assert str(old) in result["removed"]
     assert new.exists()

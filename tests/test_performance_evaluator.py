@@ -13,18 +13,38 @@ class FakeRepository:
 
 @pytest.mark.asyncio
 async def test_evaluator_aggregates_outcomes_and_slices():
-    repository = FakeRepository({
-        "d1": [
-            {"record_type": "DECISION", "decision_id": "d1"},
-            {"record_type": "TRADE_LINK", "decision_id": "d1", "trade_id": "t1"},
-            {"record_type": "OUTCOME", "decision_id": "d1", "trade_id": "t1", "symbol": "BTCUSDT",
-             "side": "LONG", "strategy_id": "s1", "regime": "trend", "exit_reason": "tp_triggered",
-             "pnl": 100.0, "r_multiple": 2.0},
-            {"record_type": "OUTCOME", "decision_id": "d1", "trade_id": "t2", "symbol": "BTCUSDT",
-             "side": "LONG", "strategy_id": "s1", "regime": "trend", "exit_reason": "sl_triggered",
-             "pnl": -50.0, "r_multiple": -1.0},
-        ]
-    })
+    repository = FakeRepository(
+        {
+            "d1": [
+                {"record_type": "DECISION", "decision_id": "d1"},
+                {"record_type": "TRADE_LINK", "decision_id": "d1", "trade_id": "t1"},
+                {
+                    "record_type": "OUTCOME",
+                    "decision_id": "d1",
+                    "trade_id": "t1",
+                    "symbol": "BTCUSDT",
+                    "side": "LONG",
+                    "strategy_id": "s1",
+                    "regime": "trend",
+                    "exit_reason": "tp_triggered",
+                    "pnl": 100.0,
+                    "r_multiple": 2.0,
+                },
+                {
+                    "record_type": "OUTCOME",
+                    "decision_id": "d1",
+                    "trade_id": "t2",
+                    "symbol": "BTCUSDT",
+                    "side": "LONG",
+                    "strategy_id": "s1",
+                    "regime": "trend",
+                    "exit_reason": "sl_triggered",
+                    "pnl": -50.0,
+                    "r_multiple": -1.0,
+                },
+            ]
+        }
+    )
     evaluator = DecisionPerformanceEvaluator(repository)
     await evaluator.initialize({})
 
@@ -45,7 +65,9 @@ async def test_evaluator_aggregates_outcomes_and_slices():
 
 @pytest.mark.asyncio
 async def test_evaluator_handles_missing_outcomes():
-    repository = FakeRepository({"d2": [{"record_type": "DECISION", "decision_id": "d2"}]})
+    repository = FakeRepository(
+        {"d2": [{"record_type": "DECISION", "decision_id": "d2"}]}
+    )
     evaluator = DecisionPerformanceEvaluator(repository)
     await evaluator.initialize({})
 

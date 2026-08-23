@@ -31,20 +31,24 @@ async def test_stream_trades_uses_futures_aggtrade_direct_socket_without_hot_rec
 
     def connector(url):
         urls.append(url)
-        return FakeWS([
-            json.dumps({
-                "e": "aggTrade",
-                "E": 1700000000000,
-                "s": "BTCUSDT",
-                "a": 1,
-                "p": "50000.0",
-                "q": "0.01",
-                "f": 10,
-                "l": 10,
-                "T": 1700000000000,
-                "m": True,
-            })
-        ])
+        return FakeWS(
+            [
+                json.dumps(
+                    {
+                        "e": "aggTrade",
+                        "E": 1700000000000,
+                        "s": "BTCUSDT",
+                        "a": 1,
+                        "p": "50000.0",
+                        "q": "0.01",
+                        "f": 10,
+                        "l": 10,
+                        "T": 1700000000000,
+                        "m": True,
+                    }
+                )
+            ]
+        )
 
     adapter = BinanceFuturesAdapter(ws_connector=connector)
     stream = adapter.stream_trades(["BTCUSDT"])

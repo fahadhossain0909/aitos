@@ -61,16 +61,28 @@ class OrderExecutor(ABC):
         executors that actually support it (e.g. ``BinanceFuturesOrderExecutor``)."""
         return False
 
-    async def place_stop_loss_order(self, symbol: str, side: TradeSide, quantity: float, stop_price: float) -> OrderResult:
-        raise NotImplementedError(f"{type(self).__name__} does not support exchange-side stop orders")
+    async def place_stop_loss_order(
+        self, symbol: str, side: TradeSide, quantity: float, stop_price: float
+    ) -> OrderResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support exchange-side stop orders"
+        )
 
-    async def place_take_profit_order(self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float) -> OrderResult:
-        raise NotImplementedError(f"{type(self).__name__} does not support exchange-side take-profit orders")
+    async def place_take_profit_order(
+        self, symbol: str, side: TradeSide, quantity: float, take_profit_price: float
+    ) -> OrderResult:
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support exchange-side take-profit orders"
+        )
 
     async def cancel_resting_order(self, symbol: str, order_id: str) -> None:
-        raise NotImplementedError(f"{type(self).__name__} does not support cancelling resting orders")
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support cancelling resting orders"
+        )
 
-    async def get_resting_order_status(self, symbol: str, order_id: str) -> Optional[str]:
+    async def get_resting_order_status(
+        self, symbol: str, order_id: str
+    ) -> Optional[str]:
         """Return the exchange's status string for a resting order (e.g.
         'FILLED', 'NEW', 'CANCELED'), or ``None`` if not supported."""
         return None
@@ -86,7 +98,9 @@ class SimulatedOrderExecutor(OrderExecutor):
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
         self._order_counter += 1
-        slippage_factor = 1 + (self._slippage_bps / 10_000) * (1 if request.side == TradeSide.LONG else -1)
+        slippage_factor = 1 + (self._slippage_bps / 10_000) * (
+            1 if request.side == TradeSide.LONG else -1
+        )
         fill_price = request.reference_price * slippage_factor
         return OrderResult(
             order_id=f"sim-{self._order_counter}",

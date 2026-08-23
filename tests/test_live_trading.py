@@ -9,28 +9,36 @@ from aitos.live_trading import confirm_live_trading, prepare_live_executor
 
 def test_confirm_live_trading_succeeds_with_exact_phrase():
     inputs = iter(["fahad", "I APPROVE LIVE TRADING"])
-    operator = confirm_live_trading(["BTCUSDT"], testnet=True, input_fn=lambda prompt: next(inputs))
+    operator = confirm_live_trading(
+        ["BTCUSDT"], testnet=True, input_fn=lambda prompt: next(inputs)
+    )
     assert operator == "fahad"
 
 
 def test_confirm_live_trading_exits_on_empty_operator():
     inputs = iter([""])
     with pytest.raises(SystemExit) as exc_info:
-        confirm_live_trading(["BTCUSDT"], testnet=True, input_fn=lambda prompt: next(inputs))
+        confirm_live_trading(
+            ["BTCUSDT"], testnet=True, input_fn=lambda prompt: next(inputs)
+        )
     assert exc_info.value.code == 1
 
 
 def test_confirm_live_trading_exits_on_wrong_confirmation_phrase():
     inputs = iter(["fahad", "yes I approve"])
     with pytest.raises(SystemExit) as exc_info:
-        confirm_live_trading(["BTCUSDT"], testnet=True, input_fn=lambda prompt: next(inputs))
+        confirm_live_trading(
+            ["BTCUSDT"], testnet=True, input_fn=lambda prompt: next(inputs)
+        )
     assert exc_info.value.code == 1
 
 
 def test_confirm_live_trading_case_sensitive_exact_match_required():
     inputs = iter(["fahad", "i approve live trading"])  # lowercase — should fail
     with pytest.raises(SystemExit):
-        confirm_live_trading(["BTCUSDT"], testnet=True, input_fn=lambda prompt: next(inputs))
+        confirm_live_trading(
+            ["BTCUSDT"], testnet=True, input_fn=lambda prompt: next(inputs)
+        )
 
 
 class FakeSettings:
@@ -60,7 +68,9 @@ async def test_prepare_live_executor_exits_on_hedge_mode_mismatch():
     settings = FakeSettings()  # configured hedge_mode=False
     with aioresponses() as m:
         m.get(
-            re.compile(r'^' + re.escape(TESTNET_URL + '/fapi/v1/positionSide/dual') + r'.*'),
+            re.compile(
+                r"^" + re.escape(TESTNET_URL + "/fapi/v1/positionSide/dual") + r".*"
+            ),
             payload={"dualSidePosition": True},  # account is actually in hedge mode
         )
         with pytest.raises(SystemExit) as exc_info:
@@ -74,17 +84,26 @@ async def test_prepare_live_executor_succeeds_and_loads_symbol_filters():
 
     settings = FakeSettings()
     exchange_info = {
-        "symbols": [{
-            "symbol": "BTCUSDT", "quantityPrecision": 3, "pricePrecision": 1,
-            "filters": [
-                {"filterType": "LOT_SIZE", "stepSize": "0.001"},
-                {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
-                {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
-            ],
-        }],
+        "symbols": [
+            {
+                "symbol": "BTCUSDT",
+                "quantityPrecision": 3,
+                "pricePrecision": 1,
+                "filters": [
+                    {"filterType": "LOT_SIZE", "stepSize": "0.001"},
+                    {"filterType": "PRICE_FILTER", "tickSize": "0.1"},
+                    {"filterType": "MIN_NOTIONAL", "notional": "5.0"},
+                ],
+            }
+        ],
     }
     with aioresponses() as m:
-        m.get(re.compile(r'^' + re.escape(TESTNET_URL + '/fapi/v1/positionSide/dual') + r'.*'), payload={"dualSidePosition": False})
+        m.get(
+            re.compile(
+                r"^" + re.escape(TESTNET_URL + "/fapi/v1/positionSide/dual") + r".*"
+            ),
+            payload={"dualSidePosition": False},
+        )
         m.get(f"{REST_BASE_URL}/fapi/v1/exchangeInfo", payload=exchange_info)
 
         executor = await prepare_live_executor(settings, ["BTCUSDT"])

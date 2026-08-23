@@ -1,14 +1,17 @@
 """JournalSystem — trade journal plus autonomous decision/outcome attribution."""
+
 from __future__ import annotations
 
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.journal import reviews
 from aitos.journal.decision_repository import DecisionJournalRepository
-from aitos.journal.models import DailyReview, JournalEntry, JournalEntryType, MonthlyReview, WeeklyReview
+from aitos.journal.models import (DailyReview, JournalEntry, JournalEntryType,
+                                  MonthlyReview, WeeklyReview)
 from aitos.journal.repository import JournalRepository
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Trade
@@ -59,16 +62,30 @@ class JournalSystem(AITOSModule):
             return
         self._subscriptions.extend(
             [
-                await self._event_bus.subscribe("trade.position_opened", self._on_position_opened, group="journal"),
-                await self._event_bus.subscribe("trade.position_closed", self._on_position_closed, group="journal"),
-                await self._event_bus.subscribe("trade.rejected", self._on_rejected, group="journal"),
+                await self._event_bus.subscribe(
+                    "trade.position_opened", self._on_position_opened, group="journal"
+                ),
+                await self._event_bus.subscribe(
+                    "trade.position_closed", self._on_position_closed, group="journal"
+                ),
+                await self._event_bus.subscribe(
+                    "trade.rejected", self._on_rejected, group="journal"
+                ),
             ]
         )
         if self._decision_repository is not None:
             self._subscriptions.extend(
                 [
-                    await self._event_bus.subscribe("decision.snapshot", self._on_decision_snapshot, group="decision-journal"),
-                    await self._event_bus.subscribe("decision.opportunity", self._on_decision_opportunity, group="decision-journal"),
+                    await self._event_bus.subscribe(
+                        "decision.snapshot",
+                        self._on_decision_snapshot,
+                        group="decision-journal",
+                    ),
+                    await self._event_bus.subscribe(
+                        "decision.opportunity",
+                        self._on_decision_opportunity,
+                        group="decision-journal",
+                    ),
                 ]
             )
         self._initialized = True
@@ -77,7 +94,9 @@ class JournalSystem(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={
@@ -114,7 +133,11 @@ class JournalSystem(AITOSModule):
         return self._decision_trade_ids.get(decision_id)
 
     async def record_mistake(
-        self, trade_id: str, mistake: str, lesson: Optional[str] = None, improvement: Optional[str] = None
+        self,
+        trade_id: str,
+        mistake: str,
+        lesson: Optional[str] = None,
+        improvement: Optional[str] = None,
     ) -> JournalEntry:
         self._require_initialized()
         entry = JournalEntry(
@@ -126,28 +149,76 @@ class JournalSystem(AITOSModule):
             improvements=[improvement] if improvement else [],
         )
         await self._persist(entry)
-        await self._event_bus.publish(Event(topic=TOPIC_MISTAKE_RECORDED, payload=entry.to_dict(), source_module=self.module_id))
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_MISTAKE_RECORDED,
+                payload=entry.to_dict(),
+                source_module=self.module_id,
+            )
+        )
         return entry
 
-    async def generate_daily_review(self, trades: List[Trade], date: str) -> DailyReview:
+    async def generate_daily_review(
+        self, trades: List[Trade], date: str
+    ) -> DailyReview:
         self._require_initialized()
         review = reviews.daily_review(trades, date)
-        await self._persist(JournalEntry(trade_id=None, entry_type=JournalEntryType.DAILY, market_context=review.to_dict()))
-        await self._event_bus.publish(Event(topic=TOPIC_DAILY_REVIEW, payload=review.to_dict(), source_module=self.module_id))
+        await self._persist(
+            JournalEntry(
+                trade_id=None,
+                entry_type=JournalEntryType.DAILY,
+                market_context=review.to_dict(),
+            )
+        )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_DAILY_REVIEW,
+                payload=review.to_dict(),
+                source_module=self.module_id,
+            )
+        )
         return review
 
-    async def generate_weekly_review(self, trades: List[Trade], week_start: str) -> WeeklyReview:
+    async def generate_weekly_review(
+        self, trades: List[Trade], week_start: str
+    ) -> WeeklyReview:
         self._require_initialized()
         review = reviews.weekly_review(trades, week_start)
-        await self._persist(JournalEntry(trade_id=None, entry_type=JournalEntryType.WEEKLY, market_context=review.to_dict()))
-        await self._event_bus.publish(Event(topic=TOPIC_WEEKLY_REVIEW, payload=review.to_dict(), source_module=self.module_id))
+        await self._persist(
+            JournalEntry(
+                trade_id=None,
+                entry_type=JournalEntryType.WEEKLY,
+                market_context=review.to_dict(),
+            )
+        )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_WEEKLY_REVIEW,
+                payload=review.to_dict(),
+                source_module=self.module_id,
+            )
+        )
         return review
 
-    async def generate_monthly_review(self, trades: List[Trade], month: str, starting_equity: float = 10_000.0) -> MonthlyReview:
+    async def generate_monthly_review(
+        self, trades: List[Trade], month: str, starting_equity: float = 10_000.0
+    ) -> MonthlyReview:
         self._require_initialized()
         review = reviews.monthly_review(trades, month, starting_equity)
-        await self._persist(JournalEntry(trade_id=None, entry_type=JournalEntryType.MONTHLY, market_context=review.to_dict()))
-        await self._event_bus.publish(Event(topic=TOPIC_MONTHLY_REVIEW, payload=review.to_dict(), source_module=self.module_id))
+        await self._persist(
+            JournalEntry(
+                trade_id=None,
+                entry_type=JournalEntryType.MONTHLY,
+                market_context=review.to_dict(),
+            )
+        )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_MONTHLY_REVIEW,
+                payload=review.to_dict(),
+                source_module=self.module_id,
+            )
+        )
         return review
 
     async def _on_decision_snapshot(self, event: Event) -> Optional[EventResponse]:
@@ -161,7 +232,13 @@ class JournalSystem(AITOSModule):
         self._pending_decisions.setdefault(key, []).append(decision_id)
         await self._decision_repository.save_decision(decision_id, payload)
         self._last_event_time = event.created_at
-        await self._event_bus.publish(Event(topic=TOPIC_DECISION_RECORDED, payload=payload, source_module=self.module_id))
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_DECISION_RECORDED,
+                payload=payload,
+                source_module=self.module_id,
+            )
+        )
         return None
 
     async def _on_decision_opportunity(self, event: Event) -> Optional[EventResponse]:
@@ -173,7 +250,12 @@ class JournalSystem(AITOSModule):
             return None
         payload["decision_id"] = str(payload.get("decision_id") or event.event_id)
         return await self._on_decision_snapshot(
-            Event(topic="decision.snapshot", payload=payload, source_module=event.source_module, created_at=event.created_at)
+            Event(
+                topic="decision.snapshot",
+                payload=payload,
+                source_module=event.source_module,
+                created_at=event.created_at,
+            )
         )
 
     async def _on_position_opened(self, event: Event) -> Optional[EventResponse]:
@@ -186,8 +268,12 @@ class JournalSystem(AITOSModule):
         }
         explanation_payload = dict(trade_dict)
         explanation_payload["agent_consensus"] = numeric_consensus
-        risk_assessment = self._risk_engine.last_assessment if self._risk_engine else None
-        explanation = build_trade_explanation(explanation_payload, risk_assessment=risk_assessment)
+        risk_assessment = (
+            self._risk_engine.last_assessment if self._risk_engine else None
+        )
+        explanation = build_trade_explanation(
+            explanation_payload, risk_assessment=risk_assessment
+        )
         trade_id = trade_dict.get("trade_id", "")
         self._explanations[trade_id] = explanation
         entry = JournalEntry(
@@ -199,8 +285,12 @@ class JournalSystem(AITOSModule):
                 "explanation": explanation.to_dict(),
             },
             confidence_score=explanation.confidence_score,
-            order_flow_observations={"order_flow_bias": raw_consensus.get("order_flow_bias")},
-            liquidity_observations={"liquidity_quality": raw_consensus.get("liquidity_quality")},
+            order_flow_observations={
+                "order_flow_bias": raw_consensus.get("order_flow_bias")
+            },
+            liquidity_observations={
+                "liquidity_quality": raw_consensus.get("liquidity_quality")
+            },
             amt_observations={
                 "auction_context": raw_consensus.get("auction_context"),
                 "market_regime": raw_consensus.get("market_regime"),
@@ -213,7 +303,10 @@ class JournalSystem(AITOSModule):
         if self._decision_repository is not None:
             decision_id = raw_consensus.get("decision_id")
             if not decision_id:
-                key = (str(trade_dict.get("symbol", "")), str(trade_dict.get("side", "")))
+                key = (
+                    str(trade_dict.get("symbol", "")),
+                    str(trade_dict.get("side", "")),
+                )
                 pending = self._pending_decisions.get(key, [])
                 decision_id = pending.pop(0) if pending else None
             if decision_id:
@@ -240,15 +333,30 @@ class JournalSystem(AITOSModule):
         if self._repository is not None:
             await self._repository.save_trade_snapshot(trade_dict)
         if self._decision_repository is not None:
-            decision_id = next((did for did, tid in self._decision_trade_ids.items() if tid == trade_id), None)
+            decision_id = next(
+                (
+                    did
+                    for did, tid in self._decision_trade_ids.items()
+                    if tid == trade_id
+                ),
+                None,
+            )
             if not decision_id:
-                decision_id = (trade_dict.get("agent_consensus") or {}).get("decision_id")
+                decision_id = (trade_dict.get("agent_consensus") or {}).get(
+                    "decision_id"
+                )
             if decision_id:
-                await self._decision_repository.attribute_outcome(str(decision_id), trade_dict)
+                await self._decision_repository.attribute_outcome(
+                    str(decision_id), trade_dict
+                )
                 await self._event_bus.publish(
                     Event(
                         topic=TOPIC_OUTCOME_ATTRIBUTED,
-                        payload={"decision_id": str(decision_id), "trade_id": trade_id, "pnl": trade_dict.get("pnl")},
+                        payload={
+                            "decision_id": str(decision_id),
+                            "trade_id": trade_id,
+                            "pnl": trade_dict.get("pnl"),
+                        },
                         source_module=self.module_id,
                     )
                 )
@@ -260,18 +368,29 @@ class JournalSystem(AITOSModule):
         entry = JournalEntry(
             trade_id=trade_dict.get("trade_id"),
             entry_type=JournalEntryType.PRE_TRADE,
-            market_context={"rejected": True, "reason": trade_dict.get("rejection_reason"), "symbol": trade_dict.get("symbol")},
+            market_context={
+                "rejected": True,
+                "reason": trade_dict.get("rejection_reason"),
+                "symbol": trade_dict.get("symbol"),
+            },
         )
         await self._persist(entry)
         if self._decision_repository is not None:
             decision_id = (trade_dict.get("agent_consensus") or {}).get("decision_id")
             if not decision_id:
-                key = (str(trade_dict.get("symbol", "")), str(trade_dict.get("side", "")))
+                key = (
+                    str(trade_dict.get("symbol", "")),
+                    str(trade_dict.get("side", "")),
+                )
                 pending = self._pending_decisions.get(key, [])
                 decision_id = pending.pop(0) if pending else None
             if decision_id:
-                self._decision_trade_ids[str(decision_id)] = trade_dict.get("trade_id", "")
-                await self._decision_repository.attribute_outcome(str(decision_id), trade_dict)
+                self._decision_trade_ids[str(decision_id)] = trade_dict.get(
+                    "trade_id", ""
+                )
+                await self._decision_repository.attribute_outcome(
+                    str(decision_id), trade_dict
+                )
         self._last_event_time = entry.created_at
         return None
 
@@ -282,4 +401,6 @@ class JournalSystem(AITOSModule):
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("JournalSystem.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "JournalSystem.initialize() must be called first"
+            )

@@ -28,8 +28,14 @@ async def test_feedback_loop_trains_explainer_from_closed_trade(event_bus):
     loop = AttentionFeedbackLoop(event_bus=event_bus, explainer=explainer)
     await loop.initialize({})
 
-    payload = {"trade_id": "t1", "pnl": 100.0, "agent_consensus": make_agent_consensus()}
-    await event_bus.publish(Event(topic="trade.position_closed", payload=payload, source_module="test"))
+    payload = {
+        "trade_id": "t1",
+        "pnl": 100.0,
+        "agent_consensus": make_agent_consensus(),
+    }
+    await event_bus.publish(
+        Event(topic="trade.position_closed", payload=payload, source_module="test")
+    )
 
     assert await _wait_for(lambda: loop.updates_applied == 1)
     assert explainer.n_samples_seen == 1
@@ -44,7 +50,9 @@ async def test_feedback_loop_skips_trades_without_agent_consensus(event_bus):
     await loop.initialize({})
 
     payload = {"trade_id": "t1", "pnl": 100.0, "agent_consensus": {}}
-    await event_bus.publish(Event(topic="trade.position_closed", payload=payload, source_module="test"))
+    await event_bus.publish(
+        Event(topic="trade.position_closed", payload=payload, source_module="test")
+    )
 
     await asyncio.sleep(0.3)
     assert loop.updates_applied == 0
@@ -59,8 +67,14 @@ async def test_health_check_reports_state(event_bus):
     await loop.initialize({})
 
     for i in range(2):
-        payload = {"trade_id": f"t{i}", "pnl": 100.0 if i == 0 else -50.0, "agent_consensus": make_agent_consensus()}
-        await event_bus.publish(Event(topic="trade.position_closed", payload=payload, source_module="test"))
+        payload = {
+            "trade_id": f"t{i}",
+            "pnl": 100.0 if i == 0 else -50.0,
+            "agent_consensus": make_agent_consensus(),
+        }
+        await event_bus.publish(
+            Event(topic="trade.position_closed", payload=payload, source_module="test")
+        )
 
     assert await _wait_for(lambda: loop.updates_applied == 2)
     health = await loop.health_check()

@@ -1,11 +1,14 @@
 """Replayable lifecycle for historical limit-order queue simulation."""
+
 from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Literal
 
 Side = Literal["buy", "sell"]
 Status = Literal["open", "partial", "filled", "cancelled", "expired"]
+
 
 @dataclass
 class SimulatedOrder:
@@ -20,6 +23,7 @@ class SimulatedOrder:
     last_queue_update: datetime | None = None
     ttl: timedelta | None = None
 
+
 @dataclass(frozen=True)
 class LifecycleFill:
     order_id: str
@@ -28,8 +32,10 @@ class LifecycleFill:
     timestamp: datetime
     maker: bool = True
 
+
 class QueueOrderLifecycle:
     """Conservative passive-order lifecycle with book-change queue aging."""
+
     def __init__(self) -> None:
         self.orders: dict[str, SimulatedOrder] = {}
 
@@ -61,7 +67,14 @@ class QueueOrderLifecycle:
                 expired.append(order.order_id)
         return expired
 
-    def on_book_change(self, side: Side, price: float, old_qty: float, new_qty: float, timestamp: datetime) -> list[str]:
+    def on_book_change(
+        self,
+        side: Side,
+        price: float,
+        old_qty: float,
+        new_qty: float,
+        timestamp: datetime,
+    ) -> list[str]:
         """Apply displayed-volume reductions conservatively to queue ahead.
 
         Reductions are assigned to the earliest resting orders first. Increases
@@ -74,7 +87,11 @@ class QueueOrderLifecycle:
         updated: list[str] = []
         if reduction <= 0:
             return updated
-        candidates = [o for o in self.orders.values() if o.status in {"open", "partial"} and o.side == side and o.price == price]
+        candidates = [
+            o
+            for o in self.orders.values()
+            if o.status in {"open", "partial"} and o.side == side and o.price == price
+        ]
         candidates.sort(key=lambda o: (o.created_at, o.order_id))
         for order in candidates:
             if reduction <= 0:
@@ -87,13 +104,19 @@ class QueueOrderLifecycle:
                 updated.append(order.order_id)
         return updated
 
-    def consume(self, side: Side, price: float, traded_qty: float, timestamp: datetime) -> list[LifecycleFill]:
+    def consume(
+        self, side: Side, price: float, traded_qty: float, timestamp: datetime
+    ) -> list[LifecycleFill]:
         if traded_qty <= 0:
             return []
         self.age(timestamp)
         fills: list[LifecycleFill] = []
         remaining_trade = traded_qty
-        candidates = [o for o in self.orders.values() if o.status in {"open", "partial"} and o.side == side and o.price == price]
+        candidates = [
+            o
+            for o in self.orders.values()
+            if o.status in {"open", "partial"} and o.side == side and o.price == price
+        ]
         candidates.sort(key=lambda o: (o.created_at, o.order_id))
         for order in candidates:
             if remaining_trade <= 0:
@@ -109,8 +132,11 @@ class QueueOrderLifecycle:
             remaining_trade -= fill_qty
             order.status = "filled" if order.remaining <= 1e-12 else "partial"
             order.last_queue_update = timestamp
-            fills.append(LifecycleFill(order.order_id, fill_qty, price, timestamp, maker=True))
+            fills.append(
+                LifecycleFill(order.order_id, fill_qty, price, timestamp, maker=True)
+            )
         return fills
+
 
 @dataclass(frozen=True)
 class FeeSchedule:

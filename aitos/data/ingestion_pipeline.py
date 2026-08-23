@@ -1,4 +1,5 @@
 """Download -> normalize -> canonical Parquet ingestion pipeline."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -18,13 +19,19 @@ class IngestionResult:
 class DatasetIngestionPipeline:
     """Wire dataset-aware downloading directly to canonical Parquet writing."""
 
-    def __init__(self, downloader: IncrementalDownloader, parquet_root: str | Path,
-                 normalizers: dict[str, Callable[[Path, DownloadItem], Iterable[Any]]]) -> None:
+    def __init__(
+        self,
+        downloader: IncrementalDownloader,
+        parquet_root: str | Path,
+        normalizers: dict[str, Callable[[Path, DownloadItem], Iterable[Any]]],
+    ) -> None:
         self.downloader = downloader
         self.normalizers = normalizers
         self.parquet_root = Path(parquet_root)
 
-    def run(self, items: Iterable[DownloadItem], overwrite: bool = False) -> IngestionResult:
+    def run(
+        self, items: Iterable[DownloadItem], overwrite: bool = False
+    ) -> IngestionResult:
         requested = list(items)
         downloaded = self.downloader.download_items(requested, overwrite=overwrite)
         by_destination = {item.destination: item for item in requested}
@@ -33,7 +40,9 @@ class DatasetIngestionPipeline:
             item = by_destination[raw_path]
             normalizer = self.normalizers.get(item.dataset)
             if normalizer is None:
-                raise ValueError(f"No normalizer registered for dataset: {item.dataset}")
+                raise ValueError(
+                    f"No normalizer registered for dataset: {item.dataset}"
+                )
             writer = CanonicalParquetWriter(self._dataset_root(item.dataset))
             written.extend(writer.write(normalizer(raw_path, item)))
         return IngestionResult(tuple(downloaded), tuple(written))

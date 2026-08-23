@@ -1,6 +1,9 @@
 """Executed-trade order-flow analytics from real TradeTick data."""
+
 from __future__ import annotations
+
 from typing import Sequence
+
 from aitos.models.market import TradeSide, TradeTick
 
 

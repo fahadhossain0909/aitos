@@ -22,7 +22,9 @@ class TokenBucketRateLimiter:
 
     async def acquire(self, weight: int = 1) -> None:
         if weight > self._capacity:
-            raise ValueError(f"weight {weight} exceeds bucket capacity {self._capacity}")
+            raise ValueError(
+                f"weight {weight} exceeds bucket capacity {self._capacity}"
+            )
         while True:
             async with self._lock:
                 self._refill()
@@ -36,5 +38,7 @@ class TokenBucketRateLimiter:
     def _refill(self) -> None:
         now = time.monotonic()
         elapsed = now - self._last_refill
-        self._tokens = min(self._capacity, self._tokens + elapsed * self._refill_per_second)
+        self._tokens = min(
+            self._capacity, self._tokens + elapsed * self._refill_per_second
+        )
         self._last_refill = now

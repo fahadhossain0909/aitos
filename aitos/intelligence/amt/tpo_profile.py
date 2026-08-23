@@ -3,6 +3,7 @@
 TPO requires time/bracket observations. This module never infers TPO from
 trade volume; callers must provide timestamped price observations.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -70,17 +71,28 @@ def build_tpo_profile(
         lv = ordered[left][1] if left >= 0 else -1
         rv = ordered[right][1] if right < len(ordered) else -1
         if rv > lv:
-            included.add(right); covered += rv; right += 1
+            included.add(right)
+            covered += rv
+            right += 1
         else:
-            included.add(left); covered += lv; left -= 1
+            included.add(left)
+            covered += lv
+            left -= 1
     prices = [ordered[i][0] for i in included]
     high, low = ordered[-1][0], ordered[0][0]
     high_count, low_count = ordered[-1][1], ordered[0][1]
     return TPOProfile(
-        bins=tuple(ordered), poc=ordered[poc_index][0], vah=max(prices), val=min(prices),
-        high=high, low=low, total_tpo=total, bracket_count=len(brackets),
+        bins=tuple(ordered),
+        poc=ordered[poc_index][0],
+        vah=max(prices),
+        val=min(prices),
+        high=high,
+        low=low,
+        total_tpo=total,
+        bracket_count=len(brackets),
         single_prints=tuple(p for p, c in ordered if c == 1),
-        poor_high=high_count > 1, poor_low=low_count > 1,
+        poor_high=high_count > 1,
+        poor_low=low_count > 1,
         excess_high=len(ordered) >= 2 and high_count == 1 and ordered[-2][1] >= 3,
         excess_low=len(ordered) >= 2 and low_count == 1 and ordered[1][1] >= 3,
     )

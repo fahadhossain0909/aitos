@@ -1,17 +1,19 @@
 """Memory-bounded, sequential backtest streaming primitives."""
+
 from __future__ import annotations
 
+import json
+import pickle
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-import json
-import pickle
 from typing import Any, Callable, Iterable, Iterator, Sequence
 
 
 @dataclass(frozen=True)
 class BacktestChunk:
     """A bounded time window of events."""
+
     index: int
     start: datetime
     end: datetime
@@ -53,7 +55,9 @@ class CheckpointManager:
 
     def load(self) -> Any:
         with self.path.open("rb") as handle:
-            return pickle.load(handle)
+            return pickle.load(
+                handle
+            )  # nosec B301 - checkpoint files are local application state
 
     def exists(self) -> bool:
         return self.path.exists()
@@ -62,7 +66,9 @@ class CheckpointManager:
 class JsonlChunkReader:
     """Stream a timestamp-sorted JSONL event file in bounded time chunks."""
 
-    def __init__(self, path: str | Path, parser: Callable[[dict[str, Any]], Any] | None = None):
+    def __init__(
+        self, path: str | Path, parser: Callable[[dict[str, Any]], Any] | None = None
+    ):
         self.path = Path(path)
         self.parser = parser or (lambda row: row)
 
@@ -95,7 +101,13 @@ class JsonlChunkReader:
 class StreamingBacktestEngine:
     """Sequential chunk runner that preserves state between chunks."""
 
-    def __init__(self, process_event: Callable[[Any], None], state_getter: Callable[[], Any], state_loader: Callable[[Any], None], checkpoint: CheckpointManager | None = None):
+    def __init__(
+        self,
+        process_event: Callable[[Any], None],
+        state_getter: Callable[[], Any],
+        state_loader: Callable[[Any], None],
+        checkpoint: CheckpointManager | None = None,
+    ):
         self.process_event = process_event
         self.state_getter = state_getter
         self.state_loader = state_loader
@@ -115,5 +127,7 @@ class StreamingBacktestEngine:
                 self.process_event(event)
                 processed += 1
             if self.checkpoint:
-                self.checkpoint.save({"next_chunk": chunk.index + 1, "state": self.state_getter()})
+                self.checkpoint.save(
+                    {"next_chunk": chunk.index + 1, "state": self.state_getter()}
+                )
         return processed

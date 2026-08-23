@@ -17,7 +17,9 @@ async def test_acquire_within_capacity_is_immediate():
 
 @pytest.mark.asyncio
 async def test_acquire_beyond_capacity_waits_for_refill():
-    limiter = TokenBucketRateLimiter(capacity=2, refill_per_second=20)  # fast refill for test speed
+    limiter = TokenBucketRateLimiter(
+        capacity=2, refill_per_second=20
+    )  # fast refill for test speed
     await limiter.acquire(weight=2)  # drain the bucket
     start = time.monotonic()
     await limiter.acquire(weight=2)  # must wait for refill

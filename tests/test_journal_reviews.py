@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
-from aitos.journal.reviews import daily_review, monthly_review, r_multiple, weekly_review
+from aitos.journal.reviews import (daily_review, monthly_review, r_multiple,
+                                   weekly_review)
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 
 NOW = datetime.now(timezone.utc).isoformat()
@@ -47,7 +48,11 @@ def test_daily_review_empty_trades():
 
 
 def test_daily_review_computes_stats():
-    trades = [make_closed_trade(pnl=100.0), make_closed_trade(pnl=-50.0), make_closed_trade(pnl=200.0)]
+    trades = [
+        make_closed_trade(pnl=100.0),
+        make_closed_trade(pnl=-50.0),
+        make_closed_trade(pnl=200.0),
+    ]
     review = daily_review(trades, date="2026-07-10")
     assert review.total_trades == 3
     assert review.wins == 2
@@ -86,7 +91,11 @@ def test_monthly_review_empty_trades():
 
 
 def test_monthly_review_computes_drawdown_and_sharpe():
-    trades = [make_closed_trade(pnl=500.0), make_closed_trade(pnl=-1500.0), make_closed_trade(pnl=800.0)]
+    trades = [
+        make_closed_trade(pnl=500.0),
+        make_closed_trade(pnl=-1500.0),
+        make_closed_trade(pnl=800.0),
+    ]
     review = monthly_review(trades, month="2026-07", starting_equity=10_000.0)
     assert review.total_trades == 3
     assert review.total_pnl == -200.0

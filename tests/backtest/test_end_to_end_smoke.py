@@ -8,13 +8,21 @@ def test_canonical_trade_and_l2_replay_smoke():
     trades = []
     books = []
     states = []
-    replay = AITOSReplay(on_trade=trades.append, on_book=books.append, on_book_state=states.append)
+    replay = AITOSReplay(
+        on_trade=trades.append, on_book=books.append, on_book_state=states.append
+    )
 
     ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
     events = [
-        CanonicalBookEvent("binance", "futures_um", "BTCUSDT", 1, ts, "buy", 100.0, 2.0),
-        CanonicalBookEvent("binance", "futures_um", "BTCUSDT", 2, ts, "sell", 101.0, 3.0),
-        CanonicalTrade("binance", "futures_um", "BTCUSDT", "t1", ts, 101.0, 0.5, "buy", False),
+        CanonicalBookEvent(
+            "binance", "futures_um", "BTCUSDT", 1, ts, "buy", 100.0, 2.0
+        ),
+        CanonicalBookEvent(
+            "binance", "futures_um", "BTCUSDT", 2, ts, "sell", 101.0, 3.0
+        ),
+        CanonicalTrade(
+            "binance", "futures_um", "BTCUSDT", "t1", ts, 101.0, 0.5, "buy", False
+        ),
     ]
 
     stats = replay.replay(events)
@@ -32,7 +40,11 @@ def test_stale_l2_update_is_not_forwarded():
     replay = AITOSReplay(on_book=forwarded.append)
     ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
-    assert replay.feed_book(CanonicalBookEvent("binance", "futures_um", "BTCUSDT", 10, ts, "buy", 100, 1))
-    assert not replay.feed_book(CanonicalBookEvent("binance", "futures_um", "BTCUSDT", 9, ts, "buy", 100, 4))
+    assert replay.feed_book(
+        CanonicalBookEvent("binance", "futures_um", "BTCUSDT", 10, ts, "buy", 100, 1)
+    )
+    assert not replay.feed_book(
+        CanonicalBookEvent("binance", "futures_um", "BTCUSDT", 9, ts, "buy", 100, 4)
+    )
     assert len(forwarded) == 1
     assert replay.stats.stale_book_events == 1

@@ -1,20 +1,24 @@
-from aitos.exchange.parsing import (
-    parse_agg_trade_ws,
-    parse_depth_ws,
-    parse_funding_rate_rest,
-    parse_kline_rest,
-    parse_kline_ws,
-    parse_open_interest_rest,
-    parse_order_book_rest,
-    parse_trade_rest,
-)
+from aitos.exchange.parsing import (parse_agg_trade_ws, parse_depth_ws,
+                                    parse_funding_rate_rest, parse_kline_rest,
+                                    parse_kline_ws, parse_open_interest_rest,
+                                    parse_order_book_rest, parse_trade_rest)
 from aitos.models.market import TradeSide
 
 # Sample payloads shaped exactly like Binance USDT-M Futures API responses.
 
 SAMPLE_KLINE_ROW = [
-    1718000000000, "65000.10", "65100.00", "64950.50", "65080.25", "123.456",
-    1718000059999, "8031234.56", 4521, "70.111", "4560000.12", "0",
+    1718000000000,
+    "65000.10",
+    "65100.00",
+    "64950.50",
+    "65080.25",
+    "123.456",
+    1718000059999,
+    "8031234.56",
+    4521,
+    "70.111",
+    "4560000.12",
+    "0",
 ]
 
 SAMPLE_DEPTH_REST = {
@@ -25,34 +29,76 @@ SAMPLE_DEPTH_REST = {
     "asks": [["65000.50", "1.0"], ["65001.00", "0.8"]],
 }
 
-SAMPLE_TRADE_REST = {"id": 28457, "price": "65000.00", "qty": "0.5", "quoteQty": "32500.0", "time": 1718000000000, "isBuyerMaker": True}
-
-SAMPLE_PREMIUM_INDEX = {
-    "symbol": "BTCUSDT", "markPrice": "65010.5", "indexPrice": "65005.0",
-    "estimatedSettlePrice": "65008.0", "lastFundingRate": "0.00010000",
-    "nextFundingTime": 1718000400000, "interestRate": "0.00010000", "time": 1718000000000,
+SAMPLE_TRADE_REST = {
+    "id": 28457,
+    "price": "65000.00",
+    "qty": "0.5",
+    "quoteQty": "32500.0",
+    "time": 1718000000000,
+    "isBuyerMaker": True,
 }
 
-SAMPLE_OPEN_INTEREST = {"openInterest": "45123.456", "symbol": "BTCUSDT", "time": 1718000000000}
+SAMPLE_PREMIUM_INDEX = {
+    "symbol": "BTCUSDT",
+    "markPrice": "65010.5",
+    "indexPrice": "65005.0",
+    "estimatedSettlePrice": "65008.0",
+    "lastFundingRate": "0.00010000",
+    "nextFundingTime": 1718000400000,
+    "interestRate": "0.00010000",
+    "time": 1718000000000,
+}
+
+SAMPLE_OPEN_INTEREST = {
+    "openInterest": "45123.456",
+    "symbol": "BTCUSDT",
+    "time": 1718000000000,
+}
 
 SAMPLE_KLINE_WS = {
-    "e": "kline", "E": 1718000000000, "s": "BTCUSDT",
+    "e": "kline",
+    "E": 1718000000000,
+    "s": "BTCUSDT",
     "k": {
-        "t": 1718000000000, "T": 1718000059999, "s": "BTCUSDT", "i": "1m",
-        "o": "65000.10", "c": "65080.25", "h": "65100.00", "l": "64950.50",
-        "v": "123.456", "n": 4521, "x": False, "q": "8031234.56",
-        "V": "70.111", "Q": "4560000.12",
+        "t": 1718000000000,
+        "T": 1718000059999,
+        "s": "BTCUSDT",
+        "i": "1m",
+        "o": "65000.10",
+        "c": "65080.25",
+        "h": "65100.00",
+        "l": "64950.50",
+        "v": "123.456",
+        "n": 4521,
+        "x": False,
+        "q": "8031234.56",
+        "V": "70.111",
+        "Q": "4560000.12",
     },
 }
 
 SAMPLE_AGG_TRADE_WS = {
-    "e": "aggTrade", "E": 1718000000000, "s": "BTCUSDT", "a": 999999,
-    "p": "65000.00", "q": "0.25", "f": 100, "l": 105, "T": 1718000000000, "m": False,
+    "e": "aggTrade",
+    "E": 1718000000000,
+    "s": "BTCUSDT",
+    "a": 999999,
+    "p": "65000.00",
+    "q": "0.25",
+    "f": 100,
+    "l": 105,
+    "T": 1718000000000,
+    "m": False,
 }
 
 SAMPLE_DEPTH_WS = {
-    "e": "depthUpdate", "E": 1718000000000, "T": 1718000000000, "s": "BTCUSDT",
-    "U": 100, "u": 110, "b": [["65000.00", "1.5"]], "a": [["65000.50", "1.0"]],
+    "e": "depthUpdate",
+    "E": 1718000000000,
+    "T": 1718000000000,
+    "s": "BTCUSDT",
+    "U": 100,
+    "u": 110,
+    "b": [["65000.00", "1.5"]],
+    "a": [["65000.50", "1.0"]],
 }
 
 

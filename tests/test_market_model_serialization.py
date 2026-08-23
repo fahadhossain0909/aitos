@@ -4,7 +4,9 @@ from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
 
 def test_trade_tick_round_trip():
-    tick = TradeTick("BTCUSDT", 123, 100.5, 0.25, TradeSide.BUY, False, datetime.now(timezone.utc))
+    tick = TradeTick(
+        "BTCUSDT", 123, 100.5, 0.25, TradeSide.BUY, False, datetime.now(timezone.utc)
+    )
     assert TradeTick.from_dict(tick.to_dict()) == tick
 
 

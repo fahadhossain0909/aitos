@@ -1,14 +1,16 @@
 """Incremental download with dataset-aware canonical Parquet gating."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import date
-from pathlib import Path
-from typing import Iterable
 import hashlib
 import json
 import tempfile
 import urllib.request
+from dataclasses import dataclass
+from datetime import date
+from pathlib import Path
+from typing import Iterable
+from urllib.parse import urlparse
 
 from .dataset_layout import DatasetLayout
 from .dataset_policy import DatasetGate
@@ -26,6 +28,7 @@ class FileRecord:
 @dataclass(frozen=True)
 class DownloadItem:
     """A raw source file mapped to one canonical dataset partition."""
+
     dataset: str
     exchange: str
     market: str
@@ -44,9 +47,17 @@ class DownloadManifest:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(self.records, indent=2, sort_keys=True), encoding="utf-8")
+        self.path.write_text(
+            json.dumps(self.records, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
-    def valid(self, key: str, path: Path, expected_size: int | None = None, sha256: str | None = None) -> bool:
+    def valid(
+        self,
+        key: str,
+        path: Path,
+        expected_size: int | None = None,
+        sha256: str | None = None,
+    ) -> bool:
         rec = self.records.get(key)
         if not rec or not path.exists():
             return False
@@ -63,6 +74,22 @@ def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
         for block in iter(lambda: handle.read(chunk_size), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _validate_download_url(url: str) -> None:
+    scheme = urlparse(url).scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise ValueError(f"unsupported download URL scheme: {scheme or '<missing>'}")
+
+
+def _download_to_path(url: str, destination: Path) -> None:
+    """Download a validated HTTP(S) URL without enabling local-file schemes."""
+    _validate_download_url(url)
+    # URL scheme validation above intentionally constrains this urlopen call.
+    with urllib.request.urlopen(url, timeout=30) as response:  # nosec B310
+        with destination.open("wb") as handle:
+            while chunk := response.read(1024 * 1024):
+                handle.write(chunk)
 
 
 class CanonicalDataIndex:
@@ -117,7 +144,9 @@ class IncrementalDownloader:
     def _manifest_key(item: DownloadItem) -> str:
         return f"{item.dataset}/{item.exchange}/{item.market}/{item.symbol.upper()}/{item.day.isoformat()}"
 
-    def download_items(self, items: Iterable[DownloadItem], overwrite: bool = False) -> list[Path]:
+    def download_items(
+        self, items: Iterable[DownloadItem], overwrite: bool = False
+    ) -> list[Path]:
         downloaded: list[Path] = []
         for item in items:
             key = self._manifest_key(item)
@@ -129,11 +158,14 @@ class IncrementalDownloader:
             if not overwrite and self.manifest.valid(key, item.destination):
                 continue
 
+            _validate_download_url(item.url)
             item.destination.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=item.destination.parent, delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(
+                dir=item.destination.parent, delete=False
+            ) as tmp:
                 tmp_path = Path(tmp.name)
             try:
-                urllib.request.urlretrieve(item.url, tmp_path)
+                _download_to_path(item.url, tmp_path)
                 digest = sha256_file(tmp_path)
                 size = tmp_path.stat().st_size
                 tmp_path.replace(item.destination)
@@ -173,15 +205,23 @@ class IncrementalDownloader:
                 continue
             if not overwrite and self.manifest.valid(key, destination):
                 continue
+            _validate_download_url(url)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with tempfile.NamedTemporaryFile(dir=destination.parent, delete=False) as tmp:
+            with tempfile.NamedTemporaryFile(
+                dir=destination.parent, delete=False
+            ) as tmp:
                 tmp_path = Path(tmp.name)
             try:
-                urllib.request.urlretrieve(url, tmp_path)
+                _download_to_path(url, tmp_path)
                 digest = sha256_file(tmp_path)
                 size = tmp_path.stat().st_size
                 tmp_path.replace(destination)
-                self.manifest.records[key] = {"url": url, "path": str(destination), "size": size, "sha256": digest}
+                self.manifest.records[key] = {
+                    "url": url,
+                    "path": str(destination),
+                    "size": size,
+                    "sha256": digest,
+                }
                 self.manifest.save()
                 downloaded.append(destination)
             finally:

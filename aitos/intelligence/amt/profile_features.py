@@ -1,4 +1,5 @@
 """Advanced Market Profile features built from volume-at-price data."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,14 +22,24 @@ class ProfileFeatures:
     distribution_peaks: tuple[float, ...]
 
 
-def _local_peaks(bins: Sequence[tuple[float, float]], multiplier: float = 1.5) -> list[int]:
+def _local_peaks(
+    bins: Sequence[tuple[float, float]], multiplier: float = 1.5
+) -> list[int]:
     if len(bins) < 3:
         return []
     mean = sum(v for _, v in bins) / len(bins)
-    return [i for i in range(1, len(bins) - 1) if bins[i][1] >= mean * multiplier and bins[i][1] >= bins[i - 1][1] and bins[i][1] >= bins[i + 1][1]]
+    return [
+        i
+        for i in range(1, len(bins) - 1)
+        if bins[i][1] >= mean * multiplier
+        and bins[i][1] >= bins[i - 1][1]
+        and bins[i][1] >= bins[i + 1][1]
+    ]
 
 
-def compute_profile_features(profile: VolumeProfile, previous_profiles: Sequence[VolumeProfile] = ()) -> ProfileFeatures:
+def compute_profile_features(
+    profile: VolumeProfile, previous_profiles: Sequence[VolumeProfile] = ()
+) -> ProfileFeatures:
     if not profile.bins:
         return ProfileFeatures(0.0, (), (), (), None, None, False, False, (), ())
     bins = profile.bins

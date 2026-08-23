@@ -9,8 +9,15 @@ from __future__ import annotations
 from typing import Dict, List
 
 
-def composite_score(component_scores: Dict[str, float], weights: Dict[str, float]) -> float:
-    return sum(component_scores.get(k, 0.0) * weights.get(k, 0.0) for k in component_scores) * 10
+def composite_score(
+    component_scores: Dict[str, float], weights: Dict[str, float]
+) -> float:
+    return (
+        sum(
+            component_scores.get(k, 0.0) * weights.get(k, 0.0) for k in component_scores
+        )
+        * 10
+    )
 
 
 def counterfactual_for_threshold(

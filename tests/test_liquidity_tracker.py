@@ -5,7 +5,9 @@ from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
 
 def book(bids, asks, update_id):
-    return OrderBookSnapshot("BTCUSDT", tuple(bids), tuple(asks), update_id, datetime.now(timezone.utc))
+    return OrderBookSnapshot(
+        "BTCUSDT", tuple(bids), tuple(asks), update_id, datetime.now(timezone.utc)
+    )
 
 
 def trade(qty, side, maker=False):
@@ -24,14 +26,19 @@ def test_detects_stacking_and_pulling():
 def test_detects_buy_side_sweep():
     tracker = LiquidityTracker(removal_ratio=0.25)
     tracker.update(book([(99, 10)], [(101, 20), (102, 10)], 1))
-    events = tracker.update(book([(99, 10)], [(101, 5), (102, 2)], 2), [trade(15, TradeSide.BUY)])
+    events = tracker.update(
+        book([(99, 10)], [(101, 5), (102, 2)], 2), [trade(15, TradeSide.BUY)]
+    )
     assert any(e.kind == "sweep" and e.side == "ask" for e in events)
 
 
 def test_detects_sell_side_sweep():
     tracker = LiquidityTracker(removal_ratio=0.25)
     tracker.update(book([(99, 20), (98, 10)], [(101, 10)], 1))
-    events = tracker.update(book([(99, 5), (98, 2)], [(101, 10)], 2), [trade(15, TradeSide.SELL, maker=True)])
+    events = tracker.update(
+        book([(99, 5), (98, 2)], [(101, 10)], 2),
+        [trade(15, TradeSide.SELL, maker=True)],
+    )
     assert any(e.kind == "sweep" and e.side == "bid" for e in events)
 
 

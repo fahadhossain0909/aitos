@@ -10,7 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (AITOSModule, Event, EventResponse,
+                                  HealthStatus, ModuleStatus)
 from aitos.journal.performance_evaluator import PerformanceReport
 
 
@@ -57,12 +58,24 @@ class PolicyCandidate:
 class AdaptivePolicyEngine(AITOSModule):
     """Generate bounded, reviewable policy candidates from historical results."""
 
-    def __init__(self, *, min_trades: int = 20, base_min_confidence: float = 0.60,
-                 confidence_floor: float = 0.55, confidence_ceiling: float = 0.90,
-                 base_policy_version: str = "fusion-v1") -> None:
+    def __init__(
+        self,
+        *,
+        min_trades: int = 20,
+        base_min_confidence: float = 0.60,
+        confidence_floor: float = 0.55,
+        confidence_ceiling: float = 0.90,
+        base_policy_version: str = "fusion-v1",
+    ) -> None:
         if min_trades < 1:
             raise ValueError("min_trades must be positive")
-        if not 0.0 <= confidence_floor <= base_min_confidence <= confidence_ceiling <= 1.0:
+        if (
+            not 0.0
+            <= confidence_floor
+            <= base_min_confidence
+            <= confidence_ceiling
+            <= 1.0
+        ):
             raise ValueError("confidence bounds must satisfy floor <= base <= ceiling")
         self.min_trades = min_trades
         self.base_min_confidence = base_min_confidence
@@ -96,7 +109,9 @@ class AdaptivePolicyEngine(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=None,
             details={"has_candidate": self._last_candidate is not None},
@@ -125,8 +140,10 @@ class AdaptivePolicyEngine(AITOSModule):
                 threshold = self.base_min_confidence
                 enabled = True
             regimes[item.value] = RegimePolicy(
-                regime=item.value, enabled=enabled,
-                min_confidence=round(threshold, 4), trades=item.trades,
+                regime=item.value,
+                enabled=enabled,
+                min_confidence=round(threshold, 4),
+                trades=item.trades,
                 win_rate=round(item.win_rate, 4),
                 average_r_multiple=round(item.average_r_multiple, 4),
             )

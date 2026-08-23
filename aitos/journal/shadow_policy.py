@@ -33,7 +33,9 @@ class ShadowPolicyResult:
         return self.__dict__.copy()
 
 
-def evaluate_shadow(report: PerformanceReport, candidate: PolicyCandidate) -> ShadowPolicyResult:
+def evaluate_shadow(
+    report: PerformanceReport, candidate: PolicyCandidate
+) -> ShadowPolicyResult:
     """Estimate candidate performance from regime-level historical slices.
 
     A candidate only removes regimes explicitly disabled. For enabled regimes,
@@ -43,14 +45,28 @@ def evaluate_shadow(report: PerformanceReport, candidate: PolicyCandidate) -> Sh
     validation step and never happens automatically here.
     """
     regime_map = candidate.regimes
-    selected = [s for s in report.slices if s.key == "regime" and regime_map.get(s.value, None) is not None and regime_map[s.value].enabled]
+    selected = [
+        s
+        for s in report.slices
+        if s.key == "regime"
+        and regime_map.get(s.value, None) is not None
+        and regime_map[s.value].enabled
+    ]
     candidate_trades = sum(s.trades for s in selected)
     candidate_pnl = sum(s.total_pnl for s in selected)
-    candidate_r = (sum(s.average_r_multiple * s.trades for s in selected) / candidate_trades) if candidate_trades else 0.0
+    candidate_r = (
+        (sum(s.average_r_multiple * s.trades for s in selected) / candidate_trades)
+        if candidate_trades
+        else 0.0
+    )
     candidate_wins = sum(s.wins for s in selected)
     candidate_win_rate = candidate_wins / candidate_trades if candidate_trades else 0.0
 
-    improved = candidate_pnl > report.total_pnl and candidate_r >= report.average_r_multiple and candidate_win_rate >= report.win_rate
+    improved = (
+        candidate_pnl > report.total_pnl
+        and candidate_r >= report.average_r_multiple
+        and candidate_win_rate >= report.win_rate
+    )
     return ShadowPolicyResult(
         candidate_id=candidate.candidate_id,
         baseline_trades=report.outcome_count,
