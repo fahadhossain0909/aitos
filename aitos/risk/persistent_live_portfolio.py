@@ -50,7 +50,9 @@ class PersistentDrawdownStore:
     async def initialize(self) -> None:
         if self._client is not None:
             return
-        self._client = await clickhouse_connect.get_async_client(**self._conn_params)
+        self._client = await clickhouse_connect.get_async_client(
+            **self._conn_params
+        )
         await self._client.command(CREATE_DRAWDOWN_TRACKING)
 
     async def load_peak_equity(self) -> Optional[float]:
