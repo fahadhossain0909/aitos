@@ -16,10 +16,10 @@ class ReplayStats:
     rejected_book_events: int = 0
 
 
-class ProjectAlphaReplay:
+class AITOSReplay:
     """Small integration seam; strategy/execution logic remains in existing engines.
 
-    Callbacks receive canonical events so the existing ProjectAlpha Order Flow,
+    Callbacks receive canonical events so the existing AITOS Order Flow,
     Footprint, Liquidity and Execution components can be wired without creating
     duplicate implementations here.
     """
