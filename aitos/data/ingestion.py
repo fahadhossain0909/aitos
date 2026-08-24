@@ -193,7 +193,6 @@ class DataIngestionService(AITOSModule):
                 maxsize=TRADE_STREAM_QUEUE_SIZE
             )
             try:
-
                 async def producer() -> None:
                     async for trade in self._exchange.stream_trades(self._symbols):
                         try:
@@ -231,9 +230,7 @@ class DataIngestionService(AITOSModule):
                             },
                         )
                         producer_task.cancel()
-                        await asyncio.gather(
-                            producer_task, return_exceptions=True
-                        )
+                        await asyncio.gather(producer_task, return_exceptions=True)
                         producer_task = None
                         await self._recover_recent_trades()
                         break
@@ -245,9 +242,7 @@ class DataIngestionService(AITOSModule):
             except asyncio.CancelledError:
                 if producer_task is not None:
                     producer_task.cancel()
-                    await asyncio.gather(
-                        producer_task, return_exceptions=True
-                    )
+                    await asyncio.gather(producer_task, return_exceptions=True)
                 return
             except Exception as exc:
                 self._errors += 1
@@ -264,9 +259,7 @@ class DataIngestionService(AITOSModule):
                 )
                 if producer_task is not None:
                     producer_task.cancel()
-                    await asyncio.gather(
-                        producer_task, return_exceptions=True
-                    )
+                    await asyncio.gather(producer_task, return_exceptions=True)
                 await asyncio.sleep(TRADE_STREAM_RESTART_DELAY_SECONDS)
 
     async def _recover_recent_trades(self) -> None:
