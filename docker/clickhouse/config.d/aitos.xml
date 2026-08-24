@@ -12,7 +12,6 @@
 
     <!-- Limit MergeTree background work so merges cannot consume both vCPUs. -->
     <background_pool_size>2</background_pool_size>
-    <background_mer_pool_size>1</background_mer_pool_size>
     <background_schedule_pool_size>1</background_schedule_pool_size>
 
     <!-- Keep a meaningful amount of filesystem headroom for merges and recovery. -->
