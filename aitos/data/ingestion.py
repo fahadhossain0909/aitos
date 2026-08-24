@@ -6,8 +6,14 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from aitos.core.contracts import (AITOSModule, Event, EventPriority,
-                                  EventResponse, HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventPriority,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus
@@ -187,13 +193,16 @@ class DataIngestionService(AITOSModule):
                 maxsize=TRADE_STREAM_QUEUE_SIZE
             )
             try:
+
                 async def producer() -> None:
                     async for trade in self._exchange.stream_trades(self._symbols):
                         try:
                             queue.put_nowait(trade)
                         except asyncio.QueueFull:
                             self._trade_stream_errors += 1
-                            logger.error("trade stream queue overflow; dropping oldest trade")
+                            logger.error(
+                                "trade stream queue overflow; dropping oldest trade"
+                            )
                             try:
                                 queue.get_nowait()
                             except asyncio.QueueEmpty:
@@ -222,7 +231,9 @@ class DataIngestionService(AITOSModule):
                             },
                         )
                         producer_task.cancel()
-                        await asyncio.gather(producer_task, return_exceptions=True)
+                        await asyncio.gather(
+                            producer_task, return_exceptions=True
+                        )
                         producer_task = None
                         await self._recover_recent_trades()
                         break
@@ -234,7 +245,9 @@ class DataIngestionService(AITOSModule):
             except asyncio.CancelledError:
                 if producer_task is not None:
                     producer_task.cancel()
-                    await asyncio.gather(producer_task, return_exceptions=True)
+                    await asyncio.gather(
+                        producer_task, return_exceptions=True
+                    )
                 return
             except Exception as exc:
                 self._errors += 1
@@ -243,11 +256,17 @@ class DataIngestionService(AITOSModule):
                 logger.error(
                     "trade stream loop crashed; restarting: %s",
                     exc,
-                    extra={"aitos_extra": {"restart_count": self._trade_stream_restarts}},
+                    extra={
+                        "aitos_extra": {
+                            "restart_count": self._trade_stream_restarts
+                        }
+                    },
                 )
                 if producer_task is not None:
                     producer_task.cancel()
-                    await asyncio.gather(producer_task, return_exceptions=True)
+                    await asyncio.gather(
+                        producer_task, return_exceptions=True
+                    )
                 await asyncio.sleep(TRADE_STREAM_RESTART_DELAY_SECONDS)
 
     async def _recover_recent_trades(self) -> None:
@@ -264,7 +283,12 @@ class DataIngestionService(AITOSModule):
                 if fresh:
                     logger.info(
                         "recovered trades from REST",
-                        extra={"aitos_extra": {"symbol": symbol, "count": len(fresh)}},
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "count": len(fresh),
+                            }
+                        },
                     )
             except Exception as exc:
                 self._trade_stream_errors += 1
