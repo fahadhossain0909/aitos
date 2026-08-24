@@ -130,9 +130,7 @@ async def main() -> None:
     outcome_classifier = TradeOutcomeClassifier()
     outcome_classifier.load_state()
     attention_path = "models/online_ml/attention_explainer.pkl"
-    attention_explainer = (
-        load_attention_model(attention_path) or AttentionExplainer()
-    )
+    attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
     components = await build_system(
         event_bus=event_bus,
         exchange=exchange,
@@ -230,9 +228,7 @@ async def main() -> None:
             except Exception as exc:
                 logger.error("scan/trade cycle failed: %s", exc)
             try:
-                await asyncio.wait_for(
-                    stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS
-                )
+                await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
                 pass
     finally:

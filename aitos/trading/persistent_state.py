@@ -57,13 +57,15 @@ class DurableTradingStateStore:
         payload = trade.to_dict()
         await client.insert(
             "trade_runtime_state",
-            [[
-                trade.trade_id,
-                trade.symbol,
-                trade.state.value,
-                json.dumps(payload, sort_keys=True, default=str),
-                datetime.now(timezone.utc),
-            ]],
+            [
+                [
+                    trade.trade_id,
+                    trade.symbol,
+                    trade.state.value,
+                    json.dumps(payload, sort_keys=True, default=str),
+                    datetime.now(timezone.utc),
+                ]
+            ],
             column_names=[
                 "trade_id",
                 "symbol",
@@ -83,14 +85,12 @@ class DurableTradingStateStore:
 
     async def load_open_trades(self) -> List[Trade]:
         client = self._client()
-        result = await client.query(
-            """
+        result = await client.query("""
             SELECT trade_id, argMax(payload_json, updated_at) AS payload_json
             FROM trade_runtime_state
             WHERE state IN ('position_opened', 'exit_triggered')
             GROUP BY trade_id
-            """
-        )
+            """)
         trades: List[Trade] = []
         for row in result.result_rows:
             try:
@@ -333,14 +333,10 @@ class IdempotentOrderExecutor(OrderExecutor):
         )
         return "aitos-" + hashlib.sha256(raw.encode()).hexdigest()[:24]
 
-    async def place_stop_loss_order(
-        self, *args: Any, **kwargs: Any
-    ) -> OrderResult:
+    async def place_stop_loss_order(self, *args: Any, **kwargs: Any) -> OrderResult:
         return await self._inner.place_stop_loss_order(*args, **kwargs)
 
-    async def place_take_profit_order(
-        self, *args: Any, **kwargs: Any
-    ) -> OrderResult:
+    async def place_take_profit_order(self, *args: Any, **kwargs: Any) -> OrderResult:
         return await self._inner.place_take_profit_order(*args, **kwargs)
 
     async def cancel_resting_order(self, *args: Any, **kwargs: Any) -> None:
