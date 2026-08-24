@@ -57,10 +57,13 @@ jobs:
             mkdir -p "$HOME/aitos-production-audit"
             REPORT="$HOME/aitos-production-audit/report.txt"
             set +e
-            bash scripts/paper_runtime_audit.sh 2>&1 | tee "$REPORT"
-            status=${PIPESTATUS[0]}
+            bash scripts/paper_runtime_audit.sh >"$REPORT" 2>&1
+            status=$?
             set -e
-            echo "AUDIT_EXIT_CODE=$status"
+            printf 'AUDIT_EXIT_CODE=%s\n' "$status"
+            printf 'AUDIT_REPORT_B64='
+            base64 -w 0 "$REPORT"
+            printf '\n'
             exit "$status"
 
       - name: Write audit report
@@ -71,7 +74,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p aitos-production-audit
-          printf '%s\n' "$AUDIT_OUTPUT" > aitos-production-audit/report.txt
+          encoded="$(printf '%s\n' "$AUDIT_OUTPUT" | sed -n 's/^AUDIT_REPORT_B64=//p' | tail -n 1)"
+          if [ -n "$encoded" ]; then
+            printf '%s' "$encoded" | base64 --decode > aitos-production-audit/report.txt
+          else
+            printf '%s\n' "Audit output was unavailable. Inspect the workflow log." > aitos-production-audit/report.txt
+          fi
           test -s aitos-production-audit/report.txt
 
       - name: Upload audit report artifact
