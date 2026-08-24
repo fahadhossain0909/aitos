@@ -46,7 +46,7 @@ ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS = 10.0
 class BinanceFuturesAdapter(ExchangeAdapter):
     def __init__(
         self,
-        session_factory: Callable[[], aiohttp.ClientSession],
+        session_factory: Callable[[], aiohttp.ClientSession] = aiohttp.ClientSession,
         ws_connector: Optional[Callable[..., Any]] = None,
         rate_limiter: Optional[TokenBucketRateLimiter] = None,
     ) -> None:
