@@ -6,7 +6,13 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.logging_setup import get_logger
@@ -70,7 +76,9 @@ ORDER BY (symbol, time, event_id)
 class MarketOSPersistence(AITOSModule):
     """Persist Market OS events without coupling the live state store to ClickHouse."""
 
-    def __init__(self, event_bus: EventBus, repository: Optional[MarketDataRepository]) -> None:
+    def __init__(
+        self, event_bus: EventBus, repository: Optional[MarketDataRepository]
+    ) -> None:
         self._event_bus = event_bus
         self._repository = repository
         self._subscriptions: list[Subscription] = []
@@ -91,7 +99,9 @@ class MarketOSPersistence(AITOSModule):
         if self._initialized:
             return
         if self._repository is None:
-            logger.warning("Market OS persistence disabled: ClickHouse repository unavailable")
+            logger.warning(
+                "Market OS persistence disabled: ClickHouse repository unavailable"
+            )
             self._initialized = True
             return
         await self._repository._client.command(CREATE_MARKET_ORDERFLOW)
@@ -99,26 +109,39 @@ class MarketOSPersistence(AITOSModule):
         await self._repository._client.command(CREATE_MARKET_LIVE_STATE)
         self._subscriptions = [
             await self._event_bus.subscribe(
-                "market.orderflow.*", self._handle_orderflow, group="market-os-orderflow"
+                "market.orderflow.*",
+                self._handle_orderflow,
+                group="market-os-orderflow",
             ),
             await self._event_bus.subscribe(
-                "market.liquidity.*", self._handle_liquidity, group="market-os-liquidity"
+                "market.liquidity.*",
+                self._handle_liquidity,
+                group="market-os-liquidity",
             ),
             await self._event_bus.subscribe(
-                "market.live_state.*", self._handle_live_state, group="market-os-live-state"
+                "market.live_state.*",
+                self._handle_live_state,
+                group="market-os-live-state",
             ),
         ]
         self._initialized = True
         logger.info("Market OS persistence initialized")
 
     async def health_check(self) -> HealthStatus:
-        status = ModuleStatus.HEALTHY if self._repository is not None else ModuleStatus.DEGRADED
+        status = (
+            ModuleStatus.HEALTHY
+            if self._repository is not None
+            else ModuleStatus.DEGRADED
+        )
         return HealthStatus(
             module_id=self.module_id,
             status=status,
             latency_ms=0.0,
             last_event_time=self._last_event_time,
-            details={"events_persisted": self._events_persisted, "errors": self._errors},
+            details={
+                "events_persisted": self._events_persisted,
+                "errors": self._errors,
+            },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
@@ -139,26 +162,39 @@ class MarketOSPersistence(AITOSModule):
         try:
             await self._repository._client.insert(
                 "market_orderflow",
-                [[
-                    event.created_at,
-                    event.event_id,
-                    symbol,
-                    int(payload.get("trade_count", 0)),
-                    float(payload.get("buy_volume", 0.0)),
-                    float(payload.get("sell_volume", 0.0)),
-                    float(payload.get("delta", 0.0)),
-                    float(payload.get("cvd", 0.0)),
-                    float(payload.get("buy_ratio", 0.0)),
-                    float(payload.get("aggression", 0.0)),
-                    float(payload.get("imbalance", 0.0)),
-                    float(payload.get("vwap", 0.0)),
-                    float(payload.get("last_price", 0.0)),
-                    str(payload.get("direction", "")),
-                ]],
+                [
+                    [
+                        event.created_at,
+                        event.event_id,
+                        symbol,
+                        int(payload.get("trade_count", 0)),
+                        float(payload.get("buy_volume", 0.0)),
+                        float(payload.get("sell_volume", 0.0)),
+                        float(payload.get("delta", 0.0)),
+                        float(payload.get("cvd", 0.0)),
+                        float(payload.get("buy_ratio", 0.0)),
+                        float(payload.get("aggression", 0.0)),
+                        float(payload.get("imbalance", 0.0)),
+                        float(payload.get("vwap", 0.0)),
+                        float(payload.get("last_price", 0.0)),
+                        str(payload.get("direction", "")),
+                    ]
+                ],
                 column_names=[
-                    "time", "event_id", "symbol", "trade_count", "buy_volume",
-                    "sell_volume", "delta", "cvd", "buy_ratio", "aggression",
-                    "imbalance", "vwap", "last_price", "direction",
+                    "time",
+                    "event_id",
+                    "symbol",
+                    "trade_count",
+                    "buy_volume",
+                    "sell_volume",
+                    "delta",
+                    "cvd",
+                    "buy_ratio",
+                    "aggression",
+                    "imbalance",
+                    "vwap",
+                    "last_price",
+                    "direction",
                 ],
             )
             self._record_success(event)
@@ -173,20 +209,31 @@ class MarketOSPersistence(AITOSModule):
         try:
             await self._repository._client.insert(
                 "market_liquidity_events",
-                [[
-                    event.created_at,
-                    event.event_id,
-                    symbol,
-                    str(payload.get("kind", "")),
-                    str(payload.get("side", "")),
-                    float(payload.get("score", 0.0)),
-                    float(payload.get("price", 0.0)),
-                    json.dumps(payload.get("details", {}), sort_keys=True, default=str),
-                    int(payload.get("last_update_id", 0)),
-                ]],
+                [
+                    [
+                        event.created_at,
+                        event.event_id,
+                        symbol,
+                        str(payload.get("kind", "")),
+                        str(payload.get("side", "")),
+                        float(payload.get("score", 0.0)),
+                        float(payload.get("price", 0.0)),
+                        json.dumps(
+                            payload.get("details", {}), sort_keys=True, default=str
+                        ),
+                        int(payload.get("last_update_id", 0)),
+                    ]
+                ],
                 column_names=[
-                    "time", "event_id", "symbol", "kind", "side", "score", "price",
-                    "details_json", "last_update_id",
+                    "time",
+                    "event_id",
+                    "symbol",
+                    "kind",
+                    "side",
+                    "score",
+                    "price",
+                    "details_json",
+                    "last_update_id",
                 ],
             )
             self._record_success(event)
@@ -202,20 +249,35 @@ class MarketOSPersistence(AITOSModule):
         try:
             await self._repository._client.insert(
                 "market_live_state",
-                [[
-                    event.created_at,
-                    event.event_id,
-                    symbol,
-                    int(payload.get("trade_count", 0)),
-                    json.dumps(payload.get("order_flow"), sort_keys=True, default=str),
-                    json.dumps(payload.get("liquidity_events", []), sort_keys=True, default=str),
-                    _optional_float(payload.get("best_bid")),
-                    _optional_float(payload.get("best_ask")),
-                    state_timestamp,
-                ]],
+                [
+                    [
+                        event.created_at,
+                        event.event_id,
+                        symbol,
+                        int(payload.get("trade_count", 0)),
+                        json.dumps(
+                            payload.get("order_flow"), sort_keys=True, default=str
+                        ),
+                        json.dumps(
+                            payload.get("liquidity_events", []),
+                            sort_keys=True,
+                            default=str,
+                        ),
+                        _optional_float(payload.get("best_bid")),
+                        _optional_float(payload.get("best_ask")),
+                        state_timestamp,
+                    ]
+                ],
                 column_names=[
-                    "time", "event_id", "symbol", "trade_count", "order_flow_json",
-                    "liquidity_events_json", "best_bid", "best_ask", "state_timestamp",
+                    "time",
+                    "event_id",
+                    "symbol",
+                    "trade_count",
+                    "order_flow_json",
+                    "liquidity_events_json",
+                    "best_bid",
+                    "best_ask",
+                    "state_timestamp",
                 ],
             )
             self._record_success(event)
@@ -232,7 +294,13 @@ class MarketOSPersistence(AITOSModule):
         self._errors += 1
         logger.exception(
             "failed to persist Market OS event",
-            extra={"aitos_extra": {"stream": stream, "topic": event.topic, "event_id": event.event_id}},
+            extra={
+                "aitos_extra": {
+                    "stream": stream,
+                    "topic": event.topic,
+                    "event_id": event.event_id,
+                }
+            },
         )
 
 
