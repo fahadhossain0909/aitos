@@ -181,14 +181,55 @@ jobs:
               fi
             fi
 
+            echo "=== Docker runtime preflight ==="
+            docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
+            echo "=== Data disk ==="
+            df -h "$DATA_ROOT"
+            echo "=== Docker disk usage ==="
+            docker system df
+            echo "=== Existing AITOS containers ==="
+            docker ps -a --filter 'name=aitos-' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+
             echo "Logging in to GHCR..."
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             echo "Validating docker-compose configuration..."
             docker compose config > /dev/null
             echo "Pulling immutable application image sha-${{ github.sha }}..."
             docker compose pull
-            echo "Starting pre-built application without VPS-side Docker build..."
-            docker compose up -d
+
+            echo "=== Pre-start container state ==="
+            docker compose ps --all
+            echo "=== Starting pre-built application without VPS-side Docker build ==="
+            echo "Docker startup timeout: 4 minutes"
+            set +e
+            timeout --foreground --signal=TERM --kill-after=30s 4m docker compose up -d
+            compose_rc=$?
+            set -e
+
+            if [ "$compose_rc" -ne 0 ]; then
+              if [ "$compose_rc" -eq 124 ] || [ "$compose_rc" -eq 137 ]; then
+                echo "::error::docker compose up -d exceeded the 4-minute startup budget. Deployment is stopping here instead of consuming the full SSH timeout."
+              else
+                echo "::error::docker compose up -d failed with exit code $compose_rc."
+              fi
+              echo "=== Container state at startup failure ==="
+              docker compose ps --all || true
+              docker ps -a --filter 'name=aitos-' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
+              echo "=== Detailed container states ==="
+              for c in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
+                if docker inspect "$c" >/dev/null 2>&1; then
+                  echo "--- $c ---"
+                  docker inspect --format 'status={{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$c" || true
+                fi
+              done
+              echo "=== Recent container logs ==="
+              docker compose logs --no-color --tail=150 clickhouse redis neo4j paper learning storage-maintenance 2>/dev/null || true
+              echo "=== Docker events from the last 10 minutes ==="
+              docker events --since 10m --until 0s --filter type=container 2>/dev/null | tail -200 || true
+              echo "=== Filesystem state ==="
+              df -h "$DATA_ROOT" . || true
+              exit "$compose_rc"
+            fi
 
             echo "=== Container status after startup ==="
             docker compose ps --all
