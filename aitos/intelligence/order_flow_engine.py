@@ -32,6 +32,11 @@ class OrderFlowFeatures:
     direction: str
     timestamp: datetime | None
 
+    @property
+    def bias_score(self) -> float:
+        """Backward-compatible 0-10 order-flow bias used by the scanner."""
+        return self.imbalance
+
 
 class OrderFlowEngine:
     """Rolling order-flow state with deterministic batch/live equivalence."""
