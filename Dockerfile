@@ -16,13 +16,17 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
-COPY aitos/ ./aitos/
-COPY run_paper_trading.py run_live_trading.py run_continual_learning.py ./
+# Create the runtime user before copying application files so Docker can set
+# ownership during COPY instead of recursively walking the whole application
+# tree in a separate layer.
+RUN useradd --create-home --shell /bin/bash aitos
+
+COPY --chown=aitos:aitos aitos/ ./aitos/
+COPY --chown=aitos:aitos run_paper_trading.py run_live_trading.py run_continual_learning.py ./
 
 # Non-root user -- the app has no business running as root, and root
 # inside a container is one less thing to worry about if anything in the
 # dependency chain is ever compromised.
-RUN useradd --create-home --shell /bin/bash aitos && chown -R aitos:aitos /app
 USER aitos
 
 # Both entrypoint scripts' health servers listen on one of these, depending
@@ -30,5 +34,5 @@ USER aitos
 EXPOSE 8090 8091
 
 # No CMD here on purpose -- docker-compose.yml's per-service `command:`
-# picks run_paper_trading.py or run_live_trading.py explicitly, so it's
+# picks run_paper_trading.py or run_continual_learning.py explicitly, so it's
 # never ambiguous which one a given container is running.
