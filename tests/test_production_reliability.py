@@ -3,8 +3,8 @@ import pytest
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.exchange.symbol_filters import SymbolFilters
 from aitos.execution.order_executor import OrderRequest, SimulatedOrderExecutor
-from aitos.models.trade import Opportunity, TradeSide
-from aitos.trading.persistent_state import IdempotentOrderExecutor
+from aitos.models.trade import Opportunity, Trade, TradeLifecycleState, TradeSide
+from aitos.trading.persistent_state import IdempotentOrderExecutor, TradeStatePersistence
 
 
 class CountingExecutor(SimulatedOrderExecutor):
@@ -77,6 +77,56 @@ async def test_symbol_filter_refresher_loads_filters_and_stops():
         assert refresher.refresh_count == 1
     finally:
         await refresher.stop()
+
+
+class FakeStateStore:
+    def __init__(self, trades):
+        self.trades = trades
+
+    async def load_open_trades(self):
+        return list(self.trades)
+
+    async def initialize(self):
+        return None
+
+
+class FakeLifecycle:
+    def __init__(self):
+        self._open_trades = {}
+
+
+@pytest.mark.asyncio
+async def test_open_trade_is_restored_after_restart(event_bus):
+    trade = Trade(
+        trade_id="trade-restart",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=2.0,
+        position_size_usd=100.0,
+        risk_amount_usd=5.0,
+        strategy_id="test",
+        agent_consensus={},
+        explanation="restart recovery",
+        sl_price=95.0,
+        tp_price=110.0,
+        take_profit_levels=[110.0],
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-08-24T03:00:00+00:00",
+    )
+    lifecycle = FakeLifecycle()
+    persistence = TradeStatePersistence(
+        event_bus,
+        lifecycle,
+        FakeStateStore([trade]),
+    )
+
+    restored = await persistence.restore()
+
+    assert restored == 1
+    assert lifecycle._open_trades["trade-restart"].symbol == "BTCUSDT"
+    assert lifecycle._open_trades["trade-restart"].state == TradeLifecycleState.POSITION_OPENED
 
 
 @pytest.mark.asyncio
