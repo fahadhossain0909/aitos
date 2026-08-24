@@ -1,0 +1,17 @@
+<clickhouse>
+    <!-- 2-vCPU / 12-GB production VPS guardrails. Keep headroom for Neo4j and AITOS. -->
+    <max_server_memory_usage>4831838208</max_server_memory_usage>
+    <max_server_memory_usage_to_ram_ratio>0.40</max_server_memory_usage_to_ram_ratio>
+
+    <!-- Limit MergeTree background work so merges cannot consume both vCPUs. -->
+    <background_pool_size>2</background_pool_size>
+    <background_mer_pool_size>1</background_mer_pool_size>
+    <background_schedule_pool_size>1</background_schedule_pool_size>
+
+    <!-- Keep a meaningful amount of filesystem headroom for merges and recovery. -->
+    <keep_free_space_bytes>21474836480</keep_free_space_bytes>
+
+    <!-- Bound caches rather than allowing defaults to grow aggressively. -->
+    <mark_cache_size>536870912</mark_cache_size>
+    <uncompressed_cache_size>268435456</uncompressed_cache_size>
+</clickhouse>
