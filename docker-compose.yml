@@ -26,14 +26,15 @@ services:
     cpus: "1.0"
     mem_limit: 5g
     logging: {driver: json-file, options: {max-size: "50m", max-file: "5"}}
-    # Authenticate as the same application user created by the image entrypoint.
-    # Using the implicit default user here breaks when CLICKHOUSE_USER is customized.
+    # Use the HTTP ping endpoint for readiness. It tests the same interface
+    # used by AITOS (port 8123) and avoids treating native-client port 9000
+    # availability as the service readiness signal.
     healthcheck:
-      test: ["CMD-SHELL", "clickhouse-client --user \"$${CLICKHOUSE_USER:-default}\" --password \"$${CLICKHOUSE_PASSWORD:-}\" --query \"SELECT 1\" >/dev/null"]
+      test: ["CMD-SHELL", "wget --spider -q --timeout=5 http://127.0.0.1:8123/ping || exit 1"]
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 60s
+      timeout: 7s
+      retries: 12
+      start_period: 120s
     restart: unless-stopped
 
   neo4j:
