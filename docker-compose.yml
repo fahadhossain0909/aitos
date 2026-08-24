@@ -23,6 +23,7 @@ services:
     volumes:
       - "${CLICKHOUSE_DATA_DIR:-./.storage/data/clickhouse}:/var/lib/clickhouse"
       - ./docker/clickhouse/config.d/aitos.xml:/etc/clickhouse-server/config.d/aitos.xml:ro
+      - ./docker/clickhouse/users.d/aitos.xml:/etc/clickhouse-server/users.d/aitos.xml:ro
     cpus: "1.0"
     mem_limit: 5g
     logging: {driver: json-file, options: {max-size: "50m", max-file: "5"}}
