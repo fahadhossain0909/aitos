@@ -1,4 +1,4 @@
-"""Bounded storage maintenance for ClickHouse and the backtest cache."""
+"""Bounded storage maintenance for ClickHouse and boot-disk caches."""
 
 from __future__ import annotations
 
@@ -13,33 +13,21 @@ import clickhouse_connect
 
 RETENTION_LADDER = (90, 30, 15, 10, 7)
 DEFAULT_DB = "aitos"
-DEFAULT_BUDGET_GB = 100
-DEFAULT_TARGET_GB = 90
-DEFAULT_CACHE_GB = 20
+DEFAULT_BUDGET_GB = 130
+DEFAULT_TARGET_GB = 120
+DEFAULT_CACHE_GB = 22.5
+DEFAULT_OTHERS_GB = 22.5
+DEFAULT_BOOT_BUFFER_GB = 5.0
 
-# Only explicitly listed high-volume historical tables can be evicted.
-# Unknown tables are never mutated automatically.
 EVICTABLE_TABLES = {
     "order_book_snapshots": "time",
     "order_book_updates": "time",
     "market_ohlcv": "time",
 }
 
-# Extra safeguard: even if a future table is accidentally added to the
-# evictable list, names containing these tokens remain protected.
 PROTECTED_TABLE_TOKENS = (
-    "trade",
-    "order",
-    "fill",
-    "position",
-    "decision",
-    "risk",
-    "model",
-    "experience",
-    "journal",
-    "strategy",
-    "execution",
-    "portfolio",
+    "trade", "order", "fill", "position", "decision", "risk", "model",
+    "experience", "journal", "strategy", "execution", "portfolio",
 )
 PROTECTED_CACHE_NAMES = {"manifest.json", "download_manifest.json", ".gitkeep"}
 
@@ -49,26 +37,21 @@ class StorageConfig:
     clickhouse_budget_gb: float = DEFAULT_BUDGET_GB
     clickhouse_target_gb: float = DEFAULT_TARGET_GB
     backtest_cache_gb: float = DEFAULT_CACHE_GB
+    others_gb: float = DEFAULT_OTHERS_GB
+    boot_buffer_gb: float = DEFAULT_BOOT_BUFFER_GB
     interval_seconds: int = 86400
     dry_run: bool = False
 
     @classmethod
     def from_env(cls) -> "StorageConfig":
         return cls(
-            clickhouse_budget_gb=float(
-                os.getenv("CLICKHOUSE_STORAGE_BUDGET_GB", DEFAULT_BUDGET_GB)
-            ),
-            clickhouse_target_gb=float(
-                os.getenv("CLICKHOUSE_STORAGE_TARGET_GB", DEFAULT_TARGET_GB)
-            ),
-            backtest_cache_gb=float(
-                os.getenv("BACKTEST_CACHE_MAX_GB", DEFAULT_CACHE_GB)
-            ),
-            interval_seconds=int(
-                os.getenv("STORAGE_MAINTENANCE_INTERVAL_SECONDS", 86400)
-            ),
-            dry_run=os.getenv("STORAGE_MAINTENANCE_DRY_RUN", "false").lower()
-            in {"1", "true", "yes"},
+            clickhouse_budget_gb=float(os.getenv("CLICKHOUSE_STORAGE_BUDGET_GB", DEFAULT_BUDGET_GB)),
+            clickhouse_target_gb=float(os.getenv("CLICKHOUSE_STORAGE_TARGET_GB", DEFAULT_TARGET_GB)),
+            backtest_cache_gb=float(os.getenv("BACKTEST_CACHE_MAX_GB", DEFAULT_CACHE_GB)),
+            others_gb=float(os.getenv("OTHERS_MAX_GB", DEFAULT_OTHERS_GB)),
+            boot_buffer_gb=float(os.getenv("BOOT_FREE_BUFFER_GB", DEFAULT_BOOT_BUFFER_GB)),
+            interval_seconds=int(os.getenv("STORAGE_MAINTENANCE_INTERVAL_SECONDS", 86400)),
+            dry_run=os.getenv("STORAGE_MAINTENANCE_DRY_RUN", "false").lower() in {"1", "true", "yes"},
         )
 
 
@@ -81,10 +64,7 @@ def _protected(table: str) -> bool:
     return any(token in name for token in PROTECTED_TABLE_TOKENS)
 
 
-def choose_retention_days(
-    current_gb: float, target_gb: float, evictable_daily_gb: float
-) -> int:
-    """Choose the longest configured retention window that fits the budget."""
+def choose_retention_days(current_gb: float, target_gb: float, evictable_daily_gb: float) -> int:
     if current_gb <= target_gb or evictable_daily_gb <= 0:
         return RETENTION_LADDER[0]
     for days in RETENTION_LADDER:
@@ -93,9 +73,7 @@ def choose_retention_days(
     return RETENTION_LADDER[-1]
 
 
-def _table_inventory(
-    client, database: str
-) -> list[tuple[str, int, datetime | None, datetime | None]]:
+def _table_inventory(client, database: str) -> list[tuple[str, int, datetime | None, datetime | None]]:
     rows = client.query(
         """
         SELECT table, sum(bytes_on_disk) AS bytes,
@@ -110,16 +88,10 @@ def _table_inventory(
     return [(str(row[0]), int(row[1] or 0), row[2], row[3]) for row in rows]
 
 
-def enforce_clickhouse(
-    client, config: StorageConfig, database: str = DEFAULT_DB
-) -> dict:
+def enforce_clickhouse(client, config: StorageConfig, database: str = DEFAULT_DB) -> dict:
     inventory = _table_inventory(client, database)
     total_bytes = sum(row[1] for row in inventory)
-    evictable = [
-        row
-        for row in inventory
-        if row[0] in EVICTABLE_TABLES and not _protected(row[0])
-    ]
+    evictable = [row for row in inventory if row[0] in EVICTABLE_TABLES and not _protected(row[0])]
     evictable_bytes = sum(row[1] for row in evictable)
     protected_bytes = max(0, total_bytes - evictable_bytes)
 
@@ -141,16 +113,9 @@ def enforce_clickhouse(
 
     target_bytes = config.clickhouse_target_gb * (1024**3)
     available_evictable_bytes = max(0.0, target_bytes - protected_bytes)
-    retention = choose_retention_days(
-        _gb(evictable_bytes),
-        _gb(available_evictable_bytes),
-        _gb(daily_bytes),
-    )
-
+    retention = choose_retention_days(_gb(evictable_bytes), _gb(available_evictable_bytes), _gb(daily_bytes))
     evicted: list[str] = []
-    # Keep the configured target as the normal cleanup trigger. The physical
-    # budget is a safety boundary for VPS sizing; this controller never deletes
-    # protected data to force the target lower.
+
     if _gb(total_bytes) > config.clickhouse_target_gb:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
         for table, _size, _min_time, _max_time in evictable:
@@ -182,6 +147,10 @@ def _files(root: Path) -> Iterable[Path]:
     return (path for path in root.rglob("*") if path.is_file())
 
 
+def _directory_size(root: Path) -> int:
+    return sum(path.stat().st_size for path in _files(root) if path.exists())
+
+
 def enforce_backtest_cache(root: Path, max_gb: float, dry_run: bool = False) -> dict:
     files = [path for path in _files(root) if path.name not in PROTECTED_CACHE_NAMES]
     files.sort(key=lambda path: path.stat().st_mtime if path.exists() else 0)
@@ -199,11 +168,23 @@ def enforce_backtest_cache(root: Path, max_gb: float, dry_run: bool = False) -> 
         total -= size
         removed.append(str(path))
 
+    return {"cache_gb": _gb(total), "max_gb": max_gb, "removed": removed, "dry_run": dry_run}
+
+
+def inspect_boot_storage(backtest_root: Path, others_root: Path, config: StorageConfig) -> dict:
+    backtest_gb = _gb(_directory_size(backtest_root))
+    others_gb = _gb(_directory_size(others_root))
+    # This service deliberately does not delete arbitrary "others" data or the
+    # 5 GB reserve. It reports violations so deployment/monitoring can react.
     return {
-        "cache_gb": _gb(total),
-        "max_gb": max_gb,
-        "removed": removed,
-        "dry_run": dry_run,
+        "backtest_gb": backtest_gb,
+        "backtest_max_gb": config.backtest_cache_gb,
+        "others_gb": others_gb,
+        "others_max_gb": config.others_gb,
+        "boot_allocated_gb": config.backtest_cache_gb + config.others_gb,
+        "boot_buffer_gb": config.boot_buffer_gb,
+        "backtest_over_budget": backtest_gb > config.backtest_cache_gb,
+        "others_over_budget": others_gb > config.others_gb,
     }
 
 
@@ -216,18 +197,15 @@ def run_once(config: StorageConfig) -> dict:
         database=os.getenv("CLICKHOUSE_DB", DEFAULT_DB),
     )
     try:
-        clickhouse_result = enforce_clickhouse(
-            client, config, os.getenv("CLICKHOUSE_DB", DEFAULT_DB)
-        )
+        clickhouse_result = enforce_clickhouse(client, config, os.getenv("CLICKHOUSE_DB", DEFAULT_DB))
     finally:
         client.close()
 
-    cache_result = enforce_backtest_cache(
-        Path(os.getenv("BACKTEST_DATA_DIR", "/data/backtest")),
-        config.backtest_cache_gb,
-        config.dry_run,
-    )
-    return {"clickhouse": clickhouse_result, "backtest_cache": cache_result}
+    backtest_root = Path(os.getenv("BACKTEST_DATA_DIR", "/data"))
+    others_root = Path(os.getenv("OTHERS_DATA_DIR", "/others"))
+    cache_result = enforce_backtest_cache(backtest_root, config.backtest_cache_gb, config.dry_run)
+    boot_result = inspect_boot_storage(backtest_root, others_root, config)
+    return {"clickhouse": clickhouse_result, "backtest_cache": cache_result, "boot_storage": boot_result}
 
 
 def main() -> None:
