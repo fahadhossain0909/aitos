@@ -10,9 +10,9 @@ from typing import Optional
 from redis.asyncio import Redis
 
 from aitos.app import (
-    PaperPortfolioTracker,
     build_system,
     initialize_all,
+    PaperPortfolioTracker,
     run_scan_and_trade_cycle,
     shutdown_all,
 )
