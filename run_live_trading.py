@@ -153,7 +153,10 @@ async def main() -> None:
         while not stop_event.is_set():
             try:
                 submitted = await run_scan_and_trade_cycle(
-                    components, tracker, is_production=True, approved_by=approved_by
+                    components,
+                    tracker,
+                    is_production=True,
+                    approved_by=approved_by,
                 )
                 rl_scorer.save_state()
                 outcome_classifier.save_state()
@@ -163,7 +166,9 @@ async def main() -> None:
                     extra={
                         "aitos_extra": {
                             "submitted": submitted,
-                            "open_trades": len(components.trade_lifecycle.get_open_trades()),
+                            "open_trades": len(
+                                components.trade_lifecycle.get_open_trades()
+                            ),
                             "account_equity_usd": tracker._last_known_equity_usd,
                             "rl_samples": rl_scorer.n_samples_seen,
                             "ml_samples": outcome_classifier.n_samples_seen,
@@ -176,7 +181,9 @@ async def main() -> None:
             except Exception as exc:
                 logger.error("scan/trade cycle failed: %s", exc)
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
+                await asyncio.wait_for(
+                    stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS
+                )
             except asyncio.TimeoutError:
                 pass
     finally:
