@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
-"""AITOS LIVE trading entrypoint with persistent market/decision/learning data."""
+"""AITOS LIVE trading entrypoint with durable production runtime state."""
 
 from __future__ import annotations
 
 import asyncio
 import signal
-from typing import Optional
 
 from redis.asyncio import Redis
 
 from aitos.app import (
-    LivePortfolioTracker,
     build_system,
     initialize_all,
     run_scan_and_trade_cycle,
@@ -20,6 +18,7 @@ from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
+from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.journal.repository import JournalRepository
@@ -28,6 +27,12 @@ from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.live_trading import confirm_live_trading, prepare_live_executor
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
+from aitos.trading.persistent_state import (
+    DurableTradingStateStore,
+    IdempotentOrderExecutor,
+    PersistentLivePortfolioTracker,
+    TradeStatePersistence,
+)
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
@@ -37,6 +42,7 @@ SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 SCAN_INTERVAL_SECONDS = 60.0
 KLINE_TIMEFRAME = "15m"
 HEALTH_SERVER_PORT = 8091
+SYMBOL_FILTER_TTL_SECONDS = 300.0
 
 
 async def connect_redis_with_retry(settings) -> Redis:
@@ -86,7 +92,8 @@ async def try_connect_neo4j(settings):
     from neo4j import AsyncGraphDatabase
 
     driver = AsyncGraphDatabase.driver(
-        settings.neo4j.uri, auth=(settings.neo4j.user, settings.neo4j.password)
+        settings.neo4j.uri,
+        auth=(settings.neo4j.user, settings.neo4j.password),
     )
     try:
         await driver.verify_connectivity()
@@ -100,7 +107,10 @@ async def try_connect_neo4j(settings):
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    approved_by = confirm_live_trading(SYMBOLS, testnet=settings.binance.testnet)
+    approved_by = confirm_live_trading(
+        SYMBOLS,
+        testnet=settings.binance.testnet,
+    )
     redis_client = await connect_redis_with_retry(settings)
     from aitos.eventbus.redis_bus import EventBus
 
@@ -108,7 +118,13 @@ async def main() -> None:
     await event_bus.initialize({})
     market_repo, journal_repo = await try_connect_clickhouse_repositories(settings)
     graph_driver = await try_connect_neo4j(settings)
-    order_executor = await prepare_live_executor(settings, SYMBOLS)
+    raw_order_executor = await prepare_live_executor(settings, SYMBOLS)
+    order_executor = IdempotentOrderExecutor(raw_order_executor)
+    exchange = BinanceFuturesAdapter()
+    state_store = DurableTradingStateStore(market_repo)
+    trade_state_persistence = None
+    if market_repo is not None:
+        await state_store.initialize()
     rl_scorer = DeepValueRLScorer()
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
@@ -117,7 +133,7 @@ async def main() -> None:
     attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
     components = await build_system(
         event_bus=event_bus,
-        exchange=BinanceFuturesAdapter(),
+        exchange=exchange,
         order_executor=order_executor,
         symbols=SYMBOLS,
         kline_timeframe=KLINE_TIMEFRAME,
@@ -125,26 +141,56 @@ async def main() -> None:
         market_data_repository=market_repo,
         journal_repository=journal_repo,
         graph_driver=graph_driver,
-        kernel=AIKernel(event_bus=event_bus, require_human_approval_for_prod=True),
+        kernel=AIKernel(
+            event_bus=event_bus,
+            require_human_approval_for_prod=True,
+        ),
         rl_scorer=rl_scorer,
         outcome_classifier=outcome_classifier,
         attention_explainer=attention_explainer,
         use_exchange_side_stops=True,
     )
+    if market_repo is not None:
+        trade_state_persistence = TradeStatePersistence(
+            event_bus,
+            components.trade_lifecycle,
+            state_store,
+        )
+        await trade_state_persistence.restore()
+        await trade_state_persistence.initialize()
     await initialize_all(components)
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     await market_os_persistence.initialize({})
     experience_recorder = LearningExperienceRecorder(
-        event_bus, market_repo, source="live"
+        event_bus,
+        market_repo,
+        source="live",
     )
     await experience_recorder.initialize({})
+    filter_refresher = SymbolFilterRefresher(
+        exchange,
+        raw_order_executor,
+        SYMBOLS,
+        ttl_seconds=SYMBOL_FILTER_TTL_SECONDS,
+    )
+    await filter_refresher.start()
     health_server = HealthServer(
         components.all_modules() + [experience_recorder, market_os_persistence],
         host="0.0.0.0",  # nosec B104 - required for Docker port forwarding
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
-    tracker = LivePortfolioTracker(order_executor=order_executor)
+    tracker = (
+        PersistentLivePortfolioTracker(order_executor, state_store)
+        if market_repo is not None
+        else None
+    )
+    if tracker is not None:
+        await tracker.restore()
+    else:
+        from aitos.app import LivePortfolioTracker
+
+        tracker = LivePortfolioTracker(order_executor=order_executor)
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -170,6 +216,7 @@ async def main() -> None:
                                 components.trade_lifecycle.get_open_trades()
                             ),
                             "account_equity_usd": tracker._last_known_equity_usd,
+                            "drawdown_peak_equity_usd": tracker._peak_equity_usd,
                             "rl_samples": rl_scorer.n_samples_seen,
                             "ml_samples": outcome_classifier.n_samples_seen,
                             "attention_samples": attention_explainer.n_samples_seen,
@@ -188,9 +235,12 @@ async def main() -> None:
         rl_scorer.save_state()
         outcome_classifier.save_state()
         save_attention_model(attention_explainer, attention_path)
+        await filter_refresher.stop()
         await health_server.stop()
         await experience_recorder.shutdown()
         await market_os_persistence.shutdown()
+        if trade_state_persistence is not None:
+            await trade_state_persistence.shutdown()
         await shutdown_all(components)
         await order_executor.close()
         if market_repo is not None:
