@@ -88,7 +88,7 @@ jobs:
           free -h
           echo "=== Disk ==="
           df -h /
-      - name: Deploy to remote host over SSH
+      - name: Deploy pre-built image to remote host over SSH
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
         with:
@@ -103,12 +103,10 @@ jobs:
             if [ ! -d .git ]; then
               git clone https://github.com/${{ github.repository }}.git .
             else
-              git pull --ff-only
+              git fetch origin main
+              git reset --hard origin/main
             fi
 
-            # Final VPS storage policy:
-            # Boot (50 GB): 22.5 GB backtest + 22.5 GB others + 5 GB free buffer.
-            # Data (150 GB): ONLY ClickHouse, Neo4j and persistent Redis data.
             DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
             if ! mountpoint -q "$DATA_ROOT"; then
               echo "::error::$DATA_ROOT is not a mounted 150 GB data disk; refusing to place database data on the boot disk."
@@ -117,7 +115,6 @@ jobs:
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
             mkdir -p ./.storage/backtest ./.storage/others ./.storage/others/backups ./.storage/others/snapshots
 
-            # Never intentionally consume the 5 GiB boot-disk safety buffer.
             boot_free_bytes=$(df --output=avail -B1 . | tail -1 | tr -d ' ')
             min_free_bytes=$((5 * 1024 * 1024 * 1024))
             if [ "$boot_free_bytes" -lt "$min_free_bytes" ]; then
@@ -169,8 +166,8 @@ jobs:
             APP_PORT=8000
             APP_HOST=0.0.0.0
             COMPOSE_PROJECT_NAME=aitos
-            DOCKER_REGISTRY=ghcr.io
-            DOCKER_USERNAME=${{ github.actor }}
+            AITOS_IMAGE=ghcr.io/fahadhossain0909/aitos
+            AITOS_IMAGE_TAG=sha-${{ github.sha }}
             DATABASE_URL=${{ secrets.DATABASE_URL }}
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
@@ -184,11 +181,14 @@ jobs:
               fi
             fi
 
-            docker login ${{ env.REGISTRY }} -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
+            echo "Logging in to GHCR..."
+            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             echo "Validating docker-compose configuration..."
             docker compose config > /dev/null
+            echo "Pulling immutable application image sha-${{ github.sha }}..."
             docker compose pull
-            docker compose up -d --build
+            echo "Starting pre-built application without VPS-side Docker build..."
+            docker compose up -d
 
             echo "=== Container status after startup ==="
             docker compose ps --all
