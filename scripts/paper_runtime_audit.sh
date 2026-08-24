@@ -44,7 +44,7 @@ if command -v docker >/dev/null 2>&1; then
     status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || echo unknown)"
     printf '%-40s restart=%s status=%s\n' "$container" "$restart_count" "$status"
     if [ "$restart_count" -gt 0 ]; then
-      blockers=1
+      echo "WARNING: $container has historical Docker restarts; current runtime state is evaluated separately."
     fi
   done < <(docker ps -a --format '{{.Names}}' | grep '^aitos-' || true)
   echo
@@ -105,7 +105,7 @@ if command -v curl >/dev/null 2>&1; then
     blockers=1
   fi
   echo
-echo '--- AITOS metrics endpoint ---'
+  echo '--- AITOS metrics endpoint ---'
   if curl --fail --silent --show-error --max-time 5 "$METRICS_URL" | head -n 20; then
     echo 'Metrics endpoint: PASS'
   else
