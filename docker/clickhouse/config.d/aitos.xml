@@ -3,6 +3,13 @@
     <max_server_memory_usage>4831838208</max_server_memory_usage>
     <max_server_memory_usage_to_ram_ratio>0.40</max_server_memory_usage_to_ram_ratio>
 
+    <!-- Server-side batching protects MergeTree from high-frequency single-row callers. -->
+    <async_insert>1</async_insert>
+    <wait_for_async_insert>1</wait_for_async_insert>
+    <async_insert_busy_timeout_ms>1000</async_insert_busy_timeout_ms>
+    <async_insert_max_data_size>1048576</async_insert_max_data_size>
+    <async_insert_threads>2</async_insert_threads>
+
     <!-- Limit MergeTree background work so merges cannot consume both vCPUs. -->
     <background_pool_size>2</background_pool_size>
     <background_mer_pool_size>1</background_mer_pool_size>
