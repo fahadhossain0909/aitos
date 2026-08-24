@@ -23,7 +23,13 @@ from aitos.exchange.parsing import (
 from aitos.exchange.rate_limiter import TokenBucketRateLimiter
 from aitos.exchange.symbol_filters import SymbolFilters, parse_exchange_info
 from aitos.logging_setup import get_logger
-from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot, TradeTick
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeTick,
+)
 
 logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
@@ -64,20 +70,32 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         if self._session is not None and not self._session.closed:
             await self._session.close()
 
-    async def fetch_klines(self, symbol: str, timeframe: str, limit: int = 500) -> List[Kline]:
+    async def fetch_klines(
+        self, symbol: str, timeframe: str, limit: int = 500
+    ) -> List[Kline]:
         weight = 5 if limit <= 100 else (10 if limit <= 500 else 25)
         raw = await self._get(
-            "/fapi/v1/klines", {"symbol": symbol, "interval": timeframe, "limit": limit}, weight
+            "/fapi/v1/klines",
+            {"symbol": symbol, "interval": timeframe, "limit": limit},
+            weight,
         )
         return [parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw]
 
-    async def fetch_order_book(self, symbol: str, limit: int = 50) -> OrderBookSnapshot:
+    async def fetch_order_book(
+        self, symbol: str, limit: int = 50
+    ) -> OrderBookSnapshot:
         weight = 2 if limit <= 50 else (5 if limit <= 100 else 10)
-        raw = await self._get("/fapi/v1/depth", {"symbol": symbol, "limit": limit}, weight)
+        raw = await self._get(
+            "/fapi/v1/depth", {"symbol": symbol, "limit": limit}, weight
+        )
         return parse_order_book_rest(raw, symbol=symbol)
 
-    async def fetch_recent_trades(self, symbol: str, limit: int = 500) -> List[TradeTick]:
-        raw = await self._get("/fapi/v1/trades", {"symbol": symbol, "limit": limit}, weight=5)
+    async def fetch_recent_trades(
+        self, symbol: str, limit: int = 500
+    ) -> List[TradeTick]:
+        raw = await self._get(
+            "/fapi/v1/trades", {"symbol": symbol, "limit": limit}, weight=5
+        )
         return [parse_trade_rest(row, symbol=symbol) for row in raw]
 
     async def fetch_funding_rate(self, symbol: str) -> FundingRate:
@@ -90,12 +108,20 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             await self._get("/fapi/v1/openInterest", {"symbol": symbol}, weight=1)
         )
 
-    async def fetch_exchange_info(self, symbols: Optional[List[str]] = None) -> Dict[str, SymbolFilters]:
+    async def fetch_exchange_info(
+        self, symbols: Optional[List[str]] = None
+    ) -> Dict[str, SymbolFilters]:
         raw = await self._get("/fapi/v1/exchangeInfo", {}, weight=1)
         all_filters = parse_exchange_info(raw)
-        return all_filters if symbols is None else {s: all_filters[s] for s in symbols if s in all_filters}
+        return (
+            all_filters
+            if symbols is None
+            else {s: all_filters[s] for s in symbols if s in all_filters}
+        )
 
-    async def stream_klines(self, symbols: List[str], timeframe: str) -> AsyncIterator[Kline]:
+    async def stream_klines(
+        self, symbols: List[str], timeframe: str
+    ) -> AsyncIterator[Kline]:
         streams = [f"{s.lower()}@kline_{timeframe}" for s in symbols]
 
         async def _parse(data: Any) -> Kline:
@@ -174,20 +200,26 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    async def stream_order_book(self, symbols: List[str], levels: int = 20) -> AsyncIterator[OrderBookSnapshot]:
+    async def stream_order_book(
+        self, symbols: List[str], levels: int = 20
+    ) -> AsyncIterator[OrderBookSnapshot]:
         """Reconstruct a local L2 book with loss-aware Binance bootstrap."""
         if not symbols:
             return
 
         streams = [f"{s.lower()}@depth@100ms" for s in symbols]
         symbol_by_stream = {f"{s.lower()}@depth@100ms": s for s in symbols}
-        queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE)
+        queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(
+            maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE
+        )
         producer_done = asyncio.Event()
         producer_ready = asyncio.Event()
 
         async def producer() -> None:
             try:
-                async for data, stream_name in self._raw_stream(streams, emit_reconnect=True):
+                async for data, stream_name in self._raw_stream(
+                    streams, emit_reconnect=True
+                ):
                     producer_ready.set()
                     try:
                         queue.put_nowait((data, stream_name))
@@ -207,11 +239,16 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             finally:
                 producer_done.set()
 
-        producer_task = asyncio.create_task(producer(), name="binance-orderbook-producer")
+        producer_task = asyncio.create_task(
+            producer(), name="binance-orderbook-producer"
+        )
         books: Dict[str, LocalOrderBook] = {}
         try:
             try:
-                await asyncio.wait_for(producer_ready.wait(), timeout=ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS)
+                await asyncio.wait_for(
+                    producer_ready.wait(),
+                    timeout=ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS,
+                )
             except asyncio.TimeoutError:
                 raise RuntimeError("Binance order-book stream did not become ready")
             while True:
@@ -223,7 +260,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     books[symbol] = LocalOrderBook(symbol=symbol, levels=levels)
                 try:
                     event = parse_depth_diff_ws(data, symbol=symbol)
-                    snapshot = await books[symbol].apply(event, self.fetch_order_book)
+                    snapshot = await books[symbol].apply(
+                        event, self.fetch_order_book
+                    )
                 except OrderBookSequenceError:
                     books[symbol] = LocalOrderBook(symbol=symbol, levels=levels)
                     snapshot = None
@@ -237,11 +276,15 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
-        async with self._session.get(f"{REST_BASE_URL}{path}", params=params) as response:
+        async with self._session.get(
+            f"{REST_BASE_URL}{path}", params=params
+        ) as response:
             response.raise_for_status()
             return await response.json()
 
-    async def _stream(self, streams: List[str], parser: Callable[[Any], Any]) -> AsyncIterator[Any]:
+    async def _stream(
+        self, streams: List[str], parser: Callable[[Any], Any]
+    ) -> AsyncIterator[Any]:
         async for data, _stream_name in self._raw_stream(streams):
             yield await parser(data)
 
@@ -263,7 +306,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 if emit_reconnect:
                     logger.warning(
                         "Binance combined stream closed, reconnecting",
-                        extra={"aitos_extra": {"streams": streams, "backoff_seconds": backoff}},
+                        extra={
+                            "aitos_extra": {
+                                "streams": streams,
+                                "backoff_seconds": backoff,
+                            }
+                        },
                     )
             except asyncio.CancelledError:
                 raise
