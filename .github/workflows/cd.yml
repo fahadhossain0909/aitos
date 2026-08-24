@@ -18,7 +18,6 @@ jobs:
   publish-image:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
@@ -53,7 +52,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: publish-image
     environment: papertrade
-
     steps:
       - name: Check required deployment secrets
         id: check-secrets
@@ -75,7 +73,6 @@ jobs:
           done
           if [ "$missing" -ne 0 ]; then exit 1; fi
           echo "has_secrets=true" >> "$GITHUB_OUTPUT"
-
       - name: Write SSH key with proper formatting
         if: steps.check-secrets.outputs.has_secrets == 'true'
         env:
@@ -84,7 +81,6 @@ jobs:
           set -euo pipefail
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
-
       - name: Check system resources
         if: steps.check-secrets.outputs.has_secrets == 'true'
         run: |
@@ -92,7 +88,6 @@ jobs:
           free -h
           echo "=== Disk ==="
           df -h /
-
       - name: Deploy to remote host over SSH
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
@@ -120,7 +115,7 @@ jobs:
               exit 1
             fi
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
-            mkdir -p ./.storage/backtest ./.storage/others
+            mkdir -p ./.storage/backtest ./.storage/others ./.storage/others/backups ./.storage/others/snapshots
 
             # Never intentionally consume the 5 GiB boot-disk safety buffer.
             boot_free_bytes=$(df --output=avail -B1 . | tail -1 | tr -d ' ')
@@ -159,8 +154,10 @@ jobs:
             LEARNING_LOOKBACK_HOURS=168
             LEARNING_MODEL_PATH=/models/online_rl/deep_value.pkl
             LEARNING_STATE_PATH=/models/online_rl/worker_state.json
-            LEARNING_POLL_SECONDS=60
             BACKTEST_DATA_DIR=./.storage/backtest
+            OTHERS_DATA_DIR=./.storage/others
+            BACKUP_DIR=./.storage/others/backups
+            SNAPSHOT_DIR=./.storage/others/snapshots
             BINANCE_API_KEY=${{ secrets.BINANCE_API_KEY }}
             BINANCE_API_SECRET=${{ secrets.BINANCE_API_SECRET }}
             BINANCE_TESTNET=${{ secrets.BINANCE_TESTNET || 'true' }}
@@ -211,7 +208,6 @@ jobs:
               fi
               sleep 10
             done
-
             if [ "$status" != '"healthy"' ]; then
               echo "::error::ClickHouse failed to become healthy; printing logs:"
               docker compose logs --no-color --tail=300 aitos-clickhouse || true
