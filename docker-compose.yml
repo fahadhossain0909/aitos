@@ -6,6 +6,8 @@ services:
     volumes: [aitos_redis_data:/data]
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 10}
+    cpus: "0.25"
+    mem_limit: 512m
     restart: unless-stopped
 
   clickhouse:
@@ -18,6 +20,8 @@ services:
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes: [aitos_clickhouse_data:/var/lib/clickhouse]
+    cpus: "1.0"
+    mem_limit: 5g
     healthcheck: {test: ["CMD", "clickhouse-client", "--query", "SELECT 1"], interval: 10s, timeout: 5s, retries: 5, start_period: 60s}
     restart: unless-stopped
 
@@ -27,9 +31,11 @@ services:
     ports: ["127.0.0.1:7474:7474", "127.0.0.1:7687:7687"]
     environment:
       NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-changeme}"
-      NEO4J_dbms_memory_pagecache_size: 512M
+      NEO4J_dbms_memory_pagecache_size: 1G
       NEO4J_dbms_memory_heap_max__size: 1G
     volumes: [aitos_neo4j_data:/data, aitos_neo4j_logs:/logs]
+    cpus: "0.5"
+    mem_limit: 2.5g
     healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10}
     restart: unless-stopped
 
@@ -41,6 +47,8 @@ services:
     environment: {REDIS_HOST: redis, CLICKHOUSE_HOST: clickhouse, NEO4J_URI: bolt://neo4j:7687}
     volumes: [aitos_model_data:/models]
     ports: ["127.0.0.1:8090:8090"]
+    cpus: "0.5"
+    mem_limit: 1.5g
     depends_on: {redis: {condition: service_healthy}, clickhouse: {condition: service_healthy}, neo4j: {condition: service_healthy}}
     healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
     restart: unless-stopped
@@ -60,7 +68,7 @@ services:
       LEARNING_LOOKBACK_HOURS: "168"
     volumes: [aitos_model_data:/models]
     depends_on: {clickhouse: {condition: service_healthy}}
-    cpus: "0.5"
+    cpus: "0.25"
     mem_limit: 512m
     restart: unless-stopped
 
@@ -70,7 +78,7 @@ services:
     volumes: ["${BACKTEST_DATA_DIR:-./data}:/data:ro", "aitos_model_data:/models:ro"]
     environment: {PYTHONUNBUFFERED: "1", CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"}
     depends_on: {clickhouse: {condition: service_healthy}}
-    cpus: "2.0"
+    cpus: "1.5"
     mem_limit: 3g
     restart: "no"
     profiles: [backtest]
@@ -83,6 +91,8 @@ services:
     environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}", CLICKHOUSE_STORAGE_BUDGET_GB: "100", CLICKHOUSE_STORAGE_TARGET_GB: "90", BACKTEST_CACHE_MAX_GB: "20", BACKTEST_DATA_DIR: /data, STORAGE_MAINTENANCE_INTERVAL_SECONDS: "86400", STORAGE_MAINTENANCE_DRY_RUN: "false"}
     volumes: ["${BACKTEST_DATA_DIR:-./data}:/data"]
     depends_on: {clickhouse: {condition: service_healthy}}
+    cpus: "0.25"
+    mem_limit: 256m
     restart: unless-stopped
 
   aitos-live:
@@ -96,6 +106,8 @@ services:
     stdin_open: true
     tty: true
     depends_on: {redis: {condition: service_healthy}, clickhouse: {condition: service_healthy}, neo4j: {condition: service_healthy}}
+    cpus: "0.5"
+    mem_limit: 1.5g
     restart: "no"
     profiles: [live]
 
