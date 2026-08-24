@@ -193,6 +193,7 @@ class DataIngestionService(AITOSModule):
                 maxsize=TRADE_STREAM_QUEUE_SIZE
             )
             try:
+
                 async def producer() -> None:
                     async for trade in self._exchange.stream_trades(self._symbols):
                         try:
