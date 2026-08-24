@@ -13,7 +13,6 @@ jobs:
 
     steps:
       - name: Check required deployment secrets
-        id: check-secrets
         shell: bash
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -31,7 +30,6 @@ jobs:
           if [ "$missing" -ne 0 ]; then
             exit 1
           fi
-          echo "Required deployment secrets are present."
 
       - name: Prepare SSH key
         shell: bash
@@ -43,132 +41,41 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_audit_key
           chmod 600 /tmp/aitos_audit_key
 
-      - name: Run read-only production audit on VPS
+      - name: Run canonical read-only audit on VPS
+        id: audit
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_audit_key
           command_timeout: 10m
-          script: |
-            set -u
-            AUDIT_DIR="$HOME/aitos-production-audit"
-            mkdir -p "$AUDIT_DIR"
-            REPORT="$AUDIT_DIR/report.txt"
-
-            exec > >(tee "$REPORT") 2>&1
-
-            echo "=== AITOS Production VPS Audit ==="
-            echo "timestamp=$(date -Is)"
-            echo "host=$(hostname)"
-            echo "kernel=$(uname -sr)"
-            echo
-
-            echo "=== System resources ==="
-            free -h || true
-            echo
-            df -h / || true
-            echo
-            uptime || true
-            echo
-
-            echo "=== Docker version ==="
-            docker --version || true
-            docker compose version || true
-            echo
-
-            echo "=== Compose container status ==="
-            cd "$HOME/aitos" 2>/dev/null || true
-            docker compose ps --all 2>&1 || true
-            echo
-
-            echo "=== Docker health summary ==="
-            docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>&1 || true
-            echo
-
-            echo "=== AITOS health endpoint ==="
-            curl -fsS --max-time 10 http://127.0.0.1:8090/health 2>&1 || true
-            echo
-
-            echo "=== AITOS metrics endpoint (first 120 lines) ==="
-            curl -fsS --max-time 10 http://127.0.0.1:8090/metrics 2>&1 | head -120 || true
-            echo
-
-            echo "=== Recent application logs ==="
-            docker compose logs --no-color --tail=300 aitos-paper 2>&1 || true
-            echo
-
-            echo "=== Recent learning-service logs ==="
-            docker compose logs --no-color --tail=300 aitos-learning 2>&1 || true
-            echo
-
-            echo "=== Learning container state ==="
-            docker inspect --format '{{json .State}}' aitos-learning 2>&1 || true
-            echo
-
-            echo "=== Learning container resource usage ==="
-            docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' aitos-learning 2>&1 || true
-            echo
-
-            echo "=== Recent service errors ==="
-            docker compose logs --no-color --tail=500 2>&1 | grep -Ei 'error|exception|traceback|fatal|critical|panic|unhealthy|failed|oom|killed' | tail -250 || true
-            echo
-
-            echo "=== ClickHouse health ==="
-            docker inspect --format '{{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-clickhouse 2>&1 || true
-            echo
-
-            echo "=== Redis health ==="
-            docker exec aitos-redis redis-cli ping 2>&1 || true
-            echo
-
-            echo "=== ClickHouse basic connectivity ==="
-            docker exec aitos-clickhouse clickhouse-client --query 'SELECT version()' 2>&1 || true
-            echo
-
-            echo "=== ClickHouse database list (no credentials printed) ==="
-            docker exec aitos-clickhouse clickhouse-client --query 'SHOW DATABASES' 2>&1 || true
-            echo
-
-            echo "=== Recent ClickHouse table row counts (safe metadata only) ==="
-            docker exec aitos-clickhouse clickhouse-client --query "SELECT database, table, total_rows FROM system.tables WHERE database NOT IN ('system','INFORMATION_SCHEMA','information_schema') ORDER BY database, table" 2>&1 || true
-            echo
-
-            echo "=== Recent container restart counts ==="
-            docker ps -a --format '{{.Names}}' | while read -r c; do
-              docker inspect --format '{{.Name}} restart={{.RestartCount}} started={{.State.StartedAt}} status={{.State.Status}}' "$c" 2>/dev/null || true
-            done
-            echo
-
-            echo "=== Audit complete ==="
-            echo "Report saved at: $REPORT"
-
-      - name: Collect audit report from VPS
-        id: collect-report
-        uses: appleboy/ssh-action@v1.2.5
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key_path: /tmp/aitos_audit_key
-          command_timeout: 2m
           capture_stdout: true
           script: |
             set -u
+            cd "$HOME/aitos"
+            test -f scripts/paper_runtime_audit.sh
+            mkdir -p "$HOME/aitos-production-audit"
             REPORT="$HOME/aitos-production-audit/report.txt"
-            test -s "$REPORT"
-            cat "$REPORT"
+            set +e
+            bash scripts/paper_runtime_audit.sh 2>&1 | tee "$REPORT"
+            status=${PIPESTATUS[0]}
+            set -e
+            echo "AUDIT_EXIT_CODE=$status"
+            exit "$status"
 
-      - name: Write collected audit report
+      - name: Write audit report
+        if: always()
         shell: bash
         env:
-          AUDIT_REPORT: ${{ steps.collect-report.outputs.stdout }}
+          AUDIT_OUTPUT: ${{ steps.audit.outputs.stdout }}
         run: |
           set -euo pipefail
           mkdir -p aitos-production-audit
-          printf '%s\n' "$AUDIT_REPORT" > aitos-production-audit/report.txt
+          printf '%s\n' "$AUDIT_OUTPUT" > aitos-production-audit/report.txt
           test -s aitos-production-audit/report.txt
 
       - name: Upload audit report artifact
+        if: always()
         uses: actions/upload-artifact@v4.6.2
         with:
           name: aitos-production-audit
