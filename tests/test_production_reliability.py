@@ -4,7 +4,10 @@ from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.exchange.symbol_filters import SymbolFilters
 from aitos.execution.order_executor import OrderRequest, SimulatedOrderExecutor
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState, TradeSide
-from aitos.trading.persistent_state import IdempotentOrderExecutor, TradeStatePersistence
+from aitos.trading.persistent_state import (
+    IdempotentOrderExecutor,
+    TradeStatePersistence,
+)
 
 
 class CountingExecutor(SimulatedOrderExecutor):
