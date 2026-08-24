@@ -193,7 +193,6 @@ class DataIngestionService(AITOSModule):
                 maxsize=TRADE_STREAM_QUEUE_SIZE
             )
             try:
-
                 async def producer() -> None:
                     async for trade in self._exchange.stream_trades(self._symbols):
                         try:
@@ -252,11 +251,7 @@ class DataIngestionService(AITOSModule):
                 logger.error(
                     "trade stream loop crashed; restarting: %s",
                     exc,
-                    extra={
-                        "aitos_extra": {
-                            "restart_count": self._trade_stream_restarts
-                        }
-                    },
+                    extra={"aitos_extra": {"restart_count": self._trade_stream_restarts}},
                 )
                 if producer_task is not None:
                     producer_task.cancel()
