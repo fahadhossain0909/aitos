@@ -36,6 +36,7 @@ Click any topic below to jump directly to that section.
 ### 🏗️ Deployment & Operations
 
 - [Docker and VPS deployment](#docker-and-vps-deployment)
+- [Dedicated VPS data disk](#dedicated-vps-data-disk)
 - [CI/CD](#cicd)
 - [Operations and troubleshooting](#operations-and-troubleshooting)
 - [Storage and maintenance](#storage-and-maintenance)
@@ -233,7 +234,6 @@ When using the Docker service:
 
 ```bash
 docker compose up -d
-
 docker compose ps --all
 docker compose logs -f aitos-paper
 ```
@@ -323,6 +323,188 @@ ssh -L 8090:localhost:8090 user@your-vps
 ### Resource-aware services
 
 The continual-learning worker is explicitly capped at 0.5 CPU / 512 MB RAM. The backtest service is capped at 2 CPU / 3 GB RAM. Storage maintenance has explicit ClickHouse/cache budgets. These limits are intended to reduce resource contention on a VPS.
+
+[↑ Back to Index](#-interactive-index)
+
+## Dedicated VPS data disk
+
+Production VPS deployments should use a dedicated data disk for database and persistent application storage. The boot disk should remain separate from database storage.
+
+A typical layout is:
+
+```text
+/dev/sdb1  50 GB   → /
+/dev/sda   150 GB  → /mnt/aitos-data
+```
+
+The AITOS data disk is organized as:
+
+```text
+/mnt/aitos-data
+├── clickhouse
+├── neo4j
+└── redis
+```
+
+### Important safety warning
+
+The formatting step below is **destructive**. Only run `mkfs.ext4` after confirming that the selected disk is the intended empty data disk. Never blindly assume that `/dev/sda` is the data disk on another VPS; device names can differ between machines.
+
+### Step 1 — Identify the disks
+
+```bash
+lsblk -o NAME,SIZE,FSTYPE,TYPE,MOUNTPOINTS,UUID
+```
+
+Confirm which disk is the boot disk and which disk is the dedicated data disk.
+
+### Step 2 — Check that the intended data disk is empty
+
+Replace `/dev/sda` below if your data disk has a different device name:
+
+```bash
+wipefs -n /dev/sda
+```
+
+If this prints a filesystem signature, **stop** and inspect the disk. Do not format it.
+
+### Step 3 — Create an ext4 filesystem
+
+Only after confirming the disk is empty:
+
+```bash
+mkfs.ext4 -L aitos-data /dev/sda
+```
+
+This creates the filesystem and automatically generates a UUID.
+
+### Step 4 — Get the UUID
+
+```bash
+blkid /dev/sda
+```
+
+Example:
+
+```text
+/dev/sda: LABEL="aitos-data" UUID="<generated-uuid>" TYPE="ext4"
+```
+
+### Step 5 — Create the mount point
+
+```bash
+mkdir -p /mnt/aitos-data
+```
+
+### Step 6 — Configure persistent mounting
+
+Add the UUID to `/etc/fstab`:
+
+```text
+UUID=<generated-uuid> /mnt/aitos-data ext4 defaults,nofail 0 2
+```
+
+Then reload systemd:
+
+```bash
+systemctl daemon-reload
+```
+
+Mount the disk:
+
+```bash
+mount /mnt/aitos-data
+```
+
+### Step 7 — Create AITOS storage directories
+
+```bash
+mkdir -p \
+  /mnt/aitos-data/clickhouse \
+  /mnt/aitos-data/neo4j \
+  /mnt/aitos-data/redis
+```
+
+### Step 8 — Verify the mount
+
+```bash
+mountpoint /mnt/aitos-data
+df -hT /mnt/aitos-data
+ls -ld /mnt/aitos-data/{clickhouse,neo4j,redis}
+```
+
+Expected structure:
+
+```text
+/mnt/aitos-data
+├── clickhouse
+├── neo4j
+└── redis
+```
+
+### Step 9 — Test persistence
+
+A remount test verifies that `/etc/fstab` is correct without requiring a reboot:
+
+```bash
+umount /mnt/aitos-data
+mount /mnt/aitos-data
+mountpoint /mnt/aitos-data
+df -hT /mnt/aitos-data
+```
+
+The mounted filesystem should resolve to the dedicated data disk, not the boot disk.
+
+### Complete first-time setup — combined command block
+
+The following block combines the first-time setup steps. **Review the `DATA_DISK` value before running it.** It intentionally aborts if the selected disk already has a filesystem signature.
+
+```bash
+set -e
+
+DATA_DISK=/dev/sda
+MOUNT_POINT=/mnt/aitos-data
+
+# Verify the selected disk.
+lsblk -o NAME,SIZE,FSTYPE,TYPE,MOUNTPOINTS,UUID "$DATA_DISK"
+
+# Safety check: never format a disk that already has a filesystem signature.
+if [ -n "$(wipefs -n "$DATA_DISK")" ]; then
+  echo "ERROR: $DATA_DISK contains a filesystem signature. Aborting."
+  exit 1
+fi
+
+# Create filesystem and obtain its UUID.
+mkfs.ext4 -L aitos-data "$DATA_DISK"
+UUID=$(blkid -s UUID -o value "$DATA_DISK")
+[ -n "$UUID" ]
+
+echo "Created filesystem UUID: $UUID"
+
+# Configure persistent mount.
+mkdir -p "$MOUNT_POINT"
+sed -i '\|[[:space:]]/mnt/aitos-data[[:space:]]|d' /etc/fstab
+echo "UUID=$UUID $MOUNT_POINT ext4 defaults,nofail 0 2" >> /etc/fstab
+
+systemctl daemon-reload
+mount "$MOUNT_POINT"
+
+# Create persistent AITOS storage directories.
+mkdir -p \
+  "$MOUNT_POINT/clickhouse" \
+  "$MOUNT_POINT/neo4j" \
+  "$MOUNT_POINT/redis"
+
+# Final verification.
+mountpoint "$MOUNT_POINT"
+df -hT "$MOUNT_POINT"
+ls -ld \
+  "$MOUNT_POINT/clickhouse" \
+  "$MOUNT_POINT/neo4j" \
+  "$MOUNT_POINT/redis"
+```
+
+> **Do not run the combined first-time setup block on an existing production data disk.** Once the filesystem has been created, use the verification/remount commands above instead. Running `mkfs.ext4` again will destroy the filesystem contents.
 
 [↑ Back to Index](#-interactive-index)
 
