@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
 
   aitos-paper:
-    build: .
+    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     container_name: aitos-paper
     command: ["python3", "run_paper_trading.py"]
     env_file: [.env]
@@ -62,7 +62,7 @@ services:
     restart: unless-stopped
 
   aitos-learning:
-    build: .
+    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     container_name: aitos-learning
     command: ["python3", "run_continual_learning.py"]
     env_file: [.env]
@@ -82,7 +82,7 @@ services:
     restart: unless-stopped
 
   aitos-backtest:
-    build: .
+    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     command: ["python3", "-m", "aitos.backtest.cli"]
     volumes:
       - "${BACKTEST_DATA_DIR:-./.storage/backtest}:/data:rw"
@@ -96,7 +96,7 @@ services:
     profiles: [backtest]
 
   aitos-storage-maintenance:
-    build: .
+    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     container_name: aitos-storage-maintenance
     command: ["python3", "-m", "aitos.storage.maintenance"]
     env_file: [.env]
@@ -125,7 +125,7 @@ services:
     restart: unless-stopped
 
   aitos-live:
-    build: .
+    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     container_name: aitos-live
     command: ["python3", "run_live_trading.py"]
     env_file: [.env]
