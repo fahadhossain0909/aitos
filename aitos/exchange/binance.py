@@ -46,7 +46,7 @@ ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS = 10.0
 class BinanceFuturesAdapter(ExchangeAdapter):
     def __init__(
         self,
-        session_factory: Callable[[], aiohttp.ClientSession] = aiohttp.ClientSession,
+        session_factory: Callable[[], aiohttp.ClientSession],
         ws_connector: Optional[Callable[..., Any]] = None,
         rate_limiter: Optional[TokenBucketRateLimiter] = None,
     ) -> None:
@@ -79,7 +79,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             {"symbol": symbol, "interval": timeframe, "limit": limit},
             weight,
         )
-        return [parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw]
+        return [
+            parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw
+        ]
 
     async def fetch_order_book(
         self, symbol: str, limit: int = 50
