@@ -92,7 +92,8 @@ async def try_connect_neo4j(settings):
     from neo4j import AsyncGraphDatabase
 
     driver = AsyncGraphDatabase.driver(
-        settings.neo4j.uri, auth=(settings.neo4j.user, settings.neo4j.password)
+        settings.neo4j.uri,
+        auth=(settings.neo4j.user, settings.neo4j.password),
     )
     try:
         await driver.verify_connectivity()
@@ -106,7 +107,10 @@ async def try_connect_neo4j(settings):
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    approved_by = confirm_live_trading(SYMBOLS, testnet=settings.binance.testnet)
+    approved_by = confirm_live_trading(
+        SYMBOLS,
+        testnet=settings.binance.testnet,
+    )
     redis_client = await connect_redis_with_retry(settings)
     from aitos.eventbus.redis_bus import EventBus
 
@@ -126,7 +130,9 @@ async def main() -> None:
     outcome_classifier = TradeOutcomeClassifier()
     outcome_classifier.load_state()
     attention_path = "models/online_ml/attention_explainer.pkl"
-    attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
+    attention_explainer = (
+        load_attention_model(attention_path) or AttentionExplainer()
+    )
     components = await build_system(
         event_bus=event_bus,
         exchange=exchange,
@@ -137,7 +143,10 @@ async def main() -> None:
         market_data_repository=market_repo,
         journal_repository=journal_repo,
         graph_driver=graph_driver,
-        kernel=AIKernel(event_bus=event_bus, require_human_approval_for_prod=True),
+        kernel=AIKernel(
+            event_bus=event_bus,
+            require_human_approval_for_prod=True,
+        ),
         rl_scorer=rl_scorer,
         outcome_classifier=outcome_classifier,
         attention_explainer=attention_explainer,
@@ -145,7 +154,9 @@ async def main() -> None:
     )
     if market_repo is not None:
         trade_state_persistence = TradeStatePersistence(
-            event_bus, components.trade_lifecycle, state_store
+            event_bus,
+            components.trade_lifecycle,
+            state_store,
         )
         await trade_state_persistence.restore()
         await trade_state_persistence.initialize()
@@ -153,7 +164,9 @@ async def main() -> None:
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     await market_os_persistence.initialize({})
     experience_recorder = LearningExperienceRecorder(
-        event_bus, market_repo, source="live"
+        event_bus,
+        market_repo,
+        source="live",
     )
     await experience_recorder.initialize({})
     filter_refresher = SymbolFilterRefresher(
