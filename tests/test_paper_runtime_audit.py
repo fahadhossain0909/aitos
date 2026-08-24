@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from aitos.models.trade import TradeLifecycleState, TradeSide
+from aitos.models.trade import TradeLifecycleState
 from aitos.trading.reconciliation import ReconciliationScheduler
 
 
@@ -18,7 +18,10 @@ async def test_reconciliation_closes_exchange_closed_position(event_bus):
     lifecycle = MagicMock()
     lifecycle.get_open_trades.return_value = [trade]
     lifecycle.reconcile_trade = AsyncMock(
-        return_value=MagicMock(state=TradeLifecycleState.POSITION_CLOSED, exit_reason="exchange_stop")
+        return_value=MagicMock(
+            state=TradeLifecycleState.POSITION_CLOSED,
+            exit_reason="exchange_stop",
+        )
     )
 
     scheduler = ReconciliationScheduler(
@@ -38,14 +41,19 @@ async def test_reconciliation_closes_exchange_closed_position(event_bus):
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_keeps_open_trade_when_exchange_position_remains(event_bus):
+async def test_reconciliation_keeps_open_trade_when_exchange_position_remains(
+    event_bus,
+):
     trade = MagicMock()
     trade.trade_id = "paper-reconcile-2"
 
     lifecycle = MagicMock()
     lifecycle.get_open_trades.return_value = [trade]
     lifecycle.reconcile_trade = AsyncMock(
-        return_value=MagicMock(state=TradeLifecycleState.POSITION_OPENED, exit_reason=None)
+        return_value=MagicMock(
+            state=TradeLifecycleState.POSITION_OPENED,
+            exit_reason=None,
+        )
     )
 
     scheduler = ReconciliationScheduler(
@@ -63,8 +71,6 @@ async def test_reconciliation_keeps_open_trade_when_exchange_position_remains(ev
 
 def test_paper_runtime_configuration_is_safe_for_real_execution():
     from aitos.execution.order_executor import SimulatedOrderExecutor
-    from aitos.models.trade import TradeSide
 
     executor = SimulatedOrderExecutor()
     assert executor is not None
-    assert TradeSide.LONG.value
