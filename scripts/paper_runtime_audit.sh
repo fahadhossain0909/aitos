@@ -5,6 +5,7 @@ HEALTH_URL="${AITOS_HEALTH_URL:-http://127.0.0.1:8090/health}"
 METRICS_URL="${AITOS_METRICS_URL:-http://127.0.0.1:8090/metrics}"
 MAX_LOG_MB="${AITOS_MAX_LOG_MB:-512}"
 MIN_DISK_FREE_GB="${AITOS_MIN_DISK_FREE_GB:-10}"
+DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 
 blockers=0
 
@@ -47,6 +48,32 @@ if command -v docker >/dev/null 2>&1; then
       echo "WARNING: $container has historical Docker restarts; current runtime state is evaluated separately."
     fi
   done < <(docker ps -a --format '{{.Names}}' | grep '^aitos-' || true)
+  echo
+
+  echo '--- Database storage mounts ---'
+  for container in aitos-clickhouse aitos-neo4j aitos-redis; do
+    if docker inspect "$container" >/dev/null 2>&1; then
+      printf '%s\n' "$container"
+      docker inspect --format '{{range .Mounts}}{{printf "  %s -> %s (%s)\n" .Source .Destination .Type}}{{end}}' "$container" || true
+    fi
+  done
+  if command -v findmnt >/dev/null 2>&1; then
+    echo '--- Data disk mount ---'
+    findmnt -T "$DATA_ROOT" -o SOURCE,FSTYPE,SIZE,USED,AVAIL,USE%,TARGET 2>/dev/null || echo "WARNING: $DATA_ROOT is not mounted"
+  fi
+  echo
+
+  echo '--- ClickHouse storage/merge diagnostics ---'
+  if docker inspect aitos-clickhouse >/dev/null 2>&1; then
+    docker exec aitos-clickhouse clickhouse-client --query \
+      "SELECT table, formatReadableSize(sum(bytes_on_disk)) AS disk, sum(rows) AS rows, count() AS active_parts FROM system.parts WHERE database='aitos' AND active GROUP BY table ORDER BY sum(bytes_on_disk) DESC FORMAT PrettyCompactMonoBlock" 2>/dev/null || echo 'ClickHouse table inventory unavailable'
+    echo
+    docker exec aitos-clickhouse clickhouse-client --query \
+      "SELECT count() AS active_merges, formatReadableSize(sum(bytes_read_uncompressed)) AS bytes_read, formatReadableSize(sum(bytes_written_uncompressed)) AS bytes_written FROM system.merges FORMAT PrettyCompactMonoBlock" 2>/dev/null || echo 'ClickHouse merge inventory unavailable'
+    echo
+    docker exec aitos-clickhouse clickhouse-client --query \
+      "SELECT count() AS pending_mutations FROM system.mutations WHERE database='aitos' AND is_done=0 FORMAT PrettyCompactMonoBlock" 2>/dev/null || echo 'ClickHouse mutation inventory unavailable'
+  fi
   echo
 
   echo '--- Docker disk usage ---'
