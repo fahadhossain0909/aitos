@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 SCRIPT = Path(__file__).parents[1] / "scripts" / "paper_runtime_audit.sh"
 
 
