@@ -12,6 +12,11 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  AITOS_DATA_ROOT: /mnt/aitos-data
+
+env:
+  REGISTRY: ghcr.io
+  AITOS_DATA_ROOT: /mnt/aitos-data
 
 jobs:
   publish-image:
@@ -103,6 +108,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
+          command_timeout: 15m
           script: |
             set -euo pipefail
             mkdir -p ~/aitos
@@ -111,6 +117,26 @@ jobs:
               git clone https://github.com/${{ github.repository }}.git .
             else
               git pull --ff-only
+            fi
+
+            # Final storage policy for the 2-vCPU/12-GB VPS:
+            # Boot disk (50 GB): 22.5 GB backtest + 22.5 GB others + 5 GB free buffer.
+            # Data disk (150 GB): ONLY ClickHouse, Neo4j and persistent Redis data.
+            DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
+            if ! mountpoint -q "$DATA_ROOT"; then
+              echo "::error::$DATA_ROOT is not a mounted 150 GB data disk; refusing to place database data on the boot disk."
+              exit 1
+            fi
+            mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j"
+            mkdir -p ./.storage/backtest ./.storage/others
+
+            # Keep at least 5 GiB of boot-disk free space as an emergency buffer.
+            boot_free_bytes=$(df --output=avail -B1 . | tail -1 | tr -d ' ')
+            min_free_bytes=$((5 * 1024 * 1024 * 1024))
+            if [ "$boot_free_bytes" -lt "$min_free_bytes" ]; then
+              echo "::error::Boot disk has less than the required 5 GiB free buffer."
+              df -h .
+              exit 1
             fi
 
             umask 077
@@ -125,6 +151,7 @@ jobs:
             REDIS_PORT=6379
             REDIS_DB=0
             REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+            REDIS_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/redis
 
             CLICKHOUSE_HOST=clickhouse
             CLICKHOUSE_PORT=8123
@@ -132,17 +159,20 @@ jobs:
             CLICKHOUSE_PASSWORD=${{ secrets.CLICKHOUSE_PASSWORD }}
             CLICKHOUSE_DATABASE=aitos
             CLICKHOUSE_DB=aitos
+            CLICKHOUSE_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/clickhouse
 
             NEO4J_URI=bolt://neo4j:7687
             NEO4J_USER=${{ secrets.NEO4J_USER || 'neo4j' }}
             NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}
+            NEO4J_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/neo4j
+            NEO4J_LOG_DIR=./.storage/others/neo4j-logs
 
             LEARNING_POLL_SECONDS=60
             LEARNING_LOOKBACK_HOURS=168
             LEARNING_MODEL_PATH=/models/online_rl/deep_value.pkl
             LEARNING_STATE_PATH=/models/online_rl/worker_state.json
 
-            BACKTEST_DATA_DIR=./data
+            BACKTEST_DATA_DIR=./.storage/backtest
 
             BINANCE_API_KEY=${{ secrets.BINANCE_API_KEY }}
             BINANCE_API_SECRET=${{ secrets.BINANCE_API_SECRET }}
@@ -166,8 +196,6 @@ jobs:
             ENVEOF
             chmod 600 .env
 
-            # Binance credentials are deliberately optional during testing/paper trading.
-            # They become mandatory only when live execution is explicitly enabled.
             if [ "${{ secrets.BINANCE_TESTNET || 'true' }}" = "false" ]; then
               if [ -z "${{ secrets.BINANCE_API_KEY }}" ] || [ -z "${{ secrets.BINANCE_API_SECRET }}" ]; then
                 echo "::error::BINANCE_API_KEY and BINANCE_API_SECRET are required when BINANCE_TESTNET=false"
@@ -176,10 +204,8 @@ jobs:
             fi
 
             docker login ${{ env.REGISTRY }} -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
-
             echo "Validating docker-compose configuration..."
             docker compose config > /dev/null
-
             docker compose pull
             docker compose up -d --build
 
