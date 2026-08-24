@@ -199,18 +199,24 @@ jobs:
             echo "Pulling immutable application image sha-${{ github.sha }}..."
             docker compose pull
 
-            echo "=== Removing stale/orphan Compose containers only ==="
-            # This removes containers belonging to the AITOS Compose project, but
-            # does not remove named volumes or the bind-mounted database data under
-            # /mnt/aitos-data. It prevents stale generated names such as
-            # <hash>_aitos-clickhouse from blocking recreation.
-            docker compose down --remove-orphans --timeout 30
+            echo "=== Removing stale/orphan Compose containers safely ==="
+            # Stop/remove the current AITOS Compose project first. This does not
+            # remove bind-mounted database data under /mnt/aitos-data.
+            docker compose down --remove-orphans --timeout 30 || true
+            # Compose can leave generated-name containers behind when an older
+            # project/container-name state exists. Remove every container carrying
+            # the AITOS Compose project label, regardless of its generated name.
+            project_containers=$(docker ps -aq --filter 'label=com.docker.compose.project=aitos')
+            if [ -n "$project_containers" ]; then
+              echo "$project_containers" | xargs -r docker rm -f
+            fi
 
             echo "=== Post-cleanup container state ==="
             docker ps -a --filter 'name=aitos-' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
-            if docker ps -a --format '{{.Names}}' | grep -Eq '^[0-9a-f]{8,}_aitos-(clickhouse|neo4j|redis|paper|learning|storage-maintenance)$'; then
-              echo "::error::A stale generated AITOS container name remains after Compose cleanup. Refusing deployment."
-              docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -E '^[0-9a-f]{8,}_aitos-' || true
+            stale_generated=$(docker ps -a --format '{{.Names}}' | grep -E '^[0-9a-f]{8,}_aitos-' || true)
+            if [ -n "$stale_generated" ]; then
+              echo "::error::A stale generated AITOS container name remains after project cleanup. Refusing deployment."
+              printf '%s\n' "$stale_generated"
               exit 1
             fi
 
