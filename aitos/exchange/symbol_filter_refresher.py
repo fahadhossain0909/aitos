@@ -36,19 +36,28 @@ class SymbolFilterRefresher:
     async def refresh_now(self) -> None:
         filters = await self._exchange.fetch_exchange_info(symbols=self._symbols)
         if not filters:
-            raise RuntimeError("exchangeInfo returned no filters for configured symbols")
+            raise RuntimeError(
+                "exchangeInfo returned no filters for configured symbols"
+            )
         self._executor.load_symbol_filters(filters)
         self._last_refresh_at = asyncio.get_running_loop().time()
         self._refresh_count += 1
         self._last_error = None
         logger.info(
             "refreshed exchange symbol filters",
-            extra={"aitos_extra": {"symbols": list(filters), "refresh_count": self._refresh_count}},
+            extra={
+                "aitos_extra": {
+                    "symbols": list(filters),
+                    "refresh_count": self._refresh_count,
+                }
+            },
         )
 
     async def start(self) -> None:
         await self.refresh_now()
-        self._task = asyncio.create_task(self._run(), name="aitos-symbol-filter-refresh")
+        self._task = asyncio.create_task(
+            self._run(), name="aitos-symbol-filter-refresh"
+        )
 
     async def stop(self) -> None:
         if self._task is not None:
