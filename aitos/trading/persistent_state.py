@@ -57,15 +57,13 @@ class DurableTradingStateStore:
         payload = trade.to_dict()
         await client.insert(
             "trade_runtime_state",
-            [
-                [
-                    trade.trade_id,
-                    trade.symbol,
-                    trade.state.value,
-                    json.dumps(payload, sort_keys=True, default=str),
-                    datetime.now(timezone.utc),
-                ]
-            ],
+            [[
+                trade.trade_id,
+                trade.symbol,
+                trade.state.value,
+                json.dumps(payload, sort_keys=True, default=str),
+                datetime.now(timezone.utc),
+            ]],
             column_names=[
                 "trade_id",
                 "symbol",
@@ -169,9 +167,7 @@ def _trade_from_dict(data: Dict[str, Any]) -> Trade:
         state=TradeLifecycleState(str(data.get("state", "position_opened"))),
         entry_time=str(data["entry_time"]),
         trailing_sl_enabled=bool(data.get("trailing_sl_enabled", False)),
-        take_profit_levels=[
-            float(x) for x in data.get("take_profit_levels", [])
-        ],
+        take_profit_levels=[float(x) for x in data.get("take_profit_levels", [])],
         partial_exits=partial_exits,
         sl_order_id=data.get("sl_order_id"),
         tp_order_ids=[str(x) for x in data.get("tp_order_ids", [])],
@@ -190,7 +186,10 @@ class TradeStatePersistence:
     """Persist lifecycle events and restore open positions before streams start."""
 
     def __init__(
-        self, event_bus: EventBus, lifecycle: Any, store: DurableTradingStateStore
+        self,
+        event_bus: EventBus,
+        lifecycle: Any,
+        store: DurableTradingStateStore,
     ) -> None:
         self._event_bus = event_bus
         self._lifecycle = lifecycle
