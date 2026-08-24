@@ -6,8 +6,14 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from aitos.core.contracts import (AITOSModule, Event, EventPriority,
-                                  EventResponse, HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventPriority,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus
@@ -21,6 +27,8 @@ logger = get_logger("aitos.data.ingestion")
 TRADE_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
 TRADE_STREAM_RESTART_DELAY_SECONDS = 1.0
 TRADE_STREAM_QUEUE_SIZE = 1000
+TRADE_FALLBACK_LIMIT = 100
+ORDERBOOK_PERSIST_INTERVAL_SECONDS = 1.0
 
 
 def kline_topic(symbol: str, timeframe: str) -> str:
@@ -82,6 +90,8 @@ class DataIngestionService(AITOSModule):
         self._trade_stream_idle_timeouts = 0
         self._trade_stream_messages_received = 0
         self._last_trade_event_time: Optional[str] = None
+        self._last_book_persist_at: Dict[str, datetime] = {}
+        self._last_trade_ids: Dict[str, int] = {}
         self._live_state = LiveMarketStateStore(
             max_trades=max(5000, self._liquidity_trade_window)
         )
@@ -93,11 +103,7 @@ class DataIngestionService(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.5.0"
-
-    @property
-    def live_state(self) -> LiveMarketStateStore:
-        return self._live_state
+        return "1.6.0"
 
     async def initialize(self, config: Dict[str, Any]) -> None:
         if self._initialized:
@@ -180,13 +186,7 @@ class DataIngestionService(AITOSModule):
             logger.error("kline stream loop crashed: %s", exc)
 
     async def _run_trade_stream(self) -> None:
-        """Consume trades with an explicit idle watchdog.
-
-        A connected-but-silent WebSocket can otherwise leave the task alive
-        forever while producing zero trade events. The watchdog cancels that
-        producer and recreates the subscription, exposing the condition through
-        health metrics instead of silently reporting a healthy idle stream.
-        """
+        """Consume trades with watchdog plus REST recovery for silent sockets."""
         while True:
             producer_task: Optional[asyncio.Task] = None
             queue: asyncio.Queue[TradeTick] = asyncio.Queue(
@@ -221,7 +221,7 @@ class DataIngestionService(AITOSModule):
                         self._trade_stream_idle_timeouts += 1
                         self._trade_stream_restarts += 1
                         logger.warning(
-                            "trade stream idle timeout; restarting subscription",
+                            "trade stream idle timeout; recovering from REST and restarting",
                             extra={
                                 "aitos_extra": {
                                     "symbols": self._symbols,
@@ -233,6 +233,7 @@ class DataIngestionService(AITOSModule):
                         producer_task.cancel()
                         await asyncio.gather(producer_task, return_exceptions=True)
                         producer_task = None
+                        await self._recover_recent_trades()
                         break
 
                     self._trade_stream_messages_received += 1
@@ -252,13 +253,43 @@ class DataIngestionService(AITOSModule):
                     "trade stream loop crashed; restarting: %s",
                     exc,
                     extra={
-                        "aitos_extra": {"restart_count": self._trade_stream_restarts}
+                        "aitos_extra": {
+                            "restart_count": self._trade_stream_restarts,
+                        },
                     },
                 )
                 if producer_task is not None:
                     producer_task.cancel()
                     await asyncio.gather(producer_task, return_exceptions=True)
                 await asyncio.sleep(TRADE_STREAM_RESTART_DELAY_SECONDS)
+
+    async def _recover_recent_trades(self) -> None:
+        """Recover a small REST trade window so order flow stays alive during WS gaps."""
+        for symbol in self._symbols:
+            try:
+                trades = await self._exchange.fetch_recent_trades(
+                    symbol, limit=TRADE_FALLBACK_LIMIT
+                )
+                last_id = self._last_trade_ids.get(symbol, -1)
+                fresh = [trade for trade in trades if trade.trade_id > last_id]
+                for trade in fresh:
+                    await self._handle_trade(trade)
+                if fresh:
+                    logger.info(
+                        "recovered trades from REST",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "count": len(fresh),
+                            }
+                        },
+                    )
+            except Exception as exc:
+                self._trade_stream_errors += 1
+                logger.warning(
+                    "REST trade recovery failed",
+                    extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                )
 
     async def _run_orderbook_stream(self) -> None:
         try:
@@ -286,6 +317,10 @@ class DataIngestionService(AITOSModule):
         self._tick_processed()
 
     async def _handle_trade(self, trade: TradeTick) -> None:
+        previous_id = self._last_trade_ids.get(trade.symbol, -1)
+        if trade.trade_id <= previous_id:
+            return
+        self._last_trade_ids[trade.symbol] = trade.trade_id
         self._trade_events_received += 1
         self._last_trade_event_time = datetime.now(timezone.utc).isoformat()
         try:
@@ -312,6 +347,7 @@ class DataIngestionService(AITOSModule):
                         "buy_ratio": features.buy_ratio,
                         "aggression": features.aggression,
                         "imbalance": features.imbalance,
+                        "bias_score": features.bias_score,
                         "vwap": features.vwap,
                         "last_price": features.last_price,
                         "direction": features.direction,
@@ -342,7 +378,15 @@ class DataIngestionService(AITOSModule):
             )
         )
         if self._repository is not None:
-            await self._repository.save_order_book_snapshot(book)
+            now = datetime.now(timezone.utc)
+            last_persist = self._last_book_persist_at.get(book.symbol)
+            if (
+                last_persist is None
+                or (now - last_persist).total_seconds()
+                >= ORDERBOOK_PERSIST_INTERVAL_SECONDS
+            ):
+                await self._repository.save_order_book_snapshot(book)
+                self._last_book_persist_at[book.symbol] = now
         events = self._live_state.on_order_book(book)
         for event in events:
             await self._event_bus.publish(
