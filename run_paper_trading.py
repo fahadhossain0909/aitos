@@ -10,9 +10,9 @@ from typing import Optional
 from redis.asyncio import Redis
 
 from aitos.app import (
+    PaperPortfolioTracker,
     build_system,
     initialize_all,
-    PaperPortfolioTracker,
     run_scan_and_trade_cycle,
     shutdown_all,
 )
@@ -173,7 +173,7 @@ async def main() -> None:
                     },
                 )
             except Exception as exc:
-                logger.error("scan/trade cycle failed: %s", exc)
+                logger.error("scan cycle failed: %s", exc)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
