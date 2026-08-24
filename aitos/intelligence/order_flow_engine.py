@@ -12,8 +12,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Deque, Sequence
 
-from aitos.intelligence.order_flow import (aggression_ratio, buy_volume_ratio,
-                                           delta, imbalance_score)
+from aitos.intelligence.order_flow import (
+    aggression_ratio,
+    buy_volume_ratio,
+    delta,
+    imbalance_score,
+)
 from aitos.models.market import TradeSide, TradeTick
 
 
@@ -85,7 +89,18 @@ class OrderFlowEngine:
         trades = tuple(self._trades)
         if not trades:
             return OrderFlowFeatures(
-                0, 0.0, 0.0, 0.0, self._cvd, 0.5, 0.0, 5.0, 0.0, 0.0, "neutral", None
+                0,
+                0.0,
+                0.0,
+                0.0,
+                self._cvd,
+                0.5,
+                0.0,
+                5.0,
+                0.0,
+                0.0,
+                "neutral",
+                None,
             )
         buy = sum(abs(t.quantity) for t in trades if self._signed(t) > 0)
         sell = sum(abs(t.quantity) for t in trades if self._signed(t) < 0)
