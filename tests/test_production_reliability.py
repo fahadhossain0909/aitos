@@ -3,7 +3,12 @@ import pytest
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.exchange.symbol_filters import SymbolFilters
 from aitos.execution.order_executor import OrderRequest, SimulatedOrderExecutor
-from aitos.models.trade import Opportunity, Trade, TradeLifecycleState, TradeSide
+from aitos.models.trade import (
+    Opportunity,
+    Trade,
+    TradeLifecycleState,
+    TradeSide,
+)
 from aitos.trading.persistent_state import (
     IdempotentOrderExecutor,
     TradeStatePersistence,
@@ -70,7 +75,10 @@ async def test_symbol_filter_refresher_loads_filters_and_stops():
     exchange = FakeExchange()
     sink = FilterSink()
     refresher = SymbolFilterRefresher(
-        exchange, sink, ["BTCUSDT"], ttl_seconds=60.0
+        exchange,
+        sink,
+        ["BTCUSDT"],
+        ttl_seconds=60.0,
     )
 
     await refresher.start()
