@@ -218,94 +218,64 @@ jobs:
             echo "=== Pre-start container state ==="
             docker compose ps --all
 
-            echo "=== ISOLATED CLICKHOUSE STARTUP GATE ==="
-            echo "Starting only ClickHouse so any boot failure is isolated before downstream services are started."
+            echo "=== ISOLATED CLICKHOUSE STARTUP DIAGNOSTIC GATE ==="
+            echo "Starting ClickHouse without the Compose restart loop so its fatal stdout/stderr is captured directly."
+            docker compose stop clickhouse >/dev/null 2>&1 || true
+            docker rm -f aitos-clickhouse >/dev/null 2>&1 || true
+            docker compose create clickhouse
             set +e
-            timeout --foreground --signal=TERM --kill-after=30s 90s docker compose up -d clickhouse
-            ch_start_rc=$?
+            timeout --foreground --signal=TERM --kill-after=20s 90s docker start -a aitos-clickhouse
+            ch_rc=$?
             set -e
-            if [ "$ch_start_rc" -ne 0 ]; then
-              echo "::error::Isolated ClickHouse startup command failed with exit code $ch_start_rc."
-              docker compose ps --all || true
-              docker compose logs --no-color --tail=500 clickhouse 2>/dev/null || true
-              exit "$ch_start_rc"
+            echo "ClickHouse foreground exit code: $ch_rc"
+            echo "=== ClickHouse inspect ==="
+            docker inspect --format='status={{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' aitos-clickhouse || true
+            echo "=== ClickHouse container logs ==="
+            docker logs --timestamps --tail=1000 aitos-clickhouse 2>&1 || true
+            if [ "$ch_rc" -ne 0 ]; then
+              echo "::error::ClickHouse foreground startup failed with exit code $ch_rc. Downstream services will not be started."
+              exit "$ch_rc"
             fi
 
-            ch_status=""
+            echo "ClickHouse foreground process exited successfully; restarting it under Compose health supervision."
+            docker compose up -d clickhouse
+            ch_health=""
             for i in $(seq 1 60); do
               ch_status=$(docker inspect --format='{{.State.Status}}' aitos-clickhouse 2>/dev/null || echo missing)
               ch_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-clickhouse 2>/dev/null || echo missing)
-              ch_exit=$(docker inspect --format='{{.State.ExitCode}}' aitos-clickhouse 2>/dev/null || echo unknown)
-              echo "[$i/60] clickhouse state=$ch_status health=$ch_health exit=$ch_exit"
-              if [ "$ch_health" = "healthy" ]; then
-                echo "ClickHouse isolated startup gate PASSED."
-                break
-              fi
-              if [ "$ch_status" = "exited" ] || [ "$ch_status" = "dead" ]; then
-                echo "::error::ClickHouse exited during isolated startup."
-                docker inspect --format='status={{.State.Status}} exit={{.State.ExitCode}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' aitos-clickhouse || true
-                echo "=== ClickHouse container logs ==="
-                docker compose logs --no-color --tail=500 clickhouse || true
-                echo "=== ClickHouse server error log ==="
-                docker exec aitos-clickhouse sh -c 'tail -n 500 /var/log/clickhouse-server/clickhouse-server.err.log 2>&1' || true
-                echo "=== ClickHouse server log ==="
-                docker exec aitos-clickhouse sh -c 'tail -n 300 /var/log/clickhouse-server/clickhouse-server.log 2>&1' || true
-                exit 1
-              fi
-              if [ $((i % 5)) -eq 0 ]; then
-                docker compose logs --no-color --tail=100 clickhouse 2>/dev/null || true
-              fi
+              echo "[$i/60] clickhouse state=$ch_status health=$ch_health"
+              if [ "$ch_health" = "healthy" ]; then break; fi
               sleep 5
             done
-
             if [ "$ch_health" != "healthy" ]; then
-              echo "::error::ClickHouse did not become healthy during the isolated startup budget."
-              docker inspect --format='status={{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-clickhouse || true
-              echo "=== ClickHouse logs ==="
-              docker compose logs --no-color --tail=500 clickhouse || true
-              echo "=== ClickHouse health state ==="
-              docker inspect --format='{{json .State.Health}}' aitos-clickhouse || true
-              echo "=== HTTP ping ==="
-              docker exec aitos-clickhouse sh -c 'wget -S -O- --timeout=5 http://127.0.0.1:8123/ping 2>&1' || true
-              echo "=== Native client probe ==="
-              docker exec aitos-clickhouse sh -c 'clickhouse-client --query "SELECT 1" 2>&1' || true
-              echo "=== ClickHouse error log ==="
-              docker exec aitos-clickhouse sh -c 'tail -n 500 /var/log/clickhouse-server/clickhouse-server.err.log 2>&1' || true
-              echo "=== ClickHouse server log ==="
-              docker exec aitos-clickhouse sh -c 'tail -n 300 /var/log/clickhouse-server/clickhouse-server.log 2>&1' || true
-              echo "=== ClickHouse process ==="
-              docker exec aitos-clickhouse sh -c 'ps -ef 2>&1' || true
+              echo "::error::ClickHouse did not become healthy after successful foreground startup."
+              docker logs --timestamps --tail=500 aitos-clickhouse 2>&1 || true
               exit 1
             fi
 
             echo "=== Starting remaining infrastructure after ClickHouse gate ==="
             docker compose up -d redis neo4j
-
             echo "=== Starting AITOS paper services after infrastructure gate ==="
             docker compose up -d aitos-paper aitos-learning aitos-storage-maintenance
 
             echo "=== Final container status ==="
             docker compose ps --all
-
             echo "=== Final health validation ==="
             for c in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper; do
               if docker inspect "$c" >/dev/null 2>&1; then
                 docker inspect --format "$c status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}}" "$c"
               fi
             done
-
             final_bad=$(docker ps --filter 'name=aitos-' --filter 'status=restarting' -q)
             if [ -n "$final_bad" ]; then
               echo "::error::An AITOS container is still restarting after deployment."
               docker compose logs --no-color --tail=200
               exit 1
             fi
-
             paper_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-paper 2>/dev/null || echo missing)
             if [ "$paper_health" != "healthy" ]; then
               echo "::error::aitos-paper did not reach healthy state."
               docker compose logs --no-color --tail=250 aitos-paper || true
               exit 1
             fi
-
             echo "=== Deployment completed successfully ==="
