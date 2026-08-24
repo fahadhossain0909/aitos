@@ -160,8 +160,12 @@ async def main() -> None:
                     extra={
                         "aitos_extra": {
                             "submitted": submitted,
-                            "open_trades": len(components.trade_lifecycle.get_open_trades()),
-                            "closed_trades": len(components.trade_lifecycle.get_closed_trades()),
+                            "open_trades": len(
+                                components.trade_lifecycle.get_open_trades()
+                            ),
+                            "closed_trades": len(
+                                components.trade_lifecycle.get_closed_trades()
+                            ),
                             "rl_samples": rl_scorer.n_samples_seen,
                             "ml_samples": outcome_classifier.n_samples_seen,
                             "attention_samples": attention_explainer.n_samples_seen,
