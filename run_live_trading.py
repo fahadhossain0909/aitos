@@ -8,7 +8,12 @@ import signal
 
 from redis.asyncio import Redis
 
-from aitos.app import build_system, initialize_all, run_scan_and_trade_cycle, shutdown_all
+from aitos.app import (
+    build_system,
+    initialize_all,
+    run_scan_and_trade_cycle,
+    shutdown_all,
+)
 from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.data.repository import MarketDataRepository
