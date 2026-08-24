@@ -5,12 +5,14 @@ from typing import List
 import pytest
 from aioresponses import aioresponses
 
-from aitos.exchange.binance import (REST_BASE_URL, WS_BASE_URL,
-                                    BinanceFuturesAdapter)
-from tests.test_binance_parsing import (SAMPLE_DEPTH_REST, SAMPLE_KLINE_ROW,
-                                        SAMPLE_OPEN_INTEREST,
-                                        SAMPLE_PREMIUM_INDEX,
-                                        SAMPLE_TRADE_REST)
+from aitos.exchange.binance import REST_BASE_URL, WS_BASE_URL, BinanceFuturesAdapter
+from tests.test_binance_parsing import (
+    SAMPLE_DEPTH_REST,
+    SAMPLE_KLINE_ROW,
+    SAMPLE_OPEN_INTEREST,
+    SAMPLE_PREMIUM_INDEX,
+    SAMPLE_TRADE_REST,
+)
 
 
 @pytest.mark.asyncio
@@ -141,10 +143,15 @@ async def test_fetch_exchange_info_narrows_to_requested_symbols():
 
 
 @pytest.mark.asyncio
-async def test_fetch_before_connect_raises():
+async def test_fetch_before_connect_auto_connects():
     adapter = BinanceFuturesAdapter()
-    with pytest.raises(RuntimeError):
-        await adapter.fetch_open_interest("BTCUSDT")
+    with aioresponses() as m:
+        m.get(
+            f"{REST_BASE_URL}/fapi/v1/openInterest?symbol=BTCUSDT",
+            payload=SAMPLE_OPEN_INTEREST,
+        )
+        oi = await adapter.fetch_open_interest("BTCUSDT")
+    assert oi.open_interest == 45123.456
 
 
 class FakeWebSocket:
@@ -195,21 +202,29 @@ async def test_stream_klines_yields_parsed_events():
 
 
 @pytest.mark.asyncio
-async def test_stream_trades_yields_parsed_events_from_single_stream_endpoint():
+async def test_stream_trades_yields_parsed_events_from_combined_stream_endpoint():
     from tests.test_binance_parsing import SAMPLE_AGG_TRADE_WS
 
-    envelope = {"stream": "btcusdt@aggTrade", "data": SAMPLE_AGG_TRADE_WS}
-    fake_ws = FakeWebSocket([envelope])
+    envelopes = [
+        {"stream": "btcusdt@aggTrade", "data": SAMPLE_AGG_TRADE_WS},
+        {
+            "stream": "ethusdt@aggTrade",
+            "data": {**SAMPLE_AGG_TRADE_WS, "s": "ETHUSDT", "a": 1000000},
+        },
+    ]
+    fake_ws = FakeWebSocket(envelopes)
     adapter = BinanceFuturesAdapter(ws_connector=fake_ws)
 
     received = []
 
     async def consume():
-        async for trade in adapter.stream_trades(["BTCUSDT"]):
+        async for trade in adapter.stream_trades(["BTCUSDT", "ETHUSDT"]):
             received.append(trade)
-            return
+            if len(received) >= 2:
+                return
 
     await asyncio.wait_for(consume(), timeout=5)
-    assert len(received) == 1
+    assert [trade.symbol for trade in received] == ["BTCUSDT", "ETHUSDT"]
     assert received[0].trade_id == 999999
-    assert fake_ws.url == f"{WS_BASE_URL}?streams=btcusdt@aggTrade"
+    assert received[1].trade_id == 1000000
+    assert fake_ws.url == f"{WS_BASE_URL}?streams=btcusdt@aggTrade/ethusdt@aggTrade"
