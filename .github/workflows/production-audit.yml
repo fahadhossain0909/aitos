@@ -57,7 +57,7 @@ jobs:
             mkdir -p "$HOME/aitos-production-audit"
             REPORT="$HOME/aitos-production-audit/report.txt"
             set +e
-            AITOSS_AUDIT_REPORT="$REPORT" bash scripts/paper_runtime_audit.sh 2>&1 | tee "$REPORT"
+            bash scripts/paper_runtime_audit.sh 2>&1 | tee "$REPORT"
             status=${PIPESTATUS[0]}
             set -e
             echo "AUDIT_EXIT_CODE=$status"
