@@ -200,12 +200,7 @@ jobs:
             docker compose pull
 
             echo "=== Removing stale/orphan Compose containers safely ==="
-            # Stop/remove the current AITOS Compose project first. This does not
-            # remove bind-mounted database data under /mnt/aitos-data.
             docker compose down --remove-orphans --timeout 30 || true
-            # Compose can leave generated-name containers behind when an older
-            # project/container-name state exists. Remove every container carrying
-            # the AITOS Compose project label, regardless of its generated name.
             project_containers=$(docker ps -aq --filter 'label=com.docker.compose.project=aitos')
             if [ -n "$project_containers" ]; then
               echo "$project_containers" | xargs -r docker rm -f
@@ -247,6 +242,23 @@ jobs:
               done
               echo "=== Recent container logs ==="
               docker compose logs --no-color --tail=150 clickhouse redis neo4j paper learning storage-maintenance 2>/dev/null || true
+              echo "=== ClickHouse runtime diagnostics ==="
+              if docker inspect aitos-clickhouse >/dev/null 2>&1; then
+                echo "--- Healthcheck state ---"
+                docker inspect --format='{{json .State.Health}}' aitos-clickhouse || true
+                echo "--- Listening sockets ---"
+                docker exec aitos-clickhouse sh -c 'cat /proc/net/tcp /proc/net/tcp6 2>/dev/null | head -80' || true
+                echo "--- HTTP ping verbose ---"
+                docker exec aitos-clickhouse sh -c 'wget -S -O- --timeout=5 http://127.0.0.1:8123/ping 2>&1' || true
+                echo "--- Native client probe ---"
+                docker exec aitos-clickhouse sh -c 'clickhouse-client --query "SELECT 1" 2>&1' || true
+                echo "--- ClickHouse server error log ---"
+                docker exec aitos-clickhouse sh -c 'tail -n 300 /var/log/clickhouse-server/clickhouse-server.err.log 2>&1' || true
+                echo "--- ClickHouse server log ---"
+                docker exec aitos-clickhouse sh -c 'tail -n 200 /var/log/clickhouse-server/clickhouse-server.log 2>&1' || true
+                echo "--- ClickHouse process ---"
+                docker exec aitos-clickhouse sh -c 'ps -ef 2>&1' || true
+              fi
               echo "=== Docker events from the last 10 minutes ==="
               docker events --since 10m --until 0s --filter type=container 2>/dev/null | tail -200 || true
               echo "=== Filesystem state ==="
@@ -273,7 +285,19 @@ jobs:
               sleep 10
             done
             if [ "$status" != '"healthy"' ]; then
-              echo "::error::ClickHouse failed to become healthy; printing logs:"
+              echo "::error::ClickHouse failed to become healthy; printing full runtime diagnostics:"
               docker compose logs --no-color --tail=300 aitos-clickhouse || true
+              echo "=== ClickHouse health state ==="
+              docker inspect --format='{{json .State.Health}}' aitos-clickhouse || true
+              echo "=== ClickHouse HTTP ping ==="
+              docker exec aitos-clickhouse sh -c 'wget -S -O- --timeout=5 http://127.0.0.1:8123/ping 2>&1' || true
+              echo "=== ClickHouse native probe ==="
+              docker exec aitos-clickhouse sh -c 'clickhouse-client --query "SELECT 1" 2>&1' || true
+              echo "=== ClickHouse error log ==="
+              docker exec aitos-clickhouse sh -c 'tail -n 500 /var/log/clickhouse-server/clickhouse-server.err.log 2>&1' || true
+              echo "=== ClickHouse server log ==="
+              docker exec aitos-clickhouse sh -c 'tail -n 300 /var/log/clickhouse-server/clickhouse-server.log 2>&1' || true
+              echo "=== ClickHouse process ==="
+              docker exec aitos-clickhouse sh -c 'ps -ef 2>&1' || true
               exit 1
             fi
