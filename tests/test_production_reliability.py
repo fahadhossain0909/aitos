@@ -1,11 +1,9 @@
-import asyncio
-
 import pytest
 
-from aitos.exchange.symbol_filters import SymbolFilters
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
-from aitos.execution.order_executor import OrderRequest, OrderResult, SimulatedOrderExecutor
-from aitos.models.trade import TradeSide
+from aitos.exchange.symbol_filters import SymbolFilters
+from aitos.execution.order_executor import OrderRequest, SimulatedOrderExecutor
+from aitos.models.trade import Opportunity, TradeSide
 from aitos.trading.persistent_state import IdempotentOrderExecutor
 
 
@@ -82,17 +80,11 @@ async def test_symbol_filter_refresher_loads_filters_and_stops():
 
 
 @pytest.mark.asyncio
-async def test_dynamic_exit_behaviour_is_not_static():
-    """The lifecycle's existing dynamic exit engine must move trailing SL only
-    in the profitable direction and must not loosen a protected stop."""
-    from aitos.eventbus.redis_bus import EventBus
-    from aitos.risk.risk_engine import RiskEngine
+async def test_dynamic_exit_protects_a_trailing_stop(event_bus, risk_engine):
+    from aitos.risk.models import PortfolioState
     from aitos.trading.lifecycle import TradeLifecycle
-    from aitos.models.trade import Opportunity
 
-    bus = EventBus()
-    risk = RiskEngine(event_bus=bus)
-    lifecycle = TradeLifecycle(event_bus=bus, risk_engine=risk)
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})
     opportunity = Opportunity(
         symbol="BTCUSDT",
@@ -105,20 +97,12 @@ async def test_dynamic_exit_behaviour_is_not_static():
         rationale="dynamic exit test",
         trailing_sl_enabled=True,
     )
-    portfolio = type("Portfolio", (), {
-        "equity_usd": 10_000.0,
-        "peak_equity_usd": 10_000.0,
-        "positions": (),
-        "daily_pnl_pct": 0.0,
-        "weekly_pnl_pct": 0.0,
-        "volatility_percentile": 0.0,
-        "max_pairwise_correlation": 0.0,
-        "api_error_rate_pct": 0.0,
-        "api_latency_ms": 0.0,
-        "data_freshness_seconds": 0.0,
-        "model_accuracy": 1.0,
-        "regime": "unknown",
-    })()
+    portfolio = PortfolioState(
+        equity_usd=10_000.0,
+        peak_equity_usd=10_000.0,
+        volatility_percentile=30.0,
+        max_pairwise_correlation=0.1,
+    )
     trade = await lifecycle.submit_opportunity(opportunity, portfolio)
     original_sl = trade.sl_price
     await lifecycle.update_price(trade.trade_id, 104.0)
