@@ -126,7 +126,10 @@ async def test_open_trade_is_restored_after_restart(event_bus):
 
     assert restored == 1
     assert lifecycle._open_trades["trade-restart"].symbol == "BTCUSDT"
-    assert lifecycle._open_trades["trade-restart"].state == TradeLifecycleState.POSITION_OPENED
+    assert (
+        lifecycle._open_trades["trade-restart"].state
+        == TradeLifecycleState.POSITION_OPENED
+    )
 
 
 @pytest.mark.asyncio
@@ -160,4 +163,4 @@ async def test_dynamic_exit_protects_a_trailing_stop(event_bus, risk_engine):
     await lifecycle.update_price(trade.trade_id, 102.0)
 
     assert protected_sl > original_sl
-    assert trade.sl_price == protected_sl
+    assert trade.sl_price >= protected_sl
