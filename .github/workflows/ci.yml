@@ -46,7 +46,7 @@ jobs:
           echo "files=$files" >> "$GITHUB_OUTPUT"
       - name: Run Black formatter check
         if: steps.changed-python.outputs.files != ''
-        run: black --check --diff ${{ steps.changed-python.outputs.files }}
+        run: black --check ${{ steps.changed-python.outputs.files }}
       - name: Run isort import checker
         if: steps.changed-python.outputs.files != ''
         run: isort --check-only ${{ steps.changed-python.outputs.files }}
@@ -142,7 +142,7 @@ jobs:
     name: Security Scan
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7.0.0
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
