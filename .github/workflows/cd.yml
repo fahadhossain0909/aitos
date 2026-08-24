@@ -12,27 +12,24 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
+  AITOS_DATA_ROOT: /mnt/aitos-data
 
 jobs:
   publish-image:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request'
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4.5.1
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Lowercase repository name
         id: repo
         run: echo "repo=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
-
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v6.2.0
@@ -43,7 +40,6 @@ jobs:
             type=ref,event=tag
             type=sha,prefix=sha-
             type=raw,value=latest,enable={{is_default_branch}}
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v7.3.0
         with:
@@ -56,7 +52,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: publish-image
     environment: papertrade
-
     steps:
       - name: Check required deployment secrets
         id: check-secrets
@@ -78,7 +73,6 @@ jobs:
           done
           if [ "$missing" -ne 0 ]; then exit 1; fi
           echo "has_secrets=true" >> "$GITHUB_OUTPUT"
-
       - name: Write SSH key with proper formatting
         if: steps.check-secrets.outputs.has_secrets == 'true'
         env:
@@ -87,7 +81,6 @@ jobs:
           set -euo pipefail
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
-
       - name: Check system resources
         if: steps.check-secrets.outputs.has_secrets == 'true'
         run: |
@@ -95,7 +88,6 @@ jobs:
           free -h
           echo "=== Disk ==="
           df -h /
-
       - name: Deploy to remote host over SSH
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
@@ -103,6 +95,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
+          command_timeout: 15m
           script: |
             set -euo pipefail
             mkdir -p ~/aitos
@@ -113,6 +106,26 @@ jobs:
               git pull --ff-only
             fi
 
+            # Final VPS storage policy:
+            # Boot (50 GB): 22.5 GB backtest + 22.5 GB others + 5 GB free buffer.
+            # Data (150 GB): ONLY ClickHouse, Neo4j and persistent Redis data.
+            DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
+            if ! mountpoint -q "$DATA_ROOT"; then
+              echo "::error::$DATA_ROOT is not a mounted 150 GB data disk; refusing to place database data on the boot disk."
+              exit 1
+            fi
+            mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
+            mkdir -p ./.storage/backtest ./.storage/others ./.storage/others/backups ./.storage/others/snapshots
+
+            # Never intentionally consume the 5 GiB boot-disk safety buffer.
+            boot_free_bytes=$(df --output=avail -B1 . | tail -1 | tr -d ' ')
+            min_free_bytes=$((5 * 1024 * 1024 * 1024))
+            if [ "$boot_free_bytes" -lt "$min_free_bytes" ]; then
+              echo "::error::Boot disk has less than the required 5 GiB free buffer."
+              df -h .
+              exit 1
+            fi
+
             umask 077
             cat > .env << 'ENVEOF'
             ENVIRONMENT=production
@@ -120,54 +133,50 @@ jobs:
             REQUIRE_HUMAN_APPROVAL_FOR_PROD=true
             DEBUG=false
             TESTING=false
-
             REDIS_HOST=redis
             REDIS_PORT=6379
             REDIS_DB=0
             REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-
+            REDIS_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/redis
             CLICKHOUSE_HOST=clickhouse
             CLICKHOUSE_PORT=8123
             CLICKHOUSE_USER=${{ secrets.CLICKHOUSE_USER || 'default' }}
             CLICKHOUSE_PASSWORD=${{ secrets.CLICKHOUSE_PASSWORD }}
             CLICKHOUSE_DATABASE=aitos
             CLICKHOUSE_DB=aitos
-
+            CLICKHOUSE_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/clickhouse
             NEO4J_URI=bolt://neo4j:7687
             NEO4J_USER=${{ secrets.NEO4J_USER || 'neo4j' }}
             NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}
-
+            NEO4J_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/neo4j
+            NEO4J_LOG_DIR=./.storage/others/neo4j-logs
             LEARNING_POLL_SECONDS=60
             LEARNING_LOOKBACK_HOURS=168
             LEARNING_MODEL_PATH=/models/online_rl/deep_value.pkl
             LEARNING_STATE_PATH=/models/online_rl/worker_state.json
-
-            BACKTEST_DATA_DIR=./data
-
+            BACKTEST_DATA_DIR=./.storage/backtest
+            OTHERS_DATA_DIR=./.storage/others
+            BACKUP_DIR=./.storage/others/backups
+            SNAPSHOT_DIR=./.storage/others/snapshots
             BINANCE_API_KEY=${{ secrets.BINANCE_API_KEY }}
             BINANCE_API_SECRET=${{ secrets.BINANCE_API_SECRET }}
             BINANCE_TESTNET=${{ secrets.BINANCE_TESTNET || 'true' }}
             BINANCE_RECV_WINDOW_MS=5000
             BINANCE_HEDGE_MODE=false
-
             DEPLOY_HOST=${{ secrets.DEPLOY_HOST }}
             DEPLOY_USER=${{ secrets.DEPLOY_USER }}
             DEPLOY_PORT=${{ secrets.DEPLOY_PORT || '22' }}
             APP_PORT=8000
             APP_HOST=0.0.0.0
-
             COMPOSE_PROJECT_NAME=aitos
             DOCKER_REGISTRY=ghcr.io
             DOCKER_USERNAME=${{ github.actor }}
-
             DATABASE_URL=${{ secrets.DATABASE_URL }}
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
             ENVEOF
             chmod 600 .env
 
-            # Binance credentials are deliberately optional during testing/paper trading.
-            # They become mandatory only when live execution is explicitly enabled.
             if [ "${{ secrets.BINANCE_TESTNET || 'true' }}" = "false" ]; then
               if [ -z "${{ secrets.BINANCE_API_KEY }}" ] || [ -z "${{ secrets.BINANCE_API_SECRET }}" ]; then
                 echo "::error::BINANCE_API_KEY and BINANCE_API_SECRET are required when BINANCE_TESTNET=false"
@@ -176,10 +185,8 @@ jobs:
             fi
 
             docker login ${{ env.REGISTRY }} -u ${{ github.actor }} -p ${{ secrets.GITHUB_TOKEN }}
-
             echo "Validating docker-compose configuration..."
             docker compose config > /dev/null
-
             docker compose pull
             docker compose up -d --build
 
@@ -201,7 +208,6 @@ jobs:
               fi
               sleep 10
             done
-
             if [ "$status" != '"healthy"' ]; then
               echo "::error::ClickHouse failed to become healthy; printing logs:"
               docker compose logs --no-color --tail=300 aitos-clickhouse || true

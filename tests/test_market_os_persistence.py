@@ -26,7 +26,7 @@ class FakeRepository:
 @pytest.mark.asyncio
 async def test_persists_orderflow_event():
     repository = FakeRepository()
-    service = MarketOSPersistence(None, repository)
+    service = MarketOSPersistence(None, repository, batch_size=1)
     event = Event(
         topic="market.orderflow.BTCUSDT",
         payload={
@@ -53,9 +53,28 @@ async def test_persists_orderflow_event():
 
 
 @pytest.mark.asyncio
+async def test_batches_market_os_events():
+    repository = FakeRepository()
+    service = MarketOSPersistence(None, repository, batch_size=2)
+
+    for _ in range(2):
+        await service._handle_orderflow(
+            Event(
+                topic="market.orderflow.BTCUSDT",
+                payload={"trade_count": 1},
+                source_module="test",
+            )
+        )
+
+    assert len(repository._client.inserts) == 1
+    assert len(repository._client.inserts[0][1]) == 2
+    assert service._events_persisted == 2
+
+
+@pytest.mark.asyncio
 async def test_persists_liquidity_and_live_state_events():
     repository = FakeRepository()
-    service = MarketOSPersistence(None, repository)
+    service = MarketOSPersistence(None, repository, batch_size=1)
     now = datetime.now(timezone.utc).isoformat()
 
     await service._handle_liquidity(
