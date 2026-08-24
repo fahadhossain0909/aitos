@@ -38,7 +38,7 @@ jobs:
             base="${{ github.event.pull_request.base.sha }}"
           else
             base="${{ github.event.before }}"
-            if [[ "$base" =~ ^0+$ ]]; then
+            if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
               base="$(git rev-list --max-count=1 HEAD^)"
             fi
           fi
