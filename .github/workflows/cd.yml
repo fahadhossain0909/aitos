@@ -189,6 +189,8 @@ jobs:
             docker system df
             echo "=== Existing AITOS containers ==="
             docker ps -a --filter 'name=aitos-' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+            echo "=== Compose-managed AITOS containers ==="
+            docker ps -a --filter 'label=com.docker.compose.project=aitos' --format 'table {{.Names}}\t{{.Status}}\t{{.Label "com.docker.compose.service"}}' || true
 
             echo "Logging in to GHCR..."
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
@@ -196,6 +198,21 @@ jobs:
             docker compose config > /dev/null
             echo "Pulling immutable application image sha-${{ github.sha }}..."
             docker compose pull
+
+            echo "=== Removing stale/orphan Compose containers only ==="
+            # This removes containers belonging to the AITOS Compose project, but
+            # does not remove named volumes or the bind-mounted database data under
+            # /mnt/aitos-data. It prevents stale generated names such as
+            # <hash>_aitos-clickhouse from blocking recreation.
+            docker compose down --remove-orphans --timeout 30
+
+            echo "=== Post-cleanup container state ==="
+            docker ps -a --filter 'name=aitos-' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
+            if docker ps -a --format '{{.Names}}' | grep -Eq '^[0-9a-f]{8,}_aitos-(clickhouse|neo4j|redis|paper|learning|storage-maintenance)$'; then
+              echo "::error::A stale generated AITOS container name remains after Compose cleanup. Refusing deployment."
+              docker ps -a --format '{{.Names}}\t{{.Status}}' | grep -E '^[0-9a-f]{8,}_aitos-' || true
+              exit 1
+            fi
 
             echo "=== Pre-start container state ==="
             docker compose ps --all
