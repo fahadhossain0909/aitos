@@ -251,7 +251,11 @@ class DataIngestionService(AITOSModule):
                 logger.error(
                     "trade stream loop crashed; restarting: %s",
                     exc,
-                    extra={"aitos_extra": {"restart_count": self._trade_stream_restarts}},
+                    extra={
+                        "aitos_extra": {
+                            "restart_count": self._trade_stream_restarts
+                        }
+                    },
                 )
                 if producer_task is not None:
                     producer_task.cancel()
