@@ -253,8 +253,8 @@ class DataIngestionService(AITOSModule):
                     exc,
                     extra={
                         "aitos_extra": {
-                            "restart_count": self._trade_stream_restarts
-                        }
+                            "restart_count": self._trade_stream_restarts,
+                        },
                     },
                 )
                 if producer_task is not None:
