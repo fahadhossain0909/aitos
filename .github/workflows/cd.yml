@@ -127,32 +127,19 @@ jobs:
             docker image prune -a --force || true
             docker builder prune --all --force --filter "until=168h" || true
             docker network prune --force --filter "until=24h" || true
-            echo "=== Pre-deployment boot-disk reserve check ==="
+            echo "=== Pre-source boot-disk reserve guard ==="
             boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
             if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "Boot disk is below the 7.5 GiB reserve; invoking oldest/lowest-priority boot cleanup."
+              echo "Boot disk is below the 7.5 GiB reserve; invoking the currently installed maintenance image before source transfer."
               docker compose run --rm --no-deps aitos-storage-maintenance --boot-only || true
               boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
             fi
             if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "::error::Boot disk remains below the required 7.5 GiB free reserve after automatic cleanup."
+              echo "::error::Boot disk remains below the required 7.5 GiB free reserve before source deployment."
               df -h .
               exit 1
             fi
             echo "Boot free space before source deployment: $(df -h . | tail -1)"
-            echo "=== Pre-deployment data-disk retention check ==="
-            data_free_gb=$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')
-            if [ -z "$data_free_gb" ]; then data_free_gb=0; fi
-            if [ "$data_free_gb" -lt "$DATA_DISK_MIN_FREE_GB" ]; then
-              echo "Data disk has less than ${DATA_DISK_MIN_FREE_GB} GiB free; invoking database-native historical retention before deployment."
-              docker compose run --rm --no-deps aitos-storage-maintenance --once || true
-              data_free_gb=$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')
-              if [ -z "$data_free_gb" ]; then data_free_gb=0; fi
-            fi
-            if [ "$data_free_gb" -lt "$DATA_DISK_MIN_FREE_GB" ]; then
-              echo "::warning::Data disk remains below ${DATA_DISK_MIN_FREE_GB} GiB after retention. Deployment will continue only if database services remain healthy; no raw database files will be deleted."
-            fi
-            echo "Data disk before deployment: $(df -h "$DATA_ROOT" | tail -1)"
             echo "=== Downloading source snapshot without Git history ==="
             tmp_dir=$(mktemp -d)
             trap 'rm -rf "$tmp_dir"' EXIT
@@ -220,6 +207,46 @@ jobs:
             docker compose config > /dev/null
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             docker compose pull
+
+            # The source tree and compose file are now the new commit, and all
+            # service images (including storage-maintenance) have been pulled.
+            # From this point onward every retention action MUST use the new image.
+            echo "=== Post-pull storage-maintenance image gate ==="
+            maintenance_image=$(docker compose images -q aitos-storage-maintenance | tail -1)
+            if [ -z "$maintenance_image" ]; then
+              echo "::error::The new aitos-storage-maintenance image was not pulled/resolved."
+              exit 1
+            fi
+            echo "Storage maintenance image: $maintenance_image"
+
+            echo "=== New-image boot-disk reserve enforcement ==="
+            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "Boot disk is below the 7.5 GiB reserve after source update; invoking the NEW maintenance image."
+              docker compose run --rm --no-deps aitos-storage-maintenance --boot-only
+              boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+            fi
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "::error::Boot disk remains below the required 7.5 GiB free reserve after NEW-image cleanup."
+              df -h .
+              exit 1
+            fi
+            echo "Boot free space after new-image cleanup: $(df -h . | tail -1)"
+
+            echo "=== New-image data-disk retention enforcement ==="
+            data_free_gb=$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')
+            if [ -z "$data_free_gb" ]; then data_free_gb=0; fi
+            if [ "$data_free_gb" -lt "$DATA_DISK_MIN_FREE_GB" ]; then
+              echo "Data disk has less than ${DATA_DISK_MIN_FREE_GB} GiB free; invoking NEW maintenance image."
+              docker compose run --rm --no-deps aitos-storage-maintenance --once || true
+              data_free_gb=$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')
+              if [ -z "$data_free_gb" ]; then data_free_gb=0; fi
+            fi
+            if [ "$data_free_gb" -lt "$DATA_DISK_MIN_FREE_GB" ]; then
+              echo "::warning::Data disk remains below ${DATA_DISK_MIN_FREE_GB} GiB after retention. No raw database files will be deleted."
+            fi
+            echo "Data disk before container startup: $(df -h "$DATA_ROOT" | tail -1)"
+
             echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: BEFORE CLEANUP ==="
             for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
               docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
