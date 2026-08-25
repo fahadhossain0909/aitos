@@ -14,6 +14,7 @@ env:
   REGISTRY: ghcr.io
   AITOS_DATA_ROOT: /mnt/aitos-data
   OTHERS_BUDGET_BYTES: 24159191040
+  STORAGE_RESET_MARKER: .aitos-storage-reset-v1
 
 jobs:
   publish-image:
@@ -90,66 +91,94 @@ jobs:
           free -h
           df -h /
 
-      - name: Deploy pre-built image to remote host over SSH
+      - name: Deploy pre-built image and reset stale VPS storage
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
         env:
           OTHERS_BUDGET_BYTES: ${{ env.OTHERS_BUDGET_BYTES }}
+          STORAGE_RESET_MARKER: ${{ env.STORAGE_RESET_MARKER }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 15m
-          envs: OTHERS_BUDGET_BYTES
+          envs: OTHERS_BUDGET_BYTES,STORAGE_RESET_MARKER
           script: |
             set -euo pipefail
             : "${OTHERS_BUDGET_BYTES:=24159191040}"
+            : "${STORAGE_RESET_MARKER:=.aitos-storage-reset-v1}"
 
             APP_DIR="$HOME/aitos"
             DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
             REPO="${{ github.repository }}"
             COMMIT="${{ github.sha }}"
-            mkdir -p "$APP_DIR"
-            cd "$APP_DIR"
+            MARKER="$HOME/$STORAGE_RESET_MARKER"
+            TMP_ROOT=$(mktemp -d)
+            trap 'rm -rf "$TMP_ROOT"' EXIT
 
+            echo "=== Storage safety checks ==="
             if ! mountpoint -q "$DATA_ROOT"; then
-              echo "::error::$DATA_ROOT is not a mounted data disk; refusing to place database data on the boot disk."
+              echo "::error::$DATA_ROOT is not a mounted data disk; refusing to touch database storage."
               exit 1
             fi
-            mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
-
-            echo "=== Boot disk storage policy ==="
-            echo "All non-database application data budget: 22.5 GiB"
-            echo "Database data is exclusively under: $DATA_ROOT"
-
-            echo "=== Freeing stale Git/Docker data before deployment ==="
-            if [ -d .git ]; then
-              rm -rf .git
+            if [ "$(findmnt -n -o FSTYPE --target "$DATA_ROOT")" = "" ]; then
+              echo "::error::Could not determine filesystem for $DATA_ROOT."
+              exit 1
             fi
-            docker container prune --force --filter "until=24h" || true
-            docker image prune -a --force --filter "until=168h" || true
-            docker builder prune --all --force --filter "until=168h" || true
-            docker network prune --force --filter "until=24h" || true
+            echo "Data disk: $(findmnt -n -o SOURCE,FSTYPE,SIZE,USED,AVAIL --target "$DATA_ROOT")"
+            echo "Boot disk before cleanup: $(df -h "$HOME" | tail -1)"
 
-            echo "=== Downloading source snapshot without Git history ==="
-            tmp_dir=$(mktemp -d)
-            trap 'rm -rf "$tmp_dir"' EXIT
-            curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
-            mkdir -p "$tmp_dir/source"
-            tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir/source"
+            echo "=== Stopping AITOS containers before storage reset ==="
+            docker ps -aq --filter 'name=^aitos-' | xargs -r docker rm -f
 
-            find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name .storage -exec rm -rf -- {} +
-            cp -a "$tmp_dir/source/." "$APP_DIR/"
+            echo "=== Removing old AITOS Docker volumes ==="
+            docker volume ls -q --filter label=com.docker.compose.project=aitos | xargs -r docker volume rm || true
+            docker volume rm aitos_aitos_model_data 2>/dev/null || true
+
+            if [ ! -e "$MARKER" ]; then
+              echo "=== ONE-TIME AITOS STORAGE RESET ==="
+              echo "All previously accumulated AITOS database/application data is intentionally disposable for this pre-production reset."
+
+              echo "--- Clearing mounted database disk ---"
+              find "$DATA_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+              mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
+
+              echo "--- Removing old AITOS application tree from boot disk ---"
+              rm -rf -- "$APP_DIR"
+
+              echo "--- Cleaning unused Docker storage ---"
+              docker container prune --force || true
+              docker image prune -a --force || true
+              docker builder prune --all --force || true
+              docker network prune --force || true
+
+              touch "$MARKER"
+              chmod 600 "$MARKER"
+              echo "Storage reset completed and permanently marked at $MARKER"
+            else
+              echo "=== One-time storage reset already completed; preserving current persistent data ==="
+            fi
+
+            echo "=== Boot disk after cleanup ==="
+            df -h "$HOME"
+            docker system df
+            echo "=== Database disk after cleanup ==="
+            df -h "$DATA_ROOT"
+
+            echo "=== Installing minimal deployment files ==="
+            mkdir -p "$APP_DIR/docker/clickhouse/config.d" "$APP_DIR/docker/clickhouse/users.d"
+            curl -fsSL --retry 3 --retry-delay 2 "https://raw.githubusercontent.com/$REPO/$COMMIT/docker-compose.yml" -o "$APP_DIR/docker-compose.yml"
+            curl -fsSL --retry 3 --retry-delay 2 "https://raw.githubusercontent.com/$REPO/$COMMIT/docker/clickhouse/config.d/aitos.xml" -o "$APP_DIR/docker/clickhouse/config.d/aitos.xml"
+            curl -fsSL --retry 3 --retry-delay 2 "https://raw.githubusercontent.com/$REPO/$COMMIT/docker/clickhouse/users.d/aitos.xml" -o "$APP_DIR/docker/clickhouse/users.d/aitos.xml"
+            cd "$APP_DIR"
+
             mkdir -p ./.storage/others/backtest ./.storage/others/backups ./.storage/others/snapshots
-
             others_bytes=$(du -sb ./.storage/others | cut -f1)
             if [ "$others_bytes" -gt "$OTHERS_BUDGET_BYTES" ]; then
               echo "::error::Application data under ./.storage/others exceeds the 22.5 GiB budget."
               du -sh ./.storage/others
               exit 1
             fi
-            echo "Application Others usage: $(du -sh ./.storage/others | cut -f1)"
-            echo "Boot disk: $(df -h . | tail -1)"
 
             umask 077
             cat > .env << 'ENVEOF'
@@ -202,15 +231,14 @@ jobs:
             ENVEOF
             chmod 600 .env
 
-            docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
-            df -h "$DATA_ROOT"
-            docker system df
+            echo "=== Compose validation ==="
             docker compose config > /dev/null
+            docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
+            docker system df
+
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             docker compose pull
             docker compose down --remove-orphans --timeout 30 || true
-            project_containers=$(docker ps -aq --filter 'label=com.docker.compose.project=aitos')
-            if [ -n "$project_containers" ]; then echo "$project_containers" | xargs -r docker rm -f; fi
 
             echo "=== ISOLATED CLICKHOUSE STARTUP READINESS GATE ==="
             docker compose up -d clickhouse
@@ -220,11 +248,12 @@ jobs:
             while [ "$SECONDS" -lt "$ch_deadline" ]; do
               ch_status=$(docker inspect --format='{{.State.Status}}' aitos-clickhouse 2>/dev/null || echo missing)
               ch_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-clickhouse 2>/dev/null || echo missing)
+              echo "aitos-clickhouse: status=$ch_status health=$ch_health"
               if [ "$ch_health" = "healthy" ]; then break; fi
               if [ "$ch_status" = "exited" ] || [ "$ch_status" = "dead" ]; then break; fi
               sleep 5
             done
-            docker inspect --format='status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}}' aitos-clickhouse || true
+            docker inspect --format='status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-clickhouse || true
             docker logs --timestamps --tail=1000 aitos-clickhouse 2>&1 || true
             if [ "$ch_health" != "healthy" ]; then
               echo "::error::ClickHouse did not become healthy within 180 seconds."
@@ -234,6 +263,7 @@ jobs:
             docker compose up -d redis neo4j
             docker compose up -d aitos-paper aitos-learning aitos-storage-maintenance
             docker compose ps --all
+
             final_bad=$(docker ps --filter 'name=aitos-' --filter 'status=restarting' -q)
             if [ -n "$final_bad" ]; then
               echo "::error::An AITOS container is still restarting after deployment."
@@ -260,9 +290,12 @@ jobs:
               exit 1
             fi
 
-            echo "=== Final boot-disk storage audit ==="
+            echo "=== FINAL STORAGE AUDIT ==="
             docker system df
-            echo "Boot disk: $(df -h . | tail -1)"
+            echo "Boot disk: $(df -h "$HOME" | tail -1)"
             echo "Application Others: $(du -sh ./.storage/others | cut -f1)"
             echo "Database disk: $(df -h "$DATA_ROOT" | tail -1)"
+            echo "ClickHouse data: $(du -sh "$DATA_ROOT/clickhouse" | cut -f1)"
+            echo "Neo4j data: $(du -sh "$DATA_ROOT/neo4j" | cut -f1)"
+            echo "Redis data: $(du -sh "$DATA_ROOT/redis" | cut -f1)"
             echo "=== Deployment completed successfully ==="
