@@ -149,7 +149,7 @@ jobs:
               sudo mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
 
               echo "--- Removing old AITOS application tree from boot disk ---"
-              rm -rf -- "$APP_DIR"
+              sudo rm -rf -- "$APP_DIR"
 
               echo "--- Cleaning unused Docker storage ---"
               docker container prune --force || true
