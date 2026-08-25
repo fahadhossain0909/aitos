@@ -229,10 +229,23 @@ jobs:
               docker compose logs --no-color --tail=200
               exit 1
             fi
-            paper_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-paper 2>/dev/null || echo missing)
+
+            echo "=== AITOS-PAPER READINESS GATE ==="
+            paper_health=""
+            paper_status="missing"
+            paper_deadline=$((SECONDS + 180))
+            while [ "$SECONDS" -lt "$paper_deadline" ]; do
+              paper_status=$(docker inspect --format='{{.State.Status}}' aitos-paper 2>/dev/null || echo missing)
+              paper_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-paper 2>/dev/null || echo missing)
+              echo "aitos-paper: status=$paper_status health=$paper_health"
+              if [ "$paper_health" = "healthy" ]; then break; fi
+              if [ "$paper_status" = "exited" ] || [ "$paper_status" = "dead" ]; then break; fi
+              sleep 10
+            done
+            docker inspect --format='status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-paper || true
             if [ "$paper_health" != "healthy" ]; then
-              echo "::error::aitos-paper did not reach healthy state."
-              docker compose logs --no-color --tail=250 aitos-paper || true
+              echo "::error::aitos-paper did not reach healthy state within 180 seconds."
+              docker logs --timestamps --tail=500 aitos-paper || true
               exit 1
             fi
             echo "=== Deployment completed successfully ==="
