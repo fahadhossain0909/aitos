@@ -17,22 +17,11 @@ DEFAULT_DB = "aitos"
 DEFAULT_BUDGET_GB = 130
 DEFAULT_TARGET_GB = 120
 DEFAULT_BOOT_BUFFER_GB = 7.5
-DEFAULT_DATA_DISK_MIN_FREE_GB = 20.0
+DEFAULT_DATA_DISK_MIN_FREE_GB = 2.5
 DEFAULT_DATA_DISK_TARGET_FREE_GB = 25.0
 DEFAULT_AUTO_DELETE_PERCENT = 2.5
 
-# Lower number = safer to delete. Production/application state is intentionally
-# excluded from these paths. The order also means caches/logs/history are removed
-# before backups and snapshots.
-BOOT_DISPOSABLE_DIRS = (
-    "cache",
-    "caches",
-    "logs",
-    "backtest",
-    "snapshots",
-    "tmp",
-    "backups",
-)
+BOOT_DISPOSABLE_DIRS = ("cache", "caches", "logs", "backtest", "snapshots", "tmp", "backups")
 
 EVICTABLE_TABLES = {
     "order_book_snapshots": "time",
@@ -150,17 +139,12 @@ def _files(root: Path) -> Iterable[Path]:
     return (path for path in root.rglob("*") if path.is_file() and not path.is_symlink())
 
 
-def _directory_size(root: Path) -> int:
-    return sum(path.stat().st_size for path in _files(root) if path.exists())
-
-
 def _boot_free_bytes(root: Path) -> int:
     stats = os.statvfs(root)
     return stats.f_bavail * stats.f_frsize
 
 
 def _disposable_files(root: Path) -> list[tuple[int, int, Path]]:
-    """Return disposable files as (priority, mtime_ns, path)."""
     candidates: list[tuple[int, int, Path]] = []
     for priority, dirname in enumerate(BOOT_DISPOSABLE_DIRS):
         directory = root / dirname
@@ -173,7 +157,6 @@ def _disposable_files(root: Path) -> list[tuple[int, int, Path]]:
 
 
 def prune_for_boot_buffer(root: Path, free_buffer_gb: float, delete_percent: float = 2.5, dry_run: bool = False) -> dict:
-    """Free the least-important old boot-disk files until the free-space reserve is met."""
     free_before = _boot_free_bytes(root)
     target = int(free_buffer_gb * (1024**3))
     if free_before >= target:
@@ -209,7 +192,6 @@ def prune_for_boot_buffer(root: Path, free_buffer_gb: float, delete_percent: flo
 
 
 def inspect_boot_storage(others_root: Path, config: StorageConfig) -> dict:
-    """Use free boot-disk space as the only capacity limit; no fixed Others cap."""
     free_gb = _gb(_boot_free_bytes(others_root))
     result = {"boot_free_gb": free_gb, "boot_buffer_gb": config.boot_buffer_gb, "reserve_met": free_gb >= config.boot_buffer_gb}
     if not result["reserve_met"]:
