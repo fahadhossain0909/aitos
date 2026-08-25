@@ -197,7 +197,11 @@ def enforce_clickhouse(
 def _files(root: Path) -> Iterable[Path]:
     if not root.exists():
         return ()
-    return (path for path in root.rglob("*") if path.is_file() and not path.is_symlink())
+    return (
+        path
+        for path in root.rglob("*")
+        if path.is_file() and not path.is_symlink()
+    )
 
 
 def _boot_free_bytes(root: Path) -> int:
@@ -248,7 +252,9 @@ def prune_for_boot_buffer(
     freed = 0
     deleted: list[str] = []
 
-    for _priority, _mtime, path in sorted(disposable, key=lambda item: (item[0], item[1])):
+    for _priority, _mtime, path in sorted(
+        disposable, key=lambda item: (item[0], item[1])
+    ):
         if freed >= delete_bytes:
             break
         try:
