@@ -1,10 +1,11 @@
 from pathlib import Path
 
+import aitos.storage.maintenance as maintenance
 from aitos.storage.maintenance import (
     StorageConfig,
     choose_retention_days,
     inspect_boot_storage,
-    prune_old_files,
+    prune_for_boot_buffer,
 )
 
 
@@ -14,37 +15,50 @@ def test_retention_ladder_prefers_longest_window_that_fits():
     assert choose_retention_days(120, 90, 20.0) == 7
 
 
-def test_inspect_boot_storage_reports_over_budget(tmp_path: Path):
-    big = tmp_path / "blob.bin"
-    big.write_bytes(b"x" * 1024)
-    config = StorageConfig(others_gb=0.0000005, boot_buffer_gb=10.0)
-    result = inspect_boot_storage(tmp_path, config)
-    assert result["others_gb"] > 0
-    assert result["others_max_gb"] == config.others_gb
-    assert result["boot_buffer_gb"] == 10.0
-    assert result["others_over_budget"] is True
-
-
-def test_inspect_boot_storage_under_budget(tmp_path: Path):
-    config = StorageConfig(others_gb=22.5, boot_buffer_gb=10.0)
-    result = inspect_boot_storage(tmp_path, config)
-    assert result["others_gb"] == 0.0
-    assert result["others_over_budget"] is False
-
-
-def test_prune_old_files_removes_oldest_until_budget(tmp_path: Path):
-    old = tmp_path / "old.bin"
-    new = tmp_path / "new.bin"
+def test_prune_for_boot_buffer_removes_oldest_disposable_files(monkeypatch, tmp_path: Path):
+    disposable = tmp_path / "backtest"
+    disposable.mkdir()
+    old = disposable / "old.bin"
+    new = disposable / "new.bin"
     old.write_bytes(b"o" * 800)
     new.write_bytes(b"n" * 800)
-    old.touch()
-    new.touch()
-    import os
-    os.utime(old, (1000, 1000))
-    os.utime(new, (2000, 2000))
+    monkeypatch.setattr(maintenance, "_boot_free_bytes", lambda _root: 0)
 
-    result = prune_old_files(tmp_path, max_gb=0.000001, delete_percent=2.5)
-    assert result["over_budget"] is True
+    result = prune_for_boot_buffer(
+        tmp_path,
+        free_buffer_gb=0.000001,
+        delete_percent=2.5,
+    )
+
+    assert result["cleanup_needed"] is True
+    assert result["reserve_met"] is True
     assert str(old) in result["deleted_files"]
     assert not old.exists()
     assert new.exists()
+
+
+def test_inspect_boot_storage_triggers_cleanup_when_reserve_is_breached(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(maintenance, "_boot_free_bytes", lambda _root: 0)
+    config = StorageConfig(boot_buffer_gb=10.0)
+
+    result = inspect_boot_storage(tmp_path, config)
+
+    assert result["boot_free_gb"] == 0.0
+    assert result["boot_buffer_gb"] == 10.0
+    assert result["reserve_met"] is False
+    assert result["prune"]["cleanup_needed"] is True
+
+
+def test_inspect_boot_storage_does_not_cleanup_when_reserve_is_met(
+    monkeypatch, tmp_path: Path
+):
+    monkeypatch.setattr(maintenance, "_boot_free_bytes", lambda _root: 20 * 1024**3)
+    config = StorageConfig(boot_buffer_gb=10.0)
+
+    result = inspect_boot_storage(tmp_path, config)
+
+    assert result["boot_free_gb"] == 20.0
+    assert result["reserve_met"] is True
+    assert result["prune"] is None
