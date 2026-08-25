@@ -23,7 +23,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4.5.1
+        uses: docker/login-action@v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -353,7 +353,7 @@ jobs:
 
       - name: Upload production audit artifact
         if: always() && steps.check-secrets.outputs.has_secrets == 'true'
-        uses: actions/upload-artifact@v4.6.2
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: aitos-production-audit
           path: aitos-production-audit/report.txt
