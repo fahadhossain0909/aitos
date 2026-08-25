@@ -5,9 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import sqrt
 from typing import Any, Callable, Iterable
+import logging
 
 from aitos.backtest.execution import ExecutionSimulator
 from aitos.backtest.replay import MarketReplay, ReplayEvent
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,28 +61,58 @@ class BacktestEngine:
         strategy: Callable[[ReplayEvent, ExecutionSimulator], None],
         mark_price: Callable[[ReplayEvent], float],
     ) -> BacktestResult:
+        logger.info("backtest started", extra={"aitos_extra": {
+            "initial_cash": self.initial_cash,
+            "fee_rate": self.execution.fee_rate,
+            "slippage_bps": self.execution.slippage_bps,
+        }})
         curve: list[float] = []
         self._trade_pnls.clear()
         self._trades.clear()
         replay = MarketReplay(events)
-        for event in replay.events:
-            before = self.execution.realized_pnl
-            strategy(event, self.execution)
-            after = self.execution.realized_pnl
-            if after != before:
-                pnl = after - before
-                self._trade_pnls.append(pnl)
-                self._trades.append(
-                    BacktestTrade(
-                        timestamp=event.timestamp,
-                        reward=pnl,
-                        price=float(mark_price(event)),
-                        fields=dict(getattr(event, "fields", {}) or {}),
+        events_processed = 0
+        try:
+            for event in replay.events:
+                events_processed += 1
+                before = self.execution.realized_pnl
+                strategy(event, self.execution)
+                after = self.execution.realized_pnl
+                if after != before:
+                    pnl = after - before
+                    self._trade_pnls.append(pnl)
+                    self._trades.append(
+                        BacktestTrade(
+                            timestamp=event.timestamp,
+                            reward=pnl,
+                            price=float(mark_price(event)),
+                            fields=dict(getattr(event, "fields", {}) or {}),
+                        )
                     )
-                )
-            price = mark_price(event)
-            curve.append(self.execution.snapshot(price).equity)
-        return BacktestResult(self._metrics(curve), tuple(curve), tuple(self._trades))
+                    logger.debug("backtest trade realized", extra={"aitos_extra": {
+                        "timestamp": event.timestamp, "pnl": pnl,
+                        "trade_count": len(self._trades),
+                    }})
+                price = mark_price(event)
+                curve.append(self.execution.snapshot(price).equity)
+            result = BacktestResult(
+                self._metrics(curve), tuple(curve), tuple(self._trades)
+            )
+            logger.info("backtest completed", extra={"aitos_extra": {
+                "events_processed": events_processed,
+                "trades": result.metrics.trades,
+                "final_equity": result.metrics.final_equity,
+                "total_return": result.metrics.total_return,
+                "max_drawdown": result.metrics.max_drawdown,
+                "sharpe": result.metrics.sharpe,
+                "fees": result.metrics.total_fees,
+            }})
+            return result
+        except Exception:
+            logger.exception("backtest failed", extra={"aitos_extra": {
+                "events_processed": events_processed,
+                "trades": len(self._trades),
+            }})
+            raise
 
     def _metrics(self, curve: list[float]) -> BacktestMetrics:
         final = curve[-1] if curve else self.initial_cash
