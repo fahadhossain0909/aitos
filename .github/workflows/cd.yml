@@ -13,7 +13,6 @@ permissions:
 env:
   REGISTRY: ghcr.io
   AITOS_DATA_ROOT: /mnt/aitos-data
-  BACKTEST_BUDGET_BYTES: 24159191040
   OTHERS_BUDGET_BYTES: 24159191040
 
 jobs:
@@ -75,6 +74,7 @@ jobs:
           done
           if [ "$missing" -ne 0 ]; then exit 1; fi
           echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+
       - name: Write SSH key with proper formatting
         if: steps.check-secrets.outputs.has_secrets == 'true'
         env:
@@ -83,62 +83,73 @@ jobs:
           set -euo pipefail
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
-      - name: Check system resources
+
+      - name: Check runner resources
         if: steps.check-secrets.outputs.has_secrets == 'true'
         run: |
           free -h
           df -h /
+
       - name: Deploy pre-built image to remote host over SSH
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
         env:
-          BACKTEST_BUDGET_BYTES: ${{ env.BACKTEST_BUDGET_BYTES }}
           OTHERS_BUDGET_BYTES: ${{ env.OTHERS_BUDGET_BYTES }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 15m
-          envs: BACKTEST_BUDGET_BYTES,OTHERS_BUDGET_BYTES
+          envs: OTHERS_BUDGET_BYTES
           script: |
             set -euo pipefail
-            : "${BACKTEST_BUDGET_BYTES:=24159191040}"
             : "${OTHERS_BUDGET_BYTES:=24159191040}"
-            mkdir -p ~/aitos
-            cd ~/aitos
-            if [ ! -d .git ]; then
-              git clone https://github.com/${{ github.repository }}.git .
-            else
-              git fetch origin main
-              git reset --hard origin/main
-            fi
+
+            APP_DIR="$HOME/aitos"
             DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
+            REPO="${{ github.repository }}"
+            COMMIT="${{ github.sha }}"
+            mkdir -p "$APP_DIR"
+            cd "$APP_DIR"
+
             if ! mountpoint -q "$DATA_ROOT"; then
               echo "::error::$DATA_ROOT is not a mounted data disk; refusing to place database data on the boot disk."
               exit 1
             fi
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
-            mkdir -p ./.storage/backtest ./.storage/others ./.storage/others/backups ./.storage/others/snapshots
 
             echo "=== Boot disk storage policy ==="
-            echo "Backtest budget: 22.5 GiB"
-            echo "Others budget:   22.5 GiB"
-            echo "Remaining boot disk: free headroom"
-            backtest_bytes=$(du -sb ./.storage/backtest | cut -f1)
-            others_bytes=$(du -sb ./.storage/others | cut -f1)
-            if [ "$backtest_bytes" -gt "$BACKTEST_BUDGET_BYTES" ]; then
-              echo "::error::Backtest storage exceeds the 22.5 GiB budget."
-              du -sh ./.storage/backtest
-              exit 1
+            echo "All non-database application data budget: 22.5 GiB"
+            echo "Database data is exclusively under: $DATA_ROOT"
+
+            echo "=== Freeing stale Git/Docker data before deployment ==="
+            if [ -d .git ]; then
+              rm -rf .git
             fi
+            docker container prune --force --filter "until=24h" || true
+            docker image prune -a --force --filter "until=168h" || true
+            docker builder prune --all --force --filter "until=168h" || true
+            docker network prune --force --filter "until=24h" || true
+
+            echo "=== Downloading source snapshot without Git history ==="
+            tmp_dir=$(mktemp -d)
+            trap 'rm -rf "$tmp_dir"' EXIT
+            curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
+            mkdir -p "$tmp_dir/source"
+            tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir/source"
+
+            find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name .storage -exec rm -rf -- {} +
+            cp -a "$tmp_dir/source/." "$APP_DIR/"
+            mkdir -p ./.storage/others/backtest ./.storage/others/backups ./.storage/others/snapshots
+
+            others_bytes=$(du -sb ./.storage/others | cut -f1)
             if [ "$others_bytes" -gt "$OTHERS_BUDGET_BYTES" ]; then
-              echo "::error::Others storage exceeds the 22.5 GiB budget."
+              echo "::error::Application data under ./.storage/others exceeds the 22.5 GiB budget."
               du -sh ./.storage/others
               exit 1
             fi
-            echo "Backtest usage: $(du -sh ./.storage/backtest | cut -f1)"
-            echo "Others usage:   $(du -sh ./.storage/others | cut -f1)"
-            echo "Boot disk:      $(df -h . | tail -1)"
+            echo "Application Others usage: $(du -sh ./.storage/others | cut -f1)"
+            echo "Boot disk: $(df -h . | tail -1)"
 
             umask 077
             cat > .env << 'ENVEOF'
@@ -168,7 +179,7 @@ jobs:
             LEARNING_LOOKBACK_HOURS=168
             LEARNING_MODEL_PATH=/models/online_rl/deep_value.pkl
             LEARNING_STATE_PATH=/models/online_rl/worker_state.json
-            BACKTEST_DATA_DIR=./.storage/backtest
+            BACKTEST_DATA_DIR=./.storage/others/backtest
             OTHERS_DATA_DIR=./.storage/others
             BACKUP_DIR=./.storage/others/backups
             SNAPSHOT_DIR=./.storage/others/snapshots
@@ -248,4 +259,10 @@ jobs:
               docker logs --timestamps --tail=500 aitos-paper || true
               exit 1
             fi
+
+            echo "=== Final boot-disk storage audit ==="
+            docker system df
+            echo "Boot disk: $(df -h . | tail -1)"
+            echo "Application Others: $(du -sh ./.storage/others | cut -f1)"
+            echo "Database disk: $(df -h "$DATA_ROOT" | tail -1)"
             echo "=== Deployment completed successfully ==="
