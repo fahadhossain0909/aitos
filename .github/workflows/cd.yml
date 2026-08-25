@@ -208,9 +208,45 @@ jobs:
             docker compose config > /dev/null
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             docker compose pull
+
+            echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: BEFORE CLEANUP ==="
+            echo "--- AITOS containers by exact name ---"
+            for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
+              docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
+            done
+            echo "--- AITOS containers by Compose project label ---"
+            docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
+            echo "--- ClickHouse data mount ---"
+            docker inspect --format='name={{.Name}} mounts={{range .Mounts}}{{.Type}}:{{.Source}}->{{.Destination}} {{end}}' aitos-clickhouse 2>/dev/null || echo "aitos-clickhouse not present"
+            echo "--- Docker volumes related to AITOS/ClickHouse ---"
+            docker volume ls --format '{{.Name}}' | grep -E '(^aitos|clickhouse)' || true
+
             docker compose down --remove-orphans --timeout 30 || true
+
+            echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: AFTER COMPOSE DOWN ==="
+            for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
+              docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
+            done
+            echo "--- Remaining AITOS containers ---"
+            docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
+
             project_containers=$(docker ps -aq --filter 'label=com.docker.compose.project=aitos')
             if [ -n "$project_containers" ]; then echo "$project_containers" | xargs -r docker rm -f; fi
+
+            echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: AFTER PROJECT CLEANUP ==="
+            for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
+              docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
+            done
+            echo "--- Remaining AITOS containers ---"
+            docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
+            echo "--- ClickHouse name collision check immediately before startup ---"
+            if docker inspect aitos-clickhouse >/dev/null 2>&1; then
+              docker inspect --format='COLLISION name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} image={{.Config.Image}}' aitos-clickhouse
+              echo "::error::aitos-clickhouse still exists immediately before startup."
+              exit 1
+            else
+              echo "aitos-clickhouse name is free."
+            fi
 
             echo "=== ISOLATED CLICKHOUSE STARTUP READINESS GATE ==="
             docker compose up -d clickhouse
