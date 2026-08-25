@@ -34,11 +34,18 @@ class ContinualLearningWorker:
         batch_limit: int = 5000,
         poll_seconds: int = 60,
     ) -> None:
-        logger.info("learning worker initializing", extra={"aitos_extra": {
-            "database": database, "batch_limit": batch_limit,
-            "poll_seconds": poll_seconds, "lookback_hours": lookback_hours,
-            "model_path": model_path,
-        }})
+        logger.info(
+            "learning worker initializing",
+            extra={
+                "aitos_extra": {
+                    "database": database,
+                    "batch_limit": batch_limit,
+                    "poll_seconds": poll_seconds,
+                    "lookback_hours": lookback_hours,
+                    "model_path": model_path,
+                }
+            },
+        )
         self.client = clickhouse_connect.get_client(
             host=host, port=port, username=user, password=password, database=database
         )
@@ -51,10 +58,15 @@ class ContinualLearningWorker:
         self.scorer.load_state(model_path)
         self._processed: set[str] = set()
         self._load_state()
-        logger.info("learning worker initialized", extra={"aitos_extra": {
-            "processed_experiences": len(self._processed),
-            "samples_seen": self.scorer.n_samples_seen,
-        }})
+        logger.info(
+            "learning worker initialized",
+            extra={
+                "aitos_extra": {
+                    "processed_experiences": len(self._processed),
+                    "samples_seen": self.scorer.n_samples_seen,
+                }
+            },
+        )
 
     def close(self) -> None:
         self.client.close()
@@ -62,21 +74,26 @@ class ContinualLearningWorker:
 
     def _load_state(self) -> None:
         if not self.state_path.exists():
-            logger.info("learning state file not found; starting fresh", extra={"aitos_extra": {
-                "state_path": str(self.state_path)
-            }})
+            logger.info(
+                "learning state file not found; starting fresh",
+                extra={"aitos_extra": {"state_path": str(self.state_path)}},
+            )
             return
         try:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            self._processed = set(str(x) for x in data.get("processed_experiences", []))
-            logger.info("learning state loaded", extra={"aitos_extra": {
-                "processed_experiences": len(self._processed)
-            }})
+            self._processed = set(
+                str(x) for x in data.get("processed_experiences", [])
+            )
+            logger.info(
+                "learning state loaded",
+                extra={"aitos_extra": {"processed_experiences": len(self._processed)}},
+            )
         except (OSError, ValueError, TypeError):
             self._processed = set()
-            logger.exception("learning state load failed", extra={"aitos_extra": {
-                "state_path": str(self.state_path)
-            }})
+            logger.exception(
+                "learning state load failed",
+                extra={"aitos_extra": {"state_path": str(self.state_path)}},
+            )
 
     def _save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -88,10 +105,15 @@ class ContinualLearningWorker:
         tmp = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(self.state_path)
-        logger.info("learning state persisted", extra={"aitos_extra": {
-            "processed_experiences": len(self._processed),
-            "samples_seen": self.scorer.n_samples_seen,
-        }})
+        logger.info(
+            "learning state persisted",
+            extra={
+                "aitos_extra": {
+                    "processed_experiences": len(self._processed),
+                    "samples_seen": self.scorer.n_samples_seen,
+                }
+            },
+        )
 
     def _rows(self) -> list[dict[str, Any]]:
         start = datetime.now(timezone.utc) - self.lookback
@@ -108,9 +130,15 @@ class ContinualLearningWorker:
                 sql, parameters={"start": start, "limit": self.batch_limit}
             )
             rows = [dict(zip(result.column_names, row)) for row in result.result_rows]
-            logger.info("learning batch fetched", extra={"aitos_extra": {
-                "rows": len(rows), "lookback_hours": self.lookback.total_seconds() / 3600
-            }})
+            logger.info(
+                "learning batch fetched",
+                extra={
+                    "aitos_extra": {
+                        "rows": len(rows),
+                        "lookback_hours": self.lookback.total_seconds() / 3600,
+                    }
+                },
+            )
             return rows
         except Exception:
             logger.exception("learning batch query failed")
@@ -119,7 +147,11 @@ class ContinualLearningWorker:
     @staticmethod
     def _numeric_features(features: Any) -> dict[str, float]:
         try:
-            value = json.loads(features or "{}") if not isinstance(features, dict) else features
+            value = (
+                json.loads(features or "{}")
+                if not isinstance(features, dict)
+                else features
+            )
         except (TypeError, ValueError):
             return {}
         if not isinstance(value, dict):
@@ -149,20 +181,33 @@ class ContinualLearningWorker:
                     str(row["symbol"]), features, float(row["reward"] or 0.0)
                 )
             except Exception:
-                logger.exception("learning update failed", extra={"aitos_extra": {
-                    "experience_id": experience_id, "symbol": str(row["symbol"])
-                }})
+                logger.exception(
+                    "learning update failed",
+                    extra={
+                        "aitos_extra": {
+                            "experience_id": experience_id,
+                            "symbol": str(row["symbol"]),
+                        }
+                    },
+                )
                 raise
             self._processed.add(experience_id)
             changed = True
             processed_now += 1
         if changed:
             self._save_state()
-        logger.info("learning batch completed", extra={"aitos_extra": {
-            "fetched": len(rows), "processed_now": processed_now,
-            "skipped": skipped, "total_processed": len(self._processed),
-            "samples_seen": self.scorer.n_samples_seen,
-        }})
+        logger.info(
+            "learning batch completed",
+            extra={
+                "aitos_extra": {
+                    "fetched": len(rows),
+                    "processed_now": processed_now,
+                    "skipped": skipped,
+                    "total_processed": len(self._processed),
+                    "samples_seen": self.scorer.n_samples_seen,
+                }
+            },
+        )
         return len(self._processed)
 
     def run_forever(self) -> None:
