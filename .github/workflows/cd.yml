@@ -104,44 +104,35 @@ jobs:
           script: |
             set -euo pipefail
             : "${OTHERS_BUDGET_BYTES:=24159191040}"
-
             APP_DIR="$HOME/aitos"
             DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
             REPO="${{ github.repository }}"
             COMMIT="${{ github.sha }}"
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
-
             if ! mountpoint -q "$DATA_ROOT"; then
               echo "::error::$DATA_ROOT is not a mounted data disk; refusing to place database data on the boot disk."
               exit 1
             fi
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
-
             echo "=== Boot disk storage policy ==="
             echo "All non-database application data budget: 22.5 GiB"
             echo "Database data is exclusively under: $DATA_ROOT"
-
             echo "=== Freeing stale Git/Docker data before deployment ==="
-            if [ -d .git ]; then
-              rm -rf .git
-            fi
+            if [ -d .git ]; then rm -rf .git; fi
             docker container prune --force --filter "until=24h" || true
             docker image prune -a --force --filter "until=168h" || true
             docker builder prune --all --force --filter "until=168h" || true
             docker network prune --force --filter "until=24h" || true
-
             echo "=== Downloading source snapshot without Git history ==="
             tmp_dir=$(mktemp -d)
             trap 'rm -rf "$tmp_dir"' EXIT
             curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
             mkdir -p "$tmp_dir/source"
             tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir/source"
-
             find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name .storage -exec rm -rf -- {} +
             cp -a "$tmp_dir/source/." "$APP_DIR/"
             mkdir -p ./.storage/others/backtest ./.storage/others/backups ./.storage/others/snapshots
-
             others_bytes=$(du -sb ./.storage/others | cut -f1)
             if [ "$others_bytes" -gt "$OTHERS_BUDGET_BYTES" ]; then
               echo "::error::Application data under ./.storage/others exceeds the 22.5 GiB budget."
@@ -150,7 +141,6 @@ jobs:
             fi
             echo "Application Others usage: $(du -sh ./.storage/others | cut -f1)"
             echo "Boot disk: $(df -h . | tail -1)"
-
             umask 077
             cat > .env << 'ENVEOF'
             ENVIRONMENT=production
@@ -201,43 +191,31 @@ jobs:
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
             ENVEOF
             chmod 600 .env
-
             docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
             df -h "$DATA_ROOT"
             docker system df
             docker compose config > /dev/null
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             docker compose pull
-
             echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: BEFORE CLEANUP ==="
-            echo "--- AITOS containers by exact name ---"
             for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
               docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
             done
-            echo "--- AITOS containers by Compose project label ---"
             docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
-            echo "--- ClickHouse data mount ---"
             docker inspect --format='name={{.Name}} mounts={{range .Mounts}}{{.Type}}:{{.Source}}->{{.Destination}} {{end}}' aitos-clickhouse 2>/dev/null || echo "aitos-clickhouse not present"
-            echo "--- Docker volumes related to AITOS/ClickHouse ---"
             docker volume ls --format '{{.Name}}' | grep -E '(^aitos|clickhouse)' || true
-
             docker compose down --remove-orphans --timeout 30 || true
-
             echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: AFTER COMPOSE DOWN ==="
             for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
               docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
             done
-            echo "--- Remaining AITOS containers ---"
             docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
-
             project_containers=$(docker ps -aq --filter 'label=com.docker.compose.project=aitos')
             if [ -n "$project_containers" ]; then echo "$project_containers" | xargs -r docker rm -f; fi
-
             echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: AFTER PROJECT CLEANUP ==="
             for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
               docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
             done
-            echo "--- Remaining AITOS containers ---"
             docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
             echo "--- ClickHouse name collision check immediately before startup ---"
             if docker inspect aitos-clickhouse >/dev/null 2>&1; then
@@ -247,7 +225,6 @@ jobs:
             else
               echo "aitos-clickhouse name is free."
             fi
-
             echo "=== ISOLATED CLICKHOUSE STARTUP READINESS GATE ==="
             docker compose up -d clickhouse
             ch_health=""
@@ -266,7 +243,6 @@ jobs:
               echo "::error::ClickHouse did not become healthy within 180 seconds."
               exit 1
             fi
-
             docker compose up -d redis neo4j
             docker compose up -d aitos-paper aitos-learning aitos-storage-maintenance
             docker compose ps --all
@@ -276,7 +252,6 @@ jobs:
               docker compose logs --no-color --tail=200
               exit 1
             fi
-
             echo "=== AITOS-PAPER READINESS GATE ==="
             paper_health=""
             paper_status="missing"
@@ -295,10 +270,96 @@ jobs:
               docker logs --timestamps --tail=500 aitos-paper || true
               exit 1
             fi
-
             echo "=== Final boot-disk storage audit ==="
             docker system df
             echo "Boot disk: $(df -h . | tail -1)"
             echo "Application Others: $(du -sh ./.storage/others | cut -f1)"
             echo "Database disk: $(df -h "$DATA_ROOT" | tail -1)"
             echo "=== Deployment completed successfully ==="
+
+  audit-vps:
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always() && needs.deploy.result == 'success'
+    environment: papertrade
+    steps:
+      - name: Check required deployment secrets
+        id: check-secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required GitHub Actions secret: $name"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then exit 1; fi
+          echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+
+      - name: Write SSH key with proper formatting
+        if: steps.check-secrets.outputs.has_secrets == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_audit_key
+          chmod 600 /tmp/aitos_audit_key
+
+      - name: Run production audit on remote host
+        if: steps.check-secrets.outputs.has_secrets == 'true'
+        id: audit
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_audit_key
+          command_timeout: 10m
+          capture_stdout: false
+          script: |
+            set -u
+            cd "$HOME/aitos"
+            test -f scripts/paper_runtime_audit.sh
+            mkdir -p "$HOME/aitos-production-audit"
+            REPORT="$HOME/aitos-production-audit/report.txt"
+            set +e
+            bash scripts/paper_runtime_audit.sh >"$REPORT" 2>&1
+            status=$?
+            set -e
+            echo "AUDIT_EXIT_CODE=$status"
+            echo "AUDIT_REPORT_PATH=$REPORT"
+            echo "AUDIT_REPORT_SIZE=$(wc -c < "$REPORT")"
+            exit "$status"
+
+      - name: Fetch audit report over SSH
+        if: always() && steps.check-secrets.outputs.has_secrets == 'true'
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p aitos-production-audit
+          if scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /tmp/aitos_audit_key "$DEPLOY_USER@$DEPLOY_HOST:~/aitos-production-audit/report.txt" aitos-production-audit/report.txt 2>/dev/null; then
+            echo "Audit report downloaded successfully."
+          else
+            echo "Remote audit report could not be downloaded; creating diagnostic fallback."
+            printf '%s\n' "Audit report unavailable. Inspect the remote audit step log." > aitos-production-audit/report.txt
+          fi
+          test -s aitos-production-audit/report.txt
+
+      - name: Upload production audit artifact
+        if: always() && steps.check-secrets.outputs.has_secrets == 'true'
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: aitos-production-audit
+          path: aitos-production-audit/report.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f /tmp/aitos_audit_key
