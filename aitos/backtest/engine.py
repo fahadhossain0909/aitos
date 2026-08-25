@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from math import sqrt
 from typing import Any, Callable, Iterable
-import logging
 
 from aitos.backtest.execution import ExecutionSimulator
 from aitos.backtest.replay import MarketReplay, ReplayEvent
@@ -61,11 +61,16 @@ class BacktestEngine:
         strategy: Callable[[ReplayEvent, ExecutionSimulator], None],
         mark_price: Callable[[ReplayEvent], float],
     ) -> BacktestResult:
-        logger.info("backtest started", extra={"aitos_extra": {
-            "initial_cash": self.initial_cash,
-            "fee_rate": self.execution.fee_rate,
-            "slippage_bps": self.execution.slippage_bps,
-        }})
+        logger.info(
+            "backtest started",
+            extra={
+                "aitos_extra": {
+                    "initial_cash": self.initial_cash,
+                    "fee_rate": self.execution.fee_rate,
+                    "slippage_bps": self.execution.slippage_bps,
+                }
+            },
+        )
         curve: list[float] = []
         self._trade_pnls.clear()
         self._trades.clear()
@@ -88,30 +93,46 @@ class BacktestEngine:
                             fields=dict(getattr(event, "fields", {}) or {}),
                         )
                     )
-                    logger.debug("backtest trade realized", extra={"aitos_extra": {
-                        "timestamp": event.timestamp, "pnl": pnl,
-                        "trade_count": len(self._trades),
-                    }})
+                    logger.debug(
+                        "backtest trade realized",
+                        extra={
+                            "aitos_extra": {
+                                "timestamp": event.timestamp,
+                                "pnl": pnl,
+                                "trade_count": len(self._trades),
+                            }
+                        },
+                    )
                 price = mark_price(event)
                 curve.append(self.execution.snapshot(price).equity)
             result = BacktestResult(
                 self._metrics(curve), tuple(curve), tuple(self._trades)
             )
-            logger.info("backtest completed", extra={"aitos_extra": {
-                "events_processed": events_processed,
-                "trades": result.metrics.trades,
-                "final_equity": result.metrics.final_equity,
-                "total_return": result.metrics.total_return,
-                "max_drawdown": result.metrics.max_drawdown,
-                "sharpe": result.metrics.sharpe,
-                "fees": result.metrics.total_fees,
-            }})
+            logger.info(
+                "backtest completed",
+                extra={
+                    "aitos_extra": {
+                        "events_processed": events_processed,
+                        "trades": result.metrics.trades,
+                        "final_equity": result.metrics.final_equity,
+                        "total_return": result.metrics.total_return,
+                        "max_drawdown": result.metrics.max_drawdown,
+                        "sharpe": result.metrics.sharpe,
+                        "fees": result.metrics.total_fees,
+                    }
+                },
+            )
             return result
         except Exception:
-            logger.exception("backtest failed", extra={"aitos_extra": {
-                "events_processed": events_processed,
-                "trades": len(self._trades),
-            }})
+            logger.exception(
+                "backtest failed",
+                extra={
+                    "aitos_extra": {
+                        "events_processed": events_processed,
+                        "trades": len(self._trades),
+                    }
+                },
+            )
             raise
 
     def _metrics(self, curve: list[float]) -> BacktestMetrics:
@@ -131,7 +152,9 @@ class BacktestEngine:
         if len(returns) > 1:
             mean = sum(returns) / len(returns)
             variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-            sharpe = sqrt(len(returns)) * mean / sqrt(variance) if variance > 0 else 0.0
+            sharpe = (
+                sqrt(len(returns)) * mean / sqrt(variance) if variance > 0 else 0.0
+            )
         else:
             sharpe = 0.0
         wins = sum(1 for p in self._trade_pnls if p > 0)
