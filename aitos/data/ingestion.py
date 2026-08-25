@@ -107,8 +107,27 @@ class DataIngestionService(AITOSModule):
 
     async def initialize(self, config: Dict[str, Any]) -> None:
         if self._initialized:
+            logger.info("data ingestion initialize skipped: already initialized")
             return
-        await self._exchange.connect()
+        logger.info(
+            "initializing data ingestion service",
+            extra={
+                "aitos_extra": {
+                    "symbols": self._symbols,
+                    "symbol_count": len(self._symbols),
+                    "kline_timeframe": self._kline_timeframe,
+                    "orderbook_levels": self._orderbook_levels,
+                    "repository_enabled": self._repository is not None,
+                }
+            },
+        )
+        try:
+            await self._exchange.connect()
+            logger.info("exchange connection established for data ingestion")
+        except Exception:
+            logger.exception("exchange connection failed during data ingestion initialization")
+            raise
+
         self._tasks = [
             asyncio.create_task(self._run_kline_stream(), name="aitos-kline-stream"),
             asyncio.create_task(self._run_trade_stream(), name="aitos-trade-stream"),
@@ -117,8 +136,42 @@ class DataIngestionService(AITOSModule):
             ),
         ]
         self._initialized = True
+        logger.info(
+            "data ingestion stream tasks started",
+            extra={
+                "aitos_extra": {
+                    "tasks": [task.get_name() for task in self._tasks],
+                    "task_count": len(self._tasks),
+                }
+            },
+        )
 
     async def health_check(self) -> HealthStatus:
+        task_states = []
+        for task in self._tasks:
+            state = {
+                "name": task.get_name(),
+                "done": task.done(),
+                "cancelled": task.cancelled(),
+            }
+            if task.done() and not task.cancelled():
+                try:
+                    exception = task.exception()
+                except Exception as exc:
+                    exception = exc
+                if exception is not None:
+                    state.update(
+                        {
+                            "exception_type": type(exception).__name__,
+                            "exception": str(exception),
+                        }
+                    )
+                    logger.error(
+                        "data ingestion task terminated with exception",
+                        extra={"aitos_extra": state},
+                    )
+            task_states.append(state)
+
         alive = sum(1 for task in self._tasks if not task.done())
         status = (
             ModuleStatus.UNHEALTHY
@@ -128,6 +181,20 @@ class DataIngestionService(AITOSModule):
                 if alive == len(self._tasks)
                 else ModuleStatus.DEGRADED
             )
+        )
+        logger.info(
+            "data ingestion health sampled",
+            extra={
+                "aitos_extra": {
+                    "status": status.value,
+                    "errors": self._errors,
+                    "tasks_alive": alive,
+                    "task_states": task_states,
+                    "trade_events_received": self._trade_events_received,
+                    "trade_stream_errors": self._trade_stream_errors,
+                    "trade_stream_messages_received": self._trade_stream_messages_received,
+                }
+            },
         )
         return HealthStatus(
             module_id=self.module_id,
@@ -147,10 +214,15 @@ class DataIngestionService(AITOSModule):
                 "trade_stream_idle_timeouts": self._trade_stream_idle_timeouts,
                 "trade_stream_messages_received": self._trade_stream_messages_received,
                 "last_trade_event_time": self._last_trade_event_time,
+                "task_states": task_states,
             },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        logger.info(
+            "shutting down data ingestion service",
+            extra={"aitos_extra": {"task_count": len(self._tasks)}}
+        )
         for task in self._tasks:
             task.cancel()
         if self._tasks:
@@ -174,19 +246,31 @@ class DataIngestionService(AITOSModule):
         return len(klines)
 
     async def _run_kline_stream(self) -> None:
+        logger.info(
+            "starting kline stream",
+            extra={"aitos_extra": {"symbols": self._symbols, "timeframe": self._kline_timeframe}}
+        )
         try:
             async for kline in self._exchange.stream_klines(
                 self._symbols, self._kline_timeframe
             ):
                 await self._handle_kline(kline)
         except asyncio.CancelledError:
+            logger.info("kline stream cancelled")
             return
         except Exception as exc:
             self._errors += 1
-            logger.error("kline stream loop crashed: %s", exc)
+            logger.exception(
+                "kline stream loop crashed",
+                extra={"aitos_extra": {"error_type": type(exc).__name__, "error": str(exc)}}
+            )
 
     async def _run_trade_stream(self) -> None:
         """Consume trades with watchdog plus REST recovery for silent sockets."""
+        logger.info(
+            "starting trade stream",
+            extra={"aitos_extra": {"symbols": self._symbols, "idle_timeout_seconds": TRADE_STREAM_IDLE_TIMEOUT_SECONDS}}
+        )
         while True:
             producer_task: Optional[asyncio.Task] = None
             queue: asyncio.Queue[TradeTick] = asyncio.Queue(
@@ -195,6 +279,7 @@ class DataIngestionService(AITOSModule):
             try:
 
                 async def producer() -> None:
+                    logger.info("starting exchange trade stream producer")
                     async for trade in self._exchange.stream_trades(self._symbols):
                         try:
                             queue.put_nowait(trade)
@@ -249,12 +334,13 @@ class DataIngestionService(AITOSModule):
                 self._errors += 1
                 self._trade_stream_errors += 1
                 self._trade_stream_restarts += 1
-                logger.error(
-                    "trade stream loop crashed; restarting: %s",
-                    exc,
+                logger.exception(
+                    "trade stream loop crashed; restarting",
                     extra={
                         "aitos_extra": {
                             "restart_count": self._trade_stream_restarts,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
                         },
                     },
                 )
@@ -286,22 +372,30 @@ class DataIngestionService(AITOSModule):
                     )
             except Exception as exc:
                 self._trade_stream_errors += 1
-                logger.warning(
+                logger.exception(
                     "REST trade recovery failed",
-                    extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                    extra={"aitos_extra": {"symbol": symbol, "error_type": type(exc).__name__, "error": str(exc)}},
                 )
 
     async def _run_orderbook_stream(self) -> None:
+        logger.info(
+            "starting order book stream",
+            extra={"aitos_extra": {"symbols": self._symbols, "levels": self._orderbook_levels}}
+        )
         try:
             async for book in self._exchange.stream_order_book(
                 self._symbols, self._orderbook_levels
             ):
                 await self._handle_order_book(book)
         except asyncio.CancelledError:
+            logger.info("order book stream cancelled")
             return
         except Exception as exc:
             self._errors += 1
-            logger.error("order book stream loop crashed: %s", exc)
+            logger.exception(
+                "order book stream loop crashed",
+                extra={"aitos_extra": {"error_type": type(exc).__name__, "error": str(exc)}}
+            )
 
     async def _handle_kline(self, kline: Kline) -> None:
         await self._event_bus.publish(
@@ -364,8 +458,19 @@ class DataIngestionService(AITOSModule):
             self._orderflow_events += 1
             self._publish_live_state(trade.symbol)
             self._tick_processed()
-        except Exception:
+        except Exception as exc:
             self._trade_parse_errors += 1
+            logger.exception(
+                "trade handling failed",
+                extra={
+                    "aitos_extra": {
+                        "symbol": trade.symbol,
+                        "trade_id": trade.trade_id,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                },
+            )
             raise
 
     async def _handle_order_book(self, book: OrderBookSnapshot) -> None:
