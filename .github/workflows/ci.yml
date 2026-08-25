@@ -46,7 +46,7 @@ jobs:
           echo "files=$files" >> "$GITHUB_OUTPUT"
       - name: Run Black formatter check
         if: steps.changed-python.outputs.files != ''
-        run: black --check ${{ steps.changed-python.outputs.files }}
+        run: black --check --diff ${{ steps.changed-python.outputs.files }}
       - name: Run isort import checker
         if: steps.changed-python.outputs.files != ''
         run: isort --check-only ${{ steps.changed-python.outputs.files }}
