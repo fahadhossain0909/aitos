@@ -47,7 +47,11 @@ class ContinualLearningWorker:
             },
         )
         self.client = clickhouse_connect.get_client(
-            host=host, port=port, username=user, password=password, database=database
+            host=host,
+            port=port,
+            username=user,
+            password=password,
+            database=database,
         )
         self.database = database
         self.state_path = Path(state_path)
