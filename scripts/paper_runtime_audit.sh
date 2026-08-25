@@ -7,7 +7,36 @@ MAX_LOG_MB="${AITOS_MAX_LOG_MB:-512}"
 MIN_DISK_FREE_GB="${AITOS_MIN_DISK_FREE_GB:-10}"
 DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 
+# Long-running services that must be running in paper production.
+REQUIRED_CONTAINERS=(
+  aitos-redis
+  aitos-clickhouse
+  aitos-neo4j
+  aitos-paper
+  aitos-learning
+  aitos-storage-maintenance
+)
+
+# One-shot / optional containers that are allowed to be exited.
+# Matched as substrings against container names.
+ALLOWED_EXITED_PATTERNS=(
+  clickhouse-init
+  aitos-backtest
+  aitos-live
+)
+
 blockers=0
+
+is_allowed_exited() {
+  local name="$1"
+  local pattern
+  for pattern in "${ALLOWED_EXITED_PATTERNS[@]}"; do
+    case "$name" in
+      *"$pattern"*) return 0 ;;
+    esac
+  done
+  return 1
+}
 
 printf '=== AITOS Paper Runtime Audit ===\n'
 printf 'UTC: %s\n\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -21,17 +50,11 @@ if command -v docker >/dev/null 2>&1; then
   docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}' 2>/dev/null || true
   echo
 
-  echo '--- Unhealthy/stopped AITOS containers ---'
+  echo '--- Unhealthy AITOS containers ---'
   unhealthy="$(docker ps -a --filter health=unhealthy --format '{{.Names}}' | grep '^aitos-' || true)"
-  # One-shot init containers (e.g. clickhouse-init) are expected to exit successfully.
-  # Do not treat them as runtime blockers.
-  stopped="$(docker ps -a --filter status=exited --format '{{.Names}}' \
-    | grep '^aitos-' \
-    | grep -Ev 'clickhouse-init' \
-    || true)"
   if [ -n "$unhealthy" ]; then
     printf '%s\n' "$unhealthy"
-    blockers=1
+    blockers=$((blockers + 1))
     while read -r container; do
       [ -n "$container" ] || continue
       echo "--- Healthcheck diagnostics: $container ---"
@@ -44,11 +67,54 @@ if command -v docker >/dev/null 2>&1; then
   else
     echo 'none'
   fi
-  if [ -n "$stopped" ]; then
-    printf '%s\n' "$stopped"
-    blockers=1
-  else
-    echo 'none'
+  echo
+
+  echo '--- Required runtime containers ---'
+  for container in "${REQUIRED_CONTAINERS[@]}"; do
+    if ! docker inspect "$container" >/dev/null 2>&1; then
+      echo "BLOCKER: required container missing: $container"
+      blockers=$((blockers + 1))
+      continue
+    fi
+    status="$(docker inspect --format '{{.State.Status}}' "$container" 2>/dev/null || echo unknown)"
+    health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$container" 2>/dev/null || echo none)"
+    exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || echo '?')"
+    printf '%-40s status=%s health=%s exit=%s\n' "$container" "$status" "$health" "$exit_code"
+    if [ "$status" != "running" ]; then
+      echo "BLOCKER: required container not running: $container"
+      blockers=$((blockers + 1))
+      echo "--- Diagnostics: $container ---"
+      docker inspect --format 'Status={{.State.Status}} ExitCode={{.State.ExitCode}} Error={{.State.Error}} OOM={{.State.OOMKilled}}' "$container" || true
+      docker logs --tail 100 --timestamps "$container" 2>&1 || true
+      echo
+    fi
+  done
+  echo
+
+  echo '--- Other exited AITOS containers (informational) ---'
+  other_stopped=0
+  while read -r container; do
+    [ -n "$container" ] || continue
+    # Skip required list (already handled) and allowed one-shots.
+    skip=0
+    for req in "${REQUIRED_CONTAINERS[@]}"; do
+      if [ "$container" = "$req" ]; then skip=1; break; fi
+    done
+    [ "$skip" -eq 1 ] && continue
+    if is_allowed_exited "$container"; then
+      exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || echo '?')"
+      printf 'allowed one-shot: %-40s exit=%s\n' "$container" "$exit_code"
+      continue
+    fi
+    other_stopped=1
+    exit_code="$(docker inspect --format '{{.State.ExitCode}}' "$container" 2>/dev/null || echo '?')"
+    printf 'unexpected exited: %-40s exit=%s\n' "$container" "$exit_code"
+    blockers=$((blockers + 1))
+    echo "--- Diagnostics: $container ---"
+    docker logs --tail 50 --timestamps "$container" 2>&1 || true
+  done < <(docker ps -a --filter status=exited --format '{{.Names}}' | grep '^aitos-' || true)
+  if [ "$other_stopped" -eq 0 ]; then
+    echo 'none unexpected'
   fi
   echo
 
@@ -108,13 +174,13 @@ if command -v docker >/dev/null 2>&1; then
       printf '%-40s %s MB\n' "$name" "$size_mb"
       if [ "$size_mb" -ge "$MAX_LOG_MB" ]; then
         printf 'BLOCKER: %s log is >= %s MB\n' "$name" "$MAX_LOG_MB"
-        blockers=1
+        blockers=$((blockers + 1))
       fi
     fi
   done < <(docker ps -aq)
 else
   echo 'Docker: NOT INSTALLED'
-  blockers=1
+  blockers=$((blockers + 1))
 fi
 
 echo
@@ -128,7 +194,7 @@ avail_kb="$(df -Pk / | awk 'NR==2 {print $4}')"
 min_kb="$((MIN_DISK_FREE_GB * 1024 * 1024))"
 if [ "$avail_kb" -lt "$min_kb" ]; then
   echo "BLOCKER: less than ${MIN_DISK_FREE_GB}GB free on /"
-  blockers=1
+  blockers=$((blockers + 1))
 fi
 
 echo
@@ -139,7 +205,13 @@ echo
 echo '--- AITOS health endpoint ---'
 if command -v curl >/dev/null 2>&1; then
   health_body="$(mktemp)"
-  health_code="$(curl --silent --show-error --max-time 5 -o "$health_body" -w '%{http_code}' "$HEALTH_URL" 2>&1)" || true
+  # Capture HTTP code without letting curl network errors abort under set -e.
+  health_code="000"
+  if health_code="$(curl --silent --show-error --max-time 5 -o "$health_body" -w '%{http_code}' "$HEALTH_URL" 2>/dev/null)"; then
+    :
+  else
+    health_code="000"
+  fi
   echo "Health HTTP status: $health_code"
   echo 'Health response body:'
   cat "$health_body" || true
@@ -148,7 +220,7 @@ if command -v curl >/dev/null 2>&1; then
     echo 'Health endpoint: PASS'
   else
     echo 'Health endpoint: FAIL/unreachable'
-    blockers=1
+    blockers=$((blockers + 1))
     if docker inspect aitos-paper >/dev/null 2>&1; then
       echo '--- aitos-paper diagnostics after health failure ---'
       docker inspect --format 'State={{.State.Status}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} ExitCode={{.State.ExitCode}} Error={{.State.Error}}' aitos-paper || true
@@ -160,15 +232,28 @@ if command -v curl >/dev/null 2>&1; then
   rm -f "$health_body"
   echo
   echo '--- AITOS metrics endpoint ---'
-  if curl --fail --silent --show-error --max-time 5 "$METRICS_URL" | head -n 40; then
+  # Avoid `curl | head` under pipefail: when metrics exceed 40 lines, head
+  # closes early, curl gets SIGPIPE (exit 141), and the pipeline falsely fails.
+  metrics_body="$(mktemp)"
+  metrics_code="000"
+  if metrics_code="$(curl --silent --show-error --max-time 5 -o "$metrics_body" -w '%{http_code}' "$METRICS_URL" 2>/dev/null)"; then
+    :
+  else
+    metrics_code="000"
+  fi
+  echo "Metrics HTTP status: $metrics_code"
+  head -n 40 "$metrics_body" || true
+  echo
+  if [ "$metrics_code" = "200" ]; then
     echo 'Metrics endpoint: PASS'
   else
     echo 'Metrics endpoint: FAIL/unreachable'
-    blockers=1
+    blockers=$((blockers + 1))
   fi
+  rm -f "$metrics_body"
 else
   echo 'curl: NOT INSTALLED; skipped health/metrics checks'
-  blockers=1
+  blockers=$((blockers + 1))
 fi
 
 echo
