@@ -15,7 +15,9 @@ def test_retention_ladder_prefers_longest_window_that_fits():
     assert choose_retention_days(120, 90, 20.0) == 7
 
 
-def test_prune_for_boot_buffer_removes_oldest_disposable_files(monkeypatch, tmp_path: Path):
+def test_prune_for_boot_buffer_removes_oldest_disposable_files(
+    monkeypatch, tmp_path: Path
+):
     disposable = tmp_path / "backtest"
     disposable.mkdir()
     old = disposable / "old.bin"
@@ -69,7 +71,11 @@ def test_inspect_boot_storage_triggers_cleanup_when_reserve_is_breached(
 def test_inspect_boot_storage_does_not_cleanup_when_reserve_is_met(
     monkeypatch, tmp_path: Path
 ):
-    monkeypatch.setattr(maintenance, "_boot_free_bytes", lambda _root: 20 * 1024**3)
+    monkeypatch.setattr(
+        maintenance,
+        "_boot_free_bytes",
+        lambda _root: 20 * 1024**3,
+    )
     config = StorageConfig(boot_buffer_gb=10.0)
 
     result = inspect_boot_storage(tmp_path, config)
