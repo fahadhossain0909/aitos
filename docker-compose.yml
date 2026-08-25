@@ -27,9 +27,6 @@ services:
     cpus: "1.0"
     mem_limit: 5g
     logging: {driver: json-file, options: {max-size: "50m", max-file: "5"}}
-    # Use the HTTP ping endpoint for readiness. It tests the same interface
-    # used by AITOS (port 8123) and avoids treating native-client port 9000
-    # availability as the service readiness signal.
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q --timeout=5 http://127.0.0.1:8123/ping || exit 1"]
       interval: 10s
@@ -37,6 +34,13 @@ services:
       retries: 12
       start_period: 120s
     restart: unless-stopped
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:24.3-alpine
+    command: ["clickhouse-client", "--host", "clickhouse", "--query", "CREATE DATABASE IF NOT EXISTS aitos"]
+    depends_on:
+      clickhouse: {condition: service_healthy}
+    restart: "no"
 
   neo4j:
     image: neo4j:5.19-community
@@ -65,7 +69,10 @@ services:
     cpus: "0.5"
     mem_limit: 1.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
-    depends_on: {redis: {condition: service_healthy}, clickhouse: {condition: service_healthy}, neo4j: {condition: service_healthy}}
+    depends_on:
+      redis: {condition: service_healthy}
+      clickhouse-init: {condition: service_completed_successfully}
+      neo4j: {condition: service_healthy}
     healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
     restart: unless-stopped
 
@@ -83,7 +90,8 @@ services:
       LEARNING_POLL_SECONDS: "60"
       LEARNING_LOOKBACK_HOURS: "168"
     volumes: [aitos_model_data:/models]
-    depends_on: {clickhouse: {condition: service_healthy}}
+    depends_on:
+      clickhouse-init: {condition: service_completed_successfully}
     cpus: "0.25"
     mem_limit: 512m
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
@@ -96,7 +104,7 @@ services:
       - "${BACKTEST_DATA_DIR:-./.storage/backtest}:/data:rw"
       - aitos_model_data:/models:ro
     environment: {PYTHONUNBUFFERED: "1", CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"}
-    depends_on: {clickhouse: {condition: service_healthy}}
+    depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "1.5"
     mem_limit: 3g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
@@ -126,7 +134,7 @@ services:
     volumes:
       - "${BACKTEST_DATA_DIR:-./.storage/backtest}:/data"
       - "${OTHERS_DATA_DIR:-./.storage/others}:/others"
-    depends_on: {clickhouse: {condition: service_healthy}}
+    depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "0.25"
     mem_limit: 256m
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
@@ -142,16 +150,15 @@ services:
     ports: ["127.0.0.1:8091:8091"]
     stdin_open: true
     tty: true
-    depends_on: {redis: {condition: service_healthy}, clickhouse: {condition: service_healthy}, neo4j: {condition: service_healthy}}
+    depends_on:
+      redis: {condition: service_healthy}
+      clickhouse-init: {condition: service_completed_successfully}
+      neo4j: {condition: service_healthy}
     cpus: "0.5"
     mem_limit: 1.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
     restart: "no"
     profiles: [live]
 
-# Storage policy:
-# - 150 GB data disk: ONLY ClickHouse, Neo4j and persistent Redis data.
-# - 50 GB boot disk: 22.5 GB backtest + 22.5 GB others + 5 GB reserved free buffer.
-# - Database backups/snapshots remain on the boot disk under .storage/others.
 volumes:
   aitos_model_data:
