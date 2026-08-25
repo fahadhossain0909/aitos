@@ -13,7 +13,6 @@ import clickhouse_connect
 
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -81,16 +80,10 @@ class ContinualLearningWorker:
             return
         try:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            self._processed = set(
-                str(x) for x in data.get("processed_experiences", [])
-            )
+            self._processed = set(str(x) for x in data.get("processed_experiences", []))
             logger.info(
                 "learning state loaded",
-                extra={
-                    "aitos_extra": {
-                        "processed_experiences": len(self._processed)
-                    }
-                },
+                extra={"aitos_extra": {"processed_experiences": len(self._processed)}},
             )
         except (OSError, ValueError, TypeError):
             self._processed = set()
