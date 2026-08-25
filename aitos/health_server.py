@@ -73,10 +73,24 @@ class HealthServer:
             try:
                 health = await module.health_check()
                 healthy = health.status == ModuleStatus.HEALTHY
-                if not healthy:
+                if health.status == ModuleStatus.UNHEALTHY:
                     overall_healthy = False
                     logger.warning(
                         "module reported unhealthy",
+                        extra={
+                            "aitos_extra": {
+                                "module": health.module_id,
+                                "status": health.status.value,
+                                "latency_ms": health.latency_ms,
+                                "last_event_time": health.last_event_time,
+                                "details": health.details,
+                            }
+                        },
+                    )
+                elif health.status == ModuleStatus.DEGRADED:
+                    overall_healthy = False
+                    logger.warning(
+                        "module reported degraded",
                         extra={
                             "aitos_extra": {
                                 "module": health.module_id,
@@ -122,11 +136,29 @@ class HealthServer:
                         "details": {"error": str(exc), "error_type": type(exc).__name__},
                     }
                 )
+        # Hard fail (503) only when at least one module is UNHEALTHY — intentional
+        # diagnostic for dead streams / broken dependencies. Soft DEGRADED (e.g.
+        # historical stream errors after successful restart) stays HTTP 200 so CD
+        # audit does not false-fail while still exposing status in the JSON body.
+        has_unhealthy = any(
+            item["status"] == ModuleStatus.UNHEALTHY.value for item in results
+        )
+        has_degraded = any(
+            item["status"] == ModuleStatus.DEGRADED.value for item in results
+        )
+        if has_unhealthy:
+            payload_status = "degraded"
+            status_code = 503
+        elif has_degraded or not overall_healthy:
+            payload_status = "degraded"
+            status_code = 200
+        else:
+            payload_status = "healthy"
+            status_code = 200
         payload = {
-            "status": "healthy" if overall_healthy else "degraded",
+            "status": payload_status,
             "modules": results,
         }
-        status_code = 200 if overall_healthy else 503
         logger.info(
             "health check completed",
             extra={
@@ -134,7 +166,9 @@ class HealthServer:
                     "status": payload["status"],
                     "http_status": status_code,
                     "unhealthy_modules": [
-                        item["module_id"] for item in results if item["status"] != ModuleStatus.HEALTHY.value
+                        item["module_id"]
+                        for item in results
+                        if item["status"] == ModuleStatus.UNHEALTHY.value
                     ],
                 }
             },
