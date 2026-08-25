@@ -18,6 +18,8 @@ DEFAULT_BUDGET_GB = 130
 DEFAULT_TARGET_GB = 120
 DEFAULT_OTHERS_GB = 22.5
 DEFAULT_BOOT_BUFFER_GB = 10.0
+DEFAULT_DATA_DISK_MIN_FREE_GB = 20.0
+DEFAULT_DATA_DISK_TARGET_FREE_GB = 25.0
 DEFAULT_AUTO_DELETE_PERCENT = 2.5
 
 EVICTABLE_TABLES = {
@@ -27,18 +29,8 @@ EVICTABLE_TABLES = {
 }
 
 PROTECTED_TABLE_TOKENS = (
-    "trade",
-    "order",
-    "fill",
-    "position",
-    "decision",
-    "risk",
-    "model",
-    "experience",
-    "journal",
-    "strategy",
-    "execution",
-    "portfolio",
+    "trade", "order", "fill", "position", "decision", "risk", "model",
+    "experience", "journal", "strategy", "execution", "portfolio",
 )
 
 
@@ -48,33 +40,24 @@ class StorageConfig:
     clickhouse_target_gb: float = DEFAULT_TARGET_GB
     others_gb: float = DEFAULT_OTHERS_GB
     boot_buffer_gb: float = DEFAULT_BOOT_BUFFER_GB
-    interval_seconds: int = 86400
+    data_disk_min_free_gb: float = DEFAULT_DATA_DISK_MIN_FREE_GB
+    data_disk_target_free_gb: float = DEFAULT_DATA_DISK_TARGET_FREE_GB
+    interval_seconds: int = 300
     dry_run: bool = False
     auto_delete_percent: float = DEFAULT_AUTO_DELETE_PERCENT
 
     @classmethod
     def from_env(cls) -> "StorageConfig":
         return cls(
-            clickhouse_budget_gb=float(
-                os.getenv("CLICKHOUSE_STORAGE_BUDGET_GB", DEFAULT_BUDGET_GB)
-            ),
-            clickhouse_target_gb=float(
-                os.getenv("CLICKHOUSE_STORAGE_TARGET_GB", DEFAULT_TARGET_GB)
-            ),
+            clickhouse_budget_gb=float(os.getenv("CLICKHOUSE_STORAGE_BUDGET_GB", DEFAULT_BUDGET_GB)),
+            clickhouse_target_gb=float(os.getenv("CLICKHOUSE_STORAGE_TARGET_GB", DEFAULT_TARGET_GB)),
             others_gb=float(os.getenv("OTHERS_MAX_GB", DEFAULT_OTHERS_GB)),
-            boot_buffer_gb=float(
-                os.getenv("BOOT_FREE_BUFFER_GB", DEFAULT_BOOT_BUFFER_GB)
-            ),
-            interval_seconds=int(
-                os.getenv("STORAGE_MAINTENANCE_INTERVAL_SECONDS", 86400)
-            ),
-            dry_run=os.getenv("STORAGE_MAINTENANCE_DRY_RUN", "false").lower()
-            in {"1", "true", "yes"},
-            auto_delete_percent=float(
-                os.getenv(
-                    "STORAGE_AUTO_DELETE_PERCENT", DEFAULT_AUTO_DELETE_PERCENT
-                )
-            ),
+            boot_buffer_gb=float(os.getenv("BOOT_FREE_BUFFER_GB", DEFAULT_BOOT_BUFFER_GB)),
+            data_disk_min_free_gb=float(os.getenv("DATA_DISK_MIN_FREE_GB", DEFAULT_DATA_DISK_MIN_FREE_GB)),
+            data_disk_target_free_gb=float(os.getenv("DATA_DISK_TARGET_FREE_GB", DEFAULT_DATA_DISK_TARGET_FREE_GB)),
+            interval_seconds=int(os.getenv("STORAGE_MAINTENANCE_INTERVAL_SECONDS", 300)),
+            dry_run=os.getenv("STORAGE_MAINTENANCE_DRY_RUN", "false").lower() in {"1", "true", "yes"},
+            auto_delete_percent=float(os.getenv("STORAGE_AUTO_DELETE_PERCENT", DEFAULT_AUTO_DELETE_PERCENT)),
         )
 
 
@@ -87,9 +70,7 @@ def _protected(table: str) -> bool:
     return any(token in name for token in PROTECTED_TABLE_TOKENS)
 
 
-def choose_retention_days(
-    current_gb: float, target_gb: float, evictable_daily_gb: float
-) -> int:
+def choose_retention_days(current_gb: float, target_gb: float, evictable_daily_gb: float) -> int:
     if current_gb <= target_gb or evictable_daily_gb <= 0:
         return RETENTION_LADDER[0]
     for days in RETENTION_LADDER:
@@ -98,45 +79,29 @@ def choose_retention_days(
     return RETENTION_LADDER[-1]
 
 
-def _table_inventory(
-    client, database: str
-) -> list[tuple[str, int, datetime | None, datetime | None]]:
+def _table_inventory(client, database: str):
     rows = client.query(
         """
         SELECT table, sum(bytes_on_disk) AS bytes,
                min(min_time) AS min_time, max(max_time) AS max_time
         FROM system.parts
         WHERE database = {db:String} AND active
-        GROUP BY table
-        ORDER BY bytes DESC
+        GROUP BY table ORDER BY bytes DESC
         """,
         parameters={"db": database},
     ).result_rows
     return [(str(row[0]), int(row[1] or 0), row[2], row[3]) for row in rows]
 
 
-def enforce_clickhouse(
-    client, config: StorageConfig, database: str = DEFAULT_DB
-) -> dict:
+def enforce_clickhouse(client, config: StorageConfig, database: str = DEFAULT_DB, force_emergency: bool = False) -> dict:
     inventory = _table_inventory(client, database)
     total_bytes = sum(row[1] for row in inventory)
-    evictable = [
-        row
-        for row in inventory
-        if row[0] in EVICTABLE_TABLES and not _protected(row[0])
-    ]
+    evictable = [row for row in inventory if row[0] in EVICTABLE_TABLES and not _protected(row[0])]
     evictable_bytes = sum(row[1] for row in evictable)
     protected_bytes = max(0, total_bytes - evictable_bytes)
 
     if not evictable:
-        return {
-            "total_gb": _gb(total_bytes),
-            "protected_gb": _gb(protected_bytes),
-            "evictable_gb": 0.0,
-            "retention_days": RETENTION_LADDER[0],
-            "evicted": [],
-            "reason": "no configured evictable tables",
-        }
+        return {"total_gb": _gb(total_bytes), "protected_gb": _gb(protected_bytes), "evictable_gb": 0.0, "retention_days": 7, "evicted": [], "reason": "no configured evictable tables"}
 
     daily_bytes = 0.0
     for _table, size, min_time, max_time in evictable:
@@ -146,33 +111,26 @@ def enforce_clickhouse(
 
     target_bytes = config.clickhouse_target_gb * (1024**3)
     available_evictable_bytes = max(0.0, target_bytes - protected_bytes)
-    retention = choose_retention_days(
-        _gb(evictable_bytes), _gb(available_evictable_bytes), _gb(daily_bytes)
-    )
-    evicted: list[str] = []
+    retention = choose_retention_days(_gb(evictable_bytes), _gb(available_evictable_bytes), _gb(daily_bytes))
+    if force_emergency:
+        retention = RETENTION_LADDER[-1]
 
-    if _gb(total_bytes) > config.clickhouse_target_gb:
+    evicted: list[str] = []
+    if force_emergency or _gb(total_bytes) > config.clickhouse_target_gb:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
         for table, _size, _min_time, _max_time in evictable:
             time_column = EVICTABLE_TABLES[table]
-            sql = (
-                f"ALTER TABLE `{database}`.`{table}` DELETE "
-                f"WHERE {time_column} < {{cutoff:DateTime64(3)}}"
-            )
+            sql = f"ALTER TABLE `{database}`.`{table}` DELETE WHERE {time_column} < {{cutoff:DateTime64(3)}}"
             if not config.dry_run:
                 client.command(sql, parameters={"cutoff": cutoff})
             evicted.append(f"{table}<{cutoff.isoformat()}")
 
     return {
-        "total_gb": _gb(total_bytes),
-        "protected_gb": _gb(protected_bytes),
-        "evictable_gb": _gb(evictable_bytes),
-        "retention_days": retention,
-        "evicted": evicted,
-        "dry_run": config.dry_run,
-        "protected_data_exceeds_target": protected_bytes > target_bytes,
-        "budget_gb": config.clickhouse_budget_gb,
-        "target_gb": config.clickhouse_target_gb,
+        "total_gb": _gb(total_bytes), "protected_gb": _gb(protected_bytes),
+        "evictable_gb": _gb(evictable_bytes), "retention_days": retention,
+        "evicted": evicted, "dry_run": config.dry_run,
+        "emergency": force_emergency, "protected_data_exceeds_target": protected_bytes > target_bytes,
+        "budget_gb": config.clickhouse_budget_gb, "target_gb": config.clickhouse_target_gb,
     }
 
 
@@ -193,13 +151,7 @@ def _directory_size(root: Path) -> int:
 
 
 def prune_old_files(root: Path, max_gb: float, delete_percent: float = 2.5, dry_run: bool = False) -> dict:
-    """Delete the oldest disposable files only when the configured budget is exceeded.
-
-    The normal cleanup batch is 2.5% of the current managed dataset. If the dataset
-    has already overshot the limit by more than that batch, cleanup removes enough
-    additional oldest data to return below the limit. This prevents a large upload
-    from leaving production/deployments blocked while still avoiding full wipes.
-    """
+    """Remove oldest disposable files only; never wipe the whole managed tree."""
     files = []
     total_bytes = 0
     for path in _files(root):
@@ -212,20 +164,13 @@ def prune_old_files(root: Path, max_gb: float, delete_percent: float = 2.5, dry_
 
     limit_bytes = max_gb * (1024**3)
     if total_bytes <= limit_bytes:
-        return {
-            "before_gb": _gb(total_bytes),
-            "after_gb": _gb(total_bytes),
-            "deleted_gb": 0.0,
-            "deleted_files": [],
-            "over_budget": False,
-        }
+        return {"before_gb": _gb(total_bytes), "after_gb": _gb(total_bytes), "deleted_gb": 0.0, "deleted_files": [], "over_budget": False}
 
     required_bytes = total_bytes - limit_bytes
     batch_bytes = max(1, int(total_bytes * (delete_percent / 100.0)))
     delete_bytes = max(required_bytes, batch_bytes)
     deleted: list[str] = []
     freed = 0
-
     for _mtime, path, size in sorted(files, key=lambda item: item[0]):
         if freed >= delete_bytes:
             break
@@ -236,39 +181,32 @@ def prune_old_files(root: Path, max_gb: float, delete_percent: float = 2.5, dry_
                 continue
         deleted.append(str(path))
         freed += size
-
     after_bytes = max(0, total_bytes - freed)
-    return {
-        "before_gb": _gb(total_bytes),
-        "after_gb": _gb(after_bytes),
-        "deleted_gb": _gb(freed),
-        "deleted_files": deleted,
-        "over_budget": True,
-        "delete_percent": delete_percent,
-        "dry_run": dry_run,
-    }
+    return {"before_gb": _gb(total_bytes), "after_gb": _gb(after_bytes), "deleted_gb": _gb(freed), "deleted_files": deleted, "over_budget": True, "delete_percent": delete_percent, "dry_run": dry_run}
 
 
 def inspect_boot_storage(others_root: Path, config: StorageConfig) -> dict:
     others_gb = _gb(_directory_size(others_root))
-    result = {
-        "others_gb": others_gb,
-        "others_max_gb": config.others_gb,
-        "boot_buffer_gb": config.boot_buffer_gb,
-        "others_over_budget": others_gb > config.others_gb,
-    }
+    result = {"others_gb": others_gb, "others_max_gb": config.others_gb, "boot_buffer_gb": config.boot_buffer_gb, "others_over_budget": others_gb > config.others_gb}
     if result["others_over_budget"]:
-        result["prune"] = prune_old_files(
-            others_root,
-            config.others_gb,
-            config.auto_delete_percent,
-            config.dry_run,
-        )
+        result["prune"] = prune_old_files(others_root, config.others_gb, config.auto_delete_percent, config.dry_run)
         result["others_gb"] = result["prune"]["after_gb"]
         result["others_over_budget"] = result["others_gb"] > config.others_gb
     else:
         result["prune"] = None
     return result
+
+
+def inspect_data_disk(root: Path, config: StorageConfig) -> dict:
+    """Read the data-disk filesystem headroom without deleting database files."""
+    stats = os.statvfs(root)
+    total = stats.f_blocks * stats.f_frsize
+    free = stats.f_bavail * stats.f_frsize
+    return {
+        "total_gb": _gb(total), "free_gb": _gb(free), "used_gb": _gb(total - free),
+        "min_free_gb": config.data_disk_min_free_gb,
+        "emergency": _gb(free) < config.data_disk_min_free_gb,
+    }
 
 
 def run_once(config: StorageConfig, boot_only: bool = False) -> dict:
@@ -277,43 +215,33 @@ def run_once(config: StorageConfig, boot_only: bool = False) -> dict:
     if boot_only:
         return {"boot_storage": boot_result}
 
+    data_disk_root = Path(os.getenv("DATA_DISK_DIR", "/data-disk"))
+    data_disk_result = inspect_data_disk(data_disk_root, config)
     client = clickhouse_connect.get_client(
-        host=os.getenv("CLICKHOUSE_HOST", "clickhouse"),
-        port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
-        username=os.getenv("CLICKHOUSE_USER", "default"),
-        password=os.getenv("CLICKHOUSE_PASSWORD", ""),
+        host=os.getenv("CLICKHOUSE_HOST", "clickhouse"), port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
+        username=os.getenv("CLICKHOUSE_USER", "default"), password=os.getenv("CLICKHOUSE_PASSWORD", ""),
         database=os.getenv("CLICKHOUSE_DB", DEFAULT_DB),
     )
     try:
-        clickhouse_result = enforce_clickhouse(
-            client, config, os.getenv("CLICKHOUSE_DB", DEFAULT_DB)
-        )
+        clickhouse_result = enforce_clickhouse(client, config, os.getenv("CLICKHOUSE_DB", DEFAULT_DB), data_disk_result["emergency"])
     finally:
         client.close()
-
-    return {
-        "clickhouse": clickhouse_result,
-        "boot_storage": boot_result,
-    }
+    return {"clickhouse": clickhouse_result, "data_disk": data_disk_result, "boot_storage": boot_result}
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--once", action="store_true", help="run one maintenance pass")
-    parser.add_argument(
-        "--boot-only", action="store_true", help="only enforce boot-disk file retention"
-    )
+    parser.add_argument("--once", action="store_true")
+    parser.add_argument("--boot-only", action="store_true")
     args = parser.parse_args()
     config = StorageConfig.from_env()
-
     if args.once or args.boot_only:
         print(run_once(config, boot_only=args.boot_only), flush=True)
         return
-
     while True:
         try:
             print(run_once(config), flush=True)
-        except Exception as exc:  # pragma: no cover - operational guard
+        except Exception as exc:
             print(f"storage maintenance failed: {exc}", flush=True)
         time.sleep(config.interval_seconds)
 
