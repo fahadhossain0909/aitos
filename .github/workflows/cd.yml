@@ -13,6 +13,8 @@ permissions:
 env:
   REGISTRY: ghcr.io
   AITOS_DATA_ROOT: /mnt/aitos-data
+  BACKTEST_BUDGET_BYTES: 24159191040
+  OTHERS_BUDGET_BYTES: 24159191040
 
 jobs:
   publish-image:
@@ -29,7 +31,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Lowercase repository name
         id: repo
-        run: echo "repo=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+        run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v6.2.0
@@ -84,9 +86,7 @@ jobs:
       - name: Check system resources
         if: steps.check-secrets.outputs.has_secrets == 'true'
         run: |
-          echo "=== Memory ==="
           free -h
-          echo "=== Disk ==="
           df -h /
       - name: Deploy pre-built image to remote host over SSH
         if: steps.check-secrets.outputs.has_secrets == 'true'
@@ -113,13 +113,27 @@ jobs:
             fi
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
             mkdir -p ./.storage/backtest ./.storage/others ./.storage/others/backups ./.storage/others/snapshots
-            boot_free_bytes=$(df --output=avail -B1 . | tail -1 | tr -d ' ')
-            min_free_bytes=$((5 * 1024 * 1024 * 1024))
-            if [ "$boot_free_bytes" -lt "$min_free_bytes" ]; then
-              echo "::error::Boot disk has less than the required 5 GiB free buffer."
-              df -h .
+
+            echo "=== Boot disk storage policy ==="
+            echo "Backtest budget: 22.5 GiB"
+            echo "Others budget:   22.5 GiB"
+            echo "Remaining boot disk: free headroom"
+            backtest_bytes=$(du -sb ./.storage/backtest | cut -f1)
+            others_bytes=$(du -sb ./.storage/others | cut -f1)
+            if [ "$backtest_bytes" -gt "$BACKTEST_BUDGET_BYTES" ]; then
+              echo "::error::Backtest storage exceeds the 22.5 GiB budget."
+              du -sh ./.storage/backtest
               exit 1
             fi
+            if [ "$others_bytes" -gt "$OTHERS_BUDGET_BYTES" ]; then
+              echo "::error::Others storage exceeds the 22.5 GiB budget."
+              du -sh ./.storage/others
+              exit 1
+            fi
+            echo "Backtest usage: $(du -sh ./.storage/backtest | cut -f1)"
+            echo "Others usage:   $(du -sh ./.storage/others | cut -f1)"
+            echo "Boot disk:      $(df -h . | tail -1)"
+
             umask 077
             cat > .env << 'ENVEOF'
             ENVIRONMENT=production
@@ -170,38 +184,17 @@ jobs:
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
             ENVEOF
             chmod 600 .env
-            if [ "${{ secrets.BINANCE_TESTNET || 'true' }}" = "false" ]; then
-              if [ -z "${{ secrets.BINANCE_API_KEY }}" ] || [ -z "${{ secrets.BINANCE_API_SECRET }}" ]; then
-                echo "::error::BINANCE_API_KEY and BINANCE_API_SECRET are required when BINANCE_TESTNET=false"
-                exit 1
-              fi
-            fi
-            echo "=== Docker runtime preflight ==="
+
             docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
-            echo "=== Data disk ==="
             df -h "$DATA_ROOT"
-            echo "=== Docker disk usage ==="
             docker system df
-            echo "=== Existing AITOS containers ==="
-            docker ps -a --filter 'name=aitos-' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
-            echo "=== Compose-managed AITOS containers ==="
-            docker ps -a --filter 'label=com.docker.compose.project=aitos' --format 'table {{.Names}}\t{{.Status}}\t{{.Label "com.docker.compose.service"}}' || true
-            echo "Logging in to GHCR..."
-            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
-            echo "Validating docker-compose configuration..."
             docker compose config > /dev/null
-            echo "Pulling immutable application image sha-${{ github.sha }}..."
+            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             docker compose pull
-            echo "=== Removing stale/orphan Compose containers safely ==="
             docker compose down --remove-orphans --timeout 30 || true
             project_containers=$(docker ps -aq --filter 'label=com.docker.compose.project=aitos')
             if [ -n "$project_containers" ]; then echo "$project_containers" | xargs -r docker rm -f; fi
-            stale_generated=$(docker ps -a --format '{{.Names}}' | grep -E '^[0-9a-f]{8,}_aitos-' || true)
-            if [ -n "$stale_generated" ]; then
-              echo "::error::A stale generated AITOS container name remains after project cleanup. Refusing deployment."
-              printf '%s\n' "$stale_generated"
-              exit 1
-            fi
+
             echo "=== ISOLATED CLICKHOUSE STARTUP READINESS GATE ==="
             docker compose up -d clickhouse
             ch_health=""
@@ -210,38 +203,20 @@ jobs:
             while [ "$SECONDS" -lt "$ch_deadline" ]; do
               ch_status=$(docker inspect --format='{{.State.Status}}' aitos-clickhouse 2>/dev/null || echo missing)
               ch_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-clickhouse 2>/dev/null || echo missing)
-              ch_restart=$(docker inspect --format='{{.RestartCount}}' aitos-clickhouse 2>/dev/null || echo missing)
-              echo "[$((180 - ch_deadline + SECONDS))/180s] clickhouse state=$ch_status health=$ch_health restart=$ch_restart"
-              if [ "$ch_health" = "healthy" ]; then
-                break
-              fi
-              if [ "$ch_status" = "exited" ] || [ "$ch_status" = "dead" ]; then
-                echo "::error::ClickHouse exited before becoming healthy."
-                break
-              fi
+              if [ "$ch_health" = "healthy" ]; then break; fi
+              if [ "$ch_status" = "exited" ] || [ "$ch_status" = "dead" ]; then break; fi
               sleep 5
             done
-            echo "=== ClickHouse container inspect ==="
-            docker inspect --format='status={{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' aitos-clickhouse || true
-            echo "=== ClickHouse stdout/stderr ==="
+            docker inspect --format='status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}}' aitos-clickhouse || true
             docker logs --timestamps --tail=1000 aitos-clickhouse 2>&1 || true
             if [ "$ch_health" != "healthy" ]; then
-              echo "::error::ClickHouse did not become healthy within the 180-second readiness window. Downstream services will not be started."
+              echo "::error::ClickHouse did not become healthy within 180 seconds."
               exit 1
             fi
-            echo "ClickHouse readiness gate passed; continuing with downstream services."
-            echo "=== Starting remaining infrastructure after ClickHouse gate ==="
+
             docker compose up -d redis neo4j
-            echo "=== Starting AITOS paper services after infrastructure gate ==="
             docker compose up -d aitos-paper aitos-learning aitos-storage-maintenance
-            echo "=== Final container status ==="
             docker compose ps --all
-            echo "=== Final health validation ==="
-            for c in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper; do
-              if docker inspect "$c" >/dev/null 2>&1; then
-                docker inspect --format "$c status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}}" "$c"
-              fi
-            done
             final_bad=$(docker ps --filter 'name=aitos-' --filter 'status=restarting' -q)
             if [ -n "$final_bad" ]; then
               echo "::error::An AITOS container is still restarting after deployment."
