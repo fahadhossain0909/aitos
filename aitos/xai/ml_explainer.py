@@ -38,7 +38,7 @@ class TradeOutcomeClassifier:
     def __init__(
         self,
         min_samples_for_ready: int = DEFAULT_MIN_SAMPLES,
-        state_path: str = "models/online_ml/trade_outcome.pkl",
+        state_path: str = "/models/online_ml/trade_outcome.pkl",
     ) -> None:
         self._model = SGDClassifier(loss="log_loss", random_state=0)
         self._min_samples = min_samples_for_ready
