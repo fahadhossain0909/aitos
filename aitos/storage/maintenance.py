@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import time
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ DEFAULT_BUDGET_GB = 130
 DEFAULT_TARGET_GB = 120
 DEFAULT_OTHERS_GB = 22.5
 DEFAULT_BOOT_BUFFER_GB = 10.0
+DEFAULT_AUTO_DELETE_PERCENT = 2.5
 
 EVICTABLE_TABLES = {
     "order_book_snapshots": "time",
@@ -48,6 +50,7 @@ class StorageConfig:
     boot_buffer_gb: float = DEFAULT_BOOT_BUFFER_GB
     interval_seconds: int = 86400
     dry_run: bool = False
+    auto_delete_percent: float = DEFAULT_AUTO_DELETE_PERCENT
 
     @classmethod
     def from_env(cls) -> "StorageConfig":
@@ -67,6 +70,11 @@ class StorageConfig:
             ),
             dry_run=os.getenv("STORAGE_MAINTENANCE_DRY_RUN", "false").lower()
             in {"1", "true", "yes"},
+            auto_delete_percent=float(
+                os.getenv(
+                    "STORAGE_AUTO_DELETE_PERCENT", DEFAULT_AUTO_DELETE_PERCENT
+                )
+            ),
         )
 
 
@@ -171,24 +179,104 @@ def enforce_clickhouse(
 def _files(root: Path) -> Iterable[Path]:
     if not root.exists():
         return ()
-    return (path for path in root.rglob("*") if path.is_file())
+    return (path for path in root.rglob("*") if path.is_file() and not path.is_symlink())
 
 
 def _directory_size(root: Path) -> int:
-    return sum(path.stat().st_size for path in _files(root) if path.exists())
+    total = 0
+    for path in _files(root):
+        try:
+            total += path.stat().st_size
+        except FileNotFoundError:
+            continue
+    return total
+
+
+def prune_old_files(root: Path, max_gb: float, delete_percent: float = 2.5, dry_run: bool = False) -> dict:
+    """Delete the oldest disposable files only when the configured budget is exceeded.
+
+    The normal cleanup batch is 2.5% of the current managed dataset. If the dataset
+    has already overshot the limit by more than that batch, cleanup removes enough
+    additional oldest data to return below the limit. This prevents a large upload
+    from leaving production/deployments blocked while still avoiding full wipes.
+    """
+    files = []
+    total_bytes = 0
+    for path in _files(root):
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        total_bytes += stat.st_size
+        files.append((stat.st_mtime_ns, path, stat.st_size))
+
+    limit_bytes = max_gb * (1024**3)
+    if total_bytes <= limit_bytes:
+        return {
+            "before_gb": _gb(total_bytes),
+            "after_gb": _gb(total_bytes),
+            "deleted_gb": 0.0,
+            "deleted_files": [],
+            "over_budget": False,
+        }
+
+    required_bytes = total_bytes - limit_bytes
+    batch_bytes = max(1, int(total_bytes * (delete_percent / 100.0)))
+    delete_bytes = max(required_bytes, batch_bytes)
+    deleted: list[str] = []
+    freed = 0
+
+    for _mtime, path, size in sorted(files, key=lambda item: item[0]):
+        if freed >= delete_bytes:
+            break
+        if not dry_run:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
+        deleted.append(str(path))
+        freed += size
+
+    after_bytes = max(0, total_bytes - freed)
+    return {
+        "before_gb": _gb(total_bytes),
+        "after_gb": _gb(after_bytes),
+        "deleted_gb": _gb(freed),
+        "deleted_files": deleted,
+        "over_budget": True,
+        "delete_percent": delete_percent,
+        "dry_run": dry_run,
+    }
 
 
 def inspect_boot_storage(others_root: Path, config: StorageConfig) -> dict:
     others_gb = _gb(_directory_size(others_root))
-    return {
+    result = {
         "others_gb": others_gb,
         "others_max_gb": config.others_gb,
         "boot_buffer_gb": config.boot_buffer_gb,
         "others_over_budget": others_gb > config.others_gb,
     }
+    if result["others_over_budget"]:
+        result["prune"] = prune_old_files(
+            others_root,
+            config.others_gb,
+            config.auto_delete_percent,
+            config.dry_run,
+        )
+        result["others_gb"] = result["prune"]["after_gb"]
+        result["others_over_budget"] = result["others_gb"] > config.others_gb
+    else:
+        result["prune"] = None
+    return result
 
 
-def run_once(config: StorageConfig) -> dict:
+def run_once(config: StorageConfig, boot_only: bool = False) -> dict:
+    others_root = Path(os.getenv("OTHERS_DATA_DIR", "/others"))
+    boot_result = inspect_boot_storage(others_root, config)
+    if boot_only:
+        return {"boot_storage": boot_result}
+
     client = clickhouse_connect.get_client(
         host=os.getenv("CLICKHOUSE_HOST", "clickhouse"),
         port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
@@ -203,8 +291,6 @@ def run_once(config: StorageConfig) -> dict:
     finally:
         client.close()
 
-    others_root = Path(os.getenv("OTHERS_DATA_DIR", "/others"))
-    boot_result = inspect_boot_storage(others_root, config)
     return {
         "clickhouse": clickhouse_result,
         "boot_storage": boot_result,
@@ -212,7 +298,18 @@ def run_once(config: StorageConfig) -> dict:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--once", action="store_true", help="run one maintenance pass")
+    parser.add_argument(
+        "--boot-only", action="store_true", help="only enforce boot-disk file retention"
+    )
+    args = parser.parse_args()
     config = StorageConfig.from_env()
+
+    if args.once or args.boot_only:
+        print(run_once(config, boot_only=args.boot_only), flush=True)
+        return
+
     while True:
         try:
             print(run_once(config), flush=True)
