@@ -23,7 +23,12 @@ if command -v docker >/dev/null 2>&1; then
 
   echo '--- Unhealthy/stopped AITOS containers ---'
   unhealthy="$(docker ps -a --filter health=unhealthy --format '{{.Names}}' | grep '^aitos-' || true)"
-  stopped="$(docker ps -a --filter status=exited --format '{{.Names}}' | grep '^aitos-' || true)"
+  # One-shot init containers (e.g. clickhouse-init) are expected to exit successfully.
+  # Do not treat them as runtime blockers.
+  stopped="$(docker ps -a --filter status=exited --format '{{.Names}}' \
+    | grep '^aitos-' \
+    | grep -Ev 'clickhouse-init' \
+    || true)"
   if [ -n "$unhealthy" ]; then
     printf '%s\n' "$unhealthy"
     blockers=1
