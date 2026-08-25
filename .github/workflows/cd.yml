@@ -106,15 +106,13 @@ jobs:
               git fetch origin main
               git reset --hard origin/main
             fi
-
             DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
             if ! mountpoint -q "$DATA_ROOT"; then
-              echo "::error::$DATA_ROOT is not a mounted 150 GB data disk; refusing to place database data on the boot disk."
+              echo "::error::$DATA_ROOT is not a mounted data disk; refusing to place database data on the boot disk."
               exit 1
             fi
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
             mkdir -p ./.storage/backtest ./.storage/others ./.storage/others/backups ./.storage/others/snapshots
-
             boot_free_bytes=$(df --output=avail -B1 . | tail -1 | tr -d ' ')
             min_free_bytes=$((5 * 1024 * 1024 * 1024))
             if [ "$boot_free_bytes" -lt "$min_free_bytes" ]; then
@@ -122,7 +120,6 @@ jobs:
               df -h .
               exit 1
             fi
-
             umask 077
             cat > .env << 'ENVEOF'
             ENVIRONMENT=production
@@ -173,14 +170,12 @@ jobs:
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
             ENVEOF
             chmod 600 .env
-
             if [ "${{ secrets.BINANCE_TESTNET || 'true' }}" = "false" ]; then
               if [ -z "${{ secrets.BINANCE_API_KEY }}" ] || [ -z "${{ secrets.BINANCE_API_SECRET }}" ]; then
                 echo "::error::BINANCE_API_KEY and BINANCE_API_SECRET are required when BINANCE_TESTNET=false"
                 exit 1
               fi
             fi
-
             echo "=== Docker runtime preflight ==="
             docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
             echo "=== Data disk ==="
@@ -191,52 +186,43 @@ jobs:
             docker ps -a --filter 'name=aitos-' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
             echo "=== Compose-managed AITOS containers ==="
             docker ps -a --filter 'label=com.docker.compose.project=aitos' --format 'table {{.Names}}\t{{.Status}}\t{{.Label "com.docker.compose.service"}}' || true
-
             echo "Logging in to GHCR..."
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             echo "Validating docker-compose configuration..."
             docker compose config > /dev/null
             echo "Pulling immutable application image sha-${{ github.sha }}..."
             docker compose pull
-
             echo "=== Removing stale/orphan Compose containers safely ==="
             docker compose down --remove-orphans --timeout 30 || true
             project_containers=$(docker ps -aq --filter 'label=com.docker.compose.project=aitos')
-            if [ -n "$project_containers" ]; then
-              echo "$project_containers" | xargs -r docker rm -f
-            fi
-
-            echo "=== Post-cleanup container state ==="
-            docker ps -a --filter 'name=aitos-' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
+            if [ -n "$project_containers" ]; then echo "$project_containers" | xargs -r docker rm -f; fi
             stale_generated=$(docker ps -a --format '{{.Names}}' | grep -E '^[0-9a-f]{8,}_aitos-' || true)
             if [ -n "$stale_generated" ]; then
               echo "::error::A stale generated AITOS container name remains after project cleanup. Refusing deployment."
               printf '%s\n' "$stale_generated"
               exit 1
             fi
-
-            echo "=== Pre-start container state ==="
-            docker compose ps --all
-
             echo "=== ISOLATED CLICKHOUSE STARTUP DIAGNOSTIC GATE ==="
-            echo "Starting ClickHouse without the Compose restart loop so its fatal stdout/stderr is captured directly."
-            docker compose stop clickhouse >/dev/null 2>&1 || true
-            docker rm -f aitos-clickhouse >/dev/null 2>&1 || true
             docker compose create clickhouse
             set +e
             timeout --foreground --signal=TERM --kill-after=20s 90s docker start -a aitos-clickhouse
             ch_rc=$?
             set -e
             echo "ClickHouse foreground exit code: $ch_rc"
-            echo "=== ClickHouse inspect ==="
+            echo "=== ClickHouse container inspect ==="
             docker inspect --format='status={{.State.Status}} running={{.State.Running}} restarting={{.State.Restarting}} exit={{.State.ExitCode}} error={{.State.Error}} started={{.State.StartedAt}} finished={{.State.FinishedAt}}' aitos-clickhouse || true
-            echo "=== ClickHouse container logs ==="
+            echo "=== ClickHouse stdout/stderr ==="
             docker logs --timestamps --tail=1000 aitos-clickhouse 2>&1 || true
+            echo "=== ClickHouse server error file ==="
+            docker cp aitos-clickhouse:/var/log/clickhouse-server/clickhouse-server.err.log /tmp/aitos-clickhouse.err.log 2>/dev/null || true
+            if [ -f /tmp/aitos-clickhouse.err.log ]; then tail -n 1000 /tmp/aitos-clickhouse.err.log; else echo "error log file not available"; fi
+            echo "=== ClickHouse server log file ==="
+            docker cp aitos-clickhouse:/var/log/clickhouse-server/clickhouse-server.log /tmp/aitos-clickhouse.log 2>/dev/null || true
+            if [ -f /tmp/aitos-clickhouse.log ]; then tail -n 500 /tmp/aitos-clickhouse.log; else echo "server log file not available"; fi
             if [ "$ch_rc" -ne 0 ]; then
               echo "::error::ClickHouse foreground startup failed with exit code $ch_rc. Downstream services will not be started."
               exit "$ch_rc"
             fi
-
             echo "ClickHouse foreground process exited successfully; restarting it under Compose health supervision."
             docker compose up -d clickhouse
             ch_health=""
@@ -252,12 +238,10 @@ jobs:
               docker logs --timestamps --tail=500 aitos-clickhouse 2>&1 || true
               exit 1
             fi
-
             echo "=== Starting remaining infrastructure after ClickHouse gate ==="
             docker compose up -d redis neo4j
             echo "=== Starting AITOS paper services after infrastructure gate ==="
             docker compose up -d aitos-paper aitos-learning aitos-storage-maintenance
-
             echo "=== Final container status ==="
             docker compose ps --all
             echo "=== Final health validation ==="
