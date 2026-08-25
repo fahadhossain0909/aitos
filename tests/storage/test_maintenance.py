@@ -26,9 +26,12 @@ def test_prune_for_boot_buffer_removes_oldest_disposable_files(monkeypatch, tmp_
     calls = iter([0, 2 * 1024**3])
     monkeypatch.setattr(maintenance, "_boot_free_bytes", lambda _root: next(calls))
 
+    # The reserve is intentionally smaller than the oldest file so one file
+    # is sufficient. This verifies that cleanup stops after the oldest
+    # candidate and does not remove newer disposable data unnecessarily.
     result = prune_for_boot_buffer(
         tmp_path,
-        free_buffer_gb=0.000001,
+        free_buffer_gb=0.0000001,
         delete_percent=2.5,
     )
 
@@ -37,6 +40,7 @@ def test_prune_for_boot_buffer_removes_oldest_disposable_files(monkeypatch, tmp_
     assert str(old) in result["deleted_files"]
     assert not old.exists()
     assert new.exists()
+    assert result["deleted_files"] == [str(old)]
 
 
 def test_inspect_boot_storage_triggers_cleanup_when_reserve_is_breached(
