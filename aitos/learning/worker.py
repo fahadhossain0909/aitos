@@ -46,13 +46,7 @@ class ContinualLearningWorker:
                 }
             },
         )
-        self.client = clickhouse_connect.get_client(
-            host=host,
-            port=port,
-            username=user,
-            password=password,
-            database=database,
-        )
+        self.client = clickhouse_connect.get_client(host=host, port=port, username=user, password=password, database=database)
         self.database = database
         self.state_path = Path(state_path)
         self.batch_limit = batch_limit
@@ -85,9 +79,7 @@ class ContinualLearningWorker:
             return
         try:
             data = json.loads(self.state_path.read_text(encoding="utf-8"))
-            self._processed = set(
-                str(x) for x in data.get("processed_experiences", [])
-            )
+            self._processed = set(str(x) for x in data.get("processed_experiences", []))
             logger.info(
                 "learning state loaded",
                 extra={"aitos_extra": {"processed_experiences": len(self._processed)}},
