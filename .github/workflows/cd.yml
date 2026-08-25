@@ -333,6 +333,9 @@ jobs:
             echo "AUDIT_EXIT_CODE=$status"
             echo "AUDIT_REPORT_PATH=$REPORT"
             echo "AUDIT_REPORT_SIZE=$(wc -c < "$REPORT")"
+            echo "======== AUDIT REPORT BEGIN ========"
+            cat "$REPORT"
+            echo "======== AUDIT REPORT END ========"
             exit "$status"
 
       - name: Fetch audit report over SSH
