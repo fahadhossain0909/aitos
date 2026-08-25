@@ -39,7 +39,7 @@ class DeepValueRLScorer(RLPolicyScorer):
         min_samples_for_confidence: int = DEFAULT_MIN_SAMPLES_FOR_CONFIDENCE,
         reward_scale_r_multiples: float = DEFAULT_REWARD_SCALE_R_MULTIPLES,
         random_state: int = 0,
-        state_path: str = "models/online_rl/deep_value.pkl",
+        state_path: str = "/models/online_rl/deep_value.pkl",
     ) -> None:
         self._model = MLPRegressor(
             hidden_layer_sizes=hidden_layer_sizes,
