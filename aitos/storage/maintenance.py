@@ -138,7 +138,9 @@ def enforce_clickhouse(
     inventory = _table_inventory(client, database)
     total_bytes = sum(row[1] for row in inventory)
     evictable = [
-        row for row in inventory if row[0] in EVICTABLE_TABLES and not _protected(row[0])
+        row
+        for row in inventory
+        if row[0] in EVICTABLE_TABLES and not _protected(row[0])
     ]
     evictable_bytes = sum(row[1] for row in evictable)
     protected_bytes = max(0, total_bytes - evictable_bytes)
