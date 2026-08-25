@@ -27,6 +27,15 @@ if command -v docker >/dev/null 2>&1; then
   if [ -n "$unhealthy" ]; then
     printf '%s\n' "$unhealthy"
     blockers=1
+    while read -r container; do
+      [ -n "$container" ] || continue
+      echo "--- Healthcheck diagnostics: $container ---"
+      docker inspect --format 'Status={{.State.Status}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} ExitCode={{.State.ExitCode}} Error={{.State.Error}}' "$container" || true
+      docker inspect --format '{{range .State.Health.Log}}time={{.Start}} exit={{.ExitCode}} output={{printf "%q" .Output}}\n{{end}}' "$container" 2>/dev/null | tail -n 10 || true
+      echo "--- Recent logs: $container ---"
+      docker logs --tail 100 --timestamps "$container" 2>&1 || true
+      echo
+    done <<< "$unhealthy"
   else
     echo 'none'
   fi
@@ -124,16 +133,29 @@ pgrep -af 'run_paper_trading|aitos' || true
 echo
 echo '--- AITOS health endpoint ---'
 if command -v curl >/dev/null 2>&1; then
-  if curl --fail --silent --show-error --max-time 5 "$HEALTH_URL"; then
-    echo
+  health_body="$(mktemp)"
+  health_code="$(curl --silent --show-error --max-time 5 -o "$health_body" -w '%{http_code}' "$HEALTH_URL" 2>&1)" || true
+  echo "Health HTTP status: $health_code"
+  echo 'Health response body:'
+  cat "$health_body" || true
+  echo
+  if [ "$health_code" = "200" ]; then
     echo 'Health endpoint: PASS'
   else
     echo 'Health endpoint: FAIL/unreachable'
     blockers=1
+    if docker inspect aitos-paper >/dev/null 2>&1; then
+      echo '--- aitos-paper diagnostics after health failure ---'
+      docker inspect --format 'State={{.State.Status}} Health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} ExitCode={{.State.ExitCode}} Error={{.State.Error}}' aitos-paper || true
+      docker inspect --format '{{range .State.Health.Log}}time={{.Start}} exit={{.ExitCode}} output={{printf "%q" .Output}}\n{{end}}' aitos-paper 2>/dev/null | tail -n 10 || true
+      echo '--- Last 150 aitos-paper log lines ---'
+      docker logs --tail 150 --timestamps aitos-paper 2>&1 || true
+    fi
   fi
+  rm -f "$health_body"
   echo
   echo '--- AITOS metrics endpoint ---'
-  if curl --fail --silent --show-error --max-time 5 "$METRICS_URL" | head -n 20; then
+  if curl --fail --silent --show-error --max-time 5 "$METRICS_URL" | head -n 40; then
     echo 'Metrics endpoint: PASS'
   else
     echo 'Metrics endpoint: FAIL/unreachable'
