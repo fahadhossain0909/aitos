@@ -102,7 +102,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 15m
-          envs: BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB
+          envs: BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_GB
           script: |
             set -euo pipefail
             : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
@@ -201,16 +201,41 @@ jobs:
             SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
             ENVEOF
             chmod 600 .env
+
+            echo "=== Docker/containerd storage preflight ==="
+            docker_storage_healthy=false
+            for attempt in 1 2; do
+              echo "Docker storage health attempt $attempt"
+              if docker info >/dev/null 2>&1 && docker ps -a >/dev/null 2>&1 && docker system df >/dev/null 2>&1; then
+                docker_storage_healthy=true
+                echo "Docker/containerd storage is healthy."
+                break
+              fi
+              if [ "$attempt" -eq 1 ]; then
+                echo "::warning::Docker/containerd storage health check failed; restarting Docker daemon non-destructively."
+                sudo systemctl restart docker
+                sleep 10
+              fi
+            done
+            if [ "$docker_storage_healthy" != "true" ]; then
+              echo "::error::Docker/containerd storage remains unhealthy after daemon restart."
+              echo "No destructive containerd reset was attempted."
+              docker info 2>&1 || true
+              docker ps -a 2>&1 || true
+              docker system df 2>&1 || true
+              sudo systemctl status docker --no-pager 2>&1 || true
+              sudo systemctl status containerd --no-pager 2>&1 || true
+              sudo journalctl -u docker -n 100 --no-pager 2>&1 || true
+              sudo journalctl -u containerd -n 100 --no-pager 2>&1 || true
+              exit 1
+            fi
+
             docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
             df -h "$DATA_ROOT"
-            docker system df
             docker compose config > /dev/null
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
             docker compose pull
 
-            # The source tree and compose file are now the new commit, and all
-            # service images (including storage-maintenance) have been pulled.
-            # From this point onward every retention action MUST use the new image.
             echo "=== Post-pull storage-maintenance image gate ==="
             maintenance_image=$(docker compose images -q aitos-storage-maintenance | tail -1)
             if [ -z "$maintenance_image" ]; then
@@ -276,7 +301,7 @@ jobs:
               echo "aitos-clickhouse name is free."
             fi
             echo "=== ISOLATED CLICKHOUSE STARTUP READINESS GATE ==="
-            docker compose up -d clickhouse
+            docker compose up -d --no-build clickhouse
             ch_health=""
             ch_status="missing"
             ch_deadline=$((SECONDS + 180))
@@ -293,8 +318,8 @@ jobs:
               echo "::error::ClickHouse did not become healthy within 180 seconds."
               exit 1
             fi
-            docker compose up -d redis neo4j
-            docker compose up -d aitos-paper aitos-learning aitos-storage-maintenance
+            docker compose up -d --no-build redis neo4j
+            docker compose up -d --no-build aitos-paper aitos-learning aitos-storage-maintenance
             docker compose ps --all
             final_bad=$(docker ps --filter 'name=aitos-' --filter 'status=restarting' -q)
             if [ -n "$final_bad" ]; then
