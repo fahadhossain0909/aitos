@@ -31,7 +31,7 @@ class ModelRegistry:
 
     VALID_STATUSES = {"candidate", "champion", "rejected", "archived"}
 
-    def __init__(self, path: str = "models/registry.json") -> None:
+    def __init__(self, path: str = "/models/registry.json") -> None:
         self.path = path
 
     def _load(self) -> list[dict[str, Any]]:
