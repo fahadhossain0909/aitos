@@ -46,6 +46,11 @@ def test_prune_for_boot_buffer_removes_oldest_disposable_files(monkeypatch, tmp_
 def test_inspect_boot_storage_triggers_cleanup_when_reserve_is_breached(
     monkeypatch, tmp_path: Path
 ):
+    disposable = tmp_path / "backtest"
+    disposable.mkdir()
+    old = disposable / "old.bin"
+    old.write_bytes(b"o" * 1024)
+
     calls = iter([0, 20 * 1024**3])
     monkeypatch.setattr(maintenance, "_boot_free_bytes", lambda _root: next(calls))
     config = StorageConfig(boot_buffer_gb=10.0)
@@ -57,6 +62,8 @@ def test_inspect_boot_storage_triggers_cleanup_when_reserve_is_breached(
     assert result["reserve_met"] is False
     assert result["prune"]["cleanup_needed"] is True
     assert result["prune"]["reserve_met"] is True
+    assert result["prune"]["deleted_files"] == [str(old)]
+    assert not old.exists()
 
 
 def test_inspect_boot_storage_does_not_cleanup_when_reserve_is_met(
