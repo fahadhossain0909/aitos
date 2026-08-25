@@ -125,6 +125,10 @@ jobs:
               echo "::error::Could not determine filesystem for $DATA_ROOT."
               exit 1
             fi
+            if ! sudo -n true 2>/dev/null; then
+              echo "::error::Passwordless sudo is required for the one-time database storage reset."
+              exit 1
+            fi
             echo "Data disk: $(findmnt -n -o SOURCE,FSTYPE,SIZE,USED,AVAIL --target "$DATA_ROOT")"
             echo "Boot disk before cleanup: $(df -h "$HOME" | tail -1)"
 
@@ -139,8 +143,9 @@ jobs:
               echo "=== ONE-TIME AITOS STORAGE RESET ==="
               echo "All previously accumulated AITOS database/application data is intentionally disposable for this pre-production reset."
 
-              echo "--- Clearing mounted database disk ---"
-              find "$DATA_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+              echo "--- Clearing mounted database disk as root ---"
+              echo "Preserving filesystem metadata directory: lost+found"
+              sudo find "$DATA_ROOT" -mindepth 1 -maxdepth 1 ! -name lost+found -exec rm -rf -- {} +
               mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
 
               echo "--- Removing old AITOS application tree from boot disk ---"
