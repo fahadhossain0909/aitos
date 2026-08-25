@@ -186,9 +186,14 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: ${{ steps.repo.outputs.repo }}:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - name: Verify runtime package is present in image
+        run: |
+          set -euo pipefail
+          docker run --rm --entrypoint python3 "${{ steps.repo.outputs.repo }}:test" -c "from aitos.data.ingestion import DataIngestionService; import aitos.data; print('aitos.data import OK')"
 
   results:
     runs-on: ubuntu-latest

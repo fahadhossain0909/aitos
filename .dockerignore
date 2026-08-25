@@ -17,8 +17,7 @@ Dockerfile
 # Runtime/storage data must never enter Docker build context.
 .storage/
 **/.storage/
-data/
-**/data/
+/data/
 models/
 logs/
 **/logs/
