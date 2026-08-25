@@ -82,6 +82,26 @@ async def test_health_endpoint_returns_503_when_any_module_unhealthy():
     await client.close()
 
 
+
+@pytest.mark.asyncio
+async def test_health_endpoint_returns_200_when_only_degraded():
+    """Soft DEGRADED must not hard-fail probes; only UNHEALTHY is 503."""
+    modules = [
+        FakeModule("mod-a", ModuleStatus.HEALTHY),
+        FakeModule("mod-b", ModuleStatus.DEGRADED),
+    ]
+    server = HealthServer(modules)
+    client = TestClient(TestServer(server._build_app()))
+    await client.start_server()
+
+    resp = await client.get("/health")
+    body = await resp.json()
+
+    assert resp.status == 200
+    assert body["status"] == "degraded"
+
+    await client.close()
+
 @pytest.mark.asyncio
 async def test_health_endpoint_includes_module_details():
     modules = [FakeModule("mod-a", ModuleStatus.HEALTHY, details={"trades_open": 3})]
