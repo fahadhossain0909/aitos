@@ -1,0 +1,25 @@
+services:
+  redis:
+    command:
+      - redis-server
+      - --appendonly
+      - yes
+      - --auto-aof-rewrite-percentage
+      - "50"
+      - --auto-aof-rewrite-min-size
+      - 64mb
+
+  neo4j:
+    environment:
+      NEO4J_dbms_tx__log_rotation_retention__policy: "2 days 100M"
+
+  aitos-storage-maintenance:
+    environment:
+      DATA_DISK_DIR: /data-disk
+      DATA_DISK_MIN_FREE_GB: "20"
+      DATA_DISK_TARGET_FREE_GB: "25"
+      STORAGE_AUTO_DELETE_PERCENT: "2.5"
+      STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300"
+      STORAGE_MAINTENANCE_DRY_RUN: "false"
+    volumes:
+      - "${AITOS_DATA_ROOT:-/mnt/aitos-data}:/data-disk"
