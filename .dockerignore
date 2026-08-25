@@ -20,7 +20,6 @@ Dockerfile
 data/
 **/data/
 models/
-**/models/
 logs/
 **/logs/
 backups/
