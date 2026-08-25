@@ -146,7 +146,7 @@ jobs:
               echo "--- Clearing mounted database disk as root ---"
               echo "Preserving filesystem metadata directory: lost+found"
               sudo find "$DATA_ROOT" -mindepth 1 -maxdepth 1 ! -name lost+found -exec rm -rf -- {} +
-              mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
+              sudo mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
 
               echo "--- Removing old AITOS application tree from boot disk ---"
               rm -rf -- "$APP_DIR"
