@@ -8,7 +8,11 @@ from typing import Any, Iterator, Optional
 
 import clickhouse_connect
 
+from aitos.logging_setup import get_logger
+
 from .cli import HistoricalEvent, _timestamp
+
+logger = get_logger("aitos.backtest.clickhouse_source")
 
 
 class ClickHouseHistoricalSource:
@@ -32,16 +36,42 @@ class ClickHouseHistoricalSource:
         password: str = "",  # nosec B107 - empty default is overridden by deployment config
         database: str = "aitos",
     ) -> None:
-        self.client = clickhouse_connect.get_client(
-            host=host,
-            port=port,
-            username=username,
-            password=password,
-            database=database,
-        )
+        try:
+            self.client = clickhouse_connect.get_client(
+                host=host,
+                port=port,
+                username=username,
+                password=password,
+                database=database,
+            )
+            logger.info(
+                "ClickHouse historical source connected",
+                extra={
+                    "aitos_extra": {
+                        "host": host,
+                        "port": port,
+                        "database": database,
+                    }
+                },
+            )
+        except Exception:
+            logger.exception(
+                "ClickHouse historical source connection failed",
+                extra={
+                    "aitos_extra": {
+                        "host": host,
+                        "port": port,
+                        "database": database,
+                    }
+                },
+            )
+            raise
 
     def close(self) -> None:
-        self.client.close()
+        try:
+            self.client.close()
+        except Exception:
+            logger.exception("ClickHouse historical source close failed")
 
     def events(
         self,
@@ -89,7 +119,35 @@ class ClickHouseHistoricalSource:
                 )  # nosec B608 - filters are fixed parameterized predicates
                 + " ORDER BY time LIMIT {limit:UInt32}"
             )
-        result = self.client.query(sql, parameters=parameters)
+        logger.info(
+            "ClickHouse historical query started",
+            extra={
+                "aitos_extra": {
+                    "symbol": symbol,
+                    "table": source_table,
+                    "timeframe": timeframe if table == "ohlcv" else None,
+                    "start": start.isoformat() if start else None,
+                    "end": end.isoformat() if end else None,
+                    "limit": limit,
+                }
+            },
+        )
+        try:
+            result = self.client.query(sql, parameters=parameters)
+        except Exception:
+            logger.exception(
+                "ClickHouse historical query failed",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "table": source_table,
+                        "limit": limit,
+                    }
+                },
+            )
+            raise
+
+        row_count = 0
         for row in result.result_rows:
             data = dict(zip(result.column_names, row))
             if table == "orderbook":
@@ -105,8 +163,33 @@ class ClickHouseHistoricalSource:
                 data.update({"bids": bids, "asks": asks})
             else:
                 price = float(data["close"] if table == "ohlcv" else data["price"])
+            row_count += 1
             yield HistoricalEvent(
                 _timestamp(data.pop("time")), price, {"symbol": symbol, **data}
+            )
+
+        if row_count == 0:
+            logger.warning(
+                "ClickHouse historical query returned no rows",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "table": source_table,
+                        "start": start.isoformat() if start else None,
+                        "end": end.isoformat() if end else None,
+                    }
+                },
+            )
+        else:
+            logger.info(
+                "ClickHouse historical query completed",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "table": source_table,
+                        "rows": row_count,
+                    }
+                },
             )
 
 

@@ -48,49 +48,81 @@ class DurableTradingStateStore:
 
     async def initialize(self) -> None:
         if self._repository is None or self._repository._client is None:
+            logger.warning(
+                "durable trading state store skipped: ClickHouse repository unavailable"
+            )
             return
-        await self._repository._client.command(CREATE_RUNTIME_STATE)
-        await self._repository._client.command(CREATE_DRAWDOWN_STATE)
+        try:
+            await self._repository._client.command(CREATE_RUNTIME_STATE)
+            await self._repository._client.command(CREATE_DRAWDOWN_STATE)
+            logger.info("durable trading state tables ensured")
+        except Exception:
+            logger.exception("durable trading state table ensure failed")
+            raise
 
     async def save_trade(self, trade: Trade) -> None:
         client = self._client()
         payload = trade.to_dict()
-        await client.insert(
-            "trade_runtime_state",
-            [
+        try:
+            await client.insert(
+                "trade_runtime_state",
                 [
-                    trade.trade_id,
-                    trade.symbol,
-                    trade.state.value,
-                    json.dumps(payload, sort_keys=True, default=str),
-                    datetime.now(timezone.utc),
-                ]
-            ],
-            column_names=[
-                "trade_id",
-                "symbol",
-                "state",
-                "payload_json",
-                "updated_at",
-            ],
-        )
+                    [
+                        trade.trade_id,
+                        trade.symbol,
+                        trade.state.value,
+                        json.dumps(payload, sort_keys=True, default=str),
+                        datetime.now(timezone.utc),
+                    ]
+                ],
+                column_names=[
+                    "trade_id",
+                    "symbol",
+                    "state",
+                    "payload_json",
+                    "updated_at",
+                ],
+            )
+        except Exception:
+            logger.exception(
+                "failed to save trade runtime state",
+                extra={
+                    "aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "state": trade.state.value,
+                    }
+                },
+            )
+            raise
 
     async def delete_trade(self, trade_id: str) -> None:
         client = self._client()
-        await client.command(
-            "ALTER TABLE trade_runtime_state DELETE "
-            "WHERE trade_id = {trade_id:String}",
-            parameters={"trade_id": trade_id},
-        )
+        try:
+            await client.command(
+                "ALTER TABLE trade_runtime_state DELETE "
+                "WHERE trade_id = {trade_id:String}",
+                parameters={"trade_id": trade_id},
+            )
+        except Exception:
+            logger.exception(
+                "failed to delete trade runtime state",
+                extra={"aitos_extra": {"trade_id": trade_id}},
+            )
+            raise
 
     async def load_open_trades(self) -> List[Trade]:
         client = self._client()
-        result = await client.query("""
-            SELECT trade_id, argMax(payload_json, updated_at) AS payload_json
-            FROM trade_runtime_state
-            WHERE state IN ('position_opened', 'exit_triggered')
-            GROUP BY trade_id
-            """)
+        try:
+            result = await client.query("""
+                SELECT trade_id, argMax(payload_json, updated_at) AS payload_json
+                FROM trade_runtime_state
+                WHERE state IN ('position_opened', 'exit_triggered')
+                GROUP BY trade_id
+                """)
+        except Exception:
+            logger.exception("failed to load open trades from runtime state")
+            raise
         trades: List[Trade] = []
         for row in result.result_rows:
             try:
@@ -99,35 +131,61 @@ class DurableTradingStateStore:
             except Exception as exc:
                 logger.error(
                     "failed to restore trade state",
-                    extra={"aitos_extra": {"error": str(exc)}},
+                    extra={
+                        "aitos_extra": {
+                            "trade_id": row[0] if row else None,
+                            "error": str(exc),
+                        }
+                    },
                 )
         return trades
 
     async def save_drawdown(self, asset: str, equity: float, peak: float) -> None:
         client = self._client()
         drawdown = ((peak - equity) / peak * 100.0) if peak > 0 else 0.0
-        await client.insert(
-            "portfolio_drawdown_state",
-            [[asset, datetime.now(timezone.utc), equity, peak, drawdown]],
-            column_names=[
-                "asset",
-                "time",
-                "equity_usd",
-                "peak_equity_usd",
-                "drawdown_pct",
-            ],
-        )
+        try:
+            await client.insert(
+                "portfolio_drawdown_state",
+                [[asset, datetime.now(timezone.utc), equity, peak, drawdown]],
+                column_names=[
+                    "asset",
+                    "time",
+                    "equity_usd",
+                    "peak_equity_usd",
+                    "drawdown_pct",
+                ],
+            )
+        except Exception:
+            logger.exception(
+                "failed to save portfolio drawdown state",
+                extra={
+                    "aitos_extra": {
+                        "asset": asset,
+                        "equity": equity,
+                        "peak": peak,
+                        "drawdown_pct": drawdown,
+                    }
+                },
+            )
+            raise
 
     async def load_peak_equity(self, asset: str) -> Optional[float]:
         client = self._client()
-        result = await client.query(
-            """
-            SELECT argMax(peak_equity_usd, time) AS peak_equity_usd
-            FROM portfolio_drawdown_state
-            WHERE asset = {asset:String}
-            """,
-            parameters={"asset": asset},
-        )
+        try:
+            result = await client.query(
+                """
+                SELECT argMax(peak_equity_usd, time) AS peak_equity_usd
+                FROM portfolio_drawdown_state
+                WHERE asset = {asset:String}
+                """,
+                parameters={"asset": asset},
+            )
+        except Exception:
+            logger.exception(
+                "failed to load peak equity",
+                extra={"aitos_extra": {"asset": asset}},
+            )
+            raise
         if not result.result_rows or result.result_rows[0][0] is None:
             return None
         return float(result.result_rows[0][0])
@@ -205,6 +263,8 @@ class TradeStatePersistence:
                 "restored open trades after process restart",
                 extra={"aitos_extra": {"count": len(trades)}},
             )
+        else:
+            logger.info("no open trades to restore from durable state")
         return len(trades)
 
     async def initialize(self) -> None:
@@ -236,11 +296,16 @@ class TradeStatePersistence:
                 group="trade-state-persistence",
             ),
         ]
+        logger.info(
+            "trade state persistence subscribed",
+            extra={"aitos_extra": {"subscriptions": len(self._subscriptions)}},
+        )
 
     async def shutdown(self) -> None:
         for subscription in self._subscriptions:
             subscription.cancel()
         self._subscriptions.clear()
+        logger.info("trade state persistence shut down")
 
     async def _save_event(self, event: Any) -> None:
         try:
@@ -254,13 +319,39 @@ class TradeStatePersistence:
         except Exception as exc:
             logger.error(
                 "trade state persistence failed",
-                extra={"aitos_extra": {"error": str(exc)}},
+                extra={
+                    "aitos_extra": {
+                        "error": str(exc),
+                        "event_id": getattr(event, "event_id", None),
+                        "topic": getattr(event, "topic", None),
+                    }
+                },
             )
 
     async def _delete_event(self, event: Any) -> None:
         trade_id = event.payload.get("trade_id")
-        if trade_id:
+        if not trade_id:
+            logger.warning(
+                "trade.position_closed without trade_id; skip delete",
+                extra={
+                    "aitos_extra": {
+                        "event_id": getattr(event, "event_id", None),
+                    }
+                },
+            )
+            return
+        try:
             await self._store.delete_trade(str(trade_id))
+        except Exception as exc:
+            logger.error(
+                "trade state delete failed",
+                extra={
+                    "aitos_extra": {
+                        "trade_id": trade_id,
+                        "error": str(exc),
+                    }
+                },
+            )
 
 
 class PersistentLivePortfolioTracker(LivePortfolioTracker):
@@ -276,7 +367,13 @@ class PersistentLivePortfolioTracker(LivePortfolioTracker):
         self._state_store = state_store
 
     async def restore(self) -> None:
-        self._peak_equity_usd = await self._state_store.load_peak_equity(self._asset)
+        peak = await self._state_store.load_peak_equity(self._asset)
+        self._peak_equity_usd = peak
+        if peak is not None:
+            logger.info(
+                "restored peak equity from durable state",
+                extra={"aitos_extra": {"asset": self._asset, "peak_equity_usd": peak}},
+            )
 
     async def refresh_equity(self) -> float:
         equity = await super().refresh_equity()

@@ -8,9 +8,12 @@ from typing import Iterator, Optional
 
 import clickhouse_connect
 
+from aitos.logging_setup import get_logger
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
 from .cli import _timestamp
+
+logger = get_logger("aitos.backtest.clickhouse_market_source")
 
 
 class ClickHouseMarketEventSource:
@@ -30,16 +33,42 @@ class ClickHouseMarketEventSource:
         password: str = "",  # nosec B107 - empty default is overridden by deployment config
         database: str = "aitos",
     ) -> None:
-        self.client = clickhouse_connect.get_client(
-            host=host,
-            port=port,
-            username=username,
-            password=password,
-            database=database,
-        )
+        try:
+            self.client = clickhouse_connect.get_client(
+                host=host,
+                port=port,
+                username=username,
+                password=password,
+                database=database,
+            )
+            logger.info(
+                "ClickHouse market event source connected",
+                extra={
+                    "aitos_extra": {
+                        "host": host,
+                        "port": port,
+                        "database": database,
+                    }
+                },
+            )
+        except Exception:
+            logger.exception(
+                "ClickHouse market event source connection failed",
+                extra={
+                    "aitos_extra": {
+                        "host": host,
+                        "port": port,
+                        "database": database,
+                    }
+                },
+            )
+            raise
 
     def close(self) -> None:
-        self.client.close()
+        try:
+            self.client.close()
+        except Exception:
+            logger.exception("ClickHouse market event source close failed")
 
     def _bounds(
         self, start: Optional[datetime], end: Optional[datetime]
@@ -63,20 +92,39 @@ class ClickHouseMarketEventSource:
     ) -> Iterator[TradeTick | OrderBookSnapshot]:
         where, params = self._bounds(start, end)
         params = {**params, "symbol": symbol, "limit": limit}
-        trade = self.client.query(
-            "SELECT time, price, quantity, side, trade_id, is_buyer_maker "
-            "FROM trade_ticks WHERE "
-            + where  # nosec B608 - where contains only fixed parameterized predicates
-            + " ORDER BY time, trade_id LIMIT {limit:UInt32}",
-            parameters=params,
+        logger.info(
+            "ClickHouse market event query started",
+            extra={
+                "aitos_extra": {
+                    "symbol": symbol,
+                    "start": start.isoformat() if start else None,
+                    "end": end.isoformat() if end else None,
+                    "limit": limit,
+                }
+            },
         )
-        book = self.client.query(
-            "SELECT time, bid_levels, ask_levels, last_update_id "
-            "FROM order_book_snapshots WHERE "
-            + where  # nosec B608 - where contains only fixed parameterized predicates
-            + " ORDER BY time, last_update_id LIMIT {limit:UInt32}",
-            parameters=params,
-        )
+        try:
+            trade = self.client.query(
+                "SELECT time, price, quantity, side, trade_id, is_buyer_maker "
+                "FROM trade_ticks WHERE "
+                + where  # nosec B608 - where contains only fixed parameterized predicates
+                + " ORDER BY time, trade_id LIMIT {limit:UInt32}",
+                parameters=params,
+            )
+            book = self.client.query(
+                "SELECT time, bid_levels, ask_levels, last_update_id "
+                "FROM order_book_snapshots WHERE "
+                + where  # nosec B608 - where contains only fixed parameterized predicates
+                + " ORDER BY time, last_update_id LIMIT {limit:UInt32}",
+                parameters=params,
+            )
+        except Exception:
+            logger.exception(
+                "ClickHouse market event query failed",
+                extra={"aitos_extra": {"symbol": symbol, "limit": limit}},
+            )
+            raise
+
         events: list[TradeTick | OrderBookSnapshot] = []
         for row in trade.result_rows:
             time, price, quantity, side, trade_id, is_buyer_maker = row
@@ -123,4 +171,30 @@ class ClickHouseMarketEventSource:
                 )
             )
         events.sort(key=lambda event: event.timestamp)
+
+        trade_count = len(trade.result_rows)
+        book_count = len(book.result_rows)
+        if not events:
+            logger.warning(
+                "ClickHouse market event query returned no rows",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "start": start.isoformat() if start else None,
+                        "end": end.isoformat() if end else None,
+                    }
+                },
+            )
+        else:
+            logger.info(
+                "ClickHouse market event query completed",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "trades": trade_count,
+                        "orderbook_snapshots": book_count,
+                        "total_events": len(events),
+                    }
+                },
+            )
         yield from events
