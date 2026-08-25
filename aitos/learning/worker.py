@@ -95,13 +95,13 @@ class ContinualLearningWorker:
 
     def _rows(self) -> list[dict[str, Any]]:
         start = datetime.now(timezone.utc) - self.lookback
-        sql = f"""
+        sql = """
         SELECT experience_id, source, symbol, outcome, reward, features_json
-        FROM {self.database}.learning_experiences
+        FROM learning_experiences
         WHERE source = 'backtest' AND outcome IS NOT NULL
-          AND timestamp >= {{start:DateTime64(3)}}
+          AND timestamp >= {start:DateTime64(3)}
         ORDER BY timestamp ASC
-        LIMIT {{limit:UInt32}}
+        LIMIT {limit:UInt32}
         """
         try:
             result = self.client.query(
