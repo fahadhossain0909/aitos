@@ -104,7 +104,7 @@ services:
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     command: ["python3", "-m", "aitos.backtest.cli"]
     volumes:
-      - "${BACKTEST_DATA_DIR:-./.storage/backtest}:/data:rw"
+      - "${BACKTEST_DATA_DIR:-./.storage/others/backtest}:/data:rw"
       - aitos_model_data:/models:ro
     environment: {PYTHONUNBUFFERED: "1", CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"}
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
@@ -127,14 +127,12 @@ services:
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
       CLICKHOUSE_STORAGE_BUDGET_GB: "130"
       CLICKHOUSE_STORAGE_TARGET_GB: "120"
-      BACKTEST_CACHE_MAX_GB: "22.5"
-      BACKTEST_DATA_DIR: /data
       OTHERS_DATA_DIR: /others
       OTHERS_MAX_GB: "22.5"
+      BOOT_FREE_BUFFER_GB: "10"
       STORAGE_MAINTENANCE_INTERVAL_SECONDS: "86400"
       STORAGE_MAINTENANCE_DRY_RUN: "false"
     volumes:
-      - "${BACKTEST_DATA_DIR:-./.storage/backtest}:/data"
       - "${OTHERS_DATA_DIR:-./.storage/others}:/others"
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "0.25"
