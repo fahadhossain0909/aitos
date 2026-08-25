@@ -1,9 +1,10 @@
-import os
-import time
 from pathlib import Path
 
-from aitos.storage.maintenance import (choose_retention_days,
-                                       enforce_backtest_cache)
+from aitos.storage.maintenance import (
+    StorageConfig,
+    choose_retention_days,
+    inspect_boot_storage,
+)
 
 
 def test_retention_ladder_prefers_longest_window_that_fits():
@@ -12,20 +13,22 @@ def test_retention_ladder_prefers_longest_window_that_fits():
     assert choose_retention_days(120, 90, 20.0) == 7
 
 
-def test_cache_removes_oldest_files_first(tmp_path: Path):
-    old = tmp_path / "old.parquet"
-    new = tmp_path / "new.parquet"
-    manifest = tmp_path / "manifest.json"
-    old.write_bytes(b"a" * 10)
-    new.write_bytes(b"b" * 10)
-    manifest.write_text("{}", encoding="utf-8")
+def test_inspect_boot_storage_reports_over_budget(tmp_path: Path):
+    big = tmp_path / "blob.bin"
+    big.write_bytes(b"x" * 1024)
 
-    now = time.time()
-    os.utime(old, (now - 100, now - 100))
-    os.utime(new, (now, now))
+    config = StorageConfig(others_gb=0.0000005, boot_buffer_gb=10.0)
+    result = inspect_boot_storage(tmp_path, config)
 
-    result = enforce_backtest_cache(tmp_path, max_gb=15 / (1024**3))
+    assert result["others_gb"] > 0
+    assert result["others_max_gb"] == config.others_gb
+    assert result["boot_buffer_gb"] == 10.0
+    assert result["others_over_budget"] is True
 
-    assert str(old) in result["removed"]
-    assert new.exists()
-    assert manifest.exists()
+
+def test_inspect_boot_storage_under_budget(tmp_path: Path):
+    config = StorageConfig(others_gb=22.5, boot_buffer_gb=10.0)
+    result = inspect_boot_storage(tmp_path, config)
+
+    assert result["others_gb"] == 0.0
+    assert result["others_over_budget"] is False
