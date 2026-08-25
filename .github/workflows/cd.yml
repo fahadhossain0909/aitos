@@ -13,7 +13,8 @@ permissions:
 env:
   REGISTRY: ghcr.io
   AITOS_DATA_ROOT: /mnt/aitos-data
-  OTHERS_BUDGET_BYTES: 24159191040
+  BOOT_FREE_RESERVE_BYTES: 8053063680
+  DATA_DISK_MIN_FREE_GB: 20
 
 jobs:
   publish-image:
@@ -94,16 +95,18 @@ jobs:
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
         env:
-          OTHERS_BUDGET_BYTES: ${{ env.OTHERS_BUDGET_BYTES }}
+          BOOT_FREE_RESERVE_BYTES: ${{ env.BOOT_FREE_RESERVE_BYTES }}
+          DATA_DISK_MIN_FREE_GB: ${{ env.DATA_DISK_MIN_FREE_GB }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 15m
-          envs: OTHERS_BUDGET_BYTES
+          envs: BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB
           script: |
             set -euo pipefail
-            : "${OTHERS_BUDGET_BYTES:=24159191040}"
+            : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
+            : "${DATA_DISK_MIN_FREE_GB:=20}"
             APP_DIR="$HOME/aitos"
             DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
             REPO="${{ github.repository }}"
@@ -115,15 +118,41 @@ jobs:
               exit 1
             fi
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
-            echo "=== Boot disk storage policy ==="
-            echo "All non-database application data budget: 22.5 GiB"
-            echo "Database data is exclusively under: $DATA_ROOT"
+            echo "=== Storage policy ==="
+            echo "Boot disk: keep at least 7.5 GiB free; no fixed application-data quota."
+            echo "Data disk: ClickHouse/Neo4j/Redis stay under $DATA_ROOT; historical low-priority data is retained/evicted under pressure."
             echo "=== Freeing stale Git/Docker data before deployment ==="
             if [ -d .git ]; then rm -rf .git; fi
             docker container prune --force --filter "until=24h" || true
             docker image prune -a --force || true
             docker builder prune --all --force --filter "until=168h" || true
             docker network prune --force --filter "until=24h" || true
+            echo "=== Pre-deployment boot-disk reserve check ==="
+            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "Boot disk is below the 7.5 GiB reserve; invoking oldest/lowest-priority boot cleanup."
+              docker compose run --rm --no-deps aitos-storage-maintenance --boot-only || true
+              boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+            fi
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "::error::Boot disk remains below the required 7.5 GiB free reserve after automatic cleanup."
+              df -h .
+              exit 1
+            fi
+            echo "Boot free space before source deployment: $(df -h . | tail -1)"
+            echo "=== Pre-deployment data-disk retention check ==="
+            data_free_gb=$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')
+            if [ -z "$data_free_gb" ]; then data_free_gb=0; fi
+            if [ "$data_free_gb" -lt "$DATA_DISK_MIN_FREE_GB" ]; then
+              echo "Data disk has less than ${DATA_DISK_MIN_FREE_GB} GiB free; invoking database-native historical retention before deployment."
+              docker compose run --rm --no-deps aitos-storage-maintenance --once || true
+              data_free_gb=$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')
+              if [ -z "$data_free_gb" ]; then data_free_gb=0; fi
+            fi
+            if [ "$data_free_gb" -lt "$DATA_DISK_MIN_FREE_GB" ]; then
+              echo "::warning::Data disk remains below ${DATA_DISK_MIN_FREE_GB} GiB after retention. Deployment will continue only if database services remain healthy; no raw database files will be deleted."
+            fi
+            echo "Data disk before deployment: $(df -h "$DATA_ROOT" | tail -1)"
             echo "=== Downloading source snapshot without Git history ==="
             tmp_dir=$(mktemp -d)
             trap 'rm -rf "$tmp_dir"' EXIT
@@ -133,14 +162,8 @@ jobs:
             find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name .storage -exec rm -rf -- {} +
             cp -a "$tmp_dir/source/." "$APP_DIR/"
             mkdir -p ./.storage/others/backtest ./.storage/others/backups ./.storage/others/snapshots
-            others_bytes=$(du -sb ./.storage/others | cut -f1)
-            if [ "$others_bytes" -gt "$OTHERS_BUDGET_BYTES" ]; then
-              echo "::error::Application data under ./.storage/others exceeds the 22.5 GiB budget."
-              du -sh ./.storage/others
-              exit 1
-            fi
             echo "Application Others usage: $(du -sh ./.storage/others | cut -f1)"
-            echo "Boot disk: $(df -h . | tail -1)"
+            echo "Boot disk after source update: $(df -h . | tail -1)"
             umask 077
             cat > .env << 'ENVEOF'
             ENVIRONMENT=production
@@ -270,8 +293,14 @@ jobs:
               docker logs --timestamps --tail=500 aitos-paper || true
               exit 1
             fi
-            echo "=== Final boot-disk storage audit ==="
+            echo "=== Final storage audit ==="
             docker system df
+            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "::error::Boot disk ended below the required 7.5 GiB free reserve."
+              df -h .
+              exit 1
+            fi
             echo "Boot disk: $(df -h . | tail -1)"
             echo "Application Others: $(du -sh ./.storage/others | cut -f1)"
             echo "Database disk: $(df -h "$DATA_ROOT" | tail -1)"
