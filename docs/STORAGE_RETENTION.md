@@ -8,17 +8,22 @@ AITOS uses bounded retention so storage growth cannot silently consume the files
 - Backtest downloads are a bounded, re-downloadable cache.
 - Trade/decision/risk/model/experience data is protected from automatic deletion.
 - High-volume market history such as L2/order-book data is evictable and can be downloaded again when absent.
-- Boot-disk application data under `.storage/others` is capped at **22.5 GiB**.
-- The default ClickHouse storage budget is **130 GiB**, with a normal cleanup target of **120 GiB**.
+- The boot disk is protected by a **7.5 GiB minimum-free-space reserve** rather than a fixed `.storage/others` quota.
 - The 150-GiB data disk keeps at least **20 GiB free** as an emergency filesystem headroom target; normal operation aims for **25 GiB free**.
 
 ## Boot-disk automatic cleanup
 
-The storage-maintenance service checks the boot-disk application-data tree every **5 minutes**. When `.storage/others` exceeds 22.5 GiB, it removes the **oldest disposable files first**.
+The storage-maintenance service checks boot-disk free space every **5 minutes**. When available boot-disk space falls below the 7.5-GiB reserve, it removes the **oldest files first** from explicitly disposable application directories: `cache`, `caches`, `logs`, `backtest`, `snapshots`, `tmp`, and `backups`.
 
-The cleanup batch is normally **2.5% of the managed dataset**. If a large write has already pushed the tree beyond the limit, the cleanup removes at least the amount required to return under the 22.5-GiB budget, rather than waiting for the next deployment or failing deployment.
+The cleanup batch is normally **2.5% of the disposable dataset**, but it always removes at least the amount required to restore the configured free-space reserve. Therefore a large write that exhausts the boot disk does not require a deployment failure to recover: the maintenance service can progressively remove old disposable data until the reserve is restored.
 
-This is not a full wipe. Newer files are retained; only the oldest files are selected. The disposable areas are intended for re-downloadable caches, backups and snapshots.
+This is intentionally **not a full filesystem wipe**. Protected application data and the database disk are outside the generic file-pruner. Only explicitly disposable files are eligible, and the oldest files are selected first.
+
+## Deployment protection
+
+CD performs Docker/container/cache cleanup and checks the boot-disk reserve before and after deployment. If the reserve is breached, it invokes the boot-disk retention guard before continuing. If the reserve still cannot be restored, deployment fails rather than consuming the remaining filesystem headroom.
+
+The deployment must also keep `/mnt/aitos-data` mounted. ClickHouse, Neo4j and Redis remain on that data disk and are never redirected to the boot disk as a fallback.
 
 ## Data-disk emergency protection
 
@@ -71,8 +76,8 @@ Downloaded Parquet files are consumed directly by the backtest engine and are no
 
 The desired failure mode is **degrade retention, not stop production**:
 
-1. protect the filesystem headroom;
-2. remove oldest disposable boot-disk files when their budget is exceeded;
+1. protect the boot filesystem headroom;
+2. remove oldest disposable boot-disk files when the free-space reserve is breached;
 3. shorten ClickHouse historical retention when the data disk approaches its emergency free-space threshold;
 4. let Redis compact its AOF and Neo4j rotate old transaction logs;
 5. never `rm -rf` database directories as a generic emergency action.
