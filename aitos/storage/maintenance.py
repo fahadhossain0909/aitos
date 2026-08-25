@@ -1,4 +1,4 @@
-"""Bounded storage maintenance for ClickHouse and boot-disk application data."""
+"""Bounded storage maintenance for boot and data disks."""
 
 from __future__ import annotations
 
@@ -16,11 +16,23 @@ RETENTION_LADDER = (90, 30, 15, 10, 7)
 DEFAULT_DB = "aitos"
 DEFAULT_BUDGET_GB = 130
 DEFAULT_TARGET_GB = 120
-DEFAULT_OTHERS_GB = 22.5
-DEFAULT_BOOT_BUFFER_GB = 10.0
+DEFAULT_BOOT_BUFFER_GB = 7.5
 DEFAULT_DATA_DISK_MIN_FREE_GB = 20.0
 DEFAULT_DATA_DISK_TARGET_FREE_GB = 25.0
 DEFAULT_AUTO_DELETE_PERCENT = 2.5
+
+# Lower number = safer to delete. Production/application state is intentionally
+# excluded from these paths. The order also means caches/logs/history are removed
+# before backups and snapshots.
+BOOT_DISPOSABLE_DIRS = (
+    "cache",
+    "caches",
+    "logs",
+    "backtest",
+    "snapshots",
+    "tmp",
+    "backups",
+)
 
 EVICTABLE_TABLES = {
     "order_book_snapshots": "time",
@@ -38,7 +50,6 @@ PROTECTED_TABLE_TOKENS = (
 class StorageConfig:
     clickhouse_budget_gb: float = DEFAULT_BUDGET_GB
     clickhouse_target_gb: float = DEFAULT_TARGET_GB
-    others_gb: float = DEFAULT_OTHERS_GB
     boot_buffer_gb: float = DEFAULT_BOOT_BUFFER_GB
     data_disk_min_free_gb: float = DEFAULT_DATA_DISK_MIN_FREE_GB
     data_disk_target_free_gb: float = DEFAULT_DATA_DISK_TARGET_FREE_GB
@@ -51,7 +62,6 @@ class StorageConfig:
         return cls(
             clickhouse_budget_gb=float(os.getenv("CLICKHOUSE_STORAGE_BUDGET_GB", DEFAULT_BUDGET_GB)),
             clickhouse_target_gb=float(os.getenv("CLICKHOUSE_STORAGE_TARGET_GB", DEFAULT_TARGET_GB)),
-            others_gb=float(os.getenv("OTHERS_MAX_GB", DEFAULT_OTHERS_GB)),
             boot_buffer_gb=float(os.getenv("BOOT_FREE_BUFFER_GB", DEFAULT_BOOT_BUFFER_GB)),
             data_disk_min_free_gb=float(os.getenv("DATA_DISK_MIN_FREE_GB", DEFAULT_DATA_DISK_MIN_FREE_GB)),
             data_disk_target_free_gb=float(os.getenv("DATA_DISK_TARGET_FREE_GB", DEFAULT_DATA_DISK_TARGET_FREE_GB)),
@@ -141,72 +151,79 @@ def _files(root: Path) -> Iterable[Path]:
 
 
 def _directory_size(root: Path) -> int:
-    total = 0
-    for path in _files(root):
-        try:
-            total += path.stat().st_size
-        except FileNotFoundError:
-            continue
-    return total
+    return sum(path.stat().st_size for path in _files(root) if path.exists())
 
 
-def prune_old_files(root: Path, max_gb: float, delete_percent: float = 2.5, dry_run: bool = False) -> dict:
-    """Remove oldest disposable files only; never wipe the whole managed tree."""
-    files = []
-    total_bytes = 0
-    for path in _files(root):
-        try:
-            stat = path.stat()
-        except FileNotFoundError:
-            continue
-        total_bytes += stat.st_size
-        files.append((stat.st_mtime_ns, path, stat.st_size))
+def _boot_free_bytes(root: Path) -> int:
+    stats = os.statvfs(root)
+    return stats.f_bavail * stats.f_frsize
 
-    limit_bytes = max_gb * (1024**3)
-    if total_bytes <= limit_bytes:
-        return {"before_gb": _gb(total_bytes), "after_gb": _gb(total_bytes), "deleted_gb": 0.0, "deleted_files": [], "over_budget": False}
 
-    required_bytes = total_bytes - limit_bytes
-    batch_bytes = max(1, int(total_bytes * (delete_percent / 100.0)))
-    delete_bytes = max(required_bytes, batch_bytes)
-    deleted: list[str] = []
-    freed = 0
-    for _mtime, path, size in sorted(files, key=lambda item: item[0]):
-        if freed >= delete_bytes:
-            break
-        if not dry_run:
+def _disposable_files(root: Path) -> list[tuple[int, int, Path]]:
+    """Return disposable files as (priority, mtime_ns, path)."""
+    candidates: list[tuple[int, int, Path]] = []
+    for priority, dirname in enumerate(BOOT_DISPOSABLE_DIRS):
+        directory = root / dirname
+        for path in _files(directory):
             try:
-                path.unlink()
+                candidates.append((priority, path.stat().st_mtime_ns, path))
             except FileNotFoundError:
                 continue
+    return candidates
+
+
+def prune_for_boot_buffer(root: Path, free_buffer_gb: float, delete_percent: float = 2.5, dry_run: bool = False) -> dict:
+    """Free the least-important old boot-disk files until the free-space reserve is met."""
+    free_before = _boot_free_bytes(root)
+    target = int(free_buffer_gb * (1024**3))
+    if free_before >= target:
+        return {"free_before_gb": _gb(free_before), "free_after_gb": _gb(free_before), "deleted_gb": 0.0, "deleted_files": [], "cleanup_needed": False, "reserve_met": True}
+
+    required = target - free_before
+    disposable = _disposable_files(root)
+    total_disposable = sum(path.stat().st_size for _, _, path in disposable if path.exists())
+    batch = max(1, int(total_disposable * delete_percent / 100.0))
+    delete_bytes = max(required, batch)
+    freed = 0
+    deleted: list[str] = []
+
+    for _priority, _mtime, path in sorted(disposable, key=lambda item: (item[0], item[1])):
+        if freed >= delete_bytes:
+            break
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            continue
+        if not dry_run:
+            path.unlink()
         deleted.append(str(path))
         freed += size
-    after_bytes = max(0, total_bytes - freed)
-    return {"before_gb": _gb(total_bytes), "after_gb": _gb(after_bytes), "deleted_gb": _gb(freed), "deleted_files": deleted, "over_budget": True, "delete_percent": delete_percent, "dry_run": dry_run}
+
+    free_after = _boot_free_bytes(root) if not dry_run else free_before + freed
+    return {
+        "free_before_gb": _gb(free_before), "free_after_gb": _gb(free_after),
+        "deleted_gb": _gb(freed), "deleted_files": deleted,
+        "cleanup_needed": True, "reserve_met": free_after >= target,
+        "delete_percent": delete_percent, "dry_run": dry_run,
+    }
 
 
 def inspect_boot_storage(others_root: Path, config: StorageConfig) -> dict:
-    others_gb = _gb(_directory_size(others_root))
-    result = {"others_gb": others_gb, "others_max_gb": config.others_gb, "boot_buffer_gb": config.boot_buffer_gb, "others_over_budget": others_gb > config.others_gb}
-    if result["others_over_budget"]:
-        result["prune"] = prune_old_files(others_root, config.others_gb, config.auto_delete_percent, config.dry_run)
-        result["others_gb"] = result["prune"]["after_gb"]
-        result["others_over_budget"] = result["others_gb"] > config.others_gb
+    """Use free boot-disk space as the only capacity limit; no fixed Others cap."""
+    free_gb = _gb(_boot_free_bytes(others_root))
+    result = {"boot_free_gb": free_gb, "boot_buffer_gb": config.boot_buffer_gb, "reserve_met": free_gb >= config.boot_buffer_gb}
+    if not result["reserve_met"]:
+        result["prune"] = prune_for_boot_buffer(others_root, config.boot_buffer_gb, config.auto_delete_percent, config.dry_run)
     else:
         result["prune"] = None
     return result
 
 
 def inspect_data_disk(root: Path, config: StorageConfig) -> dict:
-    """Read the data-disk filesystem headroom without deleting database files."""
     stats = os.statvfs(root)
     total = stats.f_blocks * stats.f_frsize
     free = stats.f_bavail * stats.f_frsize
-    return {
-        "total_gb": _gb(total), "free_gb": _gb(free), "used_gb": _gb(total - free),
-        "min_free_gb": config.data_disk_min_free_gb,
-        "emergency": _gb(free) < config.data_disk_min_free_gb,
-    }
+    return {"total_gb": _gb(total), "free_gb": _gb(free), "used_gb": _gb(total - free), "min_free_gb": config.data_disk_min_free_gb, "target_free_gb": config.data_disk_target_free_gb, "emergency": _gb(free) < config.data_disk_min_free_gb}
 
 
 def run_once(config: StorageConfig, boot_only: bool = False) -> dict:
@@ -214,14 +231,9 @@ def run_once(config: StorageConfig, boot_only: bool = False) -> dict:
     boot_result = inspect_boot_storage(others_root, config)
     if boot_only:
         return {"boot_storage": boot_result}
-
     data_disk_root = Path(os.getenv("DATA_DISK_DIR", "/data-disk"))
     data_disk_result = inspect_data_disk(data_disk_root, config)
-    client = clickhouse_connect.get_client(
-        host=os.getenv("CLICKHOUSE_HOST", "clickhouse"), port=int(os.getenv("CLICKHOUSE_PORT", "8123")),
-        username=os.getenv("CLICKHOUSE_USER", "default"), password=os.getenv("CLICKHOUSE_PASSWORD", ""),
-        database=os.getenv("CLICKHOUSE_DB", DEFAULT_DB),
-    )
+    client = clickhouse_connect.get_client(host=os.getenv("CLICKHOUSE_HOST", "clickhouse"), port=int(os.getenv("CLICKHOUSE_PORT", "8123")), username=os.getenv("CLICKHOUSE_USER", "default"), password=os.getenv("CLICKHOUSE_PASSWORD", ""), database=os.getenv("CLICKHOUSE_DB", DEFAULT_DB))
     try:
         clickhouse_result = enforce_clickhouse(client, config, os.getenv("CLICKHOUSE_DB", DEFAULT_DB), data_disk_result["emergency"])
     finally:
