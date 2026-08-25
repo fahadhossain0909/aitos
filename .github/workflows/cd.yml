@@ -91,13 +91,19 @@ jobs:
       - name: Deploy pre-built image to remote host over SSH
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
+        env:
+          BACKTEST_BUDGET_BYTES: ${{ env.BACKTEST_BUDGET_BYTES }}
+          OTHERS_BUDGET_BYTES: ${{ env.OTHERS_BUDGET_BYTES }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 15m
+          envs: BACKTEST_BUDGET_BYTES,OTHERS_BUDGET_BYTES
           script: |
             set -euo pipefail
+            : "${BACKTEST_BUDGET_BYTES:=24159191040}"
+            : "${OTHERS_BUDGET_BYTES:=24159191040}"
             mkdir -p ~/aitos
             cd ~/aitos
             if [ ! -d .git ]; then
