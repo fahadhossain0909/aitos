@@ -7,9 +7,10 @@
     <background_pool_size>2</background_pool_size>
     <background_schedule_pool_size>1</background_schedule_pool_size>
 
-    <!-- This is a MergeTree setting, so it must live under merge_tree. -->
+    <!-- Keep MergeTree sanity checks consistent with the intentionally small background pool. -->
     <merge_tree>
         <number_of_free_entries_in_pool_to_execute_mutation>2</number_of_free_entries_in_pool_to_execute_mutation>
+        <number_of_free_entries_in_pool_to_lower_max_size_of_merge>2</number_of_free_entries_in_pool_to_lower_max_size_of_merge>
     </merge_tree>
 
     <!-- Keep a meaningful amount of filesystem headroom for merges and recovery. -->
