@@ -203,7 +203,13 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     async def stream_order_book(
         self, symbols: List[str], levels: int = 20
     ) -> AsyncIterator[OrderBookSnapshot]:
-        """Reconstruct a local L2 book with loss-aware Binance bootstrap."""
+        """Reconstruct a local L2 book with loss-aware Binance bootstrap.
+
+        Flow per symbol:
+        1. Start buffering depth diffs from the combined websocket.
+        2. Fetch a REST snapshot and seed LocalOrderBook.
+        3. Apply buffered then live diffs; on sequence error, resync from REST.
+        """
         if not symbols:
             return
 
@@ -212,7 +218,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(
             maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE
         )
-        producer_done = asyncio.Event()
         producer_ready = asyncio.Event()
 
         async def producer() -> None:
@@ -236,8 +241,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         queue.put_nowait((data, stream_name))
             except asyncio.CancelledError:
                 raise
-            finally:
-                producer_done.set()
+
+        async def bootstrap(symbol: str) -> LocalOrderBook:
+            book = LocalOrderBook(symbol=symbol, max_levels=levels)
+            snapshot = await self.fetch_order_book(symbol, limit=max(levels, 50))
+            book.seed(snapshot)
+            return book
 
         producer_task = asyncio.create_task(
             producer(), name="binance-orderbook-producer"
@@ -251,19 +260,26 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 )
             except asyncio.TimeoutError:
                 raise RuntimeError("Binance order-book stream did not become ready")
+            # Seed every symbol once the stream is live so the first diffs can bridge.
+            for symbol in symbols:
+                books[symbol] = await bootstrap(symbol)
             while True:
                 data, stream_name = await queue.get()
                 symbol = symbol_by_stream.get(stream_name)
                 if symbol is None:
                     continue
                 if symbol not in books:
-                    books[symbol] = LocalOrderBook(symbol=symbol, levels=levels)
+                    books[symbol] = await bootstrap(symbol)
                 try:
                     event = parse_depth_diff_ws(data, symbol=symbol)
-                    snapshot = await books[symbol].apply(event, self.fetch_order_book)
+                    snapshot = books[symbol].apply(event)
                 except OrderBookSequenceError:
-                    books[symbol] = LocalOrderBook(symbol=symbol, levels=levels)
-                    snapshot = None
+                    logger.warning(
+                        "order-book sequence break; reseeding from REST",
+                        extra={"aitos_extra": {"symbol": symbol}},
+                    )
+                    books[symbol] = await bootstrap(symbol)
+                    continue
                 if snapshot is not None:
                     yield snapshot
         finally:

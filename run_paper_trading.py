@@ -113,7 +113,7 @@ async def main() -> None:
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
     outcome_classifier.load_state()
-    attention_path = "models/online_ml/attention_explainer.pkl"
+    attention_path = "/models/online_ml/attention_explainer.pkl"
     attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
     components = await build_system(
         event_bus=event_bus,
