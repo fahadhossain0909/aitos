@@ -128,13 +128,16 @@ services:
       CLICKHOUSE_STORAGE_BUDGET_GB: "130"
       CLICKHOUSE_STORAGE_TARGET_GB: "120"
       OTHERS_DATA_DIR: /others
-      OTHERS_MAX_GB: "22.5"
-      BOOT_FREE_BUFFER_GB: "10"
+      BOOT_FREE_BUFFER_GB: "7.5"
+      DATA_DISK_DIR: /data-disk
+      DATA_DISK_MIN_FREE_GB: "20"
+      DATA_DISK_TARGET_FREE_GB: "25"
       STORAGE_AUTO_DELETE_PERCENT: "2.5"
       STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300"
       STORAGE_MAINTENANCE_DRY_RUN: "false"
     volumes:
       - "${OTHERS_DATA_DIR:-./.storage/others}:/others"
+      - "${AITOS_DATA_ROOT:-/mnt/aitos-data}:/data-disk"
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "0.25"
     mem_limit: 256m
