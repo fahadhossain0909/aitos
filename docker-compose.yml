@@ -130,7 +130,8 @@ services:
       OTHERS_DATA_DIR: /others
       OTHERS_MAX_GB: "22.5"
       BOOT_FREE_BUFFER_GB: "10"
-      STORAGE_MAINTENANCE_INTERVAL_SECONDS: "86400"
+      STORAGE_AUTO_DELETE_PERCENT: "2.5"
+      STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300"
       STORAGE_MAINTENANCE_DRY_RUN: "false"
     volumes:
       - "${OTHERS_DATA_DIR:-./.storage/others}:/others"
