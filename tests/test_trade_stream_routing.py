@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from aitos.exchange.binance import BinanceFuturesAdapter
+from aitos.exchange.binance import WS_MARKET_BASE_URL, BinanceFuturesAdapter
 
 
 class FakeWS:
@@ -62,7 +62,7 @@ async def test_stream_trades_uses_futures_combined_aggtrade_stream():
     assert trade.price == 50000.0
     assert trade.quantity == 0.01
     assert urls == [
-        "wss://fstream.binance.com/market/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade"
+        f"{WS_MARKET_BASE_URL}?streams=btcusdt@aggTrade/ethusdt@aggTrade"
     ]
 
     await stream.aclose()
