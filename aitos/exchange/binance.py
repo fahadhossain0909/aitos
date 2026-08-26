@@ -131,74 +131,19 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield kline
 
     async def stream_trades(self, symbols: List[str]) -> AsyncIterator[TradeTick]:
-        """Consume Binance Futures aggTrade through one combined stream connection.
+        """Consume Binance Futures aggTrade via the shared resilient stream path.
 
-        A single combined socket avoids maintaining one long-lived connection per
-        symbol. The envelope returned by Binance's /stream endpoint is unwrapped
-        before parsing so callers receive normal TradeTick objects.
+        The kline and order-book adapters already use ``_raw_stream`` for
+        reconnect/backoff handling. Keeping aggTrade on the same path avoids a
+        second websocket implementation that can silently reconnect forever and
+        hide parsing/connection failures from the ingestion watchdog.
         """
         if not symbols:
             return
 
         streams = [f"{symbol.lower()}@aggTrade" for symbol in symbols]
-        url = f"{WS_BASE_URL}?streams={'/'.join(streams)}"
-        queue: asyncio.Queue[TradeTick] = asyncio.Queue(maxsize=5000)
-
-        async def consume() -> None:
-            backoff = INITIAL_BACKOFF_SECONDS
-            while True:
-                try:
-                    async with self._ws_connector(url) as ws:
-                        logger.info(
-                            "connected to Binance combined trade stream",
-                            extra={
-                                "aitos_extra": {
-                                    "streams": streams,
-                                    "mode": "combined-stream",
-                                }
-                            },
-                        )
-                        backoff = INITIAL_BACKOFF_SECONDS
-                        async for raw_message in ws:
-                            try:
-                                envelope = json.loads(raw_message)
-                                payload = envelope.get("data", envelope)
-                                trade = parse_agg_trade_ws(payload)
-                            except Exception as exc:
-                                logger.error(
-                                    "invalid Binance aggTrade message",
-                                    extra={
-                                        "aitos_extra": {
-                                            "streams": streams,
-                                            "error": str(exc),
-                                        }
-                                    },
-                                )
-                                continue
-                            await queue.put(trade)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as exc:
-                    logger.error(
-                        "Binance combined trade stream disconnected, reconnecting",
-                        extra={
-                            "aitos_extra": {
-                                "streams": streams,
-                                "error": str(exc),
-                                "backoff_seconds": backoff,
-                            }
-                        },
-                    )
-                await asyncio.sleep(backoff)
-                backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
-
-        task = asyncio.create_task(consume(), name="binance-trade-combined")
-        try:
-            while True:
-                yield await queue.get()
-        finally:
-            task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+        async for data, _stream_name in self._raw_stream(streams, emit_reconnect=True):
+            yield parse_agg_trade_ws(data)
 
     async def stream_order_book(
         self, symbols: List[str], levels: int = 20
