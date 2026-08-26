@@ -33,8 +33,8 @@ from aitos.models.market import (
 
 logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
-WS_BASE_URL = "wss://fstream.binance.com/stream"
-WS_SINGLE_BASE_URL = "wss://fstream.binance.com/ws"
+WS_MARKET_BASE_URL = "wss://fstream.binance.com/market/stream"
+WS_PUBLIC_BASE_URL = "wss://fstream.binance.com/public/stream"
 DEFAULT_RATE_LIMIT_CAPACITY = 2000
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2000 / 60
 MAX_BACKOFF_SECONDS = 60.0
@@ -142,13 +142,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield kline
 
     async def stream_trades(self, symbols: List[str]) -> AsyncIterator[TradeTick]:
-        """Consume Binance Futures aggTrade via the shared resilient stream path.
-
-        The kline and order-book adapters already use ``_raw_stream`` for
-        reconnect/backoff handling. Keeping aggTrade on the same path avoids a
-        second websocket implementation that can silently reconnect forever and
-        hide parsing/connection failures from the ingestion recovery.
-        """
+        """Consume Binance Futures aggTrade via the resilient market stream path."""
         if not symbols:
             return
 
@@ -259,12 +253,30 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         async for data, _stream_name in self._raw_stream(streams):
             yield await parser(data)
 
+    @staticmethod
+    def _ws_base_url(streams: List[str]) -> str:
+        """Select Binance's post-April-2026 Futures WebSocket namespace.
+
+        Binance split Futures market-data streams into ``/market`` and
+        high-frequency public streams into ``/public``. A single combined
+        connection must contain streams from only one namespace.
+        """
+        if not streams:
+            return WS_MARKET_BASE_URL
+
+        is_depth = all("@depth" in stream for stream in streams)
+        if is_depth:
+            return WS_PUBLIC_BASE_URL
+
+        return WS_MARKET_BASE_URL
+
     async def _raw_stream(
         self, streams: List[str], emit_reconnect: bool = False
     ) -> AsyncIterator[tuple[Any, str]]:
         if not streams:
             return
-        url = f"{WS_BASE_URL}?streams={'/'.join(streams)}"
+        base_url = self._ws_base_url(streams)
+        url = f"{base_url}?streams={'/'.join(streams)}"
         backoff = INITIAL_BACKOFF_SECONDS
         while True:
             try:
