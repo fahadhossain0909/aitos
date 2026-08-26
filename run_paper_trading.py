@@ -82,8 +82,19 @@ async def try_connect_neo4j(settings):
 
 async def connect_redis_with_retry(settings) -> Redis:
     async def _attempt() -> Redis:
-        client = Redis.from_url(settings.redis.url)
+        client = Redis.from_url(
+            settings.redis.url,
+            max_connections=settings.redis.max_connections,
+        )
         await client.ping()
+        logger.info(
+            "Redis connection established",
+            extra={
+                "aitos_extra": {
+                    "max_connections": settings.redis.max_connections,
+                }
+            },
+        )
         return client
 
     try:
