@@ -41,6 +41,9 @@ MAX_BACKOFF_SECONDS = 60.0
 INITIAL_BACKOFF_SECONDS = 1.0
 ORDERBOOK_BOOTSTRAP_QUEUE_SIZE = 5000
 ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS = 10.0
+WS_PING_INTERVAL_SECONDS = 15.0
+WS_PING_TIMEOUT_SECONDS = 10.0
+WS_OPEN_TIMEOUT_SECONDS = 10.0
 
 
 class BinanceFuturesAdapter(ExchangeAdapter):
@@ -55,7 +58,15 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         if ws_connector is None:
             import websockets
 
-            ws_connector = websockets.connect
+            def _default_connector(url: str):
+                return websockets.connect(
+                    url,
+                    ping_interval=WS_PING_INTERVAL_SECONDS,
+                    ping_timeout=WS_PING_TIMEOUT_SECONDS,
+                    open_timeout=WS_OPEN_TIMEOUT_SECONDS,
+                )
+
+            ws_connector = _default_connector
         self._ws_connector = ws_connector
         self._rate_limiter = rate_limiter or TokenBucketRateLimiter(
             capacity=DEFAULT_RATE_LIMIT_CAPACITY,
@@ -154,6 +165,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         1. Start buffering depth diffs from the combined websocket.
         2. Fetch a REST snapshot and seed LocalOrderBook.
         3. Apply buffered then live diffs; on sequence error, resync from REST.
+        4. On websocket disconnect, _raw_stream reconnects with backoff.
         """
         if not symbols:
             return
