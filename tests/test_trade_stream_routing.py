@@ -62,7 +62,7 @@ async def test_stream_trades_uses_futures_combined_aggtrade_stream():
     assert trade.price == 50000.0
     assert trade.quantity == 0.01
     assert urls == [
-        "wss://fstream.binance.com/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade"
+        "wss://fstream.binance.com/market/stream?streams=btcusdt@aggTrade/ethusdt@aggTrade"
     ]
 
     await stream.aclose()
