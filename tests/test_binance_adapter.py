@@ -5,7 +5,12 @@ from typing import List
 import pytest
 from aioresponses import aioresponses
 
-from aitos.exchange.binance import REST_BASE_URL, WS_BASE_URL, BinanceFuturesAdapter
+from aitos.exchange.binance import (
+    REST_BASE_URL,
+    WS_MARKET_BASE_URL,
+    WS_PUBLIC_BASE_URL,
+    BinanceFuturesAdapter,
+)
 from tests.test_binance_parsing import (
     SAMPLE_DEPTH_REST,
     SAMPLE_KLINE_ROW,
@@ -181,7 +186,7 @@ class FakeWebSocket:
 
 
 @pytest.mark.asyncio
-async def test_stream_klines_yields_parsed_events():
+async def test_stream_klines_yields_parsed_events_from_market_stream_endpoint():
     from tests.test_binance_parsing import SAMPLE_KLINE_WS
 
     envelope = {"stream": "btcusdt@kline_1m", "data": SAMPLE_KLINE_WS}
@@ -199,10 +204,13 @@ async def test_stream_klines_yields_parsed_events():
     await asyncio.wait_for(consume(), timeout=5)
     assert len(received) == 1
     assert received[0].symbol == "BTCUSDT"
+    assert fake_ws.url == (
+        f"{WS_MARKET_BASE_URL}?streams=btcusdt@kline_1m"
+    )
 
 
 @pytest.mark.asyncio
-async def test_stream_trades_yields_parsed_events_from_combined_stream_endpoint():
+async def test_stream_trades_yields_parsed_events_from_market_stream_endpoint():
     from tests.test_binance_parsing import SAMPLE_AGG_TRADE_WS
 
     envelopes = [
@@ -227,4 +235,24 @@ async def test_stream_trades_yields_parsed_events_from_combined_stream_endpoint(
     assert [trade.symbol for trade in received] == ["BTCUSDT", "ETHUSDT"]
     assert received[0].trade_id == 999999
     assert received[1].trade_id == 1000000
-    assert fake_ws.url == f"{WS_BASE_URL}?streams=btcusdt@aggTrade/ethusdt@aggTrade"
+    assert fake_ws.url == (
+        f"{WS_MARKET_BASE_URL}?streams=btcusdt@aggTrade/ethusdt@aggTrade"
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_order_book_uses_public_stream_endpoint():
+    fake_ws = FakeWebSocket([])
+    adapter = BinanceFuturesAdapter(ws_connector=fake_ws)
+
+    producer_task = asyncio.create_task(
+        adapter.stream_order_book(["BTCUSDT"], levels=20).__anext__()
+    )
+    try:
+        await asyncio.sleep(0.1)
+        assert fake_ws.url == (
+            f"{WS_PUBLIC_BASE_URL}?streams=btcusdt@depth@100ms"
+        )
+    finally:
+        producer_task.cancel()
+        await asyncio.gather(producer_task, return_exceptions=True)
