@@ -204,9 +204,7 @@ async def test_stream_klines_yields_parsed_events_from_market_stream_endpoint():
     await asyncio.wait_for(consume(), timeout=5)
     assert len(received) == 1
     assert received[0].symbol == "BTCUSDT"
-    assert fake_ws.url == (
-        f"{WS_MARKET_BASE_URL}?streams=btcusdt@kline_1m"
-    )
+    assert fake_ws.url == f"{WS_MARKET_BASE_URL}?streams=btcusdt@kline_1m"
 
 
 @pytest.mark.asyncio
@@ -250,9 +248,7 @@ async def test_stream_order_book_uses_public_stream_endpoint():
     )
     try:
         await asyncio.sleep(0.1)
-        assert fake_ws.url == (
-            f"{WS_PUBLIC_BASE_URL}?streams=btcusdt@depth@100ms"
-        )
+        assert fake_ws.url == f"{WS_PUBLIC_BASE_URL}?streams=btcusdt@depth@100ms"
     finally:
         producer_task.cancel()
         await asyncio.gather(producer_task, return_exceptions=True)
