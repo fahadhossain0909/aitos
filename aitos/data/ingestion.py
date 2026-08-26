@@ -330,7 +330,23 @@ class DataIngestionService(AITOSModule):
 
     def _publish_live_state(self, symbol: str) -> None:
         state = self._live_state.snapshot(symbol)
-        asyncio.create_task(self._event_bus.publish(Event(topic=live_state_topic(symbol), payload={"trade_count": state.trade_count, "order_flow": state.order_flow.__dict__ if state.order_flow else None, "liquidity_events": [e.__dict__ for e in state.liquidity_events[-20:]], "best_bid": state.order_book.best_bid if state.order_book else None, "best_ask": state.order_book.best_ask if state.order_book else None, "timestamp": state.order_book.timestamp.isoformat() if state.order_book else None}, source_module=self.module_id, priority=EventPriority.NORMAL))
+        asyncio.create_task(
+            self._event_bus.publish(
+                Event(
+                    topic=live_state_topic(symbol),
+                    payload={
+                        "trade_count": state.trade_count,
+                        "order_flow": state.order_flow.__dict__ if state.order_flow else None,
+                        "liquidity_events": [e.__dict__ for e in state.liquidity_events[-20:]],
+                        "best_bid": state.order_book.best_bid if state.order_book else None,
+                        "best_ask": state.order_book.best_ask if state.order_book else None,
+                        "timestamp": state.order_book.timestamp.isoformat() if state.order_book else None,
+                    },
+                    source_module=self.module_id,
+                    priority=EventPriority.NORMAL,
+                )
+            )
+        )
 
     def _tick_processed(self) -> None:
         self._ticks_processed += 1
