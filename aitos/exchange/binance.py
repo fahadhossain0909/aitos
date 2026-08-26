@@ -136,7 +136,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         The kline and order-book adapters already use ``_raw_stream`` for
         reconnect/backoff handling. Keeping aggTrade on the same path avoids a
         second websocket implementation that can silently reconnect forever and
-        hide parsing/connection failures from the ingestion watchdog.
+        hide parsing/connection failures from the ingestion recovery.
         """
         if not symbols:
             return
@@ -216,7 +216,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 if symbol not in books:
                     books[symbol] = await bootstrap(symbol)
                 try:
-                    event = parse_depth_diff_ws(data, symbol=symbol)
+                    event = parse_depth_diff_ws(data)
                     snapshot = books[symbol].apply(event)
                 except OrderBookSequenceError:
                     logger.warning(
