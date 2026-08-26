@@ -283,11 +283,14 @@ jobs:
 
             echo "=== Container lifecycle ==="
             docker compose down --remove-orphans --timeout 30 || true
-            # Fixed container_name values can survive compose down (race / orphan / external recreate).
-            # Force-remove so up can always reclaim names; data volumes under DATA_ROOT stay intact.
-            for c in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance aitos-live; do
+            # Fixed container_name values and compose-project init names can survive
+            # compose down (race / orphan / external recreate). Force-remove so up
+            # can always reclaim names; data volumes under DATA_ROOT stay intact.
+            for c in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance aitos-live aitos-clickhouse-init-1; do
               docker rm -f "$c" 2>/dev/null || true
             done
+            # Any leftover project-prefixed init / one-shot containers
+            docker ps -aq --filter "name=aitos-clickhouse-init" | xargs -r docker rm -f 2>/dev/null || true
             docker compose up -d --remove-orphans
 
             echo "=== Waiting for AITOS services ==="
