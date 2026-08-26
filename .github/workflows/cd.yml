@@ -15,6 +15,9 @@ env:
   AITOS_DATA_ROOT: /mnt/aitos-data
   BOOT_FREE_RESERVE_BYTES: 8053063680
   DATA_DISK_MIN_FREE_GB: 20
+  # Enabled only for the current papertrade/testing phase.
+  # Set to false before deploying where Docker runtime state is valuable.
+  ALLOW_DISPOSABLE_DOCKER_RESET: true
 
 jobs:
   publish-image:
@@ -23,15 +26,18 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Lowercase repository name
         id: repo
         run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v6.2.0
@@ -42,6 +48,7 @@ jobs:
             type=ref,event=tag
             type=sha,prefix=sha-,format=long
             type=raw,value=latest,enable={{is_default_branch}}
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v7.3.0
         with:
@@ -91,56 +98,44 @@ jobs:
           free -h
           df -h /
 
-      - name: Deploy pre-built image to remote host over SSH
+      - name: Deploy to remote host over SSH
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
         env:
           BOOT_FREE_RESERVE_BYTES: ${{ env.BOOT_FREE_RESERVE_BYTES }}
           DATA_DISK_MIN_FREE_GB: ${{ env.DATA_DISK_MIN_FREE_GB }}
+          ALLOW_DISPOSABLE_DOCKER_RESET: ${{ env.ALLOW_DISPOSABLE_DOCKER_RESET }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 15m
-          envs: BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_GB
+          envs: BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,ALLOW_DISPOSABLE_DOCKER_RESET
           script: |
             set -euo pipefail
             : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
             : "${DATA_DISK_MIN_FREE_GB:=20}"
+            : "${ALLOW_DISPOSABLE_DOCKER_RESET:=false}"
             APP_DIR="$HOME/aitos"
             DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
             REPO="${{ github.repository }}"
             COMMIT="${{ github.sha }}"
+
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
+
             if ! mountpoint -q "$DATA_ROOT"; then
               echo "::error::$DATA_ROOT is not a mounted data disk; refusing to place database data on the boot disk."
               exit 1
             fi
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
+
             echo "=== Storage policy ==="
-            echo "Boot disk: keep at least 7.5 GiB free; no fixed application-data quota."
-            echo "Data disk: ClickHouse/Neo4j/Redis stay under $DATA_ROOT; historical low-priority data is retained/evicted under pressure."
-            echo "=== Freeing stale Git/Docker data before deployment ==="
-            if [ -d .git ]; then rm -rf .git; fi
-            docker container prune --force --filter "until=24h" || true
-            docker image prune -a --force || true
-            docker builder prune --all --force --filter "until=168h" || true
-            docker network prune --force --filter "until=24h" || true
-            echo "=== Pre-source boot-disk reserve guard ==="
-            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "Boot disk is below the 7.5 GiB reserve; invoking the currently installed maintenance image before source transfer."
-              docker compose run --rm --no-deps aitos-storage-maintenance --boot-only || true
-              boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-            fi
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "::error::Boot disk remains below the required 7.5 GiB free reserve before source deployment."
-              df -h .
-              exit 1
-            fi
-            echo "Boot free space before source deployment: $(df -h . | tail -1)"
-            echo "=== Downloading source snapshot without Git history ==="
+            echo "Boot disk: keep at least 7.5 GiB free."
+            echo "Persistent AITOS database data: $DATA_ROOT/{clickhouse,neo4j,redis}."
+            echo "Docker/containerd runtime state is disposable only when ALLOW_DISPOSABLE_DOCKER_RESET=true."
+
+            echo "=== Downloading source snapshot ==="
             tmp_dir=$(mktemp -d)
             trap 'rm -rf "$tmp_dir"' EXIT
             curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
@@ -149,8 +144,7 @@ jobs:
             find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name .storage -exec rm -rf -- {} +
             cp -a "$tmp_dir/source/." "$APP_DIR/"
             mkdir -p ./.storage/others/backtest ./.storage/others/backups ./.storage/others/snapshots
-            echo "Application Others usage: $(du -sh ./.storage/others | cut -f1)"
-            echo "Boot disk after source update: $(df -h . | tail -1)"
+
             umask 077
             cat > .env << 'ENVEOF'
             ENVIRONMENT=production
@@ -202,248 +196,119 @@ jobs:
             ENVEOF
             chmod 600 .env
 
+            echo "=== Boot-disk reserve check ==="
+            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "::error::Boot disk is below the required 7.5 GiB free reserve."
+              df -h .
+              exit 1
+            fi
+
             echo "=== Docker/containerd storage preflight ==="
             docker_storage_healthy=false
-            for attempt in 1 2; do
-              echo "Docker storage health attempt $attempt"
-              if docker info >/dev/null 2>&1 && docker ps -a >/dev/null 2>&1 && docker system df >/dev/null 2>&1; then
-                docker_storage_healthy=true
-                echo "Docker/containerd storage is healthy."
-                break
-              fi
-              if [ "$attempt" -eq 1 ]; then
-                echo "::warning::Docker/containerd storage health check failed; restarting Docker daemon non-destructively."
-                sudo systemctl restart docker
-                sleep 10
-              fi
-            done
-            if [ "$docker_storage_healthy" != "true" ]; then
-              echo "::error::Docker/containerd storage remains unhealthy after daemon restart."
-              echo "No destructive containerd reset was attempted."
+            if docker info >/dev/null 2>&1 && docker ps -a >/dev/null 2>&1 && docker system df >/dev/null 2>&1; then
+              docker_storage_healthy=true
+              echo "Docker/containerd storage is healthy."
+            else
+              echo "::warning::Docker/containerd storage health check failed."
               docker info 2>&1 || true
               docker ps -a 2>&1 || true
               docker system df 2>&1 || true
-              sudo systemctl status docker --no-pager 2>&1 || true
-              sudo systemctl status containerd --no-pager 2>&1 || true
-              sudo journalctl -u docker -n 100 --no-pager 2>&1 || true
-              sudo journalctl -u containerd -n 100 --no-pager 2>&1 || true
-              exit 1
+              echo "Attempting one non-destructive Docker daemon restart."
+              sudo systemctl restart docker || true
+              sleep 10
+              if docker info >/dev/null 2>&1 && docker ps -a >/dev/null 2>&1 && docker system df >/dev/null 2>&1; then
+                docker_storage_healthy=true
+                echo "Docker/containerd storage recovered after daemon restart."
+              fi
             fi
 
+            if [ "$docker_storage_healthy" != "true" ]; then
+              if [ "$ALLOW_DISPOSABLE_DOCKER_RESET" != "true" ]; then
+                echo "::error::Docker/containerd storage is unhealthy and disposable reset is disabled. Persistent data has not been touched."
+                exit 1
+              fi
+
+              echo "=== DISPOSABLE DOCKER RUNTIME RESET ==="
+              echo "Current environment permits destructive reset of Docker/containerd runtime state."
+              echo "Persistent $DATA_ROOT will NOT be removed."
+
+              sudo systemctl stop docker || true
+              sudo systemctl stop containerd || true
+              sleep 3
+
+              if mountpoint -q /var/lib/docker; then
+                echo "::error::/var/lib/docker is a separate mount; refusing automatic deletion."
+                exit 1
+              fi
+              if mountpoint -q /var/lib/containerd; then
+                echo "::error::/var/lib/containerd is a separate mount; refusing automatic deletion."
+                exit 1
+              fi
+
+              sudo rm -rf /var/lib/docker /var/lib/containerd
+              sudo mkdir -p /var/lib/docker /var/lib/containerd
+              sudo chmod 711 /var/lib/docker
+              sudo chmod 700 /var/lib/containerd
+
+              sudo systemctl start containerd
+              sudo systemctl start docker
+              sleep 10
+
+              if ! docker info >/dev/null 2>&1 || ! docker ps -a >/dev/null 2>&1 || ! docker system df >/dev/null 2>&1; then
+                echo "::error::Docker/containerd remains unhealthy after disposable runtime reset."
+                sudo systemctl status containerd --no-pager || true
+                sudo systemctl status docker --no-pager || true
+                sudo journalctl -u containerd -n 100 --no-pager || true
+                sudo journalctl -u docker -n 100 --no-pager || true
+                exit 1
+              fi
+              echo "Docker/containerd runtime reset completed successfully."
+            fi
+
+            echo "=== Docker storage configuration ==="
             docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
-            df -h "$DATA_ROOT"
-            docker compose config > /dev/null
+            docker system df
+
+            echo "=== Registry login and image pull ==="
             echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
+            docker compose config > /dev/null
             docker compose pull
 
-            echo "=== Post-pull storage-maintenance image gate ==="
-            maintenance_image=$(docker compose images -q aitos-storage-maintenance | tail -1)
-            if [ -z "$maintenance_image" ]; then
-              echo "::error::The new aitos-storage-maintenance image was not pulled/resolved."
-              exit 1
-            fi
-            echo "Storage maintenance image: $maintenance_image"
+            echo "=== Persistent storage verification ==="
+            df -h "$DATA_ROOT"
+            test -d "$DATA_ROOT/clickhouse"
+            test -d "$DATA_ROOT/neo4j"
+            test -d "$DATA_ROOT/redis"
 
-            echo "=== New-image boot-disk reserve enforcement ==="
-            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "Boot disk is below the 7.5 GiB reserve after source update; invoking the NEW maintenance image."
-              docker compose run --rm --no-deps aitos-storage-maintenance --boot-only
-              boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-            fi
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "::error::Boot disk remains below the required 7.5 GiB free reserve after NEW-image cleanup."
-              df -h .
-              exit 1
-            fi
-            echo "Boot free space after new-image cleanup: $(df -h . | tail -1)"
-
-            echo "=== New-image data-disk retention enforcement ==="
-            data_free_gb=$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')
-            if [ -z "$data_free_gb" ]; then data_free_gb=0; fi
-            if [ "$data_free_gb" -lt "$DATA_DISK_MIN_FREE_GB" ]; then
-              echo "Data disk has less than ${DATA_DISK_MIN_FREE_GB} GiB free; invoking NEW maintenance image."
-              docker compose run --rm --no-deps aitos-storage-maintenance --once || true
-              data_free_gb=$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')
-              if [ -z "$data_free_gb" ]; then data_free_gb=0; fi
-            fi
-            if [ "$data_free_gb" -lt "$DATA_DISK_MIN_FREE_GB" ]; then
-              echo "::warning::Data disk remains below ${DATA_DISK_MIN_FREE_GB} GiB after retention. No raw database files will be deleted."
-            fi
-            echo "Data disk before container startup: $(df -h "$DATA_ROOT" | tail -1)"
-
-            echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: BEFORE CLEANUP ==="
-            for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
-              docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
-            done
-            docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
-            docker inspect --format='name={{.Name}} mounts={{range .Mounts}}{{.Type}}:{{.Source}}->{{.Destination}} {{end}}' aitos-clickhouse 2>/dev/null || echo "aitos-clickhouse not present"
-            docker volume ls --format '{{.Name}}' | grep -E '(^aitos|clickhouse)' || true
+            echo "=== Container lifecycle ==="
             docker compose down --remove-orphans --timeout 30 || true
-            echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: AFTER COMPOSE DOWN ==="
-            for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
-              docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} project={{index .Config.Labels "com.docker.compose.project"}} service={{index .Config.Labels "com.docker.compose.service"}} image={{.Config.Image}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
-            done
-            docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
-            project_containers=$(docker ps -aq --filter 'label=com.docker.compose.project=aitos')
-            if [ -n "$project_containers" ]; then echo "$project_containers" | xargs -r docker rm -f; fi
-            echo "=== CONTAINER LIFECYCLE DIAGNOSTIC: AFTER PROJECT CLEANUP ==="
-            for name in aitos-clickhouse aitos-clickhouse-init-1 aitos-redis aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance; do
-              docker inspect --format='name={{.Name}} id={{.Id}} status={{.State.Status}}' "$name" 2>/dev/null || echo "name=/$name status=absent"
-            done
-            docker ps -a --filter 'label=com.docker.compose.project=aitos' --no-trunc --format 'name={{.Names}} id={{.ID}} status={{.Status}} image={{.Image}}'
-            echo "--- ClickHouse name collision check immediately before startup ---"
-            if docker inspect aitos-clickhouse >/dev/null 2>&1; then
-              docker inspect --format='COLLISION name={{.Name}} id={{.Id}} status={{.State.Status}} created={{.Created}} image={{.Config.Image}}' aitos-clickhouse
-              echo "::error::aitos-clickhouse still exists immediately before startup."
-              exit 1
-            else
-              echo "aitos-clickhouse name is free."
-            fi
-            echo "=== ISOLATED CLICKHOUSE STARTUP READINESS GATE ==="
-            docker compose up -d --no-build clickhouse
-            ch_health=""
-            ch_status="missing"
-            ch_deadline=$((SECONDS + 180))
-            while [ "$SECONDS" -lt "$ch_deadline" ]; do
-              ch_status=$(docker inspect --format='{{.State.Status}}' aitos-clickhouse 2>/dev/null || echo missing)
-              ch_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-clickhouse 2>/dev/null || echo missing)
-              if [ "$ch_health" = "healthy" ]; then break; fi
-              if [ "$ch_status" = "exited" ] || [ "$ch_status" = "dead" ]; then break; fi
-              sleep 5
-            done
-            docker inspect --format='status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}}' aitos-clickhouse || true
-            docker logs --timestamps --tail=1000 aitos-clickhouse 2>&1 || true
-            if [ "$ch_health" != "healthy" ]; then
-              echo "::error::ClickHouse did not become healthy within 180 seconds."
-              exit 1
-            fi
-            docker compose up -d --no-build redis neo4j
-            docker compose up -d --no-build aitos-paper aitos-learning aitos-storage-maintenance
-            docker compose ps --all
-            final_bad=$(docker ps --filter 'name=aitos-' --filter 'status=restarting' -q)
-            if [ -n "$final_bad" ]; then
-              echo "::error::An AITOS container is still restarting after deployment."
-              docker compose logs --no-color --tail=200
-              exit 1
-            fi
-            echo "=== AITOS-PAPER READINESS GATE ==="
-            paper_health=""
-            paper_status="missing"
-            paper_deadline=$((SECONDS + 180))
-            while [ "$SECONDS" -lt "$paper_deadline" ]; do
-              paper_status=$(docker inspect --format='{{.State.Status}}' aitos-paper 2>/dev/null || echo missing)
-              paper_health=$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-paper 2>/dev/null || echo missing)
-              echo "aitos-paper: status=$paper_status health=$paper_health"
-              if [ "$paper_health" = "healthy" ]; then break; fi
-              if [ "$paper_status" = "exited" ] || [ "$paper_status" = "dead" ]; then break; fi
+            docker compose up -d --remove-orphans
+
+            echo "=== Waiting for AITOS services ==="
+            deadline=$((SECONDS + 300))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              docker compose ps --all || true
+              unhealthy=$(docker compose ps --all --format '{{.Name}} {{.State}}' | grep -E 'unhealthy|Restarting|Exited' || true)
+              redis_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-redis 2>/dev/null || true)
+              clickhouse_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-clickhouse 2>/dev/null || true)
+              neo4j_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-neo4j 2>/dev/null || true)
+              if [ -z "$unhealthy" ] && echo "$redis_state" | grep -q healthy && echo "$clickhouse_state" | grep -q healthy && echo "$neo4j_state" | grep -q healthy; then
+                echo "Core AITOS services are healthy."
+                break
+              fi
               sleep 10
             done
-            docker inspect --format='status={{.State.Status}} running={{.State.Running}} exit={{.State.ExitCode}} error={{.State.Error}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' aitos-paper || true
-            if [ "$paper_health" != "healthy" ]; then
-              echo "::error::aitos-paper did not reach healthy state within 180 seconds."
-              docker logs --timestamps --tail=500 aitos-paper || true
+
+            docker compose ps --all
+            if docker compose ps --all --format '{{.Name}} {{.State}}' | grep -E 'unhealthy|Restarting|Exited'; then
+              echo "::error::One or more AITOS services are unhealthy/restarting/exited."
+              docker compose logs --tail=150
               exit 1
             fi
-            echo "=== Final storage audit ==="
+
+            echo "=== Final storage state ==="
+            df -h .
+            df -h "$DATA_ROOT"
             docker system df
-            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "::error::Boot disk ended below the required 7.5 GiB free reserve."
-              df -h .
-              exit 1
-            fi
-            echo "Boot disk: $(df -h . | tail -1)"
-            echo "Application Others: $(du -sh ./.storage/others | cut -f1)"
-            echo "Database disk: $(df -h "$DATA_ROOT" | tail -1)"
-            echo "=== Deployment completed successfully ==="
-
-  audit-vps:
-    runs-on: ubuntu-latest
-    needs: deploy
-    if: always() && needs.deploy.result == 'success'
-    environment: papertrade
-    steps:
-      - name: Check required deployment secrets
-        id: check-secrets
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          missing=0
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required GitHub Actions secret: $name"
-              missing=1
-            fi
-          done
-          if [ "$missing" -ne 0 ]; then exit 1; fi
-          echo "has_secrets=true" >> "$GITHUB_OUTPUT"
-
-      - name: Write SSH key with proper formatting
-        if: steps.check-secrets.outputs.has_secrets == 'true'
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_audit_key
-          chmod 600 /tmp/aitos_audit_key
-
-      - name: Run production audit on remote host
-        if: steps.check-secrets.outputs.has_secrets == 'true'
-        id: audit
-        uses: appleboy/ssh-action@v1.2.5
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key_path: /tmp/aitos_audit_key
-          command_timeout: 10m
-          capture_stdout: false
-          script: |
-            set -u
-            cd "$HOME/aitos"
-            test -f scripts/paper_runtime_audit.sh
-            mkdir -p "$HOME/aitos-production-audit"
-            REPORT="$HOME/aitos-production-audit/report.txt"
-            set +e
-            bash scripts/paper_runtime_audit.sh >"$REPORT" 2>&1
-            status=$?
-            set -e
-            echo "AUDIT_EXIT_CODE=$status"
-            echo "AUDIT_REPORT_PATH=$REPORT"
-            echo "AUDIT_REPORT_SIZE=$(wc -c < "$REPORT")"
-            echo "======== AUDIT REPORT BEGIN ========"
-            cat "$REPORT"
-            echo "======== AUDIT REPORT END ========"
-            exit "$status"
-
-      - name: Fetch audit report over SSH
-        if: always() && steps.check-secrets.outputs.has_secrets == 'true'
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          mkdir -p aitos-production-audit
-          if scp -q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -i /tmp/aitos_audit_key "$DEPLOY_USER@$DEPLOY_HOST:~/aitos-production-audit/report.txt" aitos-production-audit/report.txt 2>/dev/null; then
-            echo "Audit report downloaded successfully."
-          else
-            echo "Remote audit report could not be downloaded; creating diagnostic fallback."
-            printf '%s\n' "Audit report unavailable. Inspect the remote audit step log." > aitos-production-audit/report.txt
-          fi
-          test -s aitos-production-audit/report.txt
-
-      - name: Upload production audit artifact
-        if: always() && steps.check-secrets.outputs.has_secrets == 'true'
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: aitos-production-audit
-          path: aitos-production-audit/report.txt
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Remove SSH key
-        if: always()
-        run: rm -f /tmp/aitos_audit_key
+            echo "=== Deployment completed successfully: $COMMIT ==="
