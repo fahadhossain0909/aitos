@@ -286,12 +286,43 @@ jobs:
             # Fixed container_name values and compose-project init names can survive
             # compose down (race / orphan / external recreate). Force-remove so up
             # can always reclaim names; data volumes under DATA_ROOT stay intact.
-            for c in aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance aitos-live aitos-clickhouse-init-1; do
-              docker rm -f "$c" 2>/dev/null || true
+            FIXED_NAMES="aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance aitos-live aitos-clickhouse-init-1"
+            for attempt in 1 2 3; do
+              for c in $FIXED_NAMES; do
+                if docker inspect "$c" >/dev/null 2>&1; then
+                  echo "Force-removing leftover container: $c (attempt $attempt)"
+                  docker stop -t 5 "$c" 2>/dev/null || true
+                  docker rm -f "$c" 2>/dev/null || true
+                fi
+              done
+              # Any leftover project-prefixed init / one-shot containers
+              docker ps -aq --filter "name=aitos-clickhouse-init" | xargs -r docker rm -f 2>/dev/null || true
+              # Also reclaim by exact name filter in case inspect missed a partial state
+              for c in $FIXED_NAMES; do
+                docker ps -aq --filter "name=^/${c}$" | xargs -r docker rm -f 2>/dev/null || true
+              done
+              leftover=""
+              for c in $FIXED_NAMES; do
+                if docker inspect "$c" >/dev/null 2>&1; then
+                  leftover="$leftover $c"
+                fi
+              done
+              if [ -z "$leftover" ]; then
+                echo "All fixed container names are free."
+                break
+              fi
+              echo "::warning::Sticky containers still present after attempt $attempt:$leftover"
+              sleep 3
             done
-            # Any leftover project-prefixed init / one-shot containers
-            docker ps -aq --filter "name=aitos-clickhouse-init" | xargs -r docker rm -f 2>/dev/null || true
-            docker compose up -d --remove-orphans
+            for c in $FIXED_NAMES; do
+              if docker inspect "$c" >/dev/null 2>&1; then
+                echo "::error::Could not free fixed container name: $c"
+                docker ps -a --filter "name=$c" || true
+                docker inspect "$c" || true
+                exit 1
+              fi
+            done
+            docker compose up -d --remove-orphans --force-recreate
 
             echo "=== Waiting for AITOS services ==="
             deadline=$((SECONDS + 300))
