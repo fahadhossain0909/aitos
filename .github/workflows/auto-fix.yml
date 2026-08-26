@@ -1,0 +1,83 @@
+name: CI Auto-Fix
+
+on:
+  push:
+    branches: ["**"]
+  pull_request_target:
+    branches: [main, master, develop]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-fix-${{ github.event.pull_request.head.ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python-autofix:
+    name: Safe Python Auto-Fix
+    runs-on: ubuntu-latest
+    # Never modify code from an untrusted fork. Fork PRs continue through normal CI checks.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - name: Check out source branch
+        uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.ref || github.ref_name }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install safe auto-fix tools
+        run: |
+          python -m pip install --upgrade pip
+          pip install black==25.12.0 isort ruff
+
+      - name: Determine changed Python files
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
+            git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="$GITHUB_SHA"
+            if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              base="$(git rev-list --max-count=1 HEAD^)"
+            fi
+          fi
+          files="$(git diff --name-only "$base" "$head" -- '*.py' | tr '\n' ' ' | xargs || true)"
+          echo "files=$files" >> "$GITHUB_OUTPUT"
+
+      - name: Run Black
+        if: steps.changed.outputs.files != ''
+        run: black ${{ steps.changed.outputs.files }}
+
+      - name: Run isort
+        if: steps.changed.outputs.files != ''
+        run: isort ${{ steps.changed.outputs.files }}
+
+      - name: Run Ruff safe fixes
+        if: steps.changed.outputs.files != ''
+        run: ruff check --fix --exit-zero ${{ steps.changed.outputs.files }}
+
+      - name: Commit and push safe fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No automatic fixes were needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- '*.py'
+          git commit -m "ci: apply automatic formatting and safe lint fixes"
+          git push
