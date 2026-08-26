@@ -22,6 +22,7 @@ TRADE_STREAM_RESTART_DELAY_SECONDS = 1.0
 TRADE_STREAM_QUEUE_SIZE = 10_000
 TRADE_STREAM_BATCH_SIZE = 64
 TRADE_STREAM_BATCH_WAIT_SECONDS = 0.010
+TRADE_SINK_CONCURRENCY = 8
 TRADE_FALLBACK_LIMIT = 500
 ORDERBOOK_PERSIST_INTERVAL_SECONDS = 1.0
 STREAM_RESTART_DELAY_SECONDS = 1.0
@@ -72,6 +73,7 @@ class DataIngestionService(AITOSModule):
         self._trade_events_received = 0
         self._trade_parse_errors = 0
         self._trade_stream_errors = 0
+        self._trade_downstream_errors = 0
         self._trade_stream_restarts = 0
         self._trade_stream_idle_timeouts = 0
         self._trade_stream_messages_received = 0
@@ -81,6 +83,7 @@ class DataIngestionService(AITOSModule):
         self._last_trade_event_time: Optional[str] = None
         self._last_book_persist_at: Dict[str, datetime] = {}
         self._last_trade_ids: Dict[str, int] = {}
+        self._trade_sink_semaphore = asyncio.Semaphore(TRADE_SINK_CONCURRENCY)
         self._live_state = LiveMarketStateStore(max_trades=max(5000, self._liquidity_trade_window))
         self._recent_trades = self._live_state.trades
 
@@ -90,7 +93,7 @@ class DataIngestionService(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.7.0"
+        return "1.7.1"
 
     async def initialize(self, config: Dict[str, Any]) -> None:
         if self._initialized:
@@ -102,7 +105,7 @@ class DataIngestionService(AITOSModule):
             asyncio.create_task(self._run_orderbook_stream(), name="aitos-orderbook-stream"),
         ]
         self._initialized = True
-        logger.info("data ingestion stream tasks started", extra={"aitos_extra": {"tasks": [t.get_name() for t in self._tasks], "queue_size": TRADE_STREAM_QUEUE_SIZE, "batch_size": TRADE_STREAM_BATCH_SIZE}})
+        logger.info("data ingestion stream tasks started", extra={"aitos_extra": {"tasks": [t.get_name() for t in self._tasks], "queue_size": TRADE_STREAM_QUEUE_SIZE, "batch_size": TRADE_STREAM_BATCH_SIZE, "sink_concurrency": TRADE_SINK_CONCURRENCY}})
 
     async def health_check(self) -> HealthStatus:
         states = []
@@ -127,6 +130,7 @@ class DataIngestionService(AITOSModule):
             "trade_events_received": self._trade_events_received,
             "trade_parse_errors": self._trade_parse_errors,
             "trade_stream_errors": self._trade_stream_errors,
+            "trade_downstream_errors": self._trade_downstream_errors,
             "trade_stream_restarts": self._trade_stream_restarts,
             "trade_stream_idle_timeouts": self._trade_stream_idle_timeouts,
             "trade_stream_messages_received": self._trade_stream_messages_received,
@@ -135,6 +139,7 @@ class DataIngestionService(AITOSModule):
             "trade_stream_dropped": self._trade_stream_dropped,
             "trade_stream_queue_capacity": TRADE_STREAM_QUEUE_SIZE,
             "trade_stream_batch_size": TRADE_STREAM_BATCH_SIZE,
+            "trade_sink_concurrency": TRADE_SINK_CONCURRENCY,
             "last_trade_event_time": self._last_trade_event_time,
             "task_states": states,
         })
@@ -229,7 +234,7 @@ class DataIngestionService(AITOSModule):
                 await asyncio.sleep(TRADE_STREAM_RESTART_DELAY_SECONDS)
 
     async def _process_trade_batch(self, trades: List[TradeTick]) -> None:
-        """Update state in wire order, then perform independent I/O concurrently."""
+        """Update state in wire order, then perform bounded independent I/O."""
         accepted: List[Tuple[TradeTick, Dict[str, Any]]] = []
         for trade in trades:
             previous_id = self._last_trade_ids.get(trade.symbol, -1)
@@ -265,17 +270,19 @@ class DataIngestionService(AITOSModule):
                 logger.exception("trade state update failed", extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id, "error": str(exc)}})
 
         async def io_one(trade: TradeTick, payload: Dict[str, Any]) -> None:
-            try:
-                jobs = [self._event_bus.publish(Event(topic=trade_topic(trade.symbol), payload=trade.to_dict(), source_module=self.module_id, priority=EventPriority.NORMAL)), self._event_bus.publish(Event(topic=orderflow_topic(trade.symbol), payload=payload, source_module=self.module_id, priority=EventPriority.NORMAL))]
-                if self._repository is not None:
-                    jobs.append(self._repository.save_trade_tick(trade))
-                await asyncio.gather(*jobs)
-            except Exception as exc:
-                # A sink failure must not kill the exchange reader. The stream is
-                # kept alive and the failure is explicitly visible to Audit.
-                self._errors += 1
-                self._trade_stream_errors += 1
-                logger.exception("trade downstream processing failed", extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id, "error": str(exc)}})
+            async with self._trade_sink_semaphore:
+                try:
+                    jobs = [self._event_bus.publish(Event(topic=trade_topic(trade.symbol), payload=trade.to_dict(), source_module=self.module_id, priority=EventPriority.NORMAL)), self._event_bus.publish(Event(topic=orderflow_topic(trade.symbol), payload=payload, source_module=self.module_id, priority=EventPriority.NORMAL))]
+                    if self._repository is not None:
+                        jobs.append(self._repository.save_trade_tick(trade))
+                    await asyncio.gather(*jobs)
+                except Exception as exc:
+                    # A sink failure must not kill the exchange reader. Keep the
+                    # trade in the bounded pipeline and expose sink failures
+                    # separately from websocket/stream failures.
+                    self._errors += 1
+                    self._trade_downstream_errors += 1
+                    logger.exception("trade downstream processing failed", extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id, "error_type": type(exc).__name__, "error": str(exc)}})
 
         await asyncio.gather(*(io_one(trade, payload) for trade, payload in accepted))
         for trade, _payload in accepted:
