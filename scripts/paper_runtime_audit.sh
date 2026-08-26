@@ -7,7 +7,6 @@ MAX_LOG_MB="${AITOS_MAX_LOG_MB:-512}"
 MIN_DISK_FREE_GB="${AITOS_MIN_DISK_FREE_GB:-10}"
 DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 
-# Long-running services that must be running in paper production.
 REQUIRED_CONTAINERS=(
   aitos-redis
   aitos-clickhouse
@@ -17,8 +16,6 @@ REQUIRED_CONTAINERS=(
   aitos-storage-maintenance
 )
 
-# One-shot / optional containers that are allowed to be exited.
-# Matched as substrings against container names.
 ALLOWED_EXITED_PATTERNS=(
   clickhouse-init
   aitos-backtest
@@ -95,7 +92,6 @@ if command -v docker >/dev/null 2>&1; then
   other_stopped=0
   while read -r container; do
     [ -n "$container" ] || continue
-    # Skip required list (already handled) and allowed one-shots.
     skip=0
     for req in "${REQUIRED_CONTAINERS[@]}"; do
       if [ "$container" = "$req" ]; then skip=1; break; fi
@@ -178,6 +174,19 @@ if command -v docker >/dev/null 2>&1; then
       fi
     fi
   done < <(docker ps -aq)
+
+  echo
+  echo '--- Trade downstream exception diagnostics ---'
+  echo 'The following lines are observational only; they do not change audit blocker status.'
+  echo 'Looking for sink failures from the live paper-trading process:'
+  docker logs --since 30m --timestamps aitos-paper 2>&1 \
+    | grep -E 'trade downstream processing failed|trade state update failed|REST trade recovery failed' \
+    | tail -n 100 || true
+  echo
+
+  echo '--- Trade downstream exception summary ---'
+  downstream_count="$(docker logs --since 30m aitos-paper 2>&1 | grep -c 'trade downstream processing failed' || true)"
+  echo "trade downstream exceptions in last 30m: $downstream_count"
 else
   echo 'Docker: NOT INSTALLED'
   blockers=$((blockers + 1))
@@ -205,7 +214,6 @@ echo
 echo '--- AITOS health endpoint ---'
 if command -v curl >/dev/null 2>&1; then
   health_body="$(mktemp)"
-  # Capture HTTP code without letting curl network errors abort under set -e.
   health_code="000"
   if health_code="$(curl --silent --show-error --max-time 5 -o "$health_body" -w '%{http_code}' "$HEALTH_URL" 2>/dev/null)"; then
     :
@@ -232,8 +240,6 @@ if command -v curl >/dev/null 2>&1; then
   rm -f "$health_body"
   echo
   echo '--- AITOS metrics endpoint ---'
-  # Avoid `curl | head` under pipefail: when metrics exceed 40 lines, head
-  # closes early, curl gets SIGPIPE (exit 141), and the pipeline falsely fails.
   metrics_body="$(mktemp)"
   metrics_code="000"
   if metrics_code="$(curl --silent --show-error --max-time 5 -o "$metrics_body" -w '%{http_code}' "$METRICS_URL" 2>/dev/null)"; then
