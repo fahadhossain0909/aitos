@@ -1,0 +1,71 @@
+name: Maintenance
+
+on:
+  schedule:
+    - cron: '30 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintenance
+  cancel-in-progress: true
+
+jobs:
+  docker-cleanup:
+    name: Clean disposable Docker data on VPS
+    runs-on: ubuntu-latest
+    environment: papertrade
+    steps:
+      - name: Check required deployment secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Write SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+      - name: Clean safe disposable Docker resources
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/deploy_key
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            exec 9>"$HOME/.aitos-maintenance.lock"
+            flock 9
+            DATA_ROOT="/mnt/aitos-data"
+            if ! mountpoint -q "$DATA_ROOT"; then
+              echo "::error::$DATA_ROOT is not mounted; refusing cleanup."
+              exit 1
+            fi
+            echo "=== Before cleanup ==="
+            df -h / "$DATA_ROOT"
+            docker system df || true
+            echo "=== Removing exited containers and unused Docker networks ==="
+            docker container prune -f --filter 'until=168h'
+            docker network prune -f --filter 'until=168h'
+            echo "=== Removing unused images older than 7 days ==="
+            docker image prune -af --filter 'until=168h'
+            echo "=== Removing old BuildKit cache ==="
+            docker builder prune -af --filter 'until=168h'
+            echo "=== After cleanup ==="
+            df -h / "$DATA_ROOT"
+            docker system df || true
+            echo "Persistent database data under $DATA_ROOT was not touched."
