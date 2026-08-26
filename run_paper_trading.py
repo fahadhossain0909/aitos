@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from typing import Optional
 
 from redis.asyncio import Redis
 
@@ -41,7 +40,7 @@ HEALTH_SERVER_PORT = 8090
 
 async def try_connect_clickhouse_repositories(
     settings,
-) -> tuple[Optional[MarketDataRepository], Optional[JournalRepository]]:
+) -> tuple[MarketDataRepository | None, JournalRepository | None]:
     market_repo = MarketDataRepository(
         host=settings.clickhouse.host,
         port=settings.clickhouse.port,
