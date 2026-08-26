@@ -19,6 +19,9 @@ class RedisSettings(BaseSettings):
     port: int = 6379
     db: int = 0
     password: str | None = None
+    # A bounded shared pool prevents unbounded connection creation while
+    # leaving enough capacity for the trade sink plus blocking stream readers.
+    max_connections: int = 64
 
     @property
     def url(self) -> str:
