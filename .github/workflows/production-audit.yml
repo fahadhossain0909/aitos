@@ -43,53 +43,80 @@ jobs:
 
       - name: Run canonical read-only audit on VPS
         id: audit
+        continue-on-error: true
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_audit_key
           command_timeout: 10m
-          capture_stdout: true
           script: |
             set -u
             cd "$HOME/aitos"
             test -f scripts/paper_runtime_audit.sh
             mkdir -p "$HOME/aitos-production-audit"
             REPORT="$HOME/aitos-production-audit/report.txt"
+            EXIT_CODE="$HOME/aitos-production-audit/exit_code"
             set +e
             bash scripts/paper_runtime_audit.sh >"$REPORT" 2>&1
             status=$?
             set -e
-            printf 'AUDIT_EXIT_CODE=%s\n' "$status"
-            printf 'AUDIT_REPORT_B64='
-            base64 -w 0 "$REPORT"
-            printf '\n'
+            printf '%s\n' "$status" > "$EXIT_CODE"
+            test -s "$REPORT"
             exit "$status"
 
-      - name: Write audit report
+      - name: Retrieve audit report from VPS
         if: always()
         shell: bash
         env:
-          AUDIT_OUTPUT: ${{ steps.audit.outputs.stdout }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
           mkdir -p aitos-production-audit
-          encoded="$(printf '%s\n' "$AUDIT_OUTPUT" | sed -n 's/^AUDIT_REPORT_B64=//p' | tail -n 1)"
-          if [ -n "$encoded" ]; then
-            printf '%s' "$encoded" | base64 --decode > aitos-production-audit/report.txt
-          else
-            printf '%s\n' "Audit output was unavailable. Inspect the workflow log." > aitos-production-audit/report.txt
-          fi
+          scp \
+            -i /tmp/aitos_audit_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-production-audit/report.txt" \
+            aitos-production-audit/report.txt
+          scp \
+            -i /tmp/aitos_audit_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-production-audit/exit_code" \
+            aitos-production-audit/exit_code
           test -s aitos-production-audit/report.txt
+          test -s aitos-production-audit/exit_code
 
       - name: Upload audit report artifact
         if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
           name: aitos-production-audit
-          path: aitos-production-audit/report.txt
+          path: aitos-production-audit/
           if-no-files-found: error
           retention-days: 7
+
+      - name: Finalize audit result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(tr -d '[:space:]' < aitos-production-audit/exit_code)"
+          case "$status" in
+            0)
+              echo "Production VPS audit completed successfully."
+              ;;
+            ''|*[!0-9]*)
+              echo "Invalid audit exit code: $status"
+              exit 1
+              ;;
+            *)
+              echo "Production VPS audit reported failure: exit code $status"
+              exit "$status"
+              ;;
+          esac
 
       - name: Cleanup
         if: always()
