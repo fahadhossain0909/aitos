@@ -1,6 +1,6 @@
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import AsyncIterator, List
 
 import pytest
 
@@ -8,7 +8,6 @@ from aitos.core.contracts import Event
 from aitos.data.ingestion import (
     DataIngestionService,
     kline_topic,
-    liquidity_topic,
     orderbook_topic,
     trade_topic,
 )
@@ -70,13 +69,13 @@ class FakeExchangeAdapter(ExchangeAdapter):
     async def close(self) -> None:
         self.closed = True
 
-    async def fetch_klines(self, symbol, timeframe, limit=500) -> List[Kline]:
+    async def fetch_klines(self, symbol, timeframe, limit=500) -> list[Kline]:
         return [SAMPLE_KLINE, SAMPLE_KLINE]
 
     async def fetch_order_book(self, symbol, limit=50) -> OrderBookSnapshot:
         return SAMPLE_BOOK
 
-    async def fetch_recent_trades(self, symbol, limit=500) -> List[TradeTick]:
+    async def fetch_recent_trades(self, symbol, limit=500) -> list[TradeTick]:
         return [SAMPLE_TRADE]
 
     async def fetch_funding_rate(self, symbol) -> FundingRate:
