@@ -80,6 +80,7 @@ jobs:
           done
           if [ "$missing" -ne 0 ]; then exit 1; fi
           echo "has_secrets=true" >> "$GITHUB_OUTPUT"
+
       - name: Write SSH key with proper formatting
         if: steps.check-secrets.outputs.has_secrets == 'true'
         env:
@@ -88,11 +89,13 @@ jobs:
           set -euo pipefail
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
+
       - name: Check runner resources
         if: steps.check-secrets.outputs.has_secrets == 'true'
         run: |
           free -h
           df -h /
+
       - name: Deploy to remote host over SSH
         if: steps.check-secrets.outputs.has_secrets == 'true'
         uses: appleboy/ssh-action@v1.2.5
@@ -118,8 +121,6 @@ jobs:
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
 
-            # Serialize the real remote Docker lifecycle. This prevents an older
-            # deploy from recreating containers while a newer deploy is cleaning up.
             exec 9>"$HOME/.aitos-deploy.lock"
             echo "=== Acquiring host deployment lock ==="
             flock 9
@@ -130,6 +131,50 @@ jobs:
               exit 1
             fi
             mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
+
+            # Automatic low-space recovery runs before the hard reserve check.
+            # The reserve is a post-cleanup invariant, not an immediate failure trigger.
+            echo "=== Boot-disk automatic recovery ==="
+            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+            echo "Boot free space before recovery: $boot_free_bytes bytes"
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "Boot disk is below 7.5 GiB; starting safe automatic cleanup."
+              echo "Persistent data protection: $DATA_ROOT is excluded from cleanup."
+
+              # Remove only unused Docker resources. Running containers and their
+              # attached resources remain protected by Docker prune semantics.
+              if docker info >/dev/null 2>&1; then
+                docker image prune -af --filter 'until=0s' || true
+                docker container prune -f || true
+                docker network prune -f || true
+                docker builder prune -af || true
+              else
+                echo "::warning::Docker daemon is unavailable during boot-disk recovery."
+              fi
+
+              # Remove transient OS/package/log caches only. Never touch the
+              # persistent AITOS data disk or the application data directories.
+              sudo journalctl --vacuum-time=7d || true
+              sudo apt-get clean || true
+              sudo rm -rf /tmp/* /var/tmp/* || true
+              sudo rm -rf /var/lib/apt/lists/* || true
+              sync
+
+              boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+              echo "Boot free space after recovery: $boot_free_bytes bytes"
+            fi
+
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "::error::Boot disk remains below the required 7.5 GiB free reserve after automatic cleanup."
+              df -h .
+              echo "=== Largest boot-disk directories ==="
+              sudo du -xhd1 / 2>/dev/null | sort -h | tail -20 || true
+              exit 1
+            fi
+
+            echo "Boot-disk reserve satisfied."
+            df -h .
+
             echo "=== Storage policy ==="
             echo "Boot disk: keep at least 7.5 GiB free."
             echo "Persistent AITOS database data: $DATA_ROOT/{clickhouse,neo4j,redis}."
@@ -195,10 +240,25 @@ jobs:
             ENVEOF
             chmod 600 .env
 
-            echo "=== Boot-disk reserve check ==="
+            # Source installation can temporarily consume boot-disk space.
+            # Repeat recovery after it and before Docker pulls/recreation.
+            echo "=== Post-source boot-disk reserve check ==="
             boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
             if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "::error::Boot disk is below the required 7.5 GiB free reserve."
+              echo "Boot disk crossed the reserve during source installation; cleaning again."
+              rm -rf "$tmp_dir"
+              if docker info >/dev/null 2>&1; then
+                docker image prune -af --filter 'until=0s' || true
+                docker builder prune -af || true
+              fi
+              sudo journalctl --vacuum-time=7d || true
+              sudo apt-get clean || true
+              sudo rm -rf /tmp/* /var/tmp/* /var/lib/apt/lists/* || true
+              sync
+              boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
+            fi
+            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
+              echo "::error::Boot disk remains below 7.5 GiB after post-source cleanup."
               df -h .
               exit 1
             fi
@@ -325,20 +385,13 @@ jobs:
               exit 1
             fi
 
-            # Post-deploy Docker garbage collection. Only resources that Docker
-            # reports as unused are eligible. Running containers and everything
-            # attached to them remain protected by Docker's prune semantics.
             echo "=== Safe post-deploy Docker cleanup ==="
-            echo "Running containers before cleanup:"
             docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-            echo "Disk usage before cleanup:"
             docker system df
             docker image prune -af --filter 'until=0s'
             docker container prune -f
             docker network prune -f
-            docker volume prune -f
             docker builder prune -af
-            echo "Disk usage after cleanup:"
             docker system df
 
             echo "=== Final storage state ==="
