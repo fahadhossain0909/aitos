@@ -242,8 +242,6 @@ class DataIngestionService(AITOSModule):
                     async for trade in self._exchange.stream_trades(self._symbols):
                         if queue.full():
                             self._trade_stream_queue_waits += 1
-                        # Deliberately await instead of put_nowait: backpressure is
-                        # preferable to silently losing market data.
                         await queue.put(trade)
                         self._trade_stream_max_queue_depth = max(
                             self._trade_stream_max_queue_depth, queue.qsize()
@@ -376,9 +374,6 @@ class DataIngestionService(AITOSModule):
                         jobs.append(self._repository.save_trade_tick(trade))
                     await asyncio.gather(*jobs)
                 except Exception as exc:
-                    # A sink failure must not kill the exchange reader. Keep the
-                    # trade in the bounded pipeline and expose sink failures
-                    # separately from websocket/stream failures.
                     self._errors += 1
                     self._trade_downstream_errors += 1
                     logger.exception(
@@ -452,6 +447,34 @@ class DataIngestionService(AITOSModule):
                 priority=EventPriority.NORMAL,
             )
         )
+
+        # Feed every consecutive L2 snapshot into the shared state tracker.
+        # The tracker uses the recent trade buffer to distinguish book pulling,
+        # stacking and aggressive sweeps without duplicating state in ingestion.
+        liquidity_events = self._live_state.on_order_book(book)
+        for liquidity_event in liquidity_events:
+            await self._event_bus.publish(
+                Event(
+                    topic=liquidity_topic(book.symbol),
+                    payload={
+                        "kind": liquidity_event.kind,
+                        "side": liquidity_event.side,
+                        "score": liquidity_event.score,
+                        "price": liquidity_event.price,
+                        "details": liquidity_event.details,
+                        "timestamp": book.timestamp.isoformat(),
+                        "last_update_id": book.last_update_id,
+                    },
+                    source_module=self.module_id,
+                    priority=(
+                        EventPriority.HIGH
+                        if liquidity_event.kind == "sweep"
+                        else EventPriority.NORMAL
+                    ),
+                )
+            )
+            self._liquidity_events += 1
+
         if self._repository is not None:
             now = datetime.now(timezone.utc)
             last = self._last_book_persist_at.get(book.symbol)

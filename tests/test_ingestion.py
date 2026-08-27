@@ -1,15 +1,25 @@
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import AsyncIterator, List
 
 import pytest
 
 from aitos.core.contracts import Event
-from aitos.data.ingestion import (DataIngestionService, kline_topic,
-                                  orderbook_topic, trade_topic)
+from aitos.data.ingestion import (
+    DataIngestionService,
+    kline_topic,
+    orderbook_topic,
+    trade_topic,
+)
 from aitos.exchange.base import ExchangeAdapter
-from aitos.models.market import (FundingRate, Kline, OpenInterest,
-                                 OrderBookSnapshot, TradeSide, TradeTick)
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeSide,
+    TradeTick,
+)
 
 NOW = datetime.now(timezone.utc)
 
@@ -59,13 +69,13 @@ class FakeExchangeAdapter(ExchangeAdapter):
     async def close(self) -> None:
         self.closed = True
 
-    async def fetch_klines(self, symbol, timeframe, limit=500) -> List[Kline]:
+    async def fetch_klines(self, symbol, timeframe, limit=500) -> list[Kline]:
         return [SAMPLE_KLINE, SAMPLE_KLINE]
 
     async def fetch_order_book(self, symbol, limit=50) -> OrderBookSnapshot:
         return SAMPLE_BOOK
 
-    async def fetch_recent_trades(self, symbol, limit=500) -> List[TradeTick]:
+    async def fetch_recent_trades(self, symbol, limit=500) -> list[TradeTick]:
         return [SAMPLE_TRADE]
 
     async def fetch_funding_rate(self, symbol) -> FundingRate:
@@ -101,7 +111,7 @@ class FakeRepository:
     async def save_trade_tick(self, trade):
         self.trades.append(trade)
 
-    async def save_order_book_snapshot(self, book):
+    async def save_orderbook_snapshot(self, book):
         self.books.append(book)
 
 

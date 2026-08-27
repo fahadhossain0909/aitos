@@ -4,18 +4,27 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import clickhouse_connect
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.learning.experience import ExperienceRecord
 from aitos.logging_setup import get_logger
-from aitos.models.market import (FundingRate, Kline, OpenInterest,
-                                 OrderBookSnapshot, TradeTick)
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeTick,
+)
 
 logger = get_logger("aitos.data.repository")
 
@@ -90,7 +99,7 @@ class MarketDataRepository(AITOSModule):
         )
         self._client = None
         self._initialized = False
-        self._last_event_time: Optional[str] = None
+        self._last_event_time: str | None = None
 
     @property
     def module_id(self) -> str:
@@ -100,7 +109,7 @@ class MarketDataRepository(AITOSModule):
     def version(self) -> str:
         return "1.1.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._client = await clickhouse_connect.get_async_client(**self._conn_params)
@@ -135,7 +144,7 @@ class MarketDataRepository(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     async def ensure_learning_experience_schema(self) -> None:
@@ -203,6 +212,10 @@ class MarketDataRepository(AITOSModule):
                 "last_update_id",
             ],
         )
+
+    async def save_orderbook_snapshot(self, book: OrderBookSnapshot) -> None:
+        """Compatibility alias for the ingestion service's historical API."""
+        await self.save_order_book_snapshot(book)
 
     async def save_trade_tick(self, trade: TradeTick) -> None:
         self._require_initialized()
@@ -299,7 +312,7 @@ class MarketDataRepository(AITOSModule):
 
     async def get_recent_klines(
         self, symbol: str, timeframe: str, limit: int = 500
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         self._require_initialized()
         result = await self._client.query(
             "SELECT * FROM market_ohlcv WHERE symbol = {symbol:String} AND timeframe = {timeframe:String} ORDER BY time DESC LIMIT {limit:UInt32}",
@@ -308,8 +321,8 @@ class MarketDataRepository(AITOSModule):
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
     async def _query(
-        self, sql: str, parameters: Dict[str, Any]
-    ) -> List[Dict[str, Any]]:
+        self, sql: str, parameters: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         self._require_initialized()
         result = await self._client.query(sql, parameters=parameters)
         return [dict(zip(result.column_names, row)) for row in result.result_rows]

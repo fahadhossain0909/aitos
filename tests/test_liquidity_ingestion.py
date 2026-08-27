@@ -23,7 +23,7 @@ class FakeBus:
 
 
 class FakeRepository:
-    async def save_order_book_snapshot(self, book):
+    async def save_orderbook_snapshot(self, book):
         pass
 
     async def save_trade_tick(self, trade):
@@ -70,6 +70,9 @@ async def test_live_orderbook_handler_publishes_liquidity_event():
     liquidity_events = [e for e in bus.events if e.topic == "market.liquidity.BTCUSDT"]
     assert liquidity_events
     assert any(e.payload["kind"] in {"pulling", "sweep"} for e in liquidity_events)
+
+    health = await service.health_check()
+    assert health.details["liquidity_events"] == len(liquidity_events)
 
 
 @pytest.mark.asyncio
