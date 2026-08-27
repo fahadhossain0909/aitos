@@ -109,8 +109,12 @@ class LiveScannerCache:
             }
         return {
             "cache_has_state": True,
-            "last_trade_at": state.last_trade_at.isoformat() if state.last_trade_at else None,
-            "last_book_at": state.last_book_at.isoformat() if state.last_book_at else None,
+            "last_trade_at": (
+                state.last_trade_at.isoformat() if state.last_trade_at else None
+            ),
+            "last_book_at": (
+                state.last_book_at.isoformat() if state.last_book_at else None
+            ),
             "last_trade_received_at": (
                 state.last_trade_received_at.isoformat()
                 if state.last_trade_received_at
