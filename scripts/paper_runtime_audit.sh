@@ -6,6 +6,7 @@ METRICS_URL="${AITOS_METRICS_URL:-http://127.0.0.1:8090/metrics}"
 MAX_LOG_MB="${AITOS_MAX_LOG_MB:-512}"
 MIN_DISK_FREE_GB="${AITOS_MIN_DISK_FREE_GB:-10}"
 DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
+DIAGNOSTIC_LOG_MINUTES="${AITOS_DIAGNOSTIC_LOG_MINUTES:-30}"
 
 REQUIRED_CONTAINERS=(
   aitos-redis
@@ -176,6 +177,26 @@ if command -v docker >/dev/null 2>&1; then
   done < <(docker ps -aq)
 
   echo
+  echo '--- Paper signal diagnostics (last 30m) ---'
+  echo "Capture window: ${DIAGNOSTIC_LOG_MINUTES} minutes"
+  echo 'These are observational diagnostics only; they do not change audit blocker status.'
+  diagnostic_logs="$(docker logs --since "${DIAGNOSTIC_LOG_MINUTES}m" --timestamps aitos-paper 2>&1 | grep 'paper signal diagnostics' || true)"
+  if [ -n "$diagnostic_logs" ]; then
+    printf '%s\n' "$diagnostic_logs" | tail -n 200
+  else
+    echo 'NO paper signal diagnostics found in the requested window.'
+    echo 'This may mean the scanner did not run, the deployed image predates diagnostic logging, or logs are emitted under a different logger/output configuration.'
+  fi
+  echo
+
+  echo '--- Paper signal diagnostics summary ---'
+  diagnostic_count="$(printf '%s\n' "$diagnostic_logs" | grep -c 'paper signal diagnostics' || true)"
+  echo "paper signal diagnostic entries in last ${DIAGNOSTIC_LOG_MINUTES}m: $diagnostic_count"
+  if [ "$diagnostic_count" -gt 0 ]; then
+    echo 'Expected fields to inspect per entry: symbol, market_source, live_fresh, executed_trades, structure, candle_cvd, orderflow_bias, orderflow_delta, orderflow_cvd, orderflow_buy_ratio, orderflow_aggression, orderflow_vwap, liquidity_quality, depth_imbalance, liquidity_wall, sweep_potential, absorption_proxy, liquidity_score, direction, scanner_threshold.'
+  fi
+  echo
+
   echo '--- Trade downstream exception diagnostics ---'
   echo 'The following lines are observational only; they do not change audit blocker status.'
   echo 'Looking for sink failures from the live paper-trading process:'
