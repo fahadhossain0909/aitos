@@ -5,11 +5,22 @@ from typing import AsyncIterator, List
 import pytest
 
 from aitos.core.contracts import Event
-from aitos.data.ingestion import (DataIngestionService, kline_topic,
-                                  orderbook_topic, trade_topic)
+from aitos.data.ingestion import (
+    DataIngestionService,
+    kline_topic,
+    liquidity_topic,
+    orderbook_topic,
+    trade_topic,
+)
 from aitos.exchange.base import ExchangeAdapter
-from aitos.models.market import (FundingRate, Kline, OpenInterest,
-                                 OrderBookSnapshot, TradeSide, TradeTick)
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeSide,
+    TradeTick,
+)
 
 NOW = datetime.now(timezone.utc)
 
@@ -101,7 +112,7 @@ class FakeRepository:
     async def save_trade_tick(self, trade):
         self.trades.append(trade)
 
-    async def save_order_book_snapshot(self, book):
+    async def save_orderbook_snapshot(self, book):
         self.books.append(book)
 
 
