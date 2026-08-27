@@ -36,6 +36,9 @@ SCAN_INTERVAL_SECONDS = 60.0
 KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 10_000.0
 HEALTH_SERVER_PORT = 8090
+# Deliberately relaxed for paper-only functional validation. Live/production
+# defaults remain unchanged until the signal path has been validated.
+PAPER_MIN_SCORE_THRESHOLD = 50.0
 
 
 async def try_connect_clickhouse_repositories(
@@ -139,6 +142,17 @@ async def main() -> None:
         rl_scorer=rl_scorer,
         outcome_classifier=outcome_classifier,
         attention_explainer=attention_explainer,
+        min_score_threshold=PAPER_MIN_SCORE_THRESHOLD,
+    )
+    logger.info(
+        "paper trading thresholds",
+        extra={
+            "aitos_extra": {
+                "scanner_min_score_threshold": PAPER_MIN_SCORE_THRESHOLD,
+                "kernel_min_confidence": components.kernel.fusion_min_confidence,
+                "ai_threshold_relaxed": False,
+            }
+        },
     )
     await initialize_all(components)
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)

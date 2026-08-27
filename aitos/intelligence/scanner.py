@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
 from aitos.exchange.base import ExchangeAdapter
@@ -17,22 +23,29 @@ from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.funding import funding_rate_score
-from aitos.intelligence.liquidity import liquidity_intelligence_score
+from aitos.intelligence.liquidity import (
+    absorption_proxy_score,
+    depth_imbalance_score,
+    liquidity_intelligence_score,
+    liquidity_quality_score,
+    liquidity_wall_score,
+    sweep_potential_score,
+)
 from aitos.intelligence.liquidity_tracker import LiquidityTracker
 from aitos.intelligence.live_auction import live_auction_score
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.open_interest import oi_trend_score
 from aitos.intelligence.order_flow_engine import OrderFlowEngine
-from aitos.intelligence.orderflow_liquidity_interaction import \
-    FlowLiquidityInteractionEngine
+from aitos.intelligence.orderflow_liquidity_interaction import (
+    FlowLiquidityInteractionEngine,
+)
 from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
 from aitos.logging_setup import get_logger
-from aitos.models.market import OpenInterest
 from aitos.models.trade import Opportunity, TradeSide
 
 logger = get_logger("aitos.intelligence.scanner")
 TOPIC_SCAN_COMPLETE = "market.opportunity_scanned"
-DEFAULT_WEIGHTS: Dict[str, float] = {
+DEFAULT_WEIGHTS: dict[str, float] = {
     "trend_strength": 0.10,
     "liquidity_quality": 0.10,
     "order_flow_bias": 0.15,
@@ -57,8 +70,8 @@ class ScanCandidate:
     symbol: str
     direction: TradeSide
     composite_score: float
-    component_scores: Dict[str, float]
-    rationale: List[str]
+    component_scores: dict[str, float]
+    rationale: list[str]
     entry_price: float
     atr: float
     regime: str
@@ -75,7 +88,7 @@ def _volatility_fitness(
 
 def determine_direction(
     structure_direction: str, cvd_score: float
-) -> Optional[TradeSide]:
+) -> TradeSide | None:
     if structure_direction == "bullish_bos" and cvd_score >= 5.0:
         return TradeSide.LONG
     if structure_direction == "bearish_bos" and cvd_score <= 5.0:
@@ -93,16 +106,16 @@ class OpportunityScanner(AITOSModule):
         self,
         event_bus: EventBus,
         exchange: ExchangeAdapter,
-        symbols: List[str],
+        symbols: list[str],
         timeframe: str = "15m",
         reference_symbol: str = "BTCUSDT",
-        rl_scorer: Optional[RLPolicyScorer] = None,
-        weights: Optional[Dict[str, float]] = None,
+        rl_scorer: RLPolicyScorer | None = None,
+        weights: dict[str, float] | None = None,
         min_score_threshold: float = 60.0,
         top_n: int = 5,
         kline_lookback: int = 100,
         trade_lookback: int = 500,
-        footprint_tick_sizes: Optional[Dict[str, float]] = None,
+        footprint_tick_sizes: dict[str, float] | None = None,
         live_state_stale_seconds: float = 5.0,
         amt_value_area_pct: float = 0.70,
         amt_ib_minutes: int = 60,
@@ -143,7 +156,7 @@ class OpportunityScanner(AITOSModule):
     def version(self) -> str:
         return "1.9.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         await self._exchange.connect()
@@ -201,10 +214,10 @@ class OpportunityScanner(AITOSModule):
     async def emit_events(self) -> AsyncIterator[Event]:
         return
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
-    def _footprint_tick_size(self, symbol: str) -> Optional[float]:
+    def _footprint_tick_size(self, symbol: str) -> float | None:
         tick = self._footprint_tick_sizes.get(symbol)
         return tick if tick is not None and tick > 0 else None
 
@@ -224,7 +237,7 @@ class OpportunityScanner(AITOSModule):
 
     def _analyze_amt(
         self, symbol: str, trades: list, klines: list, order_book: Any
-    ) -> Optional[AMTContext]:
+    ) -> AMTContext | None:
         tick_size = self._footprint_tick_size(symbol)
         if tick_size is None or not trades:
             return None
@@ -242,13 +255,23 @@ class OpportunityScanner(AITOSModule):
         return context
 
     async def scan_symbol(
-        self, symbol: str, reference_klines: Optional[list] = None
-    ) -> Optional[ScanCandidate]:
+        self, symbol: str, reference_klines: list | None = None
+    ) -> ScanCandidate | None:
         self._require_initialized()
         klines = await self._exchange.fetch_klines(
             symbol, self._timeframe, limit=self._kline_lookback
         )
         if len(klines) < 20:
+            logger.info(
+                "paper signal diagnostics",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "reason": "insufficient_klines",
+                        "kline_count": len(klines),
+                    }
+                },
+            )
             return None
         live_trades, live_book, live_fresh = self._live_market_data(symbol)
         if live_fresh and live_trades and live_book is not None:
@@ -285,12 +308,52 @@ class OpportunityScanner(AITOSModule):
         flow_score = flow_features.bias_score if flow_features else candle_cvd
         direction = determine_direction(structure_direction, flow_score)
         self._last_oi[symbol] = oi_current
+
+        liquidity_quality = liquidity_quality_score(order_book)
+        depth_imbalance = depth_imbalance_score(order_book)
+        liquidity_wall = liquidity_wall_score(order_book)
+        sweep_potential = sweep_potential_score(order_book)
+        absorption = absorption_proxy_score(order_book, trades)
+        liquidity_score = liquidity_intelligence_score(order_book, trades)
+        orderflow_delta = flow_features.delta if flow_features else 0.0
+        orderflow_cvd = flow_features.cvd if flow_features else 0.0
+        orderflow_buy_ratio = flow_features.buy_ratio if flow_features else 0.5
+        orderflow_aggression = flow_features.aggression if flow_features else 0.0
+        orderflow_vwap = flow_features.vwap if flow_features else 0.0
+
+        logger.info(
+            "paper signal diagnostics",
+            extra={
+                "aitos_extra": {
+                    "symbol": symbol,
+                    "market_source": market_source,
+                    "live_fresh": live_fresh,
+                    "executed_trades": len(trades),
+                    "structure": structure_direction,
+                    "structure_strength": round(structure_strength, 2),
+                    "candle_cvd": round(candle_cvd, 3),
+                    "orderflow_bias": round(flow_score, 3),
+                    "orderflow_delta": round(orderflow_delta, 6),
+                    "orderflow_cvd": round(orderflow_cvd, 6),
+                    "orderflow_buy_ratio": round(orderflow_buy_ratio, 4),
+                    "orderflow_aggression": round(orderflow_aggression, 4),
+                    "orderflow_vwap": round(orderflow_vwap, 6),
+                    "liquidity_quality": liquidity_quality,
+                    "depth_imbalance": depth_imbalance,
+                    "liquidity_wall": liquidity_wall,
+                    "sweep_potential": sweep_potential,
+                    "absorption_proxy": absorption,
+                    "liquidity_score": liquidity_score,
+                    "direction": direction.value if direction else "none",
+                    "scanner_threshold": self._min_score_threshold,
+                }
+            },
+        )
         if direction is None:
             return None
         trend_score = min(10.0, indicators.adx(klines) / 10.0)
         volatility_score = _volatility_fitness(vol_percentile)
         regime_score = REGIME_FIT_SCORE.get(regime, 5.0)
-        liquidity_score = liquidity_intelligence_score(order_book, trades)
         lead_lag = (
             indicators.lead_lag_score(klines, reference_klines)
             if reference_klines and symbol != self._reference_symbol
@@ -448,7 +511,7 @@ class OpportunityScanner(AITOSModule):
             regime=regime,
         )
 
-    async def scan_all(self) -> List[ScanCandidate]:
+    async def scan_all(self) -> list[ScanCandidate]:
         self._require_initialized()
         reference_klines = None
         if self._reference_symbol:
@@ -483,8 +546,8 @@ class OpportunityScanner(AITOSModule):
         return candidates
 
     async def rank(
-        self, candidates: List[ScanCandidate], top_n: Optional[int] = None
-    ) -> List[ScanCandidate]:
+        self, candidates: list[ScanCandidate], top_n: int | None = None
+    ) -> list[ScanCandidate]:
         n = top_n if top_n is not None else self._top_n
         return sorted(
             [c for c in candidates if c.composite_score >= self._min_score_threshold],
@@ -510,11 +573,11 @@ class OpportunityScanner(AITOSModule):
     def to_opportunity(
         self,
         candidate: ScanCandidate,
-        risk_reward_multiples: Tuple[float, ...] = (1.0, 2.0, 3.0),
+        risk_reward_multiples: tuple[float, ...] = (1.0, 2.0, 3.0),
         atr_stop_multiplier: float = 1.5,
         strategy_id: str = "opportunity-scanner",
         is_production: bool = False,
-        approved_by: Optional[str] = None,
+        approved_by: str | None = None,
     ) -> Opportunity:
         entry = candidate.entry_price
         stop_distance = (
