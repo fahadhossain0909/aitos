@@ -17,6 +17,9 @@ jobs:
     name: Auto-format Python with Black
     outputs:
       changed: ${{ steps.format.outputs.changed }}
+    concurrency:
+      group: auto-format-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
@@ -68,7 +71,30 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- '*.py'
           git commit -m "style: auto-format Python with Black"
-          git push
+
+          # The repository can receive another commit while Black is running.
+          # Rebase the formatting commit onto the current remote tip before pushing.
+          # Retry a few times so a concurrent push cannot leave CI failed with
+          # a non-fast-forward error.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "${GITHUB_REF_NAME}"
+            if git rebase "origin/${GITHUB_REF_NAME}"; then
+              if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+                exit 0
+              fi
+            else
+              git rebase --abort || true
+              git fetch origin "${GITHUB_REF_NAME}"
+              git rebase "origin/${GITHUB_REF_NAME}"
+              if git push origin "HEAD:${GITHUB_REF_NAME}"; then
+                exit 0
+              fi
+            fi
+            sleep $((attempt * 2))
+          done
+
+          echo "Unable to push Black formatting commit after multiple attempts."
+          exit 1
 
   lint:
     needs: format
