@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Dict, Optional
 
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
@@ -15,11 +14,11 @@ from aitos.models.market import OrderBookSnapshot, TradeTick
 @dataclass
 class LiveSymbolCache:
     trades: deque = field(default_factory=deque)
-    order_book: Optional[OrderBookSnapshot] = None
-    last_trade_at: Optional[datetime] = None
-    last_book_at: Optional[datetime] = None
-    last_trade_received_at: Optional[datetime] = None
-    last_book_received_at: Optional[datetime] = None
+    order_book: OrderBookSnapshot | None = None
+    last_trade_at: datetime | None = None
+    last_book_at: datetime | None = None
+    last_trade_received_at: datetime | None = None
+    last_book_received_at: datetime | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
 
 
@@ -32,7 +31,7 @@ class LiveScannerCache:
         self._bus = event_bus
         self._symbols = set(symbols)
         self._max_trades = max(100, max_trades)
-        self._state: Dict[str, LiveSymbolCache] = {}
+        self._state: dict[str, LiveSymbolCache] = {}
         self._subscriptions: list[Subscription] = []
         self._initialized = False
 
@@ -93,7 +92,7 @@ class LiveScannerCache:
         symbol = payload.get("symbol") or event.topic.rsplit(".", 1)[-1]
         self._cache(symbol).liquidity_events.append(payload)
 
-    def snapshot(self, symbol: str) -> Optional[LiveSymbolCache]:
+    def snapshot(self, symbol: str) -> LiveSymbolCache | None:
         return self._state.get(symbol)
 
     def freshness_snapshot(self, symbol: str) -> dict:
@@ -128,13 +127,13 @@ class LiveScannerCache:
         }
 
     def recent_trades(
-        self, symbol: str, limit: Optional[int] = None
+        self, symbol: str, limit: int | None = None
     ) -> list[TradeTick]:
         state = self._state.get(symbol)
         trades = list(state.trades) if state else []
         return trades[-limit:] if limit else trades
 
-    def order_book(self, symbol: str) -> Optional[OrderBookSnapshot]:
+    def order_book(self, symbol: str) -> OrderBookSnapshot | None:
         state = self._state.get(symbol)
         return state.order_book if state else None
 
