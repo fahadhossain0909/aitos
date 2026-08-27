@@ -1,0 +1,77 @@
+name: VPS Stability Check
+
+on:
+  schedule:
+    - cron: '15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vps-stability
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check Redis and paper runtime
+    runs-on: ubuntu-latest
+    environment: papertrade
+    steps:
+      - name: Check required deployment secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Write SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+      - name: Check Redis and paper runtime
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/deploy_key
+          command_timeout: 5m
+          script: |
+            set -euo pipefail
+            exec 9>"$HOME/.aitos-stability.lock"
+            flock 9
+            cd "$HOME/aitos"
+            echo '=== Storage ==='
+            df -h / /mnt/aitos-data
+            echo '=== Redis ==='
+            docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} mem={{.HostConfig.Memory}}' aitos-redis
+            docker exec aitos-redis redis-cli ping
+            loading="$(docker exec aitos-redis redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\r')"
+            test "$loading" = 0
+            echo '=== Paper runtime ==='
+            docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} mem={{.HostConfig.Memory}}' aitos-paper
+            paper_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-paper)"
+            if [ "$paper_health" != healthy ]; then
+              echo '::error::aitos-paper is not healthy.'
+              docker logs --tail 100 aitos-paper || true
+              exit 1
+            fi
+            echo '=== Docker disk ==='
+            docker system df
+            echo 'VPS stability check passed.'
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f /tmp/deploy_key

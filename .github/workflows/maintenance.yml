@@ -61,10 +61,10 @@ jobs:
             echo "=== Removing exited containers and unused Docker networks ==="
             docker container prune -f --filter 'until=168h'
             docker network prune -f --filter 'until=168h'
-            echo "=== Removing unused images older than 7 days ==="
-            docker image prune -af --filter 'until=168h'
-            echo "=== Removing old BuildKit cache ==="
-            docker builder prune -af --filter 'until=168h'
+            echo "=== Removing unused images ==="
+            docker image prune -af
+            echo "=== Removing unused BuildKit cache ==="
+            docker builder prune -af
             echo "=== After cleanup ==="
             df -h / "$DATA_ROOT"
             docker system df || true
