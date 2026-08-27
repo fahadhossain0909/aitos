@@ -9,13 +9,23 @@ from typing import Any, Dict, List, Optional
 
 import clickhouse_connect
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.learning.experience import ExperienceRecord
 from aitos.logging_setup import get_logger
-from aitos.models.market import (FundingRate, Kline, OpenInterest,
-                                 OrderBookSnapshot, TradeTick)
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeTick,
+)
 
 logger = get_logger("aitos.data.repository")
 
@@ -146,23 +156,34 @@ class MarketDataRepository(AITOSModule):
         self._require_initialized()
         await self._client.insert(
             "market_ohlcv",
-            [[
-                kline.open_time,
-                kline.symbol,
-                kline.timeframe,
-                kline.open,
-                kline.high,
-                kline.low,
-                kline.close,
-                kline.volume,
-                kline.quote_volume,
-                kline.trades_count,
-                kline.taker_buy_volume,
-                kline.taker_buy_quote_volume,
-            ]],
+            [
+                [
+                    kline.open_time,
+                    kline.symbol,
+                    kline.timeframe,
+                    kline.open,
+                    kline.high,
+                    kline.low,
+                    kline.close,
+                    kline.volume,
+                    kline.quote_volume,
+                    kline.trades_count,
+                    kline.taker_buy_volume,
+                    kline.taker_buy_quote_volume,
+                ]
+            ],
             column_names=[
-                "time", "symbol", "timeframe", "open", "high", "low", "close",
-                "volume", "quote_volume", "trades_count", "taker_buy_volume",
+                "time",
+                "symbol",
+                "timeframe",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "quote_volume",
+                "trades_count",
+                "taker_buy_volume",
                 "taker_buy_quote_volume",
             ],
         )
@@ -171,18 +192,25 @@ class MarketDataRepository(AITOSModule):
         self._require_initialized()
         await self._client.insert(
             "order_book_snapshots",
-            [[
-                book.timestamp,
-                book.symbol,
-                json.dumps(book.bids),
-                json.dumps(book.asks),
-                book.spread,
-                book.depth_ratio,
-                book.last_update_id,
-            ]],
+            [
+                [
+                    book.timestamp,
+                    book.symbol,
+                    json.dumps(book.bids),
+                    json.dumps(book.asks),
+                    book.spread,
+                    book.depth_ratio,
+                    book.last_update_id,
+                ]
+            ],
             column_names=[
-                "time", "symbol", "bid_levels", "ask_levels", "spread",
-                "depth_ratio", "last_update_id",
+                "time",
+                "symbol",
+                "bid_levels",
+                "ask_levels",
+                "spread",
+                "depth_ratio",
+                "last_update_id",
             ],
         )
 
@@ -194,17 +222,24 @@ class MarketDataRepository(AITOSModule):
         self._require_initialized()
         await self._client.insert(
             "trade_ticks",
-            [[
-                trade.timestamp,
-                trade.symbol,
-                trade.trade_id,
-                trade.price,
-                trade.quantity,
-                trade.side.value,
-                int(trade.is_buyer_maker),
-            ]],
+            [
+                [
+                    trade.timestamp,
+                    trade.symbol,
+                    trade.trade_id,
+                    trade.price,
+                    trade.quantity,
+                    trade.side.value,
+                    int(trade.is_buyer_maker),
+                ]
+            ],
             column_names=[
-                "time", "symbol", "trade_id", "price", "quantity", "side",
+                "time",
+                "symbol",
+                "trade_id",
+                "price",
+                "quantity",
+                "side",
                 "is_buyer_maker",
             ],
         )
@@ -213,12 +248,14 @@ class MarketDataRepository(AITOSModule):
         self._require_initialized()
         await self._client.insert(
             "funding_rates",
-            [[
-                funding.funding_time,
-                funding.symbol,
-                funding.funding_rate,
-                funding.mark_price,
-            ]],
+            [
+                [
+                    funding.funding_time,
+                    funding.symbol,
+                    funding.funding_rate,
+                    funding.mark_price,
+                ]
+            ],
             column_names=["time", "symbol", "funding_rate", "mark_price"],
         )
 
@@ -234,29 +271,43 @@ class MarketDataRepository(AITOSModule):
         self._require_initialized()
         await self._client.insert(
             "learning_experiences",
-            [[
-                record.experience_id,
-                record.timestamp,
-                record.source,
-                record.symbol,
-                record.decision,
-                record.outcome,
-                record.reward,
-                record.confidence,
-                record.quantity,
-                record.price,
-                json.dumps(record.features, sort_keys=True, default=str),
-                json.dumps(record.market_state, sort_keys=True, default=str),
-                json.dumps(record.risk_state, sort_keys=True, default=str),
-                record.strategy_version,
-                record.model_version,
-                json.dumps(record.metadata, sort_keys=True, default=str),
-            ]],
+            [
+                [
+                    record.experience_id,
+                    record.timestamp,
+                    record.source,
+                    record.symbol,
+                    record.decision,
+                    record.outcome,
+                    record.reward,
+                    record.confidence,
+                    record.quantity,
+                    record.price,
+                    json.dumps(record.features, sort_keys=True, default=str),
+                    json.dumps(record.market_state, sort_keys=True, default=str),
+                    json.dumps(record.risk_state, sort_keys=True, default=str),
+                    record.strategy_version,
+                    record.model_version,
+                    json.dumps(record.metadata, sort_keys=True, default=str),
+                ]
+            ],
             column_names=[
-                "experience_id", "timestamp", "source", "symbol", "decision",
-                "outcome", "reward", "confidence", "quantity", "price",
-                "features_json", "market_state_json", "risk_state_json",
-                "strategy_version", "model_version", "metadata_json",
+                "experience_id",
+                "timestamp",
+                "source",
+                "symbol",
+                "decision",
+                "outcome",
+                "reward",
+                "confidence",
+                "quantity",
+                "price",
+                "features_json",
+                "market_state_json",
+                "risk_state_json",
+                "strategy_version",
+                "model_version",
+                "metadata_json",
             ],
         )
 
