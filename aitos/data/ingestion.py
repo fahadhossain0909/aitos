@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any
 
 from aitos.core.contracts import (
     AITOSModule,
@@ -66,9 +67,9 @@ class DataIngestionService(AITOSModule):
         self,
         exchange: ExchangeAdapter,
         event_bus: EventBus,
-        symbols: List[str],
+        symbols: list[str],
         kline_timeframe: str = "1m",
-        repository: Optional[MarketDataRepository] = None,
+        repository: MarketDataRepository | None = None,
         orderbook_levels: int = 20,
         liquidity_trade_window: int = 500,
     ) -> None:
@@ -80,8 +81,8 @@ class DataIngestionService(AITOSModule):
         self._orderbook_levels = orderbook_levels
         self._liquidity_trade_window = max(50, liquidity_trade_window)
         self._initialized = False
-        self._tasks: List[asyncio.Task] = []
-        self._last_event_time: Optional[str] = None
+        self._tasks: list[asyncio.Task] = []
+        self._last_event_time: str | None = None
         self._ticks_processed = 0
         self._liquidity_events = 0
         self._orderflow_events = 0
@@ -96,9 +97,9 @@ class DataIngestionService(AITOSModule):
         self._trade_stream_queue_waits = 0
         self._trade_stream_max_queue_depth = 0
         self._trade_stream_dropped = 0
-        self._last_trade_event_time: Optional[str] = None
-        self._last_book_persist_at: Dict[str, datetime] = {}
-        self._last_trade_ids: Dict[str, int] = {}
+        self._last_trade_event_time: str | None = None
+        self._last_book_persist_at: dict[str, datetime] = {}
+        self._last_trade_ids: dict[str, int] = {}
         self._trade_sink_semaphore = asyncio.Semaphore(TRADE_SINK_CONCURRENCY)
         self._live_state = LiveMarketStateStore(
             max_trades=max(5000, self._liquidity_trade_window)
@@ -113,7 +114,7 @@ class DataIngestionService(AITOSModule):
     def version(self) -> str:
         return "1.7.1"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         await self._exchange.connect()
@@ -201,7 +202,7 @@ class DataIngestionService(AITOSModule):
         return
         yield
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     async def backfill_klines(
@@ -231,7 +232,7 @@ class DataIngestionService(AITOSModule):
     async def _run_trade_stream(self) -> None:
         """Read Binance trades without dropping messages under burst load."""
         while True:
-            producer_task: Optional[asyncio.Task] = None
+            producer_task: asyncio.Task | None = None
             queue: asyncio.Queue[TradeTick] = asyncio.Queue(
                 maxsize=TRADE_STREAM_QUEUE_SIZE
             )
@@ -303,9 +304,9 @@ class DataIngestionService(AITOSModule):
                     await asyncio.gather(producer_task, return_exceptions=True)
                 await asyncio.sleep(TRADE_STREAM_RESTART_DELAY_SECONDS)
 
-    async def _process_trade_batch(self, trades: List[TradeTick]) -> None:
+    async def _process_trade_batch(self, trades: list[TradeTick]) -> None:
         """Update state in wire order, then perform bounded independent I/O."""
-        accepted: List[Tuple[TradeTick, Dict[str, Any]]] = []
+        accepted: list[tuple[TradeTick, dict[str, Any]]] = []
         for trade in trades:
             previous_id = self._last_trade_ids.get(trade.symbol, -1)
             if trade.trade_id <= previous_id:
@@ -350,7 +351,7 @@ class DataIngestionService(AITOSModule):
                     },
                 )
 
-        async def io_one(trade: TradeTick, payload: Dict[str, Any]) -> None:
+        async def io_one(trade: TradeTick, payload: dict[str, Any]) -> None:
             async with self._trade_sink_semaphore:
                 try:
                     jobs = [
@@ -454,7 +455,10 @@ class DataIngestionService(AITOSModule):
         if self._repository is not None:
             now = datetime.now(timezone.utc)
             last = self._last_book_persist_at.get(book.symbol)
-            if last is None or (now - last).total_seconds() >= ORDERBOOK_PERSIST_INTERVAL_SECONDS:
+            if (
+                last is None
+                or (now - last).total_seconds() >= ORDERBOOK_PERSIST_INTERVAL_SECONDS
+            ):
                 await self._repository.save_orderbook_snapshot(book)
                 self._last_book_persist_at[book.symbol] = now
         self._tick_processed()
