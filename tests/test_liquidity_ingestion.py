@@ -71,6 +71,9 @@ async def test_live_orderbook_handler_publishes_liquidity_event():
     assert liquidity_events
     assert any(e.payload["kind"] in {"pulling", "sweep"} for e in liquidity_events)
 
+    health = await service.health_check()
+    assert health.details["liquidity_events"] == len(liquidity_events)
+
 
 @pytest.mark.asyncio
 async def test_orderbook_event_remains_published():
