@@ -233,8 +233,11 @@ class DataIngestionService(AITOSModule):
         """Read Binance trades without dropping messages under burst load."""
         while True:
             producer_task: asyncio.Task | None = None
-            queue: asyncio.Queue[TradeTick] = asyncio.Queue(maxsize=TRADE_STREAM_QUEUE_SIZE)
+            queue: asyncio.Queue[TradeTick] = asyncio.Queue(
+                maxsize=TRADE_STREAM_QUEUE_SIZE
+            )
             try:
+
                 async def producer() -> None:
                     async for trade in self._exchange.stream_trades(self._symbols):
                         if queue.full():
@@ -262,7 +265,10 @@ class DataIngestionService(AITOSModule):
                         break
 
                     batch = [first]
-                    deadline = asyncio.get_running_loop().time() + TRADE_STREAM_BATCH_WAIT_SECONDS
+                    deadline = (
+                        asyncio.get_running_loop().time()
+                        + TRADE_STREAM_BATCH_WAIT_SECONDS
+                    )
                     while len(batch) < TRADE_STREAM_BATCH_SIZE:
                         remaining = deadline - asyncio.get_running_loop().time()
                         if remaining <= 0:
@@ -321,7 +327,9 @@ class DataIngestionService(AITOSModule):
                     "vwap": features.vwap,
                     "last_price": features.last_price,
                     "direction": features.direction,
-                    "timestamp": features.timestamp.isoformat() if features.timestamp else None,
+                    "timestamp": (
+                        features.timestamp.isoformat() if features.timestamp else None
+                    ),
                 }
                 self._orderflow_events += 1
                 self._ticks_processed += 1
