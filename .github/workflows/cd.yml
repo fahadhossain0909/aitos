@@ -118,9 +118,8 @@ jobs:
             mkdir -p "$APP_DIR"
             cd "$APP_DIR"
 
-            # GitHub Actions concurrency does not stop an already-running remote SSH
-            # process immediately. This host-side lock serializes the real Docker
-            # lifecycle, so an older deploy cannot recreate containers during cleanup.
+            # Serialize the real remote Docker lifecycle. This prevents an older
+            # deploy from recreating containers while a newer deploy is cleaning up.
             exec 9>"$HOME/.aitos-deploy.lock"
             echo "=== Acquiring host deployment lock ==="
             flock 9
@@ -325,8 +324,24 @@ jobs:
               docker compose logs --tail=150
               exit 1
             fi
+
+            # Post-deploy Docker garbage collection. Only resources that Docker
+            # reports as unused are eligible. Running containers and everything
+            # attached to them remain protected by Docker's prune semantics.
+            echo "=== Safe post-deploy Docker cleanup ==="
+            echo "Running containers before cleanup:"
+            docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
+            echo "Disk usage before cleanup:"
+            docker system df
+            docker image prune -af --filter 'until=0s'
+            docker container prune -f
+            docker network prune -f
+            docker volume prune -f
+            docker builder prune -af
+            echo "Disk usage after cleanup:"
+            docker system df
+
             echo "=== Final storage state ==="
             df -h .
             df -h "$DATA_ROOT"
-            docker system df
             echo "=== Deployment completed successfully: $COMMIT ==="
