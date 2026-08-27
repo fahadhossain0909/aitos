@@ -17,7 +17,12 @@ from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.funding import funding_rate_score
-from aitos.intelligence.liquidity import liquidity_intelligence_score
+from aitos.intelligence.liquidity import (absorption_proxy_score,
+                                          depth_imbalance_score,
+                                          liquidity_intelligence_score,
+                                          liquidity_quality_score,
+                                          liquidity_wall_score,
+                                          sweep_potential_score)
 from aitos.intelligence.liquidity_tracker import LiquidityTracker
 from aitos.intelligence.live_auction import live_auction_score
 from aitos.intelligence.live_scanner import LiveScannerCache
@@ -249,6 +254,10 @@ class OpportunityScanner(AITOSModule):
             symbol, self._timeframe, limit=self._kline_lookback
         )
         if len(klines) < 20:
+            logger.info(
+                "paper signal diagnostics",
+                extra={"aitos_extra": {"symbol": symbol, "reason": "insufficient_klines", "kline_count": len(klines)}},
+            )
             return None
         live_trades, live_book, live_fresh = self._live_market_data(symbol)
         if live_fresh and live_trades and live_book is not None:
@@ -285,12 +294,52 @@ class OpportunityScanner(AITOSModule):
         flow_score = flow_features.bias_score if flow_features else candle_cvd
         direction = determine_direction(structure_direction, flow_score)
         self._last_oi[symbol] = oi_current
+
+        liquidity_quality = liquidity_quality_score(order_book)
+        depth_imbalance = depth_imbalance_score(order_book)
+        liquidity_wall = liquidity_wall_score(order_book)
+        sweep_potential = sweep_potential_score(order_book)
+        absorption = absorption_proxy_score(order_book, trades)
+        liquidity_score = liquidity_intelligence_score(order_book, trades)
+        orderflow_delta = flow_features.delta if flow_features else 0.0
+        orderflow_cvd = flow_features.cvd if flow_features else 0.0
+        orderflow_buy_ratio = flow_features.buy_ratio if flow_features else 0.5
+        orderflow_aggression = flow_features.aggression if flow_features else 0.0
+        orderflow_vwap = flow_features.vwap if flow_features else 0.0
+
+        logger.info(
+            "paper signal diagnostics",
+            extra={
+                "aitos_extra": {
+                    "symbol": symbol,
+                    "market_source": market_source,
+                    "live_fresh": live_fresh,
+                    "executed_trades": len(trades),
+                    "structure": structure_direction,
+                    "structure_strength": round(structure_strength, 2),
+                    "candle_cvd": round(candle_cvd, 3),
+                    "orderflow_bias": round(flow_score, 3),
+                    "orderflow_delta": round(orderflow_delta, 6),
+                    "orderflow_cvd": round(orderflow_cvd, 6),
+                    "orderflow_buy_ratio": round(orderflow_buy_ratio, 4),
+                    "orderflow_aggression": round(orderflow_aggression, 4),
+                    "orderflow_vwap": round(orderflow_vwap, 6),
+                    "liquidity_quality": liquidity_quality,
+                    "depth_imbalance": depth_imbalance,
+                    "liquidity_wall": liquidity_wall,
+                    "sweep_potential": sweep_potential,
+                    "absorption_proxy": absorption,
+                    "liquidity_score": liquidity_score,
+                    "direction": direction.value if direction else "none",
+                    "scanner_threshold": self._min_score_threshold,
+                }
+            },
+        )
         if direction is None:
             return None
         trend_score = min(10.0, indicators.adx(klines) / 10.0)
         volatility_score = _volatility_fitness(vol_percentile)
         regime_score = REGIME_FIT_SCORE.get(regime, 5.0)
-        liquidity_score = liquidity_intelligence_score(order_book, trades)
         lead_lag = (
             indicators.lead_lag_score(klines, reference_klines)
             if reference_klines and symbol != self._reference_symbol
