@@ -6,8 +6,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
 from aitos.exchange.base import ExchangeAdapter
@@ -17,19 +22,22 @@ from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.funding import funding_rate_score
-from aitos.intelligence.liquidity import (absorption_proxy_score,
-                                          depth_imbalance_score,
-                                          liquidity_intelligence_score,
-                                          liquidity_quality_score,
-                                          liquidity_wall_score,
-                                          sweep_potential_score)
+from aitos.intelligence.liquidity import (
+    absorption_proxy_score,
+    depth_imbalance_score,
+    liquidity_intelligence_score,
+    liquidity_quality_score,
+    liquidity_wall_score,
+    sweep_potential_score,
+)
 from aitos.intelligence.liquidity_tracker import LiquidityTracker
 from aitos.intelligence.live_auction import live_auction_score
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.open_interest import oi_trend_score
 from aitos.intelligence.order_flow_engine import OrderFlowEngine
-from aitos.intelligence.orderflow_liquidity_interaction import \
-    FlowLiquidityInteractionEngine
+from aitos.intelligence.orderflow_liquidity_interaction import (
+    FlowLiquidityInteractionEngine,
+)
 from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
 from aitos.logging_setup import get_logger
 from aitos.models.market import OpenInterest
@@ -256,7 +264,13 @@ class OpportunityScanner(AITOSModule):
         if len(klines) < 20:
             logger.info(
                 "paper signal diagnostics",
-                extra={"aitos_extra": {"symbol": symbol, "reason": "insufficient_klines", "kline_count": len(klines)}},
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "reason": "insufficient_klines",
+                        "kline_count": len(klines),
+                    }
+                },
             )
             return None
         live_trades, live_book, live_fresh = self._live_market_data(symbol)
