@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any
 
 from aitos.core.contracts import (
     AITOSModule,
@@ -40,12 +41,11 @@ from aitos.intelligence.orderflow_liquidity_interaction import (
 )
 from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
 from aitos.logging_setup import get_logger
-from aitos.models.market import OpenInterest
 from aitos.models.trade import Opportunity, TradeSide
 
 logger = get_logger("aitos.intelligence.scanner")
 TOPIC_SCAN_COMPLETE = "market.opportunity_scanned"
-DEFAULT_WEIGHTS: Dict[str, float] = {
+DEFAULT_WEIGHTS: dict[str, float] = {
     "trend_strength": 0.10,
     "liquidity_quality": 0.10,
     "order_flow_bias": 0.15,
@@ -70,8 +70,8 @@ class ScanCandidate:
     symbol: str
     direction: TradeSide
     composite_score: float
-    component_scores: Dict[str, float]
-    rationale: List[str]
+    component_scores: dict[str, float]
+    rationale: list[str]
     entry_price: float
     atr: float
     regime: str
@@ -88,7 +88,7 @@ def _volatility_fitness(
 
 def determine_direction(
     structure_direction: str, cvd_score: float
-) -> Optional[TradeSide]:
+) -> TradeSide | None:
     if structure_direction == "bullish_bos" and cvd_score >= 5.0:
         return TradeSide.LONG
     if structure_direction == "bearish_bos" and cvd_score <= 5.0:
@@ -106,16 +106,16 @@ class OpportunityScanner(AITOSModule):
         self,
         event_bus: EventBus,
         exchange: ExchangeAdapter,
-        symbols: List[str],
+        symbols: list[str],
         timeframe: str = "15m",
         reference_symbol: str = "BTCUSDT",
-        rl_scorer: Optional[RLPolicyScorer] = None,
-        weights: Optional[Dict[str, float]] = None,
+        rl_scorer: RLPolicyScorer | None = None,
+        weights: dict[str, float] | None = None,
         min_score_threshold: float = 60.0,
         top_n: int = 5,
         kline_lookback: int = 100,
         trade_lookback: int = 500,
-        footprint_tick_sizes: Optional[Dict[str, float]] = None,
+        footprint_tick_sizes: dict[str, float] | None = None,
         live_state_stale_seconds: float = 5.0,
         amt_value_area_pct: float = 0.70,
         amt_ib_minutes: int = 60,
@@ -156,7 +156,7 @@ class OpportunityScanner(AITOSModule):
     def version(self) -> str:
         return "1.9.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         await self._exchange.connect()
@@ -214,10 +214,10 @@ class OpportunityScanner(AITOSModule):
     async def emit_events(self) -> AsyncIterator[Event]:
         return
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
-    def _footprint_tick_size(self, symbol: str) -> Optional[float]:
+    def _footprint_tick_size(self, symbol: str) -> float | None:
         tick = self._footprint_tick_sizes.get(symbol)
         return tick if tick is not None and tick > 0 else None
 
@@ -237,7 +237,7 @@ class OpportunityScanner(AITOSModule):
 
     def _analyze_amt(
         self, symbol: str, trades: list, klines: list, order_book: Any
-    ) -> Optional[AMTContext]:
+    ) -> AMTContext | None:
         tick_size = self._footprint_tick_size(symbol)
         if tick_size is None or not trades:
             return None
@@ -255,8 +255,8 @@ class OpportunityScanner(AITOSModule):
         return context
 
     async def scan_symbol(
-        self, symbol: str, reference_klines: Optional[list] = None
-    ) -> Optional[ScanCandidate]:
+        self, symbol: str, reference_klines: list | None = None
+    ) -> ScanCandidate | None:
         self._require_initialized()
         klines = await self._exchange.fetch_klines(
             symbol, self._timeframe, limit=self._kline_lookback
@@ -511,7 +511,7 @@ class OpportunityScanner(AITOSModule):
             regime=regime,
         )
 
-    async def scan_all(self) -> List[ScanCandidate]:
+    async def scan_all(self) -> list[ScanCandidate]:
         self._require_initialized()
         reference_klines = None
         if self._reference_symbol:
@@ -546,8 +546,8 @@ class OpportunityScanner(AITOSModule):
         return candidates
 
     async def rank(
-        self, candidates: List[ScanCandidate], top_n: Optional[int] = None
-    ) -> List[ScanCandidate]:
+        self, candidates: list[ScanCandidate], top_n: int | None = None
+    ) -> list[ScanCandidate]:
         n = top_n if top_n is not None else self._top_n
         return sorted(
             [c for c in candidates if c.composite_score >= self._min_score_threshold],
@@ -573,11 +573,11 @@ class OpportunityScanner(AITOSModule):
     def to_opportunity(
         self,
         candidate: ScanCandidate,
-        risk_reward_multiples: Tuple[float, ...] = (1.0, 2.0, 3.0),
+        risk_reward_multiples: tuple[float, ...] = (1.0, 2.0, 3.0),
         atr_stop_multiplier: float = 1.5,
         strategy_id: str = "opportunity-scanner",
         is_production: bool = False,
-        approved_by: Optional[str] = None,
+        approved_by: str | None = None,
     ) -> Opportunity:
         entry = candidate.entry_price
         stop_distance = (
