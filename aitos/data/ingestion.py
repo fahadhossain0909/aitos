@@ -29,7 +29,7 @@ TRADE_STREAM_RESTART_DELAY_SECONDS = 1.0
 TRADE_STREAM_QUEUE_SIZE = 10_000
 TRADE_STREAM_BATCH_SIZE = 64
 TRADE_STREAM_BATCH_WAIT_SECONDS = 0.010
-TRADE_SINK_CONCURRENCY = 8
+TRADE_SINK_CONCURRENCY = 64
 TRADE_FALLBACK_LIMIT = 500
 ORDERBOOK_PERSIST_INTERVAL_SECONDS = 1.0
 STREAM_RESTART_DELAY_SECONDS = 1.0
@@ -454,67 +454,18 @@ class DataIngestionService(AITOSModule):
         if self._repository is not None:
             now = datetime.now(timezone.utc)
             last = self._last_book_persist_at.get(book.symbol)
-            if (
-                last is None
-                or (now - last).total_seconds() >= ORDERBOOK_PERSIST_INTERVAL_SECONDS
-            ):
-                await self._repository.save_order_book_snapshot(book)
+            if last is None or (now - last).total_seconds() >= ORDERBOOK_PERSIST_INTERVAL_SECONDS:
+                await self._repository.save_orderbook_snapshot(book)
                 self._last_book_persist_at[book.symbol] = now
-        events = self._live_state.on_order_book(book)
-        for event in events:
-            await self._event_bus.publish(
-                Event(
-                    topic=liquidity_topic(book.symbol),
-                    payload={
-                        "kind": event.kind,
-                        "side": event.side,
-                        "score": event.score,
-                        "price": event.price,
-                        "details": event.details,
-                        "timestamp": book.timestamp.isoformat(),
-                        "last_update_id": book.last_update_id,
-                    },
-                    source_module=self.module_id,
-                    priority=(
-                        EventPriority.HIGH
-                        if event.kind == "sweep"
-                        else EventPriority.NORMAL
-                    ),
-                )
-            )
-            self._liquidity_events += 1
-        self._publish_live_state(book.symbol)
         self._tick_processed()
 
     def _publish_live_state(self, symbol: str) -> None:
-        state = self._live_state.snapshot(symbol)
-        asyncio.create_task(
-            self._event_bus.publish(
-                Event(
-                    topic=live_state_topic(symbol),
-                    payload={
-                        "trade_count": state.trade_count,
-                        "order_flow": (
-                            state.order_flow.__dict__ if state.order_flow else None
-                        ),
-                        "liquidity_events": [
-                            e.__dict__ for e in state.liquidity_events[-20:]
-                        ],
-                        "best_bid": (
-                            state.order_book.best_bid if state.order_book else None
-                        ),
-                        "best_ask": (
-                            state.order_book.best_ask if state.order_book else None
-                        ),
-                        "timestamp": (
-                            state.order_book.timestamp.isoformat()
-                            if state.order_book
-                            else None
-                        ),
-                    },
-                    source_module=self.module_id,
-                    priority=EventPriority.NORMAL,
-                )
+        self._event_bus.publish(
+            Event(
+                topic=live_state_topic(symbol),
+                payload=self._live_state.snapshot(symbol),
+                source_module=self.module_id,
+                priority=EventPriority.NORMAL,
             )
         )
 
