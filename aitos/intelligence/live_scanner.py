@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from aitos.core.contracts import Event
@@ -18,6 +18,8 @@ class LiveSymbolCache:
     order_book: Optional[OrderBookSnapshot] = None
     last_trade_at: Optional[datetime] = None
     last_book_at: Optional[datetime] = None
+    last_trade_received_at: Optional[datetime] = None
+    last_book_received_at: Optional[datetime] = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
 
 
@@ -77,12 +79,14 @@ class LiveScannerCache:
         state = self._cache(trade.symbol)
         state.trades.append(trade)
         state.last_trade_at = trade.timestamp
+        state.last_trade_received_at = datetime.now(timezone.utc)
 
     async def _on_book(self, event: Event) -> None:
         book = OrderBookSnapshot.from_dict(event.payload)
         state = self._cache(book.symbol)
         state.order_book = book
         state.last_book_at = book.timestamp
+        state.last_book_received_at = datetime.now(timezone.utc)
 
     async def _on_liquidity(self, event: Event) -> None:
         payload = dict(event.payload)
@@ -91,6 +95,37 @@ class LiveScannerCache:
 
     def snapshot(self, symbol: str) -> Optional[LiveSymbolCache]:
         return self._state.get(symbol)
+
+    def freshness_snapshot(self, symbol: str) -> dict:
+        """Return source and consumer timestamps for scanner diagnostics."""
+        state = self._state.get(symbol)
+        if state is None:
+            return {
+                "cache_has_state": False,
+                "last_trade_at": None,
+                "last_book_at": None,
+                "last_trade_received_at": None,
+                "last_book_received_at": None,
+            }
+        return {
+            "cache_has_state": True,
+            "last_trade_at": (
+                state.last_trade_at.isoformat() if state.last_trade_at else None
+            ),
+            "last_book_at": (
+                state.last_book_at.isoformat() if state.last_book_at else None
+            ),
+            "last_trade_received_at": (
+                state.last_trade_received_at.isoformat()
+                if state.last_trade_received_at
+                else None
+            ),
+            "last_book_received_at": (
+                state.last_book_received_at.isoformat()
+                if state.last_book_received_at
+                else None
+            ),
+        }
 
     def recent_trades(
         self, symbol: str, limit: Optional[int] = None

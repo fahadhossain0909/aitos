@@ -21,29 +21,34 @@ import asyncio
 import fnmatch
 import os
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import (Any, AsyncIterator, Awaitable, Callable, Dict, List,
-                    Optional)
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventPriority,
-                                  EventResponse, HealthStatus, ModuleStatus)
-from aitos.core.exceptions import (EventSchemaValidationError,
-                                   ModuleNotInitializedError)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventPriority,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
+from aitos.core.exceptions import EventSchemaValidationError, ModuleNotInitializedError
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.eventbus")
 
-EventHandler = Callable[[Event], Awaitable[Optional[EventResponse]]]
+EventHandler = Callable[[Event], Awaitable[EventResponse | None]]
 
 DLQ_STREAM = "stream:dlq"
 MAX_DELIVERY_ATTEMPTS = 5
 POLL_INTERVAL_SECONDS = 0.15
+CONSUMER_BLOCK_MS = 100
+CONSUMER_BATCH_SIZE = 100
+PENDING_RECLAIM_IDLE_MS = 5_000
+PENDING_RECLAIM_BATCH_SIZE = 100
 
-# High-volume market streams are transient transport buffers. Historical market
-# data belongs in ClickHouse; trade/decision/journal streams remain unbounded.
-# Defaults are deliberately conservative for the 8–12 GiB VPS profile and can
-# be overridden without a code change through environment variables.
 STREAM_MAXLEN_DEFAULTS = {
     "market.orderbook.": 25_000,
     "market.liquidity.": 100_000,
@@ -55,8 +60,7 @@ def _stream_key(topic: str) -> str:
     return f"stream:{topic}"
 
 
-def _stream_maxlen(topic: str) -> Optional[int]:
-    """Return the configured bounded length for high-volume market topics."""
+def _stream_maxlen(topic: str) -> int | None:
     for prefix, default in STREAM_MAXLEN_DEFAULTS.items():
         if topic.startswith(prefix):
             env_name = "REDIS_STREAM_MAXLEN_" + prefix[:-1].replace(".", "_").upper()
@@ -80,7 +84,6 @@ def _stream_maxlen(topic: str) -> Optional[int]:
 
 
 def validate_event_schema(event: Event) -> None:
-    """Minimal structural validation. Extend per-topic schemas as needed."""
     if not event.topic or not isinstance(event.topic, str):
         raise EventSchemaValidationError("Event.topic must be a non-empty string")
     if not isinstance(event.payload, dict):
@@ -89,8 +92,6 @@ def validate_event_schema(event: Event) -> None:
 
 @dataclass
 class Subscription:
-    """Handle returned by ``subscribe``; call ``cancel()`` to stop consuming."""
-
     topic_pattern: str
     group: str
     consumer: str
@@ -107,11 +108,11 @@ class EventBus(AITOSModule):
         self._redis = redis_client
         self._module_id = module_id
         self._initialized = False
-        self._started_at: Optional[float] = None
-        self._last_event_time: Optional[str] = None
+        self._started_at: float | None = None
+        self._last_event_time: str | None = None
         self._known_topics: set[str] = set()
-        self._subscriptions: List[Subscription] = []
-        self._pending_replies: Dict[str, asyncio.Future] = {}
+        self._subscriptions: list[Subscription] = []
+        self._pending_replies: dict[str, asyncio.Future] = {}
 
     @property
     def module_id(self) -> str:
@@ -121,7 +122,7 @@ class EventBus(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         await self._redis.ping()
@@ -135,7 +136,7 @@ class EventBus(AITOSModule):
             await self._redis.ping()
             latency_ms = (time.monotonic() - start) * 1000
             status = ModuleStatus.HEALTHY
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             latency_ms = (time.monotonic() - start) * 1000
             status = ModuleStatus.UNHEALTHY
             logger.error("EventBus health check failed: %s", exc)
@@ -163,13 +164,13 @@ class EventBus(AITOSModule):
 
     async def emit_events(self) -> AsyncIterator[Event]:
         return
-        yield  # pragma: no cover
+        yield
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     async def publish(
-        self, event: Event, priority: Optional[EventPriority] = None
+        self, event: Event, priority: EventPriority | None = None
     ) -> None:
         self._require_initialized()
         validate_event_schema(event)
@@ -200,7 +201,6 @@ class EventBus(AITOSModule):
             "published event",
             extra={"aitos_extra": {"topic": event.topic, "event_id": event.event_id}},
         )
-
         if (
             event.topic.endswith(".reply")
             and event.correlation_id
@@ -213,10 +213,8 @@ class EventBus(AITOSModule):
     async def subscribe(
         self, topic: str, handler: EventHandler, group: str = "default"
     ) -> Subscription:
-        """Subscribe to a topic (supports ``*`` glob patterns, e.g. ``intel.*``)."""
         self._require_initialized()
         consumer_name = f"{group}-{id(handler)}"
-
         if "*" in topic:
             resolved_topics = [
                 t for t in self._known_topics if fnmatch.fnmatch(t, topic)
@@ -224,10 +222,8 @@ class EventBus(AITOSModule):
         else:
             resolved_topics = [topic]
             self._known_topics.add(topic)
-
         for t in resolved_topics or [topic]:
             await self._ensure_group(_stream_key(t), group)
-
         task = asyncio.create_task(
             self._consume_loop(
                 topic_pattern=topic,
@@ -245,7 +241,6 @@ class EventBus(AITOSModule):
     async def request_reply(
         self, event: Event, timeout_ms: float = 5000
     ) -> EventResponse:
-        """Publish ``event`` and await a correlated reply within ``timeout_ms``."""
         self._require_initialized()
         correlation_id = event.correlation_id or event.event_id
         request_event = Event(
@@ -285,9 +280,39 @@ class EventBus(AITOSModule):
     async def _ensure_group(self, stream_key: str, group: str) -> None:
         try:
             await self._redis.xgroup_create(stream_key, group, id="0", mkstream=True)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+
+    async def _reclaim_pending(
+        self, stream_key: str, group: str, consumer: str
+    ) -> list[tuple[Any, dict[str, Any]]]:
+        """Claim abandoned pending entries so a restarted scanner can catch up."""
+        try:
+            result = await self._redis.xautoclaim(
+                stream_key,
+                group,
+                consumer,
+                min_idle_time=PENDING_RECLAIM_IDLE_MS,
+                start_id="0-0",
+                count=PENDING_RECLAIM_BATCH_SIZE,
+            )
+            if isinstance(result, (list, tuple)) and len(result) >= 2:
+                return list(result[1])
+        except (AttributeError, TypeError):
+            pass
+        except Exception as exc:
+            logger.warning(
+                "pending reclaim failed",
+                extra={
+                    "aitos_extra": {
+                        "stream": stream_key,
+                        "group": group,
+                        "error": str(exc),
+                    }
+                },
+            )
+        return []
 
     async def _consume_loop(
         self, topic_pattern: str, group: str, consumer: str, handler: EventHandler
@@ -307,10 +332,18 @@ class EventBus(AITOSModule):
                     streams_seen |= matching
                 else:
                     streams_seen = {topic_pattern}
-
                 if not streams_seen:
                     await asyncio.sleep(0.2)
                     continue
+
+                # Recover abandoned entries before reading new entries.
+                for stream_topic in streams_seen:
+                    stream_key = _stream_key(stream_topic)
+                    pending = await self._reclaim_pending(stream_key, group, consumer)
+                    for entry_id, fields in pending:
+                        await self._process_message(
+                            stream_key, entry_id, fields, group, handler
+                        )
 
                 stream_map = {_stream_key(t): ">" for t in streams_seen}
                 try:
@@ -318,18 +351,16 @@ class EventBus(AITOSModule):
                         groupname=group,
                         consumername=consumer,
                         streams=stream_map,
-                        count=10,
-                        block=None,
+                        count=CONSUMER_BATCH_SIZE,
+                        block=CONSUMER_BLOCK_MS,
                     )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     logger.error("xreadgroup error: %s", exc)
                     await asyncio.sleep(1.0)
                     continue
-
                 if not resp:
                     await asyncio.sleep(POLL_INTERVAL_SECONDS)
                     continue
-
                 for stream_key, messages in resp:
                     stream_key = (
                         stream_key.decode()
@@ -347,7 +378,7 @@ class EventBus(AITOSModule):
         self,
         stream_key: str,
         entry_id: Any,
-        fields: Dict[str, Any],
+        fields: dict[str, Any],
         group: str,
         handler: EventHandler,
     ) -> None:
@@ -363,7 +394,7 @@ class EventBus(AITOSModule):
                     correlation_id=event.correlation_id,
                 )
                 await self.publish(reply_event)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.error(
                 "handler failed for event",
                 extra={
@@ -382,7 +413,7 @@ class EventBus(AITOSModule):
         self,
         stream_key: str,
         entry_id: Any,
-        fields: Dict[str, Any],
+        fields: dict[str, Any],
         group: str,
         event: Event,
         exc: Exception,
@@ -396,7 +427,6 @@ class EventBus(AITOSModule):
             if pid == entry_id:
                 delivery_count = p.get("times_delivered", 1)
                 break
-
         if delivery_count >= MAX_DELIVERY_ATTEMPTS:
             dlq_payload = dict(fields)
             dlq_payload["dlq_reason"] = str(exc)
