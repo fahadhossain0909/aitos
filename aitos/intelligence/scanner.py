@@ -86,9 +86,7 @@ def _volatility_fitness(
     )
 
 
-def determine_direction(
-    structure_direction: str, cvd_score: float
-) -> TradeSide | None:
+def determine_direction(structure_direction: str, cvd_score: float) -> TradeSide | None:
     if structure_direction == "bullish_bos" and cvd_score >= 5.0:
         return TradeSide.LONG
     if structure_direction == "bearish_bos" and cvd_score <= 5.0:
