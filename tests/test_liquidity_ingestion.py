@@ -23,7 +23,7 @@ class FakeBus:
 
 
 class FakeRepository:
-    async def save_order_book_snapshot(self, book):
+    async def save_orderbook_snapshot(self, book):
         pass
 
     async def save_trade_tick(self, trade):
