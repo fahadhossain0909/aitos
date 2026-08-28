@@ -37,7 +37,9 @@ class LiveSymbolCache:
 class LiveScannerCache:
     """Maintains live state with a process-local WebSocket fast lane."""
 
-    def __init__(self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000) -> None:
+    def __init__(
+        self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000
+    ) -> None:
         self._bus = event_bus
         self._symbols = set(symbols)
         self._max_trades = max(100, max_trades)
@@ -70,7 +72,13 @@ class LiveScannerCache:
         self._initialized = True
         logger.info(
             "live scanner direct market-data fast lane enabled",
-            extra={"aitos_extra": {"symbols": sorted(self._symbols), "redis_live_trade_bridge": False, "redis_live_book_bridge": False}},
+            extra={
+                "aitos_extra": {
+                    "symbols": sorted(self._symbols),
+                    "redis_live_trade_bridge": False,
+                    "redis_live_book_bridge": False,
+                }
+            },
         )
 
     async def shutdown(self) -> None:
@@ -90,7 +98,15 @@ class LiveScannerCache:
         if age > LIVE_TRADE_MAX_AGE_SECONDS:
             logger.info(
                 "ignored stale trade in direct live scanner",
-                extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id, "trade_age_sec": round(age, 3), "max_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS, "source": "direct_websocket_fast_lane"}},
+                extra={
+                    "aitos_extra": {
+                        "symbol": trade.symbol,
+                        "trade_id": trade.trade_id,
+                        "trade_age_sec": round(age, 3),
+                        "max_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS,
+                        "source": "direct_websocket_fast_lane",
+                    }
+                },
             )
             return
         state.trades.append(trade)
@@ -130,7 +146,18 @@ class LiveScannerCache:
     def freshness_snapshot(self, symbol: str) -> dict:
         state = self._state.get(symbol)
         if state is None:
-            return {"cache_has_state": False, "last_trade_at": None, "last_book_at": None, "last_trade_received_at": None, "last_book_received_at": None, "trade_age_sec": None, "book_age_sec": None, "trade_consumer_lag_sec": None, "book_consumer_lag_sec": None, "live_data_transport": "direct_websocket"}
+            return {
+                "cache_has_state": False,
+                "last_trade_at": None,
+                "last_book_at": None,
+                "last_trade_received_at": None,
+                "last_book_received_at": None,
+                "trade_age_sec": None,
+                "book_age_sec": None,
+                "trade_consumer_lag_sec": None,
+                "book_consumer_lag_sec": None,
+                "live_data_transport": "direct_websocket",
+            }
         now = datetime.now(timezone.utc)
         trade_age = self._age_seconds(state.last_trade_at, now)
         book_age = self._age_seconds(state.last_book_at, now)
@@ -138,14 +165,34 @@ class LiveScannerCache:
         book_received_age = self._age_seconds(state.last_book_received_at, now)
         return {
             "cache_has_state": True,
-            "last_trade_at": state.last_trade_at.isoformat() if state.last_trade_at else None,
-            "last_book_at": state.last_book_at.isoformat() if state.last_book_at else None,
-            "last_trade_received_at": state.last_trade_received_at.isoformat() if state.last_trade_received_at else None,
-            "last_book_received_at": state.last_book_received_at.isoformat() if state.last_book_received_at else None,
+            "last_trade_at": (
+                state.last_trade_at.isoformat() if state.last_trade_at else None
+            ),
+            "last_book_at": (
+                state.last_book_at.isoformat() if state.last_book_at else None
+            ),
+            "last_trade_received_at": (
+                state.last_trade_received_at.isoformat()
+                if state.last_trade_received_at
+                else None
+            ),
+            "last_book_received_at": (
+                state.last_book_received_at.isoformat()
+                if state.last_book_received_at
+                else None
+            ),
             "trade_age_sec": round(trade_age, 3) if trade_age is not None else None,
             "book_age_sec": round(book_age, 3) if book_age is not None else None,
-            "trade_consumer_lag_sec": round(max(0.0, trade_age - trade_received_age), 3) if trade_age is not None and trade_received_age is not None else None,
-            "book_consumer_lag_sec": round(max(0.0, book_age - book_received_age), 3) if book_age is not None and book_received_age is not None else None,
+            "trade_consumer_lag_sec": (
+                round(max(0.0, trade_age - trade_received_age), 3)
+                if trade_age is not None and trade_received_age is not None
+                else None
+            ),
+            "book_consumer_lag_sec": (
+                round(max(0.0, book_age - book_received_age), 3)
+                if book_age is not None and book_received_age is not None
+                else None
+            ),
             "live_data_transport": "direct_websocket",
         }
 
@@ -155,7 +202,12 @@ class LiveScannerCache:
         if previous is not None and (now - previous).total_seconds() < 30.0:
             return
         self._last_freshness_log_at[symbol] = now
-        logger.info("live scanner freshness", extra={"aitos_extra": {"symbol": symbol, **self.freshness_snapshot(symbol)}})
+        logger.info(
+            "live scanner freshness",
+            extra={
+                "aitos_extra": {"symbol": symbol, **self.freshness_snapshot(symbol)}
+            },
+        )
 
     def recent_trades(self, symbol: str, limit: int | None = None) -> list[TradeTick]:
         state = self._state.get(symbol)
