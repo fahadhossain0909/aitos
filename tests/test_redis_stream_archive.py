@@ -27,7 +27,9 @@ def test_cursor_checkpoint_is_atomic(tmp_path: Path, monkeypatch) -> None:
     assert writer.load() == {"stream:test": "123-0"}
 
 
-def test_archive_contains_stream_id_before_checkpoint(tmp_path: Path, monkeypatch) -> None:
+def test_archive_contains_stream_id_before_checkpoint(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setattr(archive, "ROOT", tmp_path)
     monkeypatch.setattr(archive, "CURSOR_FILE", tmp_path / ".cursors.json")
     writer = ArchiveWriter()
