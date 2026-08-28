@@ -45,9 +45,8 @@ class RedisEventArchive:
         line = json.dumps(
             record, ensure_ascii=False, default=str, separators=(",", ":")
         )
-        with self._lock:
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(line)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+        with self._lock, path.open("a", encoding="utf-8") as handle:
+            handle.write(line)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
