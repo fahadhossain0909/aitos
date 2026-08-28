@@ -142,14 +142,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield kline
 
     async def stream_trades(self, symbols: List[str]) -> AsyncIterator[TradeTick]:
-        """Consume Binance Futures raw trades via the resilient market stream."""
+        """Consume Binance Futures raw trades via the resilient public stream."""
         if not symbols:
             return
-
-        # The raw trade stream is the most direct live trade feed and matches
-        # the /ws/<symbol>@trade path verified from the production VPS. Using
-        # raw trade IDs also keeps the REST recovery cursor comparable with
-        # /fapi/v1/trades, avoiding an aggTrade/raw-trade ID namespace mix-up.
         streams = [f"{symbol.lower()}@trade" for symbol in symbols]
         async for data, _stream_name in self._raw_stream(streams, emit_reconnect=True):
             yield parse_trade_ws(data)
@@ -258,11 +253,14 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     @staticmethod
     def _ws_base_url(streams: List[str]) -> str:
-        """Select Binance's post-April-2026 Futures WebSocket namespace."""
+        """Route Futures streams to their post-April-2026 namespace."""
         if not streams:
             return WS_MARKET_BASE_URL
-        is_depth = all("@depth" in stream for stream in streams)
-        if is_depth:
+
+        # Binance routes high-frequency public streams (trade and depth)
+        # through /public. Regular market streams (kline, aggTrade, etc.) use
+        # /market. A combined connection must contain one namespace only.
+        if all("@depth" in stream or "@trade" in stream for stream in streams):
             return WS_PUBLIC_BASE_URL
         return WS_MARKET_BASE_URL
 
