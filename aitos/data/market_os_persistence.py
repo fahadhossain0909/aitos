@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any
 
 from aitos.core.contracts import (
     AITOSModule,
@@ -59,7 +59,7 @@ class MarketOSPersistence(AITOSModule):
     def __init__(
         self,
         event_bus: EventBus,
-        repository: Optional[MarketDataRepository],
+        repository: MarketDataRepository | None,
         batch_size: int = BATCH_SIZE,
         flush_interval_seconds: float = BATCH_FLUSH_INTERVAL_SECONDS,
     ) -> None:
@@ -69,7 +69,7 @@ class MarketOSPersistence(AITOSModule):
         self._initialized = False
         self._events_persisted = 0
         self._errors = 0
-        self._last_event_time: Optional[str] = None
+        self._last_event_time: str | None = None
         self._batch_size = max(1, batch_size)
         self._flush_interval_seconds = max(0.05, flush_interval_seconds)
         self._buffers: dict[str, list[list[Any]]] = {
@@ -118,7 +118,7 @@ class MarketOSPersistence(AITOSModule):
             ],
         }
         self._flush_lock = asyncio.Lock()
-        self._flush_task: Optional[asyncio.Task[None]] = None
+        self._flush_task: asyncio.Task[None] | None = None
 
     @property
     def module_id(self) -> str:
@@ -128,7 +128,7 @@ class MarketOSPersistence(AITOSModule):
     def version(self) -> str:
         return "1.1.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         if self._repository is None:
@@ -200,10 +200,10 @@ class MarketOSPersistence(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
-    async def _handle_orderflow(self, event: Event) -> Optional[EventResponse]:
+    async def _handle_orderflow(self, event: Event) -> EventResponse | None:
         payload = event.payload
         symbol = _symbol_from_topic(event.topic)
         row = [
@@ -225,7 +225,7 @@ class MarketOSPersistence(AITOSModule):
         await self._enqueue("market_orderflow", row, event)
         return None
 
-    async def _handle_liquidity(self, event: Event) -> Optional[EventResponse]:
+    async def _handle_liquidity(self, event: Event) -> EventResponse | None:
         payload = event.payload
         symbol = _symbol_from_topic(event.topic)
         row = [
@@ -242,7 +242,7 @@ class MarketOSPersistence(AITOSModule):
         await self._enqueue("market_liquidity_events", row, event)
         return None
 
-    async def _handle_live_state(self, event: Event) -> Optional[EventResponse]:
+    async def _handle_live_state(self, event: Event) -> EventResponse | None:
         payload = event.payload
         symbol = _symbol_from_topic(event.topic)
         row = [
@@ -285,7 +285,7 @@ class MarketOSPersistence(AITOSModule):
         for table in tuple(self._buffers):
             await self._flush_table(table, None)
 
-    async def _flush_table(self, table: str, event: Optional[Event]) -> None:
+    async def _flush_table(self, table: str, event: Event | None) -> None:
         if self._repository is None:
             return
         async with self._flush_lock:
@@ -326,11 +326,11 @@ def _symbol_from_topic(topic: str) -> str:
     return topic.rsplit(".", 1)[-1]
 
 
-def _optional_float(value: Any) -> Optional[float]:
+def _optional_float(value: Any) -> float | None:
     return None if value is None else float(value)
 
 
-def _parse_timestamp(value: Any) -> Optional[datetime]:
+def _parse_timestamp(value: Any) -> datetime | None:
     if not value:
         return None
     if isinstance(value, datetime):
