@@ -351,11 +351,62 @@ async def run_scan_and_trade_cycle(
     portfolio = portfolio_tracker.build_portfolio_state(components.trade_lifecycle)
     await components.risk_engine.assess(portfolio)
     candidates = await components.scanner.scan_all()
+    for candidate in candidates:
+        logger.info(
+            "scanner score breakdown",
+            extra={
+                "aitos_extra": {
+                    "symbol": candidate.symbol,
+                    "direction": candidate.direction.value,
+                    "raw_component_scores": dict(candidate.component_scores),
+                    "weights": dict(components.scanner._weights),
+                    "weighted_contributions": {
+                        name: round(
+                            float(score) * float(components.scanner._weights.get(name, 0.0)),
+                            6,
+                        )
+                        for name, score in candidate.component_scores.items()
+                    },
+                    "weight_total": sum(
+                        float(components.scanner._weights.get(name, 0.0))
+                        for name in candidate.component_scores
+                    ),
+                    "normalized_score": candidate.composite_score,
+                    "threshold": components.scanner._min_score_threshold,
+                    "threshold_pass": candidate.composite_score
+                    >= components.scanner._min_score_threshold,
+                }
+            },
+        )
     ranked = await components.scanner.rank(candidates)
+    logger.info(
+        "scanner ranking decision",
+        extra={
+            "aitos_extra": {
+                "candidate_count": len(candidates),
+                "ranked_count": len(ranked),
+                "threshold": components.scanner._min_score_threshold,
+                "ranked_symbols": [c.symbol for c in ranked],
+                "candidate_scores": {
+                    c.symbol: c.composite_score for c in candidates
+                },
+            }
+        },
+    )
     open_symbols = {t.symbol for t in components.trade_lifecycle.get_open_trades()}
     submitted = 0
     for candidate in ranked:
         if candidate.symbol in open_symbols:
+            logger.info(
+                "trade candidate skipped",
+                extra={
+                    "aitos_extra": {
+                        "symbol": candidate.symbol,
+                        "reason": "symbol_already_open",
+                        "score": candidate.composite_score,
+                    }
+                },
+            )
             continue
         decision = await components.scanner.decide_with_kernel(
             candidate, components.kernel
@@ -364,6 +415,23 @@ async def run_scan_and_trade_cycle(
             decision.direction != candidate.direction.value.lower()
             or decision.confidence < components.kernel.fusion_min_confidence
         ):
+            logger.info(
+                "trade candidate rejected by kernel",
+                extra={
+                    "aitos_extra": {
+                        "symbol": candidate.symbol,
+                        "score": candidate.composite_score,
+                        "candidate_direction": candidate.direction.value.lower(),
+                        "kernel_direction": decision.direction,
+                        "kernel_confidence": decision.confidence,
+                        "kernel_min_confidence": components.kernel.fusion_min_confidence,
+                        "direction_match": decision.direction
+                        == candidate.direction.value.lower(),
+                        "confidence_pass": decision.confidence
+                        >= components.kernel.fusion_min_confidence,
+                    }
+                },
+            )
             continue
         opportunity = components.scanner.to_opportunity(
             candidate, is_production=is_production, approved_by=approved_by
@@ -409,6 +477,17 @@ async def run_scan_and_trade_cycle(
             portfolio_tracker.build_portfolio_state(components.trade_lifecycle),
         )
         submitted += 1
+        logger.info(
+            "trade candidate submitted",
+            extra={
+                "aitos_extra": {
+                    "symbol": candidate.symbol,
+                    "score": candidate.composite_score,
+                    "kernel_confidence": decision.confidence,
+                    "trade_state": trade.state.value,
+                }
+            },
+        )
         if trade.state == TradeLifecycleState.POSITION_OPENED:
             open_symbols.add(candidate.symbol)
     return submitted
