@@ -11,7 +11,6 @@ import aiohttp
 from aitos.exchange.base import ExchangeAdapter
 from aitos.exchange.orderbook import LocalOrderBook, OrderBookSequenceError
 from aitos.exchange.parsing import (
-    parse_agg_trade_ws,
     parse_depth_diff_ws,
     parse_funding_rate_rest,
     parse_kline_rest,
@@ -19,6 +18,7 @@ from aitos.exchange.parsing import (
     parse_open_interest_rest,
     parse_order_book_rest,
     parse_trade_rest,
+    parse_trade_ws,
 )
 from aitos.exchange.rate_limiter import TokenBucketRateLimiter
 from aitos.exchange.symbol_filters import SymbolFilters, parse_exchange_info
@@ -94,7 +94,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw
         ]
 
-    async def fetch_order_book(self, symbol: str, limit: int = 50) -> OrderBookSnapshot:
+    async def fetch_order_book(
+        self, symbol: str, limit: int = 50
+    ) -> OrderBookSnapshot:
         weight = 2 if limit <= 50 else (5 if limit <= 100 else 10)
         raw = await self._get(
             "/fapi/v1/depth", {"symbol": symbol, "limit": limit}, weight
@@ -142,13 +144,17 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield kline
 
     async def stream_trades(self, symbols: List[str]) -> AsyncIterator[TradeTick]:
-        """Consume Binance Futures aggTrade via the resilient market stream path."""
+        """Consume Binance Futures raw trades via the resilient market stream."""
         if not symbols:
             return
 
-        streams = [f"{symbol.lower()}@aggTrade" for symbol in symbols]
+        # The raw trade stream is the most direct live trade feed and matches
+        # the /ws/<symbol>@trade path verified from the production VPS. Using
+        # raw trade IDs also keeps the REST recovery cursor comparable with
+        # /fapi/v1/trades, avoiding an aggTrade/raw-trade ID namespace mix-up.
+        streams = [f"{symbol.lower()}@trade" for symbol in symbols]
         async for data, _stream_name in self._raw_stream(streams, emit_reconnect=True):
-            yield parse_agg_trade_ws(data)
+            yield parse_trade_ws(data)
 
     async def stream_order_book(
         self, symbols: List[str], levels: int = 20
@@ -211,7 +217,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 )
             except asyncio.TimeoutError:
                 raise RuntimeError("Binance order-book stream did not become ready")
-            # Seed every symbol once the stream is live so the first diffs can bridge.
             for symbol in symbols:
                 books[symbol] = await bootstrap(symbol)
             while True:
@@ -255,19 +260,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     @staticmethod
     def _ws_base_url(streams: List[str]) -> str:
-        """Select Binance's post-April-2026 Futures WebSocket namespace.
-
-        Binance split Futures market-data streams into ``/market`` and
-        high-frequency public streams into ``/public``. A single combined
-        connection must contain streams from only one namespace.
-        """
+        """Select Binance's post-April-2026 Futures WebSocket namespace."""
         if not streams:
             return WS_MARKET_BASE_URL
-
         is_depth = all("@depth" in stream for stream in streams)
         if is_depth:
             return WS_PUBLIC_BASE_URL
-
         return WS_MARKET_BASE_URL
 
     async def _raw_stream(
