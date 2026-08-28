@@ -1,7 +1,14 @@
-from aitos.exchange.parsing import (parse_agg_trade_ws, parse_depth_ws,
-                                    parse_funding_rate_rest, parse_kline_rest,
-                                    parse_kline_ws, parse_open_interest_rest,
-                                    parse_order_book_rest, parse_trade_rest)
+from aitos.exchange.parsing import (
+    parse_agg_trade_ws,
+    parse_depth_ws,
+    parse_funding_rate_rest,
+    parse_kline_rest,
+    parse_kline_ws,
+    parse_open_interest_rest,
+    parse_order_book_rest,
+    parse_trade_rest,
+    parse_trade_ws,
+)
 from aitos.models.market import TradeSide
 
 # Sample payloads shaped exactly like Binance USDT-M Futures API responses.
@@ -90,6 +97,17 @@ SAMPLE_AGG_TRADE_WS = {
     "m": False,
 }
 
+SAMPLE_TRADE_WS = {
+    "e": "trade",
+    "E": 1718000000000,
+    "s": "BTCUSDT",
+    "t": 1234567,
+    "p": "65001.00",
+    "q": "0.125",
+    "T": 1718000000000,
+    "m": True,
+}
+
 SAMPLE_DEPTH_WS = {
     "e": "depthUpdate",
     "E": 1718000000000,
@@ -121,7 +139,7 @@ def test_parse_order_book_rest():
 
 def test_parse_trade_rest_buyer_maker_is_sell_side():
     trade = parse_trade_rest(SAMPLE_TRADE_REST, symbol="BTCUSDT")
-    assert trade.side == TradeSide.SELL  # isBuyerMaker True -> taker was seller
+    assert trade.side == TradeSide.SELL
     assert trade.trade_id == 28457
 
 
@@ -148,6 +166,14 @@ def test_parse_agg_trade_ws_buyer_not_maker_is_buy_side():
     trade = parse_agg_trade_ws(SAMPLE_AGG_TRADE_WS)
     assert trade.side == TradeSide.BUY
     assert trade.trade_id == 999999
+
+
+def test_parse_raw_trade_ws_buyer_maker_is_sell_side():
+    trade = parse_trade_ws(SAMPLE_TRADE_WS)
+    assert trade.symbol == "BTCUSDT"
+    assert trade.side == TradeSide.SELL
+    assert trade.trade_id == 1234567
+    assert trade.timestamp.isoformat() == "2024-06-10T00:53:20+00:00"
 
 
 def test_parse_depth_ws():
