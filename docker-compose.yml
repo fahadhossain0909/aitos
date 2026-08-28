@@ -99,6 +99,7 @@ services:
     restart: unless-stopped
 
   aitos-learning:
+    container_name: aitos-learning
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     command: ["python3", "run_continual_learning.py"]
     env_file: [.env]
