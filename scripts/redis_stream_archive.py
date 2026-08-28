@@ -17,7 +17,21 @@ CURSOR_FILE = ROOT / ".cursors.json"
 POLL = max(0.1, float(os.getenv("REDIS_ARCHIVE_POLL_SECONDS", "1")))
 BATCH = max(1, int(os.getenv("REDIS_ARCHIVE_BATCH_SIZE", "1000")))
 DEFAULT_MAXLEN = max(1, int(os.getenv("REDIS_STREAM_MAXLEN_DEFAULT", "5000")))
-STREAM_MAXLEN = {"stream:market.trade.": 25000, "stream:market.orderbook.": 25000, "stream:market.liquidity.": 100000, "stream:market.live_state.": 25000, "stream:market.orderflow.": 25000, "stream:market.kline.": 10000, "stream:market.opportunity_scanned": 5000, "stream:decision.": 10000, "stream:journal.": 10000, "stream:trade.": 10000, "stream:risk.": 10000, "stream:intel.": 10000, "stream:dlq": 25000}
+STREAM_MAXLEN = {
+    "stream:market.trade.": 25000,
+    "stream:market.orderbook.": 25000,
+    "stream:market.liquidity.": 100000,
+    "stream:market.live_state.": 25000,
+    "stream:market.orderflow.": 25000,
+    "stream:market.kline.": 10000,
+    "stream:market.opportunity_scanned": 5000,
+    "stream:decision.": 10000,
+    "stream:journal.": 10000,
+    "stream:trade.": 10000,
+    "stream:risk.": 10000,
+    "stream:intel.": 10000,
+    "stream:dlq": 25000,
+}
 
 
 def maxlen_for(key: str) -> int:
@@ -65,18 +79,35 @@ class ArchiveWriter:
                 handle.seek(0, os.SEEK_END)
                 size = handle.tell()
                 if size < offset:
-                    raise RuntimeError(f"archive file is shorter than checkpoint: {path}")
+                    raise RuntimeError(
+                        f"archive file is shorter than checkpoint: {path}"
+                    )
                 if size > offset:
                     handle.truncate(offset)
                     handle.flush()
                     os.fsync(handle.fileno())
         with path.open("a", encoding="utf-8") as handle:
             for entry_id, fields in entries:
-                handle.write(json.dumps({"stream": key, "stream_id": decode(entry_id), "fields": {decode(k): decode(v) for k, v in fields.items()}}, ensure_ascii=False, separators=(",", ":")) + "\n")
+                handle.write(
+                    json.dumps(
+                        {
+                            "stream": key,
+                            "stream_id": decode(entry_id),
+                            "fields": {decode(k): decode(v) for k, v in fields.items()},
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    + "\n"
+                )
             handle.flush()
             os.fsync(handle.fileno())
             end_offset = handle.tell()
-        cursors[key] = {"id": decode(entries[-1][0]), "file": str(path), "offset": end_offset}
+        cursors[key] = {
+            "id": decode(entries[-1][0]),
+            "file": str(path),
+            "offset": end_offset,
+        }
         self.save(cursors)
 
     def save(self, cursors) -> None:
@@ -106,7 +137,9 @@ class ArchiveWriter:
                         size = handle.tell()
                         offset = int(value["offset"])
                         if size < offset:
-                            raise RuntimeError(f"archive file is shorter than checkpoint: {path}")
+                            raise RuntimeError(
+                                f"archive file is shorter than checkpoint: {path}"
+                            )
                         if size > offset:
                             handle.truncate(offset)
                             handle.flush()
@@ -127,7 +160,11 @@ class ArchiveWriter:
                         except (UnicodeDecodeError, json.JSONDecodeError):
                             continue
                         if str(record.get("stream_id")) == target:
-                            normalized[key] = {"id": target, "file": str(path), "offset": handle.tell()}
+                            normalized[key] = {
+                                "id": target,
+                                "file": str(path),
+                                "offset": handle.tell(),
+                            }
                             found = True
                             break
                 if found:
@@ -135,7 +172,12 @@ class ArchiveWriter:
             if found:
                 changed = True
             else:
-                normalized[key] = {"id": target, "file": "", "offset": 0, "legacy": True}
+                normalized[key] = {
+                    "id": target,
+                    "file": "",
+                    "offset": 0,
+                    "legacy": True,
+                }
         if changed:
             self.save(normalized)
         return normalized
