@@ -1,4 +1,6 @@
-from scripts.redis_stream_archive import maxlen_for
+from pathlib import Path
+
+from scripts.redis_stream_archive import ArchiveWriter, maxlen_for
 
 
 def test_known_stream_families_are_bounded() -> None:
@@ -14,3 +16,19 @@ def test_known_stream_families_are_bounded() -> None:
 
 def test_unknown_streams_have_a_safe_default_bound() -> None:
     assert maxlen_for("stream:future.new_topic") == 5_000
+
+
+def test_cursor_checkpoint_is_atomic(tmp_path: Path) -> None:
+    writer = ArchiveWriter()
+    writer.root = tmp_path
+    writer.save({"stream:test": "123-0"})
+    assert writer.load() == {"stream:test": "123-0"}
+
+
+def test_archive_contains_stream_id_before_checkpoint(tmp_path: Path) -> None:
+    writer = ArchiveWriter()
+    writer.root = tmp_path
+    writer.append("stream:test", [("1-0", {"value": "ok"})])
+    files = list(tmp_path.rglob("*.jsonl"))
+    assert files
+    assert '"stream_id":"1-0"' in files[0].read_text()
