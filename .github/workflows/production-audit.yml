@@ -150,6 +150,21 @@ jobs:
           test -s aitos-production-audit/report.txt
           test -s aitos-production-audit/exit_code
 
+      - name: Print audit report to workflow log
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s aitos-production-audit/report.txt
+          echo '============================================================'
+          echo ' AITOS PRODUCTION AUDIT REPORT'
+          echo ' Full report retrieved from VPS'
+          echo '============================================================'
+          cat aitos-production-audit/report.txt
+          echo '============================================================'
+          echo ' AITOS PRODUCTION AUDIT REPORT END'
+          echo '============================================================'
+
       - name: Upload audit report artifact
         if: always()
         uses: actions/upload-artifact@v7.0.1
