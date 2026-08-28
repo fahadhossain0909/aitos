@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import scripts.redis_stream_archive as archive
 from scripts.redis_stream_archive import ArchiveWriter, id_lt, maxlen_for
 
 
@@ -9,8 +10,12 @@ def test_stream_ids_use_numeric_order() -> None:
     assert not id_lt("101-0", "100-999")
 
 
-def test_archive_replay_truncates_uncheckpointed_bytes(tmp_path: Path) -> None:
-    writer = ArchiveWriter(root=tmp_path)
+def test_archive_replay_truncates_uncheckpointed_bytes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(archive, "ROOT", tmp_path)
+    monkeypatch.setattr(archive, "CURSOR_FILE", tmp_path / ".cursors.json")
+    writer = ArchiveWriter()
     cursors = {}
     writer.append_and_checkpoint("stream:test", [("1-0", {"v": "a"})], cursors)
     path = tmp_path / "test" / "archive.jsonl"
