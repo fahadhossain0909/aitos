@@ -1,3 +1,4 @@
+# corrected bootstrap trigger
 name: Implement direct WebSocket live path v2
 
 on:
@@ -27,18 +28,15 @@ jobs:
                   raise SystemExit(f'missing pattern: {path}: {old[:80]!r}')
               p.write_text(s.replace(old, new, 1))
 
-          # Live cache: direct ingress methods; Redis subscriptions become optional.
           p = 'aitos/intelligence/live_scanner.py'
           repl(p, '    async def initialize(self) -> None:\n', '    async def initialize(self, direct_market_data: bool = False) -> None:\n        self._direct_market_data = direct_market_data\n')
           repl(p, '        for symbol in self._symbols:\n            self._subscriptions.append(\n                await self._bus.subscribe(\n                    f"market.trade.{symbol}",\n                    self._on_trade,\n                    group=LIVE_TRADE_GROUP,\n                    start_id="$",\n                )\n            )\n            self._subscriptions.append(\n                await self._bus.subscribe(\n                    f"market.orderbook.{symbol}",\n                    self._on_book,\n                    group=LIVE_BOOK_GROUP,\n                    start_id="$",\n                )\n            )\n', '        for symbol in self._symbols:\n            if not direct_market_data:\n                self._subscriptions.append(await self._bus.subscribe(f"market.trade.{symbol}", self._on_trade, group=LIVE_TRADE_GROUP, start_id="$"))\n                self._subscriptions.append(await self._bus.subscribe(f"market.orderbook.{symbol}", self._on_book, group=LIVE_BOOK_GROUP, start_id="$"))\n')
           repl(p, '    async def _on_trade(self, event: Event) -> None:\n', '    async def accept_live_trade(self, trade: TradeTick) -> None:\n        await self._on_trade(Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict()))\n\n    async def accept_live_order_book(self, book: OrderBookSnapshot) -> None:\n        await self._on_book(Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict()))\n\n    async def _on_trade(self, event: Event) -> None:\n')
 
-          # Scanner uses direct cache ingress.
           p = 'aitos/intelligence/scanner.py'
           repl(p, '        await self._live_cache.initialize()\n', '        await self._live_cache.initialize(direct_market_data=True)\n')
           repl(p, '    def _footprint_tick_size(self, symbol: str) -> float | None:\n', '    async def accept_live_trade(self, trade):\n        await self._live_cache.accept_live_trade(trade)\n\n    async def accept_live_order_book(self, book):\n        await self._live_cache.accept_live_order_book(book)\n\n    def _footprint_tick_size(self, symbol: str) -> float | None:\n')
 
-          # Ingestion: direct callback is executed before any persistence I/O.
           p = 'aitos/data/ingestion.py'
           repl(p, 'from collections.abc import AsyncIterator\n', 'from collections.abc import AsyncIterator, Awaitable, Callable\n')
           repl(p, 'TRADE_SINK_CONCURRENCY = 16\n', 'TRADE_SINK_CONCURRENCY = 16\nTRADE_PERSIST_QUEUE_SIZE = 50_000\n')
@@ -53,7 +51,6 @@ jobs:
           repl(p, marker, worker + marker)
           repl(p, '    async def _handle_order_book(self, book: OrderBookSnapshot) -> None:\n        await self._event_bus.publish(\n', '    async def _handle_order_book(self, book: OrderBookSnapshot) -> None:\n        if self._live_orderbook_handler is not None:\n            try:\n                await self._live_orderbook_handler(book)\n            except Exception as exc:\n                logger.exception("direct live order-book handler failed", extra={"aitos_extra": {"symbol": book.symbol, "last_update_id": book.last_update_id, "error": str(exc)}})\n        await self._event_bus.publish(\n')
 
-          # Wire scanner before ingestion and pass direct callbacks.
           p = 'aitos/app.py'
           repl(p, '        modules += [self.data_ingestion, self.scanner, self.trade_lifecycle]\n', '        modules += [self.scanner, self.data_ingestion, self.trade_lifecycle]\n')
           repl(p, '        repository=market_data_repository,\n    )\n', '        repository=market_data_repository,\n        live_trade_handler=scanner.accept_live_trade,\n        live_orderbook_handler=scanner.accept_live_order_book,\n    )\n')
