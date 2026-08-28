@@ -3,11 +3,10 @@ services:
     image: redis:7.2-alpine
     container_name: aitos-redis
     ports: ["127.0.0.1:6379:6379"]
-    volumes: ["${REDIS_DATA_DIR:-./.storage/data/redis}:/data"]
+    volumes:
+      - "${REDIS_DATA_DIR:-./.storage/data/redis}:/data"
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 10s}
-    # Redis is the latency-sensitive event bus. Give it enough CPU headroom
-    # for HFT bursts; the 2.5 GiB memory cap is intentional.
     cpus: "0.5"
     mem_limit: 2.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
@@ -24,6 +23,26 @@ services:
     volumes:
       - ./scripts/redis_dlq_retention.sh:/usr/local/bin/redis_dlq_retention.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/redis_dlq_retention.sh"]
+    depends_on:
+      redis: {condition: service_healthy}
+    cpus: "0.05"
+    mem_limit: 64m
+    logging: {driver: json-file, options: {max-size: "5m", max-file: "2"}}
+    restart: unless-stopped
+
+  redis-archive:
+    image: redis:7.2-alpine
+    container_name: aitos-redis-archive
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_ARCHIVE_ROOT: /redis-data/archive
+      REDIS_ARCHIVE_INTERVAL_SECONDS: "30"
+      REDIS_ARCHIVE_BATCH_SIZE: "1000"
+    volumes:
+      - "${REDIS_DATA_DIR:-./.storage/data/redis}:/redis-data"
+      - ./scripts/redis_archive.sh:/usr/local/bin/redis_archive.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/redis_archive.sh"]
     depends_on:
       redis: {condition: service_healthy}
     cpus: "0.05"
@@ -101,7 +120,6 @@ services:
 
   aitos-learning:
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
-    container_name: aitos-learning
     command: ["python3", "run_continual_learning.py"]
     env_file: [.env]
     environment:
