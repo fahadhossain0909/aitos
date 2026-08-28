@@ -33,9 +33,27 @@ jobs:
           command_timeout: 8m
           script: |
             set -euo pipefail
-            cd "$HOME/aitos"
-            test -f scripts/trade_path_diagnostic.sh
-            bash scripts/trade_path_diagnostic.sh
+            REDIS_CONTAINER="aitos-redis"
+            PAPER_CONTAINER="aitos-paper"
+            TRADE_GROUP="live-scanner-trades-v2"
+            rcli() { docker exec "$REDIS_CONTAINER" redis-cli "$@"; }
+            echo '=== AITOS trade-path diagnostic (READ ONLY) ==='
+            echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            for symbol in BTCUSDT ETHUSDT SOLUSDT BNBUSDT; do
+              key="stream:market.trade.${symbol}"
+              echo "--- ${symbol}: ${key} ---"
+              echo "XLEN=$(rcli XLEN "$key" 2>/dev/null || echo MISSING)"
+              echo 'LATEST_ENTRY:'
+              rcli XREVRANGE "$key" + - COUNT 1 2>/dev/null || true
+              echo 'CONSUMER_GROUPS:'
+              rcli XINFO GROUPS "$key" 2>/dev/null || true
+              echo 'GROUP_CONSUMERS:'
+              rcli XINFO CONSUMERS "$key" "$TRADE_GROUP" 2>/dev/null || true
+            done
+            echo '--- Paper logs: trade path markers (last 10m) ---'
+            docker logs --since 10m --timestamps "$PAPER_CONTAINER" 2>&1 | grep -E 'published event|trade downstream processing failed|trade state update failed|ignored stale trade in live scanner|live scanner freshness|REST trade recovery failed|aggregate-trade stream recovered|aggregate-trade stream idle|raw-trade fallback event invalid' | tail -n 400 || true
+            echo '--- Live scanner freshness (last 10m) ---'
+            docker logs --since 10m --timestamps "$PAPER_CONTAINER" 2>&1 | grep 'live scanner freshness' | tail -n 100 || true
 
       - name: Cleanup
         if: always()
