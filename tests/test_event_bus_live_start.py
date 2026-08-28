@@ -73,6 +73,7 @@ async def test_live_start_resets_existing_group_cursor(event_bus):
     await asyncio.sleep(0.05)
     old_subscription.cancel()
     await asyncio.sleep(0)
+    received.clear()
 
     # A live-only replacement must move an existing group's cursor to the
     # current stream tail and must not reclaim abandoned historical entries.
