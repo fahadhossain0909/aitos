@@ -154,9 +154,7 @@ class LiveScannerCache:
             ),
         }
 
-    def recent_trades(
-        self, symbol: str, limit: int | None = None
-    ) -> list[TradeTick]:
+    def recent_trades(self, symbol: str, limit: int | None = None) -> list[TradeTick]:
         state = self._state.get(symbol)
         trades = list(state.trades) if state else []
         return trades[-limit:] if limit else trades
