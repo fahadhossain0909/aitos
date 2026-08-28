@@ -390,7 +390,7 @@ class DataIngestionService(AITOSModule):
 
         await asyncio.gather(*(io_one(trade, payload) for trade, payload in accepted))
         for trade, _payload in accepted:
-            self._publish_live_state(trade.symbol)
+            await self._publish_live_state(trade.symbol)
 
     async def _recover_recent_trades(self) -> None:
         """Recover a REST window after a silent websocket gap; IDs prevent duplicates."""
@@ -448,9 +448,6 @@ class DataIngestionService(AITOSModule):
             )
         )
 
-        # Feed every consecutive L2 snapshot into the shared state tracker.
-        # The tracker uses the recent trade buffer to distinguish book pulling,
-        # stacking and aggressive sweeps without duplicating state in ingestion.
         liquidity_events = self._live_state.on_order_book(book)
         for liquidity_event in liquidity_events:
             await self._event_bus.publish(
@@ -486,8 +483,8 @@ class DataIngestionService(AITOSModule):
                 self._last_book_persist_at[book.symbol] = now
         self._tick_processed()
 
-    def _publish_live_state(self, symbol: str) -> None:
-        self._event_bus.publish(
+    async def _publish_live_state(self, symbol: str) -> None:
+        await self._event_bus.publish(
             Event(
                 topic=live_state_topic(symbol),
                 payload=self._live_state.snapshot(symbol),
