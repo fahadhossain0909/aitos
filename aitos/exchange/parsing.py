@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from aitos.exchange.orderbook import DepthUpdate
 from aitos.models.market import (
@@ -20,11 +20,11 @@ def _ms_to_dt(ms: int) -> datetime:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc)
 
 
-def _levels(raw_levels: List[List[str]]) -> Tuple[Tuple[float, float], ...]:
+def _levels(raw_levels: list[list[str]]) -> tuple[tuple[float, float], ...]:
     return tuple((float(p), float(q)) for p, q in raw_levels)
 
 
-def parse_kline_rest(raw: List[Any], symbol: str, timeframe: str) -> Kline:
+def parse_kline_rest(raw: list[Any], symbol: str, timeframe: str) -> Kline:
     return Kline(
         symbol=symbol,
         timeframe=timeframe,
@@ -43,7 +43,7 @@ def parse_kline_rest(raw: List[Any], symbol: str, timeframe: str) -> Kline:
     )
 
 
-def parse_order_book_rest(raw: Dict[str, Any], symbol: str) -> OrderBookSnapshot:
+def parse_order_book_rest(raw: dict[str, Any], symbol: str) -> OrderBookSnapshot:
     timestamp = _ms_to_dt(int(raw["E"])) if "E" in raw else datetime.now(timezone.utc)
     return OrderBookSnapshot(
         symbol=symbol,
@@ -54,7 +54,7 @@ def parse_order_book_rest(raw: Dict[str, Any], symbol: str) -> OrderBookSnapshot
     )
 
 
-def parse_trade_rest(raw: Dict[str, Any], symbol: str) -> TradeTick:
+def parse_trade_rest(raw: dict[str, Any], symbol: str) -> TradeTick:
     is_buyer_maker = bool(raw["isBuyerMaker"])
     return TradeTick(
         symbol=symbol,
@@ -67,7 +67,7 @@ def parse_trade_rest(raw: Dict[str, Any], symbol: str) -> TradeTick:
     )
 
 
-def parse_funding_rate_rest(raw: Dict[str, Any]) -> FundingRate:
+def parse_funding_rate_rest(raw: dict[str, Any]) -> FundingRate:
     return FundingRate(
         symbol=raw["symbol"],
         funding_rate=float(raw["lastFundingRate"]),
@@ -76,7 +76,7 @@ def parse_funding_rate_rest(raw: Dict[str, Any]) -> FundingRate:
     )
 
 
-def parse_open_interest_rest(raw: Dict[str, Any]) -> OpenInterest:
+def parse_open_interest_rest(raw: dict[str, Any]) -> OpenInterest:
     return OpenInterest(
         symbol=raw["symbol"],
         open_interest=float(raw["openInterest"]),
@@ -84,7 +84,7 @@ def parse_open_interest_rest(raw: Dict[str, Any]) -> OpenInterest:
     )
 
 
-def parse_kline_ws(payload: Dict[str, Any]) -> Kline:
+def parse_kline_ws(payload: dict[str, Any]) -> Kline:
     k = payload["k"]
     return Kline(
         symbol=payload["s"],
@@ -104,7 +104,7 @@ def parse_kline_ws(payload: Dict[str, Any]) -> Kline:
     )
 
 
-def parse_agg_trade_ws(payload: Dict[str, Any]) -> TradeTick:
+def parse_agg_trade_ws(payload: dict[str, Any]) -> TradeTick:
     is_buyer_maker = bool(payload["m"])
     return TradeTick(
         symbol=payload["s"],
@@ -117,7 +117,7 @@ def parse_agg_trade_ws(payload: Dict[str, Any]) -> TradeTick:
     )
 
 
-def parse_trade_ws(payload: Dict[str, Any]) -> TradeTick:
+def parse_trade_ws(payload: dict[str, Any]) -> TradeTick:
     """Parse Binance raw trade events (``<symbol>@trade``)."""
     is_buyer_maker = bool(payload["m"])
     return TradeTick(
@@ -131,7 +131,7 @@ def parse_trade_ws(payload: Dict[str, Any]) -> TradeTick:
     )
 
 
-def parse_depth_ws(payload: Dict[str, Any], symbol: str) -> OrderBookSnapshot:
+def parse_depth_ws(payload: dict[str, Any], symbol: str) -> OrderBookSnapshot:
     timestamp = (
         _ms_to_dt(int(payload["T"])) if "T" in payload else datetime.now(timezone.utc)
     )
@@ -144,7 +144,7 @@ def parse_depth_ws(payload: Dict[str, Any], symbol: str) -> OrderBookSnapshot:
     )
 
 
-def parse_depth_diff_ws(payload: Dict[str, Any]) -> DepthUpdate:
+def parse_depth_diff_ws(payload: dict[str, Any]) -> DepthUpdate:
     return DepthUpdate(
         first_update_id=int(payload["U"]),
         final_update_id=int(payload["u"]),

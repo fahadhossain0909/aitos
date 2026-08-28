@@ -5,40 +5,38 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Deque, Dict, Optional
 
 from aitos.intelligence.liquidity_tracker import LiquidityEvent, LiquidityTracker
 from aitos.intelligence.order_flow_engine import OrderFlowEngine, OrderFlowFeatures
 from aitos.models.market import OrderBookSnapshot, TradeTick
-
 
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
 class LiveMarketState:
-    order_flow: Optional[OrderFlowFeatures]
+    order_flow: OrderFlowFeatures | None
     liquidity_events: tuple[LiquidityEvent, ...]
-    order_book: Optional[OrderBookSnapshot]
+    order_book: OrderBookSnapshot | None
     trade_count: int
 
 
 class LiveMarketStateStore:
     def __init__(self, max_trades: int = 5000, max_liquidity_events: int = 100) -> None:
-        self._trades: Dict[str, Deque[TradeTick]] = defaultdict(
+        self._trades: dict[str, deque[TradeTick]] = defaultdict(
             lambda: deque(maxlen=max_trades)
         )
-        self._flow: Dict[str, OrderFlowEngine] = defaultdict(
+        self._flow: dict[str, OrderFlowEngine] = defaultdict(
             lambda: OrderFlowEngine(max_trades=max_trades)
         )
-        self._liquidity: Dict[str, LiquidityTracker] = defaultdict(LiquidityTracker)
-        self._events: Dict[str, Deque[LiquidityEvent]] = defaultdict(
+        self._liquidity: dict[str, LiquidityTracker] = defaultdict(LiquidityTracker)
+        self._events: dict[str, deque[LiquidityEvent]] = defaultdict(
             lambda: deque(maxlen=max_liquidity_events)
         )
-        self._books: Dict[str, OrderBookSnapshot] = {}
+        self._books: dict[str, OrderBookSnapshot] = {}
 
     @property
-    def trades(self) -> Dict[str, Deque[TradeTick]]:
+    def trades(self) -> dict[str, deque[TradeTick]]:
         """Recent trade buffers, exposed read/write for legacy ingestion callers."""
         return self._trades
 
