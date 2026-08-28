@@ -362,7 +362,8 @@ async def run_scan_and_trade_cycle(
                     "weights": dict(components.scanner._weights),
                     "weighted_contributions": {
                         name: round(
-                            float(score) * float(components.scanner._weights.get(name, 0.0)),
+                            float(score)
+                            * float(components.scanner._weights.get(name, 0.0)),
                             6,
                         )
                         for name, score in candidate.component_scores.items()
@@ -387,9 +388,7 @@ async def run_scan_and_trade_cycle(
                 "ranked_count": len(ranked),
                 "threshold": components.scanner._min_score_threshold,
                 "ranked_symbols": [c.symbol for c in ranked],
-                "candidate_scores": {
-                    c.symbol: c.composite_score for c in candidates
-                },
+                "candidate_scores": {c.symbol: c.composite_score for c in candidates},
             }
         },
     )
