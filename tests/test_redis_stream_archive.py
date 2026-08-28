@@ -34,9 +34,7 @@ def test_archive_contains_stream_id_before_checkpoint(
     monkeypatch.setattr(archive, "CURSOR_FILE", tmp_path / ".cursors.json")
     writer = ArchiveWriter()
     cursors = {}
-    writer.append_and_checkpoint(
-        "stream:test", [("1-0", {"value": "ok"})], cursors
-    )
+    writer.append_and_checkpoint("stream:test", [("1-0", {"value": "ok"})], cursors)
     files = list(tmp_path.rglob("*.jsonl"))
     assert files
     assert '"stream_id":"1-0"' in files[0].read_text()
