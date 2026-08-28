@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -41,6 +41,21 @@ async def test_live_cache_rehydrates_trade_and_book_events():
     )
     assert cache.recent_trades("BTCUSDT") == [trade]
     assert cache.order_book("BTCUSDT") == book
+    await cache.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_live_cache_ignores_stale_trade():
+    bus = FakeBus()
+    cache = LiveScannerCache(bus, ["BTCUSDT"], max_trades=10)
+    await cache.initialize()
+    stale_ts = datetime.now(timezone.utc) - timedelta(seconds=120)
+    trade = TradeTick("BTCUSDT", 1, 100.0, 2.0, TradeSide.BUY, False, stale_ts)
+    await cache._on_trade(
+        type("E", (), {"payload": trade.to_dict(), "topic": "market.trade.BTCUSDT"})()
+    )
+    assert cache.recent_trades("BTCUSDT") == []
+    assert cache.freshness_snapshot("BTCUSDT")["last_trade_at"] is None
     await cache.shutdown()
 
 
