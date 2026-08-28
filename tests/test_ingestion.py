@@ -186,3 +186,34 @@ async def test_backfill_klines_publishes_and_persists_history(event_bus):
     assert len(repository.klines) >= 2
 
     await service.shutdown(grace_period_seconds=2.0)
+
+
+@pytest.mark.asyncio
+async def test_trade_cursor_is_not_advanced_when_live_state_update_fails(event_bus):
+    exchange = FakeExchangeAdapter()
+    service = DataIngestionService(
+        exchange=exchange,
+        event_bus=event_bus,
+        symbols=["BTCUSDT"],
+    )
+    await service.initialize({})
+
+    original_on_trade = service._live_state.on_trade
+    calls = 0
+
+    def flaky_on_trade(trade):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("synthetic live-state failure")
+        return original_on_trade(trade)
+
+    service._live_state.on_trade = flaky_on_trade
+    await service._process_trade_batch([SAMPLE_TRADE])
+    assert service._last_trade_ids.get("BTCUSDT") is None
+
+    await service._process_trade_batch([SAMPLE_TRADE])
+    assert service._last_trade_ids.get("BTCUSDT") == SAMPLE_TRADE.trade_id
+    assert service._trade_parse_errors == 1
+
+    await service.shutdown(grace_period_seconds=2.0)
