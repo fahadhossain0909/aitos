@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.logging_setup import get_logger
 from aitos.models.market import OrderBookSnapshot, TradeTick
+
+logger = get_logger("aitos.intelligence.live_scanner")
 
 
 @dataclass
@@ -34,6 +37,7 @@ class LiveScannerCache:
         self._state: dict[str, LiveSymbolCache] = {}
         self._subscriptions: list[Subscription] = []
         self._initialized = False
+        self._last_freshness_log_at: dict[str, datetime] = {}
 
     def _cache(self, symbol: str) -> LiveSymbolCache:
         if symbol not in self._state:
@@ -79,6 +83,7 @@ class LiveScannerCache:
         state.trades.append(trade)
         state.last_trade_at = trade.timestamp
         state.last_trade_received_at = datetime.now(timezone.utc)
+        self._maybe_log_freshness(trade.symbol)
 
     async def _on_book(self, event: Event) -> None:
         book = OrderBookSnapshot.from_dict(event.payload)
@@ -86,6 +91,7 @@ class LiveScannerCache:
         state.order_book = book
         state.last_book_at = book.timestamp
         state.last_book_received_at = datetime.now(timezone.utc)
+        self._maybe_log_freshness(book.symbol)
 
     async def _on_liquidity(self, event: Event) -> None:
         payload = dict(event.payload)
@@ -153,6 +159,18 @@ class LiveScannerCache:
                 else None
             ),
         }
+
+    def _maybe_log_freshness(self, symbol: str) -> None:
+        now = datetime.now(timezone.utc)
+        previous = self._last_freshness_log_at.get(symbol)
+        if previous is not None and (now - previous).total_seconds() < 30.0:
+            return
+        self._last_freshness_log_at[symbol] = now
+        snapshot = self.freshness_snapshot(symbol)
+        logger.info(
+            "live scanner freshness",
+            extra={"aitos_extra": {"symbol": symbol, **snapshot}},
+        )
 
     def recent_trades(self, symbol: str, limit: int | None = None) -> list[TradeTick]:
         state = self._state.get(symbol)
