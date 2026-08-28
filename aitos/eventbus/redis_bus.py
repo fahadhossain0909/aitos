@@ -314,7 +314,7 @@ class EventBus(AITOSModule):
             if reset_existing:
                 # A live-only subscription must not inherit the previous
                 # deployment's group cursor. '$' means the current stream tail.
-                await self._redis.xgroup_setid(stream_key, group, id="$" )
+                await self._redis.xgroup_setid(stream_key, group, id="$")
 
     async def _reclaim_pending(
         self, stream_key: str, group: str, consumer: str
@@ -387,15 +387,15 @@ class EventBus(AITOSModule):
                 if not live_only:
                     for stream_topic in streams_seen:
                         stream_key = _stream_key(stream_topic)
-                        pending = await self._reclaim_pending(stream_key, group, consumer)
+                        pending = await self._reclaim_pending(
+                            stream_key, group, consumer
+                        )
                         for entry_id, fields in pending:
                             await self._process_message(
                                 stream_key, entry_id, fields, group, handler
                             )
 
-                stream_map = {
-                    _stream_key(t): ">" for t in streams_seen
-                }
+                stream_map = {_stream_key(t): ">" for t in streams_seen}
                 try:
                     resp = await self._redis.xreadgroup(
                         groupname=group,
