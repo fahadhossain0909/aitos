@@ -9,15 +9,18 @@ on:
 permissions:
   contents: write
 
+# Serialize auto-fix runs per source branch. Do not cancel an active fixer;
+# queue the next run so concurrent commits are rebased in order.
 concurrency:
-  group: auto-fix-${{ github.event.pull_request.head.ref || github.ref }}
-  cancel-in-progress: true
+  group: auto-fix-${{ github.repository }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
   python-autofix:
     name: Safe Python Auto-Fix
     runs-on: ubuntu-latest
-    # Never modify code from an untrusted fork. Fork PRs continue through normal CI checks.
+    # Never execute or modify code from an untrusted fork. Fork PRs continue
+    # through normal read-only CI checks.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Check out source branch
@@ -70,14 +73,39 @@ jobs:
 
       - name: Commit and push safe fixes
         shell: bash
+        env:
+          SOURCE_BRANCH: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.ref || github.ref_name }}
         run: |
           set -euo pipefail
           if git diff --quiet; then
             echo "No automatic fixes were needed."
             exit 0
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- '*.py'
           git commit -m "ci: apply automatic formatting and safe lint fixes"
-          git push
+
+          # Never push a PR merge ref. SOURCE_BRANCH is always the actual
+          # writable branch for trusted same-repository PRs or push events.
+          # Rebase onto the latest remote tip before every push attempt so
+          # concurrent human/bot commits are preserved instead of overwritten.
+          for attempt in 1 2 3 4 5; do
+            git fetch origin "$SOURCE_BRANCH"
+
+            if git rebase "origin/$SOURCE_BRANCH"; then
+              if git push origin "HEAD:refs/heads/$SOURCE_BRANCH"; then
+                echo "Automatic fixes pushed to $SOURCE_BRANCH."
+                exit 0
+              fi
+            else
+              git rebase --abort || true
+            fi
+
+            echo "Push attempt $attempt raced with another update; retrying."
+            sleep $((attempt * 2))
+          done
+
+          echo "Unable to push automatic fixes after multiple concurrent-update retries." >&2
+          exit 1
