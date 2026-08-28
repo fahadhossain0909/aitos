@@ -221,12 +221,15 @@ class EventBus(AITOSModule):
         """Subscribe to a Redis Stream.
 
         ``start_id='0'`` preserves the historical/replay semantics used by
-        durable consumers. Live market-data consumers can pass ``'$'`` so a
-        newly created group starts at the current stream tail and never drains
-        an old market-data backlog into the live state.
+        durable consumers. ``start_id='$'`` is an explicit live-only mode:
+        the group cursor is moved to the current stream tail even when the
+        group already exists, and abandoned pending entries are not reclaimed.
+        This prevents a restarted live scanner from replaying an old market
+        data backlog into its live state.
         """
         self._require_initialized()
         consumer_name = f"{group}-{id(handler)}"
+        live_only = start_id == "$"
         if "*" in topic:
             resolved_topics = [
                 t for t in self._known_topics if fnmatch.fnmatch(t, topic)
@@ -235,13 +238,17 @@ class EventBus(AITOSModule):
             resolved_topics = [topic]
             self._known_topics.add(topic)
         for t in resolved_topics or [topic]:
-            await self._ensure_group(_stream_key(t), group, start_id=start_id)
+            await self._ensure_group(
+                _stream_key(t), group, start_id=start_id, reset_existing=live_only
+            )
         task = asyncio.create_task(
             self._consume_loop(
                 topic_pattern=topic,
                 group=group,
                 consumer=consumer_name,
                 handler=handler,
+                live_only=live_only,
+                start_id=start_id,
             )
         )
         sub = Subscription(
@@ -290,7 +297,12 @@ class EventBus(AITOSModule):
             await handler(event)
 
     async def _ensure_group(
-        self, stream_key: str, group: str, *, start_id: str = "0"
+        self,
+        stream_key: str,
+        group: str,
+        *,
+        start_id: str = "0",
+        reset_existing: bool = False,
     ) -> None:
         try:
             await self._redis.xgroup_create(
@@ -299,6 +311,10 @@ class EventBus(AITOSModule):
         except Exception as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
+            if reset_existing:
+                # A live-only subscription must not inherit the previous
+                # deployment's group cursor. '$' means the current stream tail.
+                await self._redis.xgroup_setid(stream_key, group, id="$" )
 
     async def _reclaim_pending(
         self, stream_key: str, group: str, consumer: str
@@ -331,7 +347,14 @@ class EventBus(AITOSModule):
         return []
 
     async def _consume_loop(
-        self, topic_pattern: str, group: str, consumer: str, handler: EventHandler
+        self,
+        topic_pattern: str,
+        group: str,
+        consumer: str,
+        handler: EventHandler,
+        *,
+        live_only: bool = False,
+        start_id: str = "0",
     ) -> None:
         streams_seen: set[str] = set()
         try:
@@ -344,7 +367,12 @@ class EventBus(AITOSModule):
                     }
                     new_streams = matching - streams_seen
                     for t in new_streams:
-                        await self._ensure_group(_stream_key(t), group)
+                        await self._ensure_group(
+                            _stream_key(t),
+                            group,
+                            start_id=start_id,
+                            reset_existing=live_only,
+                        )
                     streams_seen |= matching
                 else:
                     streams_seen = {topic_pattern}
@@ -352,16 +380,22 @@ class EventBus(AITOSModule):
                     await asyncio.sleep(0.2)
                     continue
 
-                # Recover abandoned entries before reading new entries.
-                for stream_topic in streams_seen:
-                    stream_key = _stream_key(stream_topic)
-                    pending = await self._reclaim_pending(stream_key, group, consumer)
-                    for entry_id, fields in pending:
-                        await self._process_message(
-                            stream_key, entry_id, fields, group, handler
-                        )
+                # Historical/durable consumers recover their own abandoned
+                # work. Live-only market consumers intentionally do not: those
+                # entries belong to an older processing epoch and may contain
+                # stale market timestamps.
+                if not live_only:
+                    for stream_topic in streams_seen:
+                        stream_key = _stream_key(stream_topic)
+                        pending = await self._reclaim_pending(stream_key, group, consumer)
+                        for entry_id, fields in pending:
+                            await self._process_message(
+                                stream_key, entry_id, fields, group, handler
+                            )
 
-                stream_map = {_stream_key(t): ">" for t in streams_seen}
+                stream_map = {
+                    _stream_key(t): ">" for t in streams_seen
+                }
                 try:
                     resp = await self._redis.xreadgroup(
                         groupname=group,
