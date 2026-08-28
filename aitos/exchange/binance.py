@@ -152,7 +152,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
         normalized_symbols = list(dict.fromkeys(symbols))
         symbol_set = set(normalized_symbols)
-        primary_streams = [f"{symbol.lower()}@aggTrade" for symbol in normalized_symbols]
+        primary_streams = [
+            f"{symbol.lower()}@aggTrade" for symbol in normalized_symbols
+        ]
         primary = self._raw_stream(primary_streams, emit_reconnect=True).__aiter__()
         fallback_streams = {
             symbol: self._raw_stream(
@@ -204,9 +206,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
                 tasks: set[asyncio.Task] = {primary_task}
                 tasks.update(
-                    task
-                    for task in fallback_tasks.values()
-                    if task is not None
+                    task for task in fallback_tasks.values() if task is not None
                 )
 
                 timeout = TRADE_STREAM_PRIMARY_RETRY_SECONDS
@@ -276,7 +276,11 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
                 for symbol in normalized_symbols:
                     task = fallback_tasks[symbol]
-                    if task is None or task not in done or symbol not in fallback_active:
+                    if (
+                        task is None
+                        or task not in done
+                        or symbol not in fallback_active
+                    ):
                         continue
                     try:
                         data, _ = task.result()
@@ -299,7 +303,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         fallback_tasks[symbol] = None
                         logger.error(
                             "Binance raw-trade fallback stream failed",
-                            extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                            extra={
+                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                            },
                         )
                     finally:
                         if symbol in fallback_active and fallback_tasks[symbol] is None:
