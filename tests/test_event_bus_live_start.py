@@ -44,40 +44,48 @@ async def test_subscribe_start_id_dollar_skips_existing_stream_backlog(event_bus
 
 
 @pytest.mark.asyncio
-async def test_live_start_resets_existing_group_cursor(event_bus):
+async def test_live_start_resets_existing_group_cursor_without_reclaiming_pending(
+    event_bus,
+):
     received = []
+    topic = "market.trade.RESTARTUSDT"
+    group = "live-restart-test-v3"
+    stream = f"stream:{topic}"
 
     async def handler(event: Event):
         received.append(event.payload["kind"])
 
     await event_bus.publish(
         Event(
-            topic="market.trade.RESTARTUSDT",
+            topic=topic,
             payload={"kind": "old"},
             source_module="test",
         )
     )
 
-    # Simulate a group left behind by an earlier deployment. A live-only
-    # subscriber must not inherit that group's historical cursor.
-    await event_bus.subscribe(
-        "market.trade.RESTARTUSDT",
-        handler,
-        group="live-restart-test-v2",
-        start_id="0",
+    # Build a realistic abandoned PEL entry without allowing the test handler
+    # to process it. This represents a previous live process that received an
+    # event and then died before ACKing it.
+    await event_bus._redis.xgroup_create(stream, group, id="0", mkstream=True)
+    pending = await event_bus._redis.xreadgroup(
+        groupname=group,
+        consumername="previous-live-process",
+        streams={stream: ">"},
+        count=1,
+        block=1,
     )
-    await asyncio.sleep(0.05)
+    assert pending
 
     await event_bus.subscribe(
-        "market.trade.RESTARTUSDT",
+        topic,
         handler,
-        group="live-restart-test-v2",
+        group=group,
         start_id="$",
     )
 
     await event_bus.publish(
         Event(
-            topic="market.trade.RESTARTUSDT",
+            topic=topic,
             payload={"kind": "live"},
             source_module="test",
         )
@@ -88,4 +96,7 @@ async def test_live_start_resets_existing_group_cursor(event_bus):
             break
         await asyncio.sleep(0.1)
 
+    # Live trading must see only the new event. The abandoned historical PEL
+    # entry remains out of the live path; durable consumers use start_id="0"
+    # and pending recovery instead.
     assert received == ["live"]
