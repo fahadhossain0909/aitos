@@ -19,6 +19,7 @@ from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus
 from aitos.exchange.base import ExchangeAdapter
+from aitos.intelligence.live_bridge import publish_book, publish_trade
 from aitos.intelligence.live_state import LiveMarketStateStore
 from aitos.logging_setup import get_logger
 from aitos.models.market import Kline, OrderBookSnapshot, TradeTick
@@ -61,7 +62,7 @@ def live_state_topic(symbol: str) -> str:
 
 
 class DataIngestionService(AITOSModule):
-    """Live market ingestion with bounded lossless backpressure."""
+    """Live ingestion with a direct in-process trading fast lane plus persistence."""
 
     def __init__(
         self,
@@ -97,6 +98,8 @@ class DataIngestionService(AITOSModule):
         self._trade_stream_queue_waits = 0
         self._trade_stream_max_queue_depth = 0
         self._trade_stream_dropped = 0
+        self._direct_trade_deliveries = 0
+        self._direct_book_deliveries = 0
         self._last_trade_event_time: str | None = None
         self._last_book_persist_at: dict[str, datetime] = {}
         self._last_trade_ids: dict[str, int] = {}
@@ -112,7 +115,7 @@ class DataIngestionService(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.7.1"
+        return "1.8.0"
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
@@ -134,6 +137,7 @@ class DataIngestionService(AITOSModule):
                     "queue_size": TRADE_STREAM_QUEUE_SIZE,
                     "batch_size": TRADE_STREAM_BATCH_SIZE,
                     "sink_concurrency": TRADE_SINK_CONCURRENCY,
+                    "direct_live_fast_lane": True,
                 }
             },
         )
@@ -186,6 +190,9 @@ class DataIngestionService(AITOSModule):
                 "trade_stream_queue_capacity": TRADE_STREAM_QUEUE_SIZE,
                 "trade_stream_batch_size": TRADE_STREAM_BATCH_SIZE,
                 "trade_sink_concurrency": TRADE_SINK_CONCURRENCY,
+                "direct_live_fast_lane": True,
+                "direct_trade_deliveries": self._direct_trade_deliveries,
+                "direct_book_deliveries": self._direct_book_deliveries,
                 "last_trade_event_time": self._last_trade_event_time,
                 "task_states": states,
             },
@@ -303,7 +310,7 @@ class DataIngestionService(AITOSModule):
                 await asyncio.sleep(TRADE_STREAM_RESTART_DELAY_SECONDS)
 
     async def _process_trade_batch(self, trades: list[TradeTick]) -> None:
-        """Update state in wire order, then perform bounded independent I/O."""
+        """Update live state first; direct consumers never wait for persistence."""
         accepted: list[tuple[TradeTick, dict[str, Any]]] = []
         for trade in trades:
             previous_id = self._last_trade_ids.get(trade.symbol, -1)
@@ -330,20 +337,18 @@ class DataIngestionService(AITOSModule):
                         features.timestamp.isoformat() if features.timestamp else None
                     ),
                 }
-                # Advance the deduplication cursor only after the local live
-                # state accepted the trade. If state processing fails, the
-                # trade must remain eligible for retry/recovery instead of
-                # being permanently skipped by the next batch.
                 self._last_trade_ids[trade.symbol] = trade.trade_id
                 self._orderflow_events += 1
                 self._ticks_processed += 1
                 self._last_event_time = datetime.now(timezone.utc).isoformat()
                 accepted.append((trade, payload))
+                handlers = await publish_trade(trade)
+                self._direct_trade_deliveries += handlers
             except Exception as exc:
                 self._trade_parse_errors += 1
                 self._errors += 1
                 logger.exception(
-                    "trade state update failed",
+                    "trade state/direct-live update failed",
                     extra={
                         "aitos_extra": {
                             "symbol": trade.symbol,
@@ -443,6 +448,9 @@ class DataIngestionService(AITOSModule):
         self._tick_processed()
 
     async def _handle_order_book(self, book: OrderBookSnapshot) -> None:
+        # Direct live scanner receives the exchange snapshot before any Redis or
+        # persistence work can delay the latency-critical path.
+        self._direct_book_deliveries += await publish_book(book)
         await self._event_bus.publish(
             Event(
                 topic=orderbook_topic(book.symbol),
@@ -499,7 +507,6 @@ class DataIngestionService(AITOSModule):
 
     def _tick_processed(self) -> None:
         self._ticks_processed += 1
-        self._last_event_time = datetime.now(timezone.utc).isoformat()
 
     def _require_initialized(self) -> None:
         if not self._initialized:
