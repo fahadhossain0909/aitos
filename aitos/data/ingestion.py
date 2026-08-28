@@ -126,7 +126,7 @@ class DataIngestionService(AITOSModule):
             return
         await self._exchange.connect()
         self._tasks = [
-            asyncio.create_task(self._run_trade_persistence(), name="aitos-trade-persistence"),
+            *[asyncio.create_task(self._run_trade_persistence(), name=f"aitos-trade-persistence-{i}") for i in range(TRADE_SINK_CONCURRENCY)],
             asyncio.create_task(self._run_kline_stream(), name="aitos-kline-stream"),
             asyncio.create_task(self._run_trade_stream(), name="aitos-trade-stream"),
             asyncio.create_task(
