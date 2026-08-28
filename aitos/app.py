@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Protocol
 
 from aitos.core.contracts import AITOSModule, Event
 from aitos.data.ingestion import DataIngestionService
@@ -57,13 +57,13 @@ class SystemComponents:
     ml_feedback: MLExplainerFeedbackLoop
     attention_explainer: AttentionExplainer
     attention_feedback: AttentionFeedbackLoop
-    reconciliation: Optional[ReconciliationScheduler] = None
-    knowledge_graph: Optional[KnowledgeGraphWriter] = None
-    correlation_updater: Optional[SymbolCorrelationUpdater] = None
-    _price_feed_subscriptions: List[Subscription] = field(default_factory=list)
+    reconciliation: ReconciliationScheduler | None = None
+    knowledge_graph: KnowledgeGraphWriter | None = None
+    correlation_updater: SymbolCorrelationUpdater | None = None
+    _price_feed_subscriptions: list[Subscription] = field(default_factory=list)
 
-    def all_modules(self) -> List[AITOSModule]:
-        modules: List[AITOSModule] = [
+    def all_modules(self) -> list[AITOSModule]:
+        modules: list[AITOSModule] = [
             self.event_bus,
             self.kernel,
             self.risk_engine,
@@ -89,18 +89,18 @@ async def build_system(
     event_bus: EventBus,
     exchange: ExchangeAdapter,
     order_executor: OrderExecutor,
-    symbols: List[str],
+    symbols: list[str],
     kline_timeframe: str = "15m",
     scanner_timeframe: str = "15m",
-    market_data_repository: Optional[MarketDataRepository] = None,
-    journal_repository: Optional[JournalRepository] = None,
-    decision_journal_repository: Optional[DecisionJournalRepository] = None,
-    graph_driver: Optional[GraphDriver] = None,
-    risk_limits: Optional[RiskLimits] = None,
-    kernel: Optional[AIKernel] = None,
-    rl_scorer: Optional[RLPolicyScorer] = None,
-    outcome_classifier: Optional[TradeOutcomeClassifier] = None,
-    attention_explainer: Optional[AttentionExplainer] = None,
+    market_data_repository: MarketDataRepository | None = None,
+    journal_repository: JournalRepository | None = None,
+    decision_journal_repository: DecisionJournalRepository | None = None,
+    graph_driver: GraphDriver | None = None,
+    risk_limits: RiskLimits | None = None,
+    kernel: AIKernel | None = None,
+    rl_scorer: RLPolicyScorer | None = None,
+    outcome_classifier: TradeOutcomeClassifier | None = None,
+    attention_explainer: AttentionExplainer | None = None,
     use_exchange_side_stops: bool = False,
     min_score_threshold: float = 60.0,
     top_n: int = 5,
@@ -281,7 +281,7 @@ class PaperPortfolioTracker:
             )
             for t in open_trades
         )
-        regime_counts: Dict[str, int] = {}
+        regime_counts: dict[str, int] = {}
         for t in open_trades:
             regime_counts[t.regime] = regime_counts.get(t.regime, 0) + 1
         dominant_regime = (
@@ -304,7 +304,7 @@ def _parse_iso(value: str) -> datetime:
 class LivePortfolioTracker:
     def __init__(self, order_executor, asset: str = "USDT"):
         self._order_executor, self._asset = order_executor, asset
-        self._peak_equity_usd: Optional[float] = None
+        self._peak_equity_usd: float | None = None
         self._last_known_equity_usd = 0.0
 
     async def refresh_equity(self) -> float:
@@ -325,7 +325,7 @@ class LivePortfolioTracker:
             )
             for t in open_trades
         )
-        regime_counts: Dict[str, int] = {}
+        regime_counts: dict[str, int] = {}
         for t in open_trades:
             regime_counts[t.regime] = regime_counts.get(t.regime, 0) + 1
         dominant_regime = (
@@ -343,7 +343,7 @@ async def run_scan_and_trade_cycle(
     components: SystemComponents,
     portfolio_tracker: PortfolioTracker,
     is_production: bool = False,
-    approved_by: Optional[str] = None,
+    approved_by: str | None = None,
 ) -> int:
     refresh = getattr(portfolio_tracker, "refresh_equity", None)
     if refresh is not None:
@@ -351,11 +351,61 @@ async def run_scan_and_trade_cycle(
     portfolio = portfolio_tracker.build_portfolio_state(components.trade_lifecycle)
     await components.risk_engine.assess(portfolio)
     candidates = await components.scanner.scan_all()
+    for candidate in candidates:
+        logger.info(
+            "scanner score breakdown",
+            extra={
+                "aitos_extra": {
+                    "symbol": candidate.symbol,
+                    "direction": candidate.direction.value,
+                    "raw_component_scores": dict(candidate.component_scores),
+                    "weights": dict(components.scanner._weights),
+                    "weighted_contributions": {
+                        name: round(
+                            float(score)
+                            * float(components.scanner._weights.get(name, 0.0)),
+                            6,
+                        )
+                        for name, score in candidate.component_scores.items()
+                    },
+                    "weight_total": sum(
+                        float(components.scanner._weights.get(name, 0.0))
+                        for name in candidate.component_scores
+                    ),
+                    "normalized_score": candidate.composite_score,
+                    "threshold": components.scanner._min_score_threshold,
+                    "threshold_pass": candidate.composite_score
+                    >= components.scanner._min_score_threshold,
+                }
+            },
+        )
     ranked = await components.scanner.rank(candidates)
+    logger.info(
+        "scanner ranking decision",
+        extra={
+            "aitos_extra": {
+                "candidate_count": len(candidates),
+                "ranked_count": len(ranked),
+                "threshold": components.scanner._min_score_threshold,
+                "ranked_symbols": [c.symbol for c in ranked],
+                "candidate_scores": {c.symbol: c.composite_score for c in candidates},
+            }
+        },
+    )
     open_symbols = {t.symbol for t in components.trade_lifecycle.get_open_trades()}
     submitted = 0
     for candidate in ranked:
         if candidate.symbol in open_symbols:
+            logger.info(
+                "trade candidate skipped",
+                extra={
+                    "aitos_extra": {
+                        "symbol": candidate.symbol,
+                        "reason": "symbol_already_open",
+                        "score": candidate.composite_score,
+                    }
+                },
+            )
             continue
         decision = await components.scanner.decide_with_kernel(
             candidate, components.kernel
@@ -364,6 +414,23 @@ async def run_scan_and_trade_cycle(
             decision.direction != candidate.direction.value.lower()
             or decision.confidence < components.kernel.fusion_min_confidence
         ):
+            logger.info(
+                "trade candidate rejected by kernel",
+                extra={
+                    "aitos_extra": {
+                        "symbol": candidate.symbol,
+                        "score": candidate.composite_score,
+                        "candidate_direction": candidate.direction.value.lower(),
+                        "kernel_direction": decision.direction,
+                        "kernel_confidence": decision.confidence,
+                        "kernel_min_confidence": components.kernel.fusion_min_confidence,
+                        "direction_match": decision.direction
+                        == candidate.direction.value.lower(),
+                        "confidence_pass": decision.confidence
+                        >= components.kernel.fusion_min_confidence,
+                    }
+                },
+            )
             continue
         opportunity = components.scanner.to_opportunity(
             candidate, is_production=is_production, approved_by=approved_by
@@ -409,6 +476,17 @@ async def run_scan_and_trade_cycle(
             portfolio_tracker.build_portfolio_state(components.trade_lifecycle),
         )
         submitted += 1
+        logger.info(
+            "trade candidate submitted",
+            extra={
+                "aitos_extra": {
+                    "symbol": candidate.symbol,
+                    "score": candidate.composite_score,
+                    "kernel_confidence": decision.confidence,
+                    "trade_state": trade.state.value,
+                }
+            },
+        )
         if trade.state == TradeLifecycleState.POSITION_OPENED:
             open_symbols.add(candidate.symbol)
     return submitted

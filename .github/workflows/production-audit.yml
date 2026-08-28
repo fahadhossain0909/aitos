@@ -62,9 +62,9 @@ jobs:
             status=$?
             set -e
 
-            # The canonical audit above remains the source of blocker status.
-            # Append non-blocking observability sections so stale live state can
-            # be classified even when no new market events are arriving.
+            # The canonical audit remains the source of blocker status.
+            # These observability sections are deliberately non-blocking and
+            # are collected even when the canonical audit itself fails early.
             {
               echo
               echo '--- Live scanner freshness diagnostics (last 30m) ---'
@@ -78,7 +78,20 @@ jobs:
               echo '--- Live scanner freshness summary ---'
               freshness_count="$(printf '%s\n' "$freshness_logs" | grep -c 'live scanner freshness' || true)"
               echo "live scanner freshness entries in last 30m: $freshness_count"
-              echo 'Expected fields: symbol, cache_has_state, trade_age_sec, book_age_sec, trade_consumer_lag_sec, book_consumer_lag_sec, last_trade_at, last_book_at.'
+
+              echo
+              echo '--- Paper signal diagnostics (last 30m) ---'
+              paper_logs="$(docker logs --since 30m --timestamps aitos-paper 2>&1 | grep 'paper signal diagnostics' || true)"
+              if [ -n "$paper_logs" ]; then
+                printf '%s\n' "$paper_logs" | tail -n 200
+              else
+                echo 'NO paper signal diagnostics found in the requested window.'
+              fi
+              echo
+              echo '--- Paper signal diagnostics summary ---'
+              paper_count="$(printf '%s\n' "$paper_logs" | grep -c 'paper signal diagnostics' || true)"
+              echo "paper signal diagnostic entries in last 30m: $paper_count"
+              echo 'Expected fields: symbol, market_source, live_fresh, executed_trades, structure, candle_cvd, orderflow_bias, orderflow_delta, orderflow_cvd, orderflow_buy_ratio, orderflow_aggression, orderflow_vwap, liquidity_quality, depth_imbalance, liquidity_wall, sweep_potential, absorption_proxy, liquidity_score, direction, scanner_threshold.'
 
               echo
               echo '--- Scanner score-breakdown diagnostics (last 30m) ---'
@@ -87,13 +100,26 @@ jobs:
                 printf '%s\n' "$score_logs" | tail -n 200
               else
                 echo 'NO scanner score breakdown diagnostics found in the requested window.'
-                echo 'Score-breakdown instrumentation is not yet wired into the scanner execution path.'
+                echo 'This means the scanner cycle did not produce a directional candidate in the window, or the deployed image predates score-breakdown instrumentation.'
               fi
               echo
               echo '--- Scanner score-breakdown summary ---'
               score_count="$(printf '%s\n' "$score_logs" | grep -c 'scanner score breakdown' || true)"
               echo "scanner score breakdown entries in last 30m: $score_count"
-              echo 'Expected fields: symbol, raw component score, weight, weighted contribution, weight_total, normalized_score, threshold.'
+              echo 'Expected fields: symbol, direction, raw_component_scores, weights, weighted_contributions, weight_total, normalized_score, threshold, threshold_pass.'
+
+              echo
+              echo '--- Scanner ranking / trade decision diagnostics (last 30m) ---'
+              decision_logs="$(docker logs --since 30m --timestamps aitos-paper 2>&1 | grep -E 'scanner ranking decision|trade candidate rejected by kernel|trade candidate skipped|trade candidate submitted' || true)"
+              if [ -n "$decision_logs" ]; then
+                printf '%s\n' "$decision_logs" | tail -n 200
+              else
+                echo 'NO scanner ranking/trade decision diagnostics found in the requested window.'
+              fi
+              echo
+              echo '--- Scanner ranking / trade decision summary ---'
+              decision_count="$(printf '%s\n' "$decision_logs" | grep -Ec 'scanner ranking decision|trade candidate rejected by kernel|trade candidate skipped|trade candidate submitted' || true)"
+              echo "scanner ranking/trade decision entries in last 30m: $decision_count"
             } >>"$REPORT"
 
             printf '%s\n' "$status" > "$EXIT_CODE"
