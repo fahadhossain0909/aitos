@@ -77,7 +77,7 @@ class SystemComponents:
         ]
         if self.knowledge_graph is not None:
             modules.append(self.knowledge_graph)
-        modules += [self.data_ingestion, self.scanner, self.trade_lifecycle]
+        modules += [self.scanner, self.data_ingestion, self.trade_lifecycle]
         if self.reconciliation is not None:
             modules.append(self.reconciliation)
         if self.correlation_updater is not None:
@@ -139,6 +139,8 @@ async def build_system(
         symbols=symbols,
         kline_timeframe=kline_timeframe,
         repository=market_data_repository,
+        live_trade_handler=scanner.accept_live_trade,
+        live_orderbook_handler=scanner.accept_live_order_book,
     )
     decision_journal = decision_journal_repository or DecisionJournalRepository()
     journal = JournalSystem(

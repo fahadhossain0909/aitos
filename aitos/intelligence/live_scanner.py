@@ -49,26 +49,14 @@ class LiveScannerCache:
             self._state[symbol] = LiveSymbolCache(trades=deque(maxlen=self._max_trades))
         return self._state[symbol]
 
-    async def initialize(self) -> None:
+    async def initialize(self, direct_market_data: bool = False) -> None:
+        self._direct_market_data = direct_market_data
         if self._initialized:
             return
         for symbol in self._symbols:
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.trade.{symbol}",
-                    self._on_trade,
-                    group=LIVE_TRADE_GROUP,
-                    start_id="$",
-                )
-            )
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.orderbook.{symbol}",
-                    self._on_book,
-                    group=LIVE_BOOK_GROUP,
-                    start_id="$",
-                )
-            )
+            if not direct_market_data:
+                self._subscriptions.append(await self._bus.subscribe(f"market.trade.{symbol}", self._on_trade, group=LIVE_TRADE_GROUP, start_id="$"))
+                self._subscriptions.append(await self._bus.subscribe(f"market.orderbook.{symbol}", self._on_book, group=LIVE_BOOK_GROUP, start_id="$"))
             self._subscriptions.append(
                 await self._bus.subscribe(
                     f"market.liquidity.{symbol}",
@@ -84,6 +72,12 @@ class LiveScannerCache:
             sub.cancel()
         self._subscriptions.clear()
         self._initialized = False
+
+    async def accept_live_trade(self, trade: TradeTick) -> None:
+        await self._on_trade(Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict()))
+
+    async def accept_live_order_book(self, book: OrderBookSnapshot) -> None:
+        await self._on_book(Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict()))
 
     async def _on_trade(self, event: Event) -> None:
         trade = TradeTick.from_dict(event.payload)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,6 +31,7 @@ TRADE_STREAM_QUEUE_SIZE = 10_000
 TRADE_STREAM_BATCH_SIZE = 64
 TRADE_STREAM_BATCH_WAIT_SECONDS = 0.010
 TRADE_SINK_CONCURRENCY = 16
+TRADE_PERSIST_QUEUE_SIZE = 50_000
 TRADE_FALLBACK_LIMIT = 500
 ORDERBOOK_PERSIST_INTERVAL_SECONDS = 1.0
 STREAM_RESTART_DELAY_SECONDS = 1.0
@@ -72,6 +73,8 @@ class DataIngestionService(AITOSModule):
         repository: MarketDataRepository | None = None,
         orderbook_levels: int = 20,
         liquidity_trade_window: int = 500,
+        live_trade_handler: Callable[[TradeTick], Awaitable[None]] | None = None,
+        live_orderbook_handler: Callable[[OrderBookSnapshot], Awaitable[None]] | None = None,
     ) -> None:
         self._exchange = exchange
         self._event_bus = event_bus
@@ -101,6 +104,10 @@ class DataIngestionService(AITOSModule):
         self._last_book_persist_at: dict[str, datetime] = {}
         self._last_trade_ids: dict[str, int] = {}
         self._trade_sink_semaphore = asyncio.Semaphore(TRADE_SINK_CONCURRENCY)
+        self._live_trade_handler = live_trade_handler
+        self._live_orderbook_handler = live_orderbook_handler
+        self._trade_persistence_queue: asyncio.Queue[tuple[TradeTick, dict[str, Any]]] = asyncio.Queue(maxsize=TRADE_PERSIST_QUEUE_SIZE)
+        self._trade_persistence_dropped = 0
         self._live_state = LiveMarketStateStore(
             max_trades=max(5000, self._liquidity_trade_window)
         )
@@ -119,6 +126,7 @@ class DataIngestionService(AITOSModule):
             return
         await self._exchange.connect()
         self._tasks = [
+            asyncio.create_task(self._run_trade_persistence(), name="aitos-trade-persistence"),
             asyncio.create_task(self._run_kline_stream(), name="aitos-kline-stream"),
             asyncio.create_task(self._run_trade_stream(), name="aitos-trade-stream"),
             asyncio.create_task(
@@ -186,6 +194,9 @@ class DataIngestionService(AITOSModule):
                 "trade_stream_queue_capacity": TRADE_STREAM_QUEUE_SIZE,
                 "trade_stream_batch_size": TRADE_STREAM_BATCH_SIZE,
                 "trade_sink_concurrency": TRADE_SINK_CONCURRENCY,
+                "trade_persistence_queue_size": self._trade_persistence_queue.qsize(),
+                "trade_persistence_queue_capacity": TRADE_PERSIST_QUEUE_SIZE,
+                "trade_persistence_dropped": self._trade_persistence_dropped,
                 "last_trade_event_time": self._last_trade_event_time,
                 "task_states": states,
             },
@@ -334,6 +345,11 @@ class DataIngestionService(AITOSModule):
                 # state accepted the trade. If state processing fails, the
                 # trade must remain eligible for retry/recovery instead of
                 # being permanently skipped by the next batch.
+                if self._live_trade_handler is not None:
+                    try:
+                        await self._live_trade_handler(trade)
+                    except Exception as exc:
+                        logger.exception("direct live trade handler failed", extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id, "error": str(exc)}})
                 self._last_trade_ids[trade.symbol] = trade.trade_id
                 self._orderflow_events += 1
                 self._ticks_processed += 1
@@ -392,9 +408,28 @@ class DataIngestionService(AITOSModule):
                         },
                     )
 
-        await asyncio.gather(*(io_one(trade, payload) for trade, payload in accepted))
+        for trade, payload in accepted:
+            try:
+                self._trade_persistence_queue.put_nowait((trade, payload))
+            except asyncio.QueueFull:
+                self._trade_persistence_dropped += 1
+                logger.error("trade persistence queue full; live path remains active", extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id}})
         for trade, _payload in accepted:
             await self._publish_live_state(trade.symbol)
+
+    async def _run_trade_persistence(self) -> None:
+        while True:
+            trade,payload=await self._trade_persistence_queue.get()
+            try:
+                async with self._trade_sink_semaphore:
+                    jobs=[self._event_bus.publish(Event(topic=trade_topic(trade.symbol),payload=trade.to_dict(),source_module=self.module_id,priority=EventPriority.NORMAL)),self._event_bus.publish(Event(topic=orderflow_topic(trade.symbol),payload=payload,source_module=self.module_id,priority=EventPriority.NORMAL))]
+                    if self._repository is not None: jobs.append(self._repository.save_trade_tick(trade))
+                    await asyncio.gather(*jobs)
+            except Exception as exc:
+                self._errors+=1; self._trade_downstream_errors+=1
+                logger.exception("trade persistence failed",extra={"aitos_extra":{"symbol":trade.symbol,"trade_id":trade.trade_id,"error":str(exc)}})
+            finally:
+                self._trade_persistence_queue.task_done()
 
     async def _recover_recent_trades(self) -> None:
         """Recover a REST window after a silent websocket gap; IDs prevent duplicates."""
@@ -443,6 +478,11 @@ class DataIngestionService(AITOSModule):
         self._tick_processed()
 
     async def _handle_order_book(self, book: OrderBookSnapshot) -> None:
+        if self._live_orderbook_handler is not None:
+            try:
+                await self._live_orderbook_handler(book)
+            except Exception as exc:
+                logger.exception("direct live order-book handler failed",extra={"aitos_extra":{"symbol":book.symbol,"last_update_id":book.last_update_id,"error":str(exc)}})
         await self._event_bus.publish(
             Event(
                 topic=orderbook_topic(book.symbol),

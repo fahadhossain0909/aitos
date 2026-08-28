@@ -158,7 +158,7 @@ class OpportunityScanner(AITOSModule):
         if self._initialized:
             return
         await self._exchange.connect()
-        await self._live_cache.initialize()
+        await self._live_cache.initialize(direct_market_data=True)
         missing = [s for s in self._symbols if s not in self._footprint_tick_sizes]
         if missing:
             try:
@@ -214,6 +214,12 @@ class OpportunityScanner(AITOSModule):
 
     async def handle_event(self, event: Event) -> EventResponse | None:
         return None
+
+    async def accept_live_trade(self, trade):
+        await self._live_cache.accept_live_trade(trade)
+
+    async def accept_live_order_book(self, book):
+        await self._live_cache.accept_live_order_book(book)
 
     def _footprint_tick_size(self, symbol: str) -> float | None:
         tick = self._footprint_tick_sizes.get(symbol)
