@@ -309,7 +309,6 @@ class DataIngestionService(AITOSModule):
             previous_id = self._last_trade_ids.get(trade.symbol, -1)
             if trade.trade_id <= previous_id:
                 continue
-            self._last_trade_ids[trade.symbol] = trade.trade_id
             self._trade_events_received += 1
             self._last_trade_event_time = datetime.now(timezone.utc).isoformat()
             try:
@@ -331,6 +330,11 @@ class DataIngestionService(AITOSModule):
                         features.timestamp.isoformat() if features.timestamp else None
                     ),
                 }
+                # Advance the deduplication cursor only after the local live
+                # state accepted the trade. If state processing fails, the
+                # trade must remain eligible for retry/recovery instead of
+                # being permanently skipped by the next batch.
+                self._last_trade_ids[trade.symbol] = trade.trade_id
                 self._orderflow_events += 1
                 self._ticks_processed += 1
                 self._last_event_time = datetime.now(timezone.utc).isoformat()
