@@ -7,19 +7,12 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
-from aitos.core.contracts import (
-    AITOSModule,
-    Event,
-    EventResponse,
-    HealthStatus,
-    ModuleStatus,
-)
+from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.data.market_os_persistence")
-
 BATCH_SIZE = 500
 BATCH_FLUSH_INTERVAL_SECONDS = 1.0
 
@@ -32,7 +25,6 @@ CREATE TABLE IF NOT EXISTS market_orderflow (
 ) ENGINE = MergeTree() PARTITION BY toYYYYMM(time)
 ORDER BY (symbol, time, event_id)
 """
-
 CREATE_MARKET_LIQUIDITY = """
 CREATE TABLE IF NOT EXISTS market_liquidity_events (
     time DateTime64(3, 'UTC'), event_id String, symbol LowCardinality(String),
@@ -41,7 +33,6 @@ CREATE TABLE IF NOT EXISTS market_liquidity_events (
 ) ENGINE = MergeTree() PARTITION BY toYYYYMM(time)
 ORDER BY (symbol, time, event_id)
 """
-
 CREATE_MARKET_LIVE_STATE = """
 CREATE TABLE IF NOT EXISTS market_live_state (
     time DateTime64(3, 'UTC'), event_id String, symbol LowCardinality(String),
@@ -51,11 +42,6 @@ CREATE TABLE IF NOT EXISTS market_live_state (
 ) ENGINE = MergeTree() PARTITION BY toYYYYMM(time)
 ORDER BY (symbol, time, event_id)
 """
-
-# Raw order-book history is intentionally separate from the sampled
-# ``order_book_snapshots`` table used by the ingestion service.  This stream
-# consumer uses the durable EventBus path so every published L2 snapshot can
-# reach ClickHouse without applying the live-trading "start at tail" rule.
 CREATE_ORDER_BOOK_EVENTS = """
 CREATE TABLE IF NOT EXISTS order_book_events (
     time DateTime64(3, 'UTC'), event_id String, symbol LowCardinality(String),
@@ -67,15 +53,11 @@ ORDER BY (symbol, time, event_id)
 
 
 class MarketOSPersistence(AITOSModule):
-    """Persist Market OS events using bounded ClickHouse batches."""
+    """Persist Market OS events and losslessly archive raw order-book events."""
 
-    def __init__(
-        self,
-        event_bus: EventBus,
-        repository: Optional[MarketDataRepository],
-        batch_size: int = BATCH_SIZE,
-        flush_interval_seconds: float = BATCH_FLUSH_INTERVAL_SECONDS,
-    ) -> None:
+    def __init__(self, event_bus: EventBus, repository: Optional[MarketDataRepository],
+                 batch_size: int = BATCH_SIZE,
+                 flush_interval_seconds: float = BATCH_FLUSH_INTERVAL_SECONDS) -> None:
         self._event_bus = event_bus
         self._repository = repository
         self._subscriptions: list[Subscription] = []
@@ -86,60 +68,14 @@ class MarketOSPersistence(AITOSModule):
         self._batch_size = max(1, batch_size)
         self._flush_interval_seconds = max(0.05, flush_interval_seconds)
         self._buffers: dict[str, list[list[Any]]] = {
-            "market_orderflow": [],
-            "market_liquidity_events": [],
-            "market_live_state": [],
-            "order_book_events": [],
+            "market_orderflow": [], "market_liquidity_events": [],
+            "market_live_state": [], "order_book_events": [],
         }
         self._column_names = {
-            "market_orderflow": [
-                "time",
-                "event_id",
-                "symbol",
-                "trade_count",
-                "buy_volume",
-                "sell_volume",
-                "delta",
-                "cvd",
-                "buy_ratio",
-                "aggression",
-                "imbalance",
-                "vwap",
-                "last_price",
-                "direction",
-            ],
-            "market_liquidity_events": [
-                "time",
-                "event_id",
-                "symbol",
-                "kind",
-                "side",
-                "score",
-                "price",
-                "details_json",
-                "last_update_id",
-            ],
-            "market_live_state": [
-                "time",
-                "event_id",
-                "symbol",
-                "trade_count",
-                "order_flow_json",
-                "liquidity_events_json",
-                "best_bid",
-                "best_ask",
-                "state_timestamp",
-            ],
-            "order_book_events": [
-                "time",
-                "event_id",
-                "symbol",
-                "bid_levels",
-                "ask_levels",
-                "spread",
-                "depth_ratio",
-                "last_update_id",
-            ],
+            "market_orderflow": ["time", "event_id", "symbol", "trade_count", "buy_volume", "sell_volume", "delta", "cvd", "buy_ratio", "aggression", "imbalance", "vwap", "last_price", "direction"],
+            "market_liquidity_events": ["time", "event_id", "symbol", "kind", "side", "score", "price", "details_json", "last_update_id"],
+            "market_live_state": ["time", "event_id", "symbol", "trade_count", "order_flow_json", "liquidity_events_json", "best_bid", "best_ask", "state_timestamp"],
+            "order_book_events": ["time", "event_id", "symbol", "bid_levels", "ask_levels", "spread", "depth_ratio", "last_update_id"],
         }
         self._flush_lock = asyncio.Lock()
         self._flush_task: Optional[asyncio.Task[None]] = None
@@ -150,72 +86,32 @@ class MarketOSPersistence(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.2.0"
+        return "1.2.1"
 
     async def initialize(self, config: Dict[str, Any]) -> None:
         if self._initialized:
             return
         if self._repository is None:
-            logger.warning(
-                "Market OS persistence disabled: ClickHouse repository unavailable"
-            )
+            logger.warning("Market OS persistence disabled: ClickHouse repository unavailable")
             self._initialized = True
             return
-        await self._repository._client.command(CREATE_MARKET_ORDERFLOW)
-        await self._repository._client.command(CREATE_MARKET_LIQUIDITY)
-        await self._repository._client.command(CREATE_MARKET_LIVE_STATE)
-        await self._repository._client.command(CREATE_ORDER_BOOK_EVENTS)
+        for ddl in (CREATE_MARKET_ORDERFLOW, CREATE_MARKET_LIQUIDITY, CREATE_MARKET_LIVE_STATE, CREATE_ORDER_BOOK_EVENTS):
+            await self._repository._client.command(ddl)
         self._subscriptions = [
-            await self._event_bus.subscribe(
-                "market.orderflow.*",
-                self._handle_orderflow,
-                group="market-os-orderflow",
-            ),
-            await self._event_bus.subscribe(
-                "market.liquidity.*",
-                self._handle_liquidity,
-                group="market-os-liquidity",
-            ),
-            await self._event_bus.subscribe(
-                "market.live_state.*",
-                self._handle_live_state,
-                group="market-os-live-state",
-            ),
-            # IMPORTANT: this is a historical/durable consumer.  Do not use
-            # start_id="$" here: ClickHouse must consume the retained stream
-            # from its existing group cursor and recover pending entries.
-            await self._event_bus.subscribe(
-                "market.orderbook.*",
-                self._handle_orderbook,
-                group="clickhouse-orderbook-history-v1",
-                start_id="0",
-            ),
+            await self._event_bus.subscribe("market.orderflow.*", self._handle_orderflow, group="market-os-orderflow"),
+            await self._event_bus.subscribe("market.liquidity.*", self._handle_liquidity, group="market-os-liquidity"),
+            await self._event_bus.subscribe("market.live_state.*", self._handle_live_state, group="market-os-live-state"),
+            await self._event_bus.subscribe("market.orderbook.*", self._handle_orderbook, group="clickhouse-orderbook-history-v1", start_id="0"),
         ]
         self._flush_task = asyncio.create_task(self._flush_loop())
         self._initialized = True
-        logger.info(
-            "Market OS persistence initialized (batch_size=%s, flush_interval=%.2fs)",
-            self._batch_size,
-            self._flush_interval_seconds,
-        )
+        logger.info("Market OS persistence initialized (batch_size=%s, flush_interval=%.2fs)", self._batch_size, self._flush_interval_seconds)
 
     async def health_check(self) -> HealthStatus:
-        status = (
-            ModuleStatus.HEALTHY
-            if self._repository is not None
-            else ModuleStatus.DEGRADED
-        )
-        return HealthStatus(
-            module_id=self.module_id,
-            status=status,
-            latency_ms=0.0,
-            last_event_time=self._last_event_time,
-            details={
-                "events_persisted": self._events_persisted,
-                "errors": self._errors,
-                "pending_batches": sum(len(rows) for rows in self._buffers.values()),
-            },
-        )
+        status = ModuleStatus.HEALTHY if self._repository is not None else ModuleStatus.DEGRADED
+        return HealthStatus(module_id=self.module_id, status=status, latency_ms=0.0, last_event_time=self._last_event_time,
+                            details={"events_persisted": self._events_persisted, "errors": self._errors,
+                                     "pending_batches": sum(len(rows) for rows in self._buffers.values())})
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         for subscription in self._subscriptions:
@@ -232,88 +128,42 @@ class MarketOSPersistence(AITOSModule):
 
     async def emit_events(self):
         return
-        yield  # pragma: no cover
+        yield
 
     async def handle_event(self, event: Event) -> Optional[EventResponse]:
         return None
 
     async def _handle_orderflow(self, event: Event) -> Optional[EventResponse]:
-        payload = event.payload
-        symbol = _symbol_from_topic(event.topic)
-        row = [
-            event.created_at,
-            event.event_id,
-            symbol,
-            int(payload.get("trade_count", 0)),
-            float(payload.get("buy_volume", 0.0)),
-            float(payload.get("sell_volume", 0.0)),
-            float(payload.get("delta", 0.0)),
-            float(payload.get("cvd", 0.0)),
-            float(payload.get("buy_ratio", 0.0)),
-            float(payload.get("aggression", 0.0)),
-            float(payload.get("imbalance", 0.0)),
-            float(payload.get("vwap", 0.0)),
-            float(payload.get("last_price", 0.0)),
-            str(payload.get("direction", "")),
-        ]
+        p = event.payload
+        row = [event.created_at, event.event_id, _symbol_from_topic(event.topic), int(p.get("trade_count", 0)), float(p.get("buy_volume", 0.0)), float(p.get("sell_volume", 0.0)), float(p.get("delta", 0.0)), float(p.get("cvd", 0.0)), float(p.get("buy_ratio", 0.0)), float(p.get("aggression", 0.0)), float(p.get("imbalance", 0.0)), float(p.get("vwap", 0.0)), float(p.get("last_price", 0.0)), str(p.get("direction", ""))]
         await self._enqueue("market_orderflow", row, event)
         return None
 
     async def _handle_liquidity(self, event: Event) -> Optional[EventResponse]:
-        payload = event.payload
-        symbol = _symbol_from_topic(event.topic)
-        row = [
-            event.created_at,
-            event.event_id,
-            symbol,
-            str(payload.get("kind", "")),
-            str(payload.get("side", "")),
-            float(payload.get("score", 0.0)),
-            float(payload.get("price", 0.0)),
-            json.dumps(payload.get("details", {}), sort_keys=True, default=str),
-            int(payload.get("last_update_id", 0)),
-        ]
+        p = event.payload
+        row = [event.created_at, event.event_id, _symbol_from_topic(event.topic), str(p.get("kind", "")), str(p.get("side", "")), float(p.get("score", 0.0)), float(p.get("price", 0.0)), json.dumps(p.get("details", {}), sort_keys=True, default=str), int(p.get("last_update_id", 0))]
         await self._enqueue("market_liquidity_events", row, event)
         return None
 
     async def _handle_live_state(self, event: Event) -> Optional[EventResponse]:
-        payload = event.payload
-        symbol = _symbol_from_topic(event.topic)
-        row = [
-            event.created_at,
-            event.event_id,
-            symbol,
-            int(payload.get("trade_count", 0)),
-            json.dumps(payload.get("order_flow"), sort_keys=True, default=str),
-            json.dumps(
-                payload.get("liquidity_events", []), sort_keys=True, default=str
-            ),
-            _optional_float(payload.get("best_bid")),
-            _optional_float(payload.get("best_ask")),
-            _parse_timestamp(payload.get("timestamp")),
-        ]
+        p = event.payload
+        row = [event.created_at, event.event_id, _symbol_from_topic(event.topic), int(p.get("trade_count", 0)), json.dumps(p.get("order_flow"), sort_keys=True, default=str), json.dumps(p.get("liquidity_events", []), sort_keys=True, default=str), _optional_float(p.get("best_bid")), _optional_float(p.get("best_ask")), _parse_timestamp(p.get("timestamp"))]
         await self._enqueue("market_live_state", row, event)
         return None
 
     async def _handle_orderbook(self, event: Event) -> Optional[EventResponse]:
-        payload = event.payload
-        row = [
-            event.created_at,
-            event.event_id,
-            _symbol_from_topic(event.topic),
-            json.dumps(payload.get("bids", []), sort_keys=True, default=str),
-            json.dumps(payload.get("asks", []), sort_keys=True, default=str),
-            float(payload.get("spread", 0.0)),
-            float(payload.get("depth_ratio", 0.0)),
-            int(payload.get("last_update_id", 0)),
-        ]
+        p = event.payload
+        row = [event.created_at, event.event_id, _symbol_from_topic(event.topic), json.dumps(p.get("bids", []), sort_keys=True, default=str), json.dumps(p.get("asks", []), sort_keys=True, default=str), float(p.get("spread", 0.0)), float(p.get("depth_ratio", 0.0)), int(p.get("last_update_id", 0))]
+        # Raw order-book history must not be ACKed while it is only in memory.
+        # Flush this table before returning so the EventBus ACK means the row
+        # has reached ClickHouse. The live scanner is completely separate.
         await self._enqueue("order_book_events", row, event)
+        await self._flush_table("order_book_events", event)
         return None
 
     async def _enqueue(self, table: str, row: list[Any], event: Event) -> None:
         if self._repository is None:
             return
-        flush_now = False
         async with self._flush_lock:
             self._buffers[table].append(row)
             flush_now = len(self._buffers[table]) >= self._batch_size
@@ -343,25 +193,14 @@ class MarketOSPersistence(AITOSModule):
                 return
             self._buffers[table] = []
         try:
-            await self._repository._client.insert(
-                table, rows, column_names=self._column_names[table]
-            )
+            await self._repository._client.insert(table, rows, column_names=self._column_names[table])
             self._events_persisted += len(rows)
             self._last_event_time = datetime.now(timezone.utc).isoformat()
         except Exception:
             self._errors += len(rows)
             async with self._flush_lock:
                 self._buffers[table][0:0] = rows
-            logger.exception(
-                "failed to persist Market OS batch",
-                extra={
-                    "aitos_extra": {
-                        "table": table,
-                        "rows": len(rows),
-                        "event_id": getattr(event, "event_id", None),
-                    }
-                },
-            )
+            logger.exception("failed to persist Market OS batch", extra={"aitos_extra": {"table": table, "rows": len(rows), "event_id": getattr(event, "event_id", None)}})
             if event is not None:
                 raise
 
