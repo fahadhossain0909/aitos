@@ -12,6 +12,7 @@ import aiohttp
 from aitos.exchange.base import ExchangeAdapter
 from aitos.exchange.orderbook import LocalOrderBook, OrderBookSequenceError
 from aitos.exchange.parsing import (
+    parse_agg_trade_ws,
     parse_depth_diff_ws,
     parse_funding_rate_rest,
     parse_kline_rest,
@@ -19,7 +20,6 @@ from aitos.exchange.parsing import (
     parse_open_interest_rest,
     parse_order_book_rest,
     parse_trade_rest,
-    parse_trade_ws,
 )
 from aitos.exchange.rate_limiter import TokenBucketRateLimiter
 from aitos.exchange.symbol_filters import SymbolFilters, parse_exchange_info
@@ -143,12 +143,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield kline
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
-        """Consume Binance Futures raw trades via the resilient public stream."""
+        """Consume Binance Futures aggregate trades via the resilient public stream."""
         if not symbols:
             return
-        streams = [f"{symbol.lower()}@trade" for symbol in symbols]
+        streams = [f"{symbol.lower()}@aggTrade" for symbol in symbols]
         async for data, _stream_name in self._raw_stream(streams, emit_reconnect=True):
-            yield parse_trade_ws(data)
+            yield parse_agg_trade_ws(data)
 
     async def stream_order_book(
         self, symbols: list[str], levels: int = 20
