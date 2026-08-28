@@ -1,0 +1,43 @@
+name: Trade Path Diagnostic
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_KEY"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_trace_key
+          chmod 600 /tmp/aitos_trace_key
+
+      - name: Run read-only trade path diagnostic
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_trace_key
+          command_timeout: 8m
+          script: |
+            set -euo pipefail
+            cd "$HOME/aitos"
+            test -f scripts/trade_path_diagnostic.sh
+            bash scripts/trade_path_diagnostic.sh
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f /tmp/aitos_trace_key
