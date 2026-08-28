@@ -215,7 +215,12 @@ async def test_stream_trades_yields_parsed_events_from_market_stream_endpoint():
         {"stream": "btcusdt@aggTrade", "data": SAMPLE_AGG_TRADE_WS},
         {
             "stream": "ethusdt@aggTrade",
-            "data": {**SAMPLE_AGG_TRADE_WS, "s": "ETHUSDT", "a": 1000000},
+            "data": {
+                **SAMPLE_AGG_TRADE_WS,
+                "s": "ETHUSDT",
+                "a": 1000000,
+                "l": 1000005,
+            },
         },
     ]
     fake_ws = FakeWebSocket(envelopes)
@@ -235,7 +240,7 @@ async def test_stream_trades_yields_parsed_events_from_market_stream_endpoint():
     # @trade, and REST.  For aggTrade this is the payload's last raw ID (l),
     # not its aggregate ID (a).
     assert received[0].trade_id == 105
-    assert received[1].trade_id == 105
+    assert received[1].trade_id == 1000005
     assert fake_ws.url == (
         f"{WS_MARKET_BASE_URL}?streams=btcusdt@aggTrade/ethusdt@aggTrade"
     )
