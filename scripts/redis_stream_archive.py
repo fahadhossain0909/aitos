@@ -84,7 +84,9 @@ class ArchiveWriter:
                 handle.seek(0, os.SEEK_END)
                 size = handle.tell()
                 if size < offset:
-                    raise RuntimeError(f"archive file is shorter than checkpoint: {path}")
+                    raise RuntimeError(
+                        f"archive file is shorter than checkpoint: {path}"
+                    )
                 if size > offset:
                     handle.truncate(offset)
                     handle.flush()
@@ -96,11 +98,17 @@ class ArchiveWriter:
                     "stream_id": decode(entry_id),
                     "fields": {decode(k): decode(v) for k, v in fields.items()},
                 }
-                handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
+                handle.write(
+                    json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+                )
             handle.flush()
             os.fsync(handle.fileno())
             end_offset = handle.tell()
-        cursors[key] = {"id": decode(entries[-1][0]), "file": str(path), "offset": end_offset}
+        cursors[key] = {
+            "id": decode(entries[-1][0]),
+            "file": str(path),
+            "offset": end_offset,
+        }
         self.save(cursors)
 
     def save(self, cursors: dict[str, dict[str, Any]]) -> None:
@@ -130,7 +138,9 @@ class ArchiveWriter:
                         size = handle.tell()
                         offset = int(value["offset"])
                         if size < offset:
-                            raise RuntimeError(f"archive file is shorter than checkpoint: {path}")
+                            raise RuntimeError(
+                                f"archive file is shorter than checkpoint: {path}"
+                            )
                         if size > offset:
                             handle.truncate(offset)
                             handle.flush()
@@ -151,7 +161,11 @@ class ArchiveWriter:
                         except (UnicodeDecodeError, json.JSONDecodeError):
                             continue
                         if str(record.get("stream_id")) == target:
-                            normalized[key] = {"id": target, "file": str(path), "offset": handle.tell()}
+                            normalized[key] = {
+                                "id": target,
+                                "file": str(path),
+                                "offset": handle.tell(),
+                            }
                             found = True
                             break
                 if found:
@@ -159,13 +173,20 @@ class ArchiveWriter:
             if found:
                 changed = True
             else:
-                normalized[key] = {"id": target, "file": "", "offset": 0, "legacy": True}
+                normalized[key] = {
+                    "id": target,
+                    "file": "",
+                    "offset": 0,
+                    "legacy": True,
+                }
         if changed:
             self.save(normalized)
         return normalized
 
 
-async def archive_stream(r: redis.Redis, writer: ArchiveWriter, key: str, cursors: dict[str, dict[str, Any]]) -> bool:
+async def archive_stream(
+    r: redis.Redis, writer: ArchiveWriter, key: str, cursors: dict[str, dict[str, Any]]
+) -> bool:
     state = cursors.get(key, {})
     cursor = str(state.get("id", "0-0"))
     response = await r.xread({key: cursor}, count=BATCH)
