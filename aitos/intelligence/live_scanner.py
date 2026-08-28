@@ -99,6 +99,11 @@ class LiveScannerCache:
         self._cache(symbol).liquidity_events.append(payload)
 
     def snapshot(self, symbol: str) -> LiveSymbolCache | None:
+        # Scanner reads this path on every scan cycle. Sampling here guarantees
+        # freshness diagnostics are emitted even when the upstream stream has
+        # stopped producing events, which is precisely the stale-state case we
+        # need to distinguish from a healthy live stream.
+        self._maybe_log_freshness(symbol)
         return self._state.get(symbol)
 
     @staticmethod

@@ -61,6 +61,41 @@ jobs:
             bash scripts/paper_runtime_audit.sh >"$REPORT" 2>&1
             status=$?
             set -e
+
+            # The canonical audit above remains the source of blocker status.
+            # Append non-blocking observability sections so stale live state can
+            # be classified even when no new market events are arriving.
+            {
+              echo
+              echo '--- Live scanner freshness diagnostics (last 30m) ---'
+              freshness_logs="$(docker logs --since 30m --timestamps aitos-paper 2>&1 | grep 'live scanner freshness' || true)"
+              if [ -n "$freshness_logs" ]; then
+                printf '%s\n' "$freshness_logs" | tail -n 200
+              else
+                echo 'NO live scanner freshness diagnostics found in the requested window.'
+              fi
+              echo
+              echo '--- Live scanner freshness summary ---'
+              freshness_count="$(printf '%s\n' "$freshness_logs" | grep -c 'live scanner freshness' || true)"
+              echo "live scanner freshness entries in last 30m: $freshness_count"
+              echo 'Expected fields: symbol, cache_has_state, trade_age_sec, book_age_sec, trade_consumer_lag_sec, book_consumer_lag_sec, last_trade_at, last_book_at.'
+
+              echo
+              echo '--- Scanner score-breakdown diagnostics (last 30m) ---'
+              score_logs="$(docker logs --since 30m --timestamps aitos-paper 2>&1 | grep 'scanner score breakdown' || true)"
+              if [ -n "$score_logs" ]; then
+                printf '%s\n' "$score_logs" | tail -n 200
+              else
+                echo 'NO scanner score breakdown diagnostics found in the requested window.'
+                echo 'Score-breakdown instrumentation is not yet wired into the scanner execution path.'
+              fi
+              echo
+              echo '--- Scanner score-breakdown summary ---'
+              score_count="$(printf '%s\n' "$score_logs" | grep -c 'scanner score breakdown' || true)"
+              echo "scanner score breakdown entries in last 30m: $score_count"
+              echo 'Expected fields: symbol, raw component score, weight, weighted contribution, weight_total, normalized_score, threshold.'
+            } >>"$REPORT"
+
             printf '%s\n' "$status" > "$EXIT_CODE"
             test -s "$REPORT"
             exit "$status"
