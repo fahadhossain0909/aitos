@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Crash-safe Redis Stream archival with durable per-stream cursors."""
 from __future__ import annotations
-import asyncio, json, os
+
+import asyncio
+import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
 import redis.asyncio as redis
 
 HOST = os.getenv("REDIS_HOST", "redis")
