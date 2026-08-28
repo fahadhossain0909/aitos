@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from scripts.redis_stream_archive import maxlen_for
 
 
