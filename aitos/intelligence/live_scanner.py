@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
@@ -16,6 +16,7 @@ logger = get_logger("aitos.intelligence.live_scanner")
 LIVE_TRADE_GROUP = "live-scanner-trades-v2"
 LIVE_BOOK_GROUP = "live-scanner-book-v2"
 LIVE_LIQUIDITY_GROUP = "live-scanner-liquidity-v2"
+LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 
 
 @dataclass
@@ -86,10 +87,26 @@ class LiveScannerCache:
 
     async def _on_trade(self, event: Event) -> None:
         trade = TradeTick.from_dict(event.payload)
+        now = datetime.now(timezone.utc)
+        if trade.timestamp < now - timedelta(seconds=LIVE_TRADE_MAX_AGE_SECONDS):
+            logger.info(
+                "ignored stale trade in live scanner",
+                extra={
+                    "aitos_extra": {
+                        "symbol": trade.symbol,
+                        "trade_id": trade.trade_id,
+                        "trade_age_sec": round(
+                            max(0.0, (now - trade.timestamp).total_seconds()), 3
+                        ),
+                        "max_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS,
+                    }
+                },
+            )
+            return
         state = self._cache(trade.symbol)
         state.trades.append(trade)
         state.last_trade_at = trade.timestamp
-        state.last_trade_received_at = datetime.now(timezone.utc)
+        state.last_trade_received_at = now
         self._maybe_log_freshness(trade.symbol)
 
     async def _on_book(self, event: Event) -> None:
