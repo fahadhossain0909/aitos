@@ -146,65 +146,52 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield kline
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
-        """Keep every symbol live with per-symbol primary/fallback recovery."""
+        """Keep one combined aggTrade primary stream with per-symbol fallback."""
         if not symbols:
             return
 
-        async def consume_symbol(symbol: str) -> AsyncIterator[TradeTick]:
-            aggregate_stream = [f"{symbol.lower()}@aggTrade"]
-            raw_trade_stream = [f"{symbol.lower()}@trade"]
-            primary = self._raw_stream(
-                aggregate_stream, emit_reconnect=True
+        normalized_symbols = list(dict.fromkeys(symbols))
+        symbol_set = set(normalized_symbols)
+        primary_streams = [f"{symbol.lower()}@aggTrade" for symbol in normalized_symbols]
+        primary = self._raw_stream(primary_streams, emit_reconnect=True).__aiter__()
+        fallback_streams = {
+            symbol: self._raw_stream(
+                [f"{symbol.lower()}@trade"], emit_reconnect=True
             ).__aiter__()
-            fallback = self._raw_stream(
-                raw_trade_stream, emit_reconnect=True
-            ).__aiter__()
-            primary_task: asyncio.Task | None = None
-            fallback_task: asyncio.Task | None = None
-            loop = asyncio.get_running_loop()
-            primary_last_data = loop.time()
-            using_fallback = False
+            for symbol in normalized_symbols
+        }
+        loop = asyncio.get_running_loop()
+        primary_last_data = {symbol: loop.time() for symbol in normalized_symbols}
+        fallback_active: set[str] = set()
+        fallback_tasks: dict[str, asyncio.Task | None] = {
+            symbol: None for symbol in normalized_symbols
+        }
+        primary_task: asyncio.Task | None = None
 
-            try:
-                while True:
-                    if primary_task is None:
-                        primary_task = asyncio.create_task(primary.__anext__())
+        def stream_symbol(stream_name: str, data: Any) -> str:
+            raw_symbol = stream_name.split("@", 1)[0].upper()
+            if raw_symbol in symbol_set:
+                return raw_symbol
+            symbol = str(data.get("s", "")).upper() if isinstance(data, dict) else ""
+            return symbol
 
-                    if not using_fallback:
-                        # A silent-but-open primary must not block the watchdog.
-                        # The timeout is the actual five-second fallback trigger.
-                        idle_for = loop.time() - primary_last_data
-                        remaining = max(
-                            0.0, TRADE_STREAM_IDLE_FALLBACK_SECONDS - idle_for
+        try:
+            primary_task = asyncio.create_task(primary.__anext__())
+            while True:
+                if primary_task is None:
+                    primary_task = asyncio.create_task(primary.__anext__())
+
+                now = loop.time()
+                for symbol in normalized_symbols:
+                    if (
+                        symbol not in fallback_active
+                        and now - primary_last_data[symbol]
+                        >= TRADE_STREAM_IDLE_FALLBACK_SECONDS
+                    ):
+                        fallback_active.add(symbol)
+                        fallback_tasks[symbol] = asyncio.create_task(
+                            fallback_streams[symbol].__anext__()
                         )
-                        done, _ = await asyncio.wait(
-                            {primary_task},
-                            timeout=remaining,
-                            return_when=asyncio.FIRST_COMPLETED,
-                        )
-                        if done:
-                            try:
-                                data, _ = primary_task.result()
-                                primary_task = None
-                                tick = parse_agg_trade_ws(data)
-                                primary_last_data = loop.time()
-                                yield tick
-                            except StopAsyncIteration:
-                                primary_task = None
-                            except Exception as exc:
-                                primary_task = None
-                                logger.error(
-                                    "Binance aggregate-trade event invalid; keeping primary under watchdog",
-                                    extra={
-                                        "aitos_extra": {
-                                            "symbol": symbol,
-                                            "error": str(exc),
-                                        }
-                                    },
-                                )
-                            continue
-
-                        using_fallback = True
                         logger.warning(
                             "Binance aggregate-trade stream idle; entering per-symbol raw-trade fallback",
                             extra={
@@ -214,128 +201,130 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                                 }
                             },
                         )
-                        fallback_task = asyncio.create_task(fallback.__anext__())
-                        continue
 
-                    if fallback_task is None:
-                        fallback_task = asyncio.create_task(fallback.__anext__())
-                    tasks = {
-                        task
-                        for task in (primary_task, fallback_task)
-                        if task is not None
-                    }
-                    if not tasks:
-                        continue
-                    done, _ = await asyncio.wait(
-                        tasks,
-                        timeout=TRADE_STREAM_PRIMARY_RETRY_SECONDS,
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if not done:
-                        continue
+                tasks: set[asyncio.Task] = {primary_task}
+                tasks.update(
+                    task
+                    for task in fallback_tasks.values()
+                    if task is not None
+                )
 
-                    # If both streams are ready together, primary wins.
-                    if primary_task is not None and primary_task in done:
+                timeout = TRADE_STREAM_PRIMARY_RETRY_SECONDS
+                for symbol in normalized_symbols:
+                    if symbol not in fallback_active:
+                        remaining = max(
+                            0.0,
+                            TRADE_STREAM_IDLE_FALLBACK_SECONDS
+                            - (loop.time() - primary_last_data[symbol]),
+                        )
+                        timeout = min(timeout, remaining)
+
+                done, _ = await asyncio.wait(
+                    tasks,
+                    timeout=timeout,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                if not done:
+                    continue
+
+                # Always process the combined primary first. If fallback and
+                # primary complete together for the same symbol, primary wins.
+                if primary_task in done:
+                    try:
+                        data, stream_name = primary_task.result()
+                        primary_task = None
+                        symbol = stream_symbol(stream_name, data)
+                        if symbol not in symbol_set:
+                            continue
                         try:
-                            data, _ = primary_task.result()
-                            primary_task = None
                             tick = parse_agg_trade_ws(data)
-                            primary_last_data = loop.time()
+                        except Exception as exc:
+                            logger.error(
+                                "Binance aggregate-trade event invalid; keeping primary under watchdog",
+                                extra={
+                                    "aitos_extra": {
+                                        "symbol": symbol,
+                                        "error": str(exc),
+                                    }
+                                },
+                            )
+                            continue
+                        primary_last_data[symbol] = loop.time()
+                        if symbol in fallback_active:
+                            fallback_active.discard(symbol)
+                            fallback_task = fallback_tasks[symbol]
+                            fallback_tasks[symbol] = None
+                            if fallback_task is not None and not fallback_task.done():
+                                fallback_task.cancel()
+                                await asyncio.gather(
+                                    fallback_task, return_exceptions=True
+                                )
                             logger.info(
                                 "Binance aggregate-trade stream recovered; returning from per-symbol fallback",
                                 extra={"aitos_extra": {"symbol": symbol}},
                             )
-                            using_fallback = False
-                            yield tick
-                            continue
-                        except StopAsyncIteration:
-                            primary_task = None
-                        except Exception as exc:
-                            primary_task = None
-                            logger.error(
-                                "Binance recovered aggregate-trade event invalid",
-                                extra={
-                                    "aitos_extra": {"symbol": symbol, "error": str(exc)}
-                                },
-                            )
+                        yield tick
+                    except StopAsyncIteration:
+                        primary_task = None
+                    except Exception as exc:
+                        primary_task = None
+                        logger.error(
+                            "Binance combined aggregate-trade stream event failed",
+                            extra={"aitos_extra": {"error": str(exc)}},
+                        )
 
-                    if fallback_task is not None and fallback_task in done:
+                for symbol in normalized_symbols:
+                    task = fallback_tasks[symbol]
+                    if task is None or task not in done or symbol not in fallback_active:
+                        continue
+                    try:
+                        data, _ = task.result()
+                        fallback_tasks[symbol] = None
                         try:
-                            data, _ = fallback_task.result()
-                            fallback_task = None
                             yield parse_trade_ws(data)
-                        except StopAsyncIteration:
-                            fallback_task = None
                         except Exception as exc:
-                            fallback_task = None
                             logger.error(
                                 "Binance raw-trade fallback event invalid",
                                 extra={
-                                    "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                                    "aitos_extra": {
+                                        "symbol": symbol,
+                                        "error": str(exc),
+                                    }
                                 },
                             )
-            except asyncio.CancelledError:
-                raise
-            finally:
-                for task in (primary_task, fallback_task):
-                    if task is not None and not task.done():
-                        task.cancel()
-                await asyncio.gather(
-                    *(
-                        task
-                        for task in (primary_task, fallback_task)
-                        if task is not None
-                    ),
-                    return_exceptions=True,
-                )
-                await primary.aclose()
-                await fallback.aclose()
-
-        queues: dict[str, asyncio.Queue[TradeTick | BaseException | None]] = {
-            symbol: asyncio.Queue(maxsize=1000) for symbol in symbols
-        }
-
-        async def worker(symbol: str) -> None:
-            try:
-                async for tick in consume_symbol(symbol):
-                    await queues[symbol].put(tick)
-            except asyncio.CancelledError:
-                raise
-            except BaseException as exc:
-                await queues[symbol].put(exc)
-            finally:
-                await queues[symbol].put(None)
-
-        workers = [
-            asyncio.create_task(worker(symbol), name=f"binance-trades-{symbol}")
-            for symbol in symbols
-        ]
-        try:
-            active = set(symbols)
-            while active:
-                gets = {
-                    symbol: asyncio.create_task(queues[symbol].get())
-                    for symbol in active
-                }
-                done, pending = await asyncio.wait(
-                    gets.values(), return_when=asyncio.FIRST_COMPLETED
-                )
-                for task in pending:
-                    task.cancel()
-                await asyncio.gather(*pending, return_exceptions=True)
-                for task in done:
-                    symbol = next(key for key, value in gets.items() if value is task)
-                    item = task.result()
-                    if item is None:
-                        active.discard(symbol)
-                    elif isinstance(item, BaseException):
-                        raise item
-                    else:
-                        yield item
+                    except StopAsyncIteration:
+                        fallback_tasks[symbol] = None
+                    except Exception as exc:
+                        fallback_tasks[symbol] = None
+                        logger.error(
+                            "Binance raw-trade fallback stream failed",
+                            extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                        )
+                    finally:
+                        if symbol in fallback_active and fallback_tasks[symbol] is None:
+                            fallback_tasks[symbol] = asyncio.create_task(
+                                fallback_streams[symbol].__anext__()
+                            )
+        except asyncio.CancelledError:
+            raise
         finally:
-            for worker_task in workers:
-                worker_task.cancel()
-            await asyncio.gather(*workers, return_exceptions=True)
+            if primary_task is not None and not primary_task.done():
+                primary_task.cancel()
+            await asyncio.gather(
+                *(task for task in [primary_task] if task is not None),
+                return_exceptions=True,
+            )
+            for task in fallback_tasks.values():
+                if task is not None and not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                *(task for task in fallback_tasks.values() if task is not None),
+                return_exceptions=True,
+            )
+            await primary.aclose()
+            for iterator in fallback_streams.values():
+                await iterator.aclose()
 
     async def stream_order_book(
         self, symbols: list[str], levels: int = 20
