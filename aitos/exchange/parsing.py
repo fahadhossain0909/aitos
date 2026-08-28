@@ -105,10 +105,20 @@ def parse_kline_ws(payload: dict[str, Any]) -> Kline:
 
 
 def parse_agg_trade_ws(payload: dict[str, Any]) -> TradeTick:
+    """Parse an aggregate trade using the raw-trade ID namespace.
+
+    Binance's ``aggTrade`` field ``a`` is an *aggregate* trade ID, while the
+    ``@trade`` stream and REST ``/fapi/v1/trades`` use the raw trade ID
+    namespace.  AITOS uses ``TradeTick.trade_id`` as the cross-source
+    deduplication cursor, so storing ``a`` here makes a raw-trade fallback
+    incorrectly look older and causes fresh fallback trades to be discarded.
+    ``l`` is the last raw trade ID covered by this aggregate and therefore is
+    the correct monotonic cursor shared with ``@trade`` and REST.
+    """
     is_buyer_maker = bool(payload["m"])
     return TradeTick(
         symbol=payload["s"],
-        trade_id=int(payload["a"]),
+        trade_id=int(payload["l"]),
         price=float(payload["p"]),
         quantity=float(payload["q"]),
         side=TradeSide.SELL if is_buyer_maker else TradeSide.BUY,
