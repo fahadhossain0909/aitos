@@ -13,6 +13,10 @@ from aitos.models.market import OrderBookSnapshot, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")
 
+LIVE_TRADE_GROUP = "live-scanner-trades-v2"
+LIVE_BOOK_GROUP = "live-scanner-book-v2"
+LIVE_LIQUIDITY_GROUP = "live-scanner-liquidity-v2"
+
 
 @dataclass
 class LiveSymbolCache:
@@ -52,21 +56,24 @@ class LiveScannerCache:
                 await self._bus.subscribe(
                     f"market.trade.{symbol}",
                     self._on_trade,
-                    group="live-scanner-trades",
+                    group=LIVE_TRADE_GROUP,
+                    start_id="$",
                 )
             )
             self._subscriptions.append(
                 await self._bus.subscribe(
                     f"market.orderbook.{symbol}",
                     self._on_book,
-                    group="live-scanner-book",
+                    group=LIVE_BOOK_GROUP,
+                    start_id="$",
                 )
             )
             self._subscriptions.append(
                 await self._bus.subscribe(
                     f"market.liquidity.{symbol}",
                     self._on_liquidity,
-                    group="live-scanner-liquidity",
+                    group=LIVE_LIQUIDITY_GROUP,
+                    start_id="$",
                 )
             )
         self._initialized = True
