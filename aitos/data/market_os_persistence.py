@@ -93,21 +93,52 @@ class MarketOSPersistence(AITOSModule):
         }
         self._column_names = {
             "market_orderflow": [
-                "time", "event_id", "symbol", "trade_count", "buy_volume",
-                "sell_volume", "delta", "cvd", "buy_ratio", "aggression",
-                "imbalance", "vwap", "last_price", "direction",
+                "time",
+                "event_id",
+                "symbol",
+                "trade_count",
+                "buy_volume",
+                "sell_volume",
+                "delta",
+                "cvd",
+                "buy_ratio",
+                "aggression",
+                "imbalance",
+                "vwap",
+                "last_price",
+                "direction",
             ],
             "market_liquidity_events": [
-                "time", "event_id", "symbol", "kind", "side", "score",
-                "price", "details_json", "last_update_id",
+                "time",
+                "event_id",
+                "symbol",
+                "kind",
+                "side",
+                "score",
+                "price",
+                "details_json",
+                "last_update_id",
             ],
             "market_live_state": [
-                "time", "event_id", "symbol", "trade_count", "order_flow_json",
-                "liquidity_events_json", "best_bid", "best_ask", "state_timestamp",
+                "time",
+                "event_id",
+                "symbol",
+                "trade_count",
+                "order_flow_json",
+                "liquidity_events_json",
+                "best_bid",
+                "best_ask",
+                "state_timestamp",
             ],
             "order_book_events": [
-                "time", "event_id", "symbol", "bid_levels", "ask_levels",
-                "spread", "depth_ratio", "last_update_id",
+                "time",
+                "event_id",
+                "symbol",
+                "bid_levels",
+                "ask_levels",
+                "spread",
+                "depth_ratio",
+                "last_update_id",
             ],
         }
         self._flush_lock = asyncio.Lock()
@@ -136,22 +167,26 @@ class MarketOSPersistence(AITOSModule):
         await self._repository._client.command(CREATE_ORDER_BOOK_EVENTS)
         self._subscriptions = [
             await self._event_bus.subscribe(
-                "market.orderflow.*", self._handle_orderflow,
+                "market.orderflow.*",
+                self._handle_orderflow,
                 group="market-os-orderflow",
             ),
             await self._event_bus.subscribe(
-                "market.liquidity.*", self._handle_liquidity,
+                "market.liquidity.*",
+                self._handle_liquidity,
                 group="market-os-liquidity",
             ),
             await self._event_bus.subscribe(
-                "market.live_state.*", self._handle_live_state,
+                "market.live_state.*",
+                self._handle_live_state,
                 group="market-os-live-state",
             ),
             # IMPORTANT: this is a historical/durable consumer.  Do not use
             # start_id="$" here: ClickHouse must consume the retained stream
             # from its existing group cursor and recover pending entries.
             await self._event_bus.subscribe(
-                "market.orderbook.*", self._handle_orderbook,
+                "market.orderbook.*",
+                self._handle_orderbook,
                 group="clickhouse-orderbook-history-v1",
                 start_id="0",
             ),
@@ -206,12 +241,19 @@ class MarketOSPersistence(AITOSModule):
         payload = event.payload
         symbol = _symbol_from_topic(event.topic)
         row = [
-            event.created_at, event.event_id, symbol,
-            int(payload.get("trade_count", 0)), float(payload.get("buy_volume", 0.0)),
-            float(payload.get("sell_volume", 0.0)), float(payload.get("delta", 0.0)),
-            float(payload.get("cvd", 0.0)), float(payload.get("buy_ratio", 0.0)),
-            float(payload.get("aggression", 0.0)), float(payload.get("imbalance", 0.0)),
-            float(payload.get("vwap", 0.0)), float(payload.get("last_price", 0.0)),
+            event.created_at,
+            event.event_id,
+            symbol,
+            int(payload.get("trade_count", 0)),
+            float(payload.get("buy_volume", 0.0)),
+            float(payload.get("sell_volume", 0.0)),
+            float(payload.get("delta", 0.0)),
+            float(payload.get("cvd", 0.0)),
+            float(payload.get("buy_ratio", 0.0)),
+            float(payload.get("aggression", 0.0)),
+            float(payload.get("imbalance", 0.0)),
+            float(payload.get("vwap", 0.0)),
+            float(payload.get("last_price", 0.0)),
             str(payload.get("direction", "")),
         ]
         await self._enqueue("market_orderflow", row, event)
@@ -221,8 +263,12 @@ class MarketOSPersistence(AITOSModule):
         payload = event.payload
         symbol = _symbol_from_topic(event.topic)
         row = [
-            event.created_at, event.event_id, symbol, str(payload.get("kind", "")),
-            str(payload.get("side", "")), float(payload.get("score", 0.0)),
+            event.created_at,
+            event.event_id,
+            symbol,
+            str(payload.get("kind", "")),
+            str(payload.get("side", "")),
+            float(payload.get("score", 0.0)),
             float(payload.get("price", 0.0)),
             json.dumps(payload.get("details", {}), sort_keys=True, default=str),
             int(payload.get("last_update_id", 0)),
@@ -234,10 +280,14 @@ class MarketOSPersistence(AITOSModule):
         payload = event.payload
         symbol = _symbol_from_topic(event.topic)
         row = [
-            event.created_at, event.event_id, symbol,
+            event.created_at,
+            event.event_id,
+            symbol,
             int(payload.get("trade_count", 0)),
             json.dumps(payload.get("order_flow"), sort_keys=True, default=str),
-            json.dumps(payload.get("liquidity_events", []), sort_keys=True, default=str),
+            json.dumps(
+                payload.get("liquidity_events", []), sort_keys=True, default=str
+            ),
             _optional_float(payload.get("best_bid")),
             _optional_float(payload.get("best_ask")),
             _parse_timestamp(payload.get("timestamp")),
