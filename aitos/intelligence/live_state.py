@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
-from collections.abc import Mapping
 from typing import Deque, Dict, Optional
 
 from aitos.intelligence.liquidity_tracker import LiquidityEvent, LiquidityTracker
@@ -63,13 +62,8 @@ class LiveMarketStateStore:
         self._books[book.symbol] = book
         return events
 
-    def snapshot(self, symbol: str) -> Mapping[str, object]:
-        """Return a dict-shaped snapshot suitable for Event.payload.
-
-        Event payloads cross the module boundary as dictionaries. Keep the
-        internal dataclass available via ``snapshot_model`` while making the
-        public snapshot serialization-safe for the event bus.
-        """
+    def snapshot(self, symbol: str) -> dict[str, object]:
+        """Return a dict-shaped snapshot suitable for Event.payload."""
         return asdict(self.snapshot_model(symbol))
 
     def snapshot_model(self, symbol: str) -> LiveMarketState:
