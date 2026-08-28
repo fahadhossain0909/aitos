@@ -95,8 +95,14 @@ class LiveScannerCache:
     def snapshot(self, symbol: str) -> LiveSymbolCache | None:
         return self._state.get(symbol)
 
+    @staticmethod
+    def _age_seconds(timestamp: datetime | None, now: datetime) -> float | None:
+        if timestamp is None:
+            return None
+        return max(0.0, (now - timestamp).total_seconds())
+
     def freshness_snapshot(self, symbol: str) -> dict:
-        """Return source and consumer timestamps for scanner diagnostics."""
+        """Expose source age and estimated consumer lag for diagnostics."""
         state = self._state.get(symbol)
         if state is None:
             return {
@@ -105,7 +111,17 @@ class LiveScannerCache:
                 "last_book_at": None,
                 "last_trade_received_at": None,
                 "last_book_received_at": None,
+                "trade_age_sec": None,
+                "book_age_sec": None,
+                "trade_consumer_lag_sec": None,
+                "book_consumer_lag_sec": None,
             }
+
+        now = datetime.now(timezone.utc)
+        trade_age = self._age_seconds(state.last_trade_at, now)
+        book_age = self._age_seconds(state.last_book_at, now)
+        trade_received_age = self._age_seconds(state.last_trade_received_at, now)
+        book_received_age = self._age_seconds(state.last_book_received_at, now)
         return {
             "cache_has_state": True,
             "last_trade_at": (
@@ -122,6 +138,18 @@ class LiveScannerCache:
             "last_book_received_at": (
                 state.last_book_received_at.isoformat()
                 if state.last_book_received_at
+                else None
+            ),
+            "trade_age_sec": round(trade_age, 3) if trade_age is not None else None,
+            "book_age_sec": round(book_age, 3) if book_age is not None else None,
+            "trade_consumer_lag_sec": (
+                round(max(0.0, trade_age - trade_received_age), 3)
+                if trade_age is not None and trade_received_age is not None
+                else None
+            ),
+            "book_consumer_lag_sec": (
+                round(max(0.0, book_age - book_received_age), 3)
+                if book_age is not None and book_received_age is not None
                 else None
             ),
         }
