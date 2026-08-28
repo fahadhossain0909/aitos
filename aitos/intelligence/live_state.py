@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict, deque
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Deque, Dict, Optional
 
 from aitos.intelligence.liquidity_tracker import (LiquidityEvent,
@@ -11,6 +12,9 @@ from aitos.intelligence.liquidity_tracker import (LiquidityEvent,
 from aitos.intelligence.order_flow_engine import (OrderFlowEngine,
                                                   OrderFlowFeatures)
 from aitos.models.market import OrderBookSnapshot, TradeTick
+
+
+LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,12 @@ class LiveMarketStateStore:
         return self._trades
 
     def on_trade(self, trade: TradeTick) -> OrderFlowFeatures:
+        # This store feeds live order-flow/liquidity state, so a delayed REST
+        # recovery sample must never move the live cursor backwards. Historical
+        # data can still be persisted elsewhere and replayed explicitly.
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=LIVE_TRADE_MAX_AGE_SECONDS)
+        if trade.timestamp < cutoff:
+            return self._flow[trade.symbol].snapshot()
         self._trades[trade.symbol].append(trade)
         return self._flow[trade.symbol].ingest(trade)
 
