@@ -8,7 +8,10 @@ from datetime import datetime, timezone
 
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.logging_setup import get_logger
 from aitos.models.market import OrderBookSnapshot, TradeTick
+
+logger = get_logger("aitos.intelligence.live_scanner")
 
 
 @dataclass
@@ -34,6 +37,7 @@ class LiveScannerCache:
         self._state: dict[str, LiveSymbolCache] = {}
         self._subscriptions: list[Subscription] = []
         self._initialized = False
+        self._last_freshness_log_at: dict[str, datetime] = {}
 
     def _cache(self, symbol: str) -> LiveSymbolCache:
         if symbol not in self._state:
@@ -79,6 +83,7 @@ class LiveScannerCache:
         state.trades.append(trade)
         state.last_trade_at = trade.timestamp
         state.last_trade_received_at = datetime.now(timezone.utc)
+        self._maybe_log_freshness(trade.symbol)
 
     async def _on_book(self, event: Event) -> None:
         book = OrderBookSnapshot.from_dict(event.payload)
@@ -86,6 +91,7 @@ class LiveScannerCache:
         state.order_book = book
         state.last_book_at = book.timestamp
         state.last_book_received_at = datetime.now(timezone.utc)
+        self._maybe_log_freshness(book.symbol)
 
     async def _on_liquidity(self, event: Event) -> None:
         payload = dict(event.payload)
@@ -95,8 +101,14 @@ class LiveScannerCache:
     def snapshot(self, symbol: str) -> LiveSymbolCache | None:
         return self._state.get(symbol)
 
+    @staticmethod
+    def _age_seconds(timestamp: datetime | None, now: datetime) -> float | None:
+        if timestamp is None:
+            return None
+        return max(0.0, (now - timestamp).total_seconds())
+
     def freshness_snapshot(self, symbol: str) -> dict:
-        """Return source and consumer timestamps for scanner diagnostics."""
+        """Expose source age and estimated consumer lag for diagnostics."""
         state = self._state.get(symbol)
         if state is None:
             return {
@@ -105,7 +117,17 @@ class LiveScannerCache:
                 "last_book_at": None,
                 "last_trade_received_at": None,
                 "last_book_received_at": None,
+                "trade_age_sec": None,
+                "book_age_sec": None,
+                "trade_consumer_lag_sec": None,
+                "book_consumer_lag_sec": None,
             }
+
+        now = datetime.now(timezone.utc)
+        trade_age = self._age_seconds(state.last_trade_at, now)
+        book_age = self._age_seconds(state.last_book_at, now)
+        trade_received_age = self._age_seconds(state.last_trade_received_at, now)
+        book_received_age = self._age_seconds(state.last_book_received_at, now)
         return {
             "cache_has_state": True,
             "last_trade_at": (
@@ -124,11 +146,33 @@ class LiveScannerCache:
                 if state.last_book_received_at
                 else None
             ),
+            "trade_age_sec": round(trade_age, 3) if trade_age is not None else None,
+            "book_age_sec": round(book_age, 3) if book_age is not None else None,
+            "trade_consumer_lag_sec": (
+                round(max(0.0, trade_age - trade_received_age), 3)
+                if trade_age is not None and trade_received_age is not None
+                else None
+            ),
+            "book_consumer_lag_sec": (
+                round(max(0.0, book_age - book_received_age), 3)
+                if book_age is not None and book_received_age is not None
+                else None
+            ),
         }
 
-    def recent_trades(
-        self, symbol: str, limit: int | None = None
-    ) -> list[TradeTick]:
+    def _maybe_log_freshness(self, symbol: str) -> None:
+        now = datetime.now(timezone.utc)
+        previous = self._last_freshness_log_at.get(symbol)
+        if previous is not None and (now - previous).total_seconds() < 30.0:
+            return
+        self._last_freshness_log_at[symbol] = now
+        snapshot = self.freshness_snapshot(symbol)
+        logger.info(
+            "live scanner freshness",
+            extra={"aitos_extra": {"symbol": symbol, **snapshot}},
+        )
+
+    def recent_trades(self, symbol: str, limit: int | None = None) -> list[TradeTick]:
         state = self._state.get(symbol)
         trades = list(state.trades) if state else []
         return trades[-limit:] if limit else trades
