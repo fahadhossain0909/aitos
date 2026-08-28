@@ -9,16 +9,29 @@ from aitos.models.market import TradeSide
 
 def _agg_payload(symbol: str, trade_id: int = 1) -> dict:
     return {
-        "e": "aggTrade", "E": 1_700_000_000_000, "s": symbol, "a": trade_id,
-        "p": "100.0", "q": "1.0", "f": trade_id, "l": trade_id,
-        "T": 1_700_000_000_000, "m": False,
+        "e": "aggTrade",
+        "E": 1_700_000_000_000,
+        "s": symbol,
+        "a": trade_id,
+        "p": "100.0",
+        "q": "1.0",
+        "f": trade_id,
+        "l": trade_id,
+        "T": 1_700_000_000_000,
+        "m": False,
     }
 
 
 def _raw_payload(symbol: str, trade_id: int = 2) -> dict:
     return {
-        "e": "trade", "E": 1_700_000_000_010, "s": symbol, "t": trade_id,
-        "p": "101.0", "q": "1.0", "T": 1_700_000_000_010, "m": True,
+        "e": "trade",
+        "E": 1_700_000_000_010,
+        "s": symbol,
+        "t": trade_id,
+        "p": "101.0",
+        "q": "1.0",
+        "T": 1_700_000_000_010,
+        "m": True,
     }
 
 
@@ -39,7 +52,9 @@ async def test_silent_primary_triggers_fallback_without_blocking(monkeypatch):
     adapter = BinanceFuturesAdapter()
     adapter._raw_stream = fake_raw_stream
 
-    tick = await asyncio.wait_for(anext(adapter.stream_trades(["BTCUSDT"])), timeout=0.5)
+    tick = await asyncio.wait_for(
+        anext(adapter.stream_trades(["BTCUSDT"])), timeout=0.5
+    )
 
     assert tick.symbol == "BTCUSDT"
     assert tick.trade_id == 2
