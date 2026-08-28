@@ -10,8 +10,7 @@ def test_stream_ids_use_numeric_order() -> None:
 
 
 def test_archive_replay_truncates_uncheckpointed_bytes(tmp_path: Path) -> None:
-    writer = ArchiveWriter()
-    writer.root = tmp_path
+    writer = ArchiveWriter(root=tmp_path)
     cursors = {}
     writer.append_and_checkpoint("stream:test", [("1-0", {"v": "a"})], cursors)
     path = tmp_path / "test" / "archive.jsonl"
