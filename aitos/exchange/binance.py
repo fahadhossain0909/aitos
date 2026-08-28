@@ -20,6 +20,7 @@ from aitos.exchange.parsing import (
     parse_open_interest_rest,
     parse_order_book_rest,
     parse_trade_rest,
+    parse_trade_ws,
 )
 from aitos.exchange.rate_limiter import TokenBucketRateLimiter
 from aitos.exchange.symbol_filters import SymbolFilters, parse_exchange_info
@@ -45,6 +46,7 @@ ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS = 10.0
 WS_PING_INTERVAL_SECONDS = 15.0
 WS_PING_TIMEOUT_SECONDS = 10.0
 WS_OPEN_TIMEOUT_SECONDS = 10.0
+TRADE_STREAM_IDLE_FALLBACK_SECONDS = 20.0
 
 
 class BinanceFuturesAdapter(ExchangeAdapter):
@@ -143,12 +145,49 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield kline
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
-        """Consume Binance Futures aggregate trades via the resilient public stream."""
+        """Consume Futures trades with a silent-stream fallback.
+
+        Binance's aggregate-trade stream can remain connected while silently
+        stopping delivery. After a bounded idle period, switch to the raw
+        trade stream so a healthy alternative feed can restore live state.
+        """
         if not symbols:
             return
-        streams = [f"{symbol.lower()}@aggTrade" for symbol in symbols]
-        async for data, _stream_name in self._raw_stream(streams, emit_reconnect=True):
-            yield parse_agg_trade_ws(data)
+
+        aggregate_streams = [f"{symbol.lower()}@aggTrade" for symbol in symbols]
+        raw_trade_streams = [f"{symbol.lower()}@trade" for symbol in symbols]
+
+        while True:
+            primary = self._raw_stream(
+                aggregate_streams, emit_reconnect=True
+            ).__aiter__()
+            try:
+                while True:
+                    try:
+                        data, _stream_name = await asyncio.wait_for(
+                            primary.__anext__(),
+                            timeout=TRADE_STREAM_IDLE_FALLBACK_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "Binance aggregate-trade stream idle; switching to raw trade stream",
+                            extra={
+                                "aitos_extra": {
+                                    "streams": aggregate_streams,
+                                    "fallback_streams": raw_trade_streams,
+                                    "idle_seconds": TRADE_STREAM_IDLE_FALLBACK_SECONDS,
+                                }
+                            },
+                        )
+                        await primary.aclose()
+                        async for data, _stream_name in self._raw_stream(
+                            raw_trade_streams, emit_reconnect=True
+                        ):
+                            yield parse_trade_ws(data)
+                        return
+                    yield parse_agg_trade_ws(data)
+            finally:
+                await primary.aclose()
 
     async def stream_order_book(
         self, symbols: list[str], levels: int = 20
