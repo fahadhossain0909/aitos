@@ -1,5 +1,6 @@
 from pathlib import Path
 
+
 def test_redis_storage_layout() -> None:
     compose = Path("docker-compose.yml").read_text(encoding="utf-8")
     assert "${REDIS_DATA_DIR:-./.storage/data/redis}/live:/data" in compose
