@@ -8,13 +8,17 @@ from datetime import datetime, timedelta, timezone
 
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.intelligence.live_bridge import (
+    register_book_handler,
+    register_trade_handler,
+    unregister_book_handler,
+    unregister_trade_handler,
+)
 from aitos.logging_setup import get_logger
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")
 
-LIVE_TRADE_GROUP = "live-scanner-trades-v2"
-LIVE_BOOK_GROUP = "live-scanner-book-v2"
 LIVE_LIQUIDITY_GROUP = "live-scanner-liquidity-v2"
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 
@@ -31,7 +35,7 @@ class LiveSymbolCache:
 
 
 class LiveScannerCache:
-    """Consumes canonical EventBus market events and keeps a live view."""
+    """Maintains live state with a process-local WebSocket fast lane."""
 
     def __init__(
         self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000
@@ -41,6 +45,7 @@ class LiveScannerCache:
         self._max_trades = max(100, max_trades)
         self._state: dict[str, LiveSymbolCache] = {}
         self._subscriptions: list[Subscription] = []
+        self._direct_symbols: set[str] = set()
         self._initialized = False
         self._last_freshness_log_at: dict[str, datetime] = {}
 
@@ -53,22 +58,10 @@ class LiveScannerCache:
         if self._initialized:
             return
         for symbol in self._symbols:
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.trade.{symbol}",
-                    self._on_trade,
-                    group=LIVE_TRADE_GROUP,
-                    start_id="$",
-                )
-            )
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.orderbook.{symbol}",
-                    self._on_book,
-                    group=LIVE_BOOK_GROUP,
-                    start_id="$",
-                )
-            )
+            register_trade_handler(symbol, self._on_direct_trade)
+            register_book_handler(symbol, self._on_direct_book)
+            self._direct_symbols.add(symbol)
+            # Liquidity is derived/non-critical; it may continue to use Redis.
             self._subscriptions.append(
                 await self._bus.subscribe(
                     f"market.liquidity.{symbol}",
@@ -78,39 +71,51 @@ class LiveScannerCache:
                 )
             )
         self._initialized = True
+        logger.info(
+            "live scanner direct market-data fast lane enabled",
+            extra={
+                "aitos_extra": {
+                    "symbols": sorted(self._symbols),
+                    "redis_live_trade_bridge": False,
+                    "redis_live_book_bridge": False,
+                }
+            },
+        )
 
     async def shutdown(self) -> None:
+        for symbol in tuple(self._direct_symbols):
+            unregister_trade_handler(symbol, self._on_direct_trade)
+            unregister_book_handler(symbol, self._on_direct_book)
+        self._direct_symbols.clear()
         for sub in self._subscriptions:
             sub.cancel()
         self._subscriptions.clear()
         self._initialized = False
 
-    async def _on_trade(self, event: Event) -> None:
-        trade = TradeTick.from_dict(event.payload)
+    async def _on_direct_trade(self, trade: TradeTick) -> None:
         now = datetime.now(timezone.utc)
-        if trade.timestamp < now - timedelta(seconds=LIVE_TRADE_MAX_AGE_SECONDS):
+        state = self._cache(trade.symbol)
+        age = max(0.0, (now - trade.timestamp).total_seconds())
+        if age > LIVE_TRADE_MAX_AGE_SECONDS:
             logger.info(
-                "ignored stale trade in live scanner",
+                "ignored stale trade in direct live scanner",
                 extra={
                     "aitos_extra": {
                         "symbol": trade.symbol,
                         "trade_id": trade.trade_id,
-                        "trade_age_sec": round(
-                            max(0.0, (now - trade.timestamp).total_seconds()), 3
-                        ),
+                        "trade_age_sec": round(age, 3),
                         "max_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS,
+                        "source": "direct_websocket_fast_lane",
                     }
                 },
             )
             return
-        state = self._cache(trade.symbol)
         state.trades.append(trade)
         state.last_trade_at = trade.timestamp
         state.last_trade_received_at = now
         self._maybe_log_freshness(trade.symbol)
 
-    async def _on_book(self, event: Event) -> None:
-        book = OrderBookSnapshot.from_dict(event.payload)
+    async def _on_direct_book(self, book: OrderBookSnapshot) -> None:
         state = self._cache(book.symbol)
         state.order_book = book
         state.last_book_at = book.timestamp
@@ -123,10 +128,6 @@ class LiveScannerCache:
         self._cache(symbol).liquidity_events.append(payload)
 
     def snapshot(self, symbol: str) -> LiveSymbolCache | None:
-        # Scanner reads this path on every scan cycle. Sampling here guarantees
-        # freshness diagnostics are emitted even when the upstream stream has
-        # stopped producing events, which is precisely the stale-state case we
-        # need to distinguish from a healthy live stream.
         self._maybe_log_freshness(symbol)
         return self._state.get(symbol)
 
@@ -137,7 +138,7 @@ class LiveScannerCache:
         return max(0.0, (now - timestamp).total_seconds())
 
     def freshness_snapshot(self, symbol: str) -> dict:
-        """Expose source age and estimated consumer lag for diagnostics."""
+        """Expose source age and receive age for direct-live diagnostics."""
         state = self._state.get(symbol)
         if state is None:
             return {
@@ -150,6 +151,7 @@ class LiveScannerCache:
                 "book_age_sec": None,
                 "trade_consumer_lag_sec": None,
                 "book_consumer_lag_sec": None,
+                "live_data_transport": "direct_websocket",
             }
 
         now = datetime.now(timezone.utc)
@@ -187,6 +189,7 @@ class LiveScannerCache:
                 if book_age is not None and book_received_age is not None
                 else None
             ),
+            "live_data_transport": "direct_websocket",
         }
 
     def _maybe_log_freshness(self, symbol: str) -> None:
