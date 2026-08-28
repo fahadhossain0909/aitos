@@ -3,11 +3,10 @@ services:
     image: redis:7.2-alpine
     container_name: aitos-redis
     ports: ["127.0.0.1:6379:6379"]
-    volumes: ["${REDIS_DATA_DIR:-./.storage/data/redis}:/data"]
+    volumes:
+      - "${REDIS_DATA_DIR:-./.storage/data/redis}/live:/data"
     command: ["redis-server", "--appendonly", "yes"]
     healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 10s}
-    # Redis is the latency-sensitive event bus. Give it enough CPU headroom
-    # for HFT bursts; the 2.5 GiB memory cap is intentional.
     cpus: "0.5"
     mem_limit: 2.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
@@ -41,9 +40,8 @@ services:
       REDIS_ARCHIVE_DIR: /archive
       REDIS_ARCHIVE_POLL_SECONDS: "1"
       REDIS_ARCHIVE_BATCH_SIZE: "1000"
-      REDIS_STREAM_MAXLEN_DEFAULT: "5000"
     volumes:
-      - "${AITOS_DATA_ROOT:-/mnt/aitos-data}/redis-archive:/archive"
+      - "${REDIS_DATA_DIR:-./.storage/data/redis}/archive:/archive"
     depends_on:
       redis: {condition: service_healthy}
     cpus: "0.10"
@@ -66,6 +64,7 @@ services:
       - ./docker/clickhouse/users.d/aitos.xml:/etc/clickhouse-server/users.d/aitos.xml:ro
     cpus: "0.5"
     mem_limit: 2.5g
+    logging: {driver: json-file, options: {max-size: "50m", max-file: "5"}}
     healthcheck:
       test: ["CMD-SHELL", "wget --spider -q --timeout=5 http://127.0.0.1:8123/ping || exit 1"]
       interval: 10s
