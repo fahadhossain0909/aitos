@@ -94,9 +94,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw
         ]
 
-    async def fetch_order_book(
-        self, symbol: str, limit: int = 50
-    ) -> OrderBookSnapshot:
+    async def fetch_order_book(self, symbol: str, limit: int = 50) -> OrderBookSnapshot:
         weight = 2 if limit <= 50 else (5 if limit <= 100 else 10)
         raw = await self._get(
             "/fapi/v1/depth", {"symbol": symbol, "limit": limit}, weight
