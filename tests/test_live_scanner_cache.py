@@ -18,8 +18,8 @@ class FakeBus:
     def __init__(self):
         self.subscriptions = []
 
-    async def subscribe(self, topic, handler, group="default"):
-        self.subscriptions.append((topic, group, handler))
+    async def subscribe(self, topic, handler, group="default", start_id=None):
+        self.subscriptions.append((topic, group, handler, start_id))
         return FakeSubscription(handler)
 
 
