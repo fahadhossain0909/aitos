@@ -59,9 +59,7 @@ class ArchiveWriter:
         self.root = ARCHIVE_ROOT
         self.root.mkdir(parents=True, exist_ok=True)
 
-    def append_batch(
-        self, key: str, entries: list[tuple[Any, dict[Any, Any]]]
-    ) -> None:
+    def append_batch(self, key: str, entries: list[tuple[Any, dict[Any, Any]]]) -> None:
         if not entries:
             return
         topic_dir = self.root / _safe_name(key)
