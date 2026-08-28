@@ -236,7 +236,7 @@ async def test_stream_trades_yields_parsed_events_from_market_stream_endpoint():
     await asyncio.wait_for(consume(), timeout=5)
     assert [trade.symbol for trade in received] == ["BTCUSDT", "ETHUSDT"]
     # TradeTick.trade_id is the canonical raw-trade cursor across aggTrade,
-    # @trade, and REST.  For aggTrade this is the payload's last raw ID (l),
+    # @trade, and REST. For aggTrade this is the payload's last raw ID (l),
     # not its aggregate ID (a).
     assert received[0].trade_id == 105
     assert received[1].trade_id == 1000005
