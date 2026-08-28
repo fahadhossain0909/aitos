@@ -165,7 +165,18 @@ def test_parse_kline_ws():
 def test_parse_agg_trade_ws_buyer_not_maker_is_buy_side():
     trade = parse_agg_trade_ws(SAMPLE_AGG_TRADE_WS)
     assert trade.side == TradeSide.BUY
-    assert trade.trade_id == 999999
+    # ``a`` is the aggregate-trade ID. ``l`` is the last raw trade ID and is
+    # the canonical cursor shared with @trade and REST /fapi/v1/trades.
+    assert trade.trade_id == 105
+
+
+def test_parse_agg_trade_and_raw_trade_share_dedup_id_namespace():
+    aggregate = parse_agg_trade_ws(SAMPLE_AGG_TRADE_WS)
+    raw_payload = dict(SAMPLE_TRADE_WS, t=106)
+    raw = parse_trade_ws(raw_payload)
+    assert aggregate.trade_id == 105
+    assert raw.trade_id == 106
+    assert raw.trade_id > aggregate.trade_id
 
 
 def test_parse_raw_trade_ws_buyer_maker_is_sell_side():
