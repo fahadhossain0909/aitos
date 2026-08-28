@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 
 import aiohttp
 
@@ -50,11 +51,11 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     def __init__(
         self,
         session_factory: Callable[[], aiohttp.ClientSession] = aiohttp.ClientSession,
-        ws_connector: Optional[Callable[..., Any]] = None,
-        rate_limiter: Optional[TokenBucketRateLimiter] = None,
+        ws_connector: Callable[..., Any] | None = None,
+        rate_limiter: TokenBucketRateLimiter | None = None,
     ) -> None:
         self._session_factory = session_factory
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         if ws_connector is None:
             import websockets
 
@@ -83,7 +84,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     async def fetch_klines(
         self, symbol: str, timeframe: str, limit: int = 500
-    ) -> List[Kline]:
+    ) -> list[Kline]:
         weight = 5 if limit <= 100 else (10 if limit <= 500 else 25)
         raw = await self._get(
             "/fapi/v1/klines",
@@ -103,7 +104,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     async def fetch_recent_trades(
         self, symbol: str, limit: int = 500
-    ) -> List[TradeTick]:
+    ) -> list[TradeTick]:
         raw = await self._get(
             "/fapi/v1/trades", {"symbol": symbol, "limit": limit}, weight=5
         )
@@ -120,8 +121,8 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         )
 
     async def fetch_exchange_info(
-        self, symbols: Optional[List[str]] = None
-    ) -> Dict[str, SymbolFilters]:
+        self, symbols: list[str] | None = None
+    ) -> dict[str, SymbolFilters]:
         raw = await self._get("/fapi/v1/exchangeInfo", {}, weight=1)
         all_filters = parse_exchange_info(raw)
         return (
@@ -131,7 +132,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         )
 
     async def stream_klines(
-        self, symbols: List[str], timeframe: str
+        self, symbols: list[str], timeframe: str
     ) -> AsyncIterator[Kline]:
         streams = [f"{s.lower()}@kline_{timeframe}" for s in symbols]
 
@@ -141,7 +142,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         async for kline in self._stream(streams, _parse):
             yield kline
 
-    async def stream_trades(self, symbols: List[str]) -> AsyncIterator[TradeTick]:
+    async def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
         """Consume Binance Futures raw trades via the resilient public stream."""
         if not symbols:
             return
@@ -150,7 +151,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield parse_trade_ws(data)
 
     async def stream_order_book(
-        self, symbols: List[str], levels: int = 20
+        self, symbols: list[str], levels: int = 20
     ) -> AsyncIterator[OrderBookSnapshot]:
         """Reconstruct a local L2 book with loss-aware Binance bootstrap.
 
@@ -201,7 +202,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         producer_task = asyncio.create_task(
             producer(), name="binance-orderbook-producer"
         )
-        books: Dict[str, LocalOrderBook] = {}
+        books: dict[str, LocalOrderBook] = {}
         try:
             try:
                 await asyncio.wait_for(
@@ -235,7 +236,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             producer_task.cancel()
             await asyncio.gather(producer_task, return_exceptions=True)
 
-    async def _get(self, path: str, params: Dict[str, Any], weight: int) -> Any:
+    async def _get(self, path: str, params: dict[str, Any], weight: int) -> Any:
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
@@ -246,13 +247,13 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             return await response.json()
 
     async def _stream(
-        self, streams: List[str], parser: Callable[[Any], Any]
+        self, streams: list[str], parser: Callable[[Any], Any]
     ) -> AsyncIterator[Any]:
         async for data, _stream_name in self._raw_stream(streams):
             yield await parser(data)
 
     @staticmethod
-    def _ws_base_url(streams: List[str]) -> str:
+    def _ws_base_url(streams: list[str]) -> str:
         """Route Futures streams to their post-April-2026 namespace."""
         if not streams:
             return WS_MARKET_BASE_URL
@@ -265,7 +266,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         return WS_MARKET_BASE_URL
 
     async def _raw_stream(
-        self, streams: List[str], emit_reconnect: bool = False
+        self, streams: list[str], emit_reconnect: bool = False
     ) -> AsyncIterator[tuple[Any, str]]:
         if not streams:
             return
