@@ -1,6 +1,5 @@
 import asyncio
 import json
-from typing import List
 
 import pytest
 from aioresponses import aioresponses
@@ -162,7 +161,7 @@ async def test_fetch_before_connect_auto_connects():
 class FakeWebSocket:
     """Minimal async-iterable fake standing in for a ``websockets`` connection."""
 
-    def __init__(self, messages: List[dict]):
+    def __init__(self, messages: list[dict]):
         self._messages = messages
         self.url = None
 
