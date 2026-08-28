@@ -9,6 +9,7 @@ from aitos.exchange.orderbook import DepthUpdate
 from aitos.models.market import (
     FundingRate,
     Kline,
+    OpenInterest,
     OrderBookSnapshot,
     TradeSide,
     TradeTick,
