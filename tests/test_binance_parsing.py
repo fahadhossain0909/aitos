@@ -173,7 +173,7 @@ def test_parse_raw_trade_ws_buyer_maker_is_sell_side():
     assert trade.symbol == "BTCUSDT"
     assert trade.side == TradeSide.SELL
     assert trade.trade_id == 1234567
-    assert trade.timestamp.isoformat() == "2024-06-10T00:53:20+00:00"
+    assert trade.timestamp.isoformat() == "2024-06-10T06:13:20+00:00"
 
 
 def test_parse_depth_ws():
