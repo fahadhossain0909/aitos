@@ -50,6 +50,7 @@ PENDING_RECLAIM_IDLE_MS = 5_000
 PENDING_RECLAIM_BATCH_SIZE = 100
 
 STREAM_MAXLEN_DEFAULTS = {
+    "market.trade.": 25_000,
     "market.orderbook.": 25_000,
     "market.liquidity.": 100_000,
     "market.live_state.": 25_000,
@@ -211,8 +212,19 @@ class EventBus(AITOSModule):
                 fut.set_result(event)
 
     async def subscribe(
-        self, topic: str, handler: EventHandler, group: str = "default"
+        self,
+        topic: str,
+        handler: EventHandler,
+        group: str = "default",
+        start_id: str = "0",
     ) -> Subscription:
+        """Subscribe to a Redis Stream.
+
+        ``start_id='0'`` preserves the historical/replay semantics used by
+        durable consumers. Live market-data consumers can pass ``'$'`` so a
+        newly created group starts at the current stream tail and never drains
+        an old market-data backlog into the live state.
+        """
         self._require_initialized()
         consumer_name = f"{group}-{id(handler)}"
         if "*" in topic:
@@ -223,7 +235,7 @@ class EventBus(AITOSModule):
             resolved_topics = [topic]
             self._known_topics.add(topic)
         for t in resolved_topics or [topic]:
-            await self._ensure_group(_stream_key(t), group)
+            await self._ensure_group(_stream_key(t), group, start_id=start_id)
         task = asyncio.create_task(
             self._consume_loop(
                 topic_pattern=topic,
@@ -277,9 +289,13 @@ class EventBus(AITOSModule):
             event = Event.from_wire(fields)
             await handler(event)
 
-    async def _ensure_group(self, stream_key: str, group: str) -> None:
+    async def _ensure_group(
+        self, stream_key: str, group: str, *, start_id: str = "0"
+    ) -> None:
         try:
-            await self._redis.xgroup_create(stream_key, group, id="0", mkstream=True)
+            await self._redis.xgroup_create(
+                stream_key, group, id=start_id, mkstream=True
+            )
         except Exception as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
