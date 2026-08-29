@@ -7,105 +7,36 @@ on:
     branches: [main, master, develop]
 
 permissions:
-  contents: write
+  contents: read
   checks: write
   pull-requests: write
 
 jobs:
   format:
     runs-on: ubuntu-latest
-    name: Auto-format Python with Black
-    outputs:
-      changed: ${{ steps.format.outputs.changed }}
-    concurrency:
-      group: auto-format-${{ github.ref }}
-      cancel-in-progress: false
+    name: Python Formatting Check
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
-        with:
-          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.11'
           cache: 'pip'
-      - name: Install Black
-        run: python -m pip install --upgrade pip black==25.12.0
-      - name: Determine changed Python files
-        id: changed-python
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            base="${{ github.event.pull_request.base.sha }}"
-          else
-            base="${{ github.event.before }}"
-            if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              base="$(git rev-list --max-count=1 HEAD^)"
-            fi
-          fi
-          files="$(git diff --name-only "$base" "$GITHUB_SHA" -- '*.py' | tr '\n' ' ')"
-          echo "files=$files" >> "$GITHUB_OUTPUT"
-      - name: Run Black formatter
-        id: format
-        if: steps.changed-python.outputs.files != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          black ${{ steps.changed-python.outputs.files }}
-          if git diff --quiet; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Mark unchanged
-        if: steps.changed-python.outputs.files == ''
-        run: echo "changed=false" >> "$GITHUB_OUTPUT"
-      - name: Commit Black formatting changes
-        if: steps.format.outputs.changed == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- '*.py'
-          git commit -m "style: auto-format Python with Black"
-
-          # The repository can receive another commit while Black is running.
-          # Rebase the formatting commit onto the current remote tip before pushing.
-          # Retry a few times so a concurrent push cannot leave CI failed with
-          # a non-fast-forward error.
-          for attempt in 1 2 3 4 5; do
-            git fetch origin "${GITHUB_REF_NAME}"
-            if git rebase "origin/${GITHUB_REF_NAME}"; then
-              if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-                exit 0
-              fi
-            else
-              git rebase --abort || true
-              git fetch origin "${GITHUB_REF_NAME}"
-              git rebase "origin/${GITHUB_REF_NAME}"
-              if git push origin "HEAD:${GITHUB_REF_NAME}"; then
-                exit 0
-              fi
-            fi
-            sleep $((attempt * 2))
-          done
-
-          echo "Unable to push Black formatting commit after multiple attempts."
-          exit 1
+      - name: Install formatting tools
+        run: python -m pip install --upgrade pip black==25.12.0 isort
+      - name: Check Black formatting
+        run: black --check --diff .
+      - name: Check import ordering
+        run: isort --check-only .
 
   lint:
     needs: format
-    if: needs.format.outputs.changed != 'true'
     runs-on: ubuntu-latest
     name: Lint & Code Quality
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
-        with:
-          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
@@ -115,37 +46,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install flake8 black==25.12.0 isort pylint
-      - name: Determine changed Python files
-        id: changed-python
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
-            base="${{ github.event.pull_request.base.sha }}"
-          else
-            base="${{ github.event.before }}"
-            if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              base="$(git rev-list --max-count=1 HEAD^)"
-            fi
-          fi
-          files="$(git diff --name-only "$base" "$GITHUB_SHA" -- '*.py' | tr '\n' ' ')"
-          echo "files=$files" >> "$GITHUB_OUTPUT"
       - name: Verify Black formatting
-        if: steps.changed-python.outputs.files != ''
-        run: black --check --diff ${{ steps.changed-python.outputs.files }}
+        run: black --check --diff .
       - name: Run isort import checker
-        if: steps.changed-python.outputs.files != ''
-        run: isort --check-only ${{ steps.changed-python.outputs.files }}
+        run: isort --check-only .
       - name: Run Flake8 linter
-        if: steps.changed-python.outputs.files != ''
-        run: flake8 ${{ steps.changed-python.outputs.files }} --count --select=E9,F63,F7,F82 --show-source --statistics
-      - name: No Python files changed
-        if: steps.changed-python.outputs.files == ''
-        run: echo "No Python files changed; formatting/import gates are not applicable."
+        run: flake8 aitos run_live_trading.py run_paper_trading.py --count --select=E9,F63,F7,F82 --show-source --statistics
 
   test:
     needs: format
-    if: needs.format.outputs.changed != 'true'
     runs-on: ubuntu-latest
     name: Unit Tests
     strategy:
@@ -227,7 +136,6 @@ jobs:
 
   security:
     needs: format
-    if: needs.format.outputs.changed != 'true'
     runs-on: ubuntu-latest
     name: Security Scan
     steps:
@@ -256,16 +164,13 @@ jobs:
 
   docker-validate:
     needs: format
-    if: needs.format.outputs.changed != 'true'
     runs-on: ubuntu-latest
     name: Docker & Compose Validation
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
       - name: Prepare safe CI environment
-        run: |
-          set -euo pipefail
-          cp .env.example .env
+        run: cp .env.example .env
       - name: Validate Docker Compose configuration
         run: docker compose config >/dev/null
       - name: Lowercase repository name
@@ -283,9 +188,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Verify runtime package is present in image
-        run: |
-          set -euo pipefail
-          docker run --rm --entrypoint python3 "${{ steps.repo.outputs.repo }}:test" -c "from aitos.data.ingestion import DataIngestionService; import aitos.data; print('aitos.data import OK')"
+        run: docker run --rm --entrypoint python3 "${{ steps.repo.outputs.repo }}:test" -c "from aitos.data.ingestion import DataIngestionService; import aitos.data; print('aitos.data import OK')"
 
   results:
     runs-on: ubuntu-latest
@@ -294,30 +197,18 @@ jobs:
     if: always()
     steps:
       - name: Determine CI status
-        id: ci-status
         shell: bash
         run: |
           set -euo pipefail
-          if [ "${{ needs.format.result }}" != "success" ]; then
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            echo "emoji=❌" >> "$GITHUB_OUTPUT"
-            exit 1
-          fi
-          if [ "${{ needs.format.outputs.changed }}" = "true" ]; then
-            echo "status=formatted; validation will run in the automatically triggered follow-up CI" >> "$GITHUB_OUTPUT"
-            echo "emoji=🔄" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "${{ needs.lint.result }}" != "success" ] || \
+          if [ "${{ needs.format.result }}" != "success" ] || \
+             [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.security.result }}" != "success" ] || \
              [ "${{ needs.docker-validate.result }}" != "success" ]; then
-            echo "status=failed" >> "$GITHUB_OUTPUT"
-            echo "emoji=❌" >> "$GITHUB_OUTPUT"
+            echo "❌ CI failed"
             exit 1
           fi
-          echo "status=passed" >> "$GITHUB_OUTPUT"
-          echo "emoji=✅" >> "$GITHUB_OUTPUT"
+          echo "✅ CI passed"
       - name: Comment on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v9.0.0
@@ -327,5 +218,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `${{ steps.ci-status.outputs.emoji }} **CI Pipeline: ${{ steps.ci-status.outputs.status }}**\n\n| Step | Status |\n|------|--------|\n| Formatting | ${{ needs.format.result }} |\n| Linting | ${{ needs.lint.result }} |\n| Tests | ${{ needs.test.result }} |\n| Security | ${{ needs.security.result }} |\n| Docker | ${{ needs.docker-validate.result }} |`
+              body: `✅ **CI Pipeline passed**\n\n| Step | Status |\n|------|--------|\n| Formatting | ${{ needs.format.result }} |\n| Linting | ${{ needs.lint.result }} |\n| Tests | ${{ needs.test.result }} |\n| Security | ${{ needs.security.result }} |\n| Docker | ${{ needs.docker-validate.result }} |`
             })
