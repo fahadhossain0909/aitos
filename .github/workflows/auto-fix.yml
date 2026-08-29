@@ -120,3 +120,5 @@ jobs:
 
           echo "Unable to push automatic fixes after multiple concurrent-update retries." >&2
           exit 1
+
+# Force a full-repository formatting pass after a formatter-check failure.
