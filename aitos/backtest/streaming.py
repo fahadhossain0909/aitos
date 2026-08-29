@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import pickle
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator, Sequence
+from typing import Any
 
 
 @dataclass(frozen=True)

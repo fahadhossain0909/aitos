@@ -3,21 +3,28 @@
 from __future__ import annotations
 
 import os
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
 from aitos.agents.base_agent import AgentDecision, BaseAgent
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
-from aitos.core.exceptions import (AgentNotRegisteredError,
-                                   DecisionFusionError,
-                                   GovernanceViolationError,
-                                   ModuleNotInitializedError)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
+from aitos.core.exceptions import (
+    AgentNotRegisteredError,
+    DecisionFusionError,
+    GovernanceViolationError,
+    ModuleNotInitializedError,
+)
 from aitos.eventbus.redis_bus import EventBus
 from aitos.journal.policy_registry import PolicyRegistry
-from aitos.kernel.decision_fusion import (DEFAULT_EVIDENCE_WEIGHTS,
-                                          DecisionFusionEngine)
+from aitos.kernel.decision_fusion import DEFAULT_EVIDENCE_WEIGHTS, DecisionFusionEngine
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.kernel")
@@ -28,17 +35,17 @@ class WorldState:
     updated_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    active_symbols: List[str] = field(default_factory=list)
-    open_positions: Dict[str, Any] = field(default_factory=dict)
+    active_symbols: list[str] = field(default_factory=list)
+    open_positions: dict[str, Any] = field(default_factory=dict)
     risk_score: float = 0.0
     regime: str = "unknown"
-    registered_agents: List[str] = field(default_factory=list)
+    registered_agents: list[str] = field(default_factory=list)
 
 
 @dataclass
 class DecisionContext:
     symbol: str
-    context: Dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
     requested_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -49,13 +56,13 @@ class FusedDecision:
     symbol: str
     direction: str
     confidence: float
-    contributions: List[Dict[str, Any]]
-    conflicting_evidence: List[str]
+    contributions: list[dict[str, Any]]
+    conflicting_evidence: list[str]
     fused_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "direction": self.direction,
@@ -69,9 +76,9 @@ class FusedDecision:
 @dataclass
 class Action:
     action_type: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     is_production: bool = True
-    approved_by: Optional[str] = None
+    approved_by: str | None = None
 
 
 @dataclass
@@ -86,8 +93,8 @@ class AIKernel(AITOSModule):
         self,
         event_bus: EventBus,
         require_human_approval_for_prod: bool = True,
-        fusion_engine: Optional[DecisionFusionEngine] = None,
-        policy_registry: Optional[PolicyRegistry] = None,
+        fusion_engine: DecisionFusionEngine | None = None,
+        policy_registry: PolicyRegistry | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._require_human_approval_for_prod = require_human_approval_for_prod
@@ -97,9 +104,9 @@ class AIKernel(AITOSModule):
             DEFAULT_EVIDENCE_WEIGHTS,
         )
         self._initialized = False
-        self._agents: Dict[str, BaseAgent] = {}
+        self._agents: dict[str, BaseAgent] = {}
         self._world_state = WorldState()
-        self._last_event_time: Optional[str] = None
+        self._last_event_time: str | None = None
         self._policy_version = "baseline"
 
     @property
@@ -119,10 +126,10 @@ class AIKernel(AITOSModule):
         return self._policy_version
 
     @property
-    def fusion_weights(self) -> Dict[str, float]:
+    def fusion_weights(self) -> dict[str, float]:
         return self._fusion_engine.weights
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._initialized = True
@@ -186,7 +193,7 @@ class AIKernel(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         self._last_event_time = datetime.now(timezone.utc).isoformat()
         self._update_world_state_from_event(event)
         for agent in self._agents.values():
@@ -239,7 +246,7 @@ class AIKernel(AITOSModule):
             raise DecisionFusionError(
                 "No agents registered and no component evidence supplied"
             )
-        decisions: List[AgentDecision] = []
+        decisions: list[AgentDecision] = []
         for agent in self._agents.values():
             try:
                 decisions.append(
@@ -257,7 +264,7 @@ class AIKernel(AITOSModule):
         if not decisions:
             raise DecisionFusionError("All agents failed to contribute a decision")
 
-        direction_scores: Dict[str, float] = {"long": 0.0, "short": 0.0, "neutral": 0.0}
+        direction_scores: dict[str, float] = {"long": 0.0, "short": 0.0, "neutral": 0.0}
         total_weight = 0.0
         for decision in decisions:
             agent = self._agents[decision.agent_id]

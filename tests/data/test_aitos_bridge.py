@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
-from aitos.data.aitos_bridge import (book_events_to_snapshot,
-                                     canonical_trade_to_domain)
+from aitos.data.aitos_bridge import book_events_to_snapshot, canonical_trade_to_domain
 from aitos.data.schema import CanonicalBookEvent, CanonicalTrade
 from aitos.models.market import TradeSide
 

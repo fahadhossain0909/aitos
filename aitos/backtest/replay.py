@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Iterable, Protocol, Sequence
+from typing import Protocol
 
 
 class ReplayEvent(Protocol):

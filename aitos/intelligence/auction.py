@@ -7,7 +7,7 @@ range location, acceptance and breakout extension instead.
 
 from __future__ import annotations
 
-from typing import Sequence, Tuple
+from collections.abc import Sequence
 
 from aitos.models.market import Kline
 

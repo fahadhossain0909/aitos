@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from math import sqrt
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from aitos.backtest.execution import ExecutionSimulator
 from aitos.backtest.replay import MarketReplay, ReplayEvent
-
 
 logger = logging.getLogger(__name__)
 
@@ -152,9 +152,7 @@ class BacktestEngine:
         if len(returns) > 1:
             mean = sum(returns) / len(returns)
             variance = sum((r - mean) ** 2 for r in returns) / (len(returns) - 1)
-            sharpe = (
-                sqrt(len(returns)) * mean / sqrt(variance) if variance > 0 else 0.0
-            )
+            sharpe = sqrt(len(returns)) * mean / sqrt(variance) if variance > 0 else 0.0
         else:
             sharpe = 0.0
         wins = sum(1 for p in self._trade_pnls if p > 0)

@@ -1,7 +1,13 @@
 from datetime import datetime, timezone
 
-from aitos.models.market import (FundingRate, Kline, OpenInterest,
-                                 OrderBookSnapshot, TradeSide, TradeTick)
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeSide,
+    TradeTick,
+)
 
 
 def test_kline_to_dict_roundtrip_fields():

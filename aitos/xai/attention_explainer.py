@@ -35,7 +35,7 @@ for what this model actually does with a clear synthetic pattern.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -58,7 +58,7 @@ def _softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
     return exp / np.sum(exp, axis=axis, keepdims=True)
 
 
-def _vectorize(context: Dict[str, Any]) -> np.ndarray:
+def _vectorize(context: dict[str, Any]) -> np.ndarray:
     # Centered to [-1, 1] around the neutral score of 5.0 — a feature sitting
     # at the neutral value contributes exactly 0 to its token (x * W_embed = 0),
     # so only genuinely informative (non-neutral) features produce any signal;
@@ -91,7 +91,7 @@ class AttentionExplainer:
         self._rng = np.random.default_rng(random_state)
 
         scale = 0.3
-        self._params: Dict[str, np.ndarray] = {
+        self._params: dict[str, np.ndarray] = {
             "W_embed": self._rng.normal(0, scale, (N_FEATURES, d_model)),
             "b_embed": self._rng.normal(0, scale, (N_FEATURES, d_model)),
             "q_cls": self._rng.normal(
@@ -118,8 +118,8 @@ class AttentionExplainer:
     # -- Forward pass -------------------------------------------------------------
 
     def _forward(
-        self, x: np.ndarray, params: Dict[str, np.ndarray]
-    ) -> Tuple[float, np.ndarray]:
+        self, x: np.ndarray, params: dict[str, np.ndarray]
+    ) -> tuple[float, np.ndarray]:
         tokens = x[:, None] * params["W_embed"] + params["b_embed"]  # (N, d)
         K = tokens @ params["W_k"]
         V = tokens @ params["W_v"]
@@ -133,14 +133,14 @@ class AttentionExplainer:
         logit = float(pooled @ params["W_out"] + params["b_out"][0])
         return _sigmoid(logit), attn
 
-    def predict_win_probability(self, context: Dict[str, Any]) -> Optional[float]:
+    def predict_win_probability(self, context: dict[str, Any]) -> float | None:
         if not self.is_ready:
             return None
         x = _vectorize(context)
         prob, _ = self._forward(x, self._params)
         return round(prob, 4)
 
-    def attention_weights(self, context: Dict[str, Any]) -> Dict[str, float]:
+    def attention_weights(self, context: dict[str, Any]) -> dict[str, float]:
         """How much the model's single attention query weighs each of the
         10 feature tokens when forming this prediction — the actual
         "visualization" data. Sums to 1.0. Empty until ``is_ready``, same
@@ -153,7 +153,7 @@ class AttentionExplainer:
 
     # -- Training (numerical gradient descent) -----------------------------------
 
-    def partial_fit(self, context: Dict[str, Any], won: bool) -> None:
+    def partial_fit(self, context: dict[str, Any], won: bool) -> None:
         x = _vectorize(context)
         y = 1.0 if won else 0.0
 
@@ -181,13 +181,13 @@ class AttentionExplainer:
         self._n_samples_seen += 1
         self._classes_seen.add(int(y))
 
-    def _loss(self, x: np.ndarray, y: float, params: Dict[str, np.ndarray]) -> float:
+    def _loss(self, x: np.ndarray, y: float, params: dict[str, np.ndarray]) -> float:
         prob, _ = self._forward(x, params)
         prob = min(max(prob, 1e-9), 1 - 1e-9)  # avoid log(0)
         return -(y * np.log(prob) + (1 - y) * np.log(1 - prob))
 
-    def _numerical_gradient(self, x: np.ndarray, y: float) -> Dict[str, np.ndarray]:
-        grads: Dict[str, np.ndarray] = {}
+    def _numerical_gradient(self, x: np.ndarray, y: float) -> dict[str, np.ndarray]:
+        grads: dict[str, np.ndarray] = {}
         for key in self._param_keys:
             param = self._params[key]
             grad = np.zeros_like(param)

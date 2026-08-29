@@ -12,7 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import random
-from typing import Awaitable, Callable, Tuple, TypeVar
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 from aitos.logging_setup import get_logger
 
@@ -36,7 +37,7 @@ async def retry_with_backoff(
     max_attempts: int = 5,
     base_delay_seconds: float = 1.0,
     max_delay_seconds: float = 30.0,
-    exceptions: Tuple[type, ...] = (Exception,),
+    exceptions: tuple[type, ...] = (Exception,),
     operation_name: str = "operation",
 ) -> T:
     """Call ``fn()`` (a zero-arg async callable — use a lambda/partial to
@@ -50,7 +51,7 @@ async def retry_with_backoff(
     for attempt in range(1, max_attempts + 1):
         try:
             return await fn()
-        except exceptions as exc:  # noqa: BLE001
+        except exceptions as exc:
             last_exception = exc
             if attempt == max_attempts:
                 break

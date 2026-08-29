@@ -8,7 +8,7 @@ risk bucket and remain subject to the sector cap.
 
 from __future__ import annotations
 
-from typing import Mapping
+from collections.abc import Mapping
 
 # Conservative, strategy-oriented crypto sectors.  This is deliberately local
 # and deterministic so a missing exchange metadata call can never disable a

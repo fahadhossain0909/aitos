@@ -15,7 +15,6 @@ intentionally left out rather than faked.
 from __future__ import annotations
 
 import math
-from typing import Dict, List
 
 from aitos.journal.models import DailyReview, MonthlyReview, WeeklyReview
 from aitos.models.trade import Trade
@@ -28,11 +27,11 @@ def r_multiple(trade: Trade) -> float:
     return round(trade.pnl / trade.risk_amount_usd, 4)
 
 
-def _closed_only(trades: List[Trade]) -> List[Trade]:
+def _closed_only(trades: list[Trade]) -> list[Trade]:
     return [t for t in trades if t.pnl is not None]
 
 
-def daily_review(trades: List[Trade], date: str) -> DailyReview:
+def daily_review(trades: list[Trade], date: str) -> DailyReview:
     closed = _closed_only(trades)
     if not closed:
         return DailyReview(
@@ -67,9 +66,9 @@ def daily_review(trades: List[Trade], date: str) -> DailyReview:
     )
 
 
-def weekly_review(trades: List[Trade], week_start: str) -> WeeklyReview:
+def weekly_review(trades: list[Trade], week_start: str) -> WeeklyReview:
     closed = _closed_only(trades)
-    by_strategy: Dict[str, Dict[str, float]] = {}
+    by_strategy: dict[str, dict[str, float]] = {}
     for t in closed:
         bucket = by_strategy.setdefault(
             t.strategy_id, {"trades": 0, "pnl": 0.0, "wins": 0}
@@ -99,7 +98,7 @@ def weekly_review(trades: List[Trade], week_start: str) -> WeeklyReview:
 
 
 def monthly_review(
-    trades: List[Trade], month: str, starting_equity: float = 10_000.0
+    trades: list[Trade], month: str, starting_equity: float = 10_000.0
 ) -> MonthlyReview:
     closed = _closed_only(trades)
     if not closed:

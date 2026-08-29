@@ -1,6 +1,6 @@
 from pathlib import Path
 
-import aitos.storage.maintenance as maintenance
+from aitos.storage import maintenance
 from aitos.storage.maintenance import (
     StorageConfig,
     choose_retention_days,

@@ -12,11 +12,17 @@ correctly instead of leaving a stale `POSITION_OPENED` record forever.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
 from aitos.logging_setup import get_logger
@@ -41,8 +47,8 @@ class ReconciliationScheduler(AITOSModule):
         self._event_bus = event_bus
         self._interval_seconds = interval_seconds
         self._initialized = False
-        self._task: Optional[asyncio.Task] = None
-        self._last_run_at: Optional[str] = None
+        self._task: asyncio.Task | None = None
+        self._last_run_at: str | None = None
         self._last_run_trades_checked = 0
         self._last_run_trades_closed = 0
         self._total_runs = 0
@@ -58,7 +64,7 @@ class ReconciliationScheduler(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._task = asyncio.create_task(self._run_loop(), name="reconciliation-loop")
@@ -99,7 +105,7 @@ class ReconciliationScheduler(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     # -- Public API ---------------------------------------------------------------

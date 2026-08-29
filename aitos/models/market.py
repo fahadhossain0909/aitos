@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Tuple
+from typing import Any
 
 
 class TradeSide(str, Enum):
@@ -45,7 +45,7 @@ class Kline:
     taker_buy_quote_volume: float
     is_closed: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "timeframe": self.timeframe,
@@ -64,7 +64,7 @@ class Kline:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "Kline":
+    def from_dict(cls, data: dict[str, Any]) -> Kline:
         return cls(
             symbol=data["symbol"],
             timeframe=data["timeframe"],
@@ -86,8 +86,8 @@ class Kline:
 @dataclass(frozen=True)
 class OrderBookSnapshot:
     symbol: str
-    bids: Tuple[Tuple[float, float], ...]
-    asks: Tuple[Tuple[float, float], ...]
+    bids: tuple[tuple[float, float], ...]
+    asks: tuple[tuple[float, float], ...]
     last_update_id: int
     timestamp: datetime
 
@@ -109,7 +109,7 @@ class OrderBookSnapshot:
         ask_depth = sum(qty for _, qty in self.asks)
         return bid_depth / ask_depth if ask_depth else float("inf")
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "bid_levels": [{"price": p, "qty": q} for p, q in self.bids],
@@ -121,7 +121,7 @@ class OrderBookSnapshot:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "OrderBookSnapshot":
+    def from_dict(cls, data: dict[str, Any]) -> OrderBookSnapshot:
         bids = tuple(
             (float(x["price"]), float(x["qty"]))
             for x in data.get("bid_levels", data.get("bids", []))
@@ -149,7 +149,7 @@ class TradeTick:
     is_buyer_maker: bool
     timestamp: datetime
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "trade_id": self.trade_id,
@@ -161,7 +161,7 @@ class TradeTick:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TradeTick":
+    def from_dict(cls, data: dict[str, Any]) -> TradeTick:
         return cls(
             symbol=data["symbol"],
             trade_id=int(data["trade_id"]),
@@ -180,7 +180,7 @@ class FundingRate:
     funding_time: datetime
     mark_price: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "funding_rate": self.funding_rate,
@@ -189,7 +189,7 @@ class FundingRate:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "FundingRate":
+    def from_dict(cls, data: dict[str, Any]) -> FundingRate:
         return cls(
             symbol=data["symbol"],
             funding_rate=float(data["funding_rate"]),
@@ -204,7 +204,7 @@ class OpenInterest:
     open_interest: float
     timestamp: datetime
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
             "open_interest": float(self.open_interest),
@@ -212,7 +212,7 @@ class OpenInterest:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "OpenInterest":
+    def from_dict(cls, data: dict[str, Any]) -> OpenInterest:
         return cls(
             symbol=data["symbol"],
             open_interest=float(data["open_interest"]),

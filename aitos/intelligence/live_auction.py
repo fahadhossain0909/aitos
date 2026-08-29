@@ -8,7 +8,7 @@ acceptance, balance and directional extension.
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import Iterable
+from collections.abc import Iterable
 
 from aitos.models.market import OrderBookSnapshot, TradeTick
 

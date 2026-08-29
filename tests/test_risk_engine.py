@@ -1,7 +1,12 @@
 import pytest
 
-from aitos.risk.models import (PortfolioState, PositionExposure, RiskAction,
-                               RiskLimits, RiskScoreBreakdown)
+from aitos.risk.models import (
+    PortfolioState,
+    PositionExposure,
+    RiskAction,
+    RiskLimits,
+    RiskScoreBreakdown,
+)
 from aitos.risk.risk_engine import RiskEngine, _action_for_score, check_limits
 
 

@@ -7,10 +7,15 @@ It never promotes or rolls back a policy itself.
 from __future__ import annotations
 
 from collections import deque
-from typing import Any, Dict
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.journal.policy_monitor import evaluate_policy_health
 
@@ -37,7 +42,7 @@ class PolicyMonitorService(AITOSModule):
         self._min_avg_r = min_avg_r
         self._subscription: Subscription | None = None
         self._initialized = False
-        self._last_health: Dict[str, Any] | None = None
+        self._last_health: dict[str, Any] | None = None
 
     @property
     def module_id(self) -> str:
@@ -47,7 +52,7 @@ class PolicyMonitorService(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._subscription = await self._event_bus.subscribe(

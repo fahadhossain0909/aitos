@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Mapping, Optional, Sequence
 
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
@@ -24,7 +24,7 @@ class _BookState:
 
 class LiquidityTracker:
     def __init__(self, min_level_qty: float = 0.0, removal_ratio: float = 0.35) -> None:
-        self._previous: Optional[_BookState] = None
+        self._previous: _BookState | None = None
         self.min_level_qty = max(0.0, min_level_qty)
         self.removal_ratio = min(0.95, max(0.05, removal_ratio))
 

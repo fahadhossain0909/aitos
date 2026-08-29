@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
 
 from .schema import CanonicalTrade, normalize_timestamp
 

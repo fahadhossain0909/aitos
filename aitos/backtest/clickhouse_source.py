@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Any, Iterator, Optional
+from typing import Any
 
 import clickhouse_connect
 
@@ -76,8 +77,8 @@ class ClickHouseHistoricalSource:
     def events(
         self,
         symbol: str,
-        start: Optional[datetime] = None,
-        end: Optional[datetime] = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         table: str = "ohlcv",
         timeframe: str = "15m",
         limit: int = 10_000_000,
@@ -193,7 +194,7 @@ class ClickHouseHistoricalSource:
             )
 
 
-def parse_optional_time(value: Optional[str]) -> Optional[datetime]:
+def parse_optional_time(value: str | None) -> datetime | None:
     if not value:
         return None
     parsed = _timestamp(value)

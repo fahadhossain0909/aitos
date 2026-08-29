@@ -12,12 +12,17 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import clickhouse_connect
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.journal.models import JournalEntry
 from aitos.logging_setup import get_logger
@@ -93,7 +98,7 @@ class JournalRepository(AITOSModule):
         )
         self._client = None
         self._initialized = False
-        self._last_event_time: Optional[str] = None
+        self._last_event_time: str | None = None
 
     @property
     def module_id(self) -> str:
@@ -103,7 +108,7 @@ class JournalRepository(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._client = await clickhouse_connect.get_async_client(**self._conn_params)
@@ -139,12 +144,12 @@ class JournalRepository(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     # -- Writes -----------------------------------------------------------------
 
-    async def save_trade_snapshot(self, trade_dict: Dict[str, Any]) -> None:
+    async def save_trade_snapshot(self, trade_dict: dict[str, Any]) -> None:
         self._require_initialized()
         await self._client.insert(
             "trades",
@@ -236,7 +241,7 @@ class JournalRepository(AITOSModule):
 
     async def get_journal_entries_for_trade(
         self, trade_id: str
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         self._require_initialized()
         result = await self._client.query(
             "SELECT * FROM journal_entries WHERE trade_id = {trade_id:String} ORDER BY created_at",

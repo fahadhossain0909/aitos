@@ -7,9 +7,10 @@ approve a promotion and persist the resulting active policy.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Mapping, Optional
+from typing import Any
 
 from .evidence_shadow import ShadowWeightResult
 
@@ -17,7 +18,7 @@ from .evidence_shadow import ShadowWeightResult
 @dataclass(frozen=True)
 class PolicyVersion:
     version: str
-    weights: Dict[str, float]
+    weights: dict[str, float]
     created_at: str
     source: str = "baseline"
 
@@ -61,7 +62,7 @@ class PolicyGovernance:
         self.active = previous
         return previous
 
-    def snapshot(self) -> Dict[str, Any]:
+    def snapshot(self) -> dict[str, Any]:
         return {
             "active": {
                 "version": self.active.version,

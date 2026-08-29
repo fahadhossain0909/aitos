@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
@@ -17,7 +17,7 @@ class StubAgent(BaseAgent):
         self._direction = direction
         self._confidence = confidence
 
-    async def contribute_decision(self, context: Dict[str, Any]) -> AgentDecision:
+    async def contribute_decision(self, context: dict[str, Any]) -> AgentDecision:
         return AgentDecision(
             agent_id=self.module_id,
             confidence=self._confidence,

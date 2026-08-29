@@ -8,8 +8,9 @@ that a later policy optimizer can consume.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,7 @@ class EvidencePerformance:
     alignment_rate: float
     outcome_win_rate: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "source": self.source,
             "observations": self.observations,
@@ -42,9 +43,9 @@ class DecisionEvidenceAttributor:
     """Join decision evidence contributions with realized trade outcomes."""
 
     @staticmethod
-    def attribute(records: Iterable[Mapping[str, Any]]) -> List[EvidencePerformance]:
-        decisions: Dict[str, Mapping[str, Any]] = {}
-        outcomes: Dict[str, List[Mapping[str, Any]]] = {}
+    def attribute(records: Iterable[Mapping[str, Any]]) -> list[EvidencePerformance]:
+        decisions: dict[str, Mapping[str, Any]] = {}
+        outcomes: dict[str, list[Mapping[str, Any]]] = {}
         for record in records:
             kind = record.get("record_type")
             decision_id = str(record.get("decision_id") or "")
@@ -55,7 +56,7 @@ class DecisionEvidenceAttributor:
             elif kind == "OUTCOME":
                 outcomes.setdefault(decision_id, []).append(record)
 
-        buckets: Dict[str, List[tuple[float, float]]] = {}
+        buckets: dict[str, list[tuple[float, float]]] = {}
         for decision_id, decision in decisions.items():
             contribution_map = DecisionEvidenceAttributor._contributions(decision)
             for outcome in outcomes.get(decision_id, []):
@@ -74,7 +75,7 @@ class DecisionEvidenceAttributor:
                         (float(pnl), r_value * aligned)
                     )
 
-        result: List[EvidencePerformance] = []
+        result: list[EvidencePerformance] = []
         for source, values in sorted(buckets.items()):
             pnls = [v[0] for v in values]
             rs = [v[1] for v in values]
@@ -97,12 +98,12 @@ class DecisionEvidenceAttributor:
         return result
 
     @staticmethod
-    def _contributions(decision: Mapping[str, Any]) -> Dict[str, float]:
+    def _contributions(decision: Mapping[str, Any]) -> dict[str, float]:
         raw = decision.get("evidence_contributions") or decision.get(
             "fusion_contributions"
         )
         if isinstance(raw, Mapping):
-            result: Dict[str, float] = {}
+            result: dict[str, float] = {}
             for key, value in raw.items():
                 if isinstance(value, (int, float)):
                     result[str(key)] = float(value)

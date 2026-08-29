@@ -11,7 +11,7 @@ streaming/replay layer.
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 from aitos.intelligence.order_flow import delta
 from aitos.models.market import OrderBookSnapshot, TradeTick

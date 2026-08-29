@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import uuid
 from abc import ABC, abstractmethod
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any
 
 
 class EventPriority(str, Enum):
@@ -49,15 +50,15 @@ class Event:
     """
 
     topic: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     event_id: str = field(default_factory=_new_id)
     source_module: str = "unknown"
     priority: EventPriority = EventPriority.NORMAL
     created_at: str = field(default_factory=_utc_now_iso)
-    correlation_id: Optional[str] = None
+    correlation_id: str | None = None
     schema_version: str = "1.0"
 
-    def to_wire(self) -> Dict[str, Any]:
+    def to_wire(self) -> dict[str, Any]:
         """Serialize to a flat dict suitable for Redis Streams (str values)."""
         import json
 
@@ -73,7 +74,7 @@ class Event:
         }
 
     @classmethod
-    def from_wire(cls, raw: Dict[Any, Any]) -> "Event":
+    def from_wire(cls, raw: dict[Any, Any]) -> Event:
         import json
 
         def _s(v: Any) -> str:
@@ -105,9 +106,9 @@ class EventResponse:
 
     request_event_id: str
     responder_module: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
     created_at: str = field(default_factory=_utc_now_iso)
 
 
@@ -116,8 +117,8 @@ class HealthStatus:
     module_id: str
     status: ModuleStatus
     latency_ms: float
-    last_event_time: Optional[str]
-    details: Dict[str, Any] = field(default_factory=dict)
+    last_event_time: str | None
+    details: dict[str, Any] = field(default_factory=dict)
 
 
 class AITOSModule(ABC):
@@ -134,7 +135,7 @@ class AITOSModule(ABC):
         """Semantic version string."""
 
     @abstractmethod
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         """One-time setup. Must be idempotent."""
 
     @abstractmethod
@@ -150,5 +151,5 @@ class AITOSModule(ABC):
         """Yield events this module produces (for modules that generate their own stream)."""
 
     @abstractmethod
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         """Process an incoming event. Return a response if applicable."""

@@ -8,9 +8,9 @@ executed aggression and does not infer hidden/iceberg liquidity.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Iterable
 
 from aitos.models.market import TradeSide, TradeTick
 
@@ -77,7 +77,7 @@ class FootprintEngine:
         if any(trade.symbol != symbol for trade in trades):
             raise ValueError("all trades must belong to the same symbol")
 
-        buckets: Dict[float, list[float]] = defaultdict(lambda: [0.0, 0.0])
+        buckets: dict[float, list[float]] = defaultdict(lambda: [0.0, 0.0])
         for trade in trades:
             price = self.bucket_price(trade.price)
             # Buyer-maker means the taker is selling; otherwise the taker is buying.

@@ -1,7 +1,12 @@
 from datetime import datetime, timedelta, timezone
 
-from aitos.intelligence.amt import (AMTEngine, AuctionState, DayType,
-                                    ValueMigration, build_volume_profile)
+from aitos.intelligence.amt import (
+    AMTEngine,
+    AuctionState,
+    DayType,
+    ValueMigration,
+    build_volume_profile,
+)
 from aitos.models.market import TradeSide, TradeTick
 
 

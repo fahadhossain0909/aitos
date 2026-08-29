@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Iterable
 
 from aitos.backtest.execution import ExecutionSimulator
 from aitos.backtest.l2_execution import BookLevel, L2ExecutionModel
 from aitos.backtest.margin import PerpetualMarginModel
-from aitos.backtest.market_adapter import (HistoricalMarketAdapter,
-                                           HistoricalMarketState)
+from aitos.backtest.market_adapter import HistoricalMarketAdapter, HistoricalMarketState
 from aitos.backtest.queue_lifecycle import QueueOrderLifecycle, SimulatedOrder
 from aitos.backtest.replay import MarketReplay
 from aitos.models.market import OrderBookSnapshot, TradeTick

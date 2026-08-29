@@ -6,10 +6,11 @@ import argparse
 import importlib
 import json
 import os
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any
 
 from aitos.learning.clickhouse_store import ClickHouseExperienceStore
 from aitos.learning.experience import ExperienceRecord
@@ -217,8 +218,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         if not args.symbol:
             raise SystemExit("--symbol is required when --source=clickhouse")
-        from .clickhouse_source import (ClickHouseHistoricalSource,
-                                        parse_optional_time)
+        from .clickhouse_source import ClickHouseHistoricalSource, parse_optional_time
 
         source = ClickHouseHistoricalSource(
             args.clickhouse_host,

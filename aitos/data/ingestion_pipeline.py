@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from .incremental import DownloadItem, IncrementalDownloader
 from .parquet_writer import CanonicalParquetWriter

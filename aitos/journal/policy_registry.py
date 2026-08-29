@@ -5,16 +5,17 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True)
 class ActivePolicy:
     version: str
-    weights: Dict[str, float]
+    weights: dict[str, float]
     min_confidence: float = 0.60
     updated_at: str = ""
 
@@ -85,7 +86,7 @@ class PolicyRegistry:
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
             return self._default
 
-    def _atomic_write(self, data: Dict[str, Any]) -> None:
+    def _atomic_write(self, data: dict[str, Any]) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(
             prefix=f".{self._path.name}.", dir=str(self._path.parent)

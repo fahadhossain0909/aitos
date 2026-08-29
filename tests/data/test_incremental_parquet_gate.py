@@ -1,7 +1,10 @@
 from pathlib import Path
 
-from aitos.data.incremental import (CanonicalDataIndex, DownloadManifest,
-                                    IncrementalDownloader)
+from aitos.data.incremental import (
+    CanonicalDataIndex,
+    DownloadManifest,
+    IncrementalDownloader,
+)
 
 
 def test_existing_parquet_skips_raw_download(tmp_path: Path):

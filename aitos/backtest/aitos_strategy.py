@@ -8,11 +8,11 @@ without silently using a second strategy implementation.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
-from aitos.kernel.decision_fusion import (DecisionFusionEngine,
-                                          EvidenceFusionResult)
+from aitos.kernel.decision_fusion import DecisionFusionEngine, EvidenceFusionResult
 
 
 @dataclass(frozen=True)

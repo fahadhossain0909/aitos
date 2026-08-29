@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import csv
 import json
+from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from .schema import CanonicalBookEvent, normalize_timestamp
 

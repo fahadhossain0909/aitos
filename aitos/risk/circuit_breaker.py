@@ -14,8 +14,7 @@ A failed probe while HALF_OPEN sends it back to OPEN with a fresh cooldown.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import List, Optional
+from dataclasses import dataclass
 
 from aitos.risk.models import CircuitBreakerState
 
@@ -31,15 +30,15 @@ class CircuitBreaker:
     def __init__(self, cooldown_seconds: float = 300.0) -> None:
         self._state = CircuitBreakerState.CLOSED
         self._cooldown_seconds = cooldown_seconds
-        self._tripped_at: Optional[float] = None
-        self._history: List[CircuitBreakerEvent] = []
+        self._tripped_at: float | None = None
+        self._history: list[CircuitBreakerEvent] = []
 
     @property
     def state(self) -> CircuitBreakerState:
         return self._state
 
     @property
-    def history(self) -> List[CircuitBreakerEvent]:
+    def history(self) -> list[CircuitBreakerEvent]:
         return list(self._history)
 
     def is_trading_allowed(self) -> bool:

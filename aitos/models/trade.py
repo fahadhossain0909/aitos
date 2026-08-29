@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class TradeSide(str, Enum):
@@ -57,15 +57,15 @@ class Opportunity:
     side: TradeSide
     entry_price: float
     stop_loss_price: float
-    take_profit_levels: List[float]  # ordered, nearest first
+    take_profit_levels: list[float]  # ordered, nearest first
     confidence: float
     strategy_id: str
     rationale: str
-    agent_consensus: Dict[str, Any] = field(default_factory=dict)
+    agent_consensus: dict[str, Any] = field(default_factory=dict)
     is_production: bool = False
-    approved_by: Optional[str] = None
+    approved_by: str | None = None
     trailing_sl_enabled: bool = False
-    breakeven_at_r_multiple: Optional[float] = (
+    breakeven_at_r_multiple: float | None = (
         1.0  # move SL to entry after 1R profit by default
     )
     regime: str = (
@@ -96,7 +96,7 @@ class Trade:
     position_size_usd: float
     risk_amount_usd: float
     strategy_id: str
-    agent_consensus: Dict[str, Any]
+    agent_consensus: dict[str, Any]
     explanation: str
     sl_price: float
     tp_price: float
@@ -104,18 +104,18 @@ class Trade:
     entry_time: str
     trailing_sl_enabled: bool = False
     breakeven_triggered: bool = False
-    breakeven_at_r_multiple: Optional[float] = None
-    take_profit_levels: List[float] = field(default_factory=list)
-    partial_exits: List[PartialExit] = field(default_factory=list)
-    sl_order_id: Optional[str] = None
-    tp_order_ids: List[str] = field(default_factory=list)
+    breakeven_at_r_multiple: float | None = None
+    take_profit_levels: list[float] = field(default_factory=list)
+    partial_exits: list[PartialExit] = field(default_factory=list)
+    sl_order_id: str | None = None
+    tp_order_ids: list[str] = field(default_factory=list)
     regime: str = "unknown"
-    exit_price: Optional[float] = None
-    exit_time: Optional[str] = None
-    exit_reason: Optional[str] = None
-    pnl: Optional[float] = None
-    pnl_percent: Optional[float] = None
-    rejection_reason: Optional[str] = None
+    exit_price: float | None = None
+    exit_time: str | None = None
+    exit_reason: str | None = None
+    pnl: float | None = None
+    pnl_percent: float | None = None
+    rejection_reason: str | None = None
     updated_at: str = field(default_factory=_utc_now_iso)
 
     @property
@@ -129,7 +129,7 @@ class Trade:
         direction = 1 if self.side == TradeSide.LONG else -1
         return ((current_price - self.entry_price) * direction) / self.r_distance
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "trade_id": self.trade_id,
             "symbol": self.symbol,

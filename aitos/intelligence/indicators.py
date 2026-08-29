@@ -9,7 +9,7 @@ All functions expect klines in chronological order (oldest first).
 from __future__ import annotations
 
 import math
-from typing import List, Sequence, Tuple
+from collections.abc import Sequence
 
 from aitos.models.market import Kline
 
@@ -38,7 +38,7 @@ def atr_percentile(
     external calibration."""
     if len(klines) < period + 2:
         return 50.0
-    atrs: List[float] = []
+    atrs: list[float] = []
     start = max(1, len(klines) - lookback)
     for end in range(start + period, len(klines) + 1):
         atrs.append(average_true_range(klines[max(0, end - period - 1) : end], period))
@@ -53,7 +53,7 @@ def atr_percentile(
 
 def _directional_movement(
     klines: Sequence[Kline],
-) -> Tuple[List[float], List[float], List[float]]:
+) -> tuple[list[float], list[float], list[float]]:
     plus_dm, minus_dm, trs = [], [], []
     for i in range(1, len(klines)):
         up_move = klines[i].high - klines[i - 1].high
@@ -70,7 +70,7 @@ def adx(klines: Sequence[Kline], period: int = 14) -> float:
         return 0.0
     plus_dm, minus_dm, trs = _directional_movement(klines)
 
-    def _smooth(values: List[float]) -> List[float]:
+    def _smooth(values: list[float]) -> list[float]:
         smoothed = [sum(values[:period])]
         for v in values[period:]:
             smoothed.append(smoothed[-1] - (smoothed[-1] / period) + v)
@@ -123,7 +123,7 @@ def cvd_trend_score(klines: Sequence[Kline], lookback: int = 20) -> float:
 
 def detect_structure_break(
     klines: Sequence[Kline], swing_lookback: int = 10
-) -> Tuple[str, float]:
+) -> tuple[str, float]:
     """Very simplified Break-of-Structure (BOS) detector: compares the most
     recent close against the highest high / lowest low of the preceding
     swing window. Returns (direction, strength 0-10).
@@ -181,7 +181,7 @@ def pearson_correlation(series_a: Sequence[float], series_b: Sequence[float]) ->
     return round(cov / denom, 4) if denom > 0 else 0.0
 
 
-def returns(klines: Sequence[Kline]) -> List[float]:
+def returns(klines: Sequence[Kline]) -> list[float]:
     return [
         (klines[i].close - klines[i - 1].close) / klines[i - 1].close
         for i in range(1, len(klines))

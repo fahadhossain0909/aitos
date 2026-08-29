@@ -20,21 +20,36 @@ AI Kernel into an actual trade, end to end.
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Dict, List, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventPriority,
-                                  EventResponse, HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventPriority,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError, TradeNotFoundError
 from aitos.eventbus.redis_bus import EventBus
-from aitos.execution.order_executor import (OrderExecutor, OrderRequest,
-                                            SimulatedOrderExecutor)
+from aitos.execution.order_executor import (
+    OrderExecutor,
+    OrderRequest,
+    SimulatedOrderExecutor,
+)
 from aitos.kernel.ai_kernel import Action, AIKernel
 from aitos.logging_setup import get_logger
-from aitos.models.trade import (Opportunity, PartialExit, Trade,
-                                TradeLifecycleState, TradeSide, new_trade_id,
-                                utc_now_iso)
-from aitos.risk.models import (PortfolioState, PositionExposure,
-                               PositionSizeResult)
+from aitos.models.trade import (
+    Opportunity,
+    PartialExit,
+    Trade,
+    TradeLifecycleState,
+    TradeSide,
+    new_trade_id,
+    utc_now_iso,
+)
+from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResult
 from aitos.risk.risk_engine import RiskEngine
 
 logger = get_logger("aitos.trading.lifecycle")
@@ -60,8 +75,8 @@ class TradeLifecycle(AITOSModule):
         self,
         event_bus: EventBus,
         risk_engine: RiskEngine,
-        order_executor: Optional[OrderExecutor] = None,
-        kernel: Optional[AIKernel] = None,
+        order_executor: OrderExecutor | None = None,
+        kernel: AIKernel | None = None,
         use_exchange_side_stops: bool = False,
     ) -> None:
         self._event_bus = event_bus
@@ -73,9 +88,9 @@ class TradeLifecycle(AITOSModule):
             and self._order_executor.supports_exchange_side_stops
         )
         self._initialized = False
-        self._open_trades: Dict[str, Trade] = {}
-        self._closed_trades: List[Trade] = []
-        self._last_event_time: Optional[str] = None
+        self._open_trades: dict[str, Trade] = {}
+        self._closed_trades: list[Trade] = []
+        self._last_event_time: str | None = None
 
     @property
     def module_id(self) -> str:
@@ -85,7 +100,7 @@ class TradeLifecycle(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._initialized = True
@@ -115,7 +130,7 @@ class TradeLifecycle(AITOSModule):
         return
         yield
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         if not self._initialized:
             return None
         if event.topic.startswith("market.kline.") or event.topic.startswith(
@@ -129,10 +144,10 @@ class TradeLifecycle(AITOSModule):
                         await self.update_price(trade.trade_id, float(price))
         return None
 
-    def get_open_trades(self) -> List[Trade]:
+    def get_open_trades(self) -> list[Trade]:
         return list(self._open_trades.values())
 
-    def get_closed_trades(self) -> List[Trade]:
+    def get_closed_trades(self) -> list[Trade]:
         return list(self._closed_trades)
 
     async def submit_opportunity(

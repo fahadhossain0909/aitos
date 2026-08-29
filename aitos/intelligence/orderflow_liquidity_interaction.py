@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from aitos.intelligence.footprint_signals import FootprintSignals
 from aitos.intelligence.liquidity_tracker import LiquidityEvent

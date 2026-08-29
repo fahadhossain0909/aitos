@@ -8,9 +8,9 @@ volume-at-price.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import floor
-from typing import Iterable
 
 from aitos.models.market import TradeTick
 

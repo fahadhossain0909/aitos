@@ -7,11 +7,17 @@ mode and explicitly promoted by governance.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping, Optional
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.journal.performance_evaluator import PerformanceReport
 
 
@@ -24,7 +30,7 @@ class RegimePolicy:
     win_rate: float
     average_r_multiple: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "regime": self.regime,
             "enabled": self.enabled,
@@ -44,7 +50,7 @@ class PolicyCandidate:
     max_confidence_ceiling: float
     regimes: Mapping[str, RegimePolicy] = field(default_factory=dict)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "candidate_id": self.candidate_id,
             "base_policy_version": self.base_policy_version,
@@ -83,7 +89,7 @@ class AdaptivePolicyEngine(AITOSModule):
         self.confidence_ceiling = confidence_ceiling
         self.base_policy_version = base_policy_version
         self._initialized = False
-        self._last_candidate: Optional[PolicyCandidate] = None
+        self._last_candidate: PolicyCandidate | None = None
 
     @property
     def module_id(self) -> str:
@@ -93,7 +99,7 @@ class AdaptivePolicyEngine(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         self._initialized = True
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
@@ -103,7 +109,7 @@ class AdaptivePolicyEngine(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     async def health_check(self) -> HealthStatus:
@@ -125,7 +131,7 @@ class AdaptivePolicyEngine(AITOSModule):
         is allowed to use a lower threshold, but never below the safety floor.
         """
         regime_slices = [s for s in report.slices if s.key == "regime"]
-        regimes: Dict[str, RegimePolicy] = {}
+        regimes: dict[str, RegimePolicy] = {}
         for item in regime_slices:
             if item.trades < self.min_trades:
                 threshold = self.base_min_confidence
@@ -159,5 +165,5 @@ class AdaptivePolicyEngine(AITOSModule):
         self._last_candidate = candidate
         return candidate
 
-    def last_candidate(self) -> Optional[PolicyCandidate]:
+    def last_candidate(self) -> PolicyCandidate | None:
         return self._last_candidate

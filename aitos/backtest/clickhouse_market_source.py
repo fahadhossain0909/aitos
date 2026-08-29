@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from datetime import datetime
-from typing import Iterator, Optional
 
 import clickhouse_connect
 
@@ -71,7 +71,7 @@ class ClickHouseMarketEventSource:
             logger.exception("ClickHouse market event source close failed")
 
     def _bounds(
-        self, start: Optional[datetime], end: Optional[datetime]
+        self, start: datetime | None, end: datetime | None
     ) -> tuple[str, dict]:
         filters = ["symbol = {symbol:String}"]
         params: dict = {}
@@ -86,8 +86,8 @@ class ClickHouseMarketEventSource:
     def events(
         self,
         symbol: str,
-        start: Optional[datetime] = None,
-        end: Optional[datetime] = None,
+        start: datetime | None = None,
+        end: datetime | None = None,
         limit: int = 10_000_000,
     ) -> Iterator[TradeTick | OrderBookSnapshot]:
         where, params = self._bounds(start, end)

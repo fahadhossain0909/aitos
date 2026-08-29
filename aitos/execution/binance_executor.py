@@ -33,14 +33,14 @@ import hashlib
 import hmac
 import time
 import uuid
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 from urllib.parse import urlencode
 
 import aiohttp
 
 from aitos.exchange.symbol_filters import SymbolFilters
-from aitos.execution.order_executor import (OrderExecutor, OrderRequest,
-                                            OrderResult)
+from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.logging_setup import get_logger
 from aitos.models.trade import TradeSide
 
@@ -67,7 +67,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         testnet: bool = True,
         recv_window_ms: int = 5000,
         session_factory: Callable[[], aiohttp.ClientSession] = aiohttp.ClientSession,
-        symbol_filters: Optional[Dict[str, SymbolFilters]] = None,
+        symbol_filters: dict[str, SymbolFilters] | None = None,
         hedge_mode: bool = False,
     ) -> None:
         if not api_key or not api_secret:
@@ -79,8 +79,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         self._base_url = TESTNET_URL if testnet else MAINNET_URL
         self._recv_window_ms = recv_window_ms
         self._session_factory = session_factory
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._symbol_filters: Dict[str, SymbolFilters] = dict(symbol_filters or {})
+        self._session: aiohttp.ClientSession | None = None
+        self._symbol_filters: dict[str, SymbolFilters] = dict(symbol_filters or {})
         self._hedge_mode = hedge_mode
         if not testnet:
             logger.warning(
@@ -111,7 +111,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         )
         self._hedge_mode = hedge_mode
 
-    def load_symbol_filters(self, filters: Dict[str, SymbolFilters]) -> None:
+    def load_symbol_filters(self, filters: dict[str, SymbolFilters]) -> None:
         """Populate/refresh precision data — typically from
         ``exchange.fetch_exchange_info()`` on the data-layer adapter (public
         endpoint, shared with the rest of the system), called once at
@@ -126,7 +126,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         if self._session is not None and not self._session.closed:
             await self._session.close()
 
-    async def set_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
+    async def set_leverage(self, symbol: str, leverage: int) -> dict[str, Any]:
         return await self._signed_request(
             "POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage}
         )
@@ -199,12 +199,12 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             error=None if success else f"unexpected order status: {status}",
         )
 
-    async def get_order_status(self, symbol: str, order_id: str) -> Dict[str, Any]:
+    async def get_order_status(self, symbol: str, order_id: str) -> dict[str, Any]:
         return await self._signed_request(
             "GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
         )
 
-    async def cancel_order(self, symbol: str, order_id: str) -> Dict[str, Any]:
+    async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
         return await self._signed_request(
             "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
         )
@@ -242,7 +242,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
 
     async def get_resting_order_status(
         self, symbol: str, order_id: str
-    ) -> Optional[str]:
+    ) -> str | None:
         try:
             status = await self.get_order_status(symbol, order_id)
             return status.get("status")
@@ -314,7 +314,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
 
     def _position_params(
         self, position_side: TradeSide, is_closing_order: bool
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Build the ``side`` (+ ``positionSide``/``reduceOnly`` as needed)
         parameters for either mode:
 
@@ -344,14 +344,14 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             if is_closing_order
             else ("BUY" if is_long else "SELL")
         )
-        params: Dict[str, Any] = {"side": side}
+        params: dict[str, Any] = {"side": side}
         if is_closing_order:
             params["reduceOnly"] = "true"
         return params
 
     def _apply_quantity_precision(
         self, symbol: str, quantity: float
-    ) -> "tuple[float, Optional[SymbolFilters]]":
+    ) -> tuple[float, SymbolFilters | None]:
         filters = self._symbol_filters.get(symbol)
         if filters is None:
             return quantity, None
@@ -383,7 +383,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             error=error,
         )
 
-    def _sign(self, params: Dict[str, Any]) -> str:
+    def _sign(self, params: dict[str, Any]) -> str:
         query_string = urlencode(params)
         signature = hmac.new(
             self._api_secret.encode(), query_string.encode(), hashlib.sha256
@@ -391,8 +391,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return f"{query_string}&signature={signature}"
 
     async def _signed_request(
-        self, method: str, path: str, params: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, method: str, path: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
         if self._session is None:
             raise RuntimeError(
                 "BinanceFuturesOrderExecutor.connect() must be called first"

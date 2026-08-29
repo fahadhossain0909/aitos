@@ -1,5 +1,4 @@
-from aitos.xai.counterfactual import (composite_score,
-                                      counterfactual_for_threshold)
+from aitos.xai.counterfactual import composite_score, counterfactual_for_threshold
 
 WEIGHTS = {
     "trend_strength": 0.15,

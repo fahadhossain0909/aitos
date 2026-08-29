@@ -3,11 +3,15 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aitos.app import (PaperPortfolioTracker, build_system, initialize_all,
-                       run_scan_and_trade_cycle, shutdown_all)
+from aitos.app import (
+    PaperPortfolioTracker,
+    build_system,
+    initialize_all,
+    run_scan_and_trade_cycle,
+    shutdown_all,
+)
 from aitos.execution.order_executor import SimulatedOrderExecutor
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
-from aitos.trading.lifecycle import TradeLifecycle
 from tests.test_scanner import FakeScannerExchange
 
 
@@ -128,7 +132,6 @@ async def test_price_feed_subscription_auto_updates_open_trades(event_bus):
     update_price anywhere here — it's subscribed to market.* on the real
     Event Bus by initialize_all, and DataIngestionService's own published
     events are what drive it."""
-    from aitos.data.ingestion import DataIngestionService
 
     exchange = FakeScannerExchange()
     executor = SimulatedOrderExecutor()

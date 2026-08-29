@@ -6,10 +6,10 @@ import hashlib
 import json
 import tempfile
 import urllib.request
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from typing import Iterable
 from urllib.parse import urlparse
 
 from .dataset_layout import DatasetLayout

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from aitos.data.storage_policy import StorageLifecycle, StoragePolicy
+from aitos.data.storage_policy import StorageLifecycle
 
 
 def test_cleanup_refuses_when_no_parquet(tmp_path: Path):

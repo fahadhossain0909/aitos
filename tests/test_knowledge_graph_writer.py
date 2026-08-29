@@ -3,10 +3,13 @@ import asyncio
 import pytest
 
 from aitos.core.contracts import Event
-from aitos.knowledge_graph.writer import (CLOSE_TRADE_QUERY, CORRELATION_QUERY,
-                                          CREATE_TRADE_QUERY,
-                                          LINK_MISTAKE_QUERY,
-                                          KnowledgeGraphWriter)
+from aitos.knowledge_graph.writer import (
+    CLOSE_TRADE_QUERY,
+    CORRELATION_QUERY,
+    CREATE_TRADE_QUERY,
+    LINK_MISTAKE_QUERY,
+    KnowledgeGraphWriter,
+)
 
 
 class FakeSession:

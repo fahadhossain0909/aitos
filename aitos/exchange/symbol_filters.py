@@ -46,7 +46,7 @@ class SymbolFilters:
         return price * quantity >= self.min_notional
 
 
-def parse_exchange_info(raw: dict) -> "dict[str, SymbolFilters]":
+def parse_exchange_info(raw: dict) -> dict[str, SymbolFilters]:
     """Parse a ``/fapi/v1/exchangeInfo`` response into ``{symbol: SymbolFilters}``."""
     result: dict[str, SymbolFilters] = {}
     for symbol_info in raw.get("symbols", []):

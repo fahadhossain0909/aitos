@@ -9,8 +9,8 @@ from typing import Any
 
 import aiohttp
 
-from aitos.exchange.orderbook import LocalOrderBook, OrderBookSequenceError
 from aitos.exchange.base import ExchangeAdapter
+from aitos.exchange.orderbook import LocalOrderBook, OrderBookSequenceError
 from aitos.exchange.parsing import (
     parse_agg_trade_ws,
     parse_depth_diff_ws,

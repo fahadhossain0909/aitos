@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any
 
 from aitos.data.orderbook_replay import OrderBookReconstructor
 from aitos.data.schema import CanonicalBookEvent, CanonicalTrade
