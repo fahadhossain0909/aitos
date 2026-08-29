@@ -196,14 +196,10 @@ class LiveScannerCache:
             # These are the actual ages used to determine whether the
             # consumer's cached event is still live.
             "trade_receive_age_sec": (
-                round(trade_receive_age, 3)
-                if trade_receive_age is not None
-                else None
+                round(trade_receive_age, 3) if trade_receive_age is not None else None
             ),
             "book_receive_age_sec": (
-                round(book_receive_age, 3)
-                if book_receive_age is not None
-                else None
+                round(book_receive_age, 3) if book_receive_age is not None else None
             ),
             # Source-to-consumer timestamp skew, useful for diagnostics.
             "trade_consumer_lag_sec": (
