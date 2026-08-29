@@ -3,10 +3,16 @@ from .market import (
     Kline,
     OpenInterest,
     OrderBookSnapshot,
+    TradeSide as MarketTradeSide,
     TradeTick,
 )
-from .market import TradeSide as MarketTradeSide
-from .trade import Opportunity, PartialExit, Trade, TradeLifecycleState, TradeSide
+from .trade import (
+    Opportunity,
+    PartialExit,
+    Trade,
+    TradeLifecycleState,
+    TradeSide,
+)
 
 __all__ = [
     "FundingRate",
