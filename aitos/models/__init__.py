@@ -1,7 +1,7 @@
 from .market import (
     FundingRate,
     Kline,
-    MarketTradeSide,
+    TradeSide as MarketTradeSide,
     OpenInterest,
     OrderBookSnapshot,
     TradeTick,
