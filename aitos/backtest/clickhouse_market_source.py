@@ -70,9 +70,7 @@ class ClickHouseMarketEventSource:
         except Exception:
             logger.exception("ClickHouse market event source close failed")
 
-    def _bounds(
-        self, start: datetime | None, end: datetime | None
-    ) -> tuple[str, dict]:
+    def _bounds(self, start: datetime | None, end: datetime | None) -> tuple[str, dict]:
         filters = ["symbol = {symbol:String}"]
         params: dict = {}
         if start is not None:

@@ -240,9 +240,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             # (e.g. the opposite leg triggered first) — not an operational error.
             logger.info("cancel_resting_order: %s", exc)
 
-    async def get_resting_order_status(
-        self, symbol: str, order_id: str
-    ) -> str | None:
+    async def get_resting_order_status(self, symbol: str, order_id: str) -> str | None:
         try:
             status = await self.get_order_status(symbol, order_id)
             return status.get("status")

@@ -441,9 +441,7 @@ class IdempotentOrderExecutor(OrderExecutor):
     async def cancel_resting_order(self, *args: Any, **kwargs: Any) -> None:
         await self._inner.cancel_resting_order(*args, **kwargs)
 
-    async def get_resting_order_status(
-        self, *args: Any, **kwargs: Any
-    ) -> str | None:
+    async def get_resting_order_status(self, *args: Any, **kwargs: Any) -> str | None:
         return await self._inner.get_resting_order_status(*args, **kwargs)
 
     def __getattr__(self, name: str) -> Any:

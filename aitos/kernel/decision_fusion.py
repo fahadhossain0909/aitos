@@ -139,9 +139,7 @@ class DecisionFusionEngine:
             missing_components=tuple(missing),
         )
 
-    def fuse_context(
-        self, context: Mapping[str, Any]
-    ) -> EvidenceFusionResult | None:
+    def fuse_context(self, context: Mapping[str, Any]) -> EvidenceFusionResult | None:
         direction = context.get("direction")
         component_scores = context.get("component_scores")
         if not isinstance(direction, str) or not isinstance(component_scores, Mapping):

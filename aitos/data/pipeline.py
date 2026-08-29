@@ -26,19 +26,12 @@ def download_and_extract(
     manifest = DownloadManifest(manifest_path)
     downloader = IncrementalDownloader(manifest)
     downloads = downloader.download(
-        
-            (
-                item.filename,
-                item.url,
-                root
-                / "raw"
-                / item.exchange
-                / item.market
-                / item.symbol
-                / item.filename,
-            )
-            for item in items
-        
+        (
+            item.filename,
+            item.url,
+            root / "raw" / item.exchange / item.market / item.symbol / item.filename,
+        )
+        for item in items
     )
     extracted: list[Path] = []
     for archive in downloads:

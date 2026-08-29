@@ -79,9 +79,7 @@ class OrderExecutor(ABC):
             f"{type(self).__name__} does not support cancelling resting orders"
         )
 
-    async def get_resting_order_status(
-        self, symbol: str, order_id: str
-    ) -> str | None:
+    async def get_resting_order_status(self, symbol: str, order_id: str) -> str | None:
         """Return the exchange's status string for a resting order (e.g.
         'FILLED', 'NEW', 'CANCELED'), or ``None`` if not supported."""
         return None
