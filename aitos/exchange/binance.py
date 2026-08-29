@@ -85,32 +85,58 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         if self._session is not None and not self._session.closed:
             await self._session.close()
 
-    async def fetch_klines(self, symbol: str, timeframe: str, limit: int = 500) -> list[Kline]:
+    async def fetch_klines(
+        self, symbol: str, timeframe: str, limit: int = 500
+    ) -> list[Kline]:
         weight = 5 if limit <= 100 else (10 if limit <= 500 else 25)
-        raw = await self._get("/fapi/v1/klines", {"symbol": symbol, "interval": timeframe, "limit": limit}, weight)
-        return [parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw]
+        raw = await self._get(
+            "/fapi/v1/klines",
+            {"symbol": symbol, "interval": timeframe, "limit": limit},
+            weight,
+        )
+        return [
+            parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw
+        ]
 
     async def fetch_order_book(self, symbol: str, limit: int = 50) -> OrderBookSnapshot:
         weight = 2 if limit <= 50 else (5 if limit <= 100 else 10)
-        raw = await self._get("/fapi/v1/depth", {"symbol": symbol, "limit": limit}, weight)
+        raw = await self._get(
+            "/fapi/v1/depth", {"symbol": symbol, "limit": limit}, weight
+        )
         return parse_order_book_rest(raw, symbol=symbol)
 
-    async def fetch_recent_trades(self, symbol: str, limit: int = 500) -> list[TradeTick]:
-        raw = await self._get("/fapi/v1/trades", {"symbol": symbol, "limit": limit}, weight=5)
+    async def fetch_recent_trades(
+        self, symbol: str, limit: int = 500
+    ) -> list[TradeTick]:
+        raw = await self._get(
+            "/fapi/v1/trades", {"symbol": symbol, "limit": limit}, weight=5
+        )
         return [parse_trade_rest(row, symbol=symbol) for row in raw]
 
     async def fetch_funding_rate(self, symbol: str) -> FundingRate:
-        return parse_funding_rate_rest(await self._get("/fapi/v1/premiumIndex", {"symbol": symbol}, weight=1))
+        return parse_funding_rate_rest(
+            await self._get("/fapi/v1/premiumIndex", {"symbol": symbol}, weight=1)
+        )
 
     async def fetch_open_interest(self, symbol: str) -> OpenInterest:
-        return parse_open_interest_rest(await self._get("/fapi/v1/openInterest", {"symbol": symbol}, weight=1))
+        return parse_open_interest_rest(
+            await self._get("/fapi/v1/openInterest", {"symbol": symbol}, weight=1)
+        )
 
-    async def fetch_exchange_info(self, symbols: list[str] | None = None) -> dict[str, SymbolFilters]:
+    async def fetch_exchange_info(
+        self, symbols: list[str] | None = None
+    ) -> dict[str, SymbolFilters]:
         raw = await self._get("/fapi/v1/exchangeInfo", {}, weight=1)
         all_filters = parse_exchange_info(raw)
-        return all_filters if symbols is None else {s: all_filters[s] for s in symbols if s in all_filters}
+        return (
+            all_filters
+            if symbols is None
+            else {s: all_filters[s] for s in symbols if s in all_filters}
+        )
 
-    async def stream_klines(self, symbols: list[str], timeframe: str) -> AsyncIterator[Kline]:
+    async def stream_klines(
+        self, symbols: list[str], timeframe: str
+    ) -> AsyncIterator[Kline]:
         streams = [f"{s.lower()}@kline_{timeframe}" for s in symbols]
 
         async def _parse(data: Any) -> Kline:
@@ -126,18 +152,26 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
         normalized_symbols = list(dict.fromkeys(symbols))
         symbol_set = set(normalized_symbols)
-        primary_streams = [f"{symbol.lower()}@aggTrade" for symbol in normalized_symbols]
+        primary_streams = [
+            f"{symbol.lower()}@aggTrade" for symbol in normalized_symbols
+        ]
         primary = self._raw_stream(primary_streams, emit_reconnect=True).__aiter__()
         fallback_streams = {
-            symbol: self._raw_stream([f"{symbol.lower()}@trade"], emit_reconnect=True).__aiter__()
+            symbol: self._raw_stream(
+                [f"{symbol.lower()}@trade"], emit_reconnect=True
+            ).__aiter__()
             for symbol in normalized_symbols
         }
         loop = asyncio.get_running_loop()
         # None means that this symbol has not yet received a valid primary event.
         # The idle watchdog must not start until the first valid aggTrade arrives.
-        primary_last_data: dict[str, float | None] = {symbol: None for symbol in normalized_symbols}
+        primary_last_data: dict[str, float | None] = {
+            symbol: None for symbol in normalized_symbols
+        }
         fallback_active: set[str] = set()
-        fallback_tasks: dict[str, asyncio.Task | None] = {symbol: None for symbol in normalized_symbols}
+        fallback_tasks: dict[str, asyncio.Task | None] = {
+            symbol: None for symbol in normalized_symbols
+        }
         primary_task: asyncio.Task | None = None
 
         def stream_symbol(stream_name: str, data: Any) -> str:
@@ -162,23 +196,38 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         and now - last_data >= TRADE_STREAM_IDLE_FALLBACK_SECONDS
                     ):
                         fallback_active.add(symbol)
-                        fallback_tasks[symbol] = asyncio.create_task(fallback_streams[symbol].__anext__())
+                        fallback_tasks[symbol] = asyncio.create_task(
+                            fallback_streams[symbol].__anext__()
+                        )
                         logger.warning(
                             "Binance aggregate-trade stream idle; entering per-symbol raw-trade fallback",
-                            extra={"aitos_extra": {"symbol": symbol, "idle_seconds": TRADE_STREAM_IDLE_FALLBACK_SECONDS}},
+                            extra={
+                                "aitos_extra": {
+                                    "symbol": symbol,
+                                    "idle_seconds": TRADE_STREAM_IDLE_FALLBACK_SECONDS,
+                                }
+                            },
                         )
 
                 tasks: set[asyncio.Task] = {primary_task}
-                tasks.update(task for task in fallback_tasks.values() if task is not None)
+                tasks.update(
+                    task for task in fallback_tasks.values() if task is not None
+                )
 
                 timeout = TRADE_STREAM_PRIMARY_RETRY_SECONDS
                 for symbol in normalized_symbols:
                     last_data = primary_last_data[symbol]
                     if symbol not in fallback_active and last_data is not None:
-                        remaining = max(0.0, TRADE_STREAM_IDLE_FALLBACK_SECONDS - (loop.time() - last_data))
+                        remaining = max(
+                            0.0,
+                            TRADE_STREAM_IDLE_FALLBACK_SECONDS
+                            - (loop.time() - last_data),
+                        )
                         timeout = min(timeout, remaining)
 
-                done, _ = await asyncio.wait(tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED)
+                done, _ = await asyncio.wait(
+                    tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+                )
                 if not done:
                     continue
 
@@ -194,7 +243,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         except Exception as exc:
                             logger.error(
                                 "Binance aggregate-trade event invalid; keeping primary under watchdog",
-                                extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                                extra={
+                                    "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                                },
                             )
                             continue
                         primary_last_data[symbol] = loop.time()
@@ -204,7 +255,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                             fallback_tasks[symbol] = None
                             if fallback_task is not None and not fallback_task.done():
                                 fallback_task.cancel()
-                                await asyncio.gather(fallback_task, return_exceptions=True)
+                                await asyncio.gather(
+                                    fallback_task, return_exceptions=True
+                                )
                             logger.info(
                                 "Binance aggregate-trade stream recovered; returning from per-symbol fallback",
                                 extra={"aitos_extra": {"symbol": symbol}},
@@ -214,11 +267,18 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         primary_task = None
                     except Exception as exc:
                         primary_task = None
-                        logger.error("Binance combined aggregate-trade stream event failed", extra={"aitos_extra": {"error": str(exc)}})
+                        logger.error(
+                            "Binance combined aggregate-trade stream event failed",
+                            extra={"aitos_extra": {"error": str(exc)}},
+                        )
 
                 for symbol in normalized_symbols:
                     task = fallback_tasks[symbol]
-                    if task is None or task not in done or symbol not in fallback_active:
+                    if (
+                        task is None
+                        or task not in done
+                        or symbol not in fallback_active
+                    ):
                         continue
                     try:
                         data, _ = task.result()
@@ -226,45 +286,72 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         try:
                             yield parse_trade_ws(data)
                         except Exception as exc:
-                            logger.error("Binance raw-trade fallback event invalid", extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}})
+                            logger.error(
+                                "Binance raw-trade fallback event invalid",
+                                extra={
+                                    "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                                },
+                            )
                     except StopAsyncIteration:
                         fallback_tasks[symbol] = None
                     except Exception as exc:
                         fallback_tasks[symbol] = None
-                        logger.error("Binance raw-trade fallback stream failed", extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}})
+                        logger.error(
+                            "Binance raw-trade fallback stream failed",
+                            extra={
+                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                            },
+                        )
                     finally:
                         if symbol in fallback_active and fallback_tasks[symbol] is None:
-                            fallback_tasks[symbol] = asyncio.create_task(fallback_streams[symbol].__anext__())
+                            fallback_tasks[symbol] = asyncio.create_task(
+                                fallback_streams[symbol].__anext__()
+                            )
         except asyncio.CancelledError:
             raise
         finally:
             if primary_task is not None and not primary_task.done():
                 primary_task.cancel()
-            await asyncio.gather(*(task for task in [primary_task] if task is not None), return_exceptions=True)
+            await asyncio.gather(
+                *(task for task in [primary_task] if task is not None),
+                return_exceptions=True,
+            )
             for task in fallback_tasks.values():
                 if task is not None and not task.done():
                     task.cancel()
-            await asyncio.gather(*(task for task in fallback_tasks.values() if task is not None), return_exceptions=True)
+            await asyncio.gather(
+                *(task for task in fallback_tasks.values() if task is not None),
+                return_exceptions=True,
+            )
             await primary.aclose()
             for iterator in fallback_streams.values():
                 await iterator.aclose()
 
-    async def stream_order_book(self, symbols: list[str], levels: int = 20) -> AsyncIterator[OrderBookSnapshot]:
+    async def stream_order_book(
+        self, symbols: list[str], levels: int = 20
+    ) -> AsyncIterator[OrderBookSnapshot]:
         if not symbols:
             return
         streams = [f"{s.lower()}@depth@100ms" for s in symbols]
         symbol_by_stream = {f"{s.lower()}@depth@100ms": s for s in symbols}
-        queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE)
+        queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(
+            maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE
+        )
         producer_ready = asyncio.Event()
 
         async def producer() -> None:
             try:
-                async for data, stream_name in self._raw_stream(streams, emit_reconnect=True):
+                async for data, stream_name in self._raw_stream(
+                    streams, emit_reconnect=True
+                ):
                     producer_ready.set()
                     try:
                         queue.put_nowait((data, stream_name))
                     except asyncio.QueueFull:
-                        logger.error("order-book bootstrap buffer overflow; forcing resync", extra={"aitos_extra": {"streams": streams}})
+                        logger.error(
+                            "order-book bootstrap buffer overflow; forcing resync",
+                            extra={"aitos_extra": {"streams": streams}},
+                        )
                         while not queue.empty():
                             try:
                                 queue.get_nowait()
@@ -280,11 +367,16 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             book.seed(snapshot)
             return book
 
-        producer_task = asyncio.create_task(producer(), name="binance-orderbook-producer")
+        producer_task = asyncio.create_task(
+            producer(), name="binance-orderbook-producer"
+        )
         books: dict[str, LocalOrderBook] = {}
         try:
             try:
-                await asyncio.wait_for(producer_ready.wait(), timeout=ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS)
+                await asyncio.wait_for(
+                    producer_ready.wait(),
+                    timeout=ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS,
+                )
             except asyncio.TimeoutError:
                 raise RuntimeError("Binance order-book stream did not become ready")
             for symbol in symbols:
@@ -300,7 +392,10 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     event = parse_depth_diff_ws(data)
                     snapshot = books[symbol].apply(event)
                 except OrderBookSequenceError:
-                    logger.warning("order-book sequence break; reseeding from REST", extra={"aitos_extra": {"symbol": symbol}})
+                    logger.warning(
+                        "order-book sequence break; reseeding from REST",
+                        extra={"aitos_extra": {"symbol": symbol}},
+                    )
                     books[symbol] = await bootstrap(symbol)
                     continue
                 if snapshot is not None:
@@ -313,11 +408,15 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
-        async with self._session.get(f"{REST_BASE_URL}{path}", params=params) as response:
+        async with self._session.get(
+            f"{REST_BASE_URL}{path}", params=params
+        ) as response:
             response.raise_for_status()
             return await response.json()
 
-    async def _stream(self, streams: list[str], parser: Callable[[Any], Any]) -> AsyncIterator[Any]:
+    async def _stream(
+        self, streams: list[str], parser: Callable[[Any], Any]
+    ) -> AsyncIterator[Any]:
         async for data, _stream_name in self._raw_stream(streams):
             yield await parser(data)
 
@@ -329,7 +428,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             return WS_PUBLIC_BASE_URL
         return WS_MARKET_BASE_URL
 
-    async def _raw_stream(self, streams: list[str], emit_reconnect: bool = False) -> AsyncIterator[tuple[Any, str]]:
+    async def _raw_stream(
+        self, streams: list[str], emit_reconnect: bool = False
+    ) -> AsyncIterator[tuple[Any, str]]:
         if not streams:
             return
         base_url = self._ws_base_url(streams)
@@ -344,10 +445,27 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         stream_name = envelope.get("stream", "")
                         yield envelope.get("data", envelope), stream_name
                 if emit_reconnect:
-                    logger.warning("Binance combined stream closed, reconnecting", extra={"aitos_extra": {"streams": streams, "backoff_seconds": backoff}})
+                    logger.warning(
+                        "Binance combined stream closed, reconnecting",
+                        extra={
+                            "aitos_extra": {
+                                "streams": streams,
+                                "backoff_seconds": backoff,
+                            }
+                        },
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                logger.error("Binance combined stream disconnected, reconnecting", extra={"aitos_extra": {"streams": streams, "error": str(exc), "backoff_seconds": backoff}})
+                logger.error(
+                    "Binance combined stream disconnected, reconnecting",
+                    extra={
+                        "aitos_extra": {
+                            "streams": streams,
+                            "error": str(exc),
+                            "backoff_seconds": backoff,
+                        }
+                    },
+                )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
