@@ -1,0 +1,79 @@
+name: Apply trade watchdog fix
+
+on:
+  push:
+    branches: ["fix/trade-watchdog-first-message-v6"]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: ${{ !startsWith(github.event.head_commit.message, 'fix: apply first-message watchdog') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch watchdog
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('aitos/exchange/binance.py')
+          s = p.read_text()
+          old = '        primary_last_data = {symbol: loop.time() for symbol in normalized_symbols}\n'
+          new = '''        # Do not start the idle watchdog until each symbol has produced
+        # at least one valid primary aggTrade message. This prevents false
+        # fallback activation during WebSocket connection establishment.
+        primary_last_data: dict[str, float | None] = {
+            symbol: None for symbol in normalized_symbols
+        }
+'''
+          if old not in s:
+              raise SystemExit('expected watchdog initialization not found')
+          s = s.replace(old, new, 1)
+          old2 = '''                    if (
+                        symbol not in fallback_active
+                        and now - primary_last_data[symbol]
+                        >= TRADE_STREAM_IDLE_FALLBACK_SECONDS
+                    ):
+'''
+          new2 = '''                    last_data = primary_last_data[symbol]
+                    if (
+                        symbol not in fallback_active
+                        and last_data is not None
+                        and now - last_data >= TRADE_STREAM_IDLE_FALLBACK_SECONDS
+                    ):
+'''
+          if old2 not in s:
+              raise SystemExit('expected fallback condition not found')
+          s = s.replace(old2, new2, 1)
+          old3 = '''                    if symbol not in fallback_active:
+                        remaining = max(
+                            0.0,
+                            TRADE_STREAM_IDLE_FALLBACK_SECONDS
+                            - (loop.time() - primary_last_data[symbol]),
+                        )
+                        timeout = min(timeout, remaining)
+'''
+          new3 = '''                    last_data = primary_last_data[symbol]
+                    if symbol not in fallback_active and last_data is not None:
+                        remaining = max(
+                            0.0,
+                            TRADE_STREAM_IDLE_FALLBACK_SECONDS
+                            - (loop.time() - last_data),
+                        )
+                        timeout = min(timeout, remaining)
+'''
+          if old3 not in s:
+              raise SystemExit('expected timeout calculation not found')
+          s = s.replace(old3, new3, 1)
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff -- aitos/exchange/binance.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add aitos/exchange/binance.py
+          git commit -m 'fix: apply first-message watchdog'
+          git push
