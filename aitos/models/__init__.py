@@ -1,11 +1,11 @@
 from .market import (
     FundingRate,
     Kline,
+    MarketTradeSide,
     OpenInterest,
     OrderBookSnapshot,
     TradeTick,
 )
-from .market import TradeSide as MarketTradeSide
 from .trade import Opportunity, PartialExit, Trade, TradeLifecycleState, TradeSide
 
 __all__ = [
