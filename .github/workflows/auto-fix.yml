@@ -19,8 +19,6 @@ jobs:
   python-autofix:
     name: Safe Python Auto-Fix
     runs-on: ubuntu-latest
-    # Never execute or modify code from an untrusted fork. Fork PRs continue
-    # through normal read-only CI checks.
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Check out source branch
@@ -40,11 +38,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install black==25.12.0 isort ruff
 
-      - name: Determine changed Python files
-        id: changed
+      - name: Determine formatting scope
+        id: scope
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "${{ github.event.head_commit.message }}" == *"[format-all]"* ]]; then
+            echo "mode=all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [[ "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
             git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
             base="${{ github.event.pull_request.base.sha }}"
@@ -56,20 +59,34 @@ jobs:
               base="$(git rev-list --max-count=1 HEAD^)"
             fi
           fi
+
           files="$(git diff --name-only "$base" "$head" -- '*.py' | tr '\n' ' ' | xargs || true)"
+          echo "mode=changed" >> "$GITHUB_OUTPUT"
           echo "files=$files" >> "$GITHUB_OUTPUT"
 
-      - name: Run Black
-        if: steps.changed.outputs.files != ''
-        run: black ${{ steps.changed.outputs.files }}
+      - name: Run Black (full repository)
+        if: steps.scope.outputs.mode == 'all'
+        run: black .
 
-      - name: Run isort
-        if: steps.changed.outputs.files != ''
-        run: isort ${{ steps.changed.outputs.files }}
+      - name: Run isort (full repository)
+        if: steps.scope.outputs.mode == 'all'
+        run: isort .
 
-      - name: Run Ruff safe fixes
-        if: steps.changed.outputs.files != ''
-        run: ruff check --fix --exit-zero ${{ steps.changed.outputs.files }}
+      - name: Run Ruff safe fixes (full repository)
+        if: steps.scope.outputs.mode == 'all'
+        run: ruff check --fix --exit-zero .
+
+      - name: Run Black (changed Python files)
+        if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
+        run: black ${{ steps.scope.outputs.files }}
+
+      - name: Run isort (changed Python files)
+        if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
+        run: isort ${{ steps.scope.outputs.files }}
+
+      - name: Run Ruff safe fixes (changed Python files)
+        if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
+        run: ruff check --fix --exit-zero ${{ steps.scope.outputs.files }}
 
       - name: Commit and push safe fixes
         shell: bash
@@ -87,13 +104,8 @@ jobs:
           git add -- '*.py'
           git commit -m "ci: apply automatic formatting and safe lint fixes"
 
-          # Never push a PR merge ref. SOURCE_BRANCH is always the actual
-          # writable branch for trusted same-repository PRs or push events.
-          # Rebase onto the latest remote tip before every push attempt so
-          # concurrent human/bot commits are preserved instead of overwritten.
           for attempt in 1 2 3 4 5; do
             git fetch origin "$SOURCE_BRANCH"
-
             if git rebase "origin/$SOURCE_BRANCH"; then
               if git push origin "HEAD:refs/heads/$SOURCE_BRANCH"; then
                 echo "Automatic fixes pushed to $SOURCE_BRANCH."
@@ -102,7 +114,6 @@ jobs:
             else
               git rebase --abort || true
             fi
-
             echo "Push attempt $attempt raced with another update; retrying."
             sleep $((attempt * 2))
           done
