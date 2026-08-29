@@ -1,8 +1,7 @@
 from datetime import datetime, timezone
 
 from aitos.intelligence.auction import auction_context_score
-from aitos.intelligence.order_flow import (buy_volume_ratio, delta,
-                                           order_flow_bias_score)
+from aitos.intelligence.order_flow import buy_volume_ratio, delta, order_flow_bias_score
 from aitos.models.market import Kline, TradeSide, TradeTick
 
 

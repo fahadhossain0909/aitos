@@ -20,10 +20,16 @@ running one for real).
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Dict, List, Optional, Protocol
+from collections.abc import AsyncIterator
+from typing import Any, Protocol
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.logging_setup import get_logger
@@ -79,10 +85,10 @@ class KnowledgeGraphWriter(AITOSModule):
         self._event_bus = event_bus
         self._driver = driver
         self._initialized = False
-        self._subscriptions: List[Subscription] = []
+        self._subscriptions: list[Subscription] = []
         self._writes_applied = 0
         self._errors = 0
-        self._last_event_time: Optional[str] = None
+        self._last_event_time: str | None = None
 
     # -- AITOSModule contract -------------------------------------------------
 
@@ -94,7 +100,7 @@ class KnowledgeGraphWriter(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._subscriptions.append(
@@ -143,7 +149,7 @@ class KnowledgeGraphWriter(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     # -- Public API ---------------------------------------------------------------
@@ -165,7 +171,7 @@ class KnowledgeGraphWriter(AITOSModule):
 
     # -- Event handlers -------------------------------------------------------------
 
-    async def _on_position_opened(self, event: Event) -> Optional[EventResponse]:
+    async def _on_position_opened(self, event: Event) -> EventResponse | None:
         trade_dict = event.payload
         await self._run(
             CREATE_TRADE_QUERY,
@@ -181,7 +187,7 @@ class KnowledgeGraphWriter(AITOSModule):
         self._last_event_time = event.created_at
         return None
 
-    async def _on_position_closed(self, event: Event) -> Optional[EventResponse]:
+    async def _on_position_closed(self, event: Event) -> EventResponse | None:
         trade_dict = event.payload
         await self._run(
             CLOSE_TRADE_QUERY,
@@ -196,7 +202,7 @@ class KnowledgeGraphWriter(AITOSModule):
         self._last_event_time = event.created_at
         return None
 
-    async def _on_mistake_recorded(self, event: Event) -> Optional[EventResponse]:
+    async def _on_mistake_recorded(self, event: Event) -> EventResponse | None:
         entry = event.payload
         trade_id = entry.get("trade_id")
         if not trade_id or not entry.get("mistakes"):

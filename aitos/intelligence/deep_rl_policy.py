@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import pickle
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 from sklearn.neural_network import MLPRegressor
@@ -17,7 +17,7 @@ DEFAULT_MIN_SAMPLES_FOR_CONFIDENCE = 30
 DEFAULT_REWARD_SCALE_R_MULTIPLES = 2.0
 
 
-def _vectorize(context: Dict[str, Any]) -> np.ndarray:
+def _vectorize(context: dict[str, Any]) -> np.ndarray:
     return np.array(
         [[float(context.get(f, 5.0)) / 10.0 for f in FEATURE_ORDER]], dtype=float
     )
@@ -34,7 +34,7 @@ class DeepValueRLScorer(RLPolicyScorer):
 
     def __init__(
         self,
-        hidden_layer_sizes: Tuple[int, ...] = (8,),
+        hidden_layer_sizes: tuple[int, ...] = (8,),
         learning_rate_init: float = 0.01,
         min_samples_for_confidence: int = DEFAULT_MIN_SAMPLES_FOR_CONFIDENCE,
         reward_scale_r_multiples: float = DEFAULT_REWARD_SCALE_R_MULTIPLES,
@@ -53,7 +53,7 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._min_samples = min_samples_for_confidence
         self._reward_scale = reward_scale_r_multiples
         self._n_samples_seen = 0
-        self._recent_rewards: List[float] = []
+        self._recent_rewards: list[float] = []
         self._state_path = Path(state_path)
 
     @property
@@ -65,7 +65,7 @@ class DeepValueRLScorer(RLPolicyScorer):
         return self._n_samples_seen > 0
 
     def update(
-        self, symbol: str, context: Dict[str, Any], reward_r_multiple: float
+        self, symbol: str, context: dict[str, Any], reward_r_multiple: float
     ) -> None:
         self._model.partial_fit(_vectorize(context), np.array([reward_r_multiple]))
         self._n_samples_seen += 1
@@ -74,7 +74,7 @@ class DeepValueRLScorer(RLPolicyScorer):
             self._recent_rewards.pop(0)
 
     def update_and_persist(
-        self, symbol: str, context: Dict[str, Any], reward_r_multiple: float
+        self, symbol: str, context: dict[str, Any], reward_r_multiple: float
     ) -> None:
         """Atomically merge one outcome into the shared persistent model."""
         target = self._state_path
@@ -99,7 +99,7 @@ class DeepValueRLScorer(RLPolicyScorer):
                 except ImportError:
                     pass
 
-    async def score(self, symbol: str, context: Dict[str, Any]) -> float:
+    async def score(self, symbol: str, context: dict[str, Any]) -> float:
         if not self.is_fitted:
             return 5.0
         predicted_reward = float(self._model.predict(_vectorize(context))[0])

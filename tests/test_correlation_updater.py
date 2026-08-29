@@ -1,14 +1,13 @@
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator, List
 
 import pytest
 
 from aitos.exchange.base import ExchangeAdapter
 from aitos.knowledge_graph.correlation_updater import SymbolCorrelationUpdater
 from aitos.knowledge_graph.writer import KnowledgeGraphWriter
-from aitos.models.market import (FundingRate, Kline, OpenInterest,
-                                 OrderBookSnapshot)
+from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot
 from tests.test_knowledge_graph_writer import FakeDriver
 
 NOW = datetime.now(timezone.utc)
@@ -52,7 +51,7 @@ class FakeCorrelationExchange(ExchangeAdapter):
     async def close(self):
         self.closed = True
 
-    async def fetch_klines(self, symbol, timeframe, limit=500) -> List[Kline]:
+    async def fetch_klines(self, symbol, timeframe, limit=500) -> list[Kline]:
         base = [100.0 + i for i in range(30)]
         if symbol == "BTCUSDT":
             return make_klines(base)

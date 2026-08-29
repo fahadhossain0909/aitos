@@ -8,8 +8,8 @@ base weights.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Dict, Iterable, Mapping
 
 from aitos.journal.evidence_attribution import EvidencePerformance
 
@@ -68,7 +68,7 @@ class EvidenceWeightOptimizer:
             p.source: p for p in performance if p.observations >= self.min_observations
         }
         raw = dict(base)
-        confidence: Dict[str, float] = {}
+        confidence: dict[str, float] = {}
         for source, weight in base.items():
             p = stats.get(source)
             if p is None:

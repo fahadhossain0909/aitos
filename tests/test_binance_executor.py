@@ -6,9 +6,12 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from aioresponses import aioresponses
 
-from aitos.execution.binance_executor import (MAINNET_URL, TESTNET_URL,
-                                              BinanceFuturesOrderExecutor,
-                                              round_step)
+from aitos.execution.binance_executor import (
+    MAINNET_URL,
+    TESTNET_URL,
+    BinanceFuturesOrderExecutor,
+    round_step,
+)
 from aitos.models.trade import TradeSide
 
 

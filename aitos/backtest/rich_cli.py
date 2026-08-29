@@ -6,12 +6,12 @@ import argparse
 import importlib
 import json
 import os
+from collections.abc import Callable, Iterable, Iterator
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any
 
-from aitos.backtest.aitos_runner import (AITOSHistoricalRunner,
-                                         HistoricalDecision)
+from aitos.backtest.aitos_runner import AITOSHistoricalRunner, HistoricalDecision
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 

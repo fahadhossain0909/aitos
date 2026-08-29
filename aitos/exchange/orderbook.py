@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, Iterable, Optional, Tuple
 
 from aitos.models.market import OrderBookSnapshot
 
@@ -14,8 +14,8 @@ class DepthUpdate:
     first_update_id: int
     final_update_id: int
     previous_update_id: int
-    bids: Tuple[Tuple[float, float], ...]
-    asks: Tuple[Tuple[float, float], ...]
+    bids: tuple[tuple[float, float], ...]
+    asks: tuple[tuple[float, float], ...]
     event_time_ms: int
 
 
@@ -27,9 +27,9 @@ class LocalOrderBook:
     def __init__(self, symbol: str, max_levels: int = 1000) -> None:
         self.symbol = symbol
         self.max_levels = max(20, max_levels)
-        self._bids: Dict[float, float] = {}
-        self._asks: Dict[float, float] = {}
-        self.last_update_id: Optional[int] = None
+        self._bids: dict[float, float] = {}
+        self._asks: dict[float, float] = {}
+        self.last_update_id: int | None = None
         self.initialized = False
         self._awaiting_first_update = False
 
@@ -73,7 +73,7 @@ class LocalOrderBook:
 
     @staticmethod
     def _apply_levels(
-        book: Dict[float, float], levels: Iterable[Tuple[float, float]]
+        book: dict[float, float], levels: Iterable[tuple[float, float]]
     ) -> None:
         for price, quantity in levels:
             if quantity <= 0:

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus, Subscription
 
@@ -24,7 +30,7 @@ class LearningExperienceRecorder(AITOSModule):
     def __init__(
         self,
         event_bus: EventBus,
-        repository: Optional[MarketDataRepository],
+        repository: MarketDataRepository | None,
         source: str,
     ) -> None:
         if source not in {"paper", "live"}:
@@ -32,12 +38,12 @@ class LearningExperienceRecorder(AITOSModule):
         self._event_bus = event_bus
         self._repository = repository
         self._source = source
-        self._subscriptions: List[Subscription] = []
+        self._subscriptions: list[Subscription] = []
         self._initialized = False
         self._records_written = 0
         self._decision_events_received = 0
         self._outcome_events_received = 0
-        self._last_event_time: Optional[str] = None
+        self._last_event_time: str | None = None
 
     @property
     def module_id(self) -> str:
@@ -47,7 +53,7 @@ class LearningExperienceRecorder(AITOSModule):
     def version(self) -> str:
         return "1.1.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         if self._repository is not None:
@@ -93,7 +99,7 @@ class LearningExperienceRecorder(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     async def _write(self, record: ExperienceRecord) -> None:
@@ -101,7 +107,7 @@ class LearningExperienceRecorder(AITOSModule):
             await self._repository.save_learning_experience(record)
             self._records_written += 1
 
-    async def _on_decision(self, event: Event) -> Optional[EventResponse]:
+    async def _on_decision(self, event: Event) -> EventResponse | None:
         self._decision_events_received += 1
         p = dict(event.payload)
         record = ExperienceRecord(
@@ -130,7 +136,7 @@ class LearningExperienceRecorder(AITOSModule):
         self._last_event_time = event.created_at
         return None
 
-    async def _on_outcome(self, event: Event) -> Optional[EventResponse]:
+    async def _on_outcome(self, event: Event) -> EventResponse | None:
         self._outcome_events_received += 1
         p = dict(event.payload)
         pnl = p.get("pnl")

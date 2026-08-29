@@ -9,17 +9,29 @@ stop.
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from collections.abc import AsyncIterator
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventPriority,
-                                  EventResponse, HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventPriority,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
 from aitos.logging_setup import get_logger
 from aitos.risk.circuit_breaker import CircuitBreaker
-from aitos.risk.models import (CircuitBreakerState, LimitBreach,
-                               PortfolioState, RiskAction, RiskLimits,
-                               RiskScoreBreakdown)
+from aitos.risk.models import (
+    CircuitBreakerState,
+    LimitBreach,
+    PortfolioState,
+    RiskAction,
+    RiskLimits,
+    RiskScoreBreakdown,
+)
 
 logger = get_logger("aitos.risk.engine")
 
@@ -43,8 +55,8 @@ def _pct_of_limit(value: float, limit: float) -> float:
 
 def score_position_risk(
     portfolio: PortfolioState, limits: RiskLimits
-) -> Tuple[float, List[str]]:
-    notes: List[str] = []
+) -> tuple[float, list[str]]:
+    notes: list[str] = []
     leverage_score = _pct_of_limit(portfolio.max_position_leverage, limits.max_leverage)
     if leverage_score > 80:
         notes.append(
@@ -69,8 +81,8 @@ def score_position_risk(
 
 def score_market_risk(
     portfolio: PortfolioState, limits: RiskLimits
-) -> Tuple[float, List[str]]:
-    notes: List[str] = []
+) -> tuple[float, list[str]]:
+    notes: list[str] = []
     vol_score = max(0.0, min(portfolio.volatility_percentile, 100.0))
     regime_penalty = {
         "normal": 0.0,
@@ -97,8 +109,8 @@ def score_market_risk(
 
 def score_system_risk(
     portfolio: PortfolioState, limits: RiskLimits
-) -> Tuple[float, List[str]]:
-    notes: List[str] = []
+) -> tuple[float, list[str]]:
+    notes: list[str] = []
     error_score = _pct_of_limit(portfolio.api_error_rate_pct, 5.0)
     if portfolio.api_error_rate_pct > 5.0:
         notes.append(f"API error rate elevated ({portfolio.api_error_rate_pct:.1f}%)")
@@ -132,8 +144,8 @@ def score_system_risk(
 
 def score_portfolio_risk(
     portfolio: PortfolioState, limits: RiskLimits
-) -> Tuple[float, List[str]]:
-    notes: List[str] = []
+) -> tuple[float, list[str]]:
+    notes: list[str] = []
     drawdown_score = _pct_of_limit(
         portfolio.current_drawdown_pct, limits.max_drawdown_pct
     )
@@ -182,7 +194,7 @@ def _action_for_score(total: float) -> RiskAction:
     return RiskAction.NORMAL
 
 
-def check_limits(portfolio: PortfolioState, limits: RiskLimits) -> List[LimitBreach]:
+def check_limits(portfolio: PortfolioState, limits: RiskLimits) -> list[LimitBreach]:
     """Return configured-limit breaches and absolute hard-cap breaches.
 
     Sector default-limit breaches are deliberately marked as blocking
@@ -190,7 +202,7 @@ def check_limits(portfolio: PortfolioState, limits: RiskLimits) -> List[LimitBre
     ``RiskEngine.assess`` separately checks the 40% absolute hard cap before
     deciding whether to trip the emergency circuit breaker.
     """
-    breaches: List[LimitBreach] = []
+    breaches: list[LimitBreach] = []
 
     def _check(
         name: str, observed: float, default_limit: float, hard_cap: float
@@ -270,9 +282,9 @@ def check_limits(portfolio: PortfolioState, limits: RiskLimits) -> List[LimitBre
 
 def _absolute_hard_cap_breaches(
     portfolio: PortfolioState, limits: RiskLimits
-) -> List[LimitBreach]:
+) -> list[LimitBreach]:
     """Return only breaches of the configured absolute hard caps."""
-    breaches: List[LimitBreach] = []
+    breaches: list[LimitBreach] = []
     checks = [
         (
             "max_drawdown_pct",
@@ -335,7 +347,7 @@ class RiskEngine(AITOSModule):
     def __init__(
         self,
         event_bus: EventBus,
-        limits: Optional[RiskLimits] = None,
+        limits: RiskLimits | None = None,
         circuit_breaker_cooldown_seconds: float = 300.0,
     ) -> None:
         self._event_bus = event_bus
@@ -344,8 +356,8 @@ class RiskEngine(AITOSModule):
             cooldown_seconds=circuit_breaker_cooldown_seconds
         )
         self._initialized = False
-        self._last_assessment: Optional[RiskScoreBreakdown] = None
-        self._last_event_time: Optional[str] = None
+        self._last_assessment: RiskScoreBreakdown | None = None
+        self._last_event_time: str | None = None
 
     @property
     def module_id(self) -> str:
@@ -355,7 +367,7 @@ class RiskEngine(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._initialized = True
@@ -390,7 +402,7 @@ class RiskEngine(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     @property
@@ -402,7 +414,7 @@ class RiskEngine(AITOSModule):
         return self._circuit_breaker
 
     @property
-    def last_assessment(self) -> Optional[RiskScoreBreakdown]:
+    def last_assessment(self) -> RiskScoreBreakdown | None:
         return self._last_assessment
 
     async def assess(self, portfolio: PortfolioState) -> RiskScoreBreakdown:
@@ -446,7 +458,7 @@ class RiskEngine(AITOSModule):
             await self.trigger_emergency_stop(reason)
         return breakdown
 
-    def check_limits(self, portfolio: PortfolioState) -> List[LimitBreach]:
+    def check_limits(self, portfolio: PortfolioState) -> list[LimitBreach]:
         self._require_initialized()
         return check_limits(portfolio, self._limits)
 
@@ -485,7 +497,7 @@ class RiskEngine(AITOSModule):
             )
         return transitioned
 
-    def veto(self, portfolio: Optional[PortfolioState] = None) -> Tuple[bool, str]:
+    def veto(self, portfolio: PortfolioState | None = None) -> tuple[bool, str]:
         if not self._circuit_breaker.is_trading_allowed():
             return True, f"circuit breaker is {self._circuit_breaker.state.value}"
         if self._last_assessment is not None and self._last_assessment.action in (

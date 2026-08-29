@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta
 
-from aitos.backtest.streaming import (CheckpointManager, ChunkPlanner,
-                                      JsonlChunkReader,
-                                      StreamingBacktestEngine)
+from aitos.backtest.streaming import (
+    CheckpointManager,
+    ChunkPlanner,
+    JsonlChunkReader,
+    StreamingBacktestEngine,
+)
 
 
 def test_chunk_planner_preserves_contiguous_windows():

@@ -12,11 +12,17 @@ per-pair error isolation so one bad symbol doesn't block the rest.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from itertools import combinations
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence.indicators import pearson_correlation, returns
@@ -34,7 +40,7 @@ class SymbolCorrelationUpdater(AITOSModule):
         self,
         exchange: ExchangeAdapter,
         graph_writer: KnowledgeGraphWriter,
-        symbols: List[str],
+        symbols: list[str],
         timeframe: str = "1h",
         kline_lookback: int = 100,
         interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
@@ -46,8 +52,8 @@ class SymbolCorrelationUpdater(AITOSModule):
         self._kline_lookback = kline_lookback
         self._interval_seconds = interval_seconds
         self._initialized = False
-        self._task: Optional[asyncio.Task] = None
-        self._last_run_at: Optional[str] = None
+        self._task: asyncio.Task | None = None
+        self._last_run_at: str | None = None
         self._pairs_updated_last_run = 0
         self._errors = 0
 
@@ -61,7 +67,7 @@ class SymbolCorrelationUpdater(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._task = asyncio.create_task(
@@ -99,7 +105,7 @@ class SymbolCorrelationUpdater(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     # -- Public API ---------------------------------------------------------------

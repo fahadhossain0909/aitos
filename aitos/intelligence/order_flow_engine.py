@@ -8,9 +8,9 @@ features suitable for the scanner/decision-fusion layer.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Deque, Sequence
 
 from aitos.intelligence.order_flow import (
     aggression_ratio,
@@ -49,7 +49,7 @@ class OrderFlowEngine:
         if max_trades < 1:
             raise ValueError("max_trades must be >= 1")
         self._max_trades = max_trades
-        self._trades: Deque[TradeTick] = deque(maxlen=max_trades)
+        self._trades: deque[TradeTick] = deque(maxlen=max_trades)
         self._cvd = 0.0
 
     @property

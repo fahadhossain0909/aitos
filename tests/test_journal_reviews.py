@@ -1,7 +1,11 @@
 from datetime import datetime, timezone
 
-from aitos.journal.reviews import (daily_review, monthly_review, r_multiple,
-                                   weekly_review)
+from aitos.journal.reviews import (
+    daily_review,
+    monthly_review,
+    r_multiple,
+    weekly_review,
+)
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 
 NOW = datetime.now(timezone.utc).isoformat()

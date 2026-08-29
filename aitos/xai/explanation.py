@@ -20,7 +20,7 @@ this module. They stay documented, not implemented, in `xai_techniques.py`.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from aitos.risk.models import RiskScoreBreakdown
 
@@ -40,14 +40,14 @@ class TradeExplanation:
     why_sl: str
     why_tp: str
     confidence_score: float
-    supporting_evidence: List[str] = field(default_factory=list)
-    conflicting_evidence: List[str] = field(default_factory=list)
-    risks: List[str] = field(default_factory=list)
-    agent_contributions: Dict[str, str] = field(default_factory=dict)
+    supporting_evidence: list[str] = field(default_factory=list)
+    conflicting_evidence: list[str] = field(default_factory=list)
+    risks: list[str] = field(default_factory=list)
+    agent_contributions: dict[str, str] = field(default_factory=dict)
     market_context: str = ""
     regime_context: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "why_trade": self.why_trade,
             "why_now": self.why_now,
@@ -83,8 +83,8 @@ class TradeExplanation:
 
 
 def build_trade_explanation(
-    trade_dict: Dict[str, Any],
-    risk_assessment: Optional[RiskScoreBreakdown] = None,
+    trade_dict: dict[str, Any],
+    risk_assessment: RiskScoreBreakdown | None = None,
     regime: str = "",
 ) -> TradeExplanation:
     """Build a ``TradeExplanation`` from a ``Trade.to_dict()`` payload.
@@ -97,7 +97,7 @@ def build_trade_explanation(
     symbol = trade_dict.get("symbol", "?")
     side = trade_dict.get("side", "?")
     strategy_id = trade_dict.get("strategy_id", "unknown-strategy")
-    agent_consensus: Dict[str, float] = trade_dict.get("agent_consensus", {}) or {}
+    agent_consensus: dict[str, float] = trade_dict.get("agent_consensus", {}) or {}
     rationale = trade_dict.get("explanation", "") or ""
 
     why_trade = (
@@ -147,7 +147,7 @@ def build_trade_explanation(
         if v <= CONFLICTING_THRESHOLD
     ]
 
-    risks: List[str] = []
+    risks: list[str] = []
     risk_amount = trade_dict.get("risk_amount_usd", 0.0)
     position_size = trade_dict.get("position_size_usd", 0.0)
     if position_size:

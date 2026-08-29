@@ -1,12 +1,11 @@
-from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator, List
+from collections.abc import AsyncIterator
+from datetime import datetime, timezone
 
 import pytest
 
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence.scanner import OpportunityScanner, determine_direction
-from aitos.models.market import (FundingRate, Kline, OpenInterest,
-                                 OrderBookSnapshot)
+from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot
 from aitos.models.trade import TradeSide
 from aitos.risk.models import PortfolioState
 from aitos.trading.lifecycle import TradeLifecycle
@@ -29,7 +28,7 @@ class FakeScannerExchange(ExchangeAdapter):
     async def close(self):
         self.closed = True
 
-    async def fetch_klines(self, symbol, timeframe, limit=500) -> List[Kline]:
+    async def fetch_klines(self, symbol, timeframe, limit=500) -> list[Kline]:
         if symbol == "ETHUSDT":
             return make_klines(
                 [100.0 + (0.3 if i % 2 == 0 else -0.3) for i in range(40)],

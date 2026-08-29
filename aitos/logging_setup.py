@@ -10,8 +10,7 @@ import json
 import logging
 import sys
 from datetime import datetime, timezone
-from typing import Any, Dict
-
+from typing import Any
 
 SENSITIVE_KEYS = {
     "api_key",
@@ -23,9 +22,9 @@ SENSITIVE_KEYS = {
 }
 
 
-def _safe_context(context: Dict[str, Any]) -> Dict[str, Any]:
+def _safe_context(context: dict[str, Any]) -> dict[str, Any]:
     """Redact credential-like context before it reaches the log sink."""
-    safe: Dict[str, Any] = {}
+    safe: dict[str, Any] = {}
     for key, value in context.items():
         safe[key] = "[REDACTED]" if key.lower() in SENSITIVE_KEYS else value
     return safe
@@ -33,7 +32,7 @@ def _safe_context(context: Dict[str, Any]) -> Dict[str, Any]:
 
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "timestamp": datetime.fromtimestamp(
                 record.created, tz=timezone.utc
             ).isoformat(),

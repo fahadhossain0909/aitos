@@ -8,16 +8,21 @@ venue-specific code directly. Swap adapters, nothing upstream changes.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, List, Optional
+from collections.abc import AsyncIterator
 
-from aitos.models.market import (FundingRate, Kline, OpenInterest,
-                                 OrderBookSnapshot, TradeTick)
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeTick,
+)
 
 
 class ExchangeAdapter(ABC):
     """Async context-managed adapter for a single exchange/market (e.g. Binance USDT-M Futures)."""
 
-    async def __aenter__(self) -> "ExchangeAdapter":
+    async def __aenter__(self) -> ExchangeAdapter:
         await self.connect()
         return self
 
@@ -37,7 +42,7 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     async def fetch_klines(
         self, symbol: str, timeframe: str, limit: int = 500
-    ) -> List[Kline]:
+    ) -> list[Kline]:
         """Fetch the most recent ``limit`` closed candles for symbol/timeframe."""
 
     @abstractmethod
@@ -47,7 +52,7 @@ class ExchangeAdapter(ABC):
     @abstractmethod
     async def fetch_recent_trades(
         self, symbol: str, limit: int = 500
-    ) -> List[TradeTick]:
+    ) -> list[TradeTick]:
         """Fetch the most recent executed trades."""
 
     @abstractmethod
@@ -58,7 +63,7 @@ class ExchangeAdapter(ABC):
     async def fetch_open_interest(self, symbol: str) -> OpenInterest:
         """Fetch the current open interest."""
 
-    async def fetch_exchange_info(self, symbols: Optional[List[str]] = None) -> "dict":
+    async def fetch_exchange_info(self, symbols: list[str] | None = None) -> dict:
         """Fetch per-symbol trading filters (quantity step, price tick,
         minimum notional). Concrete (not abstract) with a default that
         raises, since not every adapter/test double needs to support it —
@@ -70,13 +75,13 @@ class ExchangeAdapter(ABC):
     # -- Streaming (live) -------------------------------------------------------
 
     @abstractmethod
-    def stream_klines(self, symbols: List[str], timeframe: str) -> AsyncIterator[Kline]:
+    def stream_klines(self, symbols: list[str], timeframe: str) -> AsyncIterator[Kline]:
         """Yield klines as they update/close, for all ``symbols``."""
 
     @abstractmethod
-    def stream_trades(self, symbols: List[str]) -> AsyncIterator[TradeTick]:
+    def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
         """Yield trade ticks as they execute, for all ``symbols``."""
 
     @abstractmethod
-    def stream_order_book(self, symbols: List[str]) -> AsyncIterator[OrderBookSnapshot]:
+    def stream_order_book(self, symbols: list[str]) -> AsyncIterator[OrderBookSnapshot]:
         """Yield order book updates, for all ``symbols``."""

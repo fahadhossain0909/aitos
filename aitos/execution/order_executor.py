@@ -18,7 +18,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
 
 from aitos.models.trade import TradeSide
 
@@ -34,7 +33,7 @@ class OrderRequest:
     quantity: float
     reference_price: float
     order_type: str = "MARKET"
-    client_order_id: Optional[str] = None
+    client_order_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -46,7 +45,7 @@ class OrderResult:
     fill_price: float
     filled_at: str = field(default_factory=_utc_now_iso)
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class OrderExecutor(ABC):
@@ -80,9 +79,7 @@ class OrderExecutor(ABC):
             f"{type(self).__name__} does not support cancelling resting orders"
         )
 
-    async def get_resting_order_status(
-        self, symbol: str, order_id: str
-    ) -> Optional[str]:
+    async def get_resting_order_status(self, symbol: str, order_id: str) -> str | None:
         """Return the exchange's status string for a resting order (e.g.
         'FILLED', 'NEW', 'CANCELED'), or ``None`` if not supported."""
         return None

@@ -8,10 +8,15 @@ attribution and the future adaptive-policy engine.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.journal.decision_repository import DecisionJournalRepository
 
 
@@ -29,7 +34,7 @@ class PerformanceSlice:
     average_r_multiple: float
     win_rate: float
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "key": self.key,
             "value": self.value,
@@ -52,9 +57,9 @@ class PerformanceReport:
     average_pnl: float
     average_r_multiple: float
     win_rate: float
-    slices: List[PerformanceSlice] = field(default_factory=list)
+    slices: list[PerformanceSlice] = field(default_factory=list)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "decision_count": self.decision_count,
             "outcome_count": self.outcome_count,
@@ -77,7 +82,7 @@ class DecisionPerformanceEvaluator(AITOSModule):
     def __init__(self, decision_repository: DecisionJournalRepository) -> None:
         self._repository = decision_repository
         self._initialized = False
-        self._last_report: Optional[PerformanceReport] = None
+        self._last_report: PerformanceReport | None = None
 
     @property
     def module_id(self) -> str:
@@ -87,7 +92,7 @@ class DecisionPerformanceEvaluator(AITOSModule):
     def version(self) -> str:
         return "1.0.0"
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         self._initialized = True
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
@@ -97,7 +102,7 @@ class DecisionPerformanceEvaluator(AITOSModule):
         return
         yield  # pragma: no cover
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
     async def health_check(self) -> HealthStatus:
@@ -116,17 +121,17 @@ class DecisionPerformanceEvaluator(AITOSModule):
         records = await self._repository.get_records(decision_id)
         return self._build_report(records)
 
-    async def evaluate_decisions(self, decision_ids: List[str]) -> PerformanceReport:
+    async def evaluate_decisions(self, decision_ids: list[str]) -> PerformanceReport:
         """Evaluate a supplied set of decisions without querying policy state."""
-        records: List[Dict[str, Any]] = []
+        records: list[dict[str, Any]] = []
         for decision_id in decision_ids:
             records.extend(await self._repository.get_records(decision_id))
         return self._build_report(records)
 
-    def last_report(self) -> Optional[PerformanceReport]:
+    def last_report(self) -> PerformanceReport | None:
         return self._last_report
 
-    def _build_report(self, records: List[Dict[str, Any]]) -> PerformanceReport:
+    def _build_report(self, records: list[dict[str, Any]]) -> PerformanceReport:
         decisions = [r for r in records if r.get("record_type") == "DECISION"]
         links = [r for r in records if r.get("record_type") == "TRADE_LINK"]
         outcomes = [r for r in records if r.get("record_type") == "OUTCOME"]
@@ -151,14 +156,14 @@ class DecisionPerformanceEvaluator(AITOSModule):
         return report
 
     @staticmethod
-    def _build_slices(outcomes: List[Dict[str, Any]]) -> List[PerformanceSlice]:
-        buckets: Dict[tuple[str, str], List[Dict[str, Any]]] = {}
+    def _build_slices(outcomes: list[dict[str, Any]]) -> list[PerformanceSlice]:
+        buckets: dict[tuple[str, str], list[dict[str, Any]]] = {}
         for record in outcomes:
             for key in ("symbol", "side", "strategy_id", "regime", "exit_reason"):
                 value = str(record.get(key) or "unknown")
                 buckets.setdefault((key, value), []).append(record)
 
-        result: List[PerformanceSlice] = []
+        result: list[PerformanceSlice] = []
         for (key, value), records in sorted(buckets.items()):
             pnl = [float(r["pnl"]) for r in records if r.get("pnl") is not None]
             rs = [

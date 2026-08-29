@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Deque, Dict, Mapping, Optional
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -18,7 +19,7 @@ class PolicyHealth:
     rollback_recommended: bool
     reason: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
 
 
@@ -39,7 +40,7 @@ class PolicyMonitor:
         self.min_observations = max(1, int(min_observations))
         self.max_degradation = float(max_degradation)
         self.min_avg_r = float(min_avg_r)
-        self._outcomes: Deque[float] = deque(maxlen=self.window_size)
+        self._outcomes: deque[float] = deque(maxlen=self.window_size)
 
     def record_outcome(self, outcome: Mapping[str, Any]) -> PolicyHealth:
         value = outcome.get("r_multiple")
@@ -79,7 +80,7 @@ class PolicyMonitor:
             reason,
         )
 
-    def reset(self, version: str, baseline_avg_r: Optional[float] = None) -> None:
+    def reset(self, version: str, baseline_avg_r: float | None = None) -> None:
         self.version = version
         if baseline_avg_r is not None:
             self.baseline_avg_r = float(baseline_avg_r)

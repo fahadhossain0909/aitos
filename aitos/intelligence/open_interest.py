@@ -6,8 +6,6 @@ move suggests building opposition.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from aitos.models.market import OpenInterest
 from aitos.models.trade import TradeSide
 
@@ -18,7 +16,7 @@ STRONG_CHANGE_PCT = 10.0
 
 def oi_trend_score(
     current: OpenInterest,
-    previous: Optional[OpenInterest],
+    previous: OpenInterest | None,
     side: TradeSide,
     price_moved_up: bool,
 ) -> float:

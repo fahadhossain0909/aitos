@@ -1,8 +1,12 @@
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.health_server import HealthServer
 
 
@@ -82,7 +86,6 @@ async def test_health_endpoint_returns_503_when_any_module_unhealthy():
     await client.close()
 
 
-
 @pytest.mark.asyncio
 async def test_health_endpoint_returns_200_when_only_degraded():
     """Soft DEGRADED must not hard-fail probes; only UNHEALTHY is 503."""
@@ -101,6 +104,7 @@ async def test_health_endpoint_returns_200_when_only_degraded():
     assert body["status"] == "degraded"
 
     await client.close()
+
 
 @pytest.mark.asyncio
 async def test_health_endpoint_includes_module_details():

@@ -7,8 +7,7 @@ import shutil
 from pathlib import Path
 from zipfile import ZipFile
 
-from .catalog import (RemoteFile, binance_um_daily_aggtrades,
-                      bybit_spot_daily_trades)
+from .catalog import RemoteFile, binance_um_daily_aggtrades, bybit_spot_daily_trades
 from .incremental import DownloadManifest, IncrementalDownloader
 
 
@@ -28,18 +27,11 @@ def download_and_extract(
     downloader = IncrementalDownloader(manifest)
     downloads = downloader.download(
         (
-            (
-                item.filename,
-                item.url,
-                root
-                / "raw"
-                / item.exchange
-                / item.market
-                / item.symbol
-                / item.filename,
-            )
-            for item in items
+            item.filename,
+            item.url,
+            root / "raw" / item.exchange / item.market / item.symbol / item.filename,
         )
+        for item in items
     )
     extracted: list[Path] = []
     for archive in downloads:

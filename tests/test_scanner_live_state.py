@@ -1,5 +1,3 @@
-import pytest
-
 from aitos.intelligence.scanner import OpportunityScanner
 
 

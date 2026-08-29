@@ -1,9 +1,10 @@
 import random
 
-import pytest
-
-from aitos.xai.ml_explainer import (DEFAULT_MIN_SAMPLES, FEATURE_ORDER,
-                                    TradeOutcomeClassifier)
+from aitos.xai.ml_explainer import (
+    DEFAULT_MIN_SAMPLES,
+    FEATURE_ORDER,
+    TradeOutcomeClassifier,
+)
 
 
 def make_scores(bias=0.0, seed=None):

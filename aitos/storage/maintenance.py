@@ -5,10 +5,10 @@ from __future__ import annotations
 import argparse
 import os
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Iterable
 
 import clickhouse_connect
 
@@ -65,7 +65,7 @@ class StorageConfig:
     auto_delete_percent: float = DEFAULT_AUTO_DELETE_PERCENT
 
     @classmethod
-    def from_env(cls) -> "StorageConfig":
+    def from_env(cls) -> StorageConfig:
         return cls(
             clickhouse_budget_gb=float(
                 os.getenv("CLICKHOUSE_STORAGE_BUDGET_GB", DEFAULT_BUDGET_GB)
@@ -80,9 +80,7 @@ class StorageConfig:
                 os.getenv("DATA_DISK_MIN_FREE_GB", DEFAULT_DATA_DISK_MIN_FREE_GB)
             ),
             data_disk_target_free_gb=float(
-                os.getenv(
-                    "DATA_DISK_TARGET_FREE_GB", DEFAULT_DATA_DISK_TARGET_FREE_GB
-                )
+                os.getenv("DATA_DISK_TARGET_FREE_GB", DEFAULT_DATA_DISK_TARGET_FREE_GB)
             ),
             interval_seconds=int(
                 os.getenv("STORAGE_MAINTENANCE_INTERVAL_SECONDS", 300)
@@ -95,7 +93,7 @@ class StorageConfig:
         )
 
 
-def _gb(value: int | float) -> float:
+def _gb(value: float) -> float:
     return float(value) / (1024**3)
 
 
@@ -200,9 +198,7 @@ def _files(root: Path) -> Iterable[Path]:
     if not root.exists():
         return ()
     return (
-        path
-        for path in root.rglob("*")
-        if path.is_file() and not path.is_symlink()
+        path for path in root.rglob("*") if path.is_file() and not path.is_symlink()
     )
 
 

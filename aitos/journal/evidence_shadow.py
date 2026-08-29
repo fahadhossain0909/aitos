@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -16,7 +17,7 @@ class ShadowWeightResult:
     eligible: bool
     reason: str
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
 
 
@@ -28,8 +29,8 @@ def evaluate_weight_candidate(
     min_observations: int = 30,
     min_improvement: float = 0.0,
 ) -> ShadowWeightResult:
-    decisions: Dict[str, Mapping[str, Any]] = {}
-    outcomes: Dict[str, list[Mapping[str, Any]]] = {}
+    decisions: dict[str, Mapping[str, Any]] = {}
+    outcomes: dict[str, list[Mapping[str, Any]]] = {}
     for record in records:
         decision_id = str(record.get("decision_id") or "")
         if not decision_id:

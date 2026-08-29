@@ -7,7 +7,7 @@ credentials — see ``tests/test_live_trading.py``.
 from __future__ import annotations
 
 import sys
-from typing import Callable, List
+from collections.abc import Callable
 
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
@@ -19,7 +19,7 @@ CONFIRMATION_PHRASE = "I APPROVE LIVE TRADING"
 
 
 def confirm_live_trading(
-    symbols: List[str], testnet: bool, input_fn: Callable[[str], str] = input
+    symbols: list[str], testnet: bool, input_fn: Callable[[str], str] = input
 ) -> str:
     """Interactive, session-level human approval gate. Returns the
     operator's identifier to use as every opportunity's ``approved_by``
@@ -53,7 +53,7 @@ def confirm_live_trading(
 
 
 async def prepare_live_executor(
-    settings, symbols: List[str]
+    settings, symbols: list[str]
 ) -> BinanceFuturesOrderExecutor:
     """Construct, connect, and fully prepare a live executor: verifies
     credentials exist, verifies the account's actual hedge-mode setting

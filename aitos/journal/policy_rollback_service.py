@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any
 
 from .policy_governance import PolicyGovernance, PolicyVersion
 
@@ -31,7 +31,7 @@ class PolicyRollbackService:
         self.registry = registry
         self.kernel = kernel
         self.event_bus = event_bus
-        self.requests: Dict[str, RollbackRequest] = {}
+        self.requests: dict[str, RollbackRequest] = {}
 
     def request(
         self, request_id: str, policy_version: str, reason: str
@@ -64,6 +64,6 @@ class PolicyRollbackService:
         )
         return restored
 
-    def _publish(self, event_type: str, payload: Dict[str, Any]) -> None:
+    def _publish(self, event_type: str, payload: dict[str, Any]) -> None:
         if self.event_bus is not None and hasattr(self.event_bus, "publish"):
             self.event_bus.publish(event_type, payload)

@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from aitos.intelligence.amt import (build_volume_profile,
-                                    compute_profile_features)
+from aitos.intelligence.amt import build_volume_profile, compute_profile_features
 from aitos.models.market import TradeSide, TradeTick
 
 

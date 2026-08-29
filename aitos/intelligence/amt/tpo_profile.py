@@ -6,9 +6,9 @@ trade volume; callers must provide timestamped price observations.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable
 
 
 @dataclass(frozen=True)

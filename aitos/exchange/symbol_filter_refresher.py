@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, List, Optional
+from typing import Any
 
 from aitos.logging_setup import get_logger
 
@@ -19,7 +19,7 @@ class SymbolFilterRefresher:
         self,
         exchange: Any,
         executor: Any,
-        symbols: List[str],
+        symbols: list[str],
         ttl_seconds: float = DEFAULT_SYMBOL_FILTER_TTL_SECONDS,
     ) -> None:
         if ttl_seconds <= 0:
@@ -28,10 +28,10 @@ class SymbolFilterRefresher:
         self._executor = executor
         self._symbols = list(symbols)
         self._ttl_seconds = ttl_seconds
-        self._task: Optional[asyncio.Task] = None
-        self._last_refresh_at: Optional[float] = None
+        self._task: asyncio.Task | None = None
+        self._last_refresh_at: float | None = None
         self._refresh_count = 0
-        self._last_error: Optional[str] = None
+        self._last_error: str | None = None
 
     async def refresh_now(self) -> None:
         filters = await self._exchange.fetch_exchange_info(symbols=self._symbols)
@@ -80,7 +80,7 @@ class SymbolFilterRefresher:
                 )
 
     @property
-    def last_error(self) -> Optional[str]:
+    def last_error(self) -> str | None:
         return self._last_error
 
     @property

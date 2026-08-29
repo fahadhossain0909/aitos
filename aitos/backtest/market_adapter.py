@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from aitos.intelligence.footprint import FootprintEngine
-from aitos.intelligence.footprint_signals import (FootprintSignalEngine,
-                                                  FootprintSignals)
-from aitos.intelligence.liquidity_tracker import (LiquidityEvent,
-                                                  LiquidityTracker)
+from aitos.intelligence.footprint_signals import FootprintSignalEngine, FootprintSignals
+from aitos.intelligence.liquidity_tracker import LiquidityEvent, LiquidityTracker
 from aitos.intelligence.live_auction import live_auction_score
 from aitos.intelligence.order_flow_engine import OrderFlowEngine
 from aitos.intelligence.orderflow_liquidity_interaction import (
-    FlowLiquidityInteractionEngine, FlowLiquiditySignal)
+    FlowLiquidityInteractionEngine,
+    FlowLiquiditySignal,
+)
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 

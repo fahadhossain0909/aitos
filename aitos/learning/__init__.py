@@ -5,9 +5,9 @@ from .experience import ExperienceRecord
 from .model_registry import ModelArtifact, ModelRegistry
 
 __all__ = [
+    "EvolutionEngine",
+    "EvolutionProposal",
     "ExperienceRecord",
     "ModelArtifact",
     "ModelRegistry",
-    "EvolutionProposal",
-    "EvolutionEngine",
 ]

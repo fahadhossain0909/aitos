@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -44,7 +44,7 @@ class RiskLimits(BaseModel):
     min_data_freshness_hard_cap_seconds: float = Field(default=30.0, gt=0)
 
     @model_validator(mode="after")
-    def _defaults_within_hard_caps(self) -> "RiskLimits":
+    def _defaults_within_hard_caps(self) -> RiskLimits:
         pairs = [
             ("max_risk_per_trade_pct", "max_risk_per_trade_hard_cap_pct"),
             ("max_risk_per_day_pct", "max_risk_per_day_hard_cap_pct"),
@@ -81,7 +81,7 @@ class PositionExposure:
 class PortfolioState:
     equity_usd: float
     peak_equity_usd: float
-    positions: Tuple[PositionExposure, ...] = ()
+    positions: tuple[PositionExposure, ...] = ()
     daily_pnl_pct: float = 0.0
     weekly_pnl_pct: float = 0.0
     volatility_percentile: float = 50.0
@@ -112,10 +112,10 @@ class PortfolioState:
         return max((p.leverage for p in self.positions), default=0.0)
 
     @property
-    def sector_exposure_pct(self) -> Dict[str, float]:
+    def sector_exposure_pct(self) -> dict[str, float]:
         if self.equity_usd <= 0:
             return {}
-        totals: Dict[str, float] = {}
+        totals: dict[str, float] = {}
         for p in self.positions:
             sector = p.sector or "other"
             totals[sector] = totals.get(sector, 0.0) + p.notional_usd
@@ -133,12 +133,12 @@ class RiskScoreBreakdown:
     portfolio_risk: float
     total: float
     action: RiskAction
-    explanation: List[str] = field(default_factory=list)
+    explanation: list[str] = field(default_factory=list)
     computed_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "position_risk": self.position_risk,
             "market_risk": self.market_risk,

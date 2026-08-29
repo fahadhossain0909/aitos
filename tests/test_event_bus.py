@@ -13,7 +13,6 @@ async def test_publish_and_subscribe_delivers_event(event_bus):
 
     async def handler(event: Event):
         received.append(event)
-        return None
 
     await event_bus.subscribe("orders.filled", handler, group="test-group")
     await event_bus.publish(

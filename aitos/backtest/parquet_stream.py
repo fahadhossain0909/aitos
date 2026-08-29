@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Iterator, Sequence
+from typing import Any
 
 from .streaming import BacktestChunk, ChunkPlanner
 

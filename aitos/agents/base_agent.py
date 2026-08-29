@@ -11,11 +11,17 @@ from __future__ import annotations
 
 import time
 from abc import abstractmethod
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
-from aitos.core.contracts import (AITOSModule, Event, EventResponse,
-                                  HealthStatus, ModuleStatus)
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
 from aitos.logging_setup import get_logger
@@ -35,17 +41,17 @@ class AgentMemory:
 
     def __init__(self, short_term_capacity: int = 500) -> None:
         self._short_term_capacity = short_term_capacity
-        self._short_term: List[Dict[str, Any]] = []
-        self._long_term: Dict[str, Any] = {}
+        self._short_term: list[dict[str, Any]] = []
+        self._long_term: dict[str, Any] = {}
 
-    def remember_short_term(self, item: Dict[str, Any]) -> None:
+    def remember_short_term(self, item: dict[str, Any]) -> None:
         self._short_term.append(
             {**item, "_recorded_at": datetime.now(timezone.utc).isoformat()}
         )
         if len(self._short_term) > self._short_term_capacity:
             self._short_term.pop(0)
 
-    def recent(self, n: int = 10) -> List[Dict[str, Any]]:
+    def recent(self, n: int = 10) -> list[dict[str, Any]]:
         return self._short_term[-n:]
 
     def remember_long_term(self, key: str, value: Any) -> None:
@@ -62,9 +68,9 @@ class AgentDecision:
         "agent_id",
         "confidence",
         "direction",
-        "rationale",
         "evidence",
         "metadata",
+        "rationale",
     )
 
     def __init__(
@@ -73,8 +79,8 @@ class AgentDecision:
         confidence: float,
         direction: str,
         rationale: str,
-        evidence: Optional[List[str]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        evidence: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         if not 0.0 <= confidence <= 1.0:
             raise ValueError("confidence must be within [0.0, 1.0]")
@@ -85,7 +91,7 @@ class AgentDecision:
         self.evidence = evidence or []
         self.metadata = metadata or {}
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "agent_id": self.agent_id,
             "confidence": self.confidence,
@@ -113,7 +119,7 @@ class BaseAgent(AITOSModule):
         self._event_bus = event_bus
         self._consensus_weight = consensus_weight
         self._initialized = False
-        self._last_event_time: Optional[str] = None
+        self._last_event_time: str | None = None
         self.memory = AgentMemory()
 
     # -- AITOSModule contract -------------------------------------------------
@@ -130,7 +136,7 @@ class BaseAgent(AITOSModule):
     def consensus_weight(self) -> float:
         return self._consensus_weight
 
-    async def initialize(self, config: Dict[str, Any]) -> None:
+    async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         await self.on_initialize(config)
@@ -161,7 +167,7 @@ class BaseAgent(AITOSModule):
             self._last_event_time = datetime.now(timezone.utc).isoformat()
             yield event
 
-    async def handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def handle_event(self, event: Event) -> EventResponse | None:
         if not self._initialized:
             raise ModuleNotInitializedError(f"Agent {self.module_id} not initialized")
         self._last_event_time = datetime.now(timezone.utc).isoformat()
@@ -187,12 +193,12 @@ class BaseAgent(AITOSModule):
     # -- Consensus participation --------------------------------------------
 
     @abstractmethod
-    async def contribute_decision(self, context: Dict[str, Any]) -> AgentDecision:
+    async def contribute_decision(self, context: dict[str, Any]) -> AgentDecision:
         """Produce this agent's weighted opinion for the Decision Fusion Engine."""
 
     # -- Hooks for subclasses (override what you need; defaults are no-ops) --
 
-    async def on_initialize(self, config: Dict[str, Any]) -> None:
+    async def on_initialize(self, config: dict[str, Any]) -> None:
         return None
 
     async def on_shutdown(self, grace_period_seconds: float) -> None:
@@ -202,5 +208,5 @@ class BaseAgent(AITOSModule):
         return
         yield  # pragma: no cover - makes this an async generator
 
-    async def on_handle_event(self, event: Event) -> Optional[EventResponse]:
+    async def on_handle_event(self, event: Event) -> EventResponse | None:
         return None

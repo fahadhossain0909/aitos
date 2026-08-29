@@ -1,6 +1,5 @@
 from aitos.journal.adaptive_policy import AdaptivePolicyEngine
-from aitos.journal.performance_evaluator import (PerformanceReport,
-                                                 PerformanceSlice)
+from aitos.journal.performance_evaluator import PerformanceReport, PerformanceSlice
 from aitos.journal.shadow_policy import evaluate_shadow
 
 

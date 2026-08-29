@@ -12,17 +12,17 @@ without silently overweighting a dimension nobody has actually modeled.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Dict, Tuple
+from typing import Any
 
 
 class RLPolicyScorer(ABC):
     @abstractmethod
-    async def score(self, symbol: str, context: Dict[str, Any]) -> float:
+    async def score(self, symbol: str, context: dict[str, Any]) -> float:
         """Return the RL policy's confidence in this symbol/context, 0-10."""
 
 
 class NeutralRLScorer(RLPolicyScorer):
-    async def score(self, symbol: str, context: Dict[str, Any]) -> float:
+    async def score(self, symbol: str, context: dict[str, Any]) -> float:
         return 5.0
 
 
@@ -55,14 +55,14 @@ class TabularBanditRLScorer(RLPolicyScorer):
         shouldn't be trusted as much as a large one's."""
         self._reward_scale = reward_scale_r_multiples
         self._min_samples = min_samples_for_confidence
-        self._counts: Dict[Tuple[str, str, str], int] = {}
-        self._means: Dict[Tuple[str, str, str], float] = {}
+        self._counts: dict[tuple[str, str, str], int] = {}
+        self._means: dict[tuple[str, str, str], float] = {}
 
-    def _key(self, symbol: str, regime: str, direction: str) -> Tuple[str, str, str]:
+    def _key(self, symbol: str, regime: str, direction: str) -> tuple[str, str, str]:
         return (symbol, regime, direction)
 
     def update(
-        self, symbol: str, context: Dict[str, Any], reward_r_multiple: float
+        self, symbol: str, context: dict[str, Any], reward_r_multiple: float
     ) -> None:
         """Incorporate one real trade outcome. Uses Welford's incremental
         mean update — no need to store the full history per bucket.
@@ -82,7 +82,7 @@ class TabularBanditRLScorer(RLPolicyScorer):
     def sample_count(self, symbol: str, regime: str, direction: str) -> int:
         return self._counts.get(self._key(symbol, regime, direction), 0)
 
-    async def score(self, symbol: str, context: Dict[str, Any]) -> float:
+    async def score(self, symbol: str, context: dict[str, Any]) -> float:
         regime = str(context.get("regime", "unknown"))
         direction = str(context.get("direction", "unknown"))
         key = self._key(symbol, regime, direction)

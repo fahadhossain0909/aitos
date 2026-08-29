@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Callable, Iterable
+from typing import Any
 
 from aitos.backtest.engine import BacktestEngine, BacktestResult
 

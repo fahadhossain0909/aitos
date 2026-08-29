@@ -1,9 +1,11 @@
 import pytest
 
 from aitos.risk.models import RiskLimits
-from aitos.risk.position_sizing import (calculate_adaptive_leverage,
-                                        calculate_position_size,
-                                        kelly_fraction)
+from aitos.risk.position_sizing import (
+    calculate_adaptive_leverage,
+    calculate_position_size,
+    kelly_fraction,
+)
 
 
 def test_kelly_fraction_positive_edge():

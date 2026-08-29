@@ -2,8 +2,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aitos.exchange.orderbook import (DepthUpdate, LocalOrderBook,
-                                      OrderBookSequenceError)
+from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook, OrderBookSequenceError
 from aitos.models.market import OrderBookSnapshot
 
 

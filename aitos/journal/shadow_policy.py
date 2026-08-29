@@ -7,7 +7,7 @@ outcomes. It does not execute trades and does not mutate the live policy.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Any
 
 from aitos.journal.adaptive_policy import PolicyCandidate
 from aitos.journal.performance_evaluator import PerformanceReport
@@ -29,7 +29,7 @@ class ShadowPolicyResult:
     win_rate_delta: float
     eligible_for_promotion: bool
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
 
 

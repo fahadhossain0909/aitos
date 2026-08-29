@@ -11,7 +11,6 @@ CI job against the actual docker-compose stack.)
 
 from __future__ import annotations
 
-import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fake_aioredis
 

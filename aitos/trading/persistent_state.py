@@ -7,7 +7,7 @@ import hashlib
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from aitos.app import LivePortfolioTracker
 from aitos.eventbus.redis_bus import EventBus, Subscription
@@ -111,19 +111,21 @@ class DurableTradingStateStore:
             )
             raise
 
-    async def load_open_trades(self) -> List[Trade]:
+    async def load_open_trades(self) -> list[Trade]:
         client = self._client()
         try:
-            result = await client.query("""
+            result = await client.query(
+                """
                 SELECT trade_id, argMax(payload_json, updated_at) AS payload_json
                 FROM trade_runtime_state
                 WHERE state IN ('position_opened', 'exit_triggered')
                 GROUP BY trade_id
-                """)
+                """
+            )
         except Exception:
             logger.exception("failed to load open trades from runtime state")
             raise
-        trades: List[Trade] = []
+        trades: list[Trade] = []
         for row in result.result_rows:
             try:
                 payload = json.loads(row[1])
@@ -169,7 +171,7 @@ class DurableTradingStateStore:
             )
             raise
 
-    async def load_peak_equity(self, asset: str) -> Optional[float]:
+    async def load_peak_equity(self, asset: str) -> float | None:
         client = self._client()
         try:
             result = await client.query(
@@ -198,7 +200,7 @@ class DurableTradingStateStore:
         return self._repository._client
 
 
-def _trade_from_dict(data: Dict[str, Any]) -> Trade:
+def _trade_from_dict(data: dict[str, Any]) -> Trade:
     partial_exits = [
         PartialExit(
             price=float(item["price"]),
@@ -252,7 +254,7 @@ class TradeStatePersistence:
         self._event_bus = event_bus
         self._lifecycle = lifecycle
         self._store = store
-        self._subscriptions: List[Subscription] = []
+        self._subscriptions: list[Subscription] = []
 
     async def restore(self) -> int:
         trades = await self._store.load_open_trades()
@@ -390,8 +392,8 @@ class IdempotentOrderExecutor(OrderExecutor):
 
     def __init__(self, inner: OrderExecutor) -> None:
         self._inner = inner
-        self._completed: Dict[str, OrderResult] = {}
-        self._inflight: Dict[str, asyncio.Future[OrderResult]] = {}
+        self._completed: dict[str, OrderResult] = {}
+        self._inflight: dict[str, asyncio.Future[OrderResult]] = {}
 
     @property
     def supports_exchange_side_stops(self) -> bool:
@@ -439,9 +441,7 @@ class IdempotentOrderExecutor(OrderExecutor):
     async def cancel_resting_order(self, *args: Any, **kwargs: Any) -> None:
         await self._inner.cancel_resting_order(*args, **kwargs)
 
-    async def get_resting_order_status(
-        self, *args: Any, **kwargs: Any
-    ) -> Optional[str]:
+    async def get_resting_order_status(self, *args: Any, **kwargs: Any) -> str | None:
         return await self._inner.get_resting_order_status(*args, **kwargs)
 
     def __getattr__(self, name: str) -> Any:

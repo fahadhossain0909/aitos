@@ -6,11 +6,9 @@ already have, not a learned counterfactual generator.
 
 from __future__ import annotations
 
-from typing import Dict, List
-
 
 def composite_score(
-    component_scores: Dict[str, float], weights: Dict[str, float]
+    component_scores: dict[str, float], weights: dict[str, float]
 ) -> float:
     return (
         sum(
@@ -21,8 +19,8 @@ def composite_score(
 
 
 def counterfactual_for_threshold(
-    component_scores: Dict[str, float], weights: Dict[str, float], threshold: float
-) -> List[str]:
+    component_scores: dict[str, float], weights: dict[str, float], threshold: float
+) -> list[str]:
     """Explain what single-dimension change would flip a pass/fail decision
     against ``threshold`` (e.g. the scanner's ``min_score_threshold``).
 
@@ -32,7 +30,7 @@ def counterfactual_for_threshold(
     achievable within the dimension's 0-10 range).
     """
     current = composite_score(component_scores, weights)
-    messages: List[str] = []
+    messages: list[str] = []
 
     if current >= threshold:
         for dim, score in component_scores.items():

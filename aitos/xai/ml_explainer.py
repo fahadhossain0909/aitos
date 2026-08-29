@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import pickle
 from pathlib import Path
-from typing import Dict, List, Optional
 
 import numpy as np
 from sklearn.linear_model import SGDClassifier
 
-FEATURE_ORDER: List[str] = [
+FEATURE_ORDER: list[str] = [
     "trend_strength",
     "liquidity_quality",
     "order_flow_bias",
@@ -26,7 +25,7 @@ DEFAULT_MIN_SAMPLES = 30
 BACKGROUND_BUFFER_SIZE = 200
 
 
-def _vectorize(component_scores: Dict[str, float]) -> np.ndarray:
+def _vectorize(component_scores: dict[str, float]) -> np.ndarray:
     return np.array(
         [[float(component_scores.get(f, 5.0)) for f in FEATURE_ORDER]], dtype=float
     )
@@ -44,7 +43,7 @@ class TradeOutcomeClassifier:
         self._min_samples = min_samples_for_ready
         self._n_samples_seen = 0
         self._classes_seen: set = set()
-        self._background: List[List[float]] = []
+        self._background: list[list[float]] = []
         self._state_path = Path(state_path)
 
     @property
@@ -58,7 +57,7 @@ class TradeOutcomeClassifier:
             1,
         }
 
-    def partial_fit(self, component_scores: Dict[str, float], won: bool) -> None:
+    def partial_fit(self, component_scores: dict[str, float], won: bool) -> None:
         X = _vectorize(component_scores)
         y = np.array([1 if won else 0])
         if self._n_samples_seen == 0:
@@ -72,8 +71,8 @@ class TradeOutcomeClassifier:
             self._background.pop(0)
 
     def predict_win_probability(
-        self, component_scores: Dict[str, float]
-    ) -> Optional[float]:
+        self, component_scores: dict[str, float]
+    ) -> float | None:
         if not self.is_ready:
             return None
         X = _vectorize(component_scores)
@@ -81,7 +80,7 @@ class TradeOutcomeClassifier:
         win_index = list(self._model.classes_).index(1)
         return round(float(proba[win_index]), 4)
 
-    def explain(self, component_scores: Dict[str, float]) -> Dict[str, float]:
+    def explain(self, component_scores: dict[str, float]) -> dict[str, float]:
         if not self.is_ready:
             return {}
         import shap

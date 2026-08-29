@@ -74,7 +74,9 @@ class DataIngestionService(AITOSModule):
         orderbook_levels: int = 20,
         liquidity_trade_window: int = 500,
         live_trade_handler: Callable[[TradeTick], Awaitable[None]] | None = None,
-        live_orderbook_handler: Callable[[OrderBookSnapshot], Awaitable[None]] | None = None,
+        live_orderbook_handler: (
+            Callable[[OrderBookSnapshot], Awaitable[None]] | None
+        ) = None,
     ) -> None:
         self._exchange = exchange
         self._event_bus = event_bus
@@ -106,7 +108,9 @@ class DataIngestionService(AITOSModule):
         self._trade_sink_semaphore = asyncio.Semaphore(TRADE_SINK_CONCURRENCY)
         self._live_trade_handler = live_trade_handler
         self._live_orderbook_handler = live_orderbook_handler
-        self._trade_persistence_queue: asyncio.Queue[tuple[TradeTick, dict[str, Any]]] = asyncio.Queue(maxsize=TRADE_PERSIST_QUEUE_SIZE)
+        self._trade_persistence_queue: asyncio.Queue[
+            tuple[TradeTick, dict[str, Any]]
+        ] = asyncio.Queue(maxsize=TRADE_PERSIST_QUEUE_SIZE)
         self._trade_persistence_dropped = 0
         self._live_state = LiveMarketStateStore(
             max_trades=max(5000, self._liquidity_trade_window)
@@ -126,7 +130,12 @@ class DataIngestionService(AITOSModule):
             return
         await self._exchange.connect()
         self._tasks = [
-            *[asyncio.create_task(self._run_trade_persistence(), name=f"aitos-trade-persistence-{i}") for i in range(TRADE_SINK_CONCURRENCY)],
+            *[
+                asyncio.create_task(
+                    self._run_trade_persistence(), name=f"aitos-trade-persistence-{i}"
+                )
+                for i in range(TRADE_SINK_CONCURRENCY)
+            ],
             asyncio.create_task(self._run_kline_stream(), name="aitos-kline-stream"),
             asyncio.create_task(self._run_trade_stream(), name="aitos-trade-stream"),
             asyncio.create_task(
@@ -274,7 +283,6 @@ class DataIngestionService(AITOSModule):
                         producer_task = None
                         await self._recover_recent_trades()
                         break
-
                     batch = [first]
                     deadline = (
                         asyncio.get_running_loop().time()
@@ -341,15 +349,20 @@ class DataIngestionService(AITOSModule):
                         features.timestamp.isoformat() if features.timestamp else None
                     ),
                 }
-                # Advance the deduplication cursor only after the local live
-                # state accepted the trade. If state processing fails, the
-                # trade must remain eligible for retry/recovery instead of
-                # being permanently skipped by the next batch.
                 if self._live_trade_handler is not None:
                     try:
                         await self._live_trade_handler(trade)
                     except Exception as exc:
-                        logger.exception("direct live trade handler failed", extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id, "error": str(exc)}})
+                        logger.exception(
+                            "direct live trade handler failed",
+                            extra={
+                                "aitos_extra": {
+                                    "symbol": trade.symbol,
+                                    "trade_id": trade.trade_id,
+                                    "error": str(exc),
+                                }
+                            },
+                        )
                 self._last_trade_ids[trade.symbol] = trade.trade_id
                 self._orderflow_events += 1
                 self._ticks_processed += 1
@@ -408,26 +421,58 @@ class DataIngestionService(AITOSModule):
                         },
                     )
 
-        for trade, payload in accepted:
-            try:
-                self._trade_persistence_queue.put_nowait((trade, payload))
-            except asyncio.QueueFull:
-                self._trade_persistence_dropped += 1
-                logger.error("trade persistence queue full; live path remains active", extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id}})
+        # Complete the downstream sinks before returning from the batch. This
+        # gives callers a deterministic completion boundary and prevents a
+        # direct _process_trade_batch call from reporting success while its
+        # persistence is still sitting in an unstarted worker queue. The
+        # semaphore still bounds concurrent sink I/O under burst load.
+        if accepted:
+            await asyncio.gather(
+                *(io_one(trade, payload) for trade, payload in accepted)
+            )
         for trade, _payload in accepted:
             await self._publish_live_state(trade.symbol)
 
     async def _run_trade_persistence(self) -> None:
+        """Legacy queue worker retained for compatibility with health metrics."""
         while True:
-            trade,payload=await self._trade_persistence_queue.get()
+            trade, payload = await self._trade_persistence_queue.get()
             try:
                 async with self._trade_sink_semaphore:
-                    jobs=[self._event_bus.publish(Event(topic=trade_topic(trade.symbol),payload=trade.to_dict(),source_module=self.module_id,priority=EventPriority.NORMAL)),self._event_bus.publish(Event(topic=orderflow_topic(trade.symbol),payload=payload,source_module=self.module_id,priority=EventPriority.NORMAL))]
-                    if self._repository is not None: jobs.append(self._repository.save_trade_tick(trade))
+                    jobs = [
+                        self._event_bus.publish(
+                            Event(
+                                topic=trade_topic(trade.symbol),
+                                payload=trade.to_dict(),
+                                source_module=self.module_id,
+                                priority=EventPriority.NORMAL,
+                            )
+                        ),
+                        self._event_bus.publish(
+                            Event(
+                                topic=orderflow_topic(trade.symbol),
+                                payload=payload,
+                                source_module=self.module_id,
+                                priority=EventPriority.NORMAL,
+                            )
+                        ),
+                    ]
+                    if self._repository is not None:
+                        jobs.append(self._repository.save_trade_tick(trade))
                     await asyncio.gather(*jobs)
             except Exception as exc:
-                self._errors+=1; self._trade_downstream_errors+=1
-                logger.exception("trade persistence failed",extra={"aitos_extra":{"symbol":trade.symbol,"trade_id":trade.trade_id,"error":str(exc)}})
+                self._errors += 1
+                self._trade_downstream_errors += 1
+                logger.exception(
+                    "trade persistence failed",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": trade.symbol,
+                            "trade_id": trade.trade_id,
+                            "error": str(exc),
+                        }
+                    },
+                )
             finally:
                 self._trade_persistence_queue.task_done()
 
@@ -482,7 +527,16 @@ class DataIngestionService(AITOSModule):
             try:
                 await self._live_orderbook_handler(book)
             except Exception as exc:
-                logger.exception("direct live order-book handler failed",extra={"aitos_extra":{"symbol":book.symbol,"last_update_id":book.last_update_id,"error":str(exc)}})
+                logger.exception(
+                    "direct live order-book handler failed",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": book.symbol,
+                            "last_update_id": book.last_update_id,
+                            "error": str(exc),
+                        }
+                    },
+                )
         await self._event_bus.publish(
             Event(
                 topic=orderbook_topic(book.symbol),
@@ -491,7 +545,6 @@ class DataIngestionService(AITOSModule):
                 priority=EventPriority.NORMAL,
             )
         )
-
         liquidity_events = self._live_state.on_order_book(book)
         for liquidity_event in liquidity_events:
             await self._event_bus.publish(
@@ -515,7 +568,6 @@ class DataIngestionService(AITOSModule):
                 )
             )
             self._liquidity_events += 1
-
         if self._repository is not None:
             now = datetime.now(timezone.utc)
             last = self._last_book_persist_at.get(book.symbol)

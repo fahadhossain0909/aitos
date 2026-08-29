@@ -1,8 +1,11 @@
 import pytest
 
-from aitos.execution.order_executor import (OrderExecutor, OrderRequest,
-                                            OrderResult,
-                                            SimulatedOrderExecutor)
+from aitos.execution.order_executor import (
+    OrderExecutor,
+    OrderRequest,
+    OrderResult,
+    SimulatedOrderExecutor,
+)
 from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
 from aitos.risk.models import PortfolioState
 from aitos.trading.lifecycle import TradeLifecycle
