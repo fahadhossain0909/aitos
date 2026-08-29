@@ -35,7 +35,9 @@ class LiveSymbolCache:
 class LiveScannerCache:
     """Consumes canonical EventBus market events and keeps a live view."""
 
-    def __init__(self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000) -> None:
+    def __init__(
+        self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000
+    ) -> None:
         self._bus = event_bus
         self._symbols = set(symbols)
         self._max_trades = max(100, max_trades)
@@ -55,9 +57,30 @@ class LiveScannerCache:
             return
         for symbol in self._symbols:
             if not direct_market_data:
-                self._subscriptions.append(await self._bus.subscribe(f"market.trade.{symbol}", self._on_trade, group=LIVE_TRADE_GROUP, start_id="$"))
-                self._subscriptions.append(await self._bus.subscribe(f"market.orderbook.{symbol}", self._on_book, group=LIVE_BOOK_GROUP, start_id="$"))
-            self._subscriptions.append(await self._bus.subscribe(f"market.liquidity.{symbol}", self._on_liquidity, group=LIVE_LIQUIDITY_GROUP, start_id="$"))
+                self._subscriptions.append(
+                    await self._bus.subscribe(
+                        f"market.trade.{symbol}",
+                        self._on_trade,
+                        group=LIVE_TRADE_GROUP,
+                        start_id="$",
+                    )
+                )
+                self._subscriptions.append(
+                    await self._bus.subscribe(
+                        f"market.orderbook.{symbol}",
+                        self._on_book,
+                        group=LIVE_BOOK_GROUP,
+                        start_id="$",
+                    )
+                )
+            self._subscriptions.append(
+                await self._bus.subscribe(
+                    f"market.liquidity.{symbol}",
+                    self._on_liquidity,
+                    group=LIVE_LIQUIDITY_GROUP,
+                    start_id="$",
+                )
+            )
         self._initialized = True
 
     async def shutdown(self) -> None:
@@ -67,17 +90,31 @@ class LiveScannerCache:
         self._initialized = False
 
     async def accept_live_trade(self, trade: TradeTick) -> None:
-        await self._on_trade(Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict()))
+        await self._on_trade(
+            Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict())
+        )
 
     async def accept_live_order_book(self, book: OrderBookSnapshot) -> None:
-        await self._on_book(Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict()))
+        await self._on_book(
+            Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict())
+        )
 
     async def _on_trade(self, event: Event) -> None:
         trade = TradeTick.from_dict(event.payload)
         received_at = datetime.now(timezone.utc)
         source_age = (received_at - trade.timestamp).total_seconds()
         if source_age > LIVE_TRADE_MAX_AGE_SECONDS:
-            logger.info("ignored stale trade in live scanner", extra={"aitos_extra": {"symbol": trade.symbol, "trade_id": trade.trade_id, "trade_age_sec": round(max(0.0, source_age), 3), "max_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS}})
+            logger.info(
+                "ignored stale trade in live scanner",
+                extra={
+                    "aitos_extra": {
+                        "symbol": trade.symbol,
+                        "trade_id": trade.trade_id,
+                        "trade_age_sec": round(max(0.0, source_age), 3),
+                        "max_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS,
+                    }
+                },
+            )
             return
         state = self._cache(trade.symbol)
         state.trades.append(trade)
@@ -131,33 +168,65 @@ class LiveScannerCache:
         book_age = self._age_seconds(state.last_book_at, now)
         trade_receive_age = self._age_seconds(state.last_trade_received_at, now)
         book_receive_age = self._age_seconds(state.last_book_received_at, now)
-        trade_lag = None if trade_age is None or trade_receive_age is None else max(0.0, trade_age - trade_receive_age)
-        book_lag = None if book_age is None or book_receive_age is None else max(0.0, book_age - book_receive_age)
+        trade_lag = (
+            None
+            if trade_age is None or trade_receive_age is None
+            else max(0.0, trade_age - trade_receive_age)
+        )
+        book_lag = (
+            None
+            if book_age is None or book_receive_age is None
+            else max(0.0, book_age - book_receive_age)
+        )
         return {
             "cache_has_state": True,
-            "last_trade_at": state.last_trade_at.isoformat() if state.last_trade_at else None,
-            "last_book_at": state.last_book_at.isoformat() if state.last_book_at else None,
-            "last_trade_received_at": state.last_trade_received_at.isoformat() if state.last_trade_received_at else None,
-            "last_book_received_at": state.last_book_received_at.isoformat() if state.last_book_received_at else None,
+            "last_trade_at": (
+                state.last_trade_at.isoformat() if state.last_trade_at else None
+            ),
+            "last_book_at": (
+                state.last_book_at.isoformat() if state.last_book_at else None
+            ),
+            "last_trade_received_at": (
+                state.last_trade_received_at.isoformat()
+                if state.last_trade_received_at
+                else None
+            ),
+            "last_book_received_at": (
+                state.last_book_received_at.isoformat()
+                if state.last_book_received_at
+                else None
+            ),
             "trade_age_sec": round(trade_age, 3) if trade_age is not None else None,
             "book_age_sec": round(book_age, 3) if book_age is not None else None,
-            "trade_receive_age_sec": round(trade_receive_age, 3) if trade_receive_age is not None else None,
-            "book_receive_age_sec": round(book_receive_age, 3) if book_receive_age is not None else None,
-            "trade_consumer_lag_sec": round(trade_lag, 3) if trade_lag is not None else None,
-            "book_consumer_lag_sec": round(book_lag, 3) if book_lag is not None else None,
+            "trade_receive_age_sec": (
+                round(trade_receive_age, 3) if trade_receive_age is not None else None
+            ),
+            "book_receive_age_sec": (
+                round(book_receive_age, 3) if book_receive_age is not None else None
+            ),
+            "trade_consumer_lag_sec": (
+                round(trade_lag, 3) if trade_lag is not None else None
+            ),
+            "book_consumer_lag_sec": (
+                round(book_lag, 3) if book_lag is not None else None
+            ),
         }
 
     def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
         state = self._state.get(symbol)
         if state is None or state.last_trade_received_at is None:
             return False
-        return (datetime.now(timezone.utc) - state.last_trade_received_at).total_seconds() <= max_age_seconds
+        return (
+            datetime.now(timezone.utc) - state.last_trade_received_at
+        ).total_seconds() <= max_age_seconds
 
     def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
         state = self._state.get(symbol)
         if state is None or state.last_book_received_at is None:
             return False
-        return (datetime.now(timezone.utc) - state.last_book_received_at).total_seconds() <= max_age_seconds
+        return (
+            datetime.now(timezone.utc) - state.last_book_received_at
+        ).total_seconds() <= max_age_seconds
 
     def _maybe_log_freshness(self, symbol: str) -> None:
         now = datetime.now(timezone.utc)
@@ -165,7 +234,12 @@ class LiveScannerCache:
         if previous is not None and (now - previous).total_seconds() < 30.0:
             return
         self._last_freshness_log_at[symbol] = now
-        logger.info("live scanner freshness", extra={"aitos_extra": {"symbol": symbol, **self.freshness_snapshot(symbol)}})
+        logger.info(
+            "live scanner freshness",
+            extra={
+                "aitos_extra": {"symbol": symbol, **self.freshness_snapshot(symbol)}
+            },
+        )
 
     def recent_trades(self, symbol: str, limit: int | None = None) -> list[TradeTick]:
         state = self._state.get(symbol)
