@@ -41,3 +41,5 @@ jobs:
           git push origin HEAD:fix/trade-watchdog-code
         env:
           GITHUB_EVENT_HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+
+# Trigger the formatter watchdog after the formatting-check failure.
