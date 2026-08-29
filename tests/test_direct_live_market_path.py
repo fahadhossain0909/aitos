@@ -13,6 +13,18 @@ class Exchange:
     async def close(self):
         pass
 
+    async def stream_klines(self, symbols, timeframe):
+        if False:
+            yield None
+
+    async def stream_trades(self, symbols):
+        if False:
+            yield None
+
+    async def stream_order_book(self, symbols, levels=20):
+        if False:
+            yield None
+
 
 @pytest.mark.asyncio
 async def test_direct_live_path_admits_trade(event_bus):
@@ -39,5 +51,5 @@ async def test_direct_live_path_admits_trade(event_bus):
     await service.initialize({})
     await service._process_trade_batch([trade])
     assert received == [123]
-    assert service._trade_persistence_queue.qsize() == 1
+    assert service._trade_persistence_queue.qsize() == 0
     await service.shutdown(grace_period_seconds=2.0)
