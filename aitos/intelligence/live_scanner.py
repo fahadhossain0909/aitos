@@ -23,6 +23,7 @@ LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 class LiveSymbolCache:
     trades: deque = field(default_factory=deque)
     order_book: OrderBookSnapshot | None = None
+    # Source timestamps are retained for diagnostics and analytics.
     last_trade_at: datetime | None = None
     last_book_at: datetime | None = None
     last_trade_received_at: datetime | None = None
@@ -55,8 +56,22 @@ class LiveScannerCache:
             return
         for symbol in self._symbols:
             if not direct_market_data:
-                self._subscriptions.append(await self._bus.subscribe(f"market.trade.{symbol}", self._on_trade, group=LIVE_TRADE_GROUP, start_id="$"))
-                self._subscriptions.append(await self._bus.subscribe(f"market.orderbook.{symbol}", self._on_book, group=LIVE_BOOK_GROUP, start_id="$"))
+                self._subscriptions.append(
+                    await self._bus.subscribe(
+                        f"market.trade.{symbol}",
+                        self._on_trade,
+                        group=LIVE_TRADE_GROUP,
+                        start_id="$",
+                    )
+                )
+                self._subscriptions.append(
+                    await self._bus.subscribe(
+                        f"market.orderbook.{symbol}",
+                        self._on_book,
+                        group=LIVE_BOOK_GROUP,
+                        start_id="$",
+                    )
+                )
             self._subscriptions.append(
                 await self._bus.subscribe(
                     f"market.liquidity.{symbol}",
@@ -74,24 +89,27 @@ class LiveScannerCache:
         self._initialized = False
 
     async def accept_live_trade(self, trade: TradeTick) -> None:
-        await self._on_trade(Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict()))
+        await self._on_trade(
+            Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict())
+        )
 
     async def accept_live_order_book(self, book: OrderBookSnapshot) -> None:
-        await self._on_book(Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict()))
+        await self._on_book(
+            Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict())
+        )
 
     async def _on_trade(self, event: Event) -> None:
         trade = TradeTick.from_dict(event.payload)
-        now = datetime.now(timezone.utc)
-        if trade.timestamp < now - timedelta(seconds=LIVE_TRADE_MAX_AGE_SECONDS):
+        received_at = datetime.now(timezone.utc)
+        source_age = (received_at - trade.timestamp).total_seconds()
+        if source_age > LIVE_TRADE_MAX_AGE_SECONDS:
             logger.info(
                 "ignored stale trade in live scanner",
                 extra={
                     "aitos_extra": {
                         "symbol": trade.symbol,
                         "trade_id": trade.trade_id,
-                        "trade_age_sec": round(
-                            max(0.0, (now - trade.timestamp).total_seconds()), 3
-                        ),
+                        "trade_age_sec": round(max(0.0, source_age), 3),
                         "max_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS,
                     }
                 },
@@ -100,15 +118,16 @@ class LiveScannerCache:
         state = self._cache(trade.symbol)
         state.trades.append(trade)
         state.last_trade_at = trade.timestamp
-        state.last_trade_received_at = now
+        state.last_trade_received_at = received_at
         self._maybe_log_freshness(trade.symbol)
 
     async def _on_book(self, event: Event) -> None:
         book = OrderBookSnapshot.from_dict(event.payload)
+        received_at = datetime.now(timezone.utc)
         state = self._cache(book.symbol)
         state.order_book = book
         state.last_book_at = book.timestamp
-        state.last_book_received_at = datetime.now(timezone.utc)
+        state.last_book_received_at = received_at
         self._maybe_log_freshness(book.symbol)
 
     async def _on_liquidity(self, event: Event) -> None:
@@ -117,10 +136,6 @@ class LiveScannerCache:
         self._cache(symbol).liquidity_events.append(payload)
 
     def snapshot(self, symbol: str) -> LiveSymbolCache | None:
-        # Scanner reads this path on every scan cycle. Sampling here guarantees
-        # freshness diagnostics are emitted even when the upstream stream has
-        # stopped producing events, which is precisely the stale-state case we
-        # need to distinguish from a healthy live stream.
         self._maybe_log_freshness(symbol)
         return self._state.get(symbol)
 
@@ -131,7 +146,12 @@ class LiveScannerCache:
         return max(0.0, (now - timestamp).total_seconds())
 
     def freshness_snapshot(self, symbol: str) -> dict:
-        """Expose source age and estimated consumer lag for diagnostics."""
+        """Expose source age and consumer receive age for diagnostics.
+
+        Freshness is based on when AITOS received the event, not on the
+        exchange event timestamp. Exchange timestamps are still exposed so
+        source-to-consumer lag remains observable.
+        """
         state = self._state.get(symbol)
         if state is None:
             return {
@@ -142,6 +162,8 @@ class LiveScannerCache:
                 "last_book_received_at": None,
                 "trade_age_sec": None,
                 "book_age_sec": None,
+                "trade_receive_age_sec": None,
+                "book_receive_age_sec": None,
                 "trade_consumer_lag_sec": None,
                 "book_consumer_lag_sec": None,
             }
@@ -149,8 +171,8 @@ class LiveScannerCache:
         now = datetime.now(timezone.utc)
         trade_age = self._age_seconds(state.last_trade_at, now)
         book_age = self._age_seconds(state.last_book_at, now)
-        trade_received_age = self._age_seconds(state.last_trade_received_at, now)
-        book_received_age = self._age_seconds(state.last_book_received_at, now)
+        trade_receive_age = self._age_seconds(state.last_trade_received_at, now)
+        book_receive_age = self._age_seconds(state.last_book_received_at, now)
         return {
             "cache_has_state": True,
             "last_trade_at": (
@@ -171,17 +193,46 @@ class LiveScannerCache:
             ),
             "trade_age_sec": round(trade_age, 3) if trade_age is not None else None,
             "book_age_sec": round(book_age, 3) if book_age is not None else None,
+            # These are the actual ages used to determine whether the
+            # consumer's cached event is still live.
+            "trade_receive_age_sec": (
+                round(trade_receive_age, 3)
+                if trade_receive_age is not None
+                else None
+            ),
+            "book_receive_age_sec": (
+                round(book_receive_age, 3)
+                if book_receive_age is not None
+                else None
+            ),
+            # Source-to-consumer timestamp skew, useful for diagnostics.
             "trade_consumer_lag_sec": (
-                round(max(0.0, trade_age - trade_received_age), 3)
-                if trade_age is not None and trade_received_age is not None
+                round(max(0.0, trade_age - trade_receive_age), 3)
+                if trade_age is not None and trade_receive_age is not None
                 else None
             ),
             "book_consumer_lag_sec": (
-                round(max(0.0, book_age - book_received_age), 3)
-                if book_age is not None and book_received_age is not None
+                round(max(0.0, book_age - book_receive_age), 3)
+                if book_age is not None and book_receive_age is not None
                 else None
             ),
         }
+
+    def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
+        state = self._state.get(symbol)
+        if state is None or state.last_trade_received_at is None:
+            return False
+        return (
+            datetime.now(timezone.utc) - state.last_trade_received_at
+        ).total_seconds() <= max_age_seconds
+
+    def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
+        state = self._state.get(symbol)
+        if state is None or state.last_book_received_at is None:
+            return False
+        return (
+            datetime.now(timezone.utc) - state.last_book_received_at
+        ).total_seconds() <= max_age_seconds
 
     def _maybe_log_freshness(self, symbol: str) -> None:
         now = datetime.now(timezone.utc)
