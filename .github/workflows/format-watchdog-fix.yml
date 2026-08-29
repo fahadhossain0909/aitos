@@ -1,0 +1,28 @@
+name: Format watchdog fix
+
+on:
+  push:
+    branches: ["fix/trade-watchdog-code"]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: ${{ !startsWith(github.event.head_commit.message, 'style: format watchdog fix') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore project formatting
+        run: |
+          python -m pip install --upgrade pip black
+          black aitos/exchange/binance.py
+          git diff --check
+          if git diff --quiet -- aitos/exchange/binance.py; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add aitos/exchange/binance.py
+          git commit -m 'style: format watchdog fix'
+          git push
