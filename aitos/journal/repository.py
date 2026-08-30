@@ -153,15 +153,16 @@ class JournalRepository(AITOSModule):
         snapshots. Rows with neither usable timestamp are intentionally left
         untouched so we never invent historical event times.
         """
-        epoch = "toDateTime64(0, 3, 'UTC')"
-        exit_ts = "parseDateTimeBestEffortOrNull(nullIf(exit_time, ''))"
-        entry_ts = "parseDateTimeBestEffortOrNull(nullIf(entry_time, ''))"
-        repairable = f"({exit_ts} IS NOT NULL OR {entry_ts} IS NOT NULL)"
-        replacement = f"toDateTime64(coalesce({exit_ts}, {entry_ts}), 3, 'UTC')"
         parameters = {"epoch": EPOCH_TIMESTAMP}
+        repairable = (
+            "(parseDateTimeBestEffortOrNull(nullIf(exit_time, '')) IS NOT NULL "
+            "OR parseDateTimeBestEffortOrNull(nullIf(entry_time, '')) IS NOT NULL)"
+        )
         count_result = await self._client.query(
-            f"SELECT count() AS n FROM trades WHERE recorded_at = {{epoch:DateTime64(3)}} "
-            f"AND {repairable}",
+            "SELECT count() AS n FROM trades "
+            "WHERE recorded_at = {epoch:DateTime64(3)} AND "
+            "(parseDateTimeBestEffortOrNull(nullIf(exit_time, '')) IS NOT NULL "
+            "OR parseDateTimeBestEffortOrNull(nullIf(entry_time, '')) IS NOT NULL)",
             parameters=parameters,
         )
         repairable_count = (
@@ -175,8 +176,12 @@ class JournalRepository(AITOSModule):
         )
         await self._client.command(
             "ALTER TABLE trades "
-            f"UPDATE recorded_at = {replacement} "
-            f"WHERE recorded_at = {{epoch:DateTime64(3)}} AND {repairable}",
+            "UPDATE recorded_at = toDateTime64(coalesce("
+            "parseDateTimeBestEffortOrNull(nullIf(exit_time, '')), "
+            "parseDateTimeBestEffortOrNull(nullIf(entry_time, ''))), 3, 'UTC') "
+            "WHERE recorded_at = {epoch:DateTime64(3)} AND "
+            "(parseDateTimeBestEffortOrNull(nullIf(exit_time, '')) IS NOT NULL "
+            "OR parseDateTimeBestEffortOrNull(nullIf(entry_time, '')) IS NOT NULL)",
             parameters=parameters,
         )
         logger.info("Legacy trade timestamp repair mutation submitted")
