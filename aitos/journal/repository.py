@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import clickhouse_connect
@@ -155,6 +156,7 @@ class JournalRepository(AITOSModule):
             "trades",
             [
                 [
+                    datetime.now(timezone.utc),
                     trade_dict.get("trade_id", ""),
                     trade_dict.get("symbol", ""),
                     trade_dict.get("side", ""),
@@ -178,6 +180,7 @@ class JournalRepository(AITOSModule):
                 ]
             ],
             column_names=[
+                "recorded_at",
                 "trade_id",
                 "symbol",
                 "side",
