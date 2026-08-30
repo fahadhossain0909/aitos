@@ -62,7 +62,20 @@ jobs:
             test "$loading" = 0
             echo '=== Paper runtime ==='
             docker inspect --format 'status={{.State.Status}} health={{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}} restart={{.RestartCount}} mem={{.HostConfig.Memory}}' aitos-paper
-            paper_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-paper)"
+            paper_health=""
+            for _ in $(seq 1 18); do
+              paper_status="$(docker inspect --format '{{.State.Status}}' aitos-paper)"
+              paper_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-paper)"
+              echo "aitos-paper status=$paper_status health=$paper_health"
+              if [ "$paper_health" = healthy ]; then
+                break
+              fi
+              if [ "$paper_status" = running ] && [ "$paper_health" = starting ]; then
+                sleep 10
+                continue
+              fi
+              break
+            done
             if [ "$paper_health" != healthy ]; then
               echo '::error::aitos-paper is not healthy.'
               docker logs --tail 100 aitos-paper || true
