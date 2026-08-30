@@ -121,7 +121,13 @@ class JournalRepository(AITOSModule):
         password: str = "",
         database: str = "aitos",
     ) -> None:
-        self._conn_params = dict(host=host, port=port, username=username, password=password, database=database)
+        self._conn_params = dict(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            database=database,
+        )
         self._client = None
         self._initialized = False
         self._last_event_time: str | None = None
@@ -147,22 +153,40 @@ class JournalRepository(AITOSModule):
 
     async def _ensure_excursion_columns(self) -> None:
         """Add MAE/MFE columns to existing deployments without rebuilding data."""
-        for column in ("mae_price Nullable(Float64)", "mfe_price Nullable(Float64)", "mae_r Nullable(Float64)", "mfe_r Nullable(Float64)"):
+        for column in (
+            "mae_price Nullable(Float64)",
+            "mfe_price Nullable(Float64)",
+            "mae_r Nullable(Float64)",
+            "mfe_r Nullable(Float64)",
+        ):
             try:
-                await self._client.command(f"ALTER TABLE trades ADD COLUMN IF NOT EXISTS {column}")
+                await self._client.command(
+                    f"ALTER TABLE trades ADD COLUMN IF NOT EXISTS {column}"
+                )
             except Exception as exc:
-                logger.error("Failed to ensure trade telemetry column %s: %s", column, exc)
+                logger.error(
+                    "Failed to ensure trade telemetry column %s: %s", column, exc
+                )
                 raise
 
     async def _repair_legacy_epoch_trade_timestamps(self) -> None:
         """Repair old snapshots whose recorded_at was persisted as Unix epoch."""
         parameters = {"epoch": EPOCH_TIMESTAMP}
-        count_result = await self._client.query(COUNT_REPAIRABLE_LEGACY_TRADES, parameters=parameters)
-        repairable_count = int(count_result.result_rows[0][0]) if count_result.result_rows else 0
+        count_result = await self._client.query(
+            COUNT_REPAIRABLE_LEGACY_TRADES, parameters=parameters
+        )
+        repairable_count = (
+            int(count_result.result_rows[0][0]) if count_result.result_rows else 0
+        )
         if repairable_count == 0:
             return
-        logger.warning("Repairing %s legacy trade snapshots with epoch recorded_at", repairable_count)
-        await self._client.command(REPAIR_LEGACY_TRADE_TIMESTAMPS, parameters=parameters)
+        logger.warning(
+            "Repairing %s legacy trade snapshots with epoch recorded_at",
+            repairable_count,
+        )
+        await self._client.command(
+            REPAIR_LEGACY_TRADE_TIMESTAMPS, parameters=parameters
+        )
         logger.info("Legacy trade timestamp repair mutation submitted")
 
     async def health_check(self) -> HealthStatus:
@@ -175,7 +199,13 @@ class JournalRepository(AITOSModule):
             latency_ms = (time.monotonic() - start) * 1000
             status = ModuleStatus.UNHEALTHY
             logger.error("journal repository health check failed: %s", exc)
-        return HealthStatus(module_id=self.module_id, status=status, latency_ms=latency_ms, last_event_time=self._last_event_time, details={})
+        return HealthStatus(
+            module_id=self.module_id,
+            status=status,
+            latency_ms=latency_ms,
+            last_event_time=self._last_event_time,
+            details={},
+        )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         if self._client is not None:
@@ -194,17 +224,114 @@ class JournalRepository(AITOSModule):
         recorded_at = datetime.now(timezone.utc)
         persisted_payload = dict(trade_dict)
         persisted_payload["recorded_at"] = recorded_at.isoformat()
-        await self._client.insert("trades", [[recorded_at, trade_dict.get("trade_id", ""), trade_dict.get("symbol", ""), trade_dict.get("side", ""), trade_dict.get("entry_price", 0.0), trade_dict.get("quantity", 0.0), trade_dict.get("leverage", 0.0), trade_dict.get("position_size_usd", 0.0), trade_dict.get("risk_amount_usd", 0.0), trade_dict.get("strategy_id", ""), trade_dict.get("sl_price", 0.0), trade_dict.get("tp_price", 0.0), trade_dict.get("state", ""), trade_dict.get("entry_time", ""), trade_dict.get("exit_price"), trade_dict.get("exit_time"), trade_dict.get("exit_reason"), trade_dict.get("pnl"), trade_dict.get("pnl_percent"), trade_dict.get("rejection_reason"), trade_dict.get("mae_price"), trade_dict.get("mfe_price"), trade_dict.get("mae_r"), trade_dict.get("mfe_r"), json.dumps(persisted_payload, default=str)]], column_names=["recorded_at", "trade_id", "symbol", "side", "entry_price", "quantity", "leverage", "position_size_usd", "risk_amount_usd", "strategy_id", "sl_price", "tp_price", "state", "entry_time", "exit_price", "exit_time", "exit_reason", "pnl", "pnl_percent", "rejection_reason", "mae_price", "mfe_price", "mae_r", "mfe_r", "payload"])
+        await self._client.insert(
+            "trades",
+            [
+                [
+                    recorded_at,
+                    trade_dict.get("trade_id", ""),
+                    trade_dict.get("symbol", ""),
+                    trade_dict.get("side", ""),
+                    trade_dict.get("entry_price", 0.0),
+                    trade_dict.get("quantity", 0.0),
+                    trade_dict.get("leverage", 0.0),
+                    trade_dict.get("position_size_usd", 0.0),
+                    trade_dict.get("risk_amount_usd", 0.0),
+                    trade_dict.get("strategy_id", ""),
+                    trade_dict.get("sl_price", 0.0),
+                    trade_dict.get("tp_price", 0.0),
+                    trade_dict.get("state", ""),
+                    trade_dict.get("entry_time", ""),
+                    trade_dict.get("exit_price"),
+                    trade_dict.get("exit_time"),
+                    trade_dict.get("exit_reason"),
+                    trade_dict.get("pnl"),
+                    trade_dict.get("pnl_percent"),
+                    trade_dict.get("rejection_reason"),
+                    trade_dict.get("mae_price"),
+                    trade_dict.get("mfe_price"),
+                    trade_dict.get("mae_r"),
+                    trade_dict.get("mfe_r"),
+                    json.dumps(persisted_payload, default=str),
+                ]
+            ],
+            column_names=[
+                "recorded_at",
+                "trade_id",
+                "symbol",
+                "side",
+                "entry_price",
+                "quantity",
+                "leverage",
+                "position_size_usd",
+                "risk_amount_usd",
+                "strategy_id",
+                "sl_price",
+                "tp_price",
+                "state",
+                "entry_time",
+                "exit_price",
+                "exit_time",
+                "exit_reason",
+                "pnl",
+                "pnl_percent",
+                "rejection_reason",
+                "mae_price",
+                "mfe_price",
+                "mae_r",
+                "mfe_r",
+                "payload",
+            ],
+        )
 
     async def save_journal_entry(self, entry: JournalEntry) -> None:
         self._require_initialized()
-        await self._client.insert("journal_entries", [[entry.entry_id, entry.trade_id, entry.entry_type.value, json.dumps(entry.market_context, default=str), entry.confidence_score, json.dumps(entry.order_flow_observations, default=str), json.dumps(entry.liquidity_observations, default=str), json.dumps(entry.amt_observations, default=str), json.dumps(entry.lead_lag_observations, default=str), entry.mistakes, entry.lessons, entry.improvements]], column_names=["entry_id", "trade_id", "entry_type", "market_context", "confidence_score", "order_flow_observations", "liquidity_observations", "amt_observations", "lead_lag_observations", "mistakes", "lessons", "improvements"])
+        await self._client.insert(
+            "journal_entries",
+            [
+                [
+                    entry.entry_id,
+                    entry.trade_id,
+                    entry.entry_type.value,
+                    json.dumps(entry.market_context, default=str),
+                    entry.confidence_score,
+                    json.dumps(entry.order_flow_observations, default=str),
+                    json.dumps(entry.liquidity_observations, default=str),
+                    json.dumps(entry.amt_observations, default=str),
+                    json.dumps(entry.lead_lag_observations, default=str),
+                    entry.mistakes,
+                    entry.lessons,
+                    entry.improvements,
+                ]
+            ],
+            column_names=[
+                "entry_id",
+                "trade_id",
+                "entry_type",
+                "market_context",
+                "confidence_score",
+                "order_flow_observations",
+                "liquidity_observations",
+                "amt_observations",
+                "lead_lag_observations",
+                "mistakes",
+                "lessons",
+                "improvements",
+            ],
+        )
 
-    async def get_journal_entries_for_trade(self, trade_id: str) -> list[dict[str, Any]]:
+    async def get_journal_entries_for_trade(
+        self, trade_id: str
+    ) -> list[dict[str, Any]]:
         self._require_initialized()
-        result = await self._client.query("SELECT * FROM journal_entries WHERE trade_id = {trade_id:String} ORDER BY created_at", parameters={"trade_id": trade_id})
+        result = await self._client.query(
+            "SELECT * FROM journal_entries WHERE trade_id = {trade_id:String} ORDER BY created_at",
+            parameters={"trade_id": trade_id},
+        )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("JournalRepository.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "JournalRepository.initialize() must be called first"
+            )
