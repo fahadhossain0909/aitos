@@ -5,6 +5,9 @@ LIVE="$ROOT/live"
 ARCHIVE="$ROOT/archive"
 if [ ! -d "$ROOT" ]; then echo "Redis data root does not exist: $ROOT"; exit 0; fi
 mkdir -p "$LIVE" "$ARCHIVE"
+# Redis and the archive worker run as UID/GID 999. Ensure their bind-mounted
+# directories are writable without requiring either container to run as root.
+chown 999:999 "$LIVE" "$ARCHIVE"
 if command -v redis-cli >/dev/null 2>&1 && redis-cli -h "${REDIS_HOST:-127.0.0.1}" -p "${REDIS_PORT:-6379}" ping >/dev/null 2>&1; then
   echo "Redis is reachable; stop Redis before migrating its persistent files." >&2; exit 1
 fi
