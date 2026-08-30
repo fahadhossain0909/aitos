@@ -20,6 +20,7 @@ AI Kernel into an actual trade, end to end.
 
 from __future__ import annotations
 
+import math
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -68,6 +69,15 @@ TOPIC_TRAILING_SL_UPDATE = "trade.trailing_sl"
 TOPIC_PARTIAL_CLOSE = "trade.partial_close"
 TOPIC_EXCHANGE_STOPS_PLACED = "trade.exchange_stops_placed"
 DEFAULT_PARTIAL_CLOSE_FRACTION = 0.5
+
+
+def _valid_market_price(value: Any) -> bool:
+    """Return True only for finite, strictly positive market prices."""
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(price) and price > 0.0
 
 
 class TradeLifecycle(AITOSModule):
@@ -138,10 +148,18 @@ class TradeLifecycle(AITOSModule):
         ):
             symbol = event.payload.get("symbol")
             price = event.payload.get("close", event.payload.get("price"))
-            if symbol and price is not None:
+            if symbol and _valid_market_price(price):
+                current_price = float(price)
                 for trade in list(self._open_trades.values()):
                     if trade.symbol == symbol:
-                        await self.update_price(trade.trade_id, float(price))
+                        await self.update_price(trade.trade_id, current_price)
+            elif symbol and price is not None:
+                logger.warning(
+                    "Ignoring invalid market price",
+                    extra={
+                        "aitos_extra": {"symbol": symbol, "price": price}
+                    },
+                )
         return None
 
     def get_open_trades(self) -> list[Trade]:
@@ -191,6 +209,10 @@ class TradeLifecycle(AITOSModule):
 
     async def update_price(self, trade_id: str, current_price: float) -> Trade:
         self._require_initialized()
+        if not _valid_market_price(current_price):
+            raise ValueError(
+                f"current_price must be a finite positive number, got {current_price!r}"
+            )
         trade = self._open_trades.get(trade_id)
         if trade is None:
             raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
@@ -267,6 +289,10 @@ class TradeLifecycle(AITOSModule):
 
     async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
         self._require_initialized()
+        if not _valid_market_price(exit_price):
+            raise ValueError(
+                f"exit_price must be a finite positive number, got {exit_price!r}"
+            )
         trade = self._open_trades.pop(trade_id, None)
         if trade is None:
             raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
@@ -464,8 +490,6 @@ class TradeLifecycle(AITOSModule):
             )
 
         projected_portfolio = self._project_portfolio(portfolio, opportunity, sizing)
-        # Default sector cap is enforced by sizing. Only an absolute hard cap
-        # breach (40% by default) is allowed to reject after projection.
         projected_hard_breaches = [
             b
             for b in self._risk_engine.check_limits(projected_portfolio)
