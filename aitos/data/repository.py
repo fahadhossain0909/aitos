@@ -69,6 +69,32 @@ CREATE TABLE IF NOT EXISTS learning_experiences (
 ) ENGINE = MergeTree() PARTITION BY toYYYYMM(timestamp)
 ORDER BY (symbol, timestamp, experience_id)
 """
+
+# Durable paper/live trading state is part of the ClickHouse schema contract,
+# not an optional runtime side effect.  Keeping these DDL statements in the
+# repository initializer guarantees the tables exist before reset/verification,
+# paper startup, or recovery code can access them.
+CREATE_TRADE_RUNTIME_STATE = """
+CREATE TABLE IF NOT EXISTS trade_runtime_state (
+    trade_id String,
+    symbol LowCardinality(String),
+    state LowCardinality(String),
+    payload_json String,
+    updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY trade_id
+"""
+CREATE_PORTFOLIO_DRAWDOWN_STATE = """
+CREATE TABLE IF NOT EXISTS portfolio_drawdown_state (
+    asset LowCardinality(String),
+    time DateTime64(3, 'UTC'),
+    equity_usd Float64,
+    peak_equity_usd Float64,
+    drawdown_pct Float64
+) ENGINE = ReplacingMergeTree(time)
+ORDER BY asset
+"""
+
 ALL_DDL = [
     CREATE_MARKET_OHLCV,
     CREATE_ORDER_BOOK_SNAPSHOTS,
@@ -76,6 +102,8 @@ ALL_DDL = [
     CREATE_FUNDING_RATES,
     CREATE_OPEN_INTEREST,
     CREATE_LEARNING_EXPERIENCES,
+    CREATE_TRADE_RUNTIME_STATE,
+    CREATE_PORTFOLIO_DRAWDOWN_STATE,
 ]
 
 
@@ -117,7 +145,7 @@ class MarketDataRepository(AITOSModule):
             await self._client.command(ddl)
         self._initialized = True
         logger.info(
-            "MarketDataRepository initialized (market + learning tables ensured)"
+            "MarketDataRepository initialized (market + learning + durable state tables ensured)"
         )
 
     async def health_check(self) -> HealthStatus:
