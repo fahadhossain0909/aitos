@@ -78,6 +78,7 @@ class ScanCandidate:
     direction: TradeSide
     composite_score: float
     component_scores: dict[str, float]
+    component_availability: dict[str, bool]
     rationale: list[str]
     entry_price: float
     atr: float
@@ -159,7 +160,7 @@ class OpportunityScanner(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.10.0"
+        return "1.10.1"
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
@@ -586,6 +587,7 @@ class OpportunityScanner(AITOSModule):
             direction=direction,
             composite_score=round(composite, 2),
             component_scores=component_scores,
+            component_availability=component_availability,
             rationale=rationale,
             entry_price=klines[-1].close,
             atr=atr,
@@ -639,20 +641,13 @@ class OpportunityScanner(AITOSModule):
     async def decide_with_kernel(self, candidate: ScanCandidate, kernel: Any) -> Any:
         from aitos.kernel.ai_kernel import DecisionContext
 
-        availability = {
-            name: not (
-                name in {"rl_confidence", "footprint_interaction", "lead_lag"}
-                and abs(float(score) - 5.0) < 1e-9
-            )
-            for name, score in candidate.component_scores.items()
-        }
         return await kernel.request_decision(
             DecisionContext(
                 symbol=candidate.symbol,
                 context={
                     "direction": candidate.direction.value,
                     "component_scores": candidate.component_scores,
-                    "component_availability": availability,
+                    "component_availability": dict(candidate.component_availability),
                     "regime": candidate.regime,
                     "entry_price": candidate.entry_price,
                 },
