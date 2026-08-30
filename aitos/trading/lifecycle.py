@@ -156,9 +156,7 @@ class TradeLifecycle(AITOSModule):
             elif symbol and price is not None:
                 logger.warning(
                     "Ignoring invalid market price",
-                    extra={
-                        "aitos_extra": {"symbol": symbol, "price": price}
-                    },
+                    extra={"aitos_extra": {"symbol": symbol, "price": price}},
                 )
         return None
 
