@@ -134,14 +134,14 @@ class JournalRepository(AITOSModule):
         exit_ts = "parseDateTimeBestEffortOrNull(nullIf(exit_time, ''))"
         entry_ts = "parseDateTimeBestEffortOrNull(nullIf(entry_time, ''))"
         repairable = f"({exit_ts} IS NOT NULL OR {entry_ts} IS NOT NULL)"
-        replacement = (
-            f"toDateTime64(coalesce({exit_ts}, {entry_ts}), 3, 'UTC')"
-        )
+        replacement = f"toDateTime64(coalesce({exit_ts}, {entry_ts}), 3, 'UTC')"
         count_result = await self._client.query(
             f"SELECT count() AS n FROM trades WHERE recorded_at = {epoch} "
             f"AND {repairable}"
         )
-        repairable_count = int(count_result.result_rows[0][0]) if count_result.result_rows else 0
+        repairable_count = (
+            int(count_result.result_rows[0][0]) if count_result.result_rows else 0
+        )
         if repairable_count == 0:
             return
         logger.warning(
