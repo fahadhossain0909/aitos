@@ -368,7 +368,12 @@ class OpportunityScanner(AITOSModule):
             return None
         adx_score = min(10.0, indicators.adx(klines) / 10.0)
         structure_boost = min(2.0, structure_strength * 0.2)
-        if market_structure.bias == "bullish" and direction == TradeSide.LONG or market_structure.bias == "bearish" and direction == TradeSide.SHORT:
+        if (
+            market_structure.bias == "bullish"
+            and direction == TradeSide.LONG
+            or market_structure.bias == "bearish"
+            and direction == TradeSide.SHORT
+        ):
             trend_score = min(10.0, adx_score + structure_boost)
         elif market_structure.event == "choch":
             trend_score = max(0.0, adx_score - 0.5)
