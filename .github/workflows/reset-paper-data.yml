@@ -1,0 +1,78 @@
+name: Reset Paper Trading Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type RESET_PAPER_DATA to permanently delete paper-trading state/performance data"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-data-reset
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    name: Reset paper-trading state on VPS
+    runs-on: ubuntu-latest
+    environment: papertrade
+    timeout-minutes: 15
+    steps:
+      - name: Verify confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRMATION" != "RESET_PAPER_DATA" ]; then
+            echo "::error::Confirmation mismatch. Nothing was deleted."
+            exit 1
+          fi
+
+      - name: Check deployment secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Prepare SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_reset_key
+          chmod 600 /tmp/aitos_reset_key
+
+      - name: Reset paper data
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_reset_key
+          command_timeout: 10m
+          envs: CONFIRMATION
+          script: |
+            set -euo pipefail
+            cd "$HOME/aitos"
+            git fetch origin main --quiet
+            git checkout --force main
+            git reset --hard origin/main --quiet
+            bash scripts/reset_paper_data.sh "$CONFIRMATION"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f /tmp/aitos_reset_key
