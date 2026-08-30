@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS trades (
     pnl Nullable(Float64),
     pnl_percent Nullable(Float64),
     rejection_reason Nullable(String),
+    mae_price Nullable(Float64),
+    mfe_price Nullable(Float64),
+    mae_r Nullable(Float64),
+    mfe_r Nullable(Float64),
     payload String
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMM(recorded_at)
@@ -116,9 +120,26 @@ class JournalRepository(AITOSModule):
         self._client = await clickhouse_connect.get_async_client(**self._conn_params)
         for ddl in ALL_DDL:
             await self._client.command(ddl)
+        await self._ensure_excursion_columns()
         await self._repair_legacy_epoch_trade_timestamps()
         self._initialized = True
         logger.info("JournalRepository initialized (tables ensured)")
+
+    async def _ensure_excursion_columns(self) -> None:
+        """Add MAE/MFE columns to existing deployments without rebuilding data."""
+        for column in (
+            "mae_price Nullable(Float64)",
+            "mfe_price Nullable(Float64)",
+            "mae_r Nullable(Float64)",
+            "mfe_r Nullable(Float64)",
+        ):
+            try:
+                await self._client.command(
+                    f"ALTER TABLE trades ADD COLUMN IF NOT EXISTS {column}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Failed to ensure trade telemetry column %s: %s", column, exc)
+                raise
 
     async def _repair_legacy_epoch_trade_timestamps(self) -> None:
         """Repair old snapshots whose recorded_at was persisted as Unix epoch.
@@ -137,7 +158,7 @@ class JournalRepository(AITOSModule):
         replacement = f"toDateTime64(coalesce({exit_ts}, {entry_ts}), 3, 'UTC')"
         count_result = await self._client.query(
             f"SELECT count() AS n FROM trades WHERE recorded_at = {epoch} "
-            f"AND {repairable}"  # nosec B608 - values are fixed SQL fragments
+            f"AND {repairable}"
         )
         repairable_count = (
             int(count_result.result_rows[0][0]) if count_result.result_rows else 0
@@ -216,6 +237,10 @@ class JournalRepository(AITOSModule):
                     trade_dict.get("pnl"),
                     trade_dict.get("pnl_percent"),
                     trade_dict.get("rejection_reason"),
+                    trade_dict.get("mae_price"),
+                    trade_dict.get("mfe_price"),
+                    trade_dict.get("mae_r"),
+                    trade_dict.get("mfe_r"),
                     json.dumps(persisted_payload, default=str),
                 ]
             ],
@@ -240,6 +265,10 @@ class JournalRepository(AITOSModule):
                 "pnl",
                 "pnl_percent",
                 "rejection_reason",
+                "mae_price",
+                "mfe_price",
+                "mae_r",
+                "mfe_r",
                 "payload",
             ],
         )
