@@ -216,6 +216,10 @@ class TradeLifecycle(AITOSModule):
             raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
         if trade.state != TradeLifecycleState.POSITION_OPENED:
             return trade
+
+        # Record every valid market observation before evaluating exits so
+        # MAE/MFE includes the terminal price that triggers SL/TP as well.
+        trade.record_excursion(float(current_price))
         is_long = trade.side == TradeSide.LONG
         sl_hit = (
             current_price <= trade.sl_price
