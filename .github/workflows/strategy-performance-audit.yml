@@ -63,6 +63,7 @@ jobs:
               echo '=== AITOS STRATEGY PERFORMANCE AUDIT ==='
               echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
               echo 'Purpose: strategy behaviour, execution, exits and PnL; non-blocking observational audit.'
+              echo 'Observation window: 24h for strategy funnel and lifecycle logs.'
               echo
 
               echo '--- 1. TRADE LIFECYCLE SNAPSHOT ---'
@@ -108,11 +109,11 @@ jobs:
               fi
               echo
 
-              echo '--- 4. STRATEGY / CANDIDATE FUNNEL (LAST 30m) ---'
+              echo '--- 4. STRATEGY / CANDIDATE FUNNEL (LAST 24h) ---'
               echo 'Candidate and kernel decision logs:'
-              decision_logs="$(docker logs --since 30m --timestamps aitos-paper 2>&1 | grep -E 'scanner ranking decision|scanner score breakdown|trade candidate rejected by kernel|trade candidate skipped|trade candidate submitted' || true)"
+              decision_logs="$(docker logs --since 24h --timestamps aitos-paper 2>&1 | grep -E 'scanner ranking decision|scanner score breakdown|trade candidate rejected by kernel|trade candidate skipped|trade candidate submitted' || true)"
               if [ -n "$decision_logs" ]; then
-                printf '%s\n' "$decision_logs" | tail -n 300
+                printf '%s\n' "$decision_logs" | tail -n 500
               else
                 echo 'No candidate/decision logs found.'
               fi
@@ -123,19 +124,23 @@ jobs:
               printf '%s\n' "$decision_logs" | grep -c 'trade candidate submitted' | xargs printf '  submitted: %s\n' || true
               echo
 
-              echo '--- 5. TRADE LIFECYCLE LOG EVENTS (LAST 30m) ---'
-              lifecycle_logs="$(docker logs --since 30m --timestamps aitos-paper 2>&1 | grep -E 'trade.*(submitted|opened|closed|exit|stop.?loss|take.?profit|trailing)|position.*(opened|closed|exit)' || true)"
+              echo '--- 5. TRADE LIFECYCLE LOG EVENTS (LAST 24h) ---'
+              lifecycle_logs="$(docker logs --since 24h --timestamps aitos-paper 2>&1 | grep -E 'trade.*(submitted|opened|closed|exit|stop.?loss|take.?profit|trailing)|position.*(opened|closed|exit)' || true)"
               if [ -n "$lifecycle_logs" ]; then
-                printf '%s\n' "$lifecycle_logs" | tail -n 300
+                printf '%s\n' "$lifecycle_logs" | tail -n 500
               else
                 echo 'No matching trade lifecycle log events found.'
               fi
               echo
 
-              echo '--- 6. DATA QUALITY NOTES ---'
+              echo '--- 6. EXCURSION TELEMETRY ---'
+              echo 'MAE/MFE: telemetry fields are not yet populated by the lifecycle writer; audit reports remain unavailable until per-trade excursion tracking is wired to market-price updates.'
+              echo 'The TradeLifecycle already receives market price events through update_price, which is the correct integration point for recording adverse/favorable excursions.'
+              echo
+
+              echo '--- 7. DATA QUALITY NOTES ---'
               echo 'Trade records are append-only snapshots. Current-state selection uses recorded_at first, with exit_time and entry_time as deterministic fallbacks for legacy rows whose recorded_at may be identical or epoch.'
               echo 'This audit does not alter trading state and does not change blocker status.'
-              echo 'MAE/MFE require per-trade excursion data; they are reported as unavailable until such telemetry exists.'
             } > "$REPORT" 2>&1 || status=1
 
             printf '%s\n' "$status" > "$EXIT_CODE"
