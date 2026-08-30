@@ -1,0 +1,52 @@
+name: Repair indicators.py
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    if: github.actor == 'fahadhossain0909'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore and clean indicators.py
+        run: |
+          git checkout 9cc913b45d51d1a10b377dd073b525a3a08d449b -- aitos/intelligence/indicators.py
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('aitos/intelligence/indicators.py')
+          s = p.read_text()
+          old = '''        if klines[i].high >= max(window_highs) and klines[i].high == max(\n            klines[j].high for j in range(i - left, i + right + 1)\n        ):'''
+          new = '''        if klines[i].high == max(window_highs):'''
+          if old not in s:
+              raise SystemExit('expected high pivot expression not found')
+          s = s.replace(old, new, 1)
+          old = '''        if klines[i].low <= min(window_lows) and klines[i].low == min(\n            klines[j].low for j in range(i - left, i + right + 1)\n        ):'''
+          new = '''        if klines[i].low == min(window_lows):'''
+          if old not in s:
+              raise SystemExit('expected low pivot expression not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+      - name: Commit repair
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add aitos/intelligence/indicators.py
+          git diff --cached --check
+          git commit -m 'refactor(indicators): remove redundant swing pivot comparisons'
+          git push
+
+      - name: Remove repair workflow
+        run: |
+          git rm .github/workflows/repair-indicators.yml
+          git commit -m 'chore(ci): remove temporary indicators repair workflow'
+          git push
