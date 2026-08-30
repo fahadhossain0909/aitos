@@ -47,22 +47,28 @@ if [[ "$(id -u)" -eq 0 ]]; then
 fi
 
 command -v findmnt >/dev/null 2>&1 || die "findmnt is required."
-command -v blkid >/dev/null 2>&1 || die "blkid is required."
 command -v mountpoint >/dev/null 2>&1 || die "mountpoint is required."
+command -v readlink >/dev/null 2>&1 || die "readlink is required."
+command -v lsblk >/dev/null 2>&1 || die "lsblk is required."
 
 UUID_LINK="/dev/disk/by-uuid/$DISK_UUID"
 [[ -e "$UUID_LINK" ]] || die "Configured disk UUID was not found: $DISK_UUID"
 DEVICE="$(readlink -f "$UUID_LINK")"
 [[ -b "$DEVICE" ]] || die "Resolved UUID is not a block device: $DEVICE"
 
-FSTYPE="$(blkid -o value -s TYPE "$DEVICE" || true)"
+# Prefer lsblk because it is part of util-linux and is available on the
+# supported Debian/Ubuntu hosts. Fall back to blkid when available.
+FSTYPE="$(lsblk -no FSTYPE "$DEVICE" 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+if [[ -z "$FSTYPE" ]] && command -v blkid >/dev/null 2>&1; then
+  FSTYPE="$(blkid -o value -s TYPE "$DEVICE" 2>/dev/null || true)"
+fi
 [[ -n "$FSTYPE" ]] || die "No filesystem detected on $DEVICE; refusing to mount an unknown filesystem."
 
 log "Data disk preflight"
-echo "UUID:      $DISK_UUID"
-echo "Device:    $DEVICE"
+echo "UUID:       $DISK_UUID"
+echo "Device:     $DEVICE"
 echo "Filesystem: $FSTYPE"
-echo "Mount:     $DATA_ROOT"
+echo "Mount:      $DATA_ROOT"
 
 ${SUDO[@]} mkdir -p "$DATA_ROOT"
 
