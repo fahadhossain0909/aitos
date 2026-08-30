@@ -133,7 +133,7 @@ async def test_scan_symbol_finds_long_setup_for_trending_symbol(event_bus):
     assert candidate.direction == TradeSide.LONG
     assert 0 <= candidate.composite_score <= 100
     assert candidate.atr > 0
-    assert "regime=" in candidate.rationale[-1]
+    assert any("regime=" in line for line in candidate.rationale)
 
 
 @pytest.mark.asyncio

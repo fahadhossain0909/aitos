@@ -13,6 +13,7 @@ FULL_SCORES = {
     "funding_rate": 8.0,
     "open_interest_trend": 8.0,
     "rl_confidence": 7.0,
+    "footprint_interaction": 8.0,
 }
 
 
@@ -42,7 +43,10 @@ def test_missing_components_are_not_treated_as_zero():
 
     assert result.confidence == 1.0
     assert result.direction == "long"
-    assert len(result.contributions) == 1
+    available = [item for item in result.contributions if item.available]
+    assert len(available) == 1
+    assert available[0].source == "trend_strength"
+    assert "footprint_interaction" in result.missing_components
 
 
 def test_scores_are_clamped_to_scanner_scale():
