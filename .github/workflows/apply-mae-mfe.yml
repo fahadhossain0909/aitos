@@ -1,0 +1,69 @@
+name: Apply MAE/MFE Telemetry
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-mae-mfe.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wire excursion recording
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('aitos/trading/lifecycle.py')
+          text = path.read_text()
+          old = '''        if trade.state != TradeLifecycleState.POSITION_OPENED:\n            return trade\n        is_long = trade.side == TradeSide.LONG\n'''
+          new = '''        if trade.state != TradeLifecycleState.POSITION_OPENED:\n            return trade\n\n        # Record every valid market observation before evaluating exits so\n        # MAE/MFE includes the terminal price that triggers SL/TP as well.\n        trade.record_excursion(float(current_price))\n        is_long = trade.side == TradeSide.LONG\n'''
+          if old not in text:
+              raise SystemExit('Expected update_price anchor not found')
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Validate
+        run: |
+          python -m compileall -q aitos/models/trade.py aitos/trading/lifecycle.py
+          python - <<'PY'
+          from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
+
+          def make(side):
+              return Trade(
+                  trade_id='test', symbol='BTCUSDT', side=side,
+                  entry_price=100.0, quantity=1.0, leverage=1.0,
+                  position_size_usd=100.0, risk_amount_usd=10.0,
+                  strategy_id='test', agent_consensus={}, explanation='test',
+                  sl_price=90.0, tp_price=120.0,
+                  state=TradeLifecycleState.POSITION_OPENED, entry_time='2026-01-01T00:00:00+00:00',
+              )
+
+          long_trade = make(TradeSide.LONG)
+          long_trade.record_excursion(90.0)
+          long_trade.record_excursion(115.0)
+          assert long_trade.mae_price == 10.0 and long_trade.mfe_price == 15.0
+          assert long_trade.mae_r == 1.0 and long_trade.mfe_r == 1.5
+
+          short_trade = make(TradeSide.SHORT)
+          short_trade.record_excursion(110.0)
+          short_trade.record_excursion(85.0)
+          assert short_trade.mae_price == 10.0 and short_trade.mfe_price == 15.0
+          assert short_trade.mae_r == 1.0 and short_trade.mfe_r == 1.5
+          print('MAE/MFE telemetry validation passed')
+          PY
+
+      - name: Commit and remove temporary workflow
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/apply-mae-mfe.yml
+          git add aitos/trading/lifecycle.py .github/workflows/apply-mae-mfe.yml
+          git commit -m 'feat: record MAE/MFE on every trade price update'
+          git push
