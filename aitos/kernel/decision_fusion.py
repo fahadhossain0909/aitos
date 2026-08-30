@@ -7,16 +7,17 @@ from dataclasses import dataclass
 from typing import Any
 
 DEFAULT_EVIDENCE_WEIGHTS: dict[str, float] = {
-    "trend_strength": 0.15,
+    "trend_strength": 0.14,
     "liquidity_quality": 0.10,
-    "order_flow_bias": 0.15,
+    "order_flow_bias": 0.14,
     "auction_context": 0.10,
     "volatility": 0.05,
-    "market_regime": 0.10,
-    "lead_lag": 0.10,
-    "funding_rate": 0.10,
-    "open_interest_trend": 0.10,
-    "rl_confidence": 0.05,
+    "market_regime": 0.09,
+    "lead_lag": 0.09,
+    "funding_rate": 0.08,
+    "open_interest_trend": 0.08,
+    "rl_confidence": 0.04,
+    "footprint_interaction": 0.09,
 }
 
 
@@ -28,6 +29,7 @@ class EvidenceContribution:
     score: float
     weight: float
     weighted_score: float
+    available: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -35,6 +37,7 @@ class EvidenceContribution:
             "score": self.score,
             "weight": self.weight,
             "weighted_score": self.weighted_score,
+            "available": self.available,
         }
 
 
@@ -61,7 +64,13 @@ class EvidenceFusionResult:
 
 
 class DecisionFusionEngine:
-    """Fuse directional evidence without hiding the underlying signals."""
+    """Fuse directional evidence without hiding the underlying signals.
+
+    Missing features are excluded from the denominator (Phase B of the
+    strategy audit): ``missing feature != neutral 5.0``. Callers may pass
+    ``component_availability`` (mapping name -> bool) or omit a key / pass
+    ``None`` to mark a component unavailable.
+    """
 
     def __init__(
         self,
@@ -98,7 +107,10 @@ class DecisionFusionEngine:
         return normalized
 
     def fuse(
-        self, direction: str, component_scores: Mapping[str, Any]
+        self,
+        direction: str,
+        component_scores: Mapping[str, Any],
+        component_availability: Mapping[str, bool] | None = None,
     ) -> EvidenceFusionResult:
         direction = self._normalize_direction(direction)
         if direction == "neutral":
@@ -109,14 +121,25 @@ class DecisionFusionEngine:
                 missing_components=tuple(self._weights),
             )
 
+        availability = dict(component_availability or {})
         contributions: list[EvidenceContribution] = []
         missing: list[str] = []
         denominator = 0.0
         numerator = 0.0
         for name, weight in self._weights.items():
             raw = component_scores.get(name)
-            if not isinstance(raw, (int, float)):
+            is_available = availability.get(name, True)
+            if raw is None or is_available is False or not isinstance(raw, (int, float)):
                 missing.append(name)
+                contributions.append(
+                    EvidenceContribution(
+                        source=name,
+                        score=0.0,
+                        weight=weight,
+                        weighted_score=0.0,
+                        available=False,
+                    )
+                )
                 continue
             score = max(0.0, min(10.0, float(raw)))
             contributions.append(
@@ -125,6 +148,7 @@ class DecisionFusionEngine:
                     score=round(score, 4),
                     weight=weight,
                     weighted_score=round(score * weight, 4),
+                    available=True,
                 )
             )
             numerator += score * weight
@@ -144,4 +168,7 @@ class DecisionFusionEngine:
         component_scores = context.get("component_scores")
         if not isinstance(direction, str) or not isinstance(component_scores, Mapping):
             return None
-        return self.fuse(direction, component_scores)
+        availability = context.get("component_availability")
+        if availability is not None and not isinstance(availability, Mapping):
+            availability = None
+        return self.fuse(direction, component_scores, availability)
