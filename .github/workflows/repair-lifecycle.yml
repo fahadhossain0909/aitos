@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Restore lifecycle and apply targeted PnL fix
+      - name: Restore lifecycle and apply targeted fixes
         shell: bash
         run: |
           set -euo pipefail
@@ -79,8 +79,26 @@ jobs:
           if old not in s:
               raise SystemExit("expected position reduction block not found")
           s = s.replace(old, new, 1)
+
+          old = '''        if trade.state != TradeLifecycleState.POSITION_OPENED:
+            return trade
+        is_long = trade.side == TradeSide.LONG
+'''
+          new = '''        if trade.state != TradeLifecycleState.POSITION_OPENED:
+            return trade
+
+        # Record every market observation before exit evaluation so MAE/MFE
+        # includes the terminal price that triggers SL/TP as well.
+        trade.record_excursion(float(current_price))
+        is_long = trade.side == TradeSide.LONG
+'''
+          if old not in s:
+              raise SystemExit("expected update_price anchor not found")
+          s = s.replace(old, new, 1)
+
           p.write_text(s)
           PY
+          python -m compileall -q aitos/models/trade.py aitos/trading/lifecycle.py
           git diff --check
           git diff -- aitos/trading/lifecycle.py
       - name: Commit repaired lifecycle
@@ -90,7 +108,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add aitos/trading/lifecycle.py
-          git commit -m "fix: restore lifecycle logic and correct partial PnL accounting"
+          git commit -m "feat: wire MAE/MFE telemetry into trade lifecycle"
           git push origin HEAD:main
       - name: Remove temporary repair workflow
         shell: bash
