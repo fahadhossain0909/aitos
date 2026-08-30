@@ -31,6 +31,7 @@ services:
   redis-stream-archive:
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     container_name: aitos-redis-stream-archive
+    user: "999:999"
     command: ["python3", "scripts/redis_stream_archive.py"]
     environment:
       REDIS_HOST: redis
