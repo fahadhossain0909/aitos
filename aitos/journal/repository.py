@@ -84,32 +84,6 @@ ORDER BY (entry_type, created_at)
 
 ALL_DDL = [CREATE_TRADES, CREATE_JOURNAL_ENTRIES]
 EPOCH_TIMESTAMP = datetime(1970, 1, 1, tzinfo=timezone.utc)
-LEGACY_EPOCH_TRADE_WHERE = """
-recorded_at = {epoch:DateTime64(3)}
-AND (
-    parseDateTimeBestEffortOrNull(nullIf(exit_time, '')) IS NOT NULL
-    OR parseDateTimeBestEffortOrNull(nullIf(entry_time, '')) IS NOT NULL
-)
-"""
-LEGACY_EPOCH_TRADE_REPLACEMENT = """
-toDateTime64(
-    coalesce(
-        parseDateTimeBestEffortOrNull(nullIf(exit_time, '')),
-        parseDateTimeBestEffortOrNull(nullIf(entry_time, ''))
-    ),
-    3,
-    'UTC'
-)
-"""
-COUNT_REPAIRABLE_LEGACY_TRADES = (
-    "SELECT count() AS n FROM trades WHERE " + LEGACY_EPOCH_TRADE_WHERE
-)
-REPAIR_LEGACY_TRADE_TIMESTAMPS = (
-    "ALTER TABLE trades UPDATE recorded_at = "
-    + LEGACY_EPOCH_TRADE_REPLACEMENT
-    + " WHERE "
-    + LEGACY_EPOCH_TRADE_WHERE
-)
 
 
 class JournalRepository(AITOSModule):
@@ -170,10 +144,25 @@ class JournalRepository(AITOSModule):
                 raise
 
     async def _repair_legacy_epoch_trade_timestamps(self) -> None:
-        """Repair old snapshots whose recorded_at was persisted as Unix epoch."""
+        """Repair old snapshots whose recorded_at was persisted as Unix epoch.
+
+        The current writer always supplies an explicit UTC timestamp. Existing
+        deployments can nevertheless contain legacy rows written with the
+        epoch value. For those rows, exit_time is the best deterministic
+        timestamp for a closed snapshot; entry_time is the fallback for open
+        snapshots. Rows with neither usable timestamp are intentionally left
+        untouched so we never invent historical event times.
+        """
+        epoch = "toDateTime64(0, 3, 'UTC')"
+        exit_ts = "parseDateTimeBestEffortOrNull(nullIf(exit_time, ''))"
+        entry_ts = "parseDateTimeBestEffortOrNull(nullIf(entry_time, ''))"
+        repairable = f"({exit_ts} IS NOT NULL OR {entry_ts} IS NOT NULL)"
+        replacement = f"toDateTime64(coalesce({exit_ts}, {entry_ts}), 3, 'UTC')"
         parameters = {"epoch": EPOCH_TIMESTAMP}
         count_result = await self._client.query(
-            COUNT_REPAIRABLE_LEGACY_TRADES, parameters=parameters
+            f"SELECT count() AS n FROM trades WHERE recorded_at = {{epoch:DateTime64(3)}} "
+            f"AND {repairable}",
+            parameters=parameters,
         )
         repairable_count = (
             int(count_result.result_rows[0][0]) if count_result.result_rows else 0
@@ -185,7 +174,10 @@ class JournalRepository(AITOSModule):
             repairable_count,
         )
         await self._client.command(
-            REPAIR_LEGACY_TRADE_TIMESTAMPS, parameters=parameters
+            "ALTER TABLE trades "
+            f"UPDATE recorded_at = {replacement} "
+            f"WHERE recorded_at = {{epoch:DateTime64(3)}} AND {repairable}",
+            parameters=parameters,
         )
         logger.info("Legacy trade timestamp repair mutation submitted")
 
@@ -218,6 +210,8 @@ class JournalRepository(AITOSModule):
 
     async def handle_event(self, event: Event) -> EventResponse | None:
         return None
+
+    # -- Writes -----------------------------------------------------------------
 
     async def save_trade_snapshot(self, trade_dict: dict[str, Any]) -> None:
         self._require_initialized()
@@ -319,6 +313,8 @@ class JournalRepository(AITOSModule):
                 "improvements",
             ],
         )
+
+    # -- Reads --------------------------------------------------------------------
 
     async def get_journal_entries_for_trade(
         self, trade_id: str
