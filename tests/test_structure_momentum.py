@@ -1,7 +1,11 @@
 """Extra indicator coverage for structure / momentum / regime expansions."""
 
 from aitos.intelligence import indicators
-from tests.test_indicators import make_klines, make_trending_up_klines, make_ranging_klines
+from tests.test_indicators import (
+    make_klines,
+    make_ranging_klines,
+    make_trending_up_klines,
+)
 
 
 def test_analyze_market_structure_bullish_breakout():
