@@ -116,6 +116,12 @@ class Trade:
     pnl: float | None = None
     pnl_percent: float | None = None
     rejection_reason: str | None = None
+    # Excursion telemetry. Values are absolute price excursions from entry;
+    # they are populated by the lifecycle's market-price update path.
+    mae_price: float | None = None
+    mfe_price: float | None = None
+    mae_r: float | None = None
+    mfe_r: float | None = None
     updated_at: str = field(default_factory=_utc_now_iso)
 
     @property
@@ -128,6 +134,20 @@ class Trade:
             return 0.0
         direction = 1 if self.side == TradeSide.LONG else -1
         return ((current_price - self.entry_price) * direction) / self.r_distance
+
+    def record_excursion(self, current_price: float) -> None:
+        """Update MAE/MFE telemetry from a valid market price observation."""
+        if current_price <= 0:
+            raise ValueError("current_price must be positive")
+        direction = 1 if self.side == TradeSide.LONG else -1
+        signed_move = (current_price - self.entry_price) * direction
+        adverse = max(0.0, -signed_move)
+        favorable = max(0.0, signed_move)
+        self.mae_price = max(self.mae_price or 0.0, adverse)
+        self.mfe_price = max(self.mfe_price or 0.0, favorable)
+        if self.r_distance > 0:
+            self.mae_r = self.mae_price / self.r_distance
+            self.mfe_r = self.mfe_price / self.r_distance
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -158,4 +178,8 @@ class Trade:
             "tp_order_ids": list(self.tp_order_ids),
             "regime": self.regime,
             "partial_exits": [pe.__dict__ for pe in self.partial_exits],
+            "mae_price": self.mae_price,
+            "mfe_price": self.mfe_price,
+            "mae_r": self.mae_r,
+            "mfe_r": self.mfe_r,
         }
