@@ -69,10 +69,11 @@ jobs:
           REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
           CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
           NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
         run: |
           set -euo pipefail
           missing=0
-          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY REDIS_PASSWORD CLICKHOUSE_PASSWORD NEO4J_PASSWORD; do
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY REDIS_PASSWORD CLICKHOUSE_PASSWORD NEO4J_PASSWORD AITOS_DATA_DISK_UUID; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing required GitHub Actions secret: $name"
               missing=1
@@ -103,17 +104,19 @@ jobs:
           BOOT_FREE_RESERVE_BYTES: ${{ env.BOOT_FREE_RESERVE_BYTES }}
           DATA_DISK_MIN_FREE_GB: ${{ env.DATA_DISK_MIN_FREE_GB }}
           ALLOW_DISPOSABLE_DOCKER_RESET: ${{ env.ALLOW_DISPOSABLE_DOCKER_RESET }}
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 15m
-          envs: BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,ALLOW_DISPOSABLE_DOCKER_RESET
+          envs: BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,ALLOW_DISPOSABLE_DOCKER_RESET,AITOS_DATA_DISK_UUID
           script: |
             set -euo pipefail
             : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
             : "${DATA_DISK_MIN_FREE_GB:=20}"
             : "${ALLOW_DISPOSABLE_DOCKER_RESET:=false}"
+            : "${AITOS_DATA_DISK_UUID:?AITOS_DATA_DISK_UUID must be configured in the papertrade environment}"
             APP_DIR="$HOME/aitos"
             DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
             REPO="${{ github.repository }}"
@@ -126,12 +129,6 @@ jobs:
             flock 9
             echo "Host deployment lock acquired."
 
-            if ! mountpoint -q "$DATA_ROOT"; then
-              echo "::error::$DATA_ROOT is not a mounted data disk; refusing to place database data on the boot disk."
-              exit 1
-            fi
-            mkdir -p "$DATA_ROOT/clickhouse" "$DATA_ROOT/neo4j" "$DATA_ROOT/redis"
-
             # Automatic low-space recovery runs before the hard reserve check.
             # The reserve is a post-cleanup invariant, not an immediate failure trigger.
             echo "=== Boot-disk automatic recovery ==="
@@ -140,9 +137,6 @@ jobs:
             if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
               echo "Boot disk is below 7.5 GiB; starting safe automatic cleanup."
               echo "Persistent data protection: $DATA_ROOT is excluded from cleanup."
-
-              # Remove only unused Docker resources. Running containers and their
-              # attached resources remain protected by Docker prune semantics.
               if docker info >/dev/null 2>&1; then
                 docker image prune -af --filter 'until=0s' || true
                 docker container prune -f || true
@@ -151,19 +145,14 @@ jobs:
               else
                 echo "::warning::Docker daemon is unavailable during boot-disk recovery."
               fi
-
-              # Remove transient OS/package/log caches only. Never touch the
-              # persistent AITOS data disk or the application data directories.
               sudo journalctl --vacuum-time=7d || true
               sudo apt-get clean || true
               sudo rm -rf /tmp/* /var/tmp/* || true
               sudo rm -rf /var/lib/apt/lists/* || true
               sync
-
               boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
               echo "Boot free space after recovery: $boot_free_bytes bytes"
             fi
-
             if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
               echo "::error::Boot disk remains below the required 7.5 GiB free reserve after automatic cleanup."
               df -h .
@@ -171,7 +160,6 @@ jobs:
               sudo du -xhd1 / 2>/dev/null | sort -h | tail -20 || true
               exit 1
             fi
-
             echo "Boot-disk reserve satisfied."
             df -h .
 
@@ -189,6 +177,19 @@ jobs:
             cp -a "$tmp_dir/source/." "$APP_DIR/"
             mkdir -p ./.storage/others/backtest ./.storage/others/backups ./.storage/others/snapshots
 
+            echo "=== Automated persistent-storage bootstrap ==="
+            export AITOS_DATA_ROOT="$DATA_ROOT"
+            export AITOS_DATA_DISK_UUID
+            export AITOS_HOST_UID="$(id -u)"
+            export AITOS_HOST_GID="$(id -g)"
+            chmod +x scripts/bootstrap_storage.sh
+            ./scripts/bootstrap_storage.sh
+            if ! mountpoint -q "$DATA_ROOT"; then
+              echo "::error::$DATA_ROOT is not a mounted data disk after bootstrap; refusing to deploy."
+              exit 1
+            fi
+            echo "Persistent storage bootstrap completed successfully."
+
             umask 077
             cat > .env << 'ENVEOF'
             ENVIRONMENT=production
@@ -196,6 +197,10 @@ jobs:
             REQUIRE_HUMAN_APPROVAL_FOR_PROD=true
             DEBUG=false
             TESTING=false
+            AITOS_DATA_ROOT=${{ env.AITOS_DATA_ROOT }}
+            AITOS_DATA_DISK_UUID=${AITOS_DATA_DISK_UUID}
+            AITOS_HOST_UID=$(id -u)
+            AITOS_HOST_GID=$(id -g)
             REDIS_HOST=redis
             REDIS_PORT=6379
             REDIS_DB=0
@@ -240,8 +245,6 @@ jobs:
             ENVEOF
             chmod 600 .env
 
-            # Source installation can temporarily consume boot-disk space.
-            # Repeat recovery after it and before Docker pulls/recreation.
             echo "=== Post-source boot-disk reserve check ==="
             boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
             if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
@@ -328,7 +331,8 @@ jobs:
             df -h "$DATA_ROOT"
             test -d "$DATA_ROOT/clickhouse"
             test -d "$DATA_ROOT/neo4j"
-            test -d "$DATA_ROOT/redis"
+            test -d "$DATA_ROOT/redis/live"
+            test -d "$DATA_ROOT/redis/archive"
 
             echo "=== Container lifecycle ==="
             docker compose down --remove-orphans --timeout 30 || true
