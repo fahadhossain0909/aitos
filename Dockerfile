@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 RUN useradd --create-home --shell /bin/bash aitos
 
 COPY --chown=aitos:aitos aitos/ ./aitos/
+COPY --chown=aitos:aitos scripts/ ./scripts/
 COPY --chown=aitos:aitos run_paper_trading.py run_live_trading.py run_continual_learning.py ./
 
 # Non-root user -- the app has no business running as root, and root
