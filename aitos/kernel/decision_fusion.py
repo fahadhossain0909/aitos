@@ -129,7 +129,11 @@ class DecisionFusionEngine:
         for name, weight in self._weights.items():
             raw = component_scores.get(name)
             is_available = availability.get(name, True)
-            if raw is None or is_available is False or not isinstance(raw, (int, float)):
+            if (
+                raw is None
+                or is_available is False
+                or not isinstance(raw, (int, float))
+            ):
                 missing.append(name)
                 contributions.append(
                     EvidenceContribution(
