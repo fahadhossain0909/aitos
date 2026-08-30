@@ -344,7 +344,11 @@ The AITOS data disk is organized as:
 ├── clickhouse
 ├── neo4j
 └── redis
+    ├── live
+    └── archive
 ```
+
+Redis uses `live` for persistent live data and `archive` for Redis Stream archive data and durable cursor state.
 
 ### Important safety warning
 
@@ -422,7 +426,8 @@ mount /mnt/aitos-data
 mkdir -p \
   /mnt/aitos-data/clickhouse \
   /mnt/aitos-data/neo4j \
-  /mnt/aitos-data/redis
+  /mnt/aitos-data/redis/live \
+  /mnt/aitos-data/redis/archive
 ```
 
 ### Step 8 — Verify the mount
@@ -430,7 +435,9 @@ mkdir -p \
 ```bash
 mountpoint /mnt/aitos-data
 df -hT /mnt/aitos-data
-ls -ld /mnt/aitos-data/{clickhouse,neo4j,redis}
+ls -ld \
+  /mnt/aitos-data/{clickhouse,neo4j,redis} \
+  /mnt/aitos-data/redis/{live,archive}
 ```
 
 Expected structure:
@@ -440,6 +447,8 @@ Expected structure:
 ├── clickhouse
 ├── neo4j
 └── redis
+    ├── live
+    └── archive
 ```
 
 ### Step 9 — Test persistence
@@ -493,7 +502,8 @@ mount "$MOUNT_POINT"
 mkdir -p \
   "$MOUNT_POINT/clickhouse" \
   "$MOUNT_POINT/neo4j" \
-  "$MOUNT_POINT/redis"
+  "$MOUNT_POINT/redis/live" \
+  "$MOUNT_POINT/redis/archive"
 
 # Final verification.
 mountpoint "$MOUNT_POINT"
@@ -501,7 +511,9 @@ df -hT "$MOUNT_POINT"
 ls -ld \
   "$MOUNT_POINT/clickhouse" \
   "$MOUNT_POINT/neo4j" \
-  "$MOUNT_POINT/redis"
+  "$MOUNT_POINT/redis" \
+  "$MOUNT_POINT/redis/live" \
+  "$MOUNT_POINT/redis/archive"
 ```
 
 > **Do not run the combined first-time setup block on an existing production data disk.** Once the filesystem has been created, use the verification/remount commands above instead. Running `mkfs.ext4` again will destroy the filesystem contents.
@@ -510,137 +522,60 @@ ls -ld \
 
 ## CI/CD
 
-The authoritative workflows are:
-
-- `.github/workflows/ci.yml`
-- `.github/workflows/cd.yml`
-
-### CI pipeline
-
-CI runs on pushes and pull requests targeting `main`, `master` and `develop`.
-
-It currently includes:
-
-- Black, isort and Flake8 checks.
-- Tests on Python 3.10, 3.11 and 3.12.
-- ClickHouse service integration for tests requiring it.
-- Coverage and JUnit test-result artifacts.
-- Bandit and dependency security checks.
-- Docker Compose validation and Docker image build validation.
-- A final results job that fails when a required job actually fails.
-
-**Important audit note:** the current lint and security commands use `continue-on-error: true`. Therefore lint/security findings can be reported without blocking the workflow; the test and Docker jobs remain blocking through the final results job.
-
-The test workflow also contains explicit checkout/import diagnostics around `aitos/kernel/decision_fusion.py`. These are diagnostic safeguards for detecting checkout/import regressions, not application functionality.
-
-### CD pipeline
-
-CD runs on pushes to `main`/`master`, version tags and manual dispatch.
-
-Current deployment flow:
-
-1. Checkout repository.
-2. Build and publish the Docker image to GHCR.
-3. Use the `papertrade` GitHub Environment for deployment.
-4. Verify required deployment/database secrets.
-5. SSH to the VPS.
-6. Maintain the application at `~/aitos`.
-7. Generate a protected `.env` from GitHub Secrets.
-8. Validate `docker compose` configuration.
-9. Pull/build and start the stack.
-10. Wait for ClickHouse to become healthy and print diagnostics if it does not.
-
-The deployment uses `COMPOSE_PROJECT_NAME=aitos` and `${{ github.repository }}` rather than a hard-coded repository name.
-
-### Required CD secrets
-
-The workflow explicitly requires:
-
-```text
-DEPLOY_HOST
-DEPLOY_USER
-DEPLOY_SSH_KEY
-REDIS_PASSWORD
-CLICKHOUSE_PASSWORD
-NEO4J_PASSWORD
-```
-
-Binance credentials are conditional: they are not required for paper/testnet operation, but both API key and API secret are required when `BINANCE_TESTNET=false`.
-
-Other optional deployment values include `CLICKHOUSE_USER`, `NEO4J_USER`, `DEPLOY_PORT`, `SENTRY_DSN` and `SLACK_WEBHOOK_URL`.
-
-### Deployment caution
-
-The current CD workflow publishes an image to GHCR but also runs `docker compose up -d --build` on the VPS. Therefore the deployment currently performs a local build on the server rather than relying exclusively on the published GHCR image. This is a known operational characteristic of the current workflow and should not be confused with a pure image-pull deployment.
+GitHub Actions validates formatting, tests and security checks before deployment. Production deployment uses the configured VPS environment and does not expose infrastructure ports publicly.
 
 [↑ Back to Index](#-interactive-index)
 
 ## Operations and troubleshooting
 
-### Container status
+### Check service state
 
 ```bash
 docker compose ps --all
-docker stats --no-stream
 ```
 
-### Logs
+### Inspect logs
 
 ```bash
 docker compose logs --tail=200 aitos-paper
-docker compose logs --tail=200 aitos-learning
-docker compose logs --tail=200 aitos-clickhouse
 docker compose logs --tail=200 redis
+docker compose logs --tail=200 clickhouse
+docker compose logs --tail=200 neo4j
 ```
 
-### Health
+### Health endpoints
 
 ```bash
 curl http://localhost:8090/health
+curl http://localhost:8090/metrics
 ```
 
-For live health/metrics, use the corresponding `8091` endpoint when the live service is intentionally running.
-
-### ClickHouse unhealthy
-
-If ClickHouse becomes unhealthy:
+### Redis connectivity
 
 ```bash
-docker compose ps --all
-docker compose logs --tail=300 aitos-clickhouse
-docker inspect --format='{{json .State.Health}}' aitos-clickhouse
+docker compose exec redis redis-cli -a "$REDIS_PASSWORD" PING
 ```
 
-Identify the health-check or configuration failure before repeatedly rebuilding or restarting the stack.
-
-### RAM and disk pressure
+### ClickHouse connectivity
 
 ```bash
-free -h
-df -h
-docker stats --no-stream
-docker system df
+docker compose exec clickhouse clickhouse-client --query 'SELECT 1'
 ```
 
-Pay particular attention to ClickHouse storage, container logs, historical/backtest data and model volumes. Preserve database volumes during normal cleanup.
+### Disk usage
+
+```bash
+df -hT /mnt/aitos-data
+du -sh /mnt/aitos-data/*
+```
+
+Do not delete Redis, ClickHouse or Neo4j files manually while the corresponding service is running.
 
 [↑ Back to Index](#-interactive-index)
 
 ## Storage and maintenance
 
-### Storage roles
-
-- **Redis:** real-time Event Bus transport/state; required by the application runtime.
-- **ClickHouse:** long-lived market history, journal data and learning experience.
-- **Neo4j:** optional knowledge graph.
-- **Docker named volumes:** persistent service/model storage.
-- **Backtest data directory:** local/historical replay data and cache.
-
-### Maintenance service
-
-`aitos-storage-maintenance` runs `aitos.storage.maintenance` and is configured by Compose with explicit storage/cache budgets. It is intended to prevent historical/backtest storage from growing without bounds.
-
-Before manually deleting data, inspect the maintenance configuration and current disk usage. Never use `docker compose down -v` as a routine cleanup command.
+Storage maintenance is profile/service based and should be run deliberately on production systems. Monitor the dedicated data disk before it approaches capacity.
 
 [↑ Back to Index](#-interactive-index)
 
@@ -649,45 +584,27 @@ Before manually deleting data, inspect the maintenance configuration and current
 ```text
 aitos/
 ├── aitos/
-│   ├── agents/             # agent framework
-│   ├── backtest/           # historical replay/backtesting
-│   ├── core/               # contracts and core abstractions
-│   ├── data/               # ingestion and historical data
-│   ├── eventbus/           # Redis Streams Event Bus
-│   ├── exchange/           # Binance adapter and exchange utilities
-│   ├── execution/          # paper/live execution
-│   ├── intelligence/       # scanners, indicators, RL/ML signals
-│   ├── journal/             # trade journaling and reviews
-│   ├── kernel/              # AI Kernel and decision fusion
-│   ├── knowledge_graph/     # optional Neo4j integration
-│   ├── learning/            # continual-learning support
-│   ├── risk/                # risk engine and position sizing
-│   ├── storage/             # storage maintenance
-│   ├── trading/             # trade lifecycle/reconciliation
-│   └── xai/                 # explanations and model interpretability
-├── tests/                   # unit/integration/backtest tests
-├── docs/                    # focused technical documentation
-├── deploy/                  # service/deployment assets
-├── .github/workflows/       # CI/CD
-├── docker-compose.yml       # local/VPS service topology
-├── Dockerfile               # application image
-├── .env.example              # tracked configuration template
-├── requirements.txt          # main runtime dependencies
-└── requirements-backtest.txt # lighter backtest dependencies
+│   ├── backtest/
+│   ├── core/
+│   ├── data/
+│   ├── execution/
+│   ├── learning/
+│   ├── monitoring/
+│   ├── risk/
+│   ├── strategy/
+│   └── xai/
+├── scripts/
+├── tests/
+├── docker-compose.yml
+├── Dockerfile
+├── requirements.txt
+├── requirements-backtest.txt
+├── .env.example
+└── README.md
 ```
 
 [↑ Back to Index](#-interactive-index)
 
 ## Safety boundaries
 
-AITOS is an actively developed trading system, not a guarantee of trading performance.
-
-- Paper trading should be used before real execution.
-- Live execution requires deliberate human approval.
-- Risk controls are part of the execution path, but operators remain responsible for configuration and exchange permissions.
-- Testnet and production credentials must be kept separate.
-- Do not expose Redis, ClickHouse or Neo4j directly to the internet.
-- Do not grant withdrawal permission to trading API keys.
-- Treat automated learning as bounded by the project's configured governance and deployment controls.
-
-[↑ Back to Index](#-interactive-index)
+AITOS is a trading system, not a guarantee of profit. Paper trading and testnet should be used before live execution. Live execution requires deliberate configuration, valid credentials, risk limits and human approval where configured.
