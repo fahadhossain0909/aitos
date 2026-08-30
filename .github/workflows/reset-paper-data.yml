@@ -15,6 +15,9 @@ concurrency:
   group: paper-data-reset
   cancel-in-progress: false
 
+env:
+  DEPLOY_PATH: /home/n41/aitos
+
 jobs:
   reset:
     name: Reset paper-trading state on VPS
@@ -59,15 +62,30 @@ jobs:
         uses: appleboy/ssh-action@v1.2.5
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_reset_key
           command_timeout: 10m
-          envs: CONFIRMATION
+          envs: CONFIRMATION,DEPLOY_PATH
           script: |
             set -euo pipefail
-            cd "$HOME/aitos"
+
+            if [ ! -d "$DEPLOY_PATH" ]; then
+              echo "::error::Deployment path does not exist: $DEPLOY_PATH"
+              exit 1
+            fi
+            if [ ! -d "$DEPLOY_PATH/.git" ]; then
+              echo "::error::Deployment path is not a Git repository: $DEPLOY_PATH"
+              exit 1
+            fi
+            if [ ! -f "$DEPLOY_PATH/scripts/reset_paper_data.sh" ]; then
+              echo "::error::Reset script not found under $DEPLOY_PATH"
+              exit 1
+            fi
+
+            cd "$DEPLOY_PATH"
             git fetch origin main --quiet
             git checkout --force main
             git reset --hard origin/main --quiet
