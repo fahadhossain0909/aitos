@@ -79,6 +79,7 @@ ORDER BY (entry_type, created_at)
 """
 
 ALL_DDL = [CREATE_TRADES, CREATE_JOURNAL_ENTRIES]
+EPOCH_TIMESTAMP = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 class JournalRepository(AITOSModule):
@@ -115,8 +116,44 @@ class JournalRepository(AITOSModule):
         self._client = await clickhouse_connect.get_async_client(**self._conn_params)
         for ddl in ALL_DDL:
             await self._client.command(ddl)
+        await self._repair_legacy_epoch_trade_timestamps()
         self._initialized = True
         logger.info("JournalRepository initialized (tables ensured)")
+
+    async def _repair_legacy_epoch_trade_timestamps(self) -> None:
+        """Repair old snapshots whose recorded_at was persisted as Unix epoch.
+
+        The current writer always supplies an explicit UTC timestamp. Existing
+        deployments can nevertheless contain legacy rows written with the
+        epoch value. For those rows, exit_time is the best deterministic
+        timestamp for a closed snapshot; entry_time is the fallback for open
+        snapshots. Rows with neither usable timestamp are intentionally left
+        untouched so we never invent historical event times.
+        """
+        epoch = "toDateTime64(0, 3, 'UTC')"
+        exit_ts = "parseDateTimeBestEffortOrNull(nullIf(exit_time, ''))"
+        entry_ts = "parseDateTimeBestEffortOrNull(nullIf(entry_time, ''))"
+        repairable = f"({exit_ts} IS NOT NULL OR {entry_ts} IS NOT NULL)"
+        replacement = (
+            f"toDateTime64(coalesce({exit_ts}, {entry_ts}), 3, 'UTC')"
+        )
+        count_result = await self._client.query(
+            f"SELECT count() AS n FROM trades WHERE recorded_at = {epoch} "
+            f"AND {repairable}"
+        )
+        repairable_count = int(count_result.result_rows[0][0]) if count_result.result_rows else 0
+        if repairable_count == 0:
+            return
+        logger.warning(
+            "Repairing %s legacy trade snapshots with epoch recorded_at",
+            repairable_count,
+        )
+        await self._client.command(
+            "ALTER TABLE trades "
+            f"UPDATE recorded_at = {replacement} "
+            f"WHERE recorded_at = {epoch} AND {repairable}"
+        )
+        logger.info("Legacy trade timestamp repair mutation submitted")
 
     async def health_check(self) -> HealthStatus:
         start = time.monotonic()
@@ -152,11 +189,14 @@ class JournalRepository(AITOSModule):
 
     async def save_trade_snapshot(self, trade_dict: dict[str, Any]) -> None:
         self._require_initialized()
+        recorded_at = datetime.now(timezone.utc)
+        persisted_payload = dict(trade_dict)
+        persisted_payload["recorded_at"] = recorded_at.isoformat()
         await self._client.insert(
             "trades",
             [
                 [
-                    datetime.now(timezone.utc),
+                    recorded_at,
                     trade_dict.get("trade_id", ""),
                     trade_dict.get("symbol", ""),
                     trade_dict.get("side", ""),
@@ -176,7 +216,7 @@ class JournalRepository(AITOSModule):
                     trade_dict.get("pnl"),
                     trade_dict.get("pnl_percent"),
                     trade_dict.get("rejection_reason"),
-                    json.dumps(trade_dict, default=str),
+                    json.dumps(persisted_payload, default=str),
                 ]
             ],
             column_names=[
