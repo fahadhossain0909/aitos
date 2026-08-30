@@ -8,9 +8,7 @@ All functions expect klines in chronological order (oldest first).
 
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
-from dataclasses import dataclass
 
 from aitos.models.market import Kline
 
