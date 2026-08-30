@@ -137,7 +137,7 @@ class JournalRepository(AITOSModule):
         replacement = f"toDateTime64(coalesce({exit_ts}, {entry_ts}), 3, 'UTC')"
         count_result = await self._client.query(
             f"SELECT count() AS n FROM trades WHERE recorded_at = {epoch} "
-            f"AND {repairable}"
+            f"AND {repairable}"  # nosec B608 - values are fixed SQL fragments
         )
         repairable_count = (
             int(count_result.result_rows[0][0]) if count_result.result_rows else 0
