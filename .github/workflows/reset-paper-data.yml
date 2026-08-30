@@ -76,8 +76,8 @@ jobs:
               echo "::error::Deployment path does not exist: $DEPLOY_PATH"
               exit 1
             fi
-            if [ ! -d "$DEPLOY_PATH/.git" ]; then
-              echo "::error::Deployment path is not a Git repository: $DEPLOY_PATH"
+            if [ ! -f "$DEPLOY_PATH/docker-compose.yml" ] && [ ! -f "$DEPLOY_PATH/compose.yml" ]; then
+              echo "::error::No Docker Compose file found under $DEPLOY_PATH"
               exit 1
             fi
             if [ ! -f "$DEPLOY_PATH/scripts/reset_paper_data.sh" ]; then
@@ -86,9 +86,6 @@ jobs:
             fi
 
             cd "$DEPLOY_PATH"
-            git fetch origin main --quiet
-            git checkout --force main
-            git reset --hard origin/main --quiet
             bash scripts/reset_paper_data.sh "$CONFIRMATION"
 
       - name: Cleanup SSH key
