@@ -12,6 +12,8 @@ from .scanner import (
     determine_direction,
 )
 
+# Keep the intelligence package import surface explicit; indicators.py is restored.
+
 __all__ = [
     "DEFAULT_WEIGHTS",
     "DeepValueRLScorer",
