@@ -198,9 +198,7 @@ jobs:
             DEBUG=false
             TESTING=false
             AITOS_DATA_ROOT=${{ env.AITOS_DATA_ROOT }}
-            AITOS_DATA_DISK_UUID=${AITOS_DATA_DISK_UUID}
-            AITOS_HOST_UID=$(id -u)
-            AITOS_HOST_GID=$(id -g)
+            AITOS_DATA_DISK_UUID=${{ secrets.AITOS_DATA_DISK_UUID }}
             REDIS_HOST=redis
             REDIS_PORT=6379
             REDIS_DB=0
