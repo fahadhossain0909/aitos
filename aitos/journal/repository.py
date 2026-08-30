@@ -137,8 +137,10 @@ class JournalRepository(AITOSModule):
                 await self._client.command(
                     f"ALTER TABLE trades ADD COLUMN IF NOT EXISTS {column}"
                 )
-            except Exception as exc:  # noqa: BLE001
-                logger.error("Failed to ensure trade telemetry column %s: %s", column, exc)
+            except Exception as exc:
+                logger.error(
+                    "Failed to ensure trade telemetry column %s: %s", column, exc
+                )
                 raise
 
     async def _repair_legacy_epoch_trade_timestamps(self) -> None:
