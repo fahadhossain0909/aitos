@@ -51,7 +51,7 @@ def test_position_sizing_risk_matches_final_notional_after_leverage_cap():
     result = calculate_position_size(
         equity_usd=10_000.0,
         entry_price=100.0,
-        stop_loss_price=90.0,
+        stop_loss_price=99.0,
         risk_limits=limits,
         requested_risk_pct=5.0,
         volatility_percentile=0.0,
@@ -60,7 +60,7 @@ def test_position_sizing_risk_matches_final_notional_after_leverage_cap():
     )
 
     assert result.position_size_usd == pytest.approx(10_000.0)
-    assert result.risk_amount_usd == pytest.approx(1_000.0)
+    assert result.risk_amount_usd == pytest.approx(100.0)
 
 
 def test_position_sizing_risk_matches_final_notional_after_sector_cap():
