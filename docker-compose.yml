@@ -111,6 +111,7 @@ services:
     env_file: [.env]
     environment:
       REDIS_HOST: redis
+      REDIS_MAX_CONNECTIONS: "256"
       CLICKHOUSE_HOST: clickhouse
       NEO4J_URI: bolt://neo4j:7687
       # Keep the Redis hot working set small; the archive worker preserves history.
