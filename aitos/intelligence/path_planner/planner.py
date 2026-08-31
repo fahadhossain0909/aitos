@@ -14,8 +14,9 @@ an ML model while keeping the same PathPlan contract.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from aitos.intelligence.amt.volume_profile import VolumeProfile
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
@@ -95,9 +96,7 @@ class MarketPathPlanner:
 
         # ---- Explicit extra levels (caller-supplied) ------------------------
         for p, kind in extra_levels:
-            candidates.append(
-                self._candidate(p, price, kind, "none", base_prob=0.45)
-            )
+            candidates.append(self._candidate(p, price, kind, "none", base_prob=0.45))
 
         # ---- Filter noise & de-duplicate ------------------------------------
         candidates = self._dedupe_and_filter(candidates, price)
@@ -251,9 +250,7 @@ class MarketPathPlanner:
         if price <= 0:
             return []
         filtered = [
-            c
-            for c in candidates
-            if abs(c["price"] - price) / price >= MIN_REL_DISTANCE
+            c for c in candidates if abs(c["price"] - price) / price >= MIN_REL_DISTANCE
         ]
         # Sort by price and merge levels within 0.05% of each other
         filtered.sort(key=lambda c: c["price"])
