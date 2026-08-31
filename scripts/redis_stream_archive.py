@@ -210,7 +210,9 @@ async def archive_stream(
     return True
 
 
-async def archive_forever(r: redis.Redis, writer: ArchiveWriter, cursors: dict[str, dict[str, Any]]) -> None:
+async def archive_forever(
+    r: redis.Redis, writer: ArchiveWriter, cursors: dict[str, dict[str, Any]]
+) -> None:
     while True:
         try:
             keys = []
@@ -224,7 +226,9 @@ async def archive_forever(r: redis.Redis, writer: ArchiveWriter, cursors: dict[s
         except (RedisConnectionError, RedisTimeoutError) as exc:
             # Redis is allowed to restart independently. Keep the archive worker
             # alive and retry without losing the durable file cursor.
-            print(f"Redis unavailable; retrying archive connection: {exc!r}", flush=True)
+            print(
+                f"Redis unavailable; retrying archive connection: {exc!r}", flush=True
+            )
             await asyncio.sleep(RETRY)
 
 
