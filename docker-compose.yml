@@ -114,7 +114,7 @@ services:
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     command: ["python3", "run_continual_learning.py"]
     env_file: [.env]
-    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/online_rl/online_rl/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
+    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/online_rl/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
     volumes: [aitos_model_data:/models]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "0.25"
