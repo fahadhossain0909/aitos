@@ -234,6 +234,56 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 if not done:
                     continue
 
+                # Primary recovery has precedence over fallback events when both
+                # are ready in the same wait cycle. This makes failover deterministic
+                # and prevents a stale fallback event from winning a recovery race.
+                if primary_task in done:
+                    primary_ready = primary_task
+                    primary_task = None
+                    try:
+                        data, stream_name = primary_ready.result()
+                        symbol = stream_symbol(stream_name, data)
+                        if symbol in symbol_set:
+                            try:
+                                tick = parse_agg_trade_ws(data)
+                            except Exception as exc:
+                                logger.error(
+                                    "Binance aggregate-trade event invalid; keeping primary under watchdog",
+                                    extra={
+                                        "aitos_extra": {
+                                            "symbol": symbol,
+                                            "error": str(exc),
+                                        }
+                                    },
+                                )
+                            else:
+                                primary_last_data[symbol] = loop.time()
+                                if symbol in fallback_active:
+                                    fallback_active.discard(symbol)
+                                    fallback_task = fallback_tasks[symbol]
+                                    fallback_tasks[symbol] = None
+                                    if (
+                                        fallback_task is not None
+                                        and not fallback_task.done()
+                                    ):
+                                        fallback_task.cancel()
+                                        await asyncio.gather(
+                                            fallback_task, return_exceptions=True
+                                        )
+                                    logger.info(
+                                        "Binance aggregate-trade stream recovered; returning from direct per-symbol fallback",
+                                        extra={"aitos_extra": {"symbol": symbol}},
+                                    )
+                                yield tick
+                                continue
+                    except StopAsyncIteration:
+                        pass
+                    except Exception as exc:
+                        logger.error(
+                            "Binance combined aggregate-trade stream event failed",
+                            extra={"aitos_extra": {"error": str(exc)}},
+                        )
+
                 for symbol in normalized_symbols:
                     task = fallback_tasks[symbol]
                     if (
@@ -270,53 +320,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                                 fallback_streams[symbol].__anext__()
                             )
                     break
-                else:
-                    if primary_task in done:
-                        try:
-                            data, stream_name = primary_task.result()
-                            primary_task = None
-                            symbol = stream_symbol(stream_name, data)
-                            if symbol not in symbol_set:
-                                continue
-                            try:
-                                tick = parse_agg_trade_ws(data)
-                            except Exception as exc:
-                                logger.error(
-                                    "Binance aggregate-trade event invalid; keeping primary under watchdog",
-                                    extra={
-                                        "aitos_extra": {
-                                            "symbol": symbol,
-                                            "error": str(exc),
-                                        }
-                                    },
-                                )
-                                continue
-                            primary_last_data[symbol] = loop.time()
-                            if symbol in fallback_active:
-                                fallback_active.discard(symbol)
-                                fallback_task = fallback_tasks[symbol]
-                                fallback_tasks[symbol] = None
-                                if (
-                                    fallback_task is not None
-                                    and not fallback_task.done()
-                                ):
-                                    fallback_task.cancel()
-                                    await asyncio.gather(
-                                        fallback_task, return_exceptions=True
-                                    )
-                                logger.info(
-                                    "Binance aggregate-trade stream recovered; returning from direct per-symbol fallback",
-                                    extra={"aitos_extra": {"symbol": symbol}},
-                                )
-                            yield tick
-                        except StopAsyncIteration:
-                            primary_task = None
-                        except Exception as exc:
-                            primary_task = None
-                            logger.error(
-                                "Binance combined aggregate-trade stream event failed",
-                                extra={"aitos_extra": {"error": str(exc)}},
-                            )
         except asyncio.CancelledError:
             raise
         finally:
