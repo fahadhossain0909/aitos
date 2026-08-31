@@ -24,6 +24,10 @@ def test_prune_for_boot_buffer_removes_oldest_disposable_files(
     new = disposable / "new.bin"
     old.write_bytes(b"o" * 800)
     new.write_bytes(b"n" * 800)
+    # Explicit mtimes so "oldest first" is deterministic even on fast FS.
+    import os
+    os.utime(old, (1_000_000, 1_000_000))
+    os.utime(new, (2_000_000, 2_000_000))
 
     calls = iter([0, 2 * 1024**3])
     monkeypatch.setattr(maintenance, "_boot_free_bytes", lambda _root: next(calls))
