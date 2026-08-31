@@ -1,105 +1,74 @@
 # Market Path + Exit Intelligence Architecture
 
-> **Status:** Phases A–E implemented (deterministic, explainable)  
+> **Status:** Phases A–F complete (deterministic, explainable)  
 > **Branch:** `feat/market-path-exit-architecture`  
 > **Principle:** Existing production code is never removed unless strictly necessary. Static TP/SL remain as emergency hard stops.
 
-## 1. Motivation — Architectural Imbalance
+## 1. Motivation
 
-Historically AITOS treated:
-
-- **Entry** as a rich multi-signal *decision* problem (scanner, kernel, order-flow, liquidity, RL confidence …)
-- **Exit** primarily as a *risk-control* problem (fixed R-multiples, trailing ATR, hard SL/TP)
-
-This creates an asymmetry. Once a position is open the system largely stops reasoning about *why* the trade was taken and whether the original thesis is still valid.
-
-The new architecture restores symmetry:
+Entry was a rich multi-signal decision problem; Exit was treated mainly as risk-control (fixed R-multiples). This architecture restores symmetry:
 
 ```
-Entry thesis  →  Market Path (where can price go?)  →  Exit Intelligence (is the thesis still alive?)
+Entry thesis → Market Path (where can price go?) → Exit Intelligence (is the thesis still alive?)
 ```
 
-## 2. Core Modules
+## 2. Modules
 
-| Module | Responsibility | Primary Output | Status |
-|--------|----------------|----------------|--------|
-| **Market State Engine (MSE)** | Canonical, explainable snapshot of current market condition | `MarketState` | ✅ Phase A |
-| **Market Path Planner (MPP)** | Ranked probable price destinations + probabilities | `PathPlan` | ✅ Phase B |
-| **Structural Risk Engine (SRE)** | Price level that objectively invalidates the trade thesis → structural SL | `StructuralStop` | ✅ Phase C |
-| **Exit Intelligence Engine (EIE)** | HOLD / MANAGE / EXIT decision with scored reasons | `ExitDecision` | ✅ Phase D |
-| **Position Manager (PM)** | Executes HOLD / REDUCE / TRAIL / EXIT via TradeLifecycle | `PositionAction` | ✅ Phase E |
-| **Execution Guard** | Emergency hard stop + exchange-side protection (unchanged) | hard SL | existing |
+| Module | Output | Status |
+|--------|--------|--------|
+| Market State Engine (MSE) | `MarketState` | ✅ A |
+| Market Path Planner (MPP) | `PathPlan` | ✅ B |
+| Structural Risk Engine (SRE) | `StructuralStop` | ✅ C |
+| Exit Intelligence Engine (EIE) | `ExitDecision` | ✅ D |
+| Position Manager (PM) | `PositionAction` → TradeLifecycle | ✅ E |
+| Offline Exit Replay | static vs eie comparison | ✅ F |
+| Execution Guard (existing) | hard / exchange-side SL | unchanged |
 
-### Decision flow (live)
+## 3. Live decision order (`update_price`)
 
-```
-update_price(trade, price, optional intel context)
-        │
-        ▼
-   Hard SL hit?  ──yes──► EXIT (authoritative, never skipped)
-        │ no
-        ▼
-   PositionManager present?
-        │ yes
-        ▼
-   MSE → MPP → SRE → EIE
-        │
-        ├── EXIT   → close with explainable reason
-        ├── MANAGE → partial reduce + optional structural-stop tighten
-        └── HOLD   → continue; static full-TP may be deferred
-        │
-        ▼
-   Static TP / breakeven / trailing (preserved paths)
-```
-
-## 3. Key Design Rules
-
-1. **TP is a destination, never an automatic exit command** when Exit Intelligence is enabled and action is HOLD.
-2. **SL is structural invalidation first**; hard SL remains the safety net.
-3. **Three-level exit decision**: HOLD / MANAGE / EXIT.
-4. **Momentum slowdown alone never forces EXIT.**
-5. **First versions are deterministic + fully explainable.**
-6. **Existing static / exchange-side SL & emergency stops stay.**
+1. **Hard SL** — always first, never skipped  
+2. **PositionManager** (if injected) → EXIT / MANAGE / HOLD  
+3. Static TP / breakeven / trailing (preserved; HOLD may defer full TP exit)
 
 ## 4. Package layout
 
 ```
-aitos/intelligence/
-├── market_state/          # Phase A
-├── path_planner/          # Phase B
-├── structural_risk/       # Phase C
-└── exit_intelligence/     # Phase D
-
-aitos/trading/
-├── position_manager.py    # Phase E orchestrator
-└── lifecycle.py           # additive wiring (optional injection)
+aitos/intelligence/market_state/     # A
+aitos/intelligence/path_planner/     # B
+aitos/intelligence/structural_risk/  # C
+aitos/intelligence/exit_intelligence/# D
+aitos/trading/position_manager.py    # E
+aitos/trading/lifecycle.py           # additive wiring
+aitos/evaluation/exit_replay.py      # F
+aitos/evaluation/cli.py              # F CLI
 ```
 
-## 5. Integration contract (Phase E)
+## 5. Offline evaluation (Phase F)
 
-- `TradeLifecycle(..., position_manager=PositionManager())` enables the stack.
-- Without injection, behaviour is **identical** to pre-Phase-E code.
-- Hard SL is always evaluated first.
-- `decision.exit` events are published for XAI / journal / learning.
-- `update_price` accepts optional intelligence context (`order_flow`, `volume_profile`, swings, ATR, …).
+```bash
+# Synthetic demo
+python -m aitos.evaluation.cli --demo
 
-## 6. Implementation Roadmap
+# CSV bars (timestamp,open,high,low,close[,volume])
+python -m aitos.evaluation.cli --bars data.csv --side LONG --entry 79000 --sl 78500 --tp 80000 --json
+```
 
-| Phase | Deliverable | Status |
-|-------|-------------|--------|
-| **A** | Market State Engine | ✅ |
-| **B** | Market Path Planner | ✅ |
-| **C** | Structural Risk Engine | ✅ |
-| **D** | Exit Intelligence Engine | ✅ |
-| **E** | Position Manager + TradeLifecycle wiring | ✅ |
-| **F** | Offline evaluation harness (replay) | Next |
+`compare_policies(scenario, bars)` returns side-by-side PnL, R-multiple, hold bars, exit reasons and `eie_better`.
 
-## 7. Safety & Non-Goals
+## 6. Design rules (enforced in code)
 
-- Does **not** remove human-approval requirements for production live orders.
-- Does **not** claim higher win-rate; aims for higher expected value per trade.
-- Paper-trading and offline replay (Phase F) remain mandatory before live promotion.
+- TP is a destination, not an automatic exit command when EIE=HOLD  
+- SL = structural invalidation first; hard SL is the safety net  
+- Momentum slowdown alone never forces EXIT  
+- All scoring deterministic + auditable reasons  
+- No existing production exit path removed
+
+## 7. Safety
+
+- Human approval for production live orders still required  
+- Paper + offline replay before any live promotion of EIE policy  
+- Does not claim higher win-rate; aims for higher expected value per trade
 
 ---
 
-*Next: Phase F — offline evaluation harness to replay historical trades under the new policy vs static 1R/2R.*
+*Architecture phases A–F delivered on `feat/market-path-exit-architecture`. Next steps: paper-trading soak, metric dashboards, optional calibrated probability models on top of the same contracts.*
