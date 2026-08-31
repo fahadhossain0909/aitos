@@ -30,6 +30,6 @@ def test_redis_has_memory_safety_margin_and_safe_eviction_policy():
     assert "2gb" in compose
     assert "--maxmemory-policy" in compose
     assert "noeviction" in compose
-    assert 'mem_limit: 2.5g' in compose
+    assert "mem_limit: 2.5g" in compose
     assert "--aof-use-rdb-preamble" in compose
-    assert 'start_period: 120s' in compose
+    assert "start_period: 120s" in compose
