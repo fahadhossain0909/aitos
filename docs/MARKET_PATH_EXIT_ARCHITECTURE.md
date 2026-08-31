@@ -1,6 +1,6 @@
 # Market Path + Exit Intelligence Architecture
 
-> **Status:** Phases A–D implemented (deterministic, explainable)  
+> **Status:** Phases A–E implemented (deterministic, explainable)  
 > **Branch:** `feat/market-path-exit-architecture`  
 > **Principle:** Existing production code is never removed unless strictly necessary. Static TP/SL remain as emergency hard stops.
 
@@ -27,130 +27,79 @@ Entry thesis  →  Market Path (where can price go?)  →  Exit Intelligence (is
 | **Market Path Planner (MPP)** | Ranked probable price destinations + probabilities | `PathPlan` | ✅ Phase B |
 | **Structural Risk Engine (SRE)** | Price level that objectively invalidates the trade thesis → structural SL | `StructuralStop` | ✅ Phase C |
 | **Exit Intelligence Engine (EIE)** | HOLD / MANAGE / EXIT decision with scored reasons | `ExitDecision` | ✅ Phase D |
-| **Position Manager (PM)** | Executes HOLD / REDUCE / TRAIL / EXIT | actions to lifecycle | ⏳ Phase E |
+| **Position Manager (PM)** | Executes HOLD / REDUCE / TRAIL / EXIT via TradeLifecycle | `PositionAction` | ✅ Phase E |
 | **Execution Guard** | Emergency hard stop + exchange-side protection (unchanged) | hard SL | existing |
 
-### Decision flow
+### Decision flow (live)
 
 ```
-MARKET DATA
-     │
-     ▼
-Order-Flow / Structure / Liquidity / Auction / Vol / Funding / OI
-     │
-     ▼
-MARKET STATE ENGINE  ─────────────────────►  ENTRY ENGINE (existing)
-     │                                              │
-     ├── MARKET PATH PLANNER                        │
-     │         │                                    │
-     │         ▼                                    ▼
-     │    possible destinations                  ENTRY
-     │         │                                    │
-     └── STRUCTURAL RISK ENGINE  ────────────────────────────┘
-               │
-               ▼
-        EXIT INTELLIGENCE ENGINE
-               │
-               ▼
-        HOLD  /  MANAGE  /  EXIT
-               │
-               ▼
-        POSITION MANAGER  →  TradeLifecycle (existing)
+update_price(trade, price, optional intel context)
+        │
+        ▼
+   Hard SL hit?  ──yes──► EXIT (authoritative, never skipped)
+        │ no
+        ▼
+   PositionManager present?
+        │ yes
+        ▼
+   MSE → MPP → SRE → EIE
+        │
+        ├── EXIT   → close with explainable reason
+        ├── MANAGE → partial reduce + optional structural-stop tighten
+        └── HOLD   → continue; static full-TP may be deferred
+        │
+        ▼
+   Static TP / breakeven / trailing (preserved paths)
 ```
 
 ## 3. Key Design Rules
 
-1. **TP is a destination, never an automatic exit command.**  
-   The Path Planner surfaces targets; EIE decides whether to take them.
+1. **TP is a destination, never an automatic exit command** when Exit Intelligence is enabled and action is HOLD.
+2. **SL is structural invalidation first**; hard SL remains the safety net.
+3. **Three-level exit decision**: HOLD / MANAGE / EXIT.
+4. **Momentum slowdown alone never forces EXIT.**
+5. **First versions are deterministic + fully explainable.**
+6. **Existing static / exchange-side SL & emergency stops stay.**
 
-2. **SL is structural invalidation first, risk budget second.**  
-   ```
-   Risk budget  →  Structural SL distance  →  Position size
-   ```
-   (never the reverse)
-
-3. **Three-level exit decision**
-   - **HOLD** — thesis intact, expected remaining edge positive
-   - **MANAGE** — warning signals, tighten stop / partial reduce / wait
-   - **EXIT** — multiple independent evidences that thesis is broken
-
-4. **“Momentum slowing” alone is never sufficient for EXIT.**  
-   Healthy slowdown (structure intact, OF supportive, liquidity target alive) → HOLD.  
-   Dangerous slowdown (OF reversal + absorption + structure break + target probability collapse) → EXIT.
-
-5. **First versions are deterministic + fully explainable.**  
-   Every score component is auditable. ML/RL layers may sit on top later once sufficient labelled experience exists.
-
-6. **Existing static / exchange-side SL & hard emergency stops stay.**  
-   They protect against software failure, websocket loss, flash crashes, etc.
-
-## 4. Package layout (implemented)
+## 4. Package layout
 
 ```
 aitos/intelligence/
 ├── market_state/          # Phase A
-│   ├── models.py          # MarketState + enums
-│   └── engine.py          # MarketStateEngine
 ├── path_planner/          # Phase B
-│   ├── models.py          # PathDestination, PathPlan
-│   └── planner.py         # MarketPathPlanner
 ├── structural_risk/       # Phase C
-│   ├── models.py          # StructuralStop
-│   └── engine.py          # StructuralRiskEngine
 └── exit_intelligence/     # Phase D
-    ├── models.py          # ExitAction, ExitReason, ExitDecision
-    └── engine.py          # ExitIntelligenceEngine
+
+aitos/trading/
+├── position_manager.py    # Phase E orchestrator
+└── lifecycle.py           # additive wiring (optional injection)
 ```
 
-## 5. Expected Remaining Edge (ERE)
+## 5. Integration contract (Phase E)
 
-Once a position is open, EIE computes:
-
-```
-ERE = Σ (p_i * upside_i) - Σ (q_j * downside_j) - transaction_cost
-```
-
-- ERE ≫ 0 → HOLD
-- ERE ≈ 0 → MANAGE
-- ERE < 0  → EXIT (when combined with high exit_score)
-
-This replaces static 1R/2R rules with a continuously updated, probabilistic edge estimate.
+- `TradeLifecycle(..., position_manager=PositionManager())` enables the stack.
+- Without injection, behaviour is **identical** to pre-Phase-E code.
+- Hard SL is always evaluated first.
+- `decision.exit` events are published for XAI / journal / learning.
+- `update_price` accepts optional intelligence context (`order_flow`, `volume_profile`, swings, ATR, …).
 
 ## 6. Implementation Roadmap
 
 | Phase | Deliverable | Status |
 |-------|-------------|--------|
-| **A** | Market State Engine | ✅ Done + tests |
-| **B** | Market Path Planner | ✅ Done + tests |
-| **C** | Structural Risk Engine | ✅ Done + tests |
-| **D** | Exit Intelligence Engine | ✅ Done + tests |
-| **E** | Position Manager integration into TradeLifecycle (additive) | Next |
-| **F** | Offline evaluation harness (replay old trades under new policy) | After E |
+| **A** | Market State Engine | ✅ |
+| **B** | Market Path Planner | ✅ |
+| **C** | Structural Risk Engine | ✅ |
+| **D** | Exit Intelligence Engine | ✅ |
+| **E** | Position Manager + TradeLifecycle wiring | ✅ |
+| **F** | Offline evaluation harness (replay) | Next |
 
-**No Deep RL in the first versions.** Deterministic scoring first; RL only after we can audit the feature-based decisions.
+## 7. Safety & Non-Goals
 
-## 7. Integration Contract with Existing Code
-
-- `TradeLifecycle.update_price` continues to honour the emergency hard SL and exchange-side stops.
-- New path (Phase E): when an open trade exists, EIE is consulted *before* the static TP check.  
-  If EIE says HOLD, a static TP hit becomes a *partial-reduce candidate* rather than forced full exit (configurable).
-- All new modules are pure / side-effect free; callers publish events on the existing Redis Streams bus so XAI / journal / learning can consume them without coupling.
-- Position sizing already lives in `risk/position_sizing.py`; SRE supplies the structural distance that sizing should use.
-
-## 8. Research Anchors
-
-- Multi-level Order-Flow Imbalance (MLOFI) carries measurable short-horizon predictive information (Cont et al., Xu/Gould/Howison, Kolm et al.).
-- Volume Profile HVN ≈ acceptance / stall zones; LVN ≈ faster travel zones (auction-market theory).
-- Structural invalidation (BOS / CHoCH / protected swing) is the objective definition of “thesis broken” used by professional discretionary frameworks.
-
-These are used as *feature sources*, never as black-box oracles.
-
-## 9. Safety & Non-Goals
-
-- This architecture does **not** remove the requirement for human approval on production live orders.
-- It does **not** claim higher win-rate; it claims higher *expected value per trade* by letting winners run when the path remains open and cutting when the thesis is objectively dead.
-- Paper-trading and offline replay (Phase F) are mandatory before any live promotion.
+- Does **not** remove human-approval requirements for production live orders.
+- Does **not** claim higher win-rate; aims for higher expected value per trade.
+- Paper-trading and offline replay (Phase F) remain mandatory before live promotion.
 
 ---
 
-*Next concrete step: Phase E — additive wiring of ExitDecision into TradeLifecycle without removing existing SL/TP paths.*
+*Next: Phase F — offline evaluation harness to replay historical trades under the new policy vs static 1R/2R.*
