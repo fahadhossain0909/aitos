@@ -3,32 +3,9 @@
 
 from __future__ import annotations
 
-import asyncio
-import signal
-
-from redis.asyncio import Redis
-
-from aitos.app import (
-    PaperPortfolioTracker,
-    build_system,
-    initialize_all,
-    run_scan_and_trade_cycle,
-    shutdown_all,
-)
-from aitos.config.settings import get_settings
-from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.data.repository import MarketDataRepository
-from aitos.exchange.binance import BinanceFuturesAdapter
-from aitos.execution.order_executor import SimulatedOrderExecutor
-from aitos.health_server import HealthServer
-from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.journal.repository import JournalRepository
-from aitos.learning.recorder import LearningExperienceRecorder
-from aitos.logging_setup import configure_logging, get_logger
-from aitos.resilience import RetryExhaustedError, retry_with_backoff
-from aitos.xai.attention_explainer import AttentionExplainer
-from aitos.xai.ml_explainer import TradeOutcomeClassifier
-from aitos.xai.persistence import load_attention_model, save_attention_model
+from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.run_paper_trading")
 SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
