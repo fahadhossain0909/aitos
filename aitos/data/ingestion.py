@@ -125,6 +125,11 @@ class DataIngestionService(AITOSModule):
     def version(self) -> str:
         return "1.7.1"
 
+    @property
+    def live_state(self) -> LiveMarketStateStore:
+        """Shared live order-flow / liquidity store for Exit Intelligence context."""
+        return self._live_state
+
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
@@ -421,11 +426,6 @@ class DataIngestionService(AITOSModule):
                         },
                     )
 
-        # Complete the downstream sinks before returning from the batch. This
-        # gives callers a deterministic completion boundary and prevents a
-        # direct _process_trade_batch call from reporting success while its
-        # persistence is still sitting in an unstarted worker queue. The
-        # semaphore still bounds concurrent sink I/O under burst load.
         if accepted:
             await asyncio.gather(
                 *(io_one(trade, payload) for trade, payload in accepted)
