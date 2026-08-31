@@ -1,18 +1,15 @@
 """Exit Intelligence Engine — continuation vs invalidation.
 
-Core rules (from the architecture design):
-
+Core rules:
 * Momentum slowdown alone is NEVER sufficient for EXIT.
-* Multiple independent evidences of thesis breakdown → EXIT.
-* Expected Remaining Edge (ERE) > 0 → prefer HOLD.
-* ERE ≈ 0 → MANAGE.
-* ERE < 0 and exit_score high → EXIT.
-
-All scoring is deterministic and fully auditable via the reasons list.
+* Structure break / thesis INVALIDATED → EXIT without hysteresis.
+* Soft exit pressure requires N consecutive observations (hysteresis).
+* ERE is a *heuristic* edge (soft-normalised scores, not calibrated EV).
 """
 
 from __future__ import annotations
 
+from collections import defaultdict, deque
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
@@ -30,15 +27,21 @@ from aitos.intelligence.market_state.models import (
 )
 from aitos.intelligence.path_planner.models import PathPlan
 from aitos.intelligence.structural_risk.models import StructuralStop
+from aitos.intelligence.trade_thesis.models import (
+    ThesisEvaluation,
+    ThesisHealth,
+    TradeThesis,
+)
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.intelligence.exit_intelligence")
 
-# Score thresholds
 EXIT_SCORE_EXIT = 0.65
 EXIT_SCORE_MANAGE = 0.40
-ERE_HOLD_THRESHOLD = 0.15  # relative edge units
+ERE_HOLD_THRESHOLD = 0.15
 ERE_EXIT_THRESHOLD = -0.05
+DEFAULT_EXIT_CONFIRM_TICKS = 2
+DEFAULT_TEMPORAL_WINDOW = 8
 
 
 def _clamp01(x: float) -> float:
@@ -48,6 +51,16 @@ def _clamp01(x: float) -> float:
 class ExitIntelligenceEngine:
     def __init__(self, config: Mapping[str, Any] | None = None) -> None:
         self._cfg = dict(config or {})
+        self._exit_confirm_ticks = int(
+            self._cfg.get("exit_confirm_ticks", DEFAULT_EXIT_CONFIRM_TICKS)
+        )
+        self._temporal_window = int(
+            self._cfg.get("temporal_window", DEFAULT_TEMPORAL_WINDOW)
+        )
+        self._momentum_history: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=self._temporal_window)
+        )
+        self._exit_pressure_streak: dict[str, int] = defaultdict(int)
 
     def evaluate(
         self,
@@ -59,10 +72,11 @@ class ExitIntelligenceEngine:
         market_state: MarketState,
         path_plan: PathPlan | None = None,
         structural_stop: StructuralStop | None = None,
+        thesis: TradeThesis | None = None,
+        thesis_eval: ThesisEvaluation | None = None,
         transaction_cost_pct: float = 0.0004,
         timestamp: datetime | None = None,
     ) -> ExitDecision:
-        """Produce a HOLD / MANAGE / EXIT decision with full reason audit trail."""
         side = side.upper()
         ts = timestamp or market_state.timestamp or datetime.now(timezone.utc)
         reasons: list[ExitReason] = []
@@ -75,19 +89,63 @@ class ExitIntelligenceEngine:
         }
         notes: list[str] = []
 
-        # ---- 1. Thesis / structure health ------------------------------------
+        mom_score = self._momentum_numeric(market_state)
+        hist = self._momentum_history[symbol]
+        hist.append(mom_score)
+        features["momentum_numeric"] = mom_score
+        if len(hist) >= 3:
+            decay = hist[0] - hist[-1]
+            features["momentum_decay"] = decay
+            if decay >= 0.25:
+                reasons.append(
+                    ExitReason(
+                        "momentum_decaying",
+                        f"Momentum trajectory decay={decay:.2f} over {len(hist)} ticks",
+                        +0.06,
+                    )
+                )
+
+        hard_invalidation = False
+        if thesis_eval is not None:
+            features["thesis_consistency"] = thesis_eval.consistency_score
+            if thesis_eval.health == ThesisHealth.INVALIDATED:
+                hard_invalidation = True
+                reasons.append(
+                    ExitReason(
+                        "thesis_invalidated",
+                        f"Thesis INVALIDATED: {', '.join(thesis_eval.breached_invalidations)}",
+                        +0.35,
+                    )
+                )
+            elif thesis_eval.health == ThesisHealth.DEGRADED:
+                reasons.append(
+                    ExitReason(
+                        "thesis_degraded",
+                        f"Thesis DEGRADED (consistency={thesis_eval.consistency_score:.2f})",
+                        +0.12,
+                    )
+                )
+            else:
+                reasons.append(
+                    ExitReason(
+                        "thesis_intact",
+                        f"Thesis INTACT (consistency={thesis_eval.consistency_score:.2f})",
+                        -0.10,
+                    )
+                )
+
         reasons.extend(self._structure_reasons(side, market_state))
         reasons.extend(self._order_flow_reasons(side, market_state))
         reasons.extend(self._momentum_reasons(market_state))
+        if market_state.structure == StructureBias.BROKEN:
+            hard_invalidation = True
 
-        # ---- 2. Path / destination health ------------------------------------
         ere, path_reasons = self._path_and_ere(
             side, current_price, path_plan, transaction_cost_pct
         )
         reasons.extend(path_reasons)
         features["expected_remaining_edge"] = ere
 
-        # ---- 3. Proximity to structural stop ---------------------------------
         if structural_stop is not None:
             stop_dist_pct = (
                 abs(current_price - structural_stop.stop_price) / current_price
@@ -102,7 +160,6 @@ class ExitIntelligenceEngine:
                     )
                 )
 
-        # ---- 4. Reversal risk from MarketState -------------------------------
         rr = market_state.reversal_risk
         features["reversal_risk"] = rr
         if rr >= 0.55:
@@ -116,24 +173,31 @@ class ExitIntelligenceEngine:
         elif rr <= 0.25:
             reasons.append(
                 ExitReason(
-                    "low_reversal_risk",
-                    f"MarketState reversal_risk={rr:.2f}",
-                    -0.08,
+                    "low_reversal_risk", f"MarketState reversal_risk={rr:.2f}", -0.08
                 )
             )
 
-        # ---- Aggregate exit score -------------------------------------------
         raw_score = sum(r.weight for r in reasons)
-        # Map roughly from [-1.5, +1.5] → [0, 1]
         exit_score = _clamp01(0.5 + raw_score / 2.0)
         features["exit_score_raw"] = raw_score
         features["exit_score"] = exit_score
 
-        # ---- Decision policy ------------------------------------------------
-        action, reduce_frac = self._decide(exit_score, ere, reasons)
-        notes.append(f"action={action.value} score={exit_score:.3f} ere={ere:.4f}")
+        if hard_invalidation or exit_score >= EXIT_SCORE_EXIT:
+            self._exit_pressure_streak[symbol] += 1
+        else:
+            self._exit_pressure_streak[symbol] = 0
+        streak = self._exit_pressure_streak[symbol]
+        features["exit_pressure_streak"] = float(streak)
 
-        decision = ExitDecision(
+        action, reduce_frac = self._decide(
+            exit_score, ere, hard_invalidation=hard_invalidation, streak=streak
+        )
+        notes.append(
+            f"action={action.value} score={exit_score:.3f} ere={ere:.4f} "
+            f"streak={streak} hard_inv={hard_invalidation}"
+        )
+
+        return ExitDecision(
             symbol=symbol,
             side=side,
             action=action,
@@ -145,22 +209,19 @@ class ExitIntelligenceEngine:
             features=features,
             notes=tuple(notes),
         )
-        logger.debug(
-            "ExitDecision",
-            extra={
-                "aitos_extra": {
-                    "symbol": symbol,
-                    "action": action.value,
-                    "score": exit_score,
-                    "ere": ere,
-                }
-            },
-        )
-        return decision
 
-    # ------------------------------------------------------------------
-    # Reason generators
-    # ------------------------------------------------------------------
+    def reset_symbol(self, symbol: str) -> None:
+        self._momentum_history.pop(symbol, None)
+        self._exit_pressure_streak.pop(symbol, None)
+
+    @staticmethod
+    def _momentum_numeric(state: MarketState) -> float:
+        return {
+            MomentumState.STRONG: 0.9,
+            MomentumState.MODERATING: 0.65,
+            MomentumState.WEAK: 0.35,
+            MomentumState.EXHAUSTED: 0.1,
+        }.get(state.momentum, 0.5)
 
     def _structure_reasons(self, side: str, state: MarketState) -> list[ExitReason]:
         reasons: list[ExitReason] = []
@@ -170,19 +231,11 @@ class ExitIntelligenceEngine:
             )
         elif side == "LONG" and state.structure == StructureBias.BEARISH:
             reasons.append(
-                ExitReason(
-                    "structure_against",
-                    "LONG but structure is BEARISH",
-                    +0.22,
-                )
+                ExitReason("structure_against", "LONG but structure is BEARISH", +0.22)
             )
         elif side == "SHORT" and state.structure == StructureBias.BULLISH:
             reasons.append(
-                ExitReason(
-                    "structure_against",
-                    "SHORT but structure is BULLISH",
-                    +0.22,
-                )
+                ExitReason("structure_against", "SHORT but structure is BULLISH", +0.22)
             )
         elif (side == "LONG" and state.structure == StructureBias.BULLISH) or (
             side == "SHORT" and state.structure == StructureBias.BEARISH
@@ -220,15 +273,12 @@ class ExitIntelligenceEngine:
         ):
             reasons.append(
                 ExitReason(
-                    "of_supportive",
-                    f"Order-flow {of.value} supports position",
-                    -0.10,
+                    "of_supportive", f"Order-flow {of.value} supports position", -0.10
                 )
             )
         return reasons
 
     def _momentum_reasons(self, state: MarketState) -> list[ExitReason]:
-        """Momentum alone never forces EXIT — only contributes mild pressure."""
         reasons: list[ExitReason] = []
         if state.momentum == MomentumState.EXHAUSTED:
             reasons.append(
@@ -241,9 +291,7 @@ class ExitIntelligenceEngine:
         elif state.momentum == MomentumState.WEAK:
             reasons.append(
                 ExitReason(
-                    "momentum_weak",
-                    "Momentum WEAK (mild; needs confirmation)",
-                    +0.05,
+                    "momentum_weak", "Momentum WEAK (mild; needs confirmation)", +0.05
                 )
             )
         elif state.momentum == MomentumState.STRONG:
@@ -262,86 +310,72 @@ class ExitIntelligenceEngine:
         reasons: list[ExitReason] = []
         if plan is None or current_price <= 0:
             return 0.0, reasons
-
-        # Expected upside / downside from remaining destinations
         if side == "LONG":
-            upside_dests = plan.upside
-            downside_dests = plan.downside
+            upside_dests, downside_dests = plan.upside, plan.downside
         else:
-            upside_dests = plan.downside  # “upside” for a short = lower prices
-            downside_dests = plan.upside
+            upside_dests, downside_dests = plan.downside, plan.upside
 
-        expected_gain = 0.0
-        total_up_prob = 0.0
-        for d in upside_dests:
-            rel = abs(d.price - current_price) / current_price
-            expected_gain += d.probability * rel
-            total_up_prob += d.probability
+        def _soft_mass(dests: tuple) -> tuple[float, float]:
+            if not dests:
+                return 0.0, 0.0
+            raw = [max(0.0, float(d.probability)) for d in dests]
+            total = sum(raw)
+            if total <= 1e-12:
+                return 0.0, 0.0
+            scale = 1.0 / total if total > 1.0 else 1.0
+            expected = sum(
+                (p * scale) * (abs(d.price - current_price) / current_price)
+                for d, p in zip(dests, raw)
+            )
+            return expected, total * scale if total > 1.0 else total
 
-        expected_loss = 0.0
-        total_down_prob = 0.0
-        for d in downside_dests:
-            rel = abs(d.price - current_price) / current_price
-            expected_loss += d.probability * rel
-            total_down_prob += d.probability
+        expected_gain, total_up = _soft_mass(upside_dests)
+        expected_loss, total_down = _soft_mass(downside_dests)
+        ere = expected_gain - expected_loss - cost_pct
 
-        # Normalise roughly if probabilities are not a partition
-        if total_up_prob + total_down_prob > 1e-9:
-            scale = 1.0  # keep absolute; they are already 0-1 scores
-        else:
-            scale = 1.0
-
-        ere = (expected_gain - expected_loss) * scale - cost_pct
-
-        if total_up_prob >= 0.55:
+        if total_up >= 0.55:
             reasons.append(
                 ExitReason(
                     "path_upside_alive",
-                    f"Upside path probability mass ≈ {total_up_prob:.2f}",
+                    f"Upside path probability mass ≈ {total_up:.2f}",
                     -0.12,
                 )
             )
-        elif total_up_prob <= 0.25 and total_down_prob >= 0.40:
+        elif total_up <= 0.25 and total_down >= 0.40:
             reasons.append(
                 ExitReason(
                     "path_upside_collapsed",
-                    f"Upside mass {total_up_prob:.2f}, downside {total_down_prob:.2f}",
+                    f"Upside mass {total_up:.2f}, downside {total_down:.2f}",
                     +0.18,
                 )
             )
-
         if ere > ERE_HOLD_THRESHOLD:
             reasons.append(
-                ExitReason(
-                    "positive_ere",
-                    f"Expected remaining edge={ere:.4f}",
-                    -0.10,
-                )
+                ExitReason("positive_ere", f"Heuristic remaining edge={ere:.4f}", -0.10)
             )
         elif ere < ERE_EXIT_THRESHOLD:
             reasons.append(
-                ExitReason(
-                    "negative_ere",
-                    f"Expected remaining edge={ere:.4f}",
-                    +0.15,
-                )
+                ExitReason("negative_ere", f"Heuristic remaining edge={ere:.4f}", +0.15)
             )
-
         return ere, reasons
 
     def _decide(
         self,
         exit_score: float,
         ere: float,
-        reasons: list[ExitReason],
+        *,
+        hard_invalidation: bool,
+        streak: int,
     ) -> tuple[ExitAction, float]:
-        # Hard EXIT only when score is high AND edge is non-positive
-        if exit_score >= EXIT_SCORE_EXIT and ere <= ERE_HOLD_THRESHOLD:
+        if hard_invalidation and exit_score >= EXIT_SCORE_MANAGE:
             return ExitAction.EXIT, 1.0
-
+        if (
+            exit_score >= EXIT_SCORE_EXIT
+            and ere <= ERE_HOLD_THRESHOLD
+            and streak >= self._exit_confirm_ticks
+        ):
+            return ExitAction.EXIT, 1.0
         if exit_score >= EXIT_SCORE_MANAGE or (ere <= 0.0 and exit_score >= 0.30):
-            # Partial reduce suggestion scales with score
             frac = _clamp01((exit_score - 0.25) / 0.5)
             return ExitAction.MANAGE, round(max(0.25, min(0.75, frac)), 2)
-
         return ExitAction.HOLD, 0.0

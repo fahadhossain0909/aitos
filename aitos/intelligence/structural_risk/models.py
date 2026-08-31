@@ -18,7 +18,9 @@ class StructuralStop:
     distance: float  # absolute
     distance_pct: float  # relative to entry
     invalidation_type: (
-        str  # structure_break | value_area | liquidity | swing | emergency_fallback
+        str
+        # structure_break | protected_swing | major_swing | value_area |
+        # liquidity | micro_swing | emergency_fallback
     )
     confidence: float  # 0–1
     buffer_applied: float  # price units added for noise/liquidity

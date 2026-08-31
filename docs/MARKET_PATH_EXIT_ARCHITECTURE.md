@@ -1,74 +1,53 @@
 # Market Path + Exit Intelligence Architecture
 
-> **Status:** Phases A–F complete (deterministic, explainable)  
-> **Branch:** `feat/market-path-exit-architecture`  
+> **Status:** Phases A–F complete; Phase G (v2) in progress on `feat/exit-intelligence-v2`  
 > **Principle:** Existing production code is never removed unless strictly necessary. Static TP/SL remain as emergency hard stops.
 
-## 1. Motivation
-
-Entry was a rich multi-signal decision problem; Exit was treated mainly as risk-control (fixed R-multiples). This architecture restores symmetry:
-
-```
-Entry thesis → Market Path (where can price go?) → Exit Intelligence (is the thesis still alive?)
-```
-
-## 2. Modules
+## Modules
 
 | Module | Output | Status |
 |--------|--------|--------|
 | Market State Engine (MSE) | `MarketState` | ✅ A |
-| Market Path Planner (MPP) | `PathPlan` | ✅ B |
-| Structural Risk Engine (SRE) | `StructuralStop` | ✅ C |
-| Exit Intelligence Engine (EIE) | `ExitDecision` | ✅ D |
-| Position Manager (PM) | `PositionAction` → TradeLifecycle | ✅ E |
-| Offline Exit Replay | static vs eie comparison | ✅ F |
-| Execution Guard (existing) | hard / exchange-side SL | unchanged |
+| Market Path Planner (MPP) | `PathPlan` | ✅ B (heuristic; calibration later) |
+| Structural Risk Engine (SRE) | `StructuralStop` | ✅ C + G hierarchy |
+| Exit Intelligence Engine (EIE) | `ExitDecision` | ✅ D + G hysteresis/temporal |
+| Trade Thesis | `TradeThesis` / `ThesisEvaluation` | ✅ G |
+| Position Manager (PM) | `PositionAction` | ✅ E + G |
+| Market Context Provider | live OF/liquidity into lifecycle | ✅ G |
+| Offline Exit Replay | static vs eie | ✅ F (simplified inputs) |
 
-## 3. Live decision order (`update_price`)
+## Live decision order
 
-1. **Hard SL** — always first, never skipped  
-2. **PositionManager** (if injected) → EXIT / MANAGE / HOLD  
-3. Static TP / breakeven / trailing (preserved; HOLD may defer full TP exit)
+1. **Hard SL** — always first  
+2. **PositionManager** → EXIT / MANAGE / HOLD  
+3. Static TP / breakeven / trailing (HOLD may defer full TP)
 
-## 4. Package layout
+`handle_event` injects live market context when a `MarketContextProvider` is attached.
 
+## Phase G
+
+### Trade Thesis
+Machine-readable entry rationale. EIE asks: *is the original thesis still consistent?*
+
+### Structural hierarchy
 ```
-aitos/intelligence/market_state/     # A
-aitos/intelligence/path_planner/     # B
-aitos/intelligence/structural_risk/  # C
-aitos/intelligence/exit_intelligence/# D
-aitos/trading/position_manager.py    # E
-aitos/trading/lifecycle.py           # additive wiring
-aitos/evaluation/exit_replay.py      # F
-aitos/evaluation/cli.py              # F CLI
-```
-
-## 5. Offline evaluation (Phase F)
-
-```bash
-# Synthetic demo
-python -m aitos.evaluation.cli --demo
-
-# CSV bars (timestamp,open,high,low,close[,volume])
-python -m aitos.evaluation.cli --bars data.csv --side LONG --entry 79000 --sl 78500 --tp 80000 --json
+structure_break > protected_swing > major_swing > value_area > liquidity > micro_swing > fallback
 ```
 
-`compare_policies(scenario, bars)` returns side-by-side PnL, R-multiple, hold bars, exit reasons and `eie_better`.
+### Exit hysteresis
+- Structure break / thesis INVALIDATED → EXIT immediately  
+- Soft high exit-score needs N consecutive observations (`exit_confirm_ticks`, default 2)
 
-## 6. Design rules (enforced in code)
+### Temporal memory
+Per-symbol momentum ring buffer; mild `momentum_decaying` reason.
 
-- TP is a destination, not an automatic exit command when EIE=HOLD  
-- SL = structural invalidation first; hard SL is the safety net  
-- Momentum slowdown alone never forces EXIT  
-- All scoring deterministic + auditable reasons  
-- No existing production exit path removed
+### ERE (honest)
+Heuristic scores soft-normalised; not calibrated statistical EV.
 
-## 7. Safety
+## Still open
 
-- Human approval for production live orders still required  
-- Paper + offline replay before any live promotion of EIE policy  
-- Does not claim higher win-rate; aims for higher expected value per trade
-
----
-
-*Architecture phases A–F delivered on `feat/market-path-exit-architecture`. Next steps: paper-trading soak, metric dashboards, optional calibrated probability models on top of the same contracts.*
+1. Path graph + destination state machine  
+2. Probability calibration  
+3. Richer MANAGE actions (WAIT / PROTECT / TRAIL)  
+4. Full L2/footprint synchronized replay  
+5. Production fail-closed if PM required but missing  

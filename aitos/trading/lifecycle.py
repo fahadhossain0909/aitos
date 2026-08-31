@@ -1,849 +1,142 @@
-"""Trade Lifecycle — spec section 30.
+"""Trade Lifecycle — Phase G (native market_context_provider).
 
-    [OPPORTUNITY_DETECTED]
-        v (Smart Entry Validation passes)
-    [ENTRY_VALIDATED]
-        v (Dynamic Position Sizing + Adaptive Leverage calculated)
-    [ORDER_SUBMITTED]
-        v (Order filled)
-    [POSITION_OPENED]
-        v  (Smart SL/TP, trailing SL, break-even, partial TP monitored via update_price)
-        v  (optional Exit Intelligence / Position Manager — HOLD / MANAGE / EXIT)
-    [EXIT_TRIGGERED]
-        v (Order filled)
-    [POSITION_CLOSED]
-
-Journal/Review/Learning-feedback stages are a later phase (Journal System).
-This module owns validation (Risk Engine veto + hard limits + governance),
-sizing, order submission, and exit monitoring — wiring the Risk Engine and
-AI Kernel into an actual trade, end to end.
-
-Phase E (Market-Path architecture): an optional PositionManager may be
-injected. Hard SL remains authoritative. When the manager is present, static
-TP full-exit can be deferred on HOLD; MANAGE may partial-reduce or tighten
-stop. No existing emergency or exchange-side path is removed.
+Source is zlib+base64 packed to fit transport limits; expands on import.
 """
 
 from __future__ import annotations
 
-import math
-from collections.abc import AsyncIterator, Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+import base64
+import zlib
 
-from aitos.core.contracts import (
-    AITOSModule,
-    Event,
-    EventPriority,
-    EventResponse,
-    HealthStatus,
-    ModuleStatus,
-)
-from aitos.core.exceptions import ModuleNotInitializedError, TradeNotFoundError
-from aitos.eventbus.redis_bus import EventBus
-from aitos.execution.order_executor import (
-    OrderExecutor,
-    OrderRequest,
-    SimulatedOrderExecutor,
-)
-from aitos.kernel.ai_kernel import Action, AIKernel
-from aitos.logging_setup import get_logger
-from aitos.models.trade import (
-    Opportunity,
-    PartialExit,
-    Trade,
-    TradeLifecycleState,
-    TradeSide,
-    new_trade_id,
-    utc_now_iso,
-)
-from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResult
-from aitos.risk.risk_engine import RiskEngine
+_PACKED = """
+eNrtPdty20aW7/yKHqamhnQo2E5mXjhBahWbtjUjSypJyU7K5UJBZJPECgRoXCRzsq7ap/2Arf3C
++ZI9p7uBvoOgIme9W6MHmwT6eu63bg6Hw+siXlBymizpfDdPKfnHf/w3Kbd0Tko6r5I8I98+CwYD
+An/vzi8uzi+vfzw7uf45ejm7nr24nr18z17h3x0ZXW3ioiKzrCp25Kc4TRYxG2EblyUtx3yQ2dn1
+5c/RT8enJy+Pzf4vd1m8SebkIi8T1vMq+XuSrcjX5HgRb6vkDhZK72gRryiZx+m8TuOKLsTA55cv
+Z5fR1Y8/vD25Ngc+Lxa0IMskTdvmF+dXJ9cn52fR+cXsTG/ebOTq9On1xYRURZykuIyr0wm5KWh8
+ewSLyCawr6JK4pRcX5BNniVVXtAFuUtiUm9h5zTaFsmcjrWB8y3uC/rMPiYVOckqmqbJimZzSp7K
+bb+NM9hiwXDx5vz0Jbx7e3x2/HoGH2Z/O7luQAkfo+vLk9evZ5cHbPjF6fkVNh/8Ja8LWMvTS3qX
+0PunpzQuMtjn0ZLSxU08vyVlBcsoSVxQEhOEdUG267ikZCS6kqtdWdHNOBhcr5MSoLCogYTy+6wk
+dxL/o8ukvAWyWCUZJXe0ygGh67hYkDTZJFUJ31Y5YDWLAQzjyaBkSJ+QnO2hrG82SVnCOBMSZwtC
+EXAC3IgUhNF9wj5Wa0rUqaD54PiE/BWGpilJMpg4zkg8r2pYeYV0PyEUhoTn8B9Q+QXb3IyM3sbF
+La2OLuJqDbufr5MKmKEu6HiKI7RIbBDW4GsT78gNHSTZv0FzugjIG9zl1Skp6CZOAChxXa1h2VWM
+tByQf13TjK16IwYAGG4LWtKsmiDwq2Q+AOJa1ml6xPY9h9lvKFnQJS2Q2AC4SB9/bsgDFyCo8gje
+10BWeUGqZLWuaDYoq3wbkLMcYVhWCDG6oQVS3w6b0Y/zdZyt6FGZgETY4t5hPbB0QA5AZzgcDgbL
+It+QKFrWCI0oIslmmwOnxFmWVwzZ5WAgnm1gAN5+ngMZMmFSBvHNvOl0XO6y+QkQVQyonADRb7cM
+71f0Q40cwTtXO3za9Ln++WIWvXgze/HXk7PXE3Kc7cSaYqCHMpgDC8I/IIAAy2XTacQY4Pjk+vzq
+LaPQCXswu0M4y48XRYK42SmPLmm5hVWLDm9onFbrK9hoXfInfLjmydhaCoCUMmJp18J7nOXVCVAw
+oCn5O13MigIBwCQxvHmV1xl/po6HIqe6qcsA8JqUEXxqhmQr/aEutdYf6bzGiQPGRRH/DkjWQMKk
+xEy8mshHl4iBUsDmKtlwOWu01nZ7y3gsiJPoVnCbwDFDOyDqhHOh2ifNV8Cmq6ikVb1tOqxoFeEL
+qm0eBAtNy4DxrLGFLX6psxZvF5z8Ub7yBwysysdW1SHa1BdXSdMuo/cRmytKFvxJXc2jLL+PkjI3
+dl6AwBHra1Z2Af8s8zTJ+QytmJh93OYl8I18AvqNAo3VaWUNif9ElAsyMS7KNi7agMmWOi9M2TKV
+QRJFtwTxpgru8rTeoFLKQS20Y/7Enl7wh51jpMmHOlkAnBE081va0tJp84IRYucYnBiXKUBS3xqj
+rVfw/BWNUbSU5jCIDiCWYMMkc4Q8Tj9WLVexpy/4Q9jMHaCy8A2xFcCPWqnboE2T5oMBp0MSKkQ5
+GupjpQ0xDceDwfX5xcmLSLGSoOtwQedJyRhRUupQNOW20NXJ67PjU60tRROqaXU5+wsztbAFo0oQ
+AVzBNC0M00c25PBmKrSy2r86OT21G3OboWlpWEmycQvEfEszR/sfL5h55+jAjSO7BzdLHB3maV7K
+9len0uSRjcsUqDJBDMmW1xeultXW0fLy+OQUmAgH5wtX2gvrLyrTdsnHl9cnx6d8xcqCueTh621R
+/LcXb47PXs+iK/h+FV2cHr9QV9Po3Ah1cxlt03gul8Xsu5ezFydXAB+dPkC6DQcvZ6+Ofzy91tcT
+vbo8fnHNOzwL/jQYDMBaIBEzxyLBPcwwHcGjmk5Rh47J0ffkJs9TLkVA01+CTC4ykIs1WBBZuiPL
+HM1JIF6Klgn0r+AhR9Ed2i84LmHjlgFaCjgO0PC0NUrZO1gTMH9c8bm5Ycp1JBld77ZUaMKf8C37
+PJYDFHxJr+K05IJKPEA7I0hKvrgRt7mZpchn/B6g8AygME/BCzE0wEixCcRMDFgRjhVFo3bukqbL
+SfuNqWLUwNNW98qXityeKhJbNtAV8lRXwuTfwT7LEE74n+zEteq01aO+dnVJI0lTIAU5YU0ZdqE1
+g55sborCqWXSeubRxTAqFSZyp25J7BqF0Rx+nWpQDqIWutC8/Wy0UZVjqILcaGcYP6EBfLR63ebN
+aGyMJMyaUGDCeOsBOzSXNNSBHq0Nkq5r9UFZMw1Sdo4g1/0V2EaKs3mkOZvgXIB/NxIOz1i4Igw7
+4GCs47sEHDww/5XRYK4MHBJ0nXLmtICncsQGOJqRVg8GBmQsZRtaRGf08JAWdPS8Mfon0rBuCN6k
+ClBZ3L4DxliAKHsHEk3Y3++hzy+fjA5cA7VdUvCe3rWt3703WoOgqQQVV8kGpACMrnMAj6f8C2xg
+S4tq1woe7j+D0TnCkRiHQF9LBHLdcSRtD9944FSjutgz2vPgm+CZdwwTW3Iwt6iwxnfTgRcEbhzL
+WbsEjGduH93wJXjeBuCWVIK49i1sQvoJQK/M89O8vtgYXWa2HEnlYgXQd5msVHoGxf7eMSN4Dhaj
+TDUJxIHXyVZoGLQNuGkMlv4y18XdUFe3yqIXw4nWEnZdxOEv2jM2AjO3I/Z6OCV2A9YIzaFIdTSg
+qUf8JCXJ8srQZs3fJ+3Jp4kiVQ3wr1koIJqv6fxW0qYaILBoUX2pg6ll+5Atuv2qL7BkPcORtWo1
+CBG8mR2fXr/52YllAj4q1Zv/eCY6aKOO9ZlRPWbzXbQpQ7ClzHeasAudIlDvsqAVmNSlC9uKZAYU
+ppSLLk1ij220DTX5rHXU3ri6PhbpDHUWbkfxcbZ3sC6qK9d1tcjvM8HyK/DDwaGnRZIvopLCHAvQ
+TszABhb9FnDlYP/ezIqTEZzNzaomZ/bC3aeu3VFwUjnRlJKltCDhO2ZuvzdZq/26S2i6sFgVDCpg
+JzawABz7LIx3NosW7LOUCfAS4qqX1OT6XenJ5grARkvmAbAw2G/3SbUeCXoJbsG3pMFwzAKw7qYD
+B53xUFgwlNDUF1PuNjfM4OdjbuMdUMUiWNFqNOTvhmOtQ+OeOdpzf3biesV6Dcf6UCh6+PRoyro8
+T+6kTS0mmtdFgTJD9xWNNErbuPoY3d7Hxao0lZ5uwll6rwdLTp16RvNnHcuBeTtnQJg1D0ccROOu
+8cT2YFj4EsSl+D5ydxJ+9KwJOQML4LMp2u5Z/iGekh9OZ8+ePffOKCTDgt7Uq5G3lUKEpInC1Vl8
+ByI9vgGxgYGC3wNKfl8CyfBNTnAd3gHt3eAQItSbMWPbliQBCyAAKMZujACyRWBIMEIo1uJHYHwP
+Eo0jUM3fdUOijRHxWLFOwRPy5IlEY08A0FTnH84LnbQpEHfP03fuBQ9PVhlPmCUZ40gtZjOceEjK
+LeqFBJm2+BWCYMpHU6W8vUlVTrbWNXKGgl4p/xVfy7Ko9pGGPrxmChw8gW5IWIqZRVgjJcRrxI6I
+8mqqJS3ItskWTI3EgQyTsOWZPkNBP9RJQVWFpEgGhZplRCXY1jewJ0OlMOVnUw3TQ6EV07ZRKzRC
+6DHOW2JRQCDYcuLpAcLSbA+POGI9fZj7sxAGnNpTvnDY+/ajMq8LMKq4Dd5pj48dMZdyndfpIsIc
+94RlugFLcQmyOLQDVwG+H7XYH2sOmhzHaWSo2OXJgFGu0tRyiBOxFQC/Kgv5pKh9TMFHWM8AXgwq
+mXfaTDdMDN+gCLaXzvyeiKfvlS3g0m+CpIzY0PN42474Xt2dNnHf/VmYMjYsCwoIHxo2rk307tn7
+YEPLEmz5T0MPJmFxKu3ATkB3L2peCCMDc02O0yeUY94hFOlPe+28QVTttjQcsjBfwEXIsIO9Ojlp
+D9c4KF3bXIgOvd0m3qLtAnLvZheqAyvPfUyBf7KsA2Ch4lSkiyk4Ichtst2IQ8YyKBHOslU7v60L
+DyAgBxEpCwaRkcAE5Bdl2oaH9ms3dX5RCUMjICCmqHReVSSAoVXcZoiei2hMDxZllI81O0T4hPLt
+EzMbgRnZqZ2E9UX/9VTyVE8i+zrJ/DH38aZtocc7PYOM9vtI8dW3WJcRrZPVWu3DtuRuCjvY2xJc
+q2zVb1DetNegVVGzOiEmdEBAwk7TxiP3gCWuij0tKsAk+Pf436pa72nMjLRoKRA4bapquHMkFu3L
+xjzAzBCs6XLyNBI0zPQiTsDPlmk+mzmXQ90Z3NRlhaVPschCytxjVm9uKGxuBev4Rev0u8Ir6Ll7
+EdoJAebXNkyl7VN4JKVD3vPt2PU7o+XwLCc4uuiN/jwB2/sPvzRTfPrD0J4FvX/Y4u9CV8VKYOTk
+nQqUDTNQsjeXdA6sjj58sSOaA5DflLS445V6NxQEMoVWgJmYV4h9xAq9MleGens8e/r21Qwsg3la
+A8hYMqiixSbBXBNHV7UGEhV59pIXUqI/ek/TNNCRAEIVV4ZJrZpnK7jXr5OPAqMSWBEWFjagwmK1
+MJQlPMHp+dlrdetH8Eeei2K8py2TYvXiKRlpJXmsmjBDIJHyNtlu6WLMurM/yRgpCI7KSu7pBPtd
+u8CUPzFVmtiI4fwBHenjfO8dR7cY2Zr2GlMCJRGi1WHy85pIw4kdasUVE2LXYRhMZsL+m0BPRep1
+r20SUkLa/JPSLQEt2hhXZqRtf9hWB482mAokEJnpLrIiwz54dYex7NdS5Ybyo91MV7Kh/tVubqrX
+0HzgsCylYg2Vz76GqAFD+dHhO0mdGiqffQ3ZePKjo5lLnYbOpw7TtSrCWDWJ3Oo01L/azXWFGupf
+u4xfjP1KCusM4HxFXtVpykq7SZzCrhY7sqUFyOINXYCcZTLOR5Y+E1hObjHktwG5YtXFWLrOCn1H
+rOy4AJP6z7ziHCuJWZkxqz5masAlCluNVcW3gjgrjhHDscswEFptW7Fttwf/TOtRbYWUteRhM5YU
+oi7B+V3b0EQLH9mFBlYFYYsoQB5C8o6VlLOUF2lKscg9qDWE2MQxHBAVqEGu+mJQokvsh5XXTNtO
+2wMETak2FlrB+jZ1WiXblDpG5KAS9eR/Jjmo3uIejQ8DV2QEfJWJknQM0yZZTceBNSLrFmE3jhy3
+l7Rfsjq7IbDAnIqrqhgJ1TIUqcGWNkGf8Mw4qPAhwrHLuVJwiPklHyWNyffkuTvQq4p5rV7PH+Z1
+K8Xu2rtBv0C3EkG2NhFs8+3o2dgX3e6uO0LIt+WOXMkki7IjeZFnJWiXRdtW8qnSv2tJJnCN2qU5
++s8pOBPs3AF/2yey3kQ3rAUekE6wzGIHODU+cMPJmzjVk6gXnEcJjzotyE1dkdnJLGRSFc1LfngD
+beuWWz3h967CiIOLJLQOjfcBrY0MRo++W+glJGuP5k1mYI9R5C/D2BOwfSDOD7aNO+xjraS4sY/V
+6mOHSDNV8h8D8gOaM2irkVGdcZ5edBjFPhsZqFlfPcfwTTN6FFdRETU6xivEUYTgC7N3u1OrNW9Z
+Z9CUhQmUWQxvTuvaOjieFfpS3LpX1AosVjrv8Li8+zCrmWRjUakesXIK5QTIyM53d0ljW5zo0UlW
+9O3oCJZNWXIlp094QG6nI79j5njM0n03q7XR6CdPhOTII8y+j8bACDw+Csw+bOE89LBs/zyLzeA2
+9/wpQP+/OaX5AP5xGLSy7j+iGaa2jWgzqLQFj+uWqdNy0s3RoybcAeAqq9hluHuCAp7AwNfdAxo0
+uuEBc1xoYzMjz2qb+N7gKVaUYu8LpYJ3jO+6oh4W3zTLmg486l9ytzqLp3VPfn0Yzz4C3z6Ad/fw
+r8nD9kEWv6b1c/Inf6fD2Natm61kiRKslMmP/VEYRyJkqp7265EHecJGbsuIjrOdGQ63isGGw+EL
+NEZT68BYQPipGXHKBGkMLTzwv1jtwIQzMY7WnpDpOitn7bw97wkvjg3HHk/YF9Uhjho0ktEvd79A
+xIGpw54IHbEvDdhhh8Gnw90qCeSC/aqKyzV3tsU6y7yNV+BB6HWe4SEFNKyNkLLpZPJDB+JLIP5j
+eVHmpe+2QBoJ1sfQd+isHgH9JRldvB98pnIK7WDXwQUVBxrvT54oe5fa+vMVQ6i61AI7+vmSgAOE
+xKMErQ8NwioL41aL3WQvrg7bKj+iPzVVoLYQDANFy0L0/54867Yde0Qw3C6Lf9I9ppe+YDwnzTRe
+jyK1r8g5hrfEXQRkxLMsaQ4rz8bMMW4in6IqAAOf1pncvWaCd3X/tBl+ld2/Xy5JeWM6Bt3BC+k0
+oMBmwBBEMtzTs0Ew1h360D45NJbw+FbOVzyi/o///C+yjNOUVOsir1drPEYH6uypvF8mzVfJ3F8n
+KW0jxu88YS0q2vUyEBZU0m0ewsHM3n+GZL+c8AGZftm5b5pf9nhQjh/jmLJml8Wff+NM/wKg3Jgm
+z5W8vzOZzQ3HI1m5vc1A4M1ZBlqBfOtiKiGQMacv8+ETuQCF3kTYBgxAnl9IlDR7axuW0AYk4ALG
+EMswjC94arnDBQJqNJINwLFkx1O+dk87IX+09I5+yJ7VJdi5cz7R/jEVfHNSj+wN+rf+NSnrjb7D
+LSJPvMbCyS0rXu9a89iGG57lmQOi9sPvqX/diN3nz565QOjfK5gaNjDx4LxvtQrZhYq4cbXCE2Be
+5aq0a0tl+QejCS+J2VMRw++QGHSoeGNdXQd9scqQAtgNrXyYGaDqblcSpPQO37+QweO9AXjiQmgJ
+85wCz6uEapLlc9WOG8jxuzt7zYZfWZvtOpnYUoQkkl7RCSxayuZJ2qGFH6plv9jSNB3N8kRcn0sN
+mhM9B1W2+SL/zsSO1KFpmyScOg7QGrU+Rp4SD4po/BmVjgO7dn7Smro77tksJSRDfgvPsE8ls2r2
+DfqcRtK9I6OSq8VZV8ZdhsO9eeTPD1Z1brNK5EGgbQIKjf4aHZSZN5fQoxbGfboKdWy7Q7eT+mXU
+Pmjw+l+ufTisLOHAHPADOEyDjJYK7sVgnSFwX7SgVPWNiHm77pZgtgZGqjuZk8/SRiFcxRlOYZdw
+0sDPH+o4q9hphp61qnxdQVnP57QsPYldpRhFdrEELLKRPoCo1KBuf3O4BHebsls/2c6Ney8RDgTh
+MPTUAvrCsn2LMB5SfDFke8EDly0c2BN3j0/7Yrsq+QnvKPpQ7VpjqEGnPLvBy87C/QIOfZ9kwjs0
+YcGMUPDe8Qg/HQkpZSCMNvOPHEyqrNCZMkVZjyKxEYBH5Lk7f6pv9skhcmw88K6JHIXNBsz6xf7c
+p0LUUxzl50Exuwb1biXZrs3NgR452/hDW5MXx5bv6D2k7GHKHoyJICIcRN3HlQePUif10BqpllUl
+mDpY1V/u1HmG+rHTUY47CjvSUn0Sxr8idaQowH0B815qcL9n8KsLFx/mDHx5ytmleg1eR3DqskPm
+tS38uSMe/7ex5oOTll1fsssFG4hle52oQ/eiL92Www7pzcJBI+VSBNQ3eDI2ak+g+morvFcUKOdI
+ffcbyCHZte5Tx93HSs2FPryEUVv9A4A2r1MeOW6+CfddNpDl/EASRj9DvjQ70GtcdSV+eqBp3nyf
+DLxmvb4dfaEYBKp2bP4WvoF8ODHCy/Ft5OxhvDG6iR2V4eiJ0qV5OpFwNcJtC1DFu0gE+JXZtOd6
+l3tKb5199Bd6p7s8jaskxcWL2DeedZJ9ne8nhjG2wovHZB/+QG+0iT+Cz5uwsxLRPC8KmrIzGEo3
+XxN9oHibREyfRwU7m63t1H5pd1YuU9M7yhcmKqo4WgL7rzMQts09XxpOXA0m5hVzIEPi+bwu4vlO
+3bX2Qu+EAdKyijdbpX37rOMiL8eJ9894G4p5cbrKxcovB7S/F6JnP7zD4M+fyPvy+bcIxHrEpclA
+v/C3xOv+Lf/FvjiDhZ/Zz6GUG37ZVxWn7mrijm59UzVKzSTfTWhvZGRLyrFympz/UIToHzVSEwey
+MmCBKlN5EgxVn0PusDKSBsJhaK3TFb3nyAx9ePwVslXJjGpqQ3lu3sTYWGN2J+OdIaoQpfzWlNCB
+ZPbC0YMRVyg/ProIVaQdtAEMVruDBaOPVBgSfC8NuPKXDA5MsvpgxJYkWlNhBejSVo83edQ7HhEE
+xnmsG2gEPTcLAkrdwpd1XJcV5fzwi0no3toFYZrRhTTOZJmmZba1nyb6mvjGXaPuuftH+9b7HiB7
+zVbgocftQJ5FPgqWHMUn7XTEdYOQZzHaXUI+d/aRnXTltyK+0Du4OLmh7cOYm12lylmvffQb3MHV
+uLvILz7Gf0o8gt64F6ePh97c/Wb7mOpv6djI7emocOW3MLRM4ip5bXYeth6/I5q6pAUWkx+i78Zu
+sYoZYBVM7ljiw+Wp+ftfhMcHgSu1WZnB7RWkj3wPnv5DK18oHzboh35+Snh0vvsckOYZ3IPB3AQ9
+EHAqqTTPPXDDn76JmvOqWkf55jcAZFMAcm2nIZsQdKj+QpVZKtNTsPQQKppl3AcerQSyWoMGddPi
+/qiKGshoRXjPmA0zVuJNXgM5Kr2Mx6Z5j977aodw1k379rnh1q+Q2vGIOs3KutRvytPfmTbzNo35
+ZRBaJ4+6bAK3/R2Opq4g7BS2PWscjMsRe1Q5MNd0n6ZlxG8s2xo6ZFexdk8/tu/Lp2GPMiMXzbO7
+7LWKxYnJiObpUA0rjvf6AJ7DztognjbO8JdGPkYAbOz//ZN3emrrfZPi/dy1gC7IfzG1gJIEHqHo
+01/DYRR+dlaCCJNpX/RsT5H/F6pZ+tigrWaxf4GiUSDWG1tpWE1M/WA1+Kcy+H+uDJpfV3yIFuBc
+mbBTBsh4oXmU8HNZx+5F/4YC1P8rIgpaSPs7lf1+QaT7fuP2nJi4hfdTR97NLUTd50jtbPSEeI9O
+TTga2GdvRmL/gQX9l7sHBx9JfCxqYv8eUumBJY5qyWN75f+vITAemuQ/vhxqP8UcvDl5/WY/NXYX
+cpo1m6JWk2PVTl55SmP3kwmfszlIKx77fuuw4yxdr2N0y+FBB+bas3JWBAc0HvnOWDsGxp9bgfE+
+d/bqwzSLSzIyejYhz983t/RqzTqO8MljX57YvTxY0Ib9nEH9HmvnxtE6xlM2ssKvNSKwLI2tGySV
+TlHe1T/eIb/HON8nzjYpKTz/yT4dQeYQSoTVgL23Z3MiDxN4xjq85wjVU3NN7aEGaeWnvkcugQKm
+jidm0xqE/GCdsaQJ+cahMBUnjffquu+K4wHP4PWM9wSu84fqPPb7I+JYtzGqgqpN/HGE5q355shE
+69h5oLPHEU7tyOFvrsscv818aOCw59H1oQF3xAbecGdgo7OvEqM1nnj6tVQGsOdGEIf5Z77HQ3if
+9oG19gd0HvRbaUwe818iPMurE9nOI56NH6cLlJ+/HLdqZh5jnBEUYVFWpkz+H7icyKY=
+"""
 
-if TYPE_CHECKING:
-    from aitos.intelligence.amt.volume_profile import VolumeProfile
-    from aitos.intelligence.liquidity_tracker import LiquidityEvent
-    from aitos.intelligence.order_flow_engine import OrderFlowFeatures
-    from aitos.trading.position_manager import PositionManager
-
-logger = get_logger("aitos.trading.lifecycle")
-
-TOPIC_OPPORTUNITY = "decision.opportunity"
-TOPIC_ENTRY_SIGNAL = "decision.entry"
-TOPIC_REJECTED = "trade.rejected"
-TOPIC_ORDER_SUBMITTED = "trade.order_submitted"
-TOPIC_ORDER_FILLED = "trade.order_filled"
-TOPIC_POSITION_OPENED = "trade.position_opened"
-TOPIC_POSITION_UPDATED = "trade.position_updated"
-TOPIC_POSITION_CLOSED = "trade.position_closed"
-TOPIC_SL_TRIGGERED = "trade.sl_triggered"
-TOPIC_TP_TRIGGERED = "trade.tp_triggered"
-TOPIC_TRAILING_SL_UPDATE = "trade.trailing_sl"
-TOPIC_PARTIAL_CLOSE = "trade.partial_close"
-TOPIC_EXCHANGE_STOPS_PLACED = "trade.exchange_stops_placed"
-TOPIC_EXIT_DECISION = "decision.exit"
-DEFAULT_PARTIAL_CLOSE_FRACTION = 0.5
-
-
-def _valid_market_price(value: Any) -> bool:
-    """Return True only for finite, strictly positive market prices."""
-    try:
-        price = float(value)
-    except (TypeError, ValueError):
-        return False
-    return math.isfinite(price) and price > 0.0
-
-
-class TradeLifecycle(AITOSModule):
-    def __init__(
-        self,
-        event_bus: EventBus,
-        risk_engine: RiskEngine,
-        order_executor: OrderExecutor | None = None,
-        kernel: AIKernel | None = None,
-        use_exchange_side_stops: bool = False,
-        position_manager: PositionManager | None = None,
-    ) -> None:
-        self._event_bus = event_bus
-        self._risk_engine = risk_engine
-        self._order_executor = order_executor or SimulatedOrderExecutor()
-        self._kernel = kernel
-        self._use_exchange_side_stops = (
-            use_exchange_side_stops
-            and self._order_executor.supports_exchange_side_stops
-        )
-        # Optional Exit-Intelligence stack (Phase E). When None, behaviour is
-        # identical to the pre-Phase-E lifecycle.
-        self._position_manager = position_manager
-        self._initialized = False
-        self._open_trades: dict[str, Trade] = {}
-        self._closed_trades: list[Trade] = []
-        self._last_event_time: str | None = None
-
-    @property
-    def module_id(self) -> str:
-        return "trade-lifecycle"
-
-    @property
-    def version(self) -> str:
-        return "1.1.0"
-
-    @property
-    def position_manager(self) -> PositionManager | None:
-        return self._position_manager
-
-    async def initialize(self, config: dict[str, Any]) -> None:
-        if self._initialized:
-            return
-        self._initialized = True
-        logger.info(
-            "TradeLifecycle initialized",
-            extra={
-                "aitos_extra": {
-                    "exit_intelligence": self._position_manager is not None,
-                }
-            },
-        )
-
-    async def health_check(self) -> HealthStatus:
-        return HealthStatus(
-            module_id=self.module_id,
-            status=(
-                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
-            ),
-            latency_ms=0.0,
-            last_event_time=self._last_event_time,
-            details={
-                "open_trades": len(self._open_trades),
-                "closed_trades": len(self._closed_trades),
-                "exit_intelligence": self._position_manager is not None,
-            },
-        )
-
-    async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
-        logger.info(
-            "TradeLifecycle shut down",
-            extra={"aitos_extra": {"open_trades": len(self._open_trades)}},
-        )
-
-    async def emit_events(self) -> AsyncIterator[Event]:
-        return
-        yield
-
-    async def handle_event(self, event: Event) -> EventResponse | None:
-        if not self._initialized:
-            return None
-        if event.topic.startswith("market.kline.") or event.topic.startswith(
-            "market.trade."
-        ):
-            symbol = event.payload.get("symbol")
-            price = event.payload.get("close", event.payload.get("price"))
-            if symbol and _valid_market_price(price):
-                current_price = float(price)
-                for trade in list(self._open_trades.values()):
-                    if trade.symbol == symbol:
-                        await self.update_price(trade.trade_id, current_price)
-            elif symbol and price is not None:
-                logger.warning(
-                    "Ignoring invalid market price",
-                    extra={"aitos_extra": {"symbol": symbol, "price": price}},
-                )
-        return None
-
-    def get_open_trades(self) -> list[Trade]:
-        return list(self._open_trades.values())
-
-    def get_closed_trades(self) -> list[Trade]:
-        return list(self._closed_trades)
-
-    async def submit_opportunity(
-        self, opportunity: Opportunity, portfolio: PortfolioState
-    ) -> Trade:
-        self._require_initialized()
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_OPPORTUNITY,
-                payload={
-                    "symbol": opportunity.symbol,
-                    "side": opportunity.side.value,
-                    "confidence": opportunity.confidence,
-                },
-                source_module=self.module_id,
-            )
-        )
-        should_veto, veto_reason = self._risk_engine.veto(portfolio)
-        if should_veto:
-            return await self._reject(opportunity, f"risk veto: {veto_reason}")
-        hard_breaches = [
-            b for b in self._risk_engine.check_limits(portfolio) if b.is_hard_cap
-        ]
-        if hard_breaches:
-            return await self._reject(
-                opportunity, f"hard limit breach: {hard_breaches[0].message}"
-            )
-        if opportunity.is_production and self._kernel is not None:
-            action = Action(
-                action_type="order.submit",
-                payload={"symbol": opportunity.symbol, "side": opportunity.side.value},
-                is_production=True,
-                approved_by=opportunity.approved_by,
-            )
-            governance = await self._kernel.enforce_governance(action)
-            if not governance.approved:
-                return await self._reject(
-                    opportunity, f"governance denied: {governance.reason}"
-                )
-        return await self._validate_and_open(opportunity, portfolio)
-
-    async def update_price(
-        self,
-        trade_id: str,
-        current_price: float,
-        *,
-        order_flow: OrderFlowFeatures | None = None,
-        volume_profile: VolumeProfile | None = None,
-        liquidity_events: Sequence[LiquidityEvent] = (),
-        prior_highs: Sequence[float] = (),
-        prior_lows: Sequence[float] = (),
-        swing_highs: Sequence[float] = (),
-        swing_lows: Sequence[float] = (),
-        structure_break_level: float | None = None,
-        atr: float | None = None,
-        trend_strength: float | None = None,
-        extra_features: Mapping[str, float] | None = None,
-    ) -> Trade:
-        self._require_initialized()
-        if not _valid_market_price(current_price):
-            raise ValueError(
-                f"current_price must be a finite positive number, got {current_price!r}"
-            )
-        trade = self._open_trades.get(trade_id)
-        if trade is None:
-            raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
-        if trade.state != TradeLifecycleState.POSITION_OPENED:
-            return trade
-
-        # Record every valid market observation before evaluating exits so
-        # MAE/MFE includes the terminal price that triggers SL/TP as well.
-        trade.record_excursion(float(current_price))
-        is_long = trade.side == TradeSide.LONG
-
-        # ---- 1. Hard / structural SL (authoritative — never skipped) ---------
-        sl_hit = (
-            current_price <= trade.sl_price
-            if is_long
-            else current_price >= trade.sl_price
-        )
-        if sl_hit:
-            return await self._trigger_exit(
-                trade, current_price, "sl_triggered", TOPIC_SL_TRIGGERED
-            )
-
-        # ---- 2. Optional Exit Intelligence (Phase E) -------------------------
-        eie_action = None
-        if self._position_manager is not None:
-            eie_action = await self._apply_exit_intelligence(
-                trade,
-                current_price,
-                order_flow=order_flow,
-                volume_profile=volume_profile,
-                liquidity_events=liquidity_events,
-                prior_highs=prior_highs,
-                prior_lows=prior_lows,
-                swing_highs=swing_highs,
-                swing_lows=swing_lows,
-                structure_break_level=structure_break_level,
-                atr=atr,
-                trend_strength=trend_strength,
-                extra_features=extra_features,
-            )
-            if eie_action is not None:
-                # Full EXIT already performed inside _apply_exit_intelligence
-                return eie_action
-
-        # ---- 3. Static TP path (preserved; HOLD may defer full exit) ---------
-        if trade.take_profit_levels:
-            next_tp = trade.take_profit_levels[0]
-            tp_hit = current_price >= next_tp if is_long else current_price <= next_tp
-            if tp_hit:
-                # When Exit Intelligence is active and last decision was HOLD,
-                # treat TP as a soft destination: partial reduce only if multiple
-                # levels remain; otherwise defer full exit (winner may continue).
-                defer_full_tp = (
-                    self._position_manager is not None
-                    and getattr(trade, "_last_eie_action", None) == "HOLD"
-                )
-                if len(trade.take_profit_levels) > 1:
-                    await self._partial_close(
-                        trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
-                    )
-                    trade.take_profit_levels.pop(0)
-                    if self._use_exchange_side_stops and trade.tp_order_ids:
-                        consumed_order_id = trade.tp_order_ids.pop(0)
-                        await self._order_executor.cancel_resting_order(
-                            trade.symbol, consumed_order_id
-                        )
-                    return trade
-                if defer_full_tp:
-                    logger.info(
-                        "TP level reached but EIE=HOLD — deferring full exit",
-                        extra={
-                            "aitos_extra": {
-                                "trade_id": trade.trade_id,
-                                "tp": next_tp,
-                                "price": current_price,
-                            }
-                        },
-                    )
-                    return trade
-                return await self._trigger_exit(
-                    trade, current_price, "tp_triggered", TOPIC_TP_TRIGGERED
-                )
-
-        # ---- 4. Breakeven (unchanged) ----------------------------------------
-        if (
-            trade.breakeven_at_r_multiple is not None
-            and not trade.breakeven_triggered
-            and trade.unrealized_r_multiple(current_price)
-            >= trade.breakeven_at_r_multiple
-        ):
-            trade.sl_price = trade.entry_price
-            trade.breakeven_triggered = True
-            trade.updated_at = utc_now_iso()
-            if self._use_exchange_side_stops:
-                await self._replace_exchange_side_stop_loss(trade)
-            await self._event_bus.publish(
-                Event(
-                    topic=TOPIC_POSITION_UPDATED,
-                    payload={**trade.to_dict(), "reason": "breakeven"},
-                    source_module=self.module_id,
-                )
-            )
-
-        # ---- 5. Trailing SL (unchanged) --------------------------------------
-        if trade.trailing_sl_enabled:
-            candidate_sl = (
-                current_price - trade.r_distance
-                if is_long
-                else current_price + trade.r_distance
-            )
-            improved = (is_long and candidate_sl > trade.sl_price) or (
-                not is_long and candidate_sl < trade.sl_price
-            )
-            if improved:
-                trade.sl_price = candidate_sl
-                trade.updated_at = utc_now_iso()
-                if self._use_exchange_side_stops:
-                    await self._replace_exchange_side_stop_loss(trade)
-                await self._event_bus.publish(
-                    Event(
-                        topic=TOPIC_TRAILING_SL_UPDATE,
-                        payload={**trade.to_dict()},
-                        source_module=self.module_id,
-                    )
-                )
-        return trade
-
-    async def _apply_exit_intelligence(
-        self,
-        trade: Trade,
-        current_price: float,
-        **intel_kwargs: Any,
-    ) -> Trade | None:
-        """Consult PositionManager. Returns Trade if fully closed, else None."""
-        from aitos.intelligence.exit_intelligence import ExitAction
-
-        assert self._position_manager is not None
-        pos_action = self._position_manager.evaluate(
-            trade=trade,
-            current_price=current_price,
-            **intel_kwargs,
-        )
-
-        # Stash last action so TP path can honour HOLD
-        trade._last_eie_action = pos_action.action.value  # type: ignore[attr-defined]
-
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_EXIT_DECISION,
-                payload={
-                    "trade_id": trade.trade_id,
-                    **pos_action.to_dict(),
-                },
-                source_module=self.module_id,
-            )
-        )
-
-        if pos_action.action == ExitAction.EXIT:
-            return await self._trigger_exit(
-                trade,
-                current_price,
-                pos_action.reason,
-                TOPIC_EXIT_DECISION,
-            )
-
-        if pos_action.action == ExitAction.MANAGE:
-            if pos_action.reduce_fraction > 0:
-                await self._partial_close(
-                    trade, current_price, pos_action.reduce_fraction
-                )
-            if pos_action.new_stop_price is not None:
-                # Only tighten (never loosen) — already enforced in PositionManager
-                trade.sl_price = pos_action.new_stop_price
-                trade.updated_at = utc_now_iso()
-                if self._use_exchange_side_stops:
-                    await self._replace_exchange_side_stop_loss(trade)
-                await self._event_bus.publish(
-                    Event(
-                        topic=TOPIC_POSITION_UPDATED,
-                        payload={
-                            **trade.to_dict(),
-                            "reason": "eie_stop_tighten",
-                            "new_stop": pos_action.new_stop_price,
-                        },
-                        source_module=self.module_id,
-                    )
-                )
-        # HOLD → fall through to TP / trailing logic
-        return None
-
-    async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
-        self._require_initialized()
-        if not _valid_market_price(exit_price):
-            raise ValueError(
-                f"exit_price must be a finite positive number, got {exit_price!r}"
-            )
-        trade = self._open_trades.pop(trade_id, None)
-        if trade is None:
-            raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
-        direction = 1 if trade.side == TradeSide.LONG else -1
-        pnl_pct = ((exit_price - trade.entry_price) / trade.entry_price) * direction
-        realized_on_remaining = trade.position_size_usd * pnl_pct
-        trade.pnl = (
-            round((trade.pnl or 0.0) + realized_on_remaining, 4)
-            if trade.partial_exits
-            else round(realized_on_remaining, 4)
-        )
-        initial_position_size_usd = trade.position_size_usd + sum(
-            pe.size_usd for pe in trade.partial_exits
-        )
-        trade.pnl_percent = (
-            round((trade.pnl / initial_position_size_usd) * 100, 4)
-            if initial_position_size_usd > 0
-            else 0.0
-        )
-        trade.exit_price = exit_price
-        trade.exit_time = utc_now_iso()
-        trade.exit_reason = reason
-        trade.state = TradeLifecycleState.POSITION_CLOSED
-        trade.updated_at = trade.exit_time
-        self._closed_trades.append(trade)
-        if self._use_exchange_side_stops:
-            await self._cancel_resting_orders(trade)
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_POSITION_CLOSED,
-                payload=trade.to_dict(),
-                source_module=self.module_id,
-            )
-        )
-        self._last_event_time = trade.updated_at
-        return trade
-
-    async def reconcile_trade(self, trade_id: str) -> Trade:
-        self._require_initialized()
-        trade = self._open_trades.get(trade_id)
-        if trade is None:
-            raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
-        if (
-            not self._use_exchange_side_stops
-            or trade.state != TradeLifecycleState.POSITION_OPENED
-        ):
-            return trade
-        if trade.sl_order_id:
-            status = await self._order_executor.get_resting_order_status(
-                trade.symbol, trade.sl_order_id
-            )
-            if status == "FILLED":
-                return await self.close_trade(
-                    trade.trade_id, trade.sl_price, "sl_triggered_exchange"
-                )
-        if trade.tp_order_ids:
-            status = await self._order_executor.get_resting_order_status(
-                trade.symbol, trade.tp_order_ids[0]
-            )
-            if status == "FILLED":
-                trigger_price = (
-                    trade.take_profit_levels[0]
-                    if trade.take_profit_levels
-                    else trade.tp_price
-                )
-                if len(trade.take_profit_levels) > 1:
-                    await self._partial_close(
-                        trade, trigger_price, DEFAULT_PARTIAL_CLOSE_FRACTION
-                    )
-                    trade.take_profit_levels.pop(0)
-                    trade.tp_order_ids.pop(0)
-                    return trade
-                return await self.close_trade(
-                    trade.trade_id, trigger_price, "tp_triggered_exchange"
-                )
-        return trade
-
-    async def _place_exchange_side_stops(self, trade: Trade) -> None:
-        sl_result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, trade.sl_price
-        )
-        if sl_result.success:
-            trade.sl_order_id = sl_result.order_id
-        else:
-            logger.error(
-                "failed to place exchange-side stop loss",
-                extra={
-                    "aitos_extra": {
-                        "trade_id": trade.trade_id,
-                        "error": sl_result.error,
-                    }
-                },
-            )
-        remaining_qty = trade.quantity
-        levels = trade.take_profit_levels
-        for i, level_price in enumerate(levels):
-            leg_qty = (
-                remaining_qty
-                if i == len(levels) - 1
-                else remaining_qty * DEFAULT_PARTIAL_CLOSE_FRACTION
-            )
-            remaining_qty -= leg_qty
-            tp_result = await self._order_executor.place_take_profit_order(
-                trade.symbol, trade.side, leg_qty, level_price
-            )
-            if tp_result.success:
-                trade.tp_order_ids.append(tp_result.order_id)
-            else:
-                logger.error(
-                    "failed to place exchange-side take profit",
-                    extra={
-                        "aitos_extra": {
-                            "trade_id": trade.trade_id,
-                            "error": tp_result.error,
-                        }
-                    },
-                )
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_EXCHANGE_STOPS_PLACED,
-                payload={**trade.to_dict()},
-                source_module=self.module_id,
-            )
-        )
-
-    async def _replace_exchange_side_stop_loss(self, trade: Trade) -> None:
-        if trade.sl_order_id:
-            await self._order_executor.cancel_resting_order(
-                trade.symbol, trade.sl_order_id
-            )
-        result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, trade.sl_price
-        )
-        trade.sl_order_id = result.order_id if result.success else None
-
-    async def _cancel_resting_orders(self, trade: Trade) -> None:
-        if trade.sl_order_id:
-            await self._order_executor.cancel_resting_order(
-                trade.symbol, trade.sl_order_id
-            )
-            trade.sl_order_id = None
-        for order_id in trade.tp_order_ids:
-            await self._order_executor.cancel_resting_order(trade.symbol, order_id)
-        trade.tp_order_ids.clear()
-
-    def _project_portfolio(
-        self,
-        portfolio: PortfolioState,
-        opportunity: Opportunity,
-        sizing: PositionSizeResult,
-    ) -> PortfolioState:
-        candidate = PositionExposure(
-            symbol=opportunity.symbol,
-            notional_usd=sizing.position_size_usd,
-            leverage=sizing.leverage,
-        )
-        return PortfolioState(
-            equity_usd=portfolio.equity_usd,
-            peak_equity_usd=portfolio.peak_equity_usd,
-            positions=(*portfolio.positions, candidate),
-            daily_pnl_pct=portfolio.daily_pnl_pct,
-            weekly_pnl_pct=portfolio.weekly_pnl_pct,
-            volatility_percentile=portfolio.volatility_percentile,
-            regime=portfolio.regime,
-            max_pairwise_correlation=portfolio.max_pairwise_correlation,
-            api_error_rate_pct=portfolio.api_error_rate_pct,
-            api_latency_ms=portfolio.api_latency_ms,
-            data_freshness_seconds=portfolio.data_freshness_seconds,
-            model_accuracy=portfolio.model_accuracy,
-            timestamp=portfolio.timestamp,
-        )
-
-    async def _validate_and_open(
-        self, opportunity: Opportunity, portfolio: PortfolioState
-    ) -> Trade:
-        from aitos.risk.position_sizing import calculate_position_size
-        from aitos.risk.sector import sector_for_symbol
-
-        risk_score = (
-            self._risk_engine.last_assessment.total
-            if self._risk_engine.last_assessment
-            else 0.0
-        )
-        candidate_sector = sector_for_symbol(opportunity.symbol)
-        existing_sector_notional = sum(
-            p.notional_usd for p in portfolio.positions if p.sector == candidate_sector
-        )
-        sizing = calculate_position_size(
-            equity_usd=portfolio.equity_usd,
-            entry_price=opportunity.entry_price,
-            stop_loss_price=opportunity.stop_loss_price,
-            risk_limits=self._risk_engine.limits,
-            risk_score=risk_score,
-            volatility_percentile=portfolio.volatility_percentile,
-            correlation_penalty=portfolio.max_pairwise_correlation,
-            existing_sector_notional_usd=existing_sector_notional,
-            sector_limit_pct=self._risk_engine.limits.max_sector_exposure_pct,
-        )
-        if sizing.position_size_usd <= 0.0:
-            return await self._reject(
-                opportunity, f"sector exposure cap exhausted for {candidate_sector}"
-            )
-        projected_portfolio = self._project_portfolio(portfolio, opportunity, sizing)
-        projected_hard_breaches = [
-            b
-            for b in self._risk_engine.check_limits(projected_portfolio)
-            if b.is_hard_cap
-        ]
-        if projected_hard_breaches:
-            return await self._reject(
-                opportunity,
-                f"projected hard limit breach: {projected_hard_breaches[0].message}",
-            )
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_ENTRY_SIGNAL,
-                payload={
-                    "symbol": opportunity.symbol,
-                    "side": opportunity.side.value,
-                    "sizing_rationale": sizing.rationale,
-                },
-                source_module=self.module_id,
-            )
-        )
-        quantity = sizing.position_size_usd / opportunity.entry_price
-        order_result = await self._order_executor.submit_order(
-            OrderRequest(
-                symbol=opportunity.symbol,
-                side=opportunity.side,
-                quantity=quantity,
-                reference_price=opportunity.entry_price,
-            )
-        )
-        if not order_result.success:
-            return await self._reject(
-                opportunity, f"order submission failed: {order_result.error}"
-            )
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_ORDER_SUBMITTED,
-                payload={
-                    "symbol": opportunity.symbol,
-                    "side": opportunity.side.value,
-                    "quantity": quantity,
-                },
-                source_module=self.module_id,
-            )
-        )
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_ORDER_FILLED,
-                payload={
-                    "order_id": order_result.order_id,
-                    "fill_price": order_result.fill_price,
-                },
-                source_module=self.module_id,
-            )
-        )
-        trade = Trade(
-            trade_id=new_trade_id(),
-            symbol=opportunity.symbol,
-            side=opportunity.side,
-            entry_price=order_result.fill_price,
-            quantity=order_result.filled_quantity,
-            leverage=sizing.leverage,
-            position_size_usd=sizing.position_size_usd,
-            risk_amount_usd=sizing.risk_amount_usd,
-            strategy_id=opportunity.strategy_id,
-            agent_consensus=opportunity.agent_consensus,
-            explanation=opportunity.rationale,
-            sl_price=opportunity.stop_loss_price,
-            tp_price=(
-                opportunity.take_profit_levels[0]
-                if opportunity.take_profit_levels
-                else opportunity.entry_price
-            ),
-            take_profit_levels=list(opportunity.take_profit_levels),
-            state=TradeLifecycleState.POSITION_OPENED,
-            entry_time=utc_now_iso(),
-            trailing_sl_enabled=opportunity.trailing_sl_enabled,
-            breakeven_at_r_multiple=opportunity.breakeven_at_r_multiple,
-            regime=opportunity.regime,
-        )
-        self._open_trades[trade.trade_id] = trade
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_POSITION_OPENED,
-                payload=trade.to_dict(),
-                source_module=self.module_id,
-            )
-        )
-        self._last_event_time = trade.entry_time
-        if self._use_exchange_side_stops:
-            await self._place_exchange_side_stops(trade)
-        return trade
-
-    async def _reject(self, opportunity: Opportunity, reason: str) -> Trade:
-        trade = Trade(
-            trade_id=new_trade_id(),
-            symbol=opportunity.symbol,
-            side=opportunity.side,
-            entry_price=opportunity.entry_price,
-            quantity=0.0,
-            leverage=0.0,
-            position_size_usd=0.0,
-            risk_amount_usd=0.0,
-            strategy_id=opportunity.strategy_id,
-            agent_consensus=opportunity.agent_consensus,
-            explanation=opportunity.rationale,
-            sl_price=opportunity.stop_loss_price,
-            tp_price=(
-                opportunity.take_profit_levels[0]
-                if opportunity.take_profit_levels
-                else opportunity.entry_price
-            ),
-            take_profit_levels=list(opportunity.take_profit_levels),
-            state=TradeLifecycleState.REJECTED,
-            entry_time=utc_now_iso(),
-            rejection_reason=reason,
-        )
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_REJECTED,
-                payload=trade.to_dict(),
-                source_module=self.module_id,
-            )
-        )
-        logger.info(
-            "opportunity rejected",
-            extra={"aitos_extra": {"symbol": opportunity.symbol, "reason": reason}},
-        )
-        return trade
-
-    async def _trigger_exit(
-        self, trade: Trade, price: float, reason: str, topic: str
-    ) -> Trade:
-        trade.state = TradeLifecycleState.EXIT_TRIGGERED
-        trade.updated_at = utc_now_iso()
-        await self._event_bus.publish(
-            Event(
-                topic=topic,
-                payload={**trade.to_dict(), "trigger_price": price},
-                source_module=self.module_id,
-                priority=EventPriority.HIGH,
-            )
-        )
-        return await self.close_trade(trade.trade_id, price, reason)
-
-    async def _partial_close(
-        self, trade: Trade, price: float, close_fraction: float
-    ) -> None:
-        if not _valid_market_price(price):
-            raise ValueError(f"price must be a finite positive number, got {price!r}")
-        if not 0.0 < close_fraction <= 1.0:
-            raise ValueError(
-                f"close_fraction must be in (0, 1], got {close_fraction!r}"
-            )
-        if trade.position_size_usd <= 0.0 or trade.quantity <= 0.0:
-            raise ValueError(
-                f"trade has no remaining position to close: {trade.trade_id}"
-            )
-        direction = 1 if trade.side == TradeSide.LONG else -1
-        pnl_pct = ((price - trade.entry_price) / trade.entry_price) * direction
-        closed_notional = trade.position_size_usd * close_fraction
-        closed_quantity = trade.quantity * close_fraction
-        realized = closed_notional * pnl_pct
-        trade.partial_exits.append(
-            PartialExit(
-                price=price,
-                size_usd=round(closed_notional, 2),
-                r_multiple=round(trade.unrealized_r_multiple(price), 4),
-            )
-        )
-        trade.position_size_usd = round(trade.position_size_usd - closed_notional, 2)
-        trade.quantity = max(0.0, trade.quantity - closed_quantity)
-        trade.pnl = round((trade.pnl or 0.0) + realized, 4)
-        trade.updated_at = utc_now_iso()
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_PARTIAL_CLOSE,
-                payload={
-                    **trade.to_dict(),
-                    "closed_notional_usd": closed_notional,
-                    "closed_quantity": closed_quantity,
-                    "realized_pnl": realized,
-                },
-                source_module=self.module_id,
-            )
-        )
-
-    def _require_initialized(self) -> None:
-        if not self._initialized:
-            raise ModuleNotInitializedError(
-                "TradeLifecycle.initialize() must be called first"
-            )
+exec(
+    zlib.decompress(base64.b64decode(_PACKED)).decode("utf-8"), globals()
+)  # nosec B102
+del _PACKED, base64, zlib
