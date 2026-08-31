@@ -15,8 +15,9 @@ Design constraints
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from aitos.intelligence.market_state.models import (
     AuctionState,
@@ -198,13 +199,15 @@ class MarketStateEngine:
         notes.append(f"order_flow={bias.value} (norm={normalised:.2f})")
         return bias, feats, notes
 
-    def _classify_regime(
-        self, trend_strength: float, of_bias: OrderFlowBias
-    ) -> Regime:
+    def _classify_regime(self, trend_strength: float, of_bias: OrderFlowBias) -> Regime:
         if trend_strength >= TREND_STRENGTH_STRONG:
             if of_bias == OrderFlowBias.SELLER_DOMINANT:
                 return Regime.TRANSITION  # strong trend but opposing flow
-            return Regime.TRENDING_UP if of_bias != OrderFlowBias.SELLER_DOMINANT else Regime.TRENDING_DOWN
+            return (
+                Regime.TRENDING_UP
+                if of_bias != OrderFlowBias.SELLER_DOMINANT
+                else Regime.TRENDING_DOWN
+            )
         if trend_strength <= TREND_STRENGTH_WEAK:
             return Regime.RANGE
         # medium strength — let OF decide direction if clear
@@ -310,9 +313,7 @@ class MarketStateEngine:
             return MomentumState.WEAK, feats
         return MomentumState.MODERATING, feats
 
-    def _classify_structure(
-        self, hint: str | None, regime: Regime
-    ) -> StructureBias:
+    def _classify_structure(self, hint: str | None, regime: Regime) -> StructureBias:
         if hint:
             h = hint.upper()
             if h in ("BULLISH", "BEARISH", "RANGE", "BROKEN"):
@@ -342,9 +343,15 @@ class MarketStateEngine:
         if structure == StructureBias.BROKEN:
             risk += 0.30
         # OF opposing the prevailing structure increases risk
-        if structure == StructureBias.BULLISH and of_bias == OrderFlowBias.SELLER_DOMINANT:
+        if (
+            structure == StructureBias.BULLISH
+            and of_bias == OrderFlowBias.SELLER_DOMINANT
+        ):
             risk += 0.20
-        if structure == StructureBias.BEARISH and of_bias == OrderFlowBias.BUYER_DOMINANT:
+        if (
+            structure == StructureBias.BEARISH
+            and of_bias == OrderFlowBias.BUYER_DOMINANT
+        ):
             risk += 0.20
         if trend_strength < 0.3:
             risk += 0.10
