@@ -13,8 +13,9 @@ All scoring is deterministic and fully auditable via the reasons list.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Any, Mapping
+from typing import Any
 
 from aitos.intelligence.exit_intelligence.models import (
     ExitAction,
@@ -88,7 +89,9 @@ class ExitIntelligenceEngine:
 
         # ---- 3. Proximity to structural stop ---------------------------------
         if structural_stop is not None:
-            stop_dist_pct = abs(current_price - structural_stop.stop_price) / current_price
+            stop_dist_pct = (
+                abs(current_price - structural_stop.stop_price) / current_price
+            )
             features["dist_to_structural_stop_pct"] = stop_dist_pct
             if stop_dist_pct < 0.003:
                 reasons.append(
@@ -159,9 +162,7 @@ class ExitIntelligenceEngine:
     # Reason generators
     # ------------------------------------------------------------------
 
-    def _structure_reasons(
-        self, side: str, state: MarketState
-    ) -> list[ExitReason]:
+    def _structure_reasons(self, side: str, state: MarketState) -> list[ExitReason]:
         reasons: list[ExitReason] = []
         if state.structure == StructureBias.BROKEN:
             reasons.append(
@@ -183,9 +184,8 @@ class ExitIntelligenceEngine:
                     +0.22,
                 )
             )
-        elif (
-            (side == "LONG" and state.structure == StructureBias.BULLISH)
-            or (side == "SHORT" and state.structure == StructureBias.BEARISH)
+        elif (side == "LONG" and state.structure == StructureBias.BULLISH) or (
+            side == "SHORT" and state.structure == StructureBias.BEARISH
         ):
             reasons.append(
                 ExitReason(
@@ -196,9 +196,7 @@ class ExitIntelligenceEngine:
             )
         return reasons
 
-    def _order_flow_reasons(
-        self, side: str, state: MarketState
-    ) -> list[ExitReason]:
+    def _order_flow_reasons(self, side: str, state: MarketState) -> list[ExitReason]:
         reasons: list[ExitReason] = []
         of = state.order_flow_bias
         if side == "LONG" and of == OrderFlowBias.SELLER_DOMINANT:
@@ -217,9 +215,8 @@ class ExitIntelligenceEngine:
                     +0.20,
                 )
             )
-        elif (
-            (side == "LONG" and of == OrderFlowBias.BUYER_DOMINANT)
-            or (side == "SHORT" and of == OrderFlowBias.SELLER_DOMINANT)
+        elif (side == "LONG" and of == OrderFlowBias.BUYER_DOMINANT) or (
+            side == "SHORT" and of == OrderFlowBias.SELLER_DOMINANT
         ):
             reasons.append(
                 ExitReason(
@@ -342,9 +339,7 @@ class ExitIntelligenceEngine:
         if exit_score >= EXIT_SCORE_EXIT and ere <= ERE_HOLD_THRESHOLD:
             return ExitAction.EXIT, 1.0
 
-        if exit_score >= EXIT_SCORE_MANAGE or (
-            ere <= 0.0 and exit_score >= 0.30
-        ):
+        if exit_score >= EXIT_SCORE_MANAGE or (ere <= 0.0 and exit_score >= 0.30):
             # Partial reduce suggestion scales with score
             frac = _clamp01((exit_score - 0.25) / 0.5)
             return ExitAction.MANAGE, round(max(0.25, min(0.75, frac)), 2)
