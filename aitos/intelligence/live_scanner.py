@@ -16,17 +16,12 @@ logger = get_logger("aitos.intelligence.live_scanner")
 LIVE_TRADE_GROUP = "live-scanner-trades-v2"
 LIVE_BOOK_GROUP = "live-scanner-book-v2"
 LIVE_LIQUIDITY_GROUP = "live-scanner-liquidity-v2"
-# Exchange/source timestamps can be delayed by upstream batching/replay.  A
-# trade older than this threshold is not admitted into the live scanner cache;
-# receipt time remains the freshness clock for trades that are admitted.
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 
 
 @dataclass
 class LiveSymbolCache:
     trades: deque = field(default_factory=deque)
-    # last_trade_at / last_book_at are local live-state update times. Exchange
-    # timestamps are retained separately for source-age/consumer-lag telemetry.
     last_trade_at: datetime | None = None
     last_book_at: datetime | None = None
     last_trade_source_at: datetime | None = None
@@ -38,7 +33,14 @@ class LiveSymbolCache:
 
 
 class LiveScannerCache:
-    """Consumes canonical EventBus market events and keeps a live view."""
+    """Consumes canonical EventBus market events and keeps a live view.
+
+    The cache remains subscribed even when the scanner is temporarily using
+    REST data.  REST fallback is a read-path decision in OpportunityScanner;
+    it must never disable the live WebSocket/EventBus consumer.  This makes
+    recovery automatic: as soon as fresh WS events arrive, the next scan can
+    switch back to websocket_live_state without a restart or manual reset.
+    """
 
     def __init__(
         self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000
@@ -49,6 +51,7 @@ class LiveScannerCache:
         self._state: dict[str, LiveSymbolCache] = {}
         self._subscriptions: list[Subscription] = []
         self._initialized = False
+        self._direct_market_data = False
         self._last_freshness_log_at: dict[str, datetime] = {}
 
     def _cache(self, symbol: str) -> LiveSymbolCache:
@@ -57,27 +60,33 @@ class LiveScannerCache:
         return self._state[symbol]
 
     async def initialize(self, direct_market_data: bool = False) -> None:
+        """Start live consumers; never turn them off for REST fallback.
+
+        ``direct_market_data`` is retained for API compatibility with older
+        callers.  The canonical EventBus subscription is always established.
+        Direct ingestion callbacks may also feed the cache, so handlers are
+        idempotent to prevent duplicate trades/books when both paths are live.
+        """
         self._direct_market_data = direct_market_data
         if self._initialized:
             return
         for symbol in self._symbols:
-            if not direct_market_data:
-                self._subscriptions.append(
-                    await self._bus.subscribe(
-                        f"market.trade.{symbol}",
-                        self._on_trade,
-                        group=LIVE_TRADE_GROUP,
-                        start_id="$",
-                    )
+            self._subscriptions.append(
+                await self._bus.subscribe(
+                    f"market.trade.{symbol}",
+                    self._on_trade,
+                    group=LIVE_TRADE_GROUP,
+                    start_id="$",
                 )
-                self._subscriptions.append(
-                    await self._bus.subscribe(
-                        f"market.orderbook.{symbol}",
-                        self._on_book,
-                        group=LIVE_BOOK_GROUP,
-                        start_id="$",
-                    )
+            )
+            self._subscriptions.append(
+                await self._bus.subscribe(
+                    f"market.orderbook.{symbol}",
+                    self._on_book,
+                    group=LIVE_BOOK_GROUP,
+                    start_id="$",
                 )
+            )
             self._subscriptions.append(
                 await self._bus.subscribe(
                     f"market.liquidity.{symbol}",
@@ -123,10 +132,12 @@ class LiveScannerCache:
             return
 
         state = self._cache(trade.symbol)
+        # Ingestion can feed the cache directly while the canonical EventBus
+        # consumer receives the same event.  Treat trade IDs as idempotency
+        # keys so enabling both paths cannot double-count live trades.
+        if state.trades and trade.trade_id <= state.trades[-1].trade_id:
+            return
         state.trades.append(trade)
-        # A trade accepted by the live transport is live state. Scanner
-        # freshness is driven by receipt time, while source age remains
-        # observable for diagnostics.
         state.last_trade_at = received_at
         state.last_trade_source_at = trade.timestamp
         state.last_trade_received_at = received_at
@@ -136,6 +147,14 @@ class LiveScannerCache:
         book = OrderBookSnapshot.from_dict(event.payload)
         received_at = datetime.now(timezone.utc)
         state = self._cache(book.symbol)
+        # Direct handler + EventBus can legitimately deliver the same snapshot.
+        # update_id is the exchange sequence identity when available.
+        if (
+            state.order_book is not None
+            and state.order_book.update_id == book.update_id
+            and state.order_book.timestamp == book.timestamp
+        ):
+            return
         state.order_book = book
         state.last_book_at = received_at
         state.last_book_source_at = book.timestamp
@@ -158,7 +177,6 @@ class LiveScannerCache:
         return max(0.0, (now - timestamp).total_seconds())
 
     def freshness_snapshot(self, symbol: str) -> dict:
-        """Expose source age, receive age, and derived transport lag."""
         state = self._state.get(symbol)
         if state is None:
             return {
@@ -181,9 +199,6 @@ class LiveScannerCache:
         now = datetime.now(timezone.utc)
         trade_age = self._age_seconds(state.last_trade_at, now)
         book_age = self._age_seconds(state.last_book_at, now)
-        # Tests and lightweight callers may populate last_*_at directly. In
-        # that case use the local update time as the best available source
-        # timestamp so consumer-lag telemetry remains numeric instead of None.
         trade_source_at = state.last_trade_source_at or state.last_trade_at
         book_source_at = state.last_book_source_at or state.last_book_at
         trade_source_age = self._age_seconds(trade_source_at, now)
@@ -202,69 +217,33 @@ class LiveScannerCache:
         )
         return {
             "cache_has_state": True,
-            "last_trade_at": (
-                state.last_trade_at.isoformat() if state.last_trade_at else None
-            ),
-            "last_book_at": (
-                state.last_book_at.isoformat() if state.last_book_at else None
-            ),
-            "last_trade_source_at": (
-                state.last_trade_source_at.isoformat()
-                if state.last_trade_source_at
-                else None
-            ),
-            "last_book_source_at": (
-                state.last_book_source_at.isoformat()
-                if state.last_book_source_at
-                else None
-            ),
-            "last_trade_received_at": (
-                state.last_trade_received_at.isoformat()
-                if state.last_trade_received_at
-                else None
-            ),
-            "last_book_received_at": (
-                state.last_book_received_at.isoformat()
-                if state.last_book_received_at
-                else None
-            ),
+            "last_trade_at": state.last_trade_at.isoformat() if state.last_trade_at else None,
+            "last_book_at": state.last_book_at.isoformat() if state.last_book_at else None,
+            "last_trade_source_at": state.last_trade_source_at.isoformat() if state.last_trade_source_at else None,
+            "last_book_source_at": state.last_book_source_at.isoformat() if state.last_book_source_at else None,
+            "last_trade_received_at": state.last_trade_received_at.isoformat() if state.last_trade_received_at else None,
+            "last_book_received_at": state.last_book_received_at.isoformat() if state.last_book_received_at else None,
             "trade_age_sec": round(trade_age, 3) if trade_age is not None else None,
             "book_age_sec": round(book_age, 3) if book_age is not None else None,
-            "trade_receive_age_sec": (
-                round(trade_receive_age, 3) if trade_receive_age is not None else None
-            ),
-            "book_receive_age_sec": (
-                round(book_receive_age, 3) if book_receive_age is not None else None
-            ),
-            "trade_source_age_sec": (
-                round(trade_source_age, 3) if trade_source_age is not None else None
-            ),
-            "book_source_age_sec": (
-                round(book_source_age, 3) if book_source_age is not None else None
-            ),
-            "trade_consumer_lag_sec": (
-                round(trade_lag, 3) if trade_lag is not None else None
-            ),
-            "book_consumer_lag_sec": (
-                round(book_lag, 3) if book_lag is not None else None
-            ),
+            "trade_receive_age_sec": round(trade_receive_age, 3) if trade_receive_age is not None else None,
+            "book_receive_age_sec": round(book_receive_age, 3) if book_receive_age is not None else None,
+            "trade_source_age_sec": round(trade_source_age, 3) if trade_source_age is not None else None,
+            "book_source_age_sec": round(book_source_age, 3) if book_source_age is not None else None,
+            "trade_consumer_lag_sec": round(trade_lag, 3) if trade_lag is not None else None,
+            "book_consumer_lag_sec": round(book_lag, 3) if book_lag is not None else None,
         }
 
     def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
         state = self._state.get(symbol)
         if state is None or state.last_trade_received_at is None:
             return False
-        return (
-            datetime.now(timezone.utc) - state.last_trade_received_at
-        ).total_seconds() <= max_age_seconds
+        return (datetime.now(timezone.utc) - state.last_trade_received_at).total_seconds() <= max_age_seconds
 
     def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
         state = self._state.get(symbol)
         if state is None or state.last_book_received_at is None:
             return False
-        return (
-            datetime.now(timezone.utc) - state.last_book_received_at
-        ).total_seconds() <= max_age_seconds
+        return (datetime.now(timezone.utc) - state.last_book_received_at).total_seconds() <= max_age_seconds
 
     def _maybe_log_freshness(self, symbol: str) -> None:
         now = datetime.now(timezone.utc)
