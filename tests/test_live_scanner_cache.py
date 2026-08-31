@@ -45,6 +45,54 @@ async def test_live_cache_rehydrates_trade_and_book_events():
 
 
 @pytest.mark.asyncio
+async def test_live_cache_subscribes_even_when_direct_mode_is_enabled():
+    bus = FakeBus()
+    cache = LiveScannerCache(bus, ["BTCUSDT"], max_trades=10)
+    await cache.initialize(direct_market_data=True)
+    topics = {item[0] for item in bus.subscriptions}
+    assert "market.trade.BTCUSDT" in topics
+    assert "market.orderbook.BTCUSDT" in topics
+    await cache.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_live_cache_recovers_from_rest_fallback_when_ws_event_arrives():
+    bus = FakeBus()
+    cache = LiveScannerCache(bus, ["BTCUSDT"], max_trades=10)
+    await cache.initialize(direct_market_data=True)
+
+    old_ts = datetime.now(timezone.utc) - timedelta(seconds=10)
+    old_trade = TradeTick("BTCUSDT", 1, 100.0, 2.0, TradeSide.BUY, False, old_ts)
+    await cache._on_trade(
+        type("E", (), {"payload": old_trade.to_dict(), "topic": "market.trade.BTCUSDT"})()
+    )
+    assert cache.is_trade_fresh("BTCUSDT", 5.0) is False
+
+    fresh_ts = datetime.now(timezone.utc)
+    fresh_trade = TradeTick("BTCUSDT", 2, 101.0, 1.0, TradeSide.SELL, False, fresh_ts)
+    await cache._on_trade(
+        type("E", (), {"payload": fresh_trade.to_dict(), "topic": "market.trade.BTCUSDT"})()
+    )
+    assert cache.is_trade_fresh("BTCUSDT", 5.0) is True
+    assert cache.recent_trades("BTCUSDT")[-1] == fresh_trade
+    await cache.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_live_cache_deduplicates_direct_and_eventbus_trade_delivery():
+    bus = FakeBus()
+    cache = LiveScannerCache(bus, ["BTCUSDT"], max_trades=10)
+    await cache.initialize(direct_market_data=True)
+    ts = datetime.now(timezone.utc)
+    trade = TradeTick("BTCUSDT", 42, 100.0, 2.0, TradeSide.BUY, False, ts)
+    event = type("E", (), {"payload": trade.to_dict(), "topic": "market.trade.BTCUSDT"})()
+    await cache._on_trade(event)
+    await cache._on_trade(event)
+    assert cache.recent_trades("BTCUSDT") == [trade]
+    await cache.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_live_cache_ignores_stale_trade():
     bus = FakeBus()
     cache = LiveScannerCache(bus, ["BTCUSDT"], max_trades=10)
