@@ -37,7 +37,7 @@ class RLFeedbackLoop(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.1.0"
+        return "1.2.0"
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
@@ -91,11 +91,14 @@ class RLFeedbackLoop(AITOSModule):
         agent_consensus = trade_dict.get("agent_consensus") or {}
         context = {"regime": regime, "direction": direction, **agent_consensus}
 
-        if isinstance(self._scorer, DeepValueRLScorer):
-            # Paper/live and the historical-learning worker share one durable
-            # checkpoint. Use the scorer's atomic read-modify-write path so a
-            # concurrent update cannot overwrite another process's learning.
-            self._scorer.update_and_persist(symbol, context, reward_r_multiple)
+        persist = getattr(self._scorer, "update_and_persist", None)
+        if callable(persist):
+            try:
+                persist(symbol, context, reward_r_multiple)
+            except OSError:
+                self._scorer.update(
+                    symbol=symbol, context=context, reward_r_multiple=reward_r_multiple
+                )
         else:
             self._scorer.update(
                 symbol=symbol, context=context, reward_r_multiple=reward_r_multiple
