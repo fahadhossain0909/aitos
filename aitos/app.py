@@ -30,6 +30,7 @@ from aitos.models.trade import TradeLifecycleState
 from aitos.risk.models import PortfolioState, PositionExposure, RiskLimits
 from aitos.risk.risk_engine import RiskEngine
 from aitos.trading.lifecycle import TradeLifecycle
+from aitos.trading.position_manager import PositionManager
 from aitos.trading.reconciliation import ReconciliationScheduler
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.attention_feedback import AttentionFeedbackLoop
@@ -104,6 +105,7 @@ async def build_system(
     use_exchange_side_stops: bool = False,
     min_score_threshold: float = 60.0,
     top_n: int = 5,
+    enable_exit_intelligence: bool = False,
 ) -> SystemComponents:
     kernel = kernel or AIKernel(event_bus=event_bus)
     risk_engine = RiskEngine(event_bus=event_bus, limits=risk_limits)
@@ -126,12 +128,16 @@ async def build_system(
     attention_feedback = AttentionFeedbackLoop(
         event_bus=event_bus, explainer=attention_explainer
     )
+    position_manager = PositionManager() if enable_exit_intelligence else None
+    if position_manager is not None:
+        logger.info("Exit Intelligence (PositionManager) enabled for TradeLifecycle")
     trade_lifecycle = TradeLifecycle(
         event_bus=event_bus,
         risk_engine=risk_engine,
         order_executor=order_executor,
         kernel=kernel,
         use_exchange_side_stops=use_exchange_side_stops,
+        position_manager=position_manager,
     )
     data_ingestion = DataIngestionService(
         exchange=exchange,
