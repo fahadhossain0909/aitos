@@ -9,12 +9,15 @@ from pathlib import Path
 from typing import Any
 
 import redis.asyncio as redis
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 HOST = os.getenv("REDIS_HOST", "redis")
 PORT = int(os.getenv("REDIS_PORT", "6379"))
 ROOT = Path(os.getenv("REDIS_ARCHIVE_DIR", "/archive"))
 CURSOR_FILE = ROOT / ".cursors.json"
 POLL = max(0.1, float(os.getenv("REDIS_ARCHIVE_POLL_SECONDS", "1")))
+RETRY = max(0.5, float(os.getenv("REDIS_ARCHIVE_RETRY_SECONDS", "2")))
 BATCH = max(1, int(os.getenv("REDIS_ARCHIVE_BATCH_SIZE", "1000")))
 DEFAULT_MAXLEN = max(1, int(os.getenv("REDIS_STREAM_MAXLEN_DEFAULT", "5000")))
 STREAM_MAXLEN = {
@@ -207,13 +210,9 @@ async def archive_stream(
     return True
 
 
-async def main() -> None:
-    writer = ArchiveWriter()
-    cursors = writer.recover(writer.load())
-    r = redis.Redis(host=HOST, port=PORT, decode_responses=False)
-    try:
-        await r.ping()
-        while True:
+async def archive_forever(r: redis.Redis, writer: ArchiveWriter, cursors: dict[str, dict[str, Any]]) -> None:
+    while True:
+        try:
             keys = []
             async for raw_key in r.scan_iter(match="stream:*", count=200):
                 keys.append(decode(raw_key))
@@ -222,8 +221,27 @@ async def main() -> None:
                     if not await archive_stream(r, writer, key, cursors):
                         break
             await asyncio.sleep(POLL)
-    finally:
-        await r.aclose()
+        except (RedisConnectionError, RedisTimeoutError) as exc:
+            # Redis is allowed to restart independently. Keep the archive worker
+            # alive and retry without losing the durable file cursor.
+            print(f"Redis unavailable; retrying archive connection: {exc!r}", flush=True)
+            await asyncio.sleep(RETRY)
+
+
+async def main() -> None:
+    writer = ArchiveWriter()
+    cursors = writer.recover(writer.load())
+    while True:
+        r = redis.Redis(host=HOST, port=PORT, decode_responses=False)
+        try:
+            await r.ping()
+            print("Redis archive connection established", flush=True)
+            await archive_forever(r, writer, cursors)
+        except (RedisConnectionError, RedisTimeoutError) as exc:
+            print(f"Redis unavailable; retrying: {exc!r}", flush=True)
+            await asyncio.sleep(RETRY)
+        finally:
+            await r.aclose()
 
 
 if __name__ == "__main__":
