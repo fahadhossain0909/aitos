@@ -69,7 +69,9 @@ class TradeThesisEngine:
                     )
                 )
                 confirmations.append(
-                    ConfirmationSignal("structure_supportive", "Structure remains BULLISH")
+                    ConfirmationSignal(
+                        "structure_supportive", "Structure remains BULLISH"
+                    )
                 )
             elif side == "SHORT" and market_state.structure == StructureBias.BEARISH:
                 components.append(
@@ -80,23 +82,42 @@ class TradeThesisEngine:
                     )
                 )
                 confirmations.append(
-                    ConfirmationSignal("structure_supportive", "Structure remains BEARISH")
+                    ConfirmationSignal(
+                        "structure_supportive", "Structure remains BEARISH"
+                    )
                 )
-            if side == "LONG" and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT:
+            if (
+                side == "LONG"
+                and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT
+            ):
                 components.append(
-                    ThesisComponent("buyer_imbalance", "Buyer-dominant order flow at entry", 1.0)
+                    ThesisComponent(
+                        "buyer_imbalance", "Buyer-dominant order flow at entry", 1.0
+                    )
                 )
                 confirmations.append(
-                    ConfirmationSignal("of_supportive", "Order flow remains BUYER_DOMINANT")
+                    ConfirmationSignal(
+                        "of_supportive", "Order flow remains BUYER_DOMINANT"
+                    )
                 )
-            elif side == "SHORT" and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT:
+            elif (
+                side == "SHORT"
+                and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT
+            ):
                 components.append(
-                    ThesisComponent("seller_imbalance", "Seller-dominant order flow at entry", 1.0)
+                    ThesisComponent(
+                        "seller_imbalance", "Seller-dominant order flow at entry", 1.0
+                    )
                 )
                 confirmations.append(
-                    ConfirmationSignal("of_supportive", "Order flow remains SELLER_DOMINANT")
+                    ConfirmationSignal(
+                        "of_supportive", "Order flow remains SELLER_DOMINANT"
+                    )
                 )
-            if market_state.momentum in (MomentumState.STRONG, MomentumState.MODERATING):
+            if market_state.momentum in (
+                MomentumState.STRONG,
+                MomentumState.MODERATING,
+            ):
                 components.append(
                     ThesisComponent(
                         "momentum_support",
@@ -105,11 +126,16 @@ class TradeThesisEngine:
                     )
                 )
                 confirmations.append(
-                    ConfirmationSignal("momentum_not_exhausted", "Momentum not EXHAUSTED")
+                    ConfirmationSignal(
+                        "momentum_not_exhausted", "Momentum not EXHAUSTED"
+                    )
                 )
             notes.append(f"regime={market_state.regime.value}")
 
-        if structural_invalidation_price is not None and structural_invalidation_price > 0:
+        if (
+            structural_invalidation_price is not None
+            and structural_invalidation_price > 0
+        ):
             invalidations.append(
                 InvalidationCondition(
                     "structure_break",
@@ -121,17 +147,25 @@ class TradeThesisEngine:
 
         if side == "LONG":
             invalidations.append(
-                InvalidationCondition("structure_against", "Structure flips to BEARISH or BROKEN")
+                InvalidationCondition(
+                    "structure_against", "Structure flips to BEARISH or BROKEN"
+                )
             )
             invalidations.append(
-                InvalidationCondition("of_reversal", "Order flow flips to SELLER_DOMINANT")
+                InvalidationCondition(
+                    "of_reversal", "Order flow flips to SELLER_DOMINANT"
+                )
             )
         else:
             invalidations.append(
-                InvalidationCondition("structure_against", "Structure flips to BULLISH or BROKEN")
+                InvalidationCondition(
+                    "structure_against", "Structure flips to BULLISH or BROKEN"
+                )
             )
             invalidations.append(
-                InvalidationCondition("of_reversal", "Order flow flips to BUYER_DOMINANT")
+                InvalidationCondition(
+                    "of_reversal", "Order flow flips to BUYER_DOMINANT"
+                )
             )
 
         if strategy_id:
@@ -165,7 +199,9 @@ class TradeThesisEngine:
         current_price: float | None = None,
     ) -> ThesisEvaluation:
         price = (
-            current_price if current_price and current_price > 0 else market_state.mid_price
+            current_price
+            if current_price and current_price > 0
+            else market_state.mid_price
         )
         side = thesis.side
         breached: list[str] = []
@@ -177,26 +213,28 @@ class TradeThesisEngine:
             if inv.code == "structure_break":
                 level = inv.level or thesis.invalidation_price
                 if level is not None and level > 0:
-                    if side == "LONG" and price <= level:
-                        breached.append(inv.code)
-                    elif side == "SHORT" and price >= level:
+                    if side == "LONG" and price <= level or side == "SHORT" and price >= level:
                         breached.append(inv.code)
             elif inv.code == "structure_against":
-                if market_state.structure == StructureBias.BROKEN:
-                    breached.append(inv.code)
-                elif side == "LONG" and market_state.structure == StructureBias.BEARISH:
-                    breached.append(inv.code)
-                elif side == "SHORT" and market_state.structure == StructureBias.BULLISH:
+                if market_state.structure == StructureBias.BROKEN or side == "LONG" and market_state.structure == StructureBias.BEARISH or (
+                    side == "SHORT" and market_state.structure == StructureBias.BULLISH
+                ):
                     breached.append(inv.code)
             elif inv.code == "of_reversal":
-                if side == "LONG" and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT:
-                    breached.append(inv.code)
-                elif side == "SHORT" and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT:
+                if (
+                    side == "LONG"
+                    and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT
+                ) or (
+                    side == "SHORT"
+                    and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT
+                ):
                     breached.append(inv.code)
 
         for conf in thesis.confirmations:
             if conf.code == "structure_supportive":
-                if (side == "LONG" and market_state.structure == StructureBias.BULLISH) or (
+                if (
+                    side == "LONG" and market_state.structure == StructureBias.BULLISH
+                ) or (
                     side == "SHORT" and market_state.structure == StructureBias.BEARISH
                 ):
                     active.append(conf.code)
@@ -204,9 +242,11 @@ class TradeThesisEngine:
                     lost.append(conf.code)
             elif conf.code == "of_supportive":
                 if (
-                    side == "LONG" and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT
+                    side == "LONG"
+                    and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT
                 ) or (
-                    side == "SHORT" and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT
+                    side == "SHORT"
+                    and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT
                 ):
                     active.append(conf.code)
                 else:
