@@ -46,7 +46,9 @@ class StructuralRiskEngine:
         self._min_buffer_pct = float(cfg.get("min_buffer_pct", DEFAULT_MIN_BUFFER_PCT))
         self._max_stop_pct = float(cfg.get("max_stop_pct", DEFAULT_MAX_STOP_PCT))
         self._fallback_pct = float(cfg.get("fallback_pct", DEFAULT_FALLBACK_PCT))
-        self._micro_swing_pct = float(cfg.get("micro_swing_pct", DEFAULT_MICRO_SWING_PCT))
+        self._micro_swing_pct = float(
+            cfg.get("micro_swing_pct", DEFAULT_MICRO_SWING_PCT)
+        )
         self._hierarchy_slack_pct = float(
             cfg.get("hierarchy_slack_pct", DEFAULT_HIERARCHY_SLACK_PCT)
         )
@@ -163,16 +165,16 @@ class StructuralRiskEngine:
             if atr is not None and atr > 0:
                 fallback_dist = max(fallback_dist, atr * 1.5)
             chosen_price = (
-                entry_price - fallback_dist if side == "LONG" else entry_price + fallback_dist
+                entry_price - fallback_dist
+                if side == "LONG"
+                else entry_price + fallback_dist
             )
             chosen_type = "emergency_fallback"
             chosen_conf = 0.30
             notes.append(f"fallback stop distance={fallback_dist:.6g}")
 
         buffer = self._compute_buffer(entry_price, atr)
-        stop_price = (
-            chosen_price - buffer if side == "LONG" else chosen_price + buffer
-        )
+        stop_price = chosen_price - buffer if side == "LONG" else chosen_price + buffer
 
         if side == "LONG":
             stop_price = min(stop_price, entry_price * (1.0 - self._min_buffer_pct))
