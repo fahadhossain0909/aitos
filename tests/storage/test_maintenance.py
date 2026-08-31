@@ -26,6 +26,7 @@ def test_prune_for_boot_buffer_removes_oldest_disposable_files(
     new.write_bytes(b"n" * 800)
     # Explicit mtimes so "oldest first" is deterministic even on fast FS.
     import os
+
     os.utime(old, (1_000_000, 1_000_000))
     os.utime(new, (2_000_000, 2_000_000))
 
