@@ -76,8 +76,8 @@ async def try_connect_neo4j(settings):
     try:
         await driver.verify_connectivity()
         return driver
-    except Exception:
-        logger.warning("Neo4j unavailable: %s", exp)
+    except Exception as exc:
+        logger.warning("Neo4j unavailable: %s", exc)
         await driver.close()
         return None
 
@@ -108,8 +108,8 @@ async def connect_redis_with_retry(settings) -> Redis:
             operation_name="Redis connection",
         )
     except RetryExhaustedError as exc:
-        logger.error("could not connect to Redis: %s", exc)
-        raise SystemExit(1) from exc
+        logger.error("could not connect to Redis: %s", exp)
+        raise SystemExit(1) from exp
 
 
 async def main() -> None:
@@ -197,7 +197,7 @@ async def main() -> None:
                         }
                     },
                 )
-            except Exception as exp:
+            except Exception as exc:
                 logger.error("scan cycle failed: %s", exp)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
