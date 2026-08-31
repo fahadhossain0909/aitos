@@ -17,9 +17,10 @@ existing emergency hard-SL / exchange-side paths stay authoritative.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from aitos.intelligence.amt.volume_profile import VolumeProfile
 from aitos.intelligence.exit_intelligence import (
@@ -63,7 +64,9 @@ class PositionAction:
             "reason": self.reason,
             "reduce_fraction": self.reduce_fraction,
             "new_stop_price": self.new_stop_price,
-            "exit_decision": self.exit_decision.to_dict() if self.exit_decision else None,
+            "exit_decision": (
+                self.exit_decision.to_dict() if self.exit_decision else None
+            ),
             "notes": list(self.notes),
         }
 
@@ -115,7 +118,9 @@ class PositionManager:
             mid_price=current_price,
             order_flow=order_flow,
             trend_strength=trend_strength,
-            atr_pct=(atr / current_price * 100.0) if atr and current_price > 0 else None,
+            atr_pct=(
+                (atr / current_price * 100.0) if atr and current_price > 0 else None
+            ),
             volume_profile_poc=volume_profile.poc if volume_profile else None,
             value_area_high=volume_profile.vah if volume_profile else None,
             value_area_low=volume_profile.val if volume_profile else None,
