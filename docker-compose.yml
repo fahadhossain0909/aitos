@@ -5,7 +5,7 @@ services:
     ports: ["127.0.0.1:6379:6379"]
     volumes:
       - "${REDIS_DATA_DIR:-./.storage/data/redis}/live:/data"
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--auto-aof-rewrite-percentage", "50", "--auto-aof-rewrite-min-size", "64mb"]
     healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 10s}
     cpus: "0.5"
     mem_limit: 2.5g
@@ -18,7 +18,7 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      REDIS_DLQ_MAXLEN: "25000"
+      REDIS_DLQ_MAXLEN: "10000"
       REDIS_DLQ_TRIM_INTERVAL_SECONDS: "5"
     volumes:
       - ./scripts/redis_dlq_retention.sh:/usr/local/bin/redis_dlq_retention.sh:ro
@@ -37,9 +37,9 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_ARCHIVE_DIR: /archive
-      REDIS_ARCHIVE_POLL_SECONDS: "1"
+      REDIS_ARCHIVE_POLL_SECONDS: "0.5"
       REDIS_ARCHIVE_BATCH_SIZE: "1000"
-      REDIS_STREAM_MAXLEN_DEFAULT: "5000"
+      REDIS_STREAM_MAXLEN_DEFAULT: "3000"
     volumes:
       - "${REDIS_DATA_DIR:-./.storage/data/redis}/archive:/archive"
     depends_on: {redis: {condition: service_healthy}}
@@ -90,7 +90,17 @@ services:
     container_name: aitos-paper
     command: ["python3", "run_paper_trading.py"]
     env_file: [.env]
-    environment: {REDIS_HOST: redis, CLICKHOUSE_HOST: clickhouse, NEO4J_URI: bolt://neo4j:7687}
+    environment:
+      REDIS_HOST: redis
+      CLICKHOUSE_HOST: clickhouse
+      NEO4J_URI: bolt://neo4j:7687
+      # Keep the Redis hot working set small; the archive worker preserves history.
+      # These values are deliberately below the previous 25k/100k defaults so a
+      # restart/replay burst cannot consume the full Redis cgroup before archival.
+      REDIS_STREAM_MAXLEN_MARKET_TRADE: "10000"
+      REDIS_STREAM_MAXLEN_MARKET_ORDERBOOK: "10000"
+      REDIS_STREAM_MAXLEN_MARKET_LIQUIDITY: "20000"
+      REDIS_STREAM_MAXLEN_MARKET_LIVE_STATE: "10000"
     volumes: [aitos_model_data:/models]
     ports: ["127.0.0.1:8090:8090"]
     cpus: "0.5"
@@ -104,7 +114,7 @@ services:
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     command: ["python3", "run_continual_learning.py"]
     env_file: [.env]
-    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/online_rl/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
+    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/online_rl/online_rl/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
     volumes: [aitos_model_data:/models]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "0.25"
