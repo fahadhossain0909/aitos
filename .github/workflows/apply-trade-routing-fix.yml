@@ -1,0 +1,107 @@
+name: Apply trade WebSocket routing fix
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: ${{ !contains(github.event.head_commit.message, 'fix: route Binance trade streams') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply verified trade routing and audit fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path("aitos/exchange/binance.py")
+          s = p.read_text()
+          old = '''    @staticmethod
+    def _ws_base_url(streams: list[str]) -> str:
+        if not streams:
+            return WS_MARKET_BASE_URL
+        if all("@depth" in stream or "@trade" in stream for stream in streams):
+            return WS_PUBLIC_BASE_URL
+        return WS_MARKET_BASE_URL
+'''
+          new = '''    @staticmethod
+    def _ws_base_url(streams: list[str]) -> str:
+        """Route each Futures stream family to Binance's current namespace.
+
+        Depth/book streams belong to ``/public``. Trade/aggTrade and the other
+        regular market streams belong to ``/market``. The old implementation
+        treated ``@trade`` as public, which left the trade socket connected but
+        silent and caused the REST fallback watchdog to fire repeatedly.
+        """
+        if not streams:
+            return WS_MARKET_BASE_URL
+        if all("@depth" in stream or "@bookTicker" in stream for stream in streams):
+            return WS_PUBLIC_BASE_URL
+        return WS_MARKET_BASE_URL
+'''
+          if old not in s:
+              raise SystemExit("Expected Binance routing block was not found")
+          p.write_text(s.replace(old, new, 1))
+
+          p = Path("tests/test_trade_stream_routing.py")
+          s = p.read_text()
+          if "def test_public_depth_routing_stays_public" not in s:
+              s += '''\n\n@pytest.mark.asyncio\nasync def test_trade_routing_uses_market_namespace():\n    from aitos.exchange.binance import WS_MARKET_BASE_URL\n\n    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@trade"]) == WS_MARKET_BASE_URL\n    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL\n\n\ndef test_public_depth_routing_stays_public():\n    from aitos.exchange.binance import WS_PUBLIC_BASE_URL\n\n    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@depth@100ms"]) == WS_PUBLIC_BASE_URL\n    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@bookTicker"]) == WS_PUBLIC_BASE_URL\n'''
+          p.write_text(s)
+
+          p = Path("scripts/paper_runtime_audit.sh")
+          s = p.read_text()
+          old = '''      if [ -n "$groups" ]; then
+        echo "  $key"
+        docker exec aitos-redis redis-cli XINFO GROUPS "$key" 2>/dev/null | grep -E 'name|pending|consumers|entries-read|lag' || true
+      fi
+'''
+          new = '''      if [ -n "$groups" ]; then
+        echo "  $key"
+        # XINFO GROUPS is a RESP array of alternating field/value pairs.
+        # Grepping individual field names loses the values and produced a
+        # misleading header-only audit. Render each group as one compact line.
+        docker exec aitos-redis redis-cli --json XINFO GROUPS "$key" 2>/dev/null || \\
+          docker exec aitos-redis redis-cli XINFO GROUPS "$key" 2>/dev/null | \\
+            awk 'BEGIN{ORS=" "} {printf "%s", $0} END{print ""}'
+      fi
+'''
+          if old not in s:
+              raise SystemExit("Expected consumer-group audit block was not found")
+          p.write_text(s.replace(old, new, 1))
+          PY
+
+          python -m compileall -q aitos tests/test_trade_stream_routing.py
+          pytest -q tests/test_trade_stream_routing.py tests/test_binance_trade_fallback.py
+          bash -n scripts/paper_runtime_audit.sh
+
+      - name: Commit verified fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add aitos/exchange/binance.py tests/test_trade_stream_routing.py scripts/paper_runtime_audit.sh
+          git diff --cached --check
+          git commit -m "fix: route Binance trade streams"
+          git push origin HEAD:main
+
+      - name: Remove one-shot fixer
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rm .github/workflows/apply-trade-routing-fix.yml
+          git commit -m "chore: remove one-shot trade routing fixer"
+          git push origin HEAD:main
