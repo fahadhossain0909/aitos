@@ -69,7 +69,13 @@ def test_volume_profile_destinations():
     planner = MarketPathPlanner()
     plan = planner.plan(market_state=_state(price=79100.0), volume_profile=vp)
     types = {d.market_structure_type for d in plan.upside + plan.downside}
-    assert "POC" in types or "vah" in types or "val" in types or "LVN" in types or "HVN" in types
+    assert (
+        "POC" in types
+        or "vah" in types
+        or "val" in types
+        or "LVN" in types
+        or "HVN" in types
+    )
 
 
 def test_regime_tilt_increases_upside_prob():
@@ -80,7 +86,9 @@ def test_regime_tilt_increases_upside_prob():
         prior_lows=[78000.0],
     )
     bear = planner.plan(
-        market_state=_state(regime=Regime.TRENDING_DOWN, of=OrderFlowBias.SELLER_DOMINANT),
+        market_state=_state(
+            regime=Regime.TRENDING_DOWN, of=OrderFlowBias.SELLER_DOMINANT
+        ),
         prior_highs=[80000.0],
         prior_lows=[78000.0],
     )
