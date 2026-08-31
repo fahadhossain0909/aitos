@@ -1,4 +1,4 @@
-from aitos.backtest.hedge_metrics import compare, excursions, expectancy, max_drawdown
+from aitos.backtest.hedge_metrics import compare, excursions, expectancy
 
 
 def test_hedge_metrics_and_comparison():
