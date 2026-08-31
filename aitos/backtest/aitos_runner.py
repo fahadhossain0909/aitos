@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from aitos.backtest.execution import ExecutionSimulator
+from aitos.backtest.hedge_metrics import TradeExcursion, excursions, max_drawdown
 from aitos.backtest.l2_execution import BookLevel, L2ExecutionModel
 from aitos.backtest.margin import PerpetualMarginModel
 from aitos.backtest.market_adapter import HistoricalMarketAdapter, HistoricalMarketState
@@ -39,6 +40,25 @@ class HistoricalRunResult:
     liquidated: bool
     passive_orders: int = 0
     passive_fills: int = 0
+    equity_curve: tuple[float, ...] = ()
+    trade_pnls: tuple[float, ...] = ()
+    trade_excursions: tuple[TradeExcursion, ...] = ()
+
+    @property
+    def max_drawdown(self) -> float:
+        return max_drawdown(self.equity_curve)
+
+    @property
+    def expectancy(self) -> float:
+        return sum(self.trade_pnls) / len(self.trade_pnls) if self.trade_pnls else 0.0
+
+    @property
+    def mae(self) -> float:
+        return min((x.mae for x in self.trade_excursions), default=0.0)
+
+    @property
+    def mfe(self) -> float:
+        return max((x.mfe for x in self.trade_excursions), default=0.0)
 
 
 class AITOSHistoricalRunner:
@@ -81,6 +101,11 @@ class AITOSHistoricalRunner:
         requested = filled = 0.0
         last_price = 0.0
         last_funding_time = None
+        equity_curve: list[float] = []
+        trade_pnls: list[float] = []
+        trade_excursion_prices: list[float] = []
+        trade_entry: float | None = None
+        trade_side: str | None = None
         for event in ordered.events:
             if isinstance(event, TradeTick):
                 self.adapter.on_trade(event)
@@ -109,11 +134,13 @@ class AITOSHistoricalRunner:
             decision = decide(state)
             decisions += 1
             if decision.quantity <= 0 or decision.direction not in {"long", "short"}:
+                equity_curve.append(self.margin.snapshot(last_price).equity)
                 continue
             side = "buy" if decision.direction == "long" else "sell"
             requested += decision.quantity
             if decision.order_type == "limit":
                 if decision.limit_price is None or decision.limit_price <= 0:
+                    equity_curve.append(self.margin.snapshot(last_price).equity)
                     continue
                 self._order_seq += 1
                 self.queue.place(
@@ -128,9 +155,11 @@ class AITOSHistoricalRunner:
                     )
                 )
                 passive_orders += 1
+                equity_curve.append(self.margin.snapshot(last_price).equity)
                 continue
             book = state.latest_order_book
             if book is None:
+                equity_curve.append(self.margin.snapshot(last_price).equity)
                 continue
             bids = [BookLevel(level.price, level.quantity) for level in book.bids]
             asks = [BookLevel(level.price, level.quantity) for level in book.asks]
@@ -140,6 +169,28 @@ class AITOSHistoricalRunner:
                 filled += result.filled_quantity
                 fills += 1
                 last_price = result.average_price
+                if trade_entry is None:
+                    trade_entry = result.average_price
+                    trade_side = decision.direction
+                    trade_excursion_prices = [last_price]
+                elif trade_side != decision.direction:
+                    mark = self.margin.snapshot(last_price).equity
+                    trade_pnls.append(mark - self.initial_cash if not trade_pnls else mark)
+                    trade_excursion_prices.append(last_price)
+                    trade = excursions(trade_entry, trade_side, trade_excursion_prices)
+                    trade_excursion_prices = [last_price]
+                    trade_pnls[-1] = trade.mfe + trade.mae
+                    trade_entry = result.average_price
+                    trade_side = decision.direction
+                    trade_excursion_prices = [last_price]
+                else:
+                    trade_excursion_prices.append(last_price)
+            equity_curve.append(self.margin.snapshot(last_price).equity)
+        if trade_entry is not None and trade_side is not None:
+            trade = excursions(trade_entry, trade_side, trade_excursion_prices or [last_price])
+            trade_excursion_list = [trade]
+        else:
+            trade_excursion_list = []
         snap = self.margin.snapshot(last_price) if last_price > 0 else None
         final_equity = snap.equity if snap else self.initial_cash
         return HistoricalRunResult(
@@ -155,4 +206,7 @@ class AITOSHistoricalRunner:
             self.margin.liquidated,
             passive_orders,
             passive_fills,
+            tuple(equity_curve),
+            tuple(trade_pnls),
+            tuple(trade_excursion_list),
         )
