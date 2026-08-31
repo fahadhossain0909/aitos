@@ -62,7 +62,7 @@ async def try_connect_clickhouse_repositories(
         await market_repo.initialize({})
         await journal_repo.initialize({})
         return market_repo, journal_repo
-    except Exception as exc:
+    except Exception:
         logger.warning("ClickHouse unavailable: %s", exp)
         return None, None
 
