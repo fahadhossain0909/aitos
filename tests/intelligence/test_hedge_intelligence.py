@@ -6,7 +6,15 @@ from aitos.intelligence.hedge_intelligence import HedgeAction, HedgeIntelligence
 from aitos.intelligence.trade_thesis.models import ThesisEvaluation, ThesisHealth
 
 
-def _state(*, structure="BULLISH", of="SELLER_DOMINANT", momentum="WEAK", vol="EXPANDING", liq="DOWNSIDE_LIQUIDITY_HIGH", reversal=1.0):
+def _state(
+    *,
+    structure="BULLISH",
+    of="SELLER_DOMINANT",
+    momentum="WEAK",
+    vol="EXPANDING",
+    liq="DOWNSIDE_LIQUIDITY_HIGH",
+    reversal=1.0
+):
     return SimpleNamespace(
         structure=SimpleNamespace(value=structure),
         order_flow_bias=SimpleNamespace(value=of),
@@ -43,7 +51,13 @@ def test_closes_hedge_on_primary_direction_recovery():
     decision = engine.evaluate(
         symbol="BTCUSDT",
         primary_side="LONG",
-        market_state=_state(structure="BULLISH", of="BUYER_DOMINANT", momentum="STRONG", vol="NORMAL", liq="UPSIDE_LIQUIDITY_HIGH"),
+        market_state=_state(
+            structure="BULLISH",
+            of="BUYER_DOMINANT",
+            momentum="STRONG",
+            vol="NORMAL",
+            liq="UPSIDE_LIQUIDITY_HIGH",
+        ),
         thesis_eval=_thesis(),
         exit_action=ExitAction.HOLD,
         current_price=100.0,

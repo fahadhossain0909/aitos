@@ -8,8 +8,16 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aitos.intelligence.amt.volume_profile import VolumeProfile
-from aitos.intelligence.exit_intelligence import ExitAction, ExitDecision, ExitIntelligenceEngine
-from aitos.intelligence.hedge_intelligence import HedgeAction, HedgeDecision, HedgeIntelligenceEngine
+from aitos.intelligence.exit_intelligence import (
+    ExitAction,
+    ExitDecision,
+    ExitIntelligenceEngine,
+)
+from aitos.intelligence.hedge_intelligence import (
+    HedgeAction,
+    HedgeDecision,
+    HedgeIntelligenceEngine,
+)
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
 from aitos.intelligence.market_state import MarketState, MarketStateEngine
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
@@ -44,9 +52,15 @@ class PositionAction:
             "reason": self.reason,
             "reduce_fraction": self.reduce_fraction,
             "new_stop_price": self.new_stop_price,
-            "exit_decision": self.exit_decision.to_dict() if self.exit_decision else None,
-            "hedge_decision": self.hedge_decision.to_dict() if self.hedge_decision else None,
-            "thesis_health": self.thesis_eval.health.value if self.thesis_eval else None,
+            "exit_decision": (
+                self.exit_decision.to_dict() if self.exit_decision else None
+            ),
+            "hedge_decision": (
+                self.hedge_decision.to_dict() if self.hedge_decision else None
+            ),
+            "thesis_health": (
+                self.thesis_eval.health.value if self.thesis_eval else None
+            ),
             "notes": list(self.notes),
         }
 
@@ -116,7 +130,9 @@ class PositionManager:
             mid_price=current_price,
             order_flow=order_flow,
             trend_strength=trend_strength,
-            atr_pct=(atr / current_price * 100.0) if atr and current_price > 0 else None,
+            atr_pct=(
+                (atr / current_price * 100.0) if atr and current_price > 0 else None
+            ),
             volume_profile_poc=volume_profile.poc if volume_profile else None,
             value_area_high=volume_profile.vah if volume_profile else None,
             value_area_low=volume_profile.val if volume_profile else None,
@@ -164,7 +180,9 @@ class PositionManager:
                 timestamp=ts,
             )
             self._theses[trade.trade_id] = thesis
-        thesis_eval = self._thesis_engine.evaluate(thesis, market_state, current_price=current_price)
+        thesis_eval = self._thesis_engine.evaluate(
+            thesis, market_state, current_price=current_price
+        )
         exit_decision = self._eie.evaluate(
             symbol=trade.symbol,
             side=side,
@@ -178,7 +196,11 @@ class PositionManager:
             timestamp=ts,
         )
 
-        active = hedge_active if hedge_active is not None else trade.trade_id in self._hedge_opened_at
+        active = (
+            hedge_active
+            if hedge_active is not None
+            else trade.trade_id in self._hedge_opened_at
+        )
         hedge_decision = self._hie.evaluate(
             symbol=trade.symbol,
             primary_side=side,
@@ -199,9 +221,13 @@ class PositionManager:
 
         new_stop: float | None = None
         if self._allow_stop_tighten and exit_decision.action == ExitAction.MANAGE:
-            if trade.side == TradeSide.LONG and structural_stop.stop_price > trade.sl_price:
-                new_stop = structural_stop.stop_price
-            elif trade.side == TradeSide.SHORT and structural_stop.stop_price < trade.sl_price:
+            if (
+                trade.side == TradeSide.LONG
+                and structural_stop.stop_price > trade.sl_price
+            ) or (
+                trade.side == TradeSide.SHORT
+                and structural_stop.stop_price < trade.sl_price
+            ):
                 new_stop = structural_stop.stop_price
 
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
