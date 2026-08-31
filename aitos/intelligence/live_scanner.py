@@ -16,9 +16,9 @@ logger = get_logger("aitos.intelligence.live_scanner")
 LIVE_TRADE_GROUP = "live-scanner-trades-v2"
 LIVE_BOOK_GROUP = "live-scanner-book-v2"
 LIVE_LIQUIDITY_GROUP = "live-scanner-liquidity-v2"
-# Source timestamps can be delayed by upstream batching/replay. Live-state
-# freshness is therefore based on local receipt time, while source age remains
-# observable for diagnostics instead of causing live data to be discarded.
+# Exchange/source timestamps can be delayed by upstream batching/replay.  A
+# trade older than this threshold is not admitted into the live scanner cache;
+# receipt time remains the freshness clock for trades that are admitted.
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 
 
@@ -108,17 +108,9 @@ class LiveScannerCache:
         trade = TradeTick.from_dict(event.payload)
         received_at = datetime.now(timezone.utc)
         source_age = (received_at - trade.timestamp).total_seconds()
-        state = self._cache(trade.symbol)
-        state.trades.append(trade)
-        # A trade successfully received from the live transport is live state.
-        # Do not discard it merely because its exchange timestamp is delayed;
-        # scanner freshness is intentionally driven by receipt time.
-        state.last_trade_at = received_at
-        state.last_trade_source_at = trade.timestamp
-        state.last_trade_received_at = received_at
         if source_age > LIVE_TRADE_MAX_AGE_SECONDS:
             logger.warning(
-                "accepted live trade with delayed source timestamp",
+                "discarded stale live trade",
                 extra={
                     "aitos_extra": {
                         "symbol": trade.symbol,
@@ -128,6 +120,16 @@ class LiveScannerCache:
                     }
                 },
             )
+            return
+
+        state = self._cache(trade.symbol)
+        state.trades.append(trade)
+        # A trade accepted by the live transport is live state. Scanner
+        # freshness is driven by receipt time, while source age remains
+        # observable for diagnostics.
+        state.last_trade_at = received_at
+        state.last_trade_source_at = trade.timestamp
+        state.last_trade_received_at = received_at
         self._maybe_log_freshness(trade.symbol)
 
     async def _on_book(self, event: Event) -> None:
@@ -179,8 +181,13 @@ class LiveScannerCache:
         now = datetime.now(timezone.utc)
         trade_age = self._age_seconds(state.last_trade_at, now)
         book_age = self._age_seconds(state.last_book_at, now)
-        trade_source_age = self._age_seconds(state.last_trade_source_at, now)
-        book_source_age = self._age_seconds(state.last_book_source_at, now)
+        # Tests and lightweight callers may populate last_*_at directly. In
+        # that case use the local update time as the best available source
+        # timestamp so consumer-lag telemetry remains numeric instead of None.
+        trade_source_at = state.last_trade_source_at or state.last_trade_at
+        book_source_at = state.last_book_source_at or state.last_book_at
+        trade_source_age = self._age_seconds(trade_source_at, now)
+        book_source_age = self._age_seconds(book_source_at, now)
         trade_receive_age = self._age_seconds(state.last_trade_received_at, now)
         book_receive_age = self._age_seconds(state.last_book_received_at, now)
         trade_lag = (
