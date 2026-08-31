@@ -2,6 +2,7 @@
 
 Source is zlib+base64 packed to fit transport limits; expands on import.
 """
+
 from __future__ import annotations
 
 import base64
