@@ -6,6 +6,7 @@ A TradeThesis captures *why* the position was opened so Exit Intelligence
 can ask: "is the original thesis still consistent with current MarketState?"
 """
 
+from aitos.intelligence.trade_thesis.engine import TradeThesisEngine
 from aitos.intelligence.trade_thesis.models import (
     ConfirmationSignal,
     InvalidationCondition,
@@ -13,7 +14,6 @@ from aitos.intelligence.trade_thesis.models import (
     ThesisHealth,
     TradeThesis,
 )
-from aitos.intelligence.trade_thesis.engine import TradeThesisEngine
 
 __all__ = [
     "ConfirmationSignal",
