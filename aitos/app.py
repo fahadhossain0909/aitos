@@ -151,9 +151,47 @@ async def build_system(
     if position_manager is not None:
         from aitos.trading.market_context import LiveStateContextProvider
 
-        trade_lifecycle.market_context_provider = LiveStateContextProvider(
-            data_ingestion.live_state
-        )
+        provider = LiveStateContextProvider(data_ingestion.live_state)
+        # Prefer native Phase-G property; fall back to private attr + wrap.
+        if hasattr(type(trade_lifecycle), "market_context_provider"):
+            trade_lifecycle.market_context_provider = provider  # type: ignore[attr-defined]
+        else:
+            object.__setattr__(trade_lifecycle, "_market_context_provider", provider)
+            _orig_handle = trade_lifecycle.handle_event
+            _orig_close = trade_lifecycle.close_trade
+
+            async def _handle_with_context(event: Event):
+                if event.topic.startswith("market.kline.") or event.topic.startswith(
+                    "market.trade."
+                ):
+                    symbol = event.payload.get("symbol")
+                    price = event.payload.get("close", event.payload.get("price"))
+                    from aitos.trading.lifecycle import _valid_market_price
+
+                    if symbol and _valid_market_price(price):
+                        current_price = float(price)
+                        try:
+                            ctx_kwargs = provider.get_context(symbol).as_kwargs()
+                        except Exception:
+                            ctx_kwargs = {}
+                        for trade in list(trade_lifecycle.get_open_trades()):
+                            if trade.symbol == symbol:
+                                await trade_lifecycle.update_price(
+                                    trade.trade_id, current_price, **ctx_kwargs
+                                )
+                        return None
+                return await _orig_handle(event)
+
+            async def _close_with_clear(trade_id: str, exit_price: float, reason: str):
+                trade = await _orig_close(trade_id, exit_price, reason)
+                try:
+                    position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
+                except Exception:
+                    pass
+                return trade
+
+            object.__setattr__(trade_lifecycle, "handle_event", _handle_with_context)
+            object.__setattr__(trade_lifecycle, "close_trade", _close_with_clear)
         logger.info("LiveStateContextProvider wired into TradeLifecycle")
     decision_journal = decision_journal_repository or DecisionJournalRepository()
     journal = JournalSystem(
