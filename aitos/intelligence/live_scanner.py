@@ -217,33 +217,69 @@ class LiveScannerCache:
         )
         return {
             "cache_has_state": True,
-            "last_trade_at": state.last_trade_at.isoformat() if state.last_trade_at else None,
-            "last_book_at": state.last_book_at.isoformat() if state.last_book_at else None,
-            "last_trade_source_at": state.last_trade_source_at.isoformat() if state.last_trade_source_at else None,
-            "last_book_source_at": state.last_book_source_at.isoformat() if state.last_book_source_at else None,
-            "last_trade_received_at": state.last_trade_received_at.isoformat() if state.last_trade_received_at else None,
-            "last_book_received_at": state.last_book_received_at.isoformat() if state.last_book_received_at else None,
+            "last_trade_at": (
+                state.last_trade_at.isoformat() if state.last_trade_at else None
+            ),
+            "last_book_at": (
+                state.last_book_at.isoformat() if state.last_book_at else None
+            ),
+            "last_trade_source_at": (
+                state.last_trade_source_at.isoformat()
+                if state.last_trade_source_at
+                else None
+            ),
+            "last_book_source_at": (
+                state.last_book_source_at.isoformat()
+                if state.last_book_source_at
+                else None
+            ),
+            "last_trade_received_at": (
+                state.last_trade_received_at.isoformat()
+                if state.last_trade_received_at
+                else None
+            ),
+            "last_book_received_at": (
+                state.last_book_received_at.isoformat()
+                if state.last_book_received_at
+                else None
+            ),
             "trade_age_sec": round(trade_age, 3) if trade_age is not None else None,
             "book_age_sec": round(book_age, 3) if book_age is not None else None,
-            "trade_receive_age_sec": round(trade_receive_age, 3) if trade_receive_age is not None else None,
-            "book_receive_age_sec": round(book_receive_age, 3) if book_receive_age is not None else None,
-            "trade_source_age_sec": round(trade_source_age, 3) if trade_source_age is not None else None,
-            "book_source_age_sec": round(book_source_age, 3) if book_source_age is not None else None,
-            "trade_consumer_lag_sec": round(trade_lag, 3) if trade_lag is not None else None,
-            "book_consumer_lag_sec": round(book_lag, 3) if book_lag is not None else None,
+            "trade_receive_age_sec": (
+                round(trade_receive_age, 3) if trade_receive_age is not None else None
+            ),
+            "book_receive_age_sec": (
+                round(book_receive_age, 3) if book_receive_age is not None else None
+            ),
+            "trade_source_age_sec": (
+                round(trade_source_age, 3) if trade_source_age is not None else None
+            ),
+            "book_source_age_sec": (
+                round(book_source_age, 3) if book_source_age is not None else None
+            ),
+            "trade_consumer_lag_sec": (
+                round(trade_lag, 3) if trade_lag is not None else None
+            ),
+            "book_consumer_lag_sec": (
+                round(book_lag, 3) if book_lag is not None else None
+            ),
         }
 
     def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
         state = self._state.get(symbol)
         if state is None or state.last_trade_received_at is None:
             return False
-        return (datetime.now(timezone.utc) - state.last_trade_received_at).total_seconds() <= max_age_seconds
+        return (
+            datetime.now(timezone.utc) - state.last_trade_received_at
+        ).total_seconds() <= max_age_seconds
 
     def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
         state = self._state.get(symbol)
         if state is None or state.last_book_received_at is None:
             return False
-        return (datetime.now(timezone.utc) - state.last_book_received_at).total_seconds() <= max_age_seconds
+        return (
+            datetime.now(timezone.utc) - state.last_book_received_at
+        ).total_seconds() <= max_age_seconds
 
     def _maybe_log_freshness(self, symbol: str) -> None:
         now = datetime.now(timezone.utc)
