@@ -8,6 +8,7 @@
         v (Order filled)
     [POSITION_OPENED]
         v  (Smart SL/TP, trailing SL, break-even, partial TP monitored via update_price)
+        v  (optional Exit Intelligence / Position Manager — HOLD / MANAGE / EXIT)
     [EXIT_TRIGGERED]
         v (Order filled)
     [POSITION_CLOSED]
@@ -16,13 +17,18 @@ Journal/Review/Learning-feedback stages are a later phase (Journal System).
 This module owns validation (Risk Engine veto + hard limits + governance),
 sizing, order submission, and exit monitoring — wiring the Risk Engine and
 AI Kernel into an actual trade, end to end.
+
+Phase E (Market-Path architecture): an optional PositionManager may be
+injected. Hard SL remains authoritative. When the manager is present, static
+TP full-exit can be deferred on HOLD; MANAGE may partial-reduce or tighten
+stop. No existing emergency or exchange-side path is removed.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import AsyncIterator
-from typing import Any
+from collections.abc import AsyncIterator, Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 from aitos.core.contracts import (
     AITOSModule,
@@ -53,6 +59,12 @@ from aitos.models.trade import (
 from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResult
 from aitos.risk.risk_engine import RiskEngine
 
+if TYPE_CHECKING:
+    from aitos.intelligence.amt.volume_profile import VolumeProfile
+    from aitos.intelligence.liquidity_tracker import LiquidityEvent
+    from aitos.intelligence.order_flow_engine import OrderFlowFeatures
+    from aitos.trading.position_manager import PositionManager
+
 logger = get_logger("aitos.trading.lifecycle")
 
 TOPIC_OPPORTUNITY = "decision.opportunity"
@@ -68,6 +80,7 @@ TOPIC_TP_TRIGGERED = "trade.tp_triggered"
 TOPIC_TRAILING_SL_UPDATE = "trade.trailing_sl"
 TOPIC_PARTIAL_CLOSE = "trade.partial_close"
 TOPIC_EXCHANGE_STOPS_PLACED = "trade.exchange_stops_placed"
+TOPIC_EXIT_DECISION = "decision.exit"
 DEFAULT_PARTIAL_CLOSE_FRACTION = 0.5
 
 
@@ -88,6 +101,7 @@ class TradeLifecycle(AITOSModule):
         order_executor: OrderExecutor | None = None,
         kernel: AIKernel | None = None,
         use_exchange_side_stops: bool = False,
+        position_manager: PositionManager | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._risk_engine = risk_engine
@@ -97,6 +111,9 @@ class TradeLifecycle(AITOSModule):
             use_exchange_side_stops
             and self._order_executor.supports_exchange_side_stops
         )
+        # Optional Exit-Intelligence stack (Phase E). When None, behaviour is
+        # identical to the pre-Phase-E lifecycle.
+        self._position_manager = position_manager
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
         self._closed_trades: list[Trade] = []
@@ -108,13 +125,24 @@ class TradeLifecycle(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.0.0"
+        return "1.1.0"
+
+    @property
+    def position_manager(self) -> PositionManager | None:
+        return self._position_manager
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
         self._initialized = True
-        logger.info("TradeLifecycle initialized")
+        logger.info(
+            "TradeLifecycle initialized",
+            extra={
+                "aitos_extra": {
+                    "exit_intelligence": self._position_manager is not None,
+                }
+            },
+        )
 
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
@@ -127,6 +155,7 @@ class TradeLifecycle(AITOSModule):
             details={
                 "open_trades": len(self._open_trades),
                 "closed_trades": len(self._closed_trades),
+                "exit_intelligence": self._position_manager is not None,
             },
         )
 
@@ -205,7 +234,23 @@ class TradeLifecycle(AITOSModule):
                 )
         return await self._validate_and_open(opportunity, portfolio)
 
-    async def update_price(self, trade_id: str, current_price: float) -> Trade:
+    async def update_price(
+        self,
+        trade_id: str,
+        current_price: float,
+        *,
+        order_flow: OrderFlowFeatures | None = None,
+        volume_profile: VolumeProfile | None = None,
+        liquidity_events: Sequence[LiquidityEvent] = (),
+        prior_highs: Sequence[float] = (),
+        prior_lows: Sequence[float] = (),
+        swing_highs: Sequence[float] = (),
+        swing_lows: Sequence[float] = (),
+        structure_break_level: float | None = None,
+        atr: float | None = None,
+        trend_strength: float | None = None,
+        extra_features: Mapping[str, float] | None = None,
+    ) -> Trade:
         self._require_initialized()
         if not _valid_market_price(current_price):
             raise ValueError(
@@ -221,6 +266,8 @@ class TradeLifecycle(AITOSModule):
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
         trade.record_excursion(float(current_price))
         is_long = trade.side == TradeSide.LONG
+
+        # ---- 1. Hard / structural SL (authoritative — never skipped) ---------
         sl_hit = (
             current_price <= trade.sl_price
             if is_long
@@ -230,10 +277,41 @@ class TradeLifecycle(AITOSModule):
             return await self._trigger_exit(
                 trade, current_price, "sl_triggered", TOPIC_SL_TRIGGERED
             )
+
+        # ---- 2. Optional Exit Intelligence (Phase E) -------------------------
+        eie_action = None
+        if self._position_manager is not None:
+            eie_action = await self._apply_exit_intelligence(
+                trade,
+                current_price,
+                order_flow=order_flow,
+                volume_profile=volume_profile,
+                liquidity_events=liquidity_events,
+                prior_highs=prior_highs,
+                prior_lows=prior_lows,
+                swing_highs=swing_highs,
+                swing_lows=swing_lows,
+                structure_break_level=structure_break_level,
+                atr=atr,
+                trend_strength=trend_strength,
+                extra_features=extra_features,
+            )
+            if eie_action is not None:
+                # Full EXIT already performed inside _apply_exit_intelligence
+                return eie_action
+
+        # ---- 3. Static TP path (preserved; HOLD may defer full exit) ---------
         if trade.take_profit_levels:
             next_tp = trade.take_profit_levels[0]
             tp_hit = current_price >= next_tp if is_long else current_price <= next_tp
             if tp_hit:
+                # When Exit Intelligence is active and last decision was HOLD,
+                # treat TP as a soft destination: partial reduce only if multiple
+                # levels remain; otherwise defer full exit (winner may continue).
+                defer_full_tp = (
+                    self._position_manager is not None
+                    and getattr(trade, "_last_eie_action", None) == "HOLD"
+                )
                 if len(trade.take_profit_levels) > 1:
                     await self._partial_close(
                         trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
@@ -245,9 +323,23 @@ class TradeLifecycle(AITOSModule):
                             trade.symbol, consumed_order_id
                         )
                     return trade
+                if defer_full_tp:
+                    logger.info(
+                        "TP level reached but EIE=HOLD — deferring full exit",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "tp": next_tp,
+                                "price": current_price,
+                            }
+                        },
+                    )
+                    return trade
                 return await self._trigger_exit(
                     trade, current_price, "tp_triggered", TOPIC_TP_TRIGGERED
                 )
+
+        # ---- 4. Breakeven (unchanged) ----------------------------------------
         if (
             trade.breakeven_at_r_multiple is not None
             and not trade.breakeven_triggered
@@ -266,6 +358,8 @@ class TradeLifecycle(AITOSModule):
                     source_module=self.module_id,
                 )
             )
+
+        # ---- 5. Trailing SL (unchanged) --------------------------------------
         if trade.trailing_sl_enabled:
             candidate_sl = (
                 current_price - trade.r_distance
@@ -288,6 +382,69 @@ class TradeLifecycle(AITOSModule):
                     )
                 )
         return trade
+
+    async def _apply_exit_intelligence(
+        self,
+        trade: Trade,
+        current_price: float,
+        **intel_kwargs: Any,
+    ) -> Trade | None:
+        """Consult PositionManager. Returns Trade if fully closed, else None."""
+        from aitos.intelligence.exit_intelligence import ExitAction
+
+        assert self._position_manager is not None
+        pos_action = self._position_manager.evaluate(
+            trade=trade,
+            current_price=current_price,
+            **intel_kwargs,
+        )
+
+        # Stash last action so TP path can honour HOLD
+        trade._last_eie_action = pos_action.action.value  # type: ignore[attr-defined]
+
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_EXIT_DECISION,
+                payload={
+                    "trade_id": trade.trade_id,
+                    **pos_action.to_dict(),
+                },
+                source_module=self.module_id,
+            )
+        )
+
+        if pos_action.action == ExitAction.EXIT:
+            return await self._trigger_exit(
+                trade,
+                current_price,
+                pos_action.reason,
+                TOPIC_EXIT_DECISION,
+            )
+
+        if pos_action.action == ExitAction.MANAGE:
+            if pos_action.reduce_fraction > 0:
+                await self._partial_close(
+                    trade, current_price, pos_action.reduce_fraction
+                )
+            if pos_action.new_stop_price is not None:
+                # Only tighten (never loosen) — already enforced in PositionManager
+                trade.sl_price = pos_action.new_stop_price
+                trade.updated_at = utc_now_iso()
+                if self._use_exchange_side_stops:
+                    await self._replace_exchange_side_stop_loss(trade)
+                await self._event_bus.publish(
+                    Event(
+                        topic=TOPIC_POSITION_UPDATED,
+                        payload={
+                            **trade.to_dict(),
+                            "reason": "eie_stop_tighten",
+                            "new_stop": pos_action.new_stop_price,
+                        },
+                        source_module=self.module_id,
+                    )
+                )
+        # HOLD → fall through to TP / trailing logic
+        return None
 
     async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
         self._require_initialized()
