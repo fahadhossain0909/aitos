@@ -73,7 +73,9 @@ async def test_stream_trades_uses_futures_combined_aggtrade_stream():
 
 def test_trade_streams_use_market_namespace_and_direct_fallback():
     assert BinanceFuturesAdapter._ws_base_url(["btcusdt@trade"]) == WS_MARKET_BASE_URL
-    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
+    assert (
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
+    )
     assert WS_MARKET_RAW_BASE_URL.endswith("/market/ws")
 
 
@@ -82,4 +84,6 @@ def test_orderbook_streams_stay_on_public_namespace():
         BinanceFuturesAdapter._ws_base_url(["btcusdt@depth@100ms"])
         == WS_PUBLIC_BASE_URL
     )
-    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@bookTicker"]) == WS_PUBLIC_BASE_URL
+    assert (
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@bookTicker"]) == WS_PUBLIC_BASE_URL
+    )
