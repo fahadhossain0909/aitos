@@ -147,7 +147,9 @@ class ExitIntelligenceEngine:
         features["expected_remaining_edge"] = ere
 
         if structural_stop is not None:
-            stop_dist_pct = abs(current_price - structural_stop.stop_price) / current_price
+            stop_dist_pct = (
+                abs(current_price - structural_stop.stop_price) / current_price
+            )
             features["dist_to_structural_stop_pct"] = stop_dist_pct
             if stop_dist_pct < 0.003:
                 reasons.append(
@@ -170,7 +172,9 @@ class ExitIntelligenceEngine:
             )
         elif rr <= 0.25:
             reasons.append(
-                ExitReason("low_reversal_risk", f"MarketState reversal_risk={rr:.2f}", -0.08)
+                ExitReason(
+                    "low_reversal_risk", f"MarketState reversal_risk={rr:.2f}", -0.08
+                )
             )
 
         raw_score = sum(r.weight for r in reasons)
@@ -222,11 +226,17 @@ class ExitIntelligenceEngine:
     def _structure_reasons(self, side: str, state: MarketState) -> list[ExitReason]:
         reasons: list[ExitReason] = []
         if state.structure == StructureBias.BROKEN:
-            reasons.append(ExitReason("structure_broken", "Market structure marked BROKEN", +0.30))
+            reasons.append(
+                ExitReason("structure_broken", "Market structure marked BROKEN", +0.30)
+            )
         elif side == "LONG" and state.structure == StructureBias.BEARISH:
-            reasons.append(ExitReason("structure_against", "LONG but structure is BEARISH", +0.22))
+            reasons.append(
+                ExitReason("structure_against", "LONG but structure is BEARISH", +0.22)
+            )
         elif side == "SHORT" and state.structure == StructureBias.BULLISH:
-            reasons.append(ExitReason("structure_against", "SHORT but structure is BULLISH", +0.22))
+            reasons.append(
+                ExitReason("structure_against", "SHORT but structure is BULLISH", +0.22)
+            )
         elif (side == "LONG" and state.structure == StructureBias.BULLISH) or (
             side == "SHORT" and state.structure == StructureBias.BEARISH
         ):
@@ -244,17 +254,27 @@ class ExitIntelligenceEngine:
         of = state.order_flow_bias
         if side == "LONG" and of == OrderFlowBias.SELLER_DOMINANT:
             reasons.append(
-                ExitReason("of_reversal", "Order-flow flipped to SELLER_DOMINANT against LONG", +0.20)
+                ExitReason(
+                    "of_reversal",
+                    "Order-flow flipped to SELLER_DOMINANT against LONG",
+                    +0.20,
+                )
             )
         elif side == "SHORT" and of == OrderFlowBias.BUYER_DOMINANT:
             reasons.append(
-                ExitReason("of_reversal", "Order-flow flipped to BUYER_DOMINANT against SHORT", +0.20)
+                ExitReason(
+                    "of_reversal",
+                    "Order-flow flipped to BUYER_DOMINANT against SHORT",
+                    +0.20,
+                )
             )
         elif (side == "LONG" and of == OrderFlowBias.BUYER_DOMINANT) or (
             side == "SHORT" and of == OrderFlowBias.SELLER_DOMINANT
         ):
             reasons.append(
-                ExitReason("of_supportive", f"Order-flow {of.value} supports position", -0.10)
+                ExitReason(
+                    "of_supportive", f"Order-flow {of.value} supports position", -0.10
+                )
             )
         return reasons
 
@@ -262,14 +282,22 @@ class ExitIntelligenceEngine:
         reasons: list[ExitReason] = []
         if state.momentum == MomentumState.EXHAUSTED:
             reasons.append(
-                ExitReason("momentum_exhausted", "Momentum EXHAUSTED (mild; needs confirmation)", +0.08)
+                ExitReason(
+                    "momentum_exhausted",
+                    "Momentum EXHAUSTED (mild; needs confirmation)",
+                    +0.08,
+                )
             )
         elif state.momentum == MomentumState.WEAK:
             reasons.append(
-                ExitReason("momentum_weak", "Momentum WEAK (mild; needs confirmation)", +0.05)
+                ExitReason(
+                    "momentum_weak", "Momentum WEAK (mild; needs confirmation)", +0.05
+                )
             )
         elif state.momentum == MomentumState.STRONG:
-            reasons.append(ExitReason("momentum_strong", "Momentum still STRONG", -0.08))
+            reasons.append(
+                ExitReason("momentum_strong", "Momentum still STRONG", -0.08)
+            )
         return reasons
 
     def _path_and_ere(
@@ -307,7 +335,11 @@ class ExitIntelligenceEngine:
 
         if total_up >= 0.55:
             reasons.append(
-                ExitReason("path_upside_alive", f"Upside path probability mass ≈ {total_up:.2f}", -0.12)
+                ExitReason(
+                    "path_upside_alive",
+                    f"Upside path probability mass ≈ {total_up:.2f}",
+                    -0.12,
+                )
             )
         elif total_up <= 0.25 and total_down >= 0.40:
             reasons.append(
@@ -318,9 +350,13 @@ class ExitIntelligenceEngine:
                 )
             )
         if ere > ERE_HOLD_THRESHOLD:
-            reasons.append(ExitReason("positive_ere", f"Heuristic remaining edge={ere:.4f}", -0.10))
+            reasons.append(
+                ExitReason("positive_ere", f"Heuristic remaining edge={ere:.4f}", -0.10)
+            )
         elif ere < ERE_EXIT_THRESHOLD:
-            reasons.append(ExitReason("negative_ere", f"Heuristic remaining edge={ere:.4f}", +0.15))
+            reasons.append(
+                ExitReason("negative_ere", f"Heuristic remaining edge={ere:.4f}", +0.15)
+            )
         return ere, reasons
 
     def _decide(
