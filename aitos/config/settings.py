@@ -19,9 +19,12 @@ class RedisSettings(BaseSettings):
     port: int = 6379
     db: int = 0
     password: str | None = None
-    # A bounded shared pool prevents unbounded connection creation while
-    # leaving enough capacity for the trade sink plus blocking stream readers.
-    max_connections: int = 64
+    # Redis Streams consumers use long-lived blocking connections. The
+    # previous 64-connection ceiling was too small once the scanner,
+    # lifecycle, journal, learning, and market-data consumers were active.
+    # Keep the pool bounded, but leave headroom for blocking readers,
+    # publishers, health checks, and short bursts.
+    max_connections: int = 256
 
     @property
     def url(self) -> str:
@@ -71,7 +74,6 @@ class AITOSSettings(BaseSettings):
     )
 
     environment: str = Field(default="dev", description="dev | staging | production")
-    log_level: str = "INFO"
 
     # Governance / safety — production changes require human approval per the AI Constitution.
     require_human_approval_for_prod: bool = True
