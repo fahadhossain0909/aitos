@@ -1,6 +1,6 @@
 """Trade domain models — Opportunity (input to the lifecycle) and Trade
 (the lifecycle's own record), mirroring the ``trades`` table in spec
-section 7.2 plus the state machine in section 30.1.
+section 7.2 plus the state machine in section 30.
 """
 
 from __future__ import annotations
@@ -116,6 +116,9 @@ class Trade:
     pnl: float | None = None
     pnl_percent: float | None = None
     rejection_reason: str | None = None
+    # Immutable initial risk distance. MAE/MFE and R multiples must use the
+    # original entry-to-initial-SL distance, not a later breakeven/trailing SL.
+    initial_r_distance: float | None = None
     # Excursion telemetry. Values are absolute price excursions from entry;
     # they are populated by the lifecycle's market-price update path.
     mae_price: float | None = None
@@ -124,10 +127,16 @@ class Trade:
     mfe_r: float | None = None
     updated_at: str = field(default_factory=_utc_now_iso)
 
+    def __post_init__(self) -> None:
+        if self.initial_r_distance is None:
+            object.__setattr__(
+                self, "initial_r_distance", abs(self.entry_price - self.sl_price)
+            )
+
     @property
     def r_distance(self) -> float:
-        """Price distance representing 1R (initial risk unit)."""
-        return abs(self.entry_price - self.sl_price)
+        """Return the immutable 1R distance defined at trade entry."""
+        return self.initial_r_distance or 0.0
 
     def unrealized_r_multiple(self, current_price: float) -> float:
         if self.r_distance == 0:
@@ -178,6 +187,7 @@ class Trade:
             "tp_order_ids": list(self.tp_order_ids),
             "regime": self.regime,
             "partial_exits": [pe.__dict__ for pe in self.partial_exits],
+            "initial_r_distance": self.initial_r_distance,
             "mae_price": self.mae_price,
             "mfe_price": self.mfe_price,
             "mae_r": self.mae_r,
