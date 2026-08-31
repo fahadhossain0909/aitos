@@ -102,26 +102,23 @@ async def connect_redis_with_retry(settings) -> Redis:
     try:
         return await retry_with_backoff(
             _attempt,
-            max_attempts=5,
-            base_delay_seconds=2.0,
-            max_delay_seconds=30.0,
-            operation_name="Redis connection",
+            max_attempts=10,
+            base_delay=1.0,
+            max_delay=15.0,
+            retry_on=(Exception,),
         )
-    except RetryExhaustedError as exc:
-        logger.error("could not connect to Redis: %s", exc)
-        raise SystemExit(1) from exc
+    except RetryExhaustedError:
+        logger.error("Redis connection failed after retries")
+        raise
 
 
 async def main() -> None:
+    configure_logging()
     settings = get_settings()
-    configure_logging(settings.log_level)
-    redis_client = await connect_redis_with_retry(settings)
-    from aitos.eventbus.redis_bus import EventBus
-
-    event_bus = EventBus(redis_client=redis_client)
-    await event_bus.initialize({})
+    event_bus = EventBus(await connect_redis_with_retry(settings))
     market_repo, journal_repo = await try_connect_clickhouse_repositories(settings)
     graph_driver = await try_connect_neo4j(settings)
+
     rl_scorer = DeepValueRLScorer()
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
@@ -143,6 +140,7 @@ async def main() -> None:
         outcome_classifier=outcome_classifier,
         attention_explainer=attention_explainer,
         min_score_threshold=PAPER_MIN_SCORE_THRESHOLD,
+        enable_exit_intelligence=True,
     )
     logger.info(
         "paper trading thresholds",
@@ -181,40 +179,22 @@ async def main() -> None:
                 save_attention_model(attention_explainer, attention_path)
                 logger.info(
                     "scan cycle complete",
-                    extra={
-                        "aitos_extra": {
-                            "submitted": submitted,
-                            "open_trades": len(
-                                components.trade_lifecycle.get_open_trades()
-                            ),
-                            "closed_trades": len(
-                                components.trade_lifecycle.get_closed_trades()
-                            ),
-                            "rl_samples": rl_scorer.n_samples_seen,
-                            "ml_samples": outcome_classifier.n_samples_seen,
-                            "attention_samples": attention_explainer.n_samples_seen,
-                        }
-                    },
+                    extra={"aitos_extra": {"submitted": submitted}},
                 )
-            except Exception as exc:
-                logger.error("scan cycle failed: %s", exc)
+            except Exception:
+                logger.exception("scan cycle failed")
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
                 pass
     finally:
-        rl_scorer.save_state()
-        outcome_classifier.save_state()
-        save_attention_model(attention_explainer, attention_path)
         await health_server.stop()
         await experience_recorder.shutdown()
         await market_os_persistence.shutdown()
         await shutdown_all(components)
-        if market_repo is not None:
-            await market_repo.shutdown()
-        if journal_repo is not None:
-            await journal_repo.shutdown()
-        await redis_client.aclose()
+        if graph_driver is not None:
+            await graph_driver.close()
+        await event_bus.close()
 
 
 if __name__ == "__main__":
