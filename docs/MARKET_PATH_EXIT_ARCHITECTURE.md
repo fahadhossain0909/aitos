@@ -1,6 +1,6 @@
 # Market Path + Exit Intelligence Architecture
 
-> **Status:** Design + Phase-A scaffolding  
+> **Status:** Phases A–D implemented (deterministic, explainable)  
 > **Branch:** `feat/market-path-exit-architecture`  
 > **Principle:** Existing production code is never removed unless strictly necessary. Static TP/SL remain as emergency hard stops.
 
@@ -21,14 +21,14 @@ Entry thesis  →  Market Path (where can price go?)  →  Exit Intelligence (is
 
 ## 2. Core Modules
 
-| Module | Responsibility | Primary Output |
-|--------|----------------|----------------|
-| **Market State Engine (MSE)** | Canonical, explainable snapshot of current market condition | `MarketState` |
-| **Market Path Planner (MPP)** | Ranked probable price destinations + probabilities | `PathPlan` |
-| **Structural Risk Engine (SRE)** | Price level that objectively invalidates the trade thesis → structural SL | `StructuralStop` |
-| **Exit Intelligence Engine (EIE)** | HOLD / MANAGE / EXIT decision with scored reasons | `ExitDecision` |
-| **Position Manager (PM)** | Executes HOLD / REDUCE / TRAIL / EXIT | actions to lifecycle |
-| **Execution Guard** | Emergency hard stop + exchange-side protection (unchanged) | hard SL |
+| Module | Responsibility | Primary Output | Status |
+|--------|----------------|----------------|--------|
+| **Market State Engine (MSE)** | Canonical, explainable snapshot of current market condition | `MarketState` | ✅ Phase A |
+| **Market Path Planner (MPP)** | Ranked probable price destinations + probabilities | `PathPlan` | ✅ Phase B |
+| **Structural Risk Engine (SRE)** | Price level that objectively invalidates the trade thesis → structural SL | `StructuralStop` | ✅ Phase C |
+| **Exit Intelligence Engine (EIE)** | HOLD / MANAGE / EXIT decision with scored reasons | `ExitDecision` | ✅ Phase D |
+| **Position Manager (PM)** | Executes HOLD / REDUCE / TRAIL / EXIT | actions to lifecycle | ⏳ Phase E |
+| **Execution Guard** | Emergency hard stop + exchange-side protection (unchanged) | hard SL | existing |
 
 ### Decision flow
 
@@ -84,54 +84,27 @@ MARKET STATE ENGINE  ───────────────────�
 6. **Existing static / exchange-side SL & hard emergency stops stay.**  
    They protect against software failure, websocket loss, flash crashes, etc.
 
-## 4. Market State (canonical representation)
+## 4. Package layout (implemented)
 
-```python
-@dataclass(frozen=True)
-class MarketState:
-    symbol: str
-    timestamp: datetime
-    mid_price: float
-
-    regime: str                 # TRENDING_UP | TRENDING_DOWN | RANGE | TRANSITION
-    trend_strength: float       # 0–1
-    volatility_regime: str      # CONTRACTING | NORMAL | EXPANDING
-    auction_state: str          # ACCEPTANCE_ABOVE_VALUE | …
-    order_flow_bias: str        # BUYER_DOMINANT | SELLER_DOMINANT | NEUTRAL
-    liquidity_map: str          # UPSIDE_LIQUIDITY_HIGH | …
-    momentum: str               # STRONG | MODERATING | WEAK
-    structure: str              # BULLISH | BEARISH | RANGE
-    reversal_risk: float        # 0–1
-
-    # raw feature bag for downstream modules (explainable)
-    features: dict[str, float]
+```
+aitos/intelligence/
+├── market_state/          # Phase A
+│   ├── models.py          # MarketState + enums
+│   └── engine.py          # MarketStateEngine
+├── path_planner/          # Phase B
+│   ├── models.py          # PathDestination, PathPlan
+│   └── planner.py         # MarketPathPlanner
+├── structural_risk/       # Phase C
+│   ├── models.py          # StructuralStop
+│   └── engine.py          # StructuralRiskEngine
+└── exit_intelligence/     # Phase D
+    ├── models.py          # ExitAction, ExitReason, ExitDecision
+    └── engine.py          # ExitIntelligenceEngine
 ```
 
-## 5. Path Plan
+## 5. Expected Remaining Edge (ERE)
 
-```python
-@dataclass(frozen=True)
-class PathDestination:
-    price: float
-    probability: float          # 0–1
-    distance: float
-    market_structure_type: str  # prior_high | LVN | HVN | liquidity_pool | …
-    liquidity_type: str
-    expected_horizon: str       # scalp | intraday | swing
-    confidence: float
-
-@dataclass(frozen=True)
-class PathPlan:
-    symbol: str
-    current_price: float
-    upside: tuple[PathDestination, ...]
-    downside: tuple[PathDestination, ...]
-    as_of: datetime
-```
-
-## 6. Expected Remaining Edge (ERE)
-
-Once a position is open, EIE can compute:
+Once a position is open, EIE computes:
 
 ```
 ERE = Σ (p_i * upside_i) - Σ (q_j * downside_j) - transaction_cost
@@ -139,32 +112,32 @@ ERE = Σ (p_i * upside_i) - Σ (q_j * downside_j) - transaction_cost
 
 - ERE ≫ 0 → HOLD
 - ERE ≈ 0 → MANAGE
-- ERE < 0  → EXIT
+- ERE < 0  → EXIT (when combined with high exit_score)
 
 This replaces static 1R/2R rules with a continuously updated, probabilistic edge estimate.
 
-## 7. Implementation Roadmap (strict order)
+## 6. Implementation Roadmap
 
-| Phase | Deliverable | Depends on |
-|-------|-------------|------------|
-| **A** | Market State Engine (canonical state + feature aggregation) | existing live_state, order_flow, liquidity, indicators, auction |
-| **B** | Market Path Planner (destination ranking) | A + volume profile / structure helpers |
-| **C** | Structural Risk Engine (thesis-invalidation SL) | A + structure / liquidity |
-| **D** | Exit Intelligence Engine (HOLD/MANAGE/EXIT + reasons) | A+B+C |
-| **E** | Position Manager integration into TradeLifecycle | D (additive, no removal of existing SL/TP paths) |
-| **F** | Offline evaluation harness (replay old trades under new policy) | E |
+| Phase | Deliverable | Status |
+|-------|-------------|--------|
+| **A** | Market State Engine | ✅ Done + tests |
+| **B** | Market Path Planner | ✅ Done + tests |
+| **C** | Structural Risk Engine | ✅ Done + tests |
+| **D** | Exit Intelligence Engine | ✅ Done + tests |
+| **E** | Position Manager integration into TradeLifecycle (additive) | Next |
+| **F** | Offline evaluation harness (replay old trades under new policy) | After E |
 
 **No Deep RL in the first versions.** Deterministic scoring first; RL only after we can audit the feature-based decisions.
 
-## 8. Integration Contract with Existing Code
+## 7. Integration Contract with Existing Code
 
 - `TradeLifecycle.update_price` continues to honour the emergency hard SL and exchange-side stops.
-- New path: when an open trade exists, EIE is consulted *before* the static TP check.  
+- New path (Phase E): when an open trade exists, EIE is consulted *before* the static TP check.  
   If EIE says HOLD, a static TP hit becomes a *partial-reduce candidate* rather than forced full exit (configurable).
-- All new modules publish events on the existing Redis Streams bus (`decision.market_state`, `decision.path_plan`, `decision.exit` …) so XAI / journal / learning can consume them without coupling.
-- Position sizing already lives in `risk/position_sizing.py`; SRE will supply the structural distance that sizing uses.
+- All new modules are pure / side-effect free; callers publish events on the existing Redis Streams bus so XAI / journal / learning can consume them without coupling.
+- Position sizing already lives in `risk/position_sizing.py`; SRE supplies the structural distance that sizing should use.
 
-## 9. Research Anchors
+## 8. Research Anchors
 
 - Multi-level Order-Flow Imbalance (MLOFI) carries measurable short-horizon predictive information (Cont et al., Xu/Gould/Howison, Kolm et al.).
 - Volume Profile HVN ≈ acceptance / stall zones; LVN ≈ faster travel zones (auction-market theory).
@@ -172,7 +145,7 @@ This replaces static 1R/2R rules with a continuously updated, probabilistic edge
 
 These are used as *feature sources*, never as black-box oracles.
 
-## 10. Safety & Non-Goals
+## 9. Safety & Non-Goals
 
 - This architecture does **not** remove the requirement for human approval on production live orders.
 - It does **not** claim higher win-rate; it claims higher *expected value per trade* by letting winners run when the path remains open and cutting when the thesis is objectively dead.
@@ -180,4 +153,4 @@ These are used as *feature sources*, never as black-box oracles.
 
 ---
 
-*Next concrete step: Phase A implementation under `aitos/intelligence/market_state/`.*
+*Next concrete step: Phase E — additive wiring of ExitDecision into TradeLifecycle without removing existing SL/TP paths.*
