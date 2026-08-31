@@ -114,7 +114,9 @@ class AITOSHistoricalRunner:
                 self.adapter.on_trade(event)
                 last_price = event.price
                 trade_side = "sell" if event.is_buyer_maker else "buy"
-                for pf in self.queue.consume(trade_side, event.price, event.quantity, event.timestamp):
+                for pf in self.queue.consume(
+                    trade_side, event.price, event.quantity, event.timestamp
+                ):
                     order = self.queue.orders[pf.order_id]
                     self._apply_fill(order.side, pf.quantity, pf.price)
                     filled += pf.quantity
@@ -136,7 +138,11 @@ class AITOSHistoricalRunner:
             states += 1
             decision = decide(state)
             decisions += 1
-            equity_curve.append(self.margin.snapshot(last_price).equity if last_price > 0 else self.initial_cash)
+            equity_curve.append(
+                self.margin.snapshot(last_price).equity
+                if last_price > 0
+                else self.initial_cash
+            )
             if decision.quantity <= 0 or decision.direction not in {"long", "short"}:
                 continue
 
@@ -148,9 +154,13 @@ class AITOSHistoricalRunner:
                 self._order_seq += 1
                 self.queue.place(
                     SimulatedOrder(
-                        f"bt-{self._order_seq}", side, decision.limit_price,
-                        decision.quantity, decision.quantity,
-                        max(0.0, decision.queue_ahead), event.timestamp,
+                        f"bt-{self._order_seq}",
+                        side,
+                        decision.limit_price,
+                        decision.quantity,
+                        decision.quantity,
+                        max(0.0, decision.queue_ahead),
+                        event.timestamp,
                     )
                 )
                 passive_orders += 1
@@ -171,7 +181,11 @@ class AITOSHistoricalRunner:
             last_price = result.average_price
             direction = decision.direction
             if open_entry is None:
-                open_entry, open_side, open_qty = result.average_price, direction, result.filled_quantity
+                open_entry, open_side, open_qty = (
+                    result.average_price,
+                    direction,
+                    result.filled_quantity,
+                )
                 open_prices = [last_price]
             elif open_side == direction:
                 open_qty += result.filled_quantity
@@ -182,21 +196,38 @@ class AITOSHistoricalRunner:
                 trade_excursions.append(trade)
                 sign = 1.0 if open_side == "long" else -1.0
                 trade_pnls.append((result.average_price - open_entry) * sign * open_qty)
-                open_entry, open_side, open_qty = result.average_price, direction, result.filled_quantity
+                open_entry, open_side, open_qty = (
+                    result.average_price,
+                    direction,
+                    result.filled_quantity,
+                )
                 open_prices = [last_price]
 
             equity_curve.append(self.margin.snapshot(last_price).equity)
 
         if open_entry is not None and open_side is not None:
-            trade_excursions.append(excursions(open_entry, open_side, open_prices or [last_price]))
+            trade_excursions.append(
+                excursions(open_entry, open_side, open_prices or [last_price])
+            )
             sign = 1.0 if open_side == "long" else -1.0
             trade_pnls.append((last_price - open_entry) * sign * open_qty)
 
         snap = self.margin.snapshot(last_price) if last_price > 0 else None
         final_equity = snap.equity if snap else self.initial_cash
         return HistoricalRunResult(
-            states, decisions, fills, requested, filled, final_equity,
-            final_equity / self.initial_cash - 1.0, self.execution.fees,
-            self.margin.funding_paid, self.margin.liquidated, passive_orders,
-            passive_fills, tuple(equity_curve), tuple(trade_pnls), tuple(trade_excursions),
+            states,
+            decisions,
+            fills,
+            requested,
+            filled,
+            final_equity,
+            final_equity / self.initial_cash - 1.0,
+            self.execution.fees,
+            self.margin.funding_paid,
+            self.margin.liquidated,
+            passive_orders,
+            passive_fills,
+            tuple(equity_curve),
+            tuple(trade_pnls),
+            tuple(trade_excursions),
         )
