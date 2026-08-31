@@ -76,7 +76,7 @@ async def try_connect_neo4j(settings):
     try:
         await driver.verify_connectivity()
         return driver
-    except Exception as exc:
+    except Exception:
         logger.warning("Neo4j unavailable: %s", exp)
         await driver.close()
         return None
