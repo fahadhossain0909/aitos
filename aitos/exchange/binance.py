@@ -36,6 +36,7 @@ from aitos.models.market import (
 logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
 WS_MARKET_BASE_URL = "wss://fstream.binance.com/market/stream"
+WS_MARKET_RAW_BASE_URL = "wss://fstream.binance.com/market/ws"
 WS_PUBLIC_BASE_URL = "wss://fstream.binance.com/public/stream"
 DEFAULT_RATE_LIMIT_CAPACITY = 2000
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2000 / 60
@@ -146,7 +147,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield kline
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
-        """Keep one combined aggTrade primary stream with per-symbol raw-trade fallback."""
+        """Use market aggTrade, with direct per-symbol aggTrade fallback."""
         if not symbols:
             return
 
@@ -156,15 +157,16 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             f"{symbol.lower()}@aggTrade" for symbol in normalized_symbols
         ]
         primary = self._raw_stream(primary_streams, emit_reconnect=True).__aiter__()
+        # Binance Futures' current split routes trade/aggTrade through /market.
+        # Keep the historical direct-socket fallback, but do not use @trade:
+        # the current documented Futures market-stream surface is @aggTrade.
         fallback_streams = {
-            symbol: self._raw_stream(
-                [f"{symbol.lower()}@trade"], emit_reconnect=True
+            symbol: self._direct_raw_stream(
+                f"{symbol.lower()}@aggTrade", emit_reconnect=True
             ).__aiter__()
             for symbol in normalized_symbols
         }
         loop = asyncio.get_running_loop()
-        # Start the watchdog clock at subscription time. A completely silent
-        # primary stream must therefore enter fallback even before its first event.
         primary_last_data: dict[str, float] = {
             symbol: loop.time() for symbol in normalized_symbols
         }
@@ -189,7 +191,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     fallback_streams[symbol].__anext__()
                 )
             logger.warning(
-                "Binance aggregate-trade stream idle; entering per-symbol raw-trade fallback",
+                "Binance aggregate-trade stream idle; entering direct per-symbol aggTrade fallback",
                 extra={
                     "aitos_extra": {
                         "symbol": symbol,
@@ -233,9 +235,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 if not done:
                     continue
 
-                # Fallback has priority when both sources become ready in the
-                # same scheduler turn. This prevents a recovered primary event
-                # from overtaking the already-live fallback event.
                 for symbol in normalized_symbols:
                     task = fallback_tasks[symbol]
                     if (
@@ -248,10 +247,10 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         data, _ = task.result()
                         fallback_tasks[symbol] = None
                         try:
-                            yield parse_trade_ws(data)
+                            yield parse_agg_trade_ws(data)
                         except Exception as exc:
                             logger.error(
-                                "Binance raw-trade fallback event invalid",
+                                "Binance direct aggTrade fallback event invalid",
                                 extra={
                                     "aitos_extra": {"symbol": symbol, "error": str(exc)}
                                 },
@@ -261,7 +260,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     except Exception as exc:
                         fallback_tasks[symbol] = None
                         logger.error(
-                            "Binance raw-trade fallback stream failed",
+                            "Binance direct aggTrade fallback stream failed",
                             extra={
                                 "aitos_extra": {"symbol": symbol, "error": str(exc)}
                             },
@@ -271,9 +270,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                             fallback_tasks[symbol] = asyncio.create_task(
                                 fallback_streams[symbol].__anext__()
                             )
-                    # One yield is intentional: after the caller consumes the
-                    # fallback tick, the loop can process a simultaneous primary
-                    # recovery as the next item.
                     break
                 else:
                     if primary_task in done:
@@ -310,7 +306,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                                         fallback_task, return_exceptions=True
                                     )
                                 logger.info(
-                                    "Binance aggregate-trade stream recovered; returning from per-symbol fallback",
+                                    "Binance aggregate-trade stream recovered; returning from direct per-symbol fallback",
                                     extra={"aitos_extra": {"symbol": symbol}},
                                 )
                             yield tick
@@ -439,9 +435,42 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     def _ws_base_url(streams: list[str]) -> str:
         if not streams:
             return WS_MARKET_BASE_URL
-        if all("@depth" in stream or "@trade" in stream for stream in streams):
+        if all("@depth" in stream or "@bookTicker" in stream for stream in streams):
             return WS_PUBLIC_BASE_URL
         return WS_MARKET_BASE_URL
+
+    async def _direct_raw_stream(
+        self, stream: str, emit_reconnect: bool = False
+    ) -> AsyncIterator[tuple[Any, str]]:
+        url = f"{WS_MARKET_RAW_BASE_URL}/{stream}"
+        backoff = INITIAL_BACKOFF_SECONDS
+        while True:
+            try:
+                async with self._ws_connector(url) as ws:
+                    backoff = INITIAL_BACKOFF_SECONDS
+                    async for raw_message in ws:
+                        envelope = json.loads(raw_message)
+                        yield envelope, stream
+                if emit_reconnect:
+                    logger.warning(
+                        "Binance direct market stream closed, reconnecting",
+                        extra={"aitos_extra": {"stream": stream, "backoff_seconds": backoff}},
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error(
+                    "Binance direct market stream disconnected, reconnecting",
+                    extra={
+                        "aitos_extra": {
+                            "stream": stream,
+                            "error": str(exc),
+                            "backoff_seconds": backoff,
+                        }
+                    },
+                )
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
 
     async def _raw_stream(
         self, streams: list[str], emit_reconnect: bool = False
