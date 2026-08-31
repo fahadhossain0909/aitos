@@ -21,3 +21,15 @@ def test_redis_dlq_retention_worker_does_not_delete_other_streams():
     assert "FLUSHDB" not in worker
     assert "FLUSHALL" not in worker
     assert "DEL " not in worker
+
+
+def test_redis_has_memory_safety_margin_and_safe_eviction_policy():
+    compose = (ROOT / "docker-compose.yml").read_text()
+
+    assert "--maxmemory" in compose
+    assert "2gb" in compose
+    assert "--maxmemory-policy" in compose
+    assert "noeviction" in compose
+    assert 'mem_limit: 2.5g' in compose
+    assert "--aof-use-rdb-preamble" in compose
+    assert 'start_period: 120s' in compose
