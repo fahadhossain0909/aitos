@@ -1,18 +1,6 @@
-"""Position Manager — Phase E of the Market-Path / Exit-Intelligence architecture.
+"""Position Manager — Phase E/G of Market-Path / Exit-Intelligence.
 
-Orchestrates:
-
-    MarketState → PathPlan → StructuralStop → ExitDecision
-
-and turns the decision into concrete lifecycle actions:
-
-* HOLD   — do nothing (let winners run)
-* MANAGE — optional partial reduce + optional structural-stop tighten
-* EXIT   — full close with explainable reason
-
-This module is intentionally side-effect light: it returns an action plan.
-TradeLifecycle (or a caller) is responsible for executing the plan so that
-existing emergency hard-SL / exchange-side paths stay authoritative.
+Orchestrates: MarketState → PathPlan → StructuralStop → ThesisEval → ExitDecision
 """
 
 from __future__ import annotations
@@ -33,29 +21,26 @@ from aitos.intelligence.market_state import MarketState, MarketStateEngine
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
 from aitos.intelligence.path_planner import MarketPathPlanner, PathPlan
 from aitos.intelligence.structural_risk import StructuralRiskEngine, StructuralStop
+from aitos.intelligence.trade_thesis import TradeThesis, TradeThesisEngine
+from aitos.intelligence.trade_thesis.models import ThesisEvaluation
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Trade, TradeSide
 
 logger = get_logger("aitos.trading.position_manager")
 
-TOPIC_EXIT_DECISION = "decision.exit"
-TOPIC_PATH_PLAN = "decision.path_plan"
-TOPIC_MARKET_STATE = "decision.market_state"
-TOPIC_STRUCTURAL_STOP = "decision.structural_stop"
-
 
 @dataclass(frozen=True)
 class PositionAction:
-    """Concrete instruction returned to TradeLifecycle."""
-
     action: ExitAction
     reason: str
-    reduce_fraction: float = 0.0  # 0–1 when MANAGE
-    new_stop_price: float | None = None  # tighten toward structural stop
+    reduce_fraction: float = 0.0
+    new_stop_price: float | None = None
     exit_decision: ExitDecision | None = None
     path_plan: PathPlan | None = None
     structural_stop: StructuralStop | None = None
     market_state: MarketState | None = None
+    thesis: TradeThesis | None = None
+    thesis_eval: ThesisEvaluation | None = None
     notes: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -67,28 +52,39 @@ class PositionAction:
             "exit_decision": (
                 self.exit_decision.to_dict() if self.exit_decision else None
             ),
+            "thesis_health": (
+                self.thesis_eval.health.value if self.thesis_eval else None
+            ),
             "notes": list(self.notes),
         }
 
 
 class PositionManager:
-    """Coordinates the four intelligence engines for an open position."""
-
     def __init__(
         self,
         market_state_engine: MarketStateEngine | None = None,
         path_planner: MarketPathPlanner | None = None,
         structural_risk_engine: StructuralRiskEngine | None = None,
         exit_intelligence_engine: ExitIntelligenceEngine | None = None,
+        thesis_engine: TradeThesisEngine | None = None,
         config: Mapping[str, Any] | None = None,
     ) -> None:
         self._mse = market_state_engine or MarketStateEngine()
         self._mpp = path_planner or MarketPathPlanner()
         self._sre = structural_risk_engine or StructuralRiskEngine()
         self._eie = exit_intelligence_engine or ExitIntelligenceEngine()
+        self._thesis_engine = thesis_engine or TradeThesisEngine()
         self._cfg = dict(config or {})
-        # When True, MANAGE may tighten SL toward structural stop
+        self._theses: dict[str, TradeThesis] = {}
         self._allow_stop_tighten = bool(self._cfg.get("allow_stop_tighten", True))
+
+    def register_thesis(self, thesis: TradeThesis) -> None:
+        self._theses[thesis.trade_id] = thesis
+
+    def clear_trade(self, trade_id: str, symbol: str | None = None) -> None:
+        self._theses.pop(trade_id, None)
+        if symbol:
+            self._eie.reset_symbol(symbol)
 
     def evaluate(
         self,
@@ -108,11 +104,9 @@ class PositionManager:
         extra_features: Mapping[str, float] | None = None,
         timestamp: datetime | None = None,
     ) -> PositionAction:
-        """Run the full intelligence stack and return a PositionAction."""
         ts = timestamp or datetime.now(timezone.utc)
         side = trade.side.value
 
-        # 1. Market State
         market_state = self._mse.compute(
             symbol=trade.symbol,
             mid_price=current_price,
@@ -129,7 +123,6 @@ class PositionManager:
             extra_features=extra_features,
         )
 
-        # 2. Path Plan
         path_plan = self._mpp.plan(
             market_state=market_state,
             volume_profile=volume_profile,
@@ -140,7 +133,6 @@ class PositionManager:
             swing_lows=swing_lows,
         )
 
-        # 3. Structural Stop (thesis invalidation)
         structural_stop = self._sre.compute(
             symbol=trade.symbol,
             side=side,
@@ -155,7 +147,29 @@ class PositionManager:
             timestamp=ts,
         )
 
-        # 4. Exit Intelligence
+        thesis = self._theses.get(trade.trade_id)
+        if thesis is None:
+            upside = tuple(d.price for d in path_plan.upside[:3])
+            downside = tuple(d.price for d in path_plan.downside[:3])
+            expected = upside if side == "LONG" else downside
+            thesis = self._thesis_engine.build_from_entry(
+                trade_id=trade.trade_id,
+                symbol=trade.symbol,
+                side=side,
+                entry_price=trade.entry_price,
+                market_state=market_state,
+                structural_invalidation_price=structural_stop.stop_price,
+                expected_path_prices=expected,
+                strategy_id=trade.strategy_id,
+                rationale=trade.explanation or "",
+                timestamp=ts,
+            )
+            self._theses[trade.trade_id] = thesis
+
+        thesis_eval = self._thesis_engine.evaluate(
+            thesis, market_state, current_price=current_price
+        )
+
         exit_decision = self._eie.evaluate(
             symbol=trade.symbol,
             side=side,
@@ -164,17 +178,17 @@ class PositionManager:
             market_state=market_state,
             path_plan=path_plan,
             structural_stop=structural_stop,
+            thesis=thesis,
+            thesis_eval=thesis_eval,
             timestamp=ts,
         )
 
-        # 5. Map to PositionAction
         new_stop: float | None = None
         if (
             self._allow_stop_tighten
             and exit_decision.action == ExitAction.MANAGE
             and structural_stop is not None
         ):
-            # Only tighten (never loosen) relative to current SL
             if trade.side == TradeSide.LONG:
                 if structural_stop.stop_price > trade.sl_price:
                     new_stop = structural_stop.stop_price
@@ -187,10 +201,11 @@ class PositionManager:
             f"EIE:{exit_decision.action.value}"
             f" score={exit_decision.exit_score:.2f}"
             f" ere={exit_decision.expected_remaining_edge:.4f}"
+            f" thesis={thesis_eval.health.value}"
             f" [{', '.join(reason_codes)}]"
         )
 
-        action = PositionAction(
+        return PositionAction(
             action=exit_decision.action,
             reason=reason,
             reduce_fraction=exit_decision.suggested_reduce_fraction,
@@ -199,16 +214,7 @@ class PositionManager:
             path_plan=path_plan,
             structural_stop=structural_stop,
             market_state=market_state,
+            thesis=thesis,
+            thesis_eval=thesis_eval,
             notes=exit_decision.notes,
         )
-        logger.debug(
-            "PositionAction",
-            extra={
-                "aitos_extra": {
-                    "trade_id": trade.trade_id,
-                    "action": action.action.value,
-                    "score": exit_decision.exit_score,
-                }
-            },
-        )
-        return action
