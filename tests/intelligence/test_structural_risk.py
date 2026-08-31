@@ -4,6 +4,17 @@ from __future__ import annotations
 
 from aitos.intelligence.structural_risk import StructuralRiskEngine, StructuralStop
 
+# Hierarchy types returned by classify_swing / select_by_hierarchy
+SWING_TYPES = (
+    "protected_swing",
+    "major_swing",
+    "micro_swing",
+    "structure_break",
+    "value_area",
+    "liquidity",
+    "emergency_fallback",
+)
+
 
 def test_long_uses_swing_low():
     eng = StructuralRiskEngine()
@@ -17,7 +28,7 @@ def test_long_uses_swing_low():
     assert isinstance(stop, StructuralStop)
     assert stop.side == "LONG"
     assert stop.stop_price < 79000.0
-    assert stop.invalidation_type in ("swing", "emergency_fallback")
+    assert stop.invalidation_type in SWING_TYPES
     assert stop.distance > 0
 
 
@@ -31,7 +42,7 @@ def test_short_uses_swing_high():
         atr=200.0,
     )
     assert stop.stop_price > 79000.0
-    assert stop.invalidation_type in ("swing", "emergency_fallback")
+    assert stop.invalidation_type in SWING_TYPES
 
 
 def test_fallback_when_no_structure():
