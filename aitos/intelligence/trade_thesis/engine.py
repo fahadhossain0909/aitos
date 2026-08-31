@@ -1,1 +1,246 @@
-"""Trade Thesis Engine — build and evaluate thesis consistency.\n\nDeterministic, explainable. No ML.\n"""\n\nfrom __future__ import annotations\n\nfrom collections.abc import Mapping, Sequence\nfrom datetime import datetime, timezone\nfrom typing import Any\n\nfrom aitos.intelligence.market_state.models import (\n    MarketState,\n    MomentumState,\n    OrderFlowBias,\n    StructureBias,\n)\nfrom aitos.intelligence.trade_thesis.models import (\n    ConfirmationSignal,\n    InvalidationCondition,\n    ThesisComponent,\n    ThesisEvaluation,\n    ThesisHealth,\n    TradeThesis,\n)\nfrom aitos.logging_setup import get_logger\n\nlogger = get_logger("aitos.intelligence.trade_thesis")\n\n\nclass TradeThesisEngine:\n    """Build a thesis at entry and evaluate it against live MarketState."""\n\n    def __init__(self, config: Mapping[str, Any] | None = None) -> None:\n        self._cfg = dict(config or {})\n\n    def build_from_entry(\n        self,\n        *,\n        trade_id: str,\n        symbol: str,\n        side: str,\n        entry_price: float,\n        market_state: MarketState | None = None,\n        structural_invalidation_price: float | None = None,\n        expected_path_prices: Sequence[float] = (),\n        strategy_id: str = "",\n        rationale: str = "",\n        agent_consensus: Mapping[str, Any] | None = None,\n        timestamp: datetime | None = None,\n    ) -> TradeThesis:\n        side = side.upper()\n        ts = timestamp or datetime.now(timezone.utc)\n        components: list[ThesisComponent] = []\n        invalidations: list[InvalidationCondition] = []\n        confirmations: list[ConfirmationSignal] = []\n        notes: list[str] = []\n        features: dict[str, float] = {"entry_price": entry_price}\n\n        if market_state is not None:\n            features["trend_strength"] = market_state.trend_strength\n            features["reversal_risk"] = market_state.reversal_risk\n\n            if side == "LONG" and market_state.structure == StructureBias.BULLISH:\n                components.append(\n                    ThesisComponent(\n                        "bullish_structure",\n                        "Entry aligned with bullish market structure",\n                        1.2,\n                    )\n                )\n                confirmations.append(\n                    ConfirmationSignal(\n                        "structure_supportive", "Structure remains BULLISH"\n                    )\n                )\n            elif side == "SHORT" and market_state.structure == StructureBias.BEARISH:\n                components.append(\n                    ThesisComponent(\n                        "bearish_structure",\n                        "Entry aligned with bearish market structure",\n                        1.2,\n                    )\n                )\n                confirmations.append(\n                    ConfirmationSignal(\n                        "structure_supportive", "Structure remains BEARISH"\n                    )\n                )\n\n            if side == "LONG" and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT:\n                components.append(\n                    ThesisComponent(\n                        "buyer_imbalance", "Buyer-dominant order flow at entry", 1.0\n                    )\n                )\n                confirmations.append(\n                    ConfirmationSignal(\n                        "of_supportive", "Order flow remains BUYER_DOMINANT"\n                    )\n                )\n            elif side == "SHORT" and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT:\n                components.append(\n                    ThesisComponent(\n                        "seller_imbalance", "Seller-dominant order flow at entry", 1.0\n                    )\n                )\n                confirmations.append(\n                    ConfirmationSignal(\n                        "of_supportive", "Order flow remains SELLER_DOMINANT"\n                    )\n                )\n\n            if market_state.momentum in (MomentumState.STRONG, MomentumState.MODERATING):\n                components.append(\n                    ThesisComponent(\n                        "momentum_support",\n                        f"Momentum {market_state.momentum.value} at entry",\n                        0.8,\n                    )\n                )\n                confirmations.append(\n                    ConfirmationSignal(\n                        "momentum_not_exhausted", "Momentum not EXHAUSTED"\n                    )\n                )\n\n            notes.append(f"regime={market_state.regime.value}")\n\n        if structural_invalidation_price is not None and structural_invalidation_price > 0:\n            invalidations.append(\n                InvalidationCondition(\n                    "structure_break",\n                    f"Price breaches structural level {structural_invalidation_price:.6g}",\n                    level=structural_invalidation_price,\n                )\n            )\n            notes.append(f"invalidation_price={structural_invalidation_price:.6g}")\n\n        if side == "LONG":\n            invalidations.append(\n                InvalidationCondition(\n                    "structure_against", "Structure flips to BEARISH or BROKEN"\n                )\n            )\n            invalidations.append(\n                InvalidationCondition(\n                    "of_reversal", "Order flow flips to SELLER_DOMINANT"\n                )\n            )\n        else:\n            invalidations.append(\n                InvalidationCondition(\n                    "structure_against", "Structure flips to BULLISH or BROKEN"\n                )\n            )\n            invalidations.append(\n                InvalidationCondition(\n                    "of_reversal", "Order flow flips to BUYER_DOMINANT"\n                )\n            )\n\n        if strategy_id:\n            notes.append(f"strategy={strategy_id}")\n        if rationale:\n            notes.append(rationale[:200])\n\n        if not components:\n            components.append(\n                ThesisComponent("directional_bias", f"{side} directional entry", 0.5)\n            )\n\n        return TradeThesis(\n            trade_id=trade_id,\n            symbol=symbol,\n            side=side,\n            entry_price=entry_price,\n            components=tuple(components),\n            invalidations=tuple(invalidations),\n            confirmations=tuple(confirmations),\n            expected_path_prices=tuple(float(p) for p in expected_path_prices if p > 0),\n            invalidation_price=structural_invalidation_price,\n            created_at=ts,\n            notes=tuple(notes),\n            features=features,\n        )\n\n    def evaluate(\n        self,\n        thesis: TradeThesis,\n        market_state: MarketState,\n        current_price: float | None = None,\n    ) -> ThesisEvaluation:\n        price = (\n            current_price\n            if current_price and current_price > 0\n            else market_state.mid_price\n        )\n        side = thesis.side\n        breached: list[str] = []\n        lost: list[str] = []\n        active: list[str] = []\n        notes: list[str] = []\n\n        for inv in thesis.invalidations:\n            if inv.code == "structure_break":\n                level = inv.level or thesis.invalidation_price\n                if level is not None and level > 0:\n                    if side == "LONG" and price <= level:\n                        breached.append(inv.code)\n                        notes.append(f"price {price:.6g} <= invalidation {level:.6g}")\n                    elif side == "SHORT" and price >= level:\n                        breached.append(inv.code)\n                        notes.append(f"price {price:.6g} >= invalidation {level:.6g}")\n            elif inv.code == "structure_against":\n                if market_state.structure == StructureBias.BROKEN:\n                    breached.append(inv.code)\n                elif side == "LONG" and market_state.structure == StructureBias.BEARISH:\n                    breached.append(inv.code)\n                elif side == "SHORT" and market_state.structure == StructureBias.BULLISH:\n                    breached.append(inv.code)\n            elif inv.code == "of_reversal":\n                if (\n                    side == "LONG"\n                    and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT\n                ):\n                    breached.append(inv.code)\n                elif (\n                    side == "SHORT"\n                    and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT\n                ):\n                    breached.append(inv.code)\n\n        for conf in thesis.confirmations:\n            if conf.code == "structure_supportive":\n                if (\n                    side == "LONG" and market_state.structure == StructureBias.BULLISH\n                ) or (\n                    side == "SHORT" and market_state.structure == StructureBias.BEARISH\n                ):\n                    active.append(conf.code)\n                else:\n                    lost.append(conf.code)\n            elif conf.code == "of_supportive":\n                if (\n                    side == "LONG"\n                    and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT\n                ) or (\n                    side == "SHORT"\n                    and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT\n                ):\n                    active.append(conf.code)\n                else:\n                    lost.append(conf.code)\n            elif conf.code == "momentum_not_exhausted":\n                if market_state.momentum != MomentumState.EXHAUSTED:\n                    active.append(conf.code)\n                else:\n                    lost.append(conf.code)\n\n        if breached:\n            health = ThesisHealth.INVALIDATED\n            consistency = 0.0\n        elif lost and not active:\n            health = ThesisHealth.DEGRADED\n            consistency = 0.35\n        elif lost:\n            health = ThesisHealth.DEGRADED\n            n_conf = max(1, len(thesis.confirmations))\n            consistency = max(0.4, 1.0 - 0.4 * (len(lost) / n_conf))\n        else:\n            health = ThesisHealth.INTACT\n            consistency = 1.0 if thesis.confirmations else 0.75\n\n        if market_state.reversal_risk >= 0.55 and health != ThesisHealth.INVALIDATED:\n            consistency = max(0.0, consistency - 0.15)\n            if health == ThesisHealth.INTACT:\n                health = ThesisHealth.DEGRADED\n            notes.append(f"elevated_reversal_risk={market_state.reversal_risk:.2f}")\n\n        return ThesisEvaluation(\n            health=health,\n            consistency_score=round(consistency, 4),\n            breached_invalidations=tuple(breached),\n            lost_confirmations=tuple(lost),\n            active_confirmations=tuple(active),\n            notes=tuple(notes),\n        )\n
+"""Trade Thesis Engine — build and evaluate thesis consistency.
+
+Deterministic, explainable. No ML.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
+from typing import Any
+
+from aitos.intelligence.market_state.models import (
+    MarketState,
+    MomentumState,
+    OrderFlowBias,
+    StructureBias,
+)
+from aitos.intelligence.trade_thesis.models import (
+    ConfirmationSignal,
+    InvalidationCondition,
+    ThesisComponent,
+    ThesisEvaluation,
+    ThesisHealth,
+    TradeThesis,
+)
+from aitos.logging_setup import get_logger
+
+logger = get_logger("aitos.intelligence.trade_thesis")
+
+
+class TradeThesisEngine:
+    """Build a thesis at entry and evaluate it against live MarketState."""
+
+    def __init__(self, config: Mapping[str, Any] | None = None) -> None:
+        self._cfg = dict(config or {})
+
+    def build_from_entry(
+        self,
+        *,
+        trade_id: str,
+        symbol: str,
+        side: str,
+        entry_price: float,
+        market_state: MarketState | None = None,
+        structural_invalidation_price: float | None = None,
+        expected_path_prices: Sequence[float] = (),
+        strategy_id: str = "",
+        rationale: str = "",
+        agent_consensus: Mapping[str, Any] | None = None,
+        timestamp: datetime | None = None,
+    ) -> TradeThesis:
+        side = side.upper()
+        ts = timestamp or datetime.now(timezone.utc)
+        components: list[ThesisComponent] = []
+        invalidations: list[InvalidationCondition] = []
+        confirmations: list[ConfirmationSignal] = []
+        notes: list[str] = []
+        features: dict[str, float] = {"entry_price": entry_price}
+
+        if market_state is not None:
+            features["trend_strength"] = market_state.trend_strength
+            features["reversal_risk"] = market_state.reversal_risk
+            if side == "LONG" and market_state.structure == StructureBias.BULLISH:
+                components.append(
+                    ThesisComponent(
+                        "bullish_structure",
+                        "Entry aligned with bullish market structure",
+                        1.2,
+                    )
+                )
+                confirmations.append(
+                    ConfirmationSignal("structure_supportive", "Structure remains BULLISH")
+                )
+            elif side == "SHORT" and market_state.structure == StructureBias.BEARISH:
+                components.append(
+                    ThesisComponent(
+                        "bearish_structure",
+                        "Entry aligned with bearish market structure",
+                        1.2,
+                    )
+                )
+                confirmations.append(
+                    ConfirmationSignal("structure_supportive", "Structure remains BEARISH")
+                )
+            if side == "LONG" and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT:
+                components.append(
+                    ThesisComponent("buyer_imbalance", "Buyer-dominant order flow at entry", 1.0)
+                )
+                confirmations.append(
+                    ConfirmationSignal("of_supportive", "Order flow remains BUYER_DOMINANT")
+                )
+            elif side == "SHORT" and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT:
+                components.append(
+                    ThesisComponent("seller_imbalance", "Seller-dominant order flow at entry", 1.0)
+                )
+                confirmations.append(
+                    ConfirmationSignal("of_supportive", "Order flow remains SELLER_DOMINANT")
+                )
+            if market_state.momentum in (MomentumState.STRONG, MomentumState.MODERATING):
+                components.append(
+                    ThesisComponent(
+                        "momentum_support",
+                        f"Momentum {market_state.momentum.value} at entry",
+                        0.8,
+                    )
+                )
+                confirmations.append(
+                    ConfirmationSignal("momentum_not_exhausted", "Momentum not EXHAUSTED")
+                )
+            notes.append(f"regime={market_state.regime.value}")
+
+        if structural_invalidation_price is not None and structural_invalidation_price > 0:
+            invalidations.append(
+                InvalidationCondition(
+                    "structure_break",
+                    f"Price breaches structural level {structural_invalidation_price:.6g}",
+                    level=structural_invalidation_price,
+                )
+            )
+            notes.append(f"invalidation_price={structural_invalidation_price:.6g}")
+
+        if side == "LONG":
+            invalidations.append(
+                InvalidationCondition("structure_against", "Structure flips to BEARISH or BROKEN")
+            )
+            invalidations.append(
+                InvalidationCondition("of_reversal", "Order flow flips to SELLER_DOMINANT")
+            )
+        else:
+            invalidations.append(
+                InvalidationCondition("structure_against", "Structure flips to BULLISH or BROKEN")
+            )
+            invalidations.append(
+                InvalidationCondition("of_reversal", "Order flow flips to BUYER_DOMINANT")
+            )
+
+        if strategy_id:
+            notes.append(f"strategy={strategy_id}")
+        if rationale:
+            notes.append(rationale[:200])
+        if not components:
+            components.append(
+                ThesisComponent("directional_bias", f"{side} directional entry", 0.5)
+            )
+
+        return TradeThesis(
+            trade_id=trade_id,
+            symbol=symbol,
+            side=side,
+            entry_price=entry_price,
+            components=tuple(components),
+            invalidations=tuple(invalidations),
+            confirmations=tuple(confirmations),
+            expected_path_prices=tuple(float(p) for p in expected_path_prices if p > 0),
+            invalidation_price=structural_invalidation_price,
+            created_at=ts,
+            notes=tuple(notes),
+            features=features,
+        )
+
+    def evaluate(
+        self,
+        thesis: TradeThesis,
+        market_state: MarketState,
+        current_price: float | None = None,
+    ) -> ThesisEvaluation:
+        price = (
+            current_price if current_price and current_price > 0 else market_state.mid_price
+        )
+        side = thesis.side
+        breached: list[str] = []
+        lost: list[str] = []
+        active: list[str] = []
+        notes: list[str] = []
+
+        for inv in thesis.invalidations:
+            if inv.code == "structure_break":
+                level = inv.level or thesis.invalidation_price
+                if level is not None and level > 0:
+                    if side == "LONG" and price <= level:
+                        breached.append(inv.code)
+                    elif side == "SHORT" and price >= level:
+                        breached.append(inv.code)
+            elif inv.code == "structure_against":
+                if market_state.structure == StructureBias.BROKEN:
+                    breached.append(inv.code)
+                elif side == "LONG" and market_state.structure == StructureBias.BEARISH:
+                    breached.append(inv.code)
+                elif side == "SHORT" and market_state.structure == StructureBias.BULLISH:
+                    breached.append(inv.code)
+            elif inv.code == "of_reversal":
+                if side == "LONG" and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT:
+                    breached.append(inv.code)
+                elif side == "SHORT" and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT:
+                    breached.append(inv.code)
+
+        for conf in thesis.confirmations:
+            if conf.code == "structure_supportive":
+                if (side == "LONG" and market_state.structure == StructureBias.BULLISH) or (
+                    side == "SHORT" and market_state.structure == StructureBias.BEARISH
+                ):
+                    active.append(conf.code)
+                else:
+                    lost.append(conf.code)
+            elif conf.code == "of_supportive":
+                if (
+                    side == "LONG" and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT
+                ) or (
+                    side == "SHORT" and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT
+                ):
+                    active.append(conf.code)
+                else:
+                    lost.append(conf.code)
+            elif conf.code == "momentum_not_exhausted":
+                if market_state.momentum != MomentumState.EXHAUSTED:
+                    active.append(conf.code)
+                else:
+                    lost.append(conf.code)
+
+        if breached:
+            health = ThesisHealth.INVALIDATED
+            consistency = 0.0
+        elif lost and not active:
+            health = ThesisHealth.DEGRADED
+            consistency = 0.35
+        elif lost:
+            health = ThesisHealth.DEGRADED
+            n_conf = max(1, len(thesis.confirmations))
+            consistency = max(0.4, 1.0 - 0.4 * (len(lost) / n_conf))
+        else:
+            health = ThesisHealth.INTACT
+            consistency = 1.0 if thesis.confirmations else 0.75
+
+        if market_state.reversal_risk >= 0.55 and health != ThesisHealth.INVALIDATED:
+            consistency = max(0.0, consistency - 0.15)
+            if health == ThesisHealth.INTACT:
+                health = ThesisHealth.DEGRADED
+
+        return ThesisEvaluation(
+            health=health,
+            consistency_score=round(consistency, 4),
+            breached_invalidations=tuple(breached),
+            lost_confirmations=tuple(lost),
+            active_confirmations=tuple(active),
+            notes=tuple(notes),
+        )
