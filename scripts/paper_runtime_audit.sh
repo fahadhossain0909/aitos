@@ -82,9 +82,6 @@ else
       groups="$(docker exec aitos-redis redis-cli XINFO GROUPS "$key" 2>/dev/null || true)"
       if [ -n "$groups" ]; then
         echo "  $key"
-        # XINFO GROUPS is a RESP array of alternating field/value pairs.
-        # Grepping field names alone loses the values and produced a
-        # misleading header-only audit.
         if ! docker exec aitos-redis redis-cli --json XINFO GROUPS "$key" 2>/dev/null; then
           docker exec aitos-redis redis-cli XINFO GROUPS "$key" 2>/dev/null | \
             awk 'BEGIN{ORS=" "} {printf "%s", $0} END{print ""}'
@@ -240,9 +237,11 @@ else
 fi
 
 echo
+
 echo '--- Host memory ---'
 free -h || true
 echo
+
 echo '--- Host disk ---'
 df -h / || true
 avail_kb="$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4}' || echo 0)"
@@ -253,10 +252,45 @@ if [ "${avail_kb:-0}" -lt "$min_kb" ]; then
 fi
 
 echo
-echo "--- Audit result ---"
-if [ "$blockers" -eq 0 ]; then
-  echo 'PASS: no production VPS blockers detected.'
+
+echo '--- AITOS paper-trading processes ---'
+pgrep -af 'run_paper_trading|aitos' || true
+
+echo
+echo '--- AITOS health endpoint ---'
+if command -v curl >/dev/null 2>&1; then
+  health_body="$(mktemp)"
+  health_code="000"
+  curl --silent --show-error --max-time 5 -o "$health_body" -w '%{http_code}' "$HEALTH_URL" >"${health_body}.code" 2>/dev/null || true
+  health_code="$(cat "${health_body}.code" 2>/dev/null || echo 000)"
+  echo "Health HTTP status: $health_code"
+  echo 'Health response body:'
+  cat "$health_body" || true
+  echo
+  if [ "$health_code" = "200" ]; then echo 'Health endpoint: PASS'; else echo 'Health endpoint: FAIL/unreachable'; blockers=$((blockers + 1)); fi
+  rm -f "$health_body" "${health_body}.code"
+
+  echo
+  echo '--- AITOS metrics endpoint ---'
+  metrics_body="$(mktemp)"
+  metrics_code="000"
+  curl --silent --show-error --max-time 5 -o "$metrics_body" -w '%{http_code}' "$METRICS_URL" >"${metrics_body}.code" 2>/dev/null || true
+  metrics_code="$(cat "${metrics_body}.code" 2>/dev/null || echo 000)"
+  echo "Metrics HTTP status: $metrics_code"
+  head -n 40 "$metrics_body" || true
+  echo
+  if [ "$metrics_code" = "200" ]; then echo 'Metrics endpoint: PASS'; else echo 'Metrics endpoint: FAIL/unreachable'; blockers=$((blockers + 1)); fi
+  rm -f "$metrics_body" "${metrics_body}.code"
 else
-  echo "FAIL: ${blockers} production VPS blocker(s) detected."
+  echo 'curl: NOT INSTALLED; skipped health/metrics checks'
+  blockers=$((blockers + 1))
 fi
-exit "$blockers"
+
+echo
+echo '=== Audit result ==='
+if [ "$blockers" -eq 0 ]; then
+  echo 'PASS: no production runtime blockers detected.'
+else
+  echo "FAIL: $blockers production runtime blocker(s) detected."
+  exit 1
+fi
