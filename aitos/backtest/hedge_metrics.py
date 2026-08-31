@@ -38,6 +38,16 @@ def expectancy(pnls: Sequence[float]) -> float:
     return sum(pnls) / len(pnls) if pnls else 0.0
 
 
+def aggregate_mae(excursions_: Sequence[TradeExcursion]) -> float:
+    """Worst adverse excursion across trades."""
+    return min((x.mae for x in excursions_), default=0.0)
+
+
+def aggregate_mfe(excursions_: Sequence[TradeExcursion]) -> float:
+    """Best favorable excursion across trades."""
+    return max((x.mfe for x in excursions_), default=0.0)
+
+
 @dataclass(frozen=True)
 class HedgeComparison:
     baseline_net_pnl: float
@@ -66,6 +76,16 @@ class HedgeComparison:
             self.baseline_max_drawdown - self.hedged_max_drawdown
         ) / self.baseline_max_drawdown
 
+    @property
+    def net_hedge_contribution(self) -> float:
+        return self.hedge_pnl - self.hedge_cost
+
+    @property
+    def hedge_cost_ratio(self) -> float:
+        if self.hedge_pnl == 0:
+            return 0.0
+        return self.hedge_cost / abs(self.hedge_pnl)
+
 
 def compare(
     baseline_equity: Sequence[float],
@@ -78,6 +98,7 @@ def compare(
     hedge_cost: float,
     hedge_count: int,
 ) -> HedgeComparison:
+    """Compare paired baseline/hedged replay outputs without mixing samples."""
     return HedgeComparison(
         baseline_net_pnl=(
             (baseline_equity[-1] - baseline_equity[0]) if baseline_equity else 0.0
@@ -85,10 +106,10 @@ def compare(
         hedged_net_pnl=(hedged_equity[-1] - hedged_equity[0]) if hedged_equity else 0.0,
         baseline_max_drawdown=max_drawdown(baseline_equity),
         hedged_max_drawdown=max_drawdown(hedged_equity),
-        baseline_mae=min((x.mae for x in baseline_excursions), default=0.0),
-        hedged_mae=min((x.mae for x in hedged_excursions), default=0.0),
-        baseline_mfe=max((x.mfe for x in baseline_excursions), default=0.0),
-        hedged_mfe=max((x.mfe for x in hedged_excursions), default=0.0),
+        baseline_mae=aggregate_mae(baseline_excursions),
+        hedged_mae=aggregate_mae(hedged_excursions),
+        baseline_mfe=aggregate_mfe(baseline_excursions),
+        hedged_mfe=aggregate_mfe(hedged_excursions),
         hedge_cost=hedge_cost,
         hedge_pnl=hedge_pnl,
         baseline_expectancy=expectancy(baseline_pnls),
