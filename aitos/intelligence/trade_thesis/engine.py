@@ -213,11 +213,22 @@ class TradeThesisEngine:
             if inv.code == "structure_break":
                 level = inv.level or thesis.invalidation_price
                 if level is not None and level > 0:
-                    if side == "LONG" and price <= level or side == "SHORT" and price >= level:
+                    if (
+                        side == "LONG"
+                        and price <= level
+                        or side == "SHORT"
+                        and price >= level
+                    ):
                         breached.append(inv.code)
             elif inv.code == "structure_against":
-                if market_state.structure == StructureBias.BROKEN or side == "LONG" and market_state.structure == StructureBias.BEARISH or (
-                    side == "SHORT" and market_state.structure == StructureBias.BULLISH
+                if (
+                    market_state.structure == StructureBias.BROKEN
+                    or side == "LONG"
+                    and market_state.structure == StructureBias.BEARISH
+                    or (
+                        side == "SHORT"
+                        and market_state.structure == StructureBias.BULLISH
+                    )
                 ):
                     breached.append(inv.code)
             elif inv.code == "of_reversal":
