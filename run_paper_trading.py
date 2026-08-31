@@ -107,9 +107,9 @@ async def connect_redis_with_retry(settings) -> Redis:
             max_delay_seconds=30.0,
             operation_name="Redis connection",
         )
-    except RetryExhaustedError:
-        logger.error("could not connect to Redis: %s", exp)
-        raise SystemExit(1) from exp
+    except RetryExhaustedError as exc:
+        logger.error("could not connect to Redis: %s", exc)
+        raise SystemExit(1) from exc
 
 
 async def main() -> None:
@@ -197,8 +197,8 @@ async def main() -> None:
                         }
                     },
                 )
-            except Exception:
-                logger.error("scan cycle failed: %s", exp)
+            except Exception as exc:
+                logger.error("scan cycle failed: %s", exc)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
             except asyncio.TimeoutError:
