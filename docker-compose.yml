@@ -18,7 +18,7 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      REDIS_DLQ_MAXLEN: "10000"
+      REDIS_DLQ_MAXLEN: "25000"
       REDIS_DLQ_TRIM_INTERVAL_SECONDS: "5"
     volumes:
       - ./scripts/redis_dlq_retention.sh:/usr/local/bin/redis_dlq_retention.sh:ro
