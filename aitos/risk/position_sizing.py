@@ -47,13 +47,18 @@ def calculate_position_size(
 ) -> PositionSizeResult:
     """Compute a position size in USD *notional* plus leverage.
 
-    The sector cap is applied to notional, not margin.  This is intentional:
-    leverage is already controlled separately, while sector exposure measures
-    the actual market notional concentrated in one sector.  The projected
-    notional is therefore capped before an order can reach the executor.
+    The sector cap is applied to notional, not margin. Leverage is controlled
+    separately, while sector exposure measures market notional concentration.
+    The returned ``risk_amount_usd`` is always recomputed from the final
+    (possibly leverage/sector-capped) notional so it cannot overstate the
+    actual stop-loss risk.
     """
     if equity_usd <= 0:
         raise ValueError("equity_usd must be positive")
+    if entry_price <= 0:
+        raise ValueError("entry_price must be positive")
+    if stop_loss_price <= 0:
+        raise ValueError("stop_loss_price must be positive")
     stop_distance = abs(entry_price - stop_loss_price)
     if stop_distance <= 0:
         raise ValueError("stop_loss_price must differ from entry_price")
@@ -78,8 +83,8 @@ def calculate_position_size(
     corr_factor = 1.0 - max(0.0, min(correlation_penalty, 1.0)) * 0.5
     risk_pct *= vol_factor * corr_factor
 
-    risk_amount_usd = equity_usd * (risk_pct / 100.0)
-    units = risk_amount_usd / stop_distance
+    requested_risk_amount_usd = equity_usd * (risk_pct / 100.0)
+    units = requested_risk_amount_usd / stop_distance
     position_size_usd = units * entry_price
 
     leverage = calculate_adaptive_leverage(
@@ -103,6 +108,16 @@ def calculate_position_size(
         if sector_capped:
             position_size_usd = available_sector_notional_usd
 
+    # Risk must reflect the final executable notional. This is especially
+    # important when leverage or sector caps reduce the initially requested
+    # notional: returning the uncapped risk amount would make trade records
+    # report a larger risk than the order can actually lose at the initial SL.
+    position_size_usd = round(max(0.0, position_size_usd), 2)
+    risk_amount_usd = round(
+        position_size_usd * stop_distance / entry_price,
+        2,
+    )
+
     cap_notes = []
     if capped_by_leverage:
         cap_notes.append(f"leverage_notional_cap={max_notional_usd:.2f}")
@@ -110,13 +125,13 @@ def calculate_position_size(
         cap_notes.append(f"sector_notional_cap={sector_cap_usd:.2f}")
     cap_note = ", " + ", ".join(cap_notes) if cap_notes else ""
     rationale = (
-        f"risk={risk_pct:.3f}% of equity (vol_factor={vol_factor:.2f}, corr_factor={corr_factor:.2f}"
-        f"{kelly_note}), leverage={leverage}x{cap_note} "
+        f"risk={risk_pct:.3f}% requested risk (vol_factor={vol_factor:.2f}, corr_factor={corr_factor:.2f}"
+        f"{kelly_note}), realized_stop_risk={risk_amount_usd:.2f}, leverage={leverage}x{cap_note} "
         f"(volatility_percentile={volatility_percentile}, risk_score={risk_score})"
     )
     return PositionSizeResult(
-        position_size_usd=round(position_size_usd, 2),
+        position_size_usd=position_size_usd,
         leverage=leverage,
-        risk_amount_usd=round(risk_amount_usd, 2),
+        risk_amount_usd=risk_amount_usd,
         rationale=rationale,
     )
