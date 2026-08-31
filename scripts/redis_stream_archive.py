@@ -153,7 +153,9 @@ class ArchiveWriter:
             target = str(value)
             found = False
             directory = self.root / safe_name(key)
-            for path in sorted(directory.glob("*.jsonl")) if directory.exists() else []:
+            for path in (
+                sorted(directory.glob("*.jsonl")) if directory.exists() else []
+            ):
                 with path.open("rb") as handle:
                     while True:
                         line = handle.readline()
