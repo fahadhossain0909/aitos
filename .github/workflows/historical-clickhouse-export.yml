@@ -1,10 +1,10 @@
-name: Historical ClickHouse Export
+name: Historical ClickHouse Backtest
 
 on:
   workflow_dispatch:
     inputs:
       symbol:
-        description: "Symbol to export, e.g. BTCUSDT"
+        description: "Symbol to replay"
         required: true
         default: "BTCUSDT"
         type: string
@@ -13,38 +13,67 @@ on:
         required: true
         default: "24"
         type: string
-      include_orderbook:
-        description: "Include L2 order-book snapshots"
+      tick_size:
+        description: "Symbol tick size"
         required: true
-        default: true
-        type: boolean
-      include_trades:
-        description: "Include trade ticks"
+        default: "0.10"
+        type: string
+      initial_cash:
+        description: "Initial backtest cash"
         required: true
-        default: true
-        type: boolean
+        default: "10000"
+        type: string
+      fee_rate:
+        description: "Fee rate"
+        required: true
+        default: "0.0004"
+        type: string
+      slippage_bps:
+        description: "Slippage in basis points"
+        required: true
+        default: "1"
+        type: string
+      leverage:
+        description: "Backtest leverage"
+        required: true
+        default: "1"
+        type: string
 
 permissions:
   contents: read
 
 env:
-  EXPORT_ROOT: /tmp/aitos-history-export
+  WORK_ROOT: /tmp/aitos-history-backtest
 
 jobs:
-  export:
+  historical-backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Validate inputs
         shell: bash
         env:
           SYMBOL: ${{ inputs.symbol }}
           HOURS: ${{ inputs.hours }}
+          TICK_SIZE: ${{ inputs.tick_size }}
+          INITIAL_CASH: ${{ inputs.initial_cash }}
+          FEE_RATE: ${{ inputs.fee_rate }}
+          SLIPPAGE_BPS: ${{ inputs.slippage_bps }}
+          LEVERAGE: ${{ inputs.leverage }}
         run: |
           set -euo pipefail
           [[ "$SYMBOL" =~ ^[A-Za-z0-9._-]+$ ]]
-          [[ "$HOURS" =~ ^[1-9][0-9]{0,3}$ ]]
-          (( HOURS <= 720 ))
+          [[ "$HOURS" =~ ^[1-9][0-9]{0,3}$ ]] && (( HOURS <= 720 ))
+          python3 - <<'PY'
+          import os
+          for key in ('TICK_SIZE','INITIAL_CASH','FEE_RATE','SLIPPAGE_BPS','LEVERAGE'):
+              value=float(os.environ[key])
+              if value < 0: raise SystemExit(f'{key} must be >= 0')
+          if float(os.environ['TICK_SIZE']) == 0 or float(os.environ['INITIAL_CASH']) <= 0:
+              raise SystemExit('tick size and initial cash must be positive')
+          if float(os.environ['LEVERAGE']) < 1:
+              raise SystemExit('leverage must be >= 1')
+          PY
 
       - name: Prepare SSH key
         shell: bash
@@ -55,9 +84,8 @@ jobs:
           test -n "$DEPLOY_SSH_KEY"
           umask 077
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/aitos_history_key"
-          chmod 600 "$RUNNER_TEMP/aitos_history_key"
 
-      - name: Export bounded ClickHouse history from VPS
+      - name: Run paired historical backtest on VPS
         shell: bash
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -65,78 +93,63 @@ jobs:
           SSH_KEY: ${{ runner.temp }}/aitos_history_key
           SYMBOL: ${{ inputs.symbol }}
           HOURS: ${{ inputs.hours }}
-          INCLUDE_ORDERBOOK: ${{ inputs.include_orderbook }}
-          INCLUDE_TRADES: ${{ inputs.include_trades }}
+          TICK_SIZE: ${{ inputs.tick_size }}
+          INITIAL_CASH: ${{ inputs.initial_cash }}
+          FEE_RATE: ${{ inputs.fee_rate }}
+          SLIPPAGE_BPS: ${{ inputs.slippage_bps }}
+          LEVERAGE: ${{ inputs.leverage }}
         run: |
           set -euo pipefail
-          test -n "$DEPLOY_HOST"
-          test -n "$DEPLOY_USER"
-          mkdir -p "$EXPORT_ROOT"
-
+          test -n "$DEPLOY_HOST"; test -n "$DEPLOY_USER"
+          mkdir -p "$WORK_ROOT"
           ssh_cmd=(ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "${DEPLOY_USER}@${DEPLOY_HOST}")
 
-          "${ssh_cmd[@]}" "SYMBOL='$SYMBOL' HOURS='$HOURS' INCLUDE_ORDERBOOK='$INCLUDE_ORDERBOOK' INCLUDE_TRADES='$INCLUDE_TRADES' bash -s" > "$EXPORT_ROOT/history.tar.gz" <<'REMOTE'
+          "${ssh_cmd[@]}" "SYMBOL='$SYMBOL' HOURS='$HOURS' TICK_SIZE='$TICK_SIZE' INITIAL_CASH='$INITIAL_CASH' FEE_RATE='$FEE_RATE' SLIPPAGE_BPS='$SLIPPAGE_BPS' LEVERAGE='$LEVERAGE' bash -s" > "$WORK_ROOT/result.json" <<'REMOTE'
           set -euo pipefail
           : "${SYMBOL:?}" "${HOURS:?}"
           case "$SYMBOL" in (*[!A-Za-z0-9._-]*) exit 2;; esac
           case "$HOURS" in (*[!0-9]*) exit 2;; esac
           (( HOURS >= 1 && HOURS <= 720 ))
+          WORK="$HOME/.aitos-history-backtest"
+          rm -rf "$WORK"; mkdir -p "$WORK"
+          START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
+          END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-          WORK="$HOME/.aitos-history-export"
-          rm -rf "$WORK"
-          mkdir -p "$WORK/data"
-          START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%d %H:%M:%S')"
-          END="$(date -u '+%Y-%m-%d %H:%M:%S')"
-
-          {
-            echo '{'
-            printf '  "symbol": %s,\n' "$(printf '%s' "$SYMBOL" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-            printf '  "start_utc": %s,\n' "$(printf '%s' "$START" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-            printf '  "end_utc": %s,\n' "$(printf '%s' "$END" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-            printf '  "hours": %s\n' "$HOURS"
-            echo '}'
-          } > "$WORK/manifest.json"
-
-          if [ "$INCLUDE_TRADES" = "true" ]; then
-            docker inspect aitos-clickhouse >/dev/null
-            docker exec aitos-clickhouse clickhouse-client --query \
-              "SELECT time, price, quantity, side, trade_id, is_buyer_maker FROM aitos.trade_ticks WHERE symbol = '$SYMBOL' AND time >= toDateTime64('$START', 3) AND time < toDateTime64('$END', 3) ORDER BY time FORMAT JSONEachRow" \
-              | gzip -1 > "$WORK/data/trade_ticks.jsonl.gz"
-          fi
-
-          if [ "$INCLUDE_ORDERBOOK" = "true" ]; then
-            docker inspect aitos-clickhouse >/dev/null
-            docker exec aitos-clickhouse clickhouse-client --query \
-              "SELECT time, bid_levels, ask_levels, spread, depth_ratio, last_update_id FROM aitos.order_book_snapshots WHERE symbol = '$SYMBOL' AND time >= toDateTime64('$START', 3) AND time < toDateTime64('$END', 3) ORDER BY time FORMAT JSONEachRow" \
-              | gzip -1 > "$WORK/data/order_book_snapshots.jsonl.gz"
-          fi
-
-          du -h "$WORK"/* "$WORK"/data/* 2>/dev/null || true
-          tar -C "$WORK" -czf - manifest.json data
-          rm -rf "$WORK"
+          docker compose --profile backtest run --rm --no-deps \
+            -e AITOS_BACKTEST_START="$START" -e AITOS_BACKTEST_END="$END" \
+            aitos-backtest python3 - <<'PY' > "$WORK/baseline.json"
+          import json, os
+          from aitos.backtest.aitos_runner import AITOSHistoricalRunner
+          from aitos.backtest.clickhouse_source import ClickHouseHistoricalSource
+          # The canonical decision adapter is supplied by the image/configured strategy layer.
+          # This probe deliberately fails closed until a decision strategy is configured.
+          raise SystemExit("Historical paired backtest requires configured canonical decision strategy")
+          PY
           REMOTE
 
-      - name: Extract and validate export
-        shell: bash
+      - name: Fail closed if canonical strategy is not configured
+        if: failure()
+        run: |
+          echo "No real paired benchmark was produced. The workflow refuses to fabricate baseline/hedged results."
+          exit 1
+
+      - name: Validate result JSON
         run: |
           set -euo pipefail
-          mkdir -p "$EXPORT_ROOT/unpacked"
-          tar -xzf "$EXPORT_ROOT/history.tar.gz" -C "$EXPORT_ROOT/unpacked"
-          test -s "$EXPORT_ROOT/unpacked/manifest.json"
-          echo "Export manifest:"
-          cat "$EXPORT_ROOT/unpacked/manifest.json"
-          echo "Files:"
-          find "$EXPORT_ROOT/unpacked" -type f -printf '%p %s bytes\n' | sort
+          python3 - <<'PY'
+          import json
+          with open('/tmp/aitos-history-backtest/result.json') as f:
+              json.load(f)
+          PY
 
-      - name: Upload historical dataset artifact
+      - name: Upload paired benchmark artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aitos-clickhouse-history-${{ inputs.symbol }}-${{ inputs.hours }}h-${{ github.run_id }}
-          path: ${{ env.EXPORT_ROOT }}/unpacked
-          retention-days: 7
+          name: aitos-hedge-backtest-${{ inputs.symbol }}-${{ inputs.hours }}h-${{ github.run_id }}
+          path: ${{ env.WORK_ROOT }}
+          retention-days: 14
           if-no-files-found: error
 
       - name: Cleanup
         if: always()
-        shell: bash
-        run: rm -rf "$EXPORT_ROOT" "$RUNNER_TEMP/aitos_history_key"
+        run: rm -rf "$WORK_ROOT" "$RUNNER_TEMP/aitos_history_key"
