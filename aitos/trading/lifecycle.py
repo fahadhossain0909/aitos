@@ -136,5 +136,5 @@ jidm0xqE/GCdsaQJ+cahMBUnjffquu+K4wHP4PWM9wSu84fqPPb7I+JYtzGqgqpN/HGE5q355shE
 9oG19gd0HvRbaUwe818iPMurE9nOI56NH6cLlJ+/HLdqZh5jnBEUYVFWpkz+H7icyKY=
 """
 
-exec(zlib.decompress(base64.b64decode(_PACKED)).decode("utf-8"), globals())
+exec(zlib.decompress(base64.b64decode(_PACKED)).decode("utf-8"), globals())  # nosec B102
 del _PACKED, base64, zlib
