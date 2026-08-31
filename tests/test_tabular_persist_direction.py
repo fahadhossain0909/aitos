@@ -21,9 +21,7 @@ async def test_tabular_bandit_round_trips_state(tmp_path: Path):
     restored = TabularBanditRLScorer(min_samples_for_confidence=1, state_path=str(path))
     assert restored.load_state() is True
     assert restored.sample_count("BTCUSDT", "trending", "LONG") == 1
-    score = await restored.score(
-        "BTCUSDT", {"regime": "trending", "direction": "LONG"}
-    )
+    score = await restored.score("BTCUSDT", {"regime": "trending", "direction": "LONG"})
     assert score > 5.0
 
 
