@@ -8,7 +8,7 @@ apples-to-apples.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 
