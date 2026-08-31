@@ -20,7 +20,6 @@ from aitos.exchange.parsing import (
     parse_open_interest_rest,
     parse_order_book_rest,
     parse_trade_rest,
-    parse_trade_ws,
 )
 from aitos.exchange.rate_limiter import TokenBucketRateLimiter
 from aitos.exchange.symbol_filters import SymbolFilters, parse_exchange_info
@@ -454,7 +453,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 if emit_reconnect:
                     logger.warning(
                         "Binance direct market stream closed, reconnecting",
-                        extra={"aitos_extra": {"stream": stream, "backoff_seconds": backoff}},
+                        extra={
+                            "aitos_extra": {
+                                "stream": stream,
+                                "backoff_seconds": backoff,
+                            }
+                        },
                     )
             except asyncio.CancelledError:
                 raise
