@@ -1,0 +1,79 @@
+name: Production Runtime Hardening
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-hardening-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    environment: papertrade
+    timeout-minutes: 20
+    steps:
+      - name: Check deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY AITOS_DATA_DISK_UUID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required deployment secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_runtime_key
+          chmod 600 /tmp/aitos_runtime_key
+
+      - name: Reconcile production runtime
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_runtime_key
+          command_timeout: 15m
+          envs: AITOS_DATA_DISK_UUID
+          script: |
+            set -euo pipefail
+            APP_DIR="$HOME/aitos"
+            cd "$APP_DIR"
+
+            # CD and this workflow share the same host lock. If CD is still
+            # deploying, wait for it rather than racing docker compose.
+            exec 9>"$HOME/.aitos-deploy.lock"
+            flock 9
+
+            if [ ! -f scripts/runtime_hardening.sh ]; then
+              echo "::error::runtime_hardening.sh is missing from deployed source."
+              exit 1
+            fi
+            chmod +x scripts/runtime_hardening.sh
+            AITOS_DATA_ROOT=/mnt/aitos-data \
+              AITOS_DATA_DISK_UUID="$AITOS_DATA_DISK_UUID" \
+              scripts/runtime_hardening.sh
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f /tmp/aitos_runtime_key
