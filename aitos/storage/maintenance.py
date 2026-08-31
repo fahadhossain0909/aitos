@@ -251,7 +251,7 @@ def prune_for_boot_buffer(
     deleted: list[str] = []
 
     for _priority, _mtime, path in sorted(
-        disposable, key=lambda item: (item[0], item[1])
+        disposable, key=lambda item: (item[0], item[1], str(item[2]))
     ):
         if freed >= delete_bytes:
             break
