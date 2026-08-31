@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
-
 from aitos.intelligence.market_state import (
     AuctionState,
     LiquidityBias,
@@ -54,7 +52,9 @@ def test_neutral_when_no_signals():
 
 def test_buyer_dominant_order_flow():
     eng = MarketStateEngine()
-    of = _of(imbalance=8.0, aggression=0.8, buy_ratio=0.75)  # strong buy bias on 0-10 scale
+    of = _of(
+        imbalance=8.0, aggression=0.8, buy_ratio=0.75
+    )  # strong buy bias on 0-10 scale
     state = eng.compute(
         symbol="BTCUSDT",
         mid_price=79000.0,
