@@ -59,13 +59,24 @@ jobs:
             APP_DIR="$HOME/aitos"
             cd "$APP_DIR"
 
+            # CD deploys the source snapshot concurrently with this workflow.
+            # Wait briefly for the new hardening script to arrive before taking
+            # the shared deployment lock, avoiding a false race failure.
+            for attempt in $(seq 1 12); do
+              if [ -f scripts/runtime_hardening.sh ]; then
+                break
+              fi
+              echo "Waiting for CD deployment to install runtime_hardening.sh (attempt $attempt/12)..."
+              sleep 10
+            done
+
             # CD and this workflow share the same host lock. If CD is still
             # deploying, wait for it rather than racing docker compose.
             exec 9>"$HOME/.aitos-deploy.lock"
             flock 9
 
             if [ ! -f scripts/runtime_hardening.sh ]; then
-              echo "::error::runtime_hardening.sh is missing from deployed source."
+              echo "::error::runtime_hardening.sh is missing from deployed source after waiting for CD."
               exit 1
             fi
             chmod +x scripts/runtime_hardening.sh
