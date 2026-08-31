@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import inf
-from typing import Sequence
 
 
 @dataclass(frozen=True)
@@ -62,7 +62,9 @@ class HedgeComparison:
     def drawdown_reduction(self) -> float:
         if self.baseline_max_drawdown == 0:
             return 0.0
-        return (self.baseline_max_drawdown - self.hedged_max_drawdown) / self.baseline_max_drawdown
+        return (
+            self.baseline_max_drawdown - self.hedged_max_drawdown
+        ) / self.baseline_max_drawdown
 
 
 def compare(
@@ -77,7 +79,9 @@ def compare(
     hedge_count: int,
 ) -> HedgeComparison:
     return HedgeComparison(
-        baseline_net_pnl=(baseline_equity[-1] - baseline_equity[0]) if baseline_equity else 0.0,
+        baseline_net_pnl=(
+            (baseline_equity[-1] - baseline_equity[0]) if baseline_equity else 0.0
+        ),
         hedged_net_pnl=(hedged_equity[-1] - hedged_equity[0]) if hedged_equity else 0.0,
         baseline_max_drawdown=max_drawdown(baseline_equity),
         hedged_max_drawdown=max_drawdown(hedged_equity),
