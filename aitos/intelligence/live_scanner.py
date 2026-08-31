@@ -266,19 +266,26 @@ class LiveScannerCache:
         }
 
     def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
+        """True when the latest trade *source* timestamp is within max_age.
+
+        Uses exchange/event source time (not local receive time) so REST
+        fallback snapshots older than the freshness window are not treated
+        as live.
+        """
         state = self._state.get(symbol)
-        if state is None or state.last_trade_received_at is None:
+        if state is None or state.last_trade_source_at is None:
             return False
         return (
-            datetime.now(timezone.utc) - state.last_trade_received_at
+            datetime.now(timezone.utc) - state.last_trade_source_at
         ).total_seconds() <= max_age_seconds
 
     def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
+        """True when the latest book *source* timestamp is within max_age."""
         state = self._state.get(symbol)
-        if state is None or state.last_book_received_at is None:
+        if state is None or state.last_book_source_at is None:
             return False
         return (
-            datetime.now(timezone.utc) - state.last_book_received_at
+            datetime.now(timezone.utc) - state.last_book_source_at
         ).total_seconds() <= max_age_seconds
 
     def _maybe_log_freshness(self, symbol: str) -> None:
