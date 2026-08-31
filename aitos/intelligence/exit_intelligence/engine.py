@@ -45,7 +45,7 @@ DEFAULT_TEMPORAL_WINDOW = 8
 
 
 def _clamp01(x: float) -> float:
-    return max(0.0, min(1.0, float(x))
+    return max(0.0, min(1.0, float(x)))
 
 
 class ExitIntelligenceEngine:
