@@ -131,7 +131,9 @@ def main(argv: list[str] | None = None) -> int:
         json.dump(summary.to_dict(), sys.stdout, indent=2)
         sys.stdout.write("\n")
     else:
-        print(f"Symbol={scenario.symbol} side={scenario.side} entry={scenario.entry_price}")
+        print(
+            f"Symbol={scenario.symbol} side={scenario.side} entry={scenario.entry_price}"
+        )
         print(f"Bars={summary.bars_consumed}")
         print("--- static ---")
         s = summary.static

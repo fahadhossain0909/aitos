@@ -26,9 +26,10 @@ print(summary.to_dict())
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Literal, Sequence
+from typing import Any, Literal
 
 from aitos.intelligence.exit_intelligence import ExitAction
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
@@ -211,7 +212,9 @@ class ExitReplayEngine:
                     pnl_pct=round(
                         ((realized + pnl) / size) * 100.0 if size else 0.0, 4
                     ),
-                    r_multiple=round(_r_multiple(side, entry, px, scenario.stop_loss), 4),
+                    r_multiple=round(
+                        _r_multiple(side, entry, px, scenario.stop_loss), 4
+                    ),
                     max_favorable_pct=round(mfe, 4),
                     max_adverse_pct=round(mae, 4),
                     partial_exits=partials,
@@ -259,12 +262,8 @@ class ExitReplayEngine:
 
             # Trailing
             if scenario.trailing_sl and r_dist > 0:
-                candidate = (
-                    bar.close - r_dist if is_long else bar.close + r_dist
-                )
-                if is_long and candidate > sl:
-                    sl = candidate
-                elif not is_long and candidate < sl:
+                candidate = bar.close - r_dist if is_long else bar.close + r_dist
+                if is_long and candidate > sl or not is_long and candidate < sl:
                     sl = candidate
 
             # Breakeven
@@ -274,9 +273,7 @@ class ExitReplayEngine:
                 and _r_multiple(side, entry, bar.close, scenario.stop_loss)
                 >= scenario.breakeven_at_r
             ):
-                if is_long and sl < entry:
-                    sl = entry
-                elif not is_long and sl > entry:
+                if is_long and sl < entry or not is_long and sl > entry:
                     sl = entry
 
         # Path exhausted — exit at last close
@@ -324,21 +321,23 @@ class ExitReplayEngine:
             quantity=qty,
             leverage=1.0,
             position_size_usd=size,
-            risk_amount_usd=abs(entry - scenario.stop_loss) / entry * size
-            if entry
-            else 0.0,
+            risk_amount_usd=(
+                abs(entry - scenario.stop_loss) / entry * size if entry else 0.0
+            ),
             strategy_id=scenario.strategy_id,
             agent_consensus={},
             explanation="offline_eval",
             sl_price=sl,
-            tp_price=scenario.take_profit_levels[0]
-            if scenario.take_profit_levels
-            else entry,
+            tp_price=(
+                scenario.take_profit_levels[0] if scenario.take_profit_levels else entry
+            ),
             take_profit_levels=list(scenario.take_profit_levels),
             state=TradeLifecycleState.POSITION_OPENED,
-            entry_time=bars[0].timestamp.isoformat()
-            if bars
-            else datetime.now(timezone.utc).isoformat(),
+            entry_time=(
+                bars[0].timestamp.isoformat()
+                if bars
+                else datetime.now(timezone.utc).isoformat()
+            ),
         )
 
         for i, bar in enumerate(bars):
