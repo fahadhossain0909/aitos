@@ -13,8 +13,9 @@ not sit exactly on an obvious stop-cluster.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from aitos.intelligence.amt.volume_profile import VolumeProfile
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
@@ -86,7 +87,11 @@ class StructuralRiskEngine:
             for p in swing_lows:
                 if 0 < p < entry_price:
                     candidates.append((float(p), "swing", 0.75))
-            if volume_profile and volume_profile.val > 0 and volume_profile.val < entry_price:
+            if (
+                volume_profile
+                and volume_profile.val > 0
+                and volume_profile.val < entry_price
+            ):
                 candidates.append((volume_profile.val, "value_area", 0.70))
                 features["vp_val"] = volume_profile.val
             for ev in liquidity_events:
@@ -96,7 +101,11 @@ class StructuralRiskEngine:
             for p in swing_highs:
                 if p > entry_price:
                     candidates.append((float(p), "swing", 0.75))
-            if volume_profile and volume_profile.vah > 0 and volume_profile.vah > entry_price:
+            if (
+                volume_profile
+                and volume_profile.vah > 0
+                and volume_profile.vah > entry_price
+            ):
                 candidates.append((volume_profile.vah, "value_area", 0.70))
                 features["vp_vah"] = volume_profile.vah
             for ev in liquidity_events:
@@ -125,9 +134,7 @@ class StructuralRiskEngine:
                     notes.append(f"selected {typ}@{price:.6g} (dist={dist_pct:.2%})")
                     break
                 else:
-                    notes.append(
-                        f"skipped {typ}@{price:.6g} — exceeds max_stop_pct"
-                    )
+                    notes.append(f"skipped {typ}@{price:.6g} — exceeds max_stop_pct")
 
         if chosen_price is None:
             # Fallback: volatility-aware or fixed percentage
