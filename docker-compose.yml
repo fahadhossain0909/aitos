@@ -5,8 +5,27 @@ services:
     ports: ["127.0.0.1:6379:6379"]
     volumes:
       - "${REDIS_DATA_DIR:-./.storage/data/redis}/live:/data"
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--auto-aof-rewrite-percentage", "50", "--auto-aof-rewrite-min-size", "64mb"]
-    healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 10s}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --aof-use-rdb-preamble
+      - "yes"
+      - --auto-aof-rewrite-percentage
+      - "50"
+      - --auto-aof-rewrite-min-size
+      - 64mb
+      # Keep Redis below the Docker cgroup limit so allocator/AOF/client
+      # overhead has headroom and the container does not reach an OOM kill.
+      - --maxmemory
+      - 2gb
+      # Trading streams and state are not disposable cache keys. Refuse new
+      # writes at the safety ceiling rather than silently evicting live state.
+      - --maxmemory-policy
+      - noeviction
+    healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 120s}
     cpus: "0.5"
     mem_limit: 2.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
