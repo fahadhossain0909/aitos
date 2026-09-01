@@ -7,9 +7,10 @@ expects and keeps the primary/hedge lifecycle explicit for replay runners.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
 from aitos.backtest.market_adapter import HistoricalMarketAdapter, HistoricalMarketState
 from aitos.intelligence.amt.volume_profile import VolumeProfile, build_volume_profile
@@ -69,7 +70,9 @@ class HistoricalPositionManagerAdapter:
             value_area_pct=self.value_area_pct,
         )
 
-    def context(self, timestamp: datetime, current_price: float) -> HistoricalPositionContext:
+    def context(
+        self, timestamp: datetime, current_price: float
+    ) -> HistoricalPositionContext:
         state = self.market.state()
         profile = self._volume_profile()
         order_flow: OrderFlowFeatures | None = None
@@ -94,7 +97,9 @@ class HistoricalPositionManagerAdapter:
             extra_features=_historical_feature_bag(state),
         )
 
-    def evaluate(self, trade: Trade, *, timestamp: datetime, current_price: float) -> PositionAction:
+    def evaluate(
+        self, trade: Trade, *, timestamp: datetime, current_price: float
+    ) -> PositionAction:
         ctx = self.context(timestamp, current_price)
         trade.record_excursion(current_price)
         return self.position_manager.evaluate(
@@ -147,7 +152,9 @@ def _historical_feature_bag(state: HistoricalMarketState) -> dict[str, float]:
     return features
 
 
-EntrySignal = Callable[[HistoricalPositionContext], tuple[TradeSide, float, float] | None]
+EntrySignal = Callable[
+    [HistoricalPositionContext], tuple[TradeSide, float, float] | None
+]
 
 
 def make_decision_callback(
@@ -175,7 +182,11 @@ def make_decision_callback(
             if signal is not None:
                 side, quantity, stop_distance = signal
                 entry = latest.price
-                sl = entry - stop_distance if side == TradeSide.LONG else entry + stop_distance
+                sl = (
+                    entry - stop_distance
+                    if side == TradeSide.LONG
+                    else entry + stop_distance
+                )
                 active["trade"] = Trade(
                     trade_id=f"hist-{latest.timestamp.timestamp_ns()}",
                     symbol=latest.symbol,
@@ -189,21 +200,31 @@ def make_decision_callback(
                     agent_consensus={},
                     explanation="historical entry callback",
                     sl_price=sl,
-                    tp_price=entry + 2 * stop_distance if side == TradeSide.LONG else entry - 2 * stop_distance,
+                    tp_price=(
+                        entry + 2 * stop_distance
+                        if side == TradeSide.LONG
+                        else entry - 2 * stop_distance
+                    ),
                     state="position_opened",
                     entry_time=latest.timestamp.isoformat(),
                 )
                 return HistoricalDecision(side.value.lower(), 1.0, quantity)
         if current is None:
             return HistoricalDecision("flat", 0.0, 0.0)
-        action = adapter.evaluate(current, timestamp=latest.timestamp, current_price=latest.price)
+        action = adapter.evaluate(
+            current, timestamp=latest.timestamp, current_price=latest.price
+        )
         if action.action.value == "exit":
             return HistoricalDecision("flat", 0.0, 0.0)
         if action.action.value == "manage" and action.new_stop_price is not None:
             return HistoricalDecision(current.side.value.lower(), 1.0, 0.0)
         if action.hedge_decision and action.hedge_decision.action.value == "open":
             return HistoricalDecision(
-                TradeSide.SHORT.value.lower() if current.side == TradeSide.LONG else TradeSide.LONG.value.lower(),
+                (
+                    TradeSide.SHORT.value.lower()
+                    if current.side == TradeSide.LONG
+                    else TradeSide.LONG.value.lower()
+                ),
                 action.hedge_decision.confidence,
                 current.quantity * action.hedge_decision.size_fraction,
             )
