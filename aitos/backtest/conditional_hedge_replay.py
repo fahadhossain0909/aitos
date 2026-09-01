@@ -66,9 +66,7 @@ def run(args: argparse.Namespace) -> RunResult:
         args.host, args.port, args.user, args.password, args.database
     )
     try:
-        events = iter(
-            source.events(args.symbol, start, end, "trades", args.timeframe)
-        )
+        events = iter(source.events(args.symbol, start, end, "trades", args.timeframe))
         first = next(events, None)
         if first is None:
             raise RuntimeError("No historical trade events returned by ClickHouse")
@@ -145,11 +143,7 @@ def run(args: argparse.Namespace) -> RunResult:
                 hedge_open_count += 1
                 hedge_cost += price * args.quantity * hedge_ratio * args.fee_rate
                 hedge_slippage_cost += (
-                    price
-                    * args.quantity
-                    * hedge_ratio
-                    * args.slippage_bps
-                    / 10_000
+                    price * args.quantity * hedge_ratio * args.slippage_bps / 10_000
                 )
             elif hd and hd.action == "CLOSE" and hedge_open_price is not None:
                 hedge_move = (
@@ -160,11 +154,7 @@ def run(args: argparse.Namespace) -> RunResult:
                 hedge_pnl += hedge_move
                 hedge_cost += price * args.quantity * hedge_ratio * args.fee_rate
                 hedge_slippage_cost += (
-                    price
-                    * args.quantity
-                    * hedge_ratio
-                    * args.slippage_bps
-                    / 10_000
+                    price * args.quantity * hedge_ratio * args.slippage_bps / 10_000
                 )
                 duration_hours = max(
                     (event.timestamp - hedge_open_time).total_seconds() / 3600.0,
@@ -215,9 +205,11 @@ def run(args: argparse.Namespace) -> RunResult:
                 price * args.quantity * hedge_ratio * args.slippage_bps / 10_000
             )
             duration_hours = max(
-                (end - hedge_open_time).total_seconds() / 3600.0
-                if end and hedge_open_time
-                else 0.0,
+                (
+                    (end - hedge_open_time).total_seconds() / 3600.0
+                    if end and hedge_open_time
+                    else 0.0
+                ),
                 0.0,
             )
             hedge_funding_cost += (
