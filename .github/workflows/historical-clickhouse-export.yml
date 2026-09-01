@@ -14,27 +14,22 @@ on:
         default: "24"
         type: string
       tick_size:
-        description: "Symbol tick size"
+        description: "Price-bin tick size"
         required: true
         default: "0.10"
         type: string
       initial_cash:
-        description: "Initial backtest cash"
+        description: "Initial backtest equity"
         required: true
         default: "10000"
         type: string
       fee_rate:
-        description: "Fee rate"
+        description: "Per-side fee rate"
         required: true
         default: "0.0004"
         type: string
       slippage_bps:
-        description: "Slippage in basis points"
-        required: true
-        default: "1"
-        type: string
-      leverage:
-        description: "Backtest leverage"
+        description: "Execution slippage in basis points"
         required: true
         default: "1"
         type: string
@@ -59,20 +54,18 @@ jobs:
           INITIAL_CASH: ${{ inputs.initial_cash }}
           FEE_RATE: ${{ inputs.fee_rate }}
           SLIPPAGE_BPS: ${{ inputs.slippage_bps }}
-          LEVERAGE: ${{ inputs.leverage }}
         run: |
           set -euo pipefail
           [[ "$SYMBOL" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$HOURS" =~ ^[1-9][0-9]{0,3}$ ]] && (( HOURS <= 720 ))
           python3 - <<'PY'
           import os
-          for key in ('TICK_SIZE','INITIAL_CASH','FEE_RATE','SLIPPAGE_BPS','LEVERAGE'):
-              value=float(os.environ[key])
-              if value < 0: raise SystemExit(f'{key} must be >= 0')
-          if float(os.environ['TICK_SIZE']) == 0 or float(os.environ['INITIAL_CASH']) <= 0:
+          for key in ('TICK_SIZE','INITIAL_CASH','FEE_RATE','SLIPPAGE_BPS'):
+              value = float(os.environ[key])
+              if value < 0:
+                  raise SystemExit(f'{key} must be >= 0')
+          if float(os.environ['TICK_SIZE']) <= 0 or float(os.environ['INITIAL_CASH']) <= 0:
               raise SystemExit('tick size and initial cash must be positive')
-          if float(os.environ['LEVERAGE']) < 1:
-              raise SystemExit('leverage must be >= 1')
           PY
 
       - name: Prepare SSH key
@@ -84,8 +77,9 @@ jobs:
           test -n "$DEPLOY_SSH_KEY"
           umask 077
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/aitos_history_key"
+          chmod 600 "$RUNNER_TEMP/aitos_history_key"
 
-      - name: Run paired historical backtest on VPS
+      - name: Execute canonical paired replay on VPS
         shell: bash
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -97,59 +91,110 @@ jobs:
           INITIAL_CASH: ${{ inputs.initial_cash }}
           FEE_RATE: ${{ inputs.fee_rate }}
           SLIPPAGE_BPS: ${{ inputs.slippage_bps }}
-          LEVERAGE: ${{ inputs.leverage }}
+          GH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           test -n "$DEPLOY_HOST"; test -n "$DEPLOY_USER"
           mkdir -p "$WORK_ROOT"
           ssh_cmd=(ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "${DEPLOY_USER}@${DEPLOY_HOST}")
 
-          "${ssh_cmd[@]}" "SYMBOL='$SYMBOL' HOURS='$HOURS' TICK_SIZE='$TICK_SIZE' INITIAL_CASH='$INITIAL_CASH' FEE_RATE='$FEE_RATE' SLIPPAGE_BPS='$SLIPPAGE_BPS' LEVERAGE='$LEVERAGE' bash -s" > "$WORK_ROOT/result.json" <<'REMOTE'
+          "${ssh_cmd[@]}" "SYMBOL='$SYMBOL' HOURS='$HOURS' TICK_SIZE='$TICK_SIZE' INITIAL_CASH='$INITIAL_CASH' FEE_RATE='$FEE_RATE' SLIPPAGE_BPS='$SLIPPAGE_BPS' GH_SHA='$GH_SHA' bash -s" > "$WORK_ROOT/result.json" <<'REMOTE'
           set -euo pipefail
-          : "${SYMBOL:?}" "${HOURS:?}"
-          case "$SYMBOL" in (*[!A-Za-z0-9._-]*) exit 2;; esac
-          case "$HOURS" in (*[!0-9]*) exit 2;; esac
-          (( HOURS >= 1 && HOURS <= 720 ))
+          : "${SYMBOL:?}" "${HOURS:?}" "${GH_SHA:?}"
           WORK="$HOME/.aitos-history-backtest"
-          rm -rf "$WORK"; mkdir -p "$WORK"
+          rm -rf "$WORK"
+          mkdir -p "$WORK/src"
+
+          PROJECT_DIR="$(docker inspect -f '{{ index .Config.Labels \"com.docker.compose.project.working_dir\" }}' aitos-paper 2>/dev/null || true)"
+          if [ -z "$PROJECT_DIR" ] || [ ! -d "$PROJECT_DIR/.git" ]; then
+            echo "Unable to resolve the deployed AITOS git worktree" >&2
+            exit 1
+          fi
+
+          git -C "$PROJECT_DIR" fetch --quiet origin "$GH_SHA"
+          git -C "$PROJECT_DIR" worktree add --detach "$WORK/src" "$GH_SHA" >/dev/null
+
           START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
           END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-          docker compose --profile backtest run --rm --no-deps \
-            -e AITOS_BACKTEST_START="$START" -e AITOS_BACKTEST_END="$END" \
-            aitos-backtest python3 - <<'PY' > "$WORK/baseline.json"
-          import json, os
-          from aitos.backtest.aitos_runner import AITOSHistoricalRunner
-          from aitos.backtest.clickhouse_source import ClickHouseHistoricalSource
-          # The canonical decision adapter is supplied by the image/configured strategy layer.
-          # This probe deliberately fails closed until a decision strategy is configured.
-          raise SystemExit("Historical paired backtest requires configured canonical decision strategy")
-          PY
+          # Run the exact GitHub commit inside the existing paper-trading
+          # container. No production service is stopped or mutated.
+          docker cp "$WORK/src/aitos" aitos-paper:/tmp/aitos-history-src
+          docker cp "$WORK/src/scripts/run_hedge_backtest.py" aitos-paper:/tmp/run_hedge_backtest.py
+          docker exec \
+            -e PYTHONPATH=/tmp/aitos-history-src \
+            -e CLICKHOUSE_HOST=aitos-clickhouse \
+            -e CLICKHOUSE_PORT=8123 \
+            -e CLICKHOUSE_DB=aitos \
+            -e SYMBOL="$SYMBOL" -e START="$START" -e END="$END" \
+            -e TICK_SIZE="$TICK_SIZE" -e INITIAL_CASH="$INITIAL_CASH" \
+            -e FEE_RATE="$FEE_RATE" -e SLIPPAGE_BPS="$SLIPPAGE_BPS" \
+            aitos-paper python3 /tmp/run_hedge_backtest.py \
+              --symbol "$SYMBOL" --start "$START" --end "$END" \
+              --tick-size "$TICK_SIZE" --initial-cash "$INITIAL_CASH" \
+              --fee-rate "$FEE_RATE" --output /tmp/hedge-result.json \
+            > "$WORK/result.json"
+
+          docker cp aitos-paper:/tmp/hedge-result.json "$WORK/result.json"
+          test -s "$WORK/result.json"
+          git -C "$PROJECT_DIR" worktree remove --force "$WORK/src" >/dev/null 2>&1 || true
+          rm -rf "$WORK/src"
           REMOTE
 
-      - name: Fail closed if canonical strategy is not configured
-        if: failure()
-        run: |
-          echo "No real paired benchmark was produced. The workflow refuses to fabricate baseline/hedged results."
-          exit 1
-
-      - name: Validate result JSON
+      - name: Validate and create human-readable report
+        shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           import json
-          with open('/tmp/aitos-history-backtest/result.json') as f:
-              json.load(f)
+          from pathlib import Path
+          p = Path('/tmp/aitos-history-backtest/result.json')
+          data = json.loads(p.read_text())
+          b, h, c = data['baseline'], data['hedged'], data['comparison']
+          report = f'''# AITOS Conditional Hedge Backtest
+
+- Symbol: `{data['symbol']}`
+- Window: `{data['start']}` → `{data['end']}`
+- Events: `{data['event_count']}`
+- Engine: `{data['engine']}`
+
+| Metric | Hedge OFF | Hedge ON | Delta |
+|---|---:|---:|---:|
+| Net PnL | {b['net_pnl']:.6f} | {h['net_pnl']:.6f} | {c['net_pnl_delta']:.6f} |
+| Return | {b['total_return']:.4%} | {h['total_return']:.4%} | — |
+| Max Drawdown | {b['max_drawdown']:.4%} | {h['max_drawdown']:.4%} | {c['drawdown_reduction']:.2%} reduction |
+| Expectancy | {b['expectancy']:.6f} | {h['expectancy']:.6f} | {c['expectancy_delta']:.6f} |
+| MAE | {b['mae']:.6%} | {h['mae']:.6%} | {c['mae_delta']:.6%} |
+| MFE | {b['mfe']:.6%} | {h['mfe']:.6%} | {c['mfe_delta']:.6%} |
+| Hedge PnL | — | {h['hedge_pnl']:.6f} | — |
+| Hedge fees | — | {h['hedge_fees']:.6f} | — |
+| Hedge execution cost | — | {h['hedge_execution_cost']:.6f} | — |
+| Hedge net contribution | — | {c['hedge_net_contribution']:.6f} | — |
+
+## Lifecycle
+- Hedge opens: `{h['hedge_opens']}`
+- Hedge closes: `{h['hedge_closes']}`
+- Primary entries: `{h['primary_entries']}`
+- Primary exits: `{h['primary_exits']}`
+'''
+          Path('/tmp/aitos-history-backtest/report.md').write_text(report)
+          print(report)
           PY
 
-      - name: Upload paired benchmark artifact
+      - name: Publish benchmark summary
+        shell: bash
+        run: |
+          cat /tmp/aitos-history-backtest/report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark artifact
         uses: actions/upload-artifact@v4
         with:
           name: aitos-hedge-backtest-${{ inputs.symbol }}-${{ inputs.hours }}h-${{ github.run_id }}
-          path: ${{ env.WORK_ROOT }}
+          path: /tmp/aitos-history-backtest
           retention-days: 14
           if-no-files-found: error
 
       - name: Cleanup
         if: always()
+        shell: bash
         run: rm -rf "$WORK_ROOT" "$RUNNER_TEMP/aitos_history_key"
