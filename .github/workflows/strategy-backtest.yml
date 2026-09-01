@@ -29,6 +29,24 @@ on:
         default: LONG
         type: choice
         options: [LONG, SHORT]
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      module:
+        required: true
+        type: string
+      symbol:
+        required: true
+        type: string
+      hours:
+        required: true
+        type: string
+      side:
+        required: true
+        type: string
+    secrets: inherit
 
 permissions:
   contents: read
