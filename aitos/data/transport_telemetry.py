@@ -87,20 +87,38 @@ def _wrap_publish() -> None:
             return
         owner, source = context
         topic = getattr(event, "topic", "")
-        if not (topic.startswith("market.trade.") or topic.startswith("market.orderflow.")):
+        if not (
+            topic.startswith("market.trade.") or topic.startswith("market.orderflow.")
+        ):
             await original(self, event, *args, **kwargs)
             return
         try:
             await original(self, event, *args, **kwargs)
-        except Exception as exc:
-            key = "_transport_rest_redis_errors" if source == SOURCE_REST else "_transport_ws_redis_errors"
+        except Exception:
+            key = (
+                "_transport_rest_redis_errors"
+                if source == SOURCE_REST
+                else "_transport_ws_redis_errors"
+            )
             setattr(owner, key, getattr(owner, key) + 1)
             raise
         else:
-            key = "_transport_rest_redis_events" if source == SOURCE_REST else "_transport_ws_redis_events"
+            key = (
+                "_transport_rest_redis_events"
+                if source == SOURCE_REST
+                else "_transport_ws_redis_events"
+            )
             setattr(owner, key, getattr(owner, key) + 1)
             now = _now_iso()
-            setattr(owner, "_transport_rest_redis_last_event_at" if source == SOURCE_REST else "_transport_ws_redis_last_event_at", now)
+            setattr(
+                owner,
+                (
+                    "_transport_rest_redis_last_event_at"
+                    if source == SOURCE_REST
+                    else "_transport_ws_redis_last_event_at"
+                ),
+                now,
+            )
 
     EventBus.publish = wrapper
 
@@ -113,7 +131,15 @@ def _enter_rest(service: Any, reason: str) -> None:
     service._transport_fallback_count += 1
     service._transport_last_fallback_started_at = _now_iso()
     service._transport_fallback_active_since = time.monotonic()
-    logger.warning("trade transport switched to REST fallback", extra={"aitos_extra": {"reason": reason, "fallback_count": service._transport_fallback_count}})
+    logger.warning(
+        "trade transport switched to REST fallback",
+        extra={
+            "aitos_extra": {
+                "reason": reason,
+                "fallback_count": service._transport_fallback_count,
+            }
+        },
+    )
 
 
 def _record_ws_trade(service: Any, trade: Any) -> None:
@@ -167,15 +193,33 @@ def _filter_rest(service: Any, trades: list[Any]) -> list[Any]:
 
     service._transport_rest_last_batch_count = len(trades)
     service._transport_rest_last_accepted_count = len(accepted)
-    service._transport_rest_last_max_source_age_sec = round(max(ages), 3) if ages else None
+    service._transport_rest_last_max_source_age_sec = (
+        round(max(ages), 3) if ages else None
+    )
     service._transport_rest_last_newest_trade_id = max(ids) if ids else None
     service._transport_rest_last_oldest_trade_id = min(ids) if ids else None
-    service._transport_rest_last_newest_source_at = max(timestamps).isoformat() if timestamps else None
-    service._transport_rest_last_oldest_source_at = min(timestamps).isoformat() if timestamps else None
+    service._transport_rest_last_newest_source_at = (
+        max(timestamps).isoformat() if timestamps else None
+    )
+    service._transport_rest_last_oldest_source_at = (
+        min(timestamps).isoformat() if timestamps else None
+    )
     filtered = len(trades) - len(accepted)
     service._transport_rest_stale_trades_filtered += filtered
     if filtered:
-        logger.warning("filtered stale REST trade recovery batch", extra={"aitos_extra": {"batch_count": len(trades), "accepted_count": len(accepted), "filtered_count": filtered, "max_source_age_sec": service._transport_rest_last_max_source_age_sec, "newest_trade_id": service._transport_rest_last_newest_trade_id, "oldest_trade_id": service._transport_rest_last_oldest_trade_id}})
+        logger.warning(
+            "filtered stale REST trade recovery batch",
+            extra={
+                "aitos_extra": {
+                    "batch_count": len(trades),
+                    "accepted_count": len(accepted),
+                    "filtered_count": filtered,
+                    "max_source_age_sec": service._transport_rest_last_max_source_age_sec,
+                    "newest_trade_id": service._transport_rest_last_newest_trade_id,
+                    "oldest_trade_id": service._transport_rest_last_oldest_trade_id,
+                }
+            },
+        )
     return accepted
 
 
@@ -208,7 +252,9 @@ def _health(service: Any) -> dict[str, Any]:
         "transport_last_fallback_started_at": service._transport_last_fallback_started_at,
         "transport_last_recovery_at": service._transport_last_recovery_at,
         "transport_fallback_active_seconds": round(active, 3),
-        "transport_fallback_total_seconds": round(service._transport_fallback_total_seconds, 3),
+        "transport_fallback_total_seconds": round(
+            service._transport_fallback_total_seconds, 3
+        ),
         "transport_ws_by_symbol": service._transport_ws_by_symbol,
         "transport_rest_by_symbol": service._transport_rest_by_symbol,
         "transport_ws_redis_events": service._transport_ws_redis_events,
@@ -241,20 +287,43 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
         _install(self)
 
         original_handler = self._live_trade_handler
-        if original_handler is not None and not getattr(original_handler, "_transport_telemetry_wrapped", False):
+        if original_handler is not None and not getattr(
+            original_handler, "_transport_telemetry_wrapped", False
+        ):
+
             @wraps(original_handler)
             async def direct_wrapper(trade: Any) -> None:
-                source = SOURCE_REST if self._transport_rest_recovery_active else SOURCE_WEBSOCKET
+                source = (
+                    SOURCE_REST
+                    if self._transport_rest_recovery_active
+                    else SOURCE_WEBSOCKET
+                )
                 try:
                     await original_handler(trade)
-                except Exception as exc:
-                    key = "_transport_rest_direct_errors" if source == SOURCE_REST else "_transport_ws_direct_errors"
+                except Exception:
+                    key = (
+                        "_transport_rest_direct_errors"
+                        if source == SOURCE_REST
+                        else "_transport_ws_direct_errors"
+                    )
                     setattr(self, key, getattr(self, key) + 1)
                     raise
                 else:
-                    key = "_transport_rest_direct_events" if source == SOURCE_REST else "_transport_ws_direct_events"
+                    key = (
+                        "_transport_rest_direct_events"
+                        if source == SOURCE_REST
+                        else "_transport_ws_direct_events"
+                    )
                     setattr(self, key, getattr(self, key) + 1)
-                    setattr(self, "_transport_rest_direct_last_event_at" if source == SOURCE_REST else "_transport_ws_direct_last_event_at", _now_iso())
+                    setattr(
+                        self,
+                        (
+                            "_transport_rest_direct_last_event_at"
+                            if source == SOURCE_REST
+                            else "_transport_ws_direct_last_event_at"
+                        ),
+                        _now_iso(),
+                    )
 
             direct_wrapper._transport_telemetry_wrapped = True
             self._live_trade_handler = direct_wrapper
@@ -263,11 +332,13 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
         exchange = self._exchange
         original_stream = exchange.stream_trades
         if not getattr(original_stream, "_transport_telemetry_wrapped", False):
+
             @wraps(original_stream)
             async def stream_wrapper(symbols: list[str]):
                 async for trade in original_stream(symbols):
                     _record_ws_trade(self, trade)
                     yield trade
+
             stream_wrapper._transport_telemetry_wrapped = True
             exchange.stream_trades = stream_wrapper
 
@@ -278,7 +349,9 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
     @wraps(original_process)
     async def process_wrapper(self: Any, trades: list[Any]) -> None:
         _install(self)
-        source = SOURCE_REST if self._transport_rest_recovery_active else SOURCE_WEBSOCKET
+        source = (
+            SOURCE_REST if self._transport_rest_recovery_active else SOURCE_WEBSOCKET
+        )
         if source == SOURCE_REST:
             trades = _filter_rest(self, trades)
             if not trades:
