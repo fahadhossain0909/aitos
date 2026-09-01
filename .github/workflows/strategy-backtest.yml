@@ -6,7 +6,7 @@ on:
       ref:
         description: Git ref containing the strategy/backtest implementation
         required: true
-        default: main
+        default: feat/automated-hedge-backtest
         type: string
       module:
         description: Python module implementing the canonical backtest CLI
@@ -172,6 +172,8 @@ jobs:
           print(f"- Baseline max DD: **{b['max_drawdown']:.4%}**")
           print(f"- Hedged max DD: **{h['max_drawdown']:.4%}**")
           print(f"- Δ max DD: **{d.get('delta_max_drawdown', 0):.4%}**")
+          print(f"- Hedge net contribution: **${d.get('hedge_net_contribution', 0):.2f}**")
+          print(f"- Hedge cost: **${d.get('hedge_cost', 0):.2f}**")
           print('> Historical data is sourced from VPS ClickHouse; the strategy code is checked out from the selected ref.')
           PY
 
