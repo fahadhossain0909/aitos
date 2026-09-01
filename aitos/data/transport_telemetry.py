@@ -330,8 +330,12 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
 
         # Observe the exchange iterator at the exact WS->ingestion boundary.
         exchange = self._exchange
-        original_stream = exchange.stream_trades
-        if not getattr(original_stream, "_transport_telemetry_wrapped", False):
+        original_stream = (
+            getattr(exchange, "stream_trades", None) if exchange is not None else None
+        )
+        if original_stream is not None and not getattr(
+            original_stream, "_transport_telemetry_wrapped", False
+        ):
 
             @wraps(original_stream)
             async def stream_wrapper(symbols: list[str]):
