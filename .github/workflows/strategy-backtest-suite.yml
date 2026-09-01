@@ -1,0 +1,44 @@
+name: Strategy Historical Backtest Suite
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref containing the strategy/backtest implementation
+        required: true
+        default: main
+        type: string
+      module:
+        description: Python module implementing the canonical backtest CLI
+        required: true
+        default: aitos.backtest.conditional_hedge_replay
+        type: string
+      symbol:
+        description: Symbol
+        required: true
+        default: BTCUSDT
+        type: string
+      side:
+        description: Primary position side
+        required: true
+        default: LONG
+        type: choice
+        options: [LONG, SHORT]
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-backtest:
+    strategy:
+      fail-fast: false
+      matrix:
+        hours: ['24', '72', '168', '720']
+    uses: ./.github/workflows/strategy-backtest.yml
+    with:
+      ref: ${{ inputs.ref }}
+      module: ${{ inputs.module }}
+      symbol: ${{ inputs.symbol }}
+      hours: ${{ matrix.hours }}
+      side: ${{ inputs.side }}
+    secrets: inherit
