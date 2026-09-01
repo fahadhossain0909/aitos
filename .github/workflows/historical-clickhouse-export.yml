@@ -28,11 +28,6 @@ on:
         required: true
         default: "0.0004"
         type: string
-      slippage_bps:
-        description: "Execution slippage in basis points"
-        required: true
-        default: "1"
-        type: string
 
 permissions:
   contents: read
@@ -53,14 +48,13 @@ jobs:
           TICK_SIZE: ${{ inputs.tick_size }}
           INITIAL_CASH: ${{ inputs.initial_cash }}
           FEE_RATE: ${{ inputs.fee_rate }}
-          SLIPPAGE_BPS: ${{ inputs.slippage_bps }}
         run: |
           set -euo pipefail
           [[ "$SYMBOL" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$HOURS" =~ ^[1-9][0-9]{0,3}$ ]] && (( HOURS <= 720 ))
           python3 - <<'PY'
           import os
-          for key in ('TICK_SIZE','INITIAL_CASH','FEE_RATE','SLIPPAGE_BPS'):
+          for key in ('TICK_SIZE','INITIAL_CASH','FEE_RATE'):
               value = float(os.environ[key])
               if value < 0:
                   raise SystemExit(f'{key} must be >= 0')
@@ -90,7 +84,6 @@ jobs:
           TICK_SIZE: ${{ inputs.tick_size }}
           INITIAL_CASH: ${{ inputs.initial_cash }}
           FEE_RATE: ${{ inputs.fee_rate }}
-          SLIPPAGE_BPS: ${{ inputs.slippage_bps }}
           GH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -98,7 +91,7 @@ jobs:
           mkdir -p "$WORK_ROOT"
           ssh_cmd=(ssh -i "$SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=15 "${DEPLOY_USER}@${DEPLOY_HOST}")
 
-          "${ssh_cmd[@]}" "SYMBOL='$SYMBOL' HOURS='$HOURS' TICK_SIZE='$TICK_SIZE' INITIAL_CASH='$INITIAL_CASH' FEE_RATE='$FEE_RATE' SLIPPAGE_BPS='$SLIPPAGE_BPS' GH_SHA='$GH_SHA' bash -s" > "$WORK_ROOT/result.json" <<'REMOTE'
+          "${ssh_cmd[@]}" "SYMBOL='$SYMBOL' HOURS='$HOURS' TICK_SIZE='$TICK_SIZE' INITIAL_CASH='$INITIAL_CASH' FEE_RATE='$FEE_RATE' GH_SHA='$GH_SHA' bash -s" > "$WORK_ROOT/result.json" <<'REMOTE'
           set -euo pipefail
           : "${SYMBOL:?}" "${HOURS:?}" "${GH_SHA:?}"
           WORK="$HOME/.aitos-history-backtest"
@@ -117,7 +110,7 @@ jobs:
           START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
           END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-          # Run the exact GitHub commit inside the existing paper-trading
+          # Execute the exact GitHub commit inside the existing paper-trading
           # container. No production service is stopped or mutated.
           docker cp "$WORK/src/aitos" aitos-paper:/tmp/aitos-history-src
           docker cp "$WORK/src/scripts/run_hedge_backtest.py" aitos-paper:/tmp/run_hedge_backtest.py
@@ -126,14 +119,10 @@ jobs:
             -e CLICKHOUSE_HOST=aitos-clickhouse \
             -e CLICKHOUSE_PORT=8123 \
             -e CLICKHOUSE_DB=aitos \
-            -e SYMBOL="$SYMBOL" -e START="$START" -e END="$END" \
-            -e TICK_SIZE="$TICK_SIZE" -e INITIAL_CASH="$INITIAL_CASH" \
-            -e FEE_RATE="$FEE_RATE" -e SLIPPAGE_BPS="$SLIPPAGE_BPS" \
             aitos-paper python3 /tmp/run_hedge_backtest.py \
               --symbol "$SYMBOL" --start "$START" --end "$END" \
               --tick-size "$TICK_SIZE" --initial-cash "$INITIAL_CASH" \
-              --fee-rate "$FEE_RATE" --output /tmp/hedge-result.json \
-            > "$WORK/result.json"
+              --fee-rate "$FEE_RATE" --output /tmp/hedge-result.json
 
           docker cp aitos-paper:/tmp/hedge-result.json "$WORK/result.json"
           test -s "$WORK/result.json"
@@ -183,8 +172,7 @@ jobs:
 
       - name: Publish benchmark summary
         shell: bash
-        run: |
-          cat /tmp/aitos-history-backtest/report.md >> "$GITHUB_STEP_SUMMARY"
+        run: cat /tmp/aitos-history-backtest/report.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark artifact
         uses: actions/upload-artifact@v4
