@@ -7,7 +7,10 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from aitos.backtest.clickhouse_source import ClickHouseHistoricalSource, parse_optional_time
+from aitos.backtest.clickhouse_source import (
+    ClickHouseHistoricalSource,
+    parse_optional_time,
+)
 from aitos.intelligence.hedge_intelligence import HedgeDecision
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.position_manager import PositionManager
@@ -69,7 +72,11 @@ def run(args: argparse.Namespace) -> RunResult:
         entry = float(first.price)
         side = TradeSide[args.side]
         direction = 1 if side == TradeSide.LONG else -1
-        sl = entry * (1.0 - args.stop_pct) if direction == 1 else entry * (1.0 + args.stop_pct)
+        sl = (
+            entry * (1.0 - args.stop_pct)
+            if direction == 1
+            else entry * (1.0 + args.stop_pct)
+        )
         tp = (
             entry * (1.0 + args.take_profit_pct)
             if direction == 1
@@ -113,7 +120,9 @@ def run(args: argparse.Namespace) -> RunResult:
             price = float(event.price)
             prices.append(price)
             trade.record_excursion(price)
-            action = pm.evaluate(trade=trade, current_price=price, timestamp=event.timestamp)
+            action = pm.evaluate(
+                trade=trade, current_price=price, timestamp=event.timestamp
+            )
             hd: HedgeDecision | None = action.hedge_decision
             primary_move = (price - entry) * args.quantity * direction
             if hd and hd.action == "OPEN" and hedge_open_price is None:
@@ -194,7 +203,8 @@ def run(args: argparse.Namespace) -> RunResult:
             baseline=baseline_metrics,
             hedged=hedged_metrics,
             delta_net_pnl=hedged_pnl - baseline_pnl,
-            delta_max_drawdown=hedged_metrics.max_drawdown - baseline_metrics.max_drawdown,
+            delta_max_drawdown=hedged_metrics.max_drawdown
+            - baseline_metrics.max_drawdown,
             delta_mae=hedged_metrics.mae - baseline_metrics.mae,
             delta_mfe=hedged_metrics.mfe - baseline_metrics.mfe,
             hedge_pnl=hedge_pnl,
