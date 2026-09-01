@@ -105,6 +105,12 @@ class ClickHouseHistoricalSource:
                 + " ORDER BY time LIMIT {limit:UInt32}"
             )
         elif table == "trades":
+            # Persisted trade streams can contain malformed placeholder rows.
+            # A zero/negative market price is not a valid observation and would
+            # make downstream MAE/MFE telemetry fail the replay. Filter it at
+            # the historical-source boundary so all consumers receive valid
+            # market-price observations.
+            filters.append("price > 0")
             sql = (
                 "SELECT time, price, quantity, side, trade_id, is_buyer_maker FROM trade_ticks WHERE "
                 + " AND ".join(
