@@ -30,11 +30,17 @@ def trade(trade_id: int, seconds_ago: float) -> TradeTick:
 
 
 @pytest.mark.asyncio
-async def test_transport_telemetry_records_rest_fallback_and_websocket_recovery(event_bus):
+async def test_transport_telemetry_records_both_downstream_paths(event_bus):
+    direct_events: list[int] = []
+
+    async def direct_handler(item: TradeTick) -> None:
+        direct_events.append(item.trade_id)
+
     service = DataIngestionService(
         exchange=TelemetryExchange(),
         event_bus=event_bus,
         symbols=["BTCUSDT"],
+        live_trade_handler=direct_handler,
     )
     await service.initialize({})
 
@@ -43,18 +49,25 @@ async def test_transport_telemetry_records_rest_fallback_and_websocket_recovery(
     assert service._transport_fallback_count == 1
     assert service._transport_rest_batches == 1
     assert service._transport_rest_trades_recovered == 1
+    assert service._transport_rest_direct_events == 1
+    assert service._transport_rest_direct_errors == 0
 
     await service._process_trade_batch([trade(102, 0.5)])
     assert service._transport_mode == "websocket"
     assert service._transport_recovery_count == 1
     assert service._transport_ws_batches == 1
+    assert service._transport_ws_direct_events == 1
+    assert service._transport_ws_direct_errors == 0
     assert service._transport_last_recovery_at is not None
     assert service._transport_fallback_active_seconds == 0.0
+    assert direct_events == [101, 102]
 
     health = await service.health_check()
     assert health.details["transport_mode"] == "websocket"
     assert health.details["transport_fallback_count"] == 1
     assert health.details["transport_recovery_count"] == 1
     assert health.details["transport_rest_trades_recovered"] == 1
+    assert health.details["transport_ws_direct_events"] == 1
+    assert health.details["transport_rest_direct_events"] == 1
 
     await service.shutdown(grace_period_seconds=2.0)
