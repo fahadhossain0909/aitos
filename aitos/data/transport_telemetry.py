@@ -1,9 +1,9 @@
 """Observable WebSocket/REST transport state for production diagnostics.
 
-The telemetry is deliberately observational: it does not change the existing
-fallback/reconnect state machine. It distinguishes the two live trade paths:
-1. Binance WebSocket/REST -> Redis EventBus
-2. Binance WebSocket/REST -> direct live handler (bypass path)
+The telemetry is deliberately observational except for one safety gate: REST
+recovery trades older than the live-trade freshness budget are filtered before
+entering the normal ingestion/publish path. This prevents a stale REST window
+from being amplified into Redis and repeatedly rejected by LiveScanner.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ _MODE_WEBSOCKET = "websocket"
 _MODE_REST = "rest_fallback"
 _SOURCE_WEBSOCKET = "websocket"
 _SOURCE_REST = "rest_fallback"
+_REST_MAX_SOURCE_AGE_SECONDS = 15.0
 
 _current_context: contextvars.ContextVar[tuple[Any, str] | None] = (
     contextvars.ContextVar("aitos_trade_transport_context", default=None)
@@ -46,6 +47,12 @@ def _install_telemetry(service: Any) -> None:
     service._transport_ws_batches = 0
     service._transport_rest_batches = 0
     service._transport_rest_trades_recovered = 0
+    service._transport_rest_stale_trades_filtered = 0
+    service._transport_rest_last_batch_count = 0
+    service._transport_rest_last_accepted_count = 0
+    service._transport_rest_last_max_source_age_sec = None
+    service._transport_rest_last_newest_trade_id = None
+    service._transport_rest_last_oldest_trade_id = None
     service._transport_last_ws_event_at = None
     service._transport_last_rest_event_at = None
     service._transport_last_fallback_started_at = None
@@ -230,6 +237,56 @@ def _mark_direct_error(service: Any, source: str, exc: Exception) -> None:
     )
 
 
+def _filter_stale_rest_trades(service: Any, trades: list[Any]) -> list[Any]:
+    """Reject stale REST recovery data before it reaches Redis/LiveScanner."""
+    _install_telemetry(service)
+    now = datetime.now(timezone.utc)
+    ages: list[float] = []
+    accepted: list[Any] = []
+    newest_id = None
+    oldest_id = None
+    for trade in trades:
+        trade_id = getattr(trade, "trade_id", None)
+        if trade_id is not None:
+            newest_id = trade_id if newest_id is None else max(newest_id, trade_id)
+            oldest_id = trade_id if oldest_id is None else min(oldest_id, trade_id)
+        timestamp = getattr(trade, "timestamp", None)
+        if timestamp is None:
+            continue
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        age = max(0.0, (now - timestamp).total_seconds())
+        ages.append(age)
+        if age <= _REST_MAX_SOURCE_AGE_SECONDS:
+            accepted.append(trade)
+
+    service._transport_rest_last_batch_count = len(trades)
+    service._transport_rest_last_accepted_count = len(accepted)
+    service._transport_rest_last_max_source_age_sec = (
+        round(max(ages), 3) if ages else None
+    )
+    service._transport_rest_last_newest_trade_id = newest_id
+    service._transport_rest_last_oldest_trade_id = oldest_id
+    filtered = len(trades) - len(accepted)
+    if filtered:
+        service._transport_rest_stale_trades_filtered += filtered
+        logger.warning(
+            "filtered stale REST trade recovery batch",
+            extra={
+                "aitos_extra": {
+                    "batch_count": len(trades),
+                    "accepted_count": len(accepted),
+                    "filtered_count": filtered,
+                    "max_source_age_sec": service._transport_rest_last_max_source_age_sec,
+                    "newest_trade_id": newest_id,
+                    "oldest_trade_id": oldest_id,
+                    "max_allowed_source_age_sec": _REST_MAX_SOURCE_AGE_SECONDS,
+                }
+            },
+        )
+    return accepted
+
+
 def _health_details(service: Any) -> dict[str, Any]:
     _install_telemetry(service)
     active = 0.0
@@ -245,6 +302,13 @@ def _health_details(service: Any) -> dict[str, Any]:
         "transport_ws_batches": service._transport_ws_batches,
         "transport_rest_batches": service._transport_rest_batches,
         "transport_rest_trades_recovered": service._transport_rest_trades_recovered,
+        "transport_rest_stale_trades_filtered": service._transport_rest_stale_trades_filtered,
+        "transport_rest_last_batch_count": service._transport_rest_last_batch_count,
+        "transport_rest_last_accepted_count": service._transport_rest_last_accepted_count,
+        "transport_rest_last_max_source_age_sec": service._transport_rest_last_max_source_age_sec,
+        "transport_rest_last_newest_trade_id": service._transport_rest_last_newest_trade_id,
+        "transport_rest_last_oldest_trade_id": service._transport_rest_last_oldest_trade_id,
+        "transport_rest_max_source_age_sec": _REST_MAX_SOURCE_AGE_SECONDS,
         "transport_last_ws_event_at": service._transport_last_ws_event_at,
         "transport_last_rest_event_at": service._transport_last_rest_event_at,
         "transport_last_fallback_started_at": service._transport_last_fallback_started_at,
@@ -269,7 +333,7 @@ def _health_details(service: Any) -> dict[str, Any]:
 
 
 def install_transport_telemetry(service_cls: type[Any]) -> None:
-    """Install non-invasive telemetry on DataIngestionService."""
+    """Install transport telemetry and stale-REST safety gating."""
     _wrap_event_bus_publish_once()
     if getattr(service_cls, "_transport_telemetry_wrapped", False):
         return
@@ -311,6 +375,10 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
         source = (
             _SOURCE_REST if self._transport_rest_recovery_active else _SOURCE_WEBSOCKET
         )
+        if source == _SOURCE_REST:
+            trades = _filter_stale_rest_trades(self, trades)
+            if not trades:
+                return
         token = _current_context.set((self, source))
         try:
             if source == _SOURCE_REST:
