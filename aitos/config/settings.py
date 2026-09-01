@@ -74,6 +74,10 @@ class AITOSSettings(BaseSettings):
     )
 
     environment: str = Field(default="dev", description="dev | staging | production")
+    # Shared application logging configuration. Keep this at the top level
+    # because both paper and live entrypoints consume settings.log_level and
+    # the deployment environment supplies LOG_LEVEL.
+    log_level: str = Field(default="INFO", description="Python logging level")
 
     # Governance / safety — production changes require human approval per the AI Constitution.
     require_human_approval_for_prod: bool = True
