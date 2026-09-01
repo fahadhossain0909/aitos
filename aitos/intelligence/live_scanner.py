@@ -13,9 +13,9 @@ from aitos.models.market import OrderBookSnapshot, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")
 
-LIVE_TRADE_GROUP = "live-scanner-trades-v2"
-LIVE_BOOK_GROUP = "live-scanner-book-v2"
-LIVE_LIQUIDITY_GROUP = "live-scanner-liquidity-v2"
+LIVE_TRADE_GROUP = "live-scanner-trades-v3"
+LIVE_BOOK_GROUP = "live-scanner-book-v3"
+LIVE_LIQUIDITY_GROUP = "live-scanner-liquidity-v3"
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 
 
@@ -37,14 +37,7 @@ class LiveSymbolCache:
 
 
 class LiveScannerCache:
-    """Consumes canonical EventBus market events and keeps a live view.
-
-    The cache remains subscribed even when the scanner is temporarily using
-    REST data. REST fallback is a read-path decision in OpportunityScanner;
-    it must never disable the live WebSocket/EventBus consumer. This makes
-    recovery automatic: as soon as fresh WS events arrive, the next scan can
-    switch back to websocket_live_state without a restart or manual reset.
-    """
+    """Consumes canonical EventBus market events and keeps a live view."""
 
     def __init__(
         self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000
@@ -133,9 +126,6 @@ class LiveScannerCache:
             )
             return
 
-        # Ingestion can feed the cache directly while the canonical EventBus
-        # consumer receives the same event. Treat trade IDs as idempotency keys
-        # so enabling both paths cannot double-count live trades.
         if state.trades and trade.trade_id <= state.trades[-1].trade_id:
             state.duplicate_trade_rejections += 1
             return
@@ -149,8 +139,6 @@ class LiveScannerCache:
         book = OrderBookSnapshot.from_dict(event.payload)
         received_at = datetime.now(timezone.utc)
         state = self._cache(book.symbol)
-        # Direct handler + EventBus can legitimately deliver the same snapshot.
-        # last_update_id is the exchange sequence identity for snapshots.
         if (
             state.order_book is not None
             and state.order_book.last_update_id == book.last_update_id
@@ -277,7 +265,6 @@ class LiveScannerCache:
         }
 
     def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
-        """True when the latest trade source timestamp is within max_age."""
         state = self._state.get(symbol)
         if state is None or state.last_trade_source_at is None:
             return False
@@ -286,7 +273,6 @@ class LiveScannerCache:
         ).total_seconds() <= max_age_seconds
 
     def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
-        """True when the latest book source timestamp is within max_age."""
         state = self._state.get(symbol)
         if state is None or state.last_book_source_at is None:
             return False
