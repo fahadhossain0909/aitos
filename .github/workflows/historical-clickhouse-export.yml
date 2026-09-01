@@ -28,12 +28,20 @@ on:
         required: true
         default: "0.0004"
         type: string
+  push:
+    branches:
+      - feature/conditional-hedge-intelligence-impl
 
 permissions:
   contents: read
 
 env:
   WORK_ROOT: /tmp/aitos-history-backtest
+  SYMBOL: ${{ inputs.symbol || 'BTCUSDT' }}
+  HOURS: ${{ inputs.hours || '24' }}
+  TICK_SIZE: ${{ inputs.tick_size || '0.10' }}
+  INITIAL_CASH: ${{ inputs.initial_cash || '10000' }}
+  FEE_RATE: ${{ inputs.fee_rate || '0.0004' }}
 
 jobs:
   historical-backtest:
@@ -42,12 +50,6 @@ jobs:
     steps:
       - name: Validate inputs
         shell: bash
-        env:
-          SYMBOL: ${{ inputs.symbol }}
-          HOURS: ${{ inputs.hours }}
-          TICK_SIZE: ${{ inputs.tick_size }}
-          INITIAL_CASH: ${{ inputs.initial_cash }}
-          FEE_RATE: ${{ inputs.fee_rate }}
         run: |
           set -euo pipefail
           [[ "$SYMBOL" =~ ^[A-Za-z0-9._-]+$ ]]
@@ -79,11 +81,6 @@ jobs:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           SSH_KEY: ${{ runner.temp }}/aitos_history_key
-          SYMBOL: ${{ inputs.symbol }}
-          HOURS: ${{ inputs.hours }}
-          TICK_SIZE: ${{ inputs.tick_size }}
-          INITIAL_CASH: ${{ inputs.initial_cash }}
-          FEE_RATE: ${{ inputs.fee_rate }}
           GH_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
@@ -110,8 +107,6 @@ jobs:
           START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
           END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
 
-          # Execute the exact GitHub commit inside the existing paper-trading
-          # container. No production service is stopped or mutated.
           docker cp "$WORK/src/aitos" aitos-paper:/tmp/aitos-history-src
           docker cp "$WORK/src/scripts/run_hedge_backtest.py" aitos-paper:/tmp/run_hedge_backtest.py
           docker exec \
@@ -139,6 +134,10 @@ jobs:
           from pathlib import Path
           p = Path('/tmp/aitos-history-backtest/result.json')
           data = json.loads(p.read_text())
+          required = {'schema_version','engine','symbol','start','end','event_count','baseline','hedged','comparison'}
+          missing = required - data.keys()
+          if missing:
+              raise SystemExit(f'Missing result fields: {sorted(missing)}')
           b, h, c = data['baseline'], data['hedged'], data['comparison']
           report = f'''# AITOS Conditional Hedge Backtest
 
@@ -177,7 +176,7 @@ jobs:
       - name: Upload benchmark artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aitos-hedge-backtest-${{ inputs.symbol }}-${{ inputs.hours }}h-${{ github.run_id }}
+          name: aitos-hedge-backtest-${{ env.SYMBOL }}-${{ env.HOURS }}h-${{ github.run_id }}
           path: /tmp/aitos-history-backtest
           retention-days: 14
           if-no-files-found: error
