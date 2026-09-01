@@ -11,7 +11,7 @@ from __future__ import annotations
 import time
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from aitos.logging_setup import get_logger
 
