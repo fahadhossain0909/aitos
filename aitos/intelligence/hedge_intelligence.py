@@ -110,8 +110,9 @@ class HedgeIntelligenceEngine:
         active = trade.trade_id in self._active
 
         primary_bias_aligned = (
-            market_state.structure == StructureBias.BULLISH and primary_long
-        ) or (market_state.structure == StructureBias.BEARISH and not primary_long)
+            (market_state.structure == StructureBias.BULLISH and primary_long)
+            or (market_state.structure == StructureBias.BEARISH and not primary_long)
+        )
         recovery_score = min(
             1.0,
             0.45 * float(primary_bias_aligned)
@@ -122,54 +123,25 @@ class HedgeIntelligenceEngine:
         if active and recovery_score >= self.close_threshold and adverse_score < 0.35:
             self._active.pop(trade.trade_id, None)
             return HedgeDecision(
-                "CLOSE",
-                None,
-                0.0,
-                score,
-                recovery_score,
-                "Primary-direction confirmation recovered; close protective hedge.",
-                timestamp,
+                "CLOSE", None, 0.0, score, recovery_score,
+                "Primary-direction confirmation recovered; close protective hedge.", timestamp
             )
 
         if active:
             return HedgeDecision(
-                "HOLD",
-                "SHORT" if primary_long else "LONG",
-                self._active[trade.trade_id],
-                score,
-                recovery_score,
-                "Protective hedge remains active.",
-                timestamp,
+                "HOLD", "SHORT" if primary_long else "LONG", self._active[trade.trade_id],
+                score, recovery_score, "Protective hedge remains active.", timestamp
             )
 
         if score < self.open_threshold:
             return HedgeDecision(
-                "NONE",
-                None,
-                0.0,
-                score,
-                recovery_score,
-                "Hedge conditions not strong enough.",
-                timestamp,
+                "NONE", None, 0.0, score, recovery_score,
+                "Hedge conditions not strong enough.", timestamp
             )
 
-        ratio = min(
-            self.max_ratio,
-            max(
-                self.min_ratio,
-                self.min_ratio
-                + 0.30
-                * (score - self.open_threshold)
-                / max(1.0 - self.open_threshold, 1e-9),
-            ),
-        )
+        ratio = min(self.max_ratio, max(self.min_ratio, self.min_ratio + 0.30 * (score - self.open_threshold) / max(1.0 - self.open_threshold, 1e-9)))
         self._active[trade.trade_id] = ratio
         return HedgeDecision(
-            "OPEN",
-            "SHORT" if primary_long else "LONG",
-            ratio,
-            score,
-            recovery_score,
-            "Conflicted/adverse state warrants a partial protective hedge.",
-            timestamp,
+            "OPEN", "SHORT" if primary_long else "LONG", ratio, score, recovery_score,
+            "Conflicted/adverse state warrants a partial protective hedge.", timestamp
         )

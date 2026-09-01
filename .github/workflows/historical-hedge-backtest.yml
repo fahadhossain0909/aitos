@@ -34,27 +34,21 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-
+        uses: actions/checkout@v7.0.1
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7.0.0
         with:
-          python-version: '3.12'
-
+          python-version: '3.11'
       - name: Install backtest dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e .
-
-      - name: Validate Python imports
+        run: python -m pip install -r requirements-backtest.txt
+      - name: Validate canonical hedge imports
         run: |
           python -m compileall -q aitos
           python - <<'PY'
-          from aitos.intelligence.hedge_intelligence import HedgeIntelligenceEngine, HedgeDecision
-          from aitos.trading.position_manager import PositionManager, PositionAction
+          from aitos.intelligence.hedge_intelligence import HedgeIntelligenceEngine
+          from aitos.trading.position_manager import PositionManager
           print('canonical hedge imports: OK')
           PY
-
       - name: Prepare SSH key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -62,7 +56,6 @@ jobs:
           test -n "$DEPLOY_SSH_KEY"
           umask 077
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/aitos_key"
-
       - name: Run real ClickHouse replay through SSH tunnel
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -72,52 +65,27 @@ jobs:
           SIDE: ${{ inputs.side || 'LONG' }}
         run: |
           set -euo pipefail
-          test -n "$DEPLOY_HOST"
-          test -n "$DEPLOY_USER"
+          test -n "$DEPLOY_HOST"; test -n "$DEPLOY_USER"
           [[ "$SYMBOL" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$HOURS" =~ ^[1-9][0-9]{0,2}$ ]] && (( HOURS <= 720 ))
           START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
           END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-
-          ssh -i "$RUNNER_TEMP/aitos_key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -N \
-            -L 18123:127.0.0.1:8123 "${DEPLOY_USER}@${DEPLOY_HOST}" &
+          ssh -i "$RUNNER_TEMP/aitos_key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -N -L 18123:127.0.0.1:8123 "${DEPLOY_USER}@${DEPLOY_HOST}" &
           TUNNEL_PID=$!
           trap 'kill "$TUNNEL_PID" 2>/dev/null || true' EXIT
           sleep 2
-
-          python -m aitos.backtest.conditional_hedge_replay \
-            --symbol "$SYMBOL" --side "$SIDE" \
-            --start "$START" --end "$END" --timeframe 1m \
-            --host 127.0.0.1 --port 18123 \
-            --output /tmp/hedge-result.json 2>/dev/null || \
-          python -m aitos.backtest.conditional_hedge_replay \
-            --symbol "$SYMBOL" --side "$SIDE" \
-            --start "$START" --end "$END" --timeframe 1m \
-            --host 127.0.0.1 --port 18123 > /tmp/hedge-result.json
-
-          test -s /tmp/hedge-result.json
-          python -m json.tool /tmp/hedge-result.json > hedge-result.pretty.json
-
+          python -m aitos.backtest.conditional_hedge_replay --symbol "$SYMBOL" --side "$SIDE" --start "$START" --end "$END" --timeframe 1m --host 127.0.0.1 --port 18123 > hedge-result.json
+          python -m json.tool hedge-result.json > hedge-result.pretty.json
       - name: Publish benchmark summary
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
           d=json.load(open('hedge-result.pretty.json'))
           print('## Conditional Hedge Historical Benchmark')
-          print(f"- Symbol: **{d['symbol']}**")
-          print(f"- Window: **{d['start']} → {d['end']}**")
-          print(f"- Net PnL: **{d['net_pnl']:.4f}**")
-          print(f"- Hedge PnL: **{d['hedge_pnl']:.4f}**")
-          print(f"- Hedge Cost: **{d['hedge_cost']:.4f}**")
-          print(f"- Hedge opens: **{d['hedge_open_count']}**")
-          print(f"- Hedge closes: **{d['hedge_close_count']}**")
-          print(f"- Max DD: **{d['max_drawdown']:.4%}**")
-          print(f"- MAE: **{d['mae']:.4f}R**")
-          print(f"- MFE: **{d['mfe']:.4f}R**")
-          print(f"- Expectancy proxy: **{d['expectancy']:.4f}**")
-          print('> This is an isolated hedge-overlay benchmark, not a full entry-strategy profitability claim.')
+          for key in ('symbol','side','start','end','net_pnl','hedge_pnl','hedge_cost','hedge_open_count','hedge_close_count','max_drawdown','mae','mfe','expectancy'):
+              print(f'- {key}: **{d[key]}**')
+          print('> Isolated hedge-overlay benchmark; this does not claim full entry-strategy profitability.')
           PY
-
       - name: Upload benchmark artifact
         uses: actions/upload-artifact@v4
         with:
@@ -125,7 +93,6 @@ jobs:
           path: hedge-result.pretty.json
           retention-days: 14
           if-no-files-found: error
-
       - name: Cleanup SSH key
         if: always()
         run: rm -f "$RUNNER_TEMP/aitos_key"
