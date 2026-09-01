@@ -42,7 +42,11 @@ def test_accepts_fresh_monotonic_recovery() -> None:
 
 def test_previous_id_and_timestamp_are_respected() -> None:
     now = datetime.now(timezone.utc)
-    batch = [trade(100, 2.0, base=now), trade(101, 1.0, base=now), trade(102, 0.5, base=now)]
+    batch = [
+        trade(100, 2.0, base=now),
+        trade(101, 1.0, base=now),
+        trade(102, 0.5, base=now),
+    ]
     previous_timestamp = now - timedelta(seconds=3)
     accepted, rejected = validate_recovery_window(
         batch,
