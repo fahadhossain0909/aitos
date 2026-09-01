@@ -84,6 +84,12 @@ class PositionManager:
             close_threshold=float(cfg.get("hedge_close_threshold", 0.56)),
             max_ratio=float(cfg.get("hedge_max_ratio", 0.50)),
             min_ratio=float(cfg.get("hedge_min_ratio", 0.20)),
+            min_benefit_cost_ratio=float(
+                cfg.get("hedge_min_benefit_cost_ratio", 2.0)
+            ),
+            estimated_roundtrip_cost_rate=float(
+                cfg.get("hedge_estimated_roundtrip_cost_rate", 0.0012)
+            ),
         )
         self._hedge_enabled = bool(cfg.get("hedge_enabled", True))
         self._theses: dict[str, TradeThesis] = {}
@@ -159,9 +165,7 @@ class PositionManager:
         if thesis is None:
             expected = tuple(
                 d.price
-                for d in (path_plan.upside if side == "LONG" else path_plan.downside)[
-                    :3
-                ]
+                for d in (path_plan.upside if side == "LONG" else path_plan.downside)[:3]
             )
             thesis = self._thesis_engine.build_from_entry(
                 trade_id=trade.trade_id,
