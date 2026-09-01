@@ -34,6 +34,7 @@ def _install_telemetry(service: Any) -> None:
     service._transport_mode = _MODE_UNKNOWN
     service._transport_fallback_count = 0
     service._transport_recovery_count = 0
+    service._transport_rest_recovery_attempts = 0
     service._transport_rest_recovery_errors = 0
     service._transport_ws_batches = 0
     service._transport_rest_batches = 0
@@ -120,6 +121,7 @@ def _health_details(service: Any) -> dict[str, Any]:
         "transport_mode": service._transport_mode,
         "transport_fallback_count": service._transport_fallback_count,
         "transport_recovery_count": service._transport_recovery_count,
+        "transport_rest_recovery_attempts": service._transport_rest_recovery_attempts,
         "transport_rest_recovery_errors": service._transport_rest_recovery_errors,
         "transport_ws_batches": service._transport_ws_batches,
         "transport_rest_batches": service._transport_rest_batches,
@@ -168,8 +170,8 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
     @wraps(original_recover)
     async def recover_wrapper(self: Any) -> None:
         _enter_rest_fallback(self, "websocket_idle_timeout")
+        self._transport_rest_recovery_attempts += 1
         self._transport_rest_recovery_active = True
-        before_errors = self._transport_rest_recovery_errors
         try:
             await original_recover(self)
         except Exception:
@@ -177,11 +179,6 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
             raise
         finally:
             self._transport_rest_recovery_active = False
-            # The underlying recovery method handles per-symbol failures itself.
-            # Its stream-error counter is retained; this telemetry counter is only
-            # for unexpected exceptions escaping the recovery method.
-            if self._transport_rest_recovery_errors != before_errors:
-                logger.exception("unexpected REST recovery exception")
 
     service_cls._recover_recent_trades = recover_wrapper
 
