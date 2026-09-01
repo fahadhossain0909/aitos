@@ -86,7 +86,8 @@ def main() -> int:
             "net_pnl_delta": hedged.net_pnl - baseline.net_pnl,
             "drawdown_reduction": (
                 (baseline.max_drawdown - hedged.max_drawdown) / baseline.max_drawdown
-                if baseline.max_drawdown else 0.0
+                if baseline.max_drawdown
+                else 0.0
             ),
             "expectancy_delta": hedged.expectancy - baseline.expectancy,
             "mae_delta": hedged.mae - baseline.mae,
@@ -96,7 +97,9 @@ def main() -> int:
             "hedge_net_contribution": hedged.hedge_pnl - hedged.hedge_fees,
         },
     }
-    Path(args.output).write_text(json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8")
+    Path(args.output).write_text(
+        json.dumps(payload, indent=2, allow_nan=False), encoding="utf-8"
+    )
     print(json.dumps(payload, indent=2, allow_nan=False))
     return 0
 
