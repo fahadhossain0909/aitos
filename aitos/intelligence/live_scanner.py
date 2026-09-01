@@ -57,27 +57,28 @@ class LiveScannerCache:
         return self._state[symbol]
 
     async def initialize(self, direct_market_data: bool = False) -> None:
-        """Start live consumers; never turn them off for REST fallback."""
+        """Start live consumers; direct mode bypasses Redis for trade/book data."""
         self._direct_market_data = direct_market_data
         if self._initialized:
             return
         for symbol in self._symbols:
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.trade.{symbol}",
-                    self._on_trade,
-                    group=LIVE_TRADE_GROUP,
-                    start_id="$",
+            if not direct_market_data:
+                self._subscriptions.append(
+                    await self._bus.subscribe(
+                        f"market.trade.{symbol}",
+                        self._on_trade,
+                        group=LIVE_TRADE_GROUP,
+                        start_id="$",
+                    )
                 )
-            )
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.orderbook.{symbol}",
-                    self._on_book,
-                    group=LIVE_BOOK_GROUP,
-                    start_id="$",
+                self._subscriptions.append(
+                    await self._bus.subscribe(
+                        f"market.orderbook.{symbol}",
+                        self._on_book,
+                        group=LIVE_BOOK_GROUP,
+                        start_id="$",
+                    )
                 )
-            )
             self._subscriptions.append(
                 await self._bus.subscribe(
                     f"market.liquidity.{symbol}",
