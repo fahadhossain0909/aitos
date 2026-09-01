@@ -118,8 +118,8 @@ def run(args: argparse.Namespace) -> RunResult:
                 timestamp=event.timestamp,
             )
             hd: HedgeDecision | None = action.hedge_decision
-            primary_move = (price - entry) * args.quantity * (
-                1 if side == TradeSide.LONG else -1
+            primary_move = (
+                (price - entry) * args.quantity * (1 if side == TradeSide.LONG else -1)
             )
             if hd and hd.action == "OPEN" and hedge_open_price is None:
                 hedge_open_price = price
@@ -189,9 +189,7 @@ def run(args: argparse.Namespace) -> RunResult:
             args.symbol,
             args.side,
             first.timestamp.isoformat(),
-            end.isoformat()
-            if end
-            else datetime.now(timezone.utc).isoformat(),
+            end.isoformat() if end else datetime.now(timezone.utc).isoformat(),
             args.initial_cash,
             final_hedged,
             final_hedged - args.initial_cash,
