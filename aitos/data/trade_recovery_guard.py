@@ -95,6 +95,8 @@ def install_trade_recovery_guard(service_cls: type[Any]) -> None:
             self._trade_recovery_guard_rejected = (
                 getattr(self, "_trade_recovery_guard_rejected", 0) + rejected_total
             )
+            if hasattr(self, "_transport_rest_stale_trades_filtered"):
+                self._transport_rest_stale_trades_filtered += rejected_total
             logger.warning(
                 "REST recovery trades rejected by monotonicity guard",
                 extra={"aitos_extra": {"rejected": rejected_total}},
