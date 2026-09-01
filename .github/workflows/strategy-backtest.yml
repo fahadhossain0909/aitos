@@ -1,0 +1,170 @@
+name: Strategy Historical Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref containing the strategy/backtest implementation
+        required: true
+        default: main
+        type: string
+      module:
+        description: Python module implementing the canonical backtest CLI
+        required: true
+        default: aitos.backtest.conditional_hedge_replay
+        type: string
+      symbol:
+        description: Symbol
+        required: true
+        default: BTCUSDT
+        type: string
+      hours:
+        description: Historical window in hours
+        required: true
+        default: '24'
+        type: string
+      side:
+        description: Primary position side
+        required: true
+        default: LONG
+        type: choice
+        options: [LONG, SHORT]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: papertrade
+    steps:
+      - name: Checkout strategy ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backtest dependencies
+        run: python -m pip install -r requirements-backtest.txt
+
+      - name: Validate strategy module
+        env:
+          MODULE: ${{ inputs.module }}
+        run: |
+          set -euo pipefail
+          python -m compileall -q aitos
+          python -c "import importlib; importlib.import_module('${MODULE}'); print('strategy module import: OK')"
+
+      - name: Validate required secrets
+        env:
+          CH_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$CH_PASSWORD" || { echo '::error::CLICKHOUSE_PASSWORD unavailable'; exit 1; }
+          test -n "$DEPLOY_HOST" || { echo '::error::DEPLOY_HOST unavailable'; exit 1; }
+          test -n "$DEPLOY_USER" || { echo '::error::DEPLOY_USER unavailable'; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo '::error::DEPLOY_SSH_KEY unavailable'; exit 1; }
+
+      - name: Prepare SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/aitos_key"
+
+      - name: Replay historical ClickHouse data
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          CH_USER: ${{ secrets.CLICKHOUSE_USER || 'default' }}
+          CH_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          CH_DATABASE: ${{ secrets.CLICKHOUSE_DATABASE || 'aitos' }}
+          SYMBOL: ${{ inputs.symbol }}
+          HOURS: ${{ inputs.hours }}
+          SIDE: ${{ inputs.side }}
+          MODULE: ${{ inputs.module }}
+        run: |
+          set -euo pipefail
+          [[ "$SYMBOL" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$HOURS" =~ ^[1-9][0-9]{0,2}$ ]] && (( HOURS <= 720 ))
+          [[ "$MODULE" =~ ^[A-Za-z_][A-Za-z0-9_.]*$ ]]
+          START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
+          END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          ssh -i "$RUNNER_TEMP/aitos_key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -N -L 18123:127.0.0.1:8123 "${DEPLOY_USER}@${DEPLOY_HOST}" &
+          TUNNEL_PID=$!
+          trap 'kill "$TUNNEL_PID" 2>/dev/null || true; rm -f "$RUNNER_TEMP/aitos_key"' EXIT
+          sleep 2
+          python - <<'PY'
+          import base64, os, urllib.parse, urllib.request
+          user=os.environ['CH_USER']; password=os.environ['CH_PASSWORD']; database=os.environ['CH_DATABASE']
+          q=urllib.parse.quote('SELECT 1')
+          req=urllib.request.Request(f'http://127.0.0.1:18123/?database={urllib.parse.quote(database)}&query={q}')
+          req.add_header('Authorization','Basic '+base64.b64encode(f'{user}:{password}'.encode()).decode())
+          with urllib.request.urlopen(req, timeout=10) as response:
+              body=response.read().decode().strip()
+          if body != '1': raise SystemExit(f'Unexpected ClickHouse probe response: {body!r}')
+          print('ClickHouse authentication/connectivity: OK')
+          PY
+          python -m "$MODULE" \
+            --symbol "$SYMBOL" --side "$SIDE" --start "$START" --end "$END" \
+            --timeframe 1m --host 127.0.0.1 --port 18123 \
+            --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DATABASE" \
+            > backtest-result.json
+          python -m json.tool backtest-result.json > backtest-result.pretty.json
+
+      - name: Validate canonical result contract
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('backtest-result.pretty.json'))
+          for key in ('symbol','side','start','end','baseline','hedged'):
+              if key not in d: raise SystemExit(f'Missing result field: {key}')
+          for section in ('baseline','hedged'):
+              for key in ('final_cash','net_pnl','max_drawdown','mae','mfe'):
+                  if key not in d[section]: raise SystemExit(f'Missing {section}.{key}')
+          print('canonical result contract: OK')
+          PY
+
+      - name: Publish result summary
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d=json.load(open('backtest-result.pretty.json'))
+          b=d['baseline']; h=d['hedged']
+          print('## Strategy Historical Backtest')
+          print(f"- Ref: **${{ inputs.ref }}**")
+          print(f"- Module: **${{ inputs.module }}**")
+          print(f"- Dataset: **{d['symbol']} / {d['side']} / {d['start']} → {d['end']}**")
+          print(f"- Baseline net PnL: **${b['net_pnl']:.2f}**")
+          print(f"- Hedged net PnL: **${h['net_pnl']:.2f}**")
+          print(f"- Δ net PnL: **${d.get('delta_net_pnl', 0):.2f}**")
+          print(f"- Baseline max DD: **{b['max_drawdown']:.4%}**")
+          print(f"- Hedged max DD: **{h['max_drawdown']:.4%}**")
+          print(f"- Δ max DD: **{d.get('delta_max_drawdown', 0):.4%}**")
+          print('> Historical data is sourced from VPS ClickHouse; the strategy code is checked out from the selected ref.')
+          PY
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: strategy-backtest-${{ inputs.symbol }}-${{ inputs.hours }}h-${{ github.run_id }}
+          path: backtest-result.pretty.json
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/aitos_key"
