@@ -80,7 +80,9 @@ def install_trade_recovery_guard(service_cls: type[Any]) -> None:
         rejected_total = 0
         for symbol, group in symbol_groups.items():
             previous_id = getattr(self, "_last_trade_ids", {}).get(symbol, -1)
-            previous_ts = getattr(self, "_trade_recovery_source_timestamps", {}).get(symbol)
+            previous_ts = getattr(self, "_trade_recovery_source_timestamps", {}).get(
+                symbol
+            )
             valid, rejected = validate_recovery_window(
                 group,
                 previous_trade_id=previous_id,
