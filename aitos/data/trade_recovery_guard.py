@@ -85,7 +85,10 @@ def install_trade_recovery_guard(service_cls: type[Any]) -> None:
             ]
             if timestamps and hasattr(self, "_transport_rest_last_max_source_age_sec"):
                 reference = datetime.now(timezone.utc)
-                ages = [max(0.0, (reference - timestamp).total_seconds()) for timestamp in timestamps]
+                ages = [
+                    max(0.0, (reference - timestamp).total_seconds())
+                    for timestamp in timestamps
+                ]
                 self._transport_rest_last_max_source_age_sec = round(max(ages), 3)
 
         symbol_groups: dict[str, list[Any]] = {}
