@@ -18,7 +18,6 @@ synthetic arrival.
 from __future__ import annotations
 
 import argparse
-import statistics
 import time
 from dataclasses import dataclass
 
