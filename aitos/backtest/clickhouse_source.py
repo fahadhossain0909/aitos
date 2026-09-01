@@ -89,24 +89,32 @@ class ClickHouseHistoricalSource:
         if table == "ohlcv":
             filters.append("timeframe = {timeframe:String}")
             parameters["timeframe"] = timeframe
-            sql = (
-                "SELECT time, open, high, low, close, volume, quote_volume, trades_count FROM market_ohlcv WHERE "
-                + " AND ".join(filters)
-                + " ORDER BY time LIMIT {limit:UInt32}"
-            )  # nosec B608 - static predicate templates; values bound via parameters=
         elif table == "trades":
             filters.append("price > 0")
+
+        where = " AND ".join(filters)
+        if table == "ohlcv":
             sql = (
-                "SELECT time, price, quantity, side, trade_id, is_buyer_maker FROM trade_ticks WHERE "
-                + " AND ".join(filters)
+                "SELECT time, open, high, low, close, volume, quote_volume, trades_count "
+                "FROM market_ohlcv WHERE "
+                + where  # nosec B608 - where contains only fixed parameterized predicates
                 + " ORDER BY time LIMIT {limit:UInt32}"
-            )  # nosec B608 - static predicate templates; values bound via parameters=
+            )
+        elif table == "trades":
+            sql = (
+                "SELECT time, price, quantity, side, trade_id, is_buyer_maker "
+                "FROM trade_ticks WHERE "
+                + where  # nosec B608 - where contains only fixed parameterized predicates
+                + " ORDER BY time LIMIT {limit:UInt32}"
+            )
         else:
             sql = (
-                "SELECT time, bid_levels, ask_levels, spread, depth_ratio, last_update_id FROM order_book_snapshots WHERE "
-                + " AND ".join(filters)
+                "SELECT time, bid_levels, ask_levels, spread, depth_ratio, last_update_id "
+                "FROM order_book_snapshots WHERE "
+                + where  # nosec B608 - where contains only fixed parameterized predicates
                 + " ORDER BY time LIMIT {limit:UInt32}"
-            )  # nosec B608 - static predicate templates; values bound via parameters=
+            )
+
         result = self.client.query(sql, parameters=parameters)
         for row in result.result_rows:
             data = dict(zip(result.column_names, row))
