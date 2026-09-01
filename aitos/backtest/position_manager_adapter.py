@@ -1,13 +1,12 @@
 """Bridge historical market state into the canonical PositionManager.
 
-This module deliberately contains no alternate trading intelligence. It turns
-historical adapter output into the exact feature objects PositionManager
-expects and keeps the primary/hedge lifecycle explicit for replay runners.
+No alternate management policy is implemented here. Existing positions are
+managed exclusively by PositionManager; this adapter only reconstructs
+historical context and records hedge lifecycle events for replay.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -15,14 +14,12 @@ from typing import Any
 from aitos.backtest.market_adapter import HistoricalMarketAdapter, HistoricalMarketState
 from aitos.intelligence.amt.volume_profile import VolumeProfile, build_volume_profile
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
-from aitos.models.trade import Trade, TradeSide
+from aitos.models.trade import Trade
 from aitos.trading.position_manager import PositionAction, PositionManager
 
 
 @dataclass(frozen=True)
 class HistoricalPositionContext:
-    """Inputs reconstructed from the same historical stream used by the adapter."""
-
     state: HistoricalMarketState
     volume_profile: VolumeProfile | None
     order_flow: OrderFlowFeatures | None
@@ -39,12 +36,7 @@ class HistoricalPositionContext:
 
 
 class HistoricalPositionManagerAdapter:
-    """Canonical PositionManager adapter for historical replay.
-
-    Entry selection remains an explicit callback supplied by the backtest
-    strategy. Once a position exists, all HOLD/MANAGE/EXIT and hedge decisions
-    come from PositionManager; this class never reimplements those decisions.
-    """
+    """Evaluate the real PositionManager against historical market state."""
 
     def __init__(
         self,
@@ -58,10 +50,9 @@ class HistoricalPositionManagerAdapter:
         self.position_manager = position_manager or PositionManager()
         self.value_area_pct = value_area_pct
         self.context_trade_window = context_trade_window
-        self._trade_history: list[Any] = []
 
     def _volume_profile(self) -> VolumeProfile | None:
-        trades = getattr(self.market, "_trades", ())
+        trades = self.market.order_flow.trades
         if not trades:
             return None
         return build_volume_profile(
@@ -70,35 +61,27 @@ class HistoricalPositionManagerAdapter:
             value_area_pct=self.value_area_pct,
         )
 
-    def context(
-        self, timestamp: datetime, current_price: float
-    ) -> HistoricalPositionContext:
+    def context(self, timestamp: datetime, current_price: float) -> HistoricalPositionContext:
         state = self.market.state()
         profile = self._volume_profile()
-        order_flow: OrderFlowFeatures | None = None
-        # OrderFlowEngine exposes its latest feature snapshot through the
-        # public compute path in supported versions. Fail closed when absent.
-        compute = getattr(self.market.order_flow, "features", None)
-        if callable(compute):
-            candidate = compute()
-            if isinstance(candidate, OrderFlowFeatures):
-                order_flow = candidate
+        order_flow = self.market.order_flow.snapshot()
+        bins = profile.bins if profile else ()
         return HistoricalPositionContext(
             state=state,
             volume_profile=profile,
             order_flow=order_flow,
             current_price=current_price,
             timestamp=timestamp,
-            prior_highs=tuple(p for p, _ in profile.bins[-20:]) if profile else (),
-            prior_lows=tuple(p for p, _ in profile.bins[:20]) if profile else (),
+            prior_highs=tuple(p for p, _ in bins[-20:]),
+            prior_lows=tuple(p for p, _ in bins[:20]),
             swing_highs=(profile.high,) if profile and profile.high > 0 else (),
             swing_lows=(profile.low,) if profile and profile.low > 0 else (),
             trend_strength=state_to_trend_strength(state),
-            extra_features=_historical_feature_bag(state),
+            extra_features=historical_feature_bag(state),
         )
 
     def evaluate(
-        self, trade: Trade, *, timestamp: datetime, current_price: float
+        self, trade: Trade, *, timestamp: datetime, current_price: float, hedge_active: bool | None = None
     ) -> PositionAction:
         ctx = self.context(timestamp, current_price)
         trade.record_excursion(current_price)
@@ -117,6 +100,7 @@ class HistoricalPositionManagerAdapter:
             trend_strength=ctx.trend_strength,
             extra_features=ctx.extra_features,
             timestamp=ctx.timestamp,
+            hedge_active=hedge_active,
         )
 
     def on_hedge_opened(self, trade: Trade, timestamp: datetime) -> None:
@@ -127,8 +111,7 @@ class HistoricalPositionManagerAdapter:
 
 
 def state_to_trend_strength(state: HistoricalMarketState) -> float:
-    """Derive a bounded deterministic trend-strength value from available state."""
-    scores = [state.auction_long_score, state.auction_short_score]
+    scores = [float(state.auction_long_score), float(state.auction_short_score)]
     if state.flow_liquidity_signal is not None:
         scores.append(abs(float(getattr(state.flow_liquidity_signal, "score", 0.0))))
     if not scores:
@@ -139,7 +122,7 @@ def state_to_trend_strength(state: HistoricalMarketState) -> float:
     return max(0.0, min(1.0, value))
 
 
-def _historical_feature_bag(state: HistoricalMarketState) -> dict[str, float]:
+def historical_feature_bag(state: HistoricalMarketState) -> dict[str, float]:
     features = {
         "auction_long_score": float(state.auction_long_score),
         "auction_short_score": float(state.auction_short_score),
@@ -150,84 +133,3 @@ def _historical_feature_bag(state: HistoricalMarketState) -> dict[str, float]:
         if score is not None:
             features["flow_liquidity_score"] = float(score)
     return features
-
-
-EntrySignal = Callable[
-    [HistoricalPositionContext], tuple[TradeSide, float, float] | None
-]
-
-
-def make_decision_callback(
-    adapter: HistoricalPositionManagerAdapter,
-    trade: Trade | None,
-    entry_signal: EntrySignal | None = None,
-) -> Callable[[Any], Any]:
-    """Create a replay callback while keeping entry policy separate from management.
-
-    ``entry_signal`` returns (side, quantity, stop_distance) for a new position.
-    Existing positions are always evaluated through PositionManager.
-    """
-    active = {"trade": trade}
-
-    def decide(state: Any) -> Any:
-        from aitos.backtest.aitos_runner import HistoricalDecision
-
-        latest = state.latest_trade
-        if latest is None:
-            return HistoricalDecision("flat", 0.0, 0.0)
-        context = adapter.context(latest.timestamp, latest.price)
-        current = active["trade"]
-        if current is None and entry_signal is not None:
-            signal = entry_signal(context)
-            if signal is not None:
-                side, quantity, stop_distance = signal
-                entry = latest.price
-                sl = (
-                    entry - stop_distance
-                    if side == TradeSide.LONG
-                    else entry + stop_distance
-                )
-                active["trade"] = Trade(
-                    trade_id=f"hist-{latest.timestamp.timestamp_ns()}",
-                    symbol=latest.symbol,
-                    side=side,
-                    entry_price=entry,
-                    quantity=quantity,
-                    leverage=1.0,
-                    position_size_usd=entry * quantity,
-                    risk_amount_usd=abs(stop_distance * quantity),
-                    strategy_id="historical-canonical",
-                    agent_consensus={},
-                    explanation="historical entry callback",
-                    sl_price=sl,
-                    tp_price=(
-                        entry + 2 * stop_distance
-                        if side == TradeSide.LONG
-                        else entry - 2 * stop_distance
-                    ),
-                    state="position_opened",
-                    entry_time=latest.timestamp.isoformat(),
-                )
-                return HistoricalDecision(side.value.lower(), 1.0, quantity)
-        if current is None:
-            return HistoricalDecision("flat", 0.0, 0.0)
-        action = adapter.evaluate(
-            current, timestamp=latest.timestamp, current_price=latest.price
-        )
-        if action.action.value == "exit":
-            return HistoricalDecision("flat", 0.0, 0.0)
-        if action.action.value == "manage" and action.new_stop_price is not None:
-            return HistoricalDecision(current.side.value.lower(), 1.0, 0.0)
-        if action.hedge_decision and action.hedge_decision.action.value == "open":
-            return HistoricalDecision(
-                (
-                    TradeSide.SHORT.value.lower()
-                    if current.side == TradeSide.LONG
-                    else TradeSide.LONG.value.lower()
-                ),
-                action.hedge_decision.confidence,
-                current.quantity * action.hedge_decision.size_fraction,
-            )
-        return HistoricalDecision("flat", 0.0, 0.0)
-
-    return decide
