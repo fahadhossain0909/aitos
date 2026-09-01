@@ -75,6 +75,22 @@ def percentile(values: list[float], p: float) -> float:
     return ordered[index]
 
 
+def coalesce_book_events(events: list[Event], window_ns: int) -> list[Event]:
+    """Keep the latest book delta in each time window while retaining trades."""
+    if window_ns <= 0:
+        return list(events)
+    latest_book_by_window: dict[int, Event] = {}
+    for event in events:
+        if event.kind == "book":
+            latest_book_by_window[event.source_ns // window_ns] = event
+    selected_book_seqs = {event.seq for event in latest_book_by_window.values()}
+    return [
+        event
+        for event in events
+        if event.kind == "trade" or event.seq in selected_book_seqs
+    ]
+
+
 def run(
     seconds: float,
     trade_rate: int,
@@ -83,70 +99,49 @@ def run(
     model: str = "event",
     batch_size: int = 50,
     coalesce_ms: float = 10.0,
-) -> dict[str, float]:
+) -> dict[str, float | str]:
     if model not in {"event", "batch", "coalesce"}:
         raise ValueError("model must be event, batch, or coalesce")
-    events = build_events(seconds, trade_rate, book_rate)
+    raw_events = build_events(seconds, trade_rate, book_rate)
     trade_ns, book_ns = calibrate_costs(book_work)
     arrival_rate = trade_rate + book_rate
 
-    # Service-cost reductions represent architecture changes, not data loss:
-    # batch amortizes per-trade overhead; coalesce reduces strategy-facing book
-    # updates while raw book deltas remain part of the canonical input count.
     batch_trade_ns = max(1, trade_ns // 3)
     coalesce_book_ns = max(1, book_ns // 2)
     coalesce_window_ns = int(coalesce_ms * 1_000_000)
+    events = (
+        coalesce_book_events(raw_events, coalesce_window_ns)
+        if model == "coalesce"
+        else raw_events
+    )
 
     worker_available_ns = 0
-    queue_depth = 0
     peak_queue = 0
-    queue_area = 0
-    last_source_ns = 0
+    queue_area = 0.0
     latencies_ms: list[float] = []
     processed = 0
     strategy_book_updates = 0
     strategy_trade_updates = 0
-    raw_book_events = sum(event.kind == "book" for event in events)
+    raw_book_events = sum(event.kind == "book" for event in raw_events)
 
-    # Grouping is deliberately deterministic. In batch mode, trades are
-    # processed in fixed groups. In coalesce mode, only the latest book event
-    # in each time window is exposed to the strategy-facing layer.
     i = 0
     while i < len(events):
         event = events[i]
-        source_ns = event.source_ns
-        if source_ns > last_source_ns:
-            queue_depth = max(0, queue_depth - int(
-                (source_ns - last_source_ns) * max(0, arrival_rate) / 1_000_000_000
-            ))
-            last_source_ns = source_ns
-
         if model == "batch" and event.kind == "trade":
             end = i
-            while (
-                end < len(events)
-                and events[end].kind == "trade"
-                and end - i < batch_size
-            ):
+            while end < len(events) and events[end].kind == "trade" and end - i < batch_size:
                 end += 1
             count = end - i
             service_ns = batch_trade_ns * count
             strategy_trade_updates += count
             processed += count
-            i = end
-        elif model == "coalesce" and event.kind == "book":
-            window_end = event.source_ns + coalesce_window_ns
-            end = i + 1
-            while end < len(events) and events[end].source_ns < window_end:
-                if events[end].kind == "book":
-                    pass
-                end += 1
-            service_ns = coalesce_book_ns
-            strategy_book_updates += 1
-            processed += 1
+            source_ns = event.source_ns
             i = end
         else:
+            source_ns = event.source_ns
             service_ns = book_ns if event.kind == "book" else trade_ns
+            if model == "coalesce" and event.kind == "book":
+                service_ns = coalesce_book_ns
             if event.kind == "book":
                 strategy_book_updates += 1
             else:
@@ -154,11 +149,11 @@ def run(
             processed += 1
             i += 1
 
-        arrival_queue = max(0, int((worker_available_ns - source_ns) * arrival_rate / 1_000_000_000))
-        queue_depth = max(queue_depth, arrival_queue)
-        peak_queue = max(peak_queue, queue_depth)
-        queue_area += queue_depth
         start_ns = max(worker_available_ns, source_ns)
+        backlog_ns = max(0, worker_available_ns - source_ns)
+        estimated_queue = int(backlog_ns * arrival_rate / 1_000_000_000)
+        peak_queue = max(peak_queue, estimated_queue)
+        queue_area += estimated_queue
         finish_ns = start_ns + service_ns
         latencies_ms.append((finish_ns - source_ns) / 1_000_000)
         worker_available_ns = finish_ns
@@ -166,8 +161,8 @@ def run(
     simulated_seconds = max(seconds, worker_available_ns / 1_000_000_000)
     return {
         "model": model,
-        "arrival_events": float(len(events)),
-        "processed_events": float(processed),
+        "arrival_events": float(len(raw_events)),
+        "strategy_processed_events": float(processed),
         "raw_book_events": float(raw_book_events),
         "strategy_book_updates": float(strategy_book_updates),
         "strategy_trade_updates": float(strategy_trade_updates),
@@ -193,7 +188,9 @@ def main() -> None:
     parser.add_argument("--trade-rate", type=int, default=2000)
     parser.add_argument("--book-rate", type=int, default=8000)
     parser.add_argument("--book-work", type=int, default=25)
-    parser.add_argument("--model", choices=("event", "batch", "coalesce", "all"), default="all")
+    parser.add_argument(
+        "--model", choices=("event", "batch", "coalesce", "all"), default="all"
+    )
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--coalesce-ms", type=float, default=10.0)
     args = parser.parse_args()
