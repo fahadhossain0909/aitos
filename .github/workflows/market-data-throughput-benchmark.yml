@@ -1,0 +1,46 @@
+name: Market Data Throughput Benchmark
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/market_data_throughput_benchmark.py'
+      - 'tests/test_market_data_throughput_benchmark.py'
+      - '.github/workflows/market-data-throughput-benchmark.yml'
+  workflow_dispatch:
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run baseline benchmark
+        run: |
+          python scripts/market_data_throughput_benchmark.py \
+            --seconds 2 --trade-rate 2000 --book-rate 8000 --book-work 25 --model all | tee benchmark-baseline.txt
+
+      - name: Run high-rate benchmark
+        run: |
+          python scripts/market_data_throughput_benchmark.py \
+            --seconds 2 --trade-rate 4000 --book-rate 16000 --book-work 50 --model all | tee benchmark-high-rate.txt
+
+      - name: Run saturation benchmark
+        run: |
+          python scripts/market_data_throughput_benchmark.py \
+            --seconds 2 --trade-rate 4000 --book-rate 16000 --book-work 250 --model all | tee benchmark-saturation.txt
+
+      - name: Publish benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-data-throughput-benchmark
+          path: |
+            benchmark-baseline.txt
+            benchmark-high-rate.txt
+            benchmark-saturation.txt
