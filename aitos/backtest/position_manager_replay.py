@@ -80,7 +80,9 @@ class _Leg:
             self.entry_price = price
             return
         total = self.quantity + quantity
-        self.entry_price = ((self.entry_price * self.quantity) + (price * quantity)) / total
+        self.entry_price = (
+            (self.entry_price * self.quantity) + (price * quantity)
+        ) / total
         self.quantity = total
 
     def reduce(self, quantity: float, price: float) -> float:
@@ -148,7 +150,9 @@ class PositionManagerHistoricalReplay:
         self._hedge_opened_at: datetime | None = None
         self.hedge_durations_seconds: list[float] = []
 
-    def _order(self, side: str, quantity: float, state: HistoricalMarketState) -> tuple[float, float]:
+    def _order(
+        self, side: str, quantity: float, state: HistoricalMarketState
+    ) -> tuple[float, float]:
         if quantity <= 0 or state.latest_order_book is None:
             return 0.0, 0.0
         book = state.latest_order_book
@@ -157,7 +161,11 @@ class PositionManagerHistoricalReplay:
         result = self.l2.execute(side, quantity, bids, asks)
         if result.filled_quantity <= 0:
             return 0.0, 0.0
-        mid = (book.best_bid + book.best_ask) / 2.0 if book.best_bid > 0 and book.best_ask > 0 else result.average_price
+        mid = (
+            (book.best_bid + book.best_ask) / 2.0
+            if book.best_bid > 0 and book.best_ask > 0
+            else result.average_price
+        )
         fee = result.filled_quantity * result.average_price * self.fee_rate
         execution_cost = abs(result.average_price - mid) * result.filled_quantity
         self.fees += fee
@@ -171,13 +179,22 @@ class PositionManagerHistoricalReplay:
             return TradeSide.LONG, state.auction_long_score
         return TradeSide.SHORT, state.auction_short_score
 
-    def _open_primary(self, state: HistoricalMarketState, side: TradeSide, confidence: float) -> None:
+    def _open_primary(
+        self, state: HistoricalMarketState, side: TradeSide, confidence: float
+    ) -> None:
         if state.latest_order_book is None:
             return
-        qty, price = self._order("buy" if side == TradeSide.LONG else "sell", 1.0, state)
+        qty, price = self._order(
+            "buy" if side == TradeSide.LONG else "sell", 1.0, state
+        )
         if qty <= 0:
             return
-        self.primary = _Leg(side, qty, price, opened_at=state.latest_trade.timestamp if state.latest_trade else None)
+        self.primary = _Leg(
+            side,
+            qty,
+            price,
+            opened_at=state.latest_trade.timestamp if state.latest_trade else None,
+        )
         self.trade = Trade(
             trade_id=f"bt-{self.states}",
             symbol=self.symbol,
@@ -193,13 +210,17 @@ class PositionManagerHistoricalReplay:
             sl_price=price * (0.995 if side == TradeSide.LONG else 1.005),
             tp_price=price * (1.01 if side == TradeSide.LONG else 0.99),
             state=TradeLifecycleState.POSITION_OPENED,
-            entry_time=(state.latest_trade.timestamp.isoformat() if state.latest_trade else ""),
+            entry_time=(
+                state.latest_trade.timestamp.isoformat() if state.latest_trade else ""
+            ),
         )
         self.position_manager.clear_trade(self.trade.trade_id, self.symbol)
         self.primary_entries += 1
         self._primary_prices = [price]
 
-    def _close_primary(self, state: HistoricalMarketState, fraction: float = 1.0) -> None:
+    def _close_primary(
+        self, state: HistoricalMarketState, fraction: float = 1.0
+    ) -> None:
         if self.primary is None or self.primary.quantity <= 0:
             return
         qty = self.primary.quantity * max(0.0, min(1.0, fraction))
@@ -213,7 +234,13 @@ class PositionManagerHistoricalReplay:
         if self.primary.quantity <= 0:
             self.trade_pnls.append(pnl)
             if self.trade is not None:
-                self.trade_excursions.append(excursions(self.trade.entry_price, self.trade.side.value, self._primary_prices + [price]))
+                self.trade_excursions.append(
+                    excursions(
+                        self.trade.entry_price,
+                        self.trade.side.value,
+                        self._primary_prices + [price],
+                    )
+                )
                 self.position_manager.clear_trade(self.trade.trade_id, self.symbol)
             self.trade = None
             self.primary = None
@@ -224,7 +251,9 @@ class PositionManagerHistoricalReplay:
         if self.primary is None or self.primary.quantity <= 0:
             return
         target = self.primary.quantity * max(0.0, min(1.0, ratio))
-        hedge_side = TradeSide.SHORT if self.primary.side == TradeSide.LONG else TradeSide.LONG
+        hedge_side = (
+            TradeSide.SHORT if self.primary.side == TradeSide.LONG else TradeSide.LONG
+        )
         if self.hedge is None:
             self.hedge = _Leg(hedge_side)
         delta = target - self.hedge.quantity
@@ -233,21 +262,33 @@ class PositionManagerHistoricalReplay:
             filled, price = self._order(side, delta, state)
             if filled > 0:
                 book = state.latest_order_book
-                mid = ((book.best_bid + book.best_ask) / 2.0) if book and book.best_bid > 0 and book.best_ask > 0 else price
+                mid = (
+                    ((book.best_bid + book.best_ask) / 2.0)
+                    if book and book.best_bid > 0 and book.best_ask > 0
+                    else price
+                )
                 self.hedge_execution_cost += abs(price - mid) * filled
                 self.hedge.add(filled, price)
                 self.hedge_fees += filled * price * self.fee_rate
                 if self.hedge.opened_at is None:
-                    self.hedge.opened_at = state.latest_trade.timestamp if state.latest_trade else None
+                    self.hedge.opened_at = (
+                        state.latest_trade.timestamp if state.latest_trade else None
+                    )
                     self._hedge_opened_at = self.hedge.opened_at
                     self.hedge_opens += 1
         elif delta < -1e-12:
             self._close_hedge(state, -delta)
 
-    def _close_hedge(self, state: HistoricalMarketState, quantity: float | None = None) -> None:
+    def _close_hedge(
+        self, state: HistoricalMarketState, quantity: float | None = None
+    ) -> None:
         if self.hedge is None or self.hedge.quantity <= 0:
             return
-        qty = self.hedge.quantity if quantity is None else min(quantity, self.hedge.quantity)
+        qty = (
+            self.hedge.quantity
+            if quantity is None
+            else min(quantity, self.hedge.quantity)
+        )
         side = "sell" if self.hedge.side == TradeSide.LONG else "buy"
         filled, price = self._order(side, qty, state)
         if filled <= 0:
@@ -258,7 +299,9 @@ class PositionManagerHistoricalReplay:
             opened = self._hedge_opened_at
             closed = state.latest_trade.timestamp if state.latest_trade else None
             if opened and closed:
-                self.hedge_durations_seconds.append(max(0.0, (closed - opened).total_seconds()))
+                self.hedge_durations_seconds.append(
+                    max(0.0, (closed - opened).total_seconds())
+                )
             self._hedge_opened_at = None
             self.hedge_closes += 1
             self.hedge = None
@@ -270,7 +313,11 @@ class PositionManagerHistoricalReplay:
         else:
             self.adapter.on_order_book(event)
             book = event
-            price = (book.best_bid + book.best_ask) / 2.0 if book.best_bid > 0 and book.best_ask > 0 else 0.0
+            price = (
+                (book.best_bid + book.best_ask) / 2.0
+                if book.best_bid > 0 and book.best_ask > 0
+                else 0.0
+            )
         if price <= 0:
             return
         state = self.adapter.state()
@@ -288,7 +335,9 @@ class PositionManagerHistoricalReplay:
             if len(self._primary_prices) > 500:
                 self._primary_prices.pop(0)
             of: OrderFlowFeatures = self.adapter.order_flow.snapshot()
-            profile = build_volume_profile(self.adapter.order_flow.trades, self.tick_size)
+            profile = build_volume_profile(
+                self.adapter.order_flow.trades, self.tick_size
+            )
             action = self.position_manager.evaluate(
                 trade=self.trade,
                 current_price=price,
@@ -308,17 +357,23 @@ class PositionManagerHistoricalReplay:
 
             hedge = action.hedge_decision
             if hedge is not None:
-                if hedge.action == HedgeAction.OPEN:
-                    self._open_or_resize_hedge(state, hedge.hedge_ratio)
-                elif hedge.action == HedgeAction.HOLD:
+                if hedge.action == HedgeAction.OPEN or hedge.action == HedgeAction.HOLD:
                     self._open_or_resize_hedge(state, hedge.hedge_ratio)
                 elif hedge.action == HedgeAction.CLOSE:
                     self._close_hedge(state)
 
         hedge_unrealized = self.hedge.unrealized(price) if self.hedge else 0.0
         primary_unrealized = self.primary.unrealized(price) if self.primary else 0.0
-        realized = (self.primary.realized_pnl if self.primary else 0.0) + (self.hedge_realized + (self.hedge.realized_pnl if self.hedge else 0.0))
-        self.equity = self.initial_cash + realized + primary_unrealized + hedge_unrealized - self.fees
+        realized = (self.primary.realized_pnl if self.primary else 0.0) + (
+            self.hedge_realized + (self.hedge.realized_pnl if self.hedge else 0.0)
+        )
+        self.equity = (
+            self.initial_cash
+            + realized
+            + primary_unrealized
+            + hedge_unrealized
+            - self.fees
+        )
         self.equity_curve.append(self.equity)
 
     def finish(self, last_price: float) -> PositionReplayResult:
@@ -326,10 +381,20 @@ class PositionManagerHistoricalReplay:
             pnl = self.primary.unrealized(last_price) + self.primary.realized_pnl
             self.trade_pnls.append(pnl)
             if self.trade is not None:
-                self.trade_excursions.append(excursions(self.trade.entry_price, self.trade.side.value, self._primary_prices + [last_price]))
+                self.trade_excursions.append(
+                    excursions(
+                        self.trade.entry_price,
+                        self.trade.side.value,
+                        self._primary_prices + [last_price],
+                    )
+                )
         if self.hedge is not None:
-            self.hedge_realized += self.hedge.unrealized(last_price) + self.hedge.realized_pnl
-        final_equity = self.initial_cash + self.hedge_realized + sum(self.trade_pnls) - self.fees
+            self.hedge_realized += (
+                self.hedge.unrealized(last_price) + self.hedge.realized_pnl
+            )
+        final_equity = (
+            self.initial_cash + self.hedge_realized + sum(self.trade_pnls) - self.fees
+        )
         return PositionReplayResult(
             hedge_enabled=self.position_manager._hie.enabled,
             states=self.states,
@@ -351,7 +416,9 @@ class PositionManagerHistoricalReplay:
         )
 
 
-def replay(events: Iterable[TradeTick | OrderBookSnapshot], **kwargs: object) -> PositionReplayResult:
+def replay(
+    events: Iterable[TradeTick | OrderBookSnapshot], **kwargs: object
+) -> PositionReplayResult:
     runner = PositionManagerHistoricalReplay(**kwargs)
     last_price = 0.0
     for event in sorted(events, key=lambda item: item.timestamp):
