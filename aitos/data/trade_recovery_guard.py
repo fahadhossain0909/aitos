@@ -73,10 +73,20 @@ def install_trade_recovery_guard(service_cls: type[Any]) -> None:
             return
 
         # The guard can short-circuit the downstream transport telemetry
-        # wrapper when every REST trade is rejected. Preserve the raw batch
-        # size here so last_batch_count still describes what REST returned.
+        # wrapper when every REST trade is rejected. Preserve raw-batch
+        # telemetry before filtering so it still describes the REST response.
         if hasattr(self, "_transport_rest_last_batch_count"):
             self._transport_rest_last_batch_count = len(trades)
+        if trades:
+            timestamps = [
+                _utc(trade.timestamp)
+                for trade in trades
+                if getattr(trade, "timestamp", None) is not None
+            ]
+            if timestamps and hasattr(self, "_transport_rest_last_max_source_age_sec"):
+                reference = datetime.now(timezone.utc)
+                ages = [max(0.0, (reference - timestamp).total_seconds()) for timestamp in timestamps]
+                self._transport_rest_last_max_source_age_sec = round(max(ages), 3)
 
         symbol_groups: dict[str, list[Any]] = {}
         for trade in trades:
