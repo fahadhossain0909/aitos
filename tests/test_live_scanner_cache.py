@@ -41,6 +41,24 @@ async def test_live_cache_rehydrates_trade_and_book_events():
     )
     assert cache.recent_trades("BTCUSDT") == [trade]
     assert cache.order_book("BTCUSDT") == book
+    assert cache.freshness_snapshot("BTCUSDT")["duplicate_book_rejections"] == 0
+    await cache.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_live_cache_deduplicates_direct_and_eventbus_book_delivery():
+    bus = FakeBus()
+    cache = LiveScannerCache(bus, ["BTCUSDT"], max_trades=10)
+    await cache.initialize(direct_market_data=True)
+    ts = datetime.now(timezone.utc)
+    book = OrderBookSnapshot("BTCUSDT", ((99.0, 5.0),), ((101.0, 4.0),), 7, ts)
+    event = type(
+        "E", (), {"payload": book.to_dict(), "topic": "market.orderbook.BTCUSDT"}
+    )()
+    await cache._on_book(event)
+    await cache._on_book(event)
+    assert cache.order_book("BTCUSDT") == book
+    assert cache.freshness_snapshot("BTCUSDT")["duplicate_book_rejections"] == 1
     await cache.shutdown()
 
 
@@ -95,11 +113,12 @@ async def test_live_cache_deduplicates_direct_and_eventbus_trade_delivery():
     await cache._on_trade(event)
     await cache._on_trade(event)
     assert cache.recent_trades("BTCUSDT") == [trade]
+    assert cache.freshness_snapshot("BTCUSDT")["duplicate_trade_rejections"] == 1
     await cache.shutdown()
 
 
 @pytest.mark.asyncio
-async def test_live_cache_ignores_stale_trade():
+async def test_live_cache_ignores_stale_trade_and_records_telemetry():
     bus = FakeBus()
     cache = LiveScannerCache(bus, ["BTCUSDT"], max_trades=10)
     await cache.initialize()
@@ -108,8 +127,11 @@ async def test_live_cache_ignores_stale_trade():
     await cache._on_trade(
         type("E", (), {"payload": trade.to_dict(), "topic": "market.trade.BTCUSDT"})()
     )
+    snapshot = cache.freshness_snapshot("BTCUSDT")
     assert cache.recent_trades("BTCUSDT") == []
-    assert cache.freshness_snapshot("BTCUSDT")["last_trade_at"] is None
+    assert snapshot["last_trade_at"] is None
+    assert snapshot["stale_trade_rejections"] == 1
+    assert snapshot["last_stale_trade_source_age_sec"] >= 120.0
     await cache.shutdown()
 
 
