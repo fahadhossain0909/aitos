@@ -30,14 +30,18 @@ class LiveSymbolCache:
     last_book_received_at: datetime | None = None
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
+    stale_trade_rejections: int = 0
+    duplicate_trade_rejections: int = 0
+    duplicate_book_rejections: int = 0
+    last_stale_trade_source_age_sec: float | None = None
 
 
 class LiveScannerCache:
     """Consumes canonical EventBus market events and keeps a live view.
 
     The cache remains subscribed even when the scanner is temporarily using
-    REST data.  REST fallback is a read-path decision in OpportunityScanner;
-    it must never disable the live WebSocket/EventBus consumer.  This makes
+    REST data. REST fallback is a read-path decision in OpportunityScanner;
+    it must never disable the live WebSocket/EventBus consumer. This makes
     recovery automatic: as soon as fresh WS events arrive, the next scan can
     switch back to websocket_live_state without a restart or manual reset.
     """
@@ -60,13 +64,7 @@ class LiveScannerCache:
         return self._state[symbol]
 
     async def initialize(self, direct_market_data: bool = False) -> None:
-        """Start live consumers; never turn them off for REST fallback.
-
-        ``direct_market_data`` is retained for API compatibility with older
-        callers.  The canonical EventBus subscription is always established.
-        Direct ingestion callbacks may also feed the cache, so handlers are
-        idempotent to prevent duplicate trades/books when both paths are live.
-        """
+        """Start live consumers; never turn them off for REST fallback."""
         self._direct_market_data = direct_market_data
         if self._initialized:
             return
@@ -117,7 +115,10 @@ class LiveScannerCache:
         trade = TradeTick.from_dict(event.payload)
         received_at = datetime.now(timezone.utc)
         source_age = (received_at - trade.timestamp).total_seconds()
+        state = self._cache(trade.symbol)
         if source_age > LIVE_TRADE_MAX_AGE_SECONDS:
+            state.stale_trade_rejections += 1
+            state.last_stale_trade_source_age_sec = round(max(0.0, source_age), 3)
             logger.warning(
                 "discarded stale live trade",
                 extra={
@@ -126,16 +127,17 @@ class LiveScannerCache:
                         "trade_id": trade.trade_id,
                         "source_age_sec": round(max(0.0, source_age), 3),
                         "max_source_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS,
+                        "stale_trade_rejections": state.stale_trade_rejections,
                     }
                 },
             )
             return
 
-        state = self._cache(trade.symbol)
         # Ingestion can feed the cache directly while the canonical EventBus
-        # consumer receives the same event.  Treat trade IDs as idempotency
-        # keys so enabling both paths cannot double-count live trades.
+        # consumer receives the same event. Treat trade IDs as idempotency keys
+        # so enabling both paths cannot double-count live trades.
         if state.trades and trade.trade_id <= state.trades[-1].trade_id:
+            state.duplicate_trade_rejections += 1
             return
         state.trades.append(trade)
         state.last_trade_at = received_at
@@ -148,12 +150,13 @@ class LiveScannerCache:
         received_at = datetime.now(timezone.utc)
         state = self._cache(book.symbol)
         # Direct handler + EventBus can legitimately deliver the same snapshot.
-        # update_id is the exchange sequence identity when available.
+        # last_update_id is the exchange sequence identity for snapshots.
         if (
             state.order_book is not None
-            and state.order_book.update_id == book.update_id
+            and state.order_book.last_update_id == book.last_update_id
             and state.order_book.timestamp == book.timestamp
         ):
+            state.duplicate_book_rejections += 1
             return
         state.order_book = book
         state.last_book_at = received_at
@@ -195,6 +198,10 @@ class LiveScannerCache:
                 "book_source_age_sec": None,
                 "trade_consumer_lag_sec": None,
                 "book_consumer_lag_sec": None,
+                "stale_trade_rejections": 0,
+                "duplicate_trade_rejections": 0,
+                "duplicate_book_rejections": 0,
+                "last_stale_trade_source_age_sec": None,
             }
         now = datetime.now(timezone.utc)
         trade_age = self._age_seconds(state.last_trade_at, now)
@@ -263,15 +270,14 @@ class LiveScannerCache:
             "book_consumer_lag_sec": (
                 round(book_lag, 3) if book_lag is not None else None
             ),
+            "stale_trade_rejections": state.stale_trade_rejections,
+            "duplicate_trade_rejections": state.duplicate_trade_rejections,
+            "duplicate_book_rejections": state.duplicate_book_rejections,
+            "last_stale_trade_source_age_sec": state.last_stale_trade_source_age_sec,
         }
 
     def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
-        """True when the latest trade *source* timestamp is within max_age.
-
-        Uses exchange/event source time (not local receive time) so REST
-        fallback snapshots older than the freshness window are not treated
-        as live.
-        """
+        """True when the latest trade source timestamp is within max_age."""
         state = self._state.get(symbol)
         if state is None or state.last_trade_source_at is None:
             return False
@@ -280,7 +286,7 @@ class LiveScannerCache:
         ).total_seconds() <= max_age_seconds
 
     def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
-        """True when the latest book *source* timestamp is within max_age."""
+        """True when the latest book source timestamp is within max_age."""
         state = self._state.get(symbol)
         if state is None or state.last_book_source_at is None:
             return False
