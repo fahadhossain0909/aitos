@@ -25,8 +25,8 @@ _MODE_REST = "rest_fallback"
 _SOURCE_WEBSOCKET = "websocket"
 _SOURCE_REST = "rest_fallback"
 
-_current_source: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "aitos_trade_transport_source", default=None
+_current_context: contextvars.ContextVar[tuple[Any, str] | None] = contextvars.ContextVar(
+    "aitos_trade_transport_context", default=None
 )
 
 
@@ -55,8 +55,6 @@ def _install_telemetry(service: Any) -> None:
     service._transport_fallback_active_seconds = 0.0
     service._transport_rest_recovery_active = False
 
-    # Redis/EventBus path: count successful/failed writes separately from the
-    # direct handler path so a degraded path cannot be hidden by the other.
     service._transport_ws_redis_events = 0
     service._transport_rest_redis_events = 0
     service._transport_ws_redis_errors = 0
@@ -64,7 +62,6 @@ def _install_telemetry(service: Any) -> None:
     service._transport_ws_redis_last_event_at = None
     service._transport_rest_redis_last_event_at = None
 
-    # Direct/bypass path: count handler successes/failures by source.
     service._transport_ws_direct_events = 0
     service._transport_rest_direct_events = 0
     service._transport_ws_direct_errors = 0
@@ -81,7 +78,6 @@ def _record_redis_event(service: Any, source: str, topic: str) -> None:
     else:
         service._transport_ws_redis_events += 1
         service._transport_ws_redis_last_event_at = now
-
     logger.debug(
         "trade transport Redis path event published",
         extra={
@@ -122,11 +118,11 @@ def _wrap_event_bus_publish_once() -> None:
 
     @wraps(original_publish)
     async def publish_wrapper(self: Any, event: Any, *args: Any, **kwargs: Any) -> None:
-        source = _current_source.get()
-        if source is None:
+        context = _current_context.get()
+        if context is None:
             await original_publish(self, event, *args, **kwargs)
             return
-
+        owner, source = context
         topic = getattr(event, "topic", "")
         is_trade_path_event = topic.startswith("market.trade.") or topic.startswith(
             "market.orderflow."
@@ -134,20 +130,13 @@ def _wrap_event_bus_publish_once() -> None:
         if not is_trade_path_event:
             await original_publish(self, event, *args, **kwargs)
             return
-
         try:
             await original_publish(self, event, *args, **kwargs)
         except Exception as exc:
-            # The EventBus publish failure is surfaced unchanged to the caller.
-            # Telemetry observes it without changing error semantics.
-            owner = getattr(self, "_transport_telemetry_owner", None)
-            if owner is not None:
-                _record_redis_error(owner, source, topic, exc)
+            _record_redis_error(owner, source, topic, exc)
             raise
         else:
-            owner = getattr(self, "_transport_telemetry_owner", None)
-            if owner is not None:
-                _record_redis_event(owner, source, topic)
+            _record_redis_event(owner, source, topic)
 
     EventBus.publish = publish_wrapper
 
@@ -183,7 +172,6 @@ def _mark_websocket_recovery(service: Any) -> None:
     if service._transport_mode != _MODE_REST:
         service._transport_mode = _MODE_WEBSOCKET
         return
-
     duration = 0.0
     if service._transport_fallback_active_since is not None:
         duration = max(0.0, time.monotonic() - service._transport_fallback_active_since)
@@ -262,9 +250,7 @@ def _health_details(service: Any) -> dict[str, Any]:
         "transport_last_fallback_started_at": service._transport_last_fallback_started_at,
         "transport_last_recovery_at": service._transport_last_recovery_at,
         "transport_fallback_active_seconds": round(active, 3),
-        "transport_fallback_total_seconds": round(
-            service._transport_fallback_total_seconds, 3
-        ),
+        "transport_fallback_total_seconds": round(service._transport_fallback_total_seconds, 3),
         "transport_ws_redis_events": service._transport_ws_redis_events,
         "transport_rest_redis_events": service._transport_rest_redis_events,
         "transport_ws_redis_errors": service._transport_ws_redis_errors,
@@ -293,10 +279,6 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
     def init_wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
         _install_telemetry(self)
-        # EventBus is shared, so the owner is explicitly attached to the
-        # ingestion instance before each transport operation.
-        self._event_bus._transport_telemetry_owner = self
-
         original_handler = self._live_trade_handler
         if original_handler is not None and not getattr(
             original_handler, "_transport_telemetry_wrapped", False
@@ -304,7 +286,8 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
 
             @wraps(original_handler)
             async def direct_handler_wrapper(trade: Any) -> None:
-                source = _current_source.get() or _SOURCE_WEBSOCKET
+                context = _current_context.get()
+                source = context[1] if context is not None else _SOURCE_WEBSOCKET
                 try:
                     await original_handler(trade)
                 except Exception as exc:
@@ -326,7 +309,7 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
         source = (
             _SOURCE_REST if self._transport_rest_recovery_active else _SOURCE_WEBSOCKET
         )
-        token = _current_source.set(source)
+        token = _current_context.set((self, source))
         try:
             if source == _SOURCE_REST:
                 _mark_rest_batch(self, len(trades))
@@ -334,7 +317,7 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
                 _mark_websocket_recovery(self)
             await original_process(self, trades)
         finally:
-            _current_source.reset(token)
+            _current_context.reset(token)
 
     service_cls._process_trade_batch = process_wrapper
 
