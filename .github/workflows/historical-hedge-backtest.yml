@@ -1,0 +1,35 @@
+name: Historical Hedge Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbol:
+        description: Symbol
+        required: true
+        default: BTCUSDT
+        type: string
+      hours:
+        description: Historical window in hours
+        required: true
+        default: '24'
+        type: string
+      side:
+        description: Primary position side
+        required: true
+        default: LONG
+        type: choice
+        options: [LONG, SHORT]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain execution source
+        run: |
+          echo "This default-branch workflow is the manual entry point."
+          echo "The full historical hedge backtest implementation lives on feat/automated-hedge-backtest."
+          echo "Requested: ${{ inputs.symbol }} / ${{ inputs.hours }}h / ${{ inputs.side }}"
+          echo "A manual dispatch from this workflow is intentionally non-executing until the implementation branch is merged, preventing an unvalidated benchmark from running against production infrastructure."
