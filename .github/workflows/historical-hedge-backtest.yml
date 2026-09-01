@@ -88,11 +88,62 @@ jobs:
           [[ "$HOURS" =~ ^[1-9][0-9]{0,2}$ ]] && (( HOURS <= 720 ))
           START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
           END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          ssh -i "$RUNNER_TEMP/aitos_key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -N -L 18123:127.0.0.1:8123 "${DEPLOY_USER}@${DEPLOY_HOST}" &
+
+          # Establish the tunnel in the background, but do not assume that a
+          # successful ssh process launch means the local forward is ready.
+          TUNNEL_LOG="$RUNNER_TEMP/clickhouse-tunnel.log"
+          ssh -i "$RUNNER_TEMP/aitos_key" \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -o ExitOnForwardFailure=yes \
+            -o ConnectTimeout=10 \
+            -N -L 18123:127.0.0.1:8123 \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" >"$TUNNEL_LOG" 2>&1 &
           TUNNEL_PID=$!
-          trap 'kill "$TUNNEL_PID" 2>/dev/null || true' EXIT
-          sleep 2
+          cleanup() {
+            kill "$TUNNEL_PID" 2>/dev/null || true
+            rm -f "$RUNNER_TEMP/aitos_key"
+          }
+          trap cleanup EXIT
+
+          # Wait for the local listener and the ClickHouse HTTP endpoint.
+          # Fail early with the SSH diagnostics instead of producing a vague
+          # ConnectionRefusedError from Python.
+          PROBE_OK=0
+          for attempt in {1..15}; do
+            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+              echo '::error::SSH tunnel process exited before the local port became ready'
+              echo '--- SSH tunnel diagnostics ---'
+              cat "$TUNNEL_LOG" || true
+              exit 1
+            fi
+            if python - <<'PY'
+          import socket
+          s = socket.socket()
+          s.settimeout(1)
+          try:
+              s.connect(('127.0.0.1', 18123))
+          except OSError:
+              raise SystemExit(1)
+          finally:
+              s.close()
+          PY
+            then
+              PROBE_OK=1
+              break
+            fi
+            sleep 1
+          done
+
+          if [[ "$PROBE_OK" != 1 ]]; then
+            echo '::error::SSH tunnel did not open 127.0.0.1:18123 within 15 seconds'
+            echo '--- SSH tunnel diagnostics ---'
+            cat "$TUNNEL_LOG" || true
+            exit 1
+          fi
+
           python - <<'PY'
+          import base64
           import os
           import urllib.request
           import urllib.parse
@@ -102,7 +153,6 @@ jobs:
           query = urllib.parse.quote('SELECT 1')
           req = urllib.request.Request(f'http://127.0.0.1:18123/?database={urllib.parse.quote(database)}&query={query}')
           token = (f'{user}:{password}').encode()
-          import base64
           req.add_header('Authorization', 'Basic ' + base64.b64encode(token).decode())
           with urllib.request.urlopen(req, timeout=10) as response:
               body = response.read().decode().strip()
@@ -110,6 +160,7 @@ jobs:
               raise SystemExit(f'Unexpected ClickHouse probe response: {body!r}')
           print('ClickHouse authentication/connectivity: OK')
           PY
+
           python -m aitos.backtest.conditional_hedge_replay \
             --symbol "$SYMBOL" --side "$SIDE" --start "$START" --end "$END" \
             --timeframe 1m --host 127.0.0.1 --port 18123 \
