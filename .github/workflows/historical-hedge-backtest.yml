@@ -23,13 +23,125 @@ on:
 permissions:
   contents: read
 
+env:
+  BENCHMARK_REF: feat/automated-hedge-backtest
+
 jobs:
-  dispatch:
+  hedge-backtest:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - name: Explain execution source
+      - name: Checkout validated benchmark branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/automated-hedge-backtest
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install backtest dependencies
+        run: python -m pip install -r requirements-backtest.txt
+
+      - name: Validate canonical hedge imports
         run: |
-          echo "This default-branch workflow is the manual entry point."
-          echo "The full historical hedge backtest implementation lives on feat/automated-hedge-backtest."
-          echo "Requested: ${{ inputs.symbol }} / ${{ inputs.hours }}h / ${{ inputs.side }}"
-          echo "A manual dispatch from this workflow is intentionally non-executing until the implementation branch is merged, preventing an unvalidated benchmark from running against production infrastructure."
+          set -euo pipefail
+          python -m compileall -q aitos
+          python - <<'PY'
+          from aitos.intelligence.hedge_intelligence import HedgeIntelligenceEngine
+          from aitos.trading.position_manager import PositionManager
+          print('canonical hedge imports: OK')
+          PY
+
+      - name: Validate required secrets
+        env:
+          CH_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$CH_PASSWORD" || { echo '::error::CLICKHOUSE_PASSWORD repository secret is missing'; exit 1; }
+          test -n "$DEPLOY_HOST" || { echo '::error::DEPLOY_HOST repository secret is missing'; exit 1; }
+          test -n "$DEPLOY_USER" || { echo '::error::DEPLOY_USER repository secret is missing'; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo '::error::DEPLOY_SSH_KEY repository secret is missing'; exit 1; }
+
+      - name: Prepare SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/aitos_key"
+
+      - name: Run real ClickHouse replay through SSH tunnel
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          SYMBOL: ${{ inputs.symbol || 'BTCUSDT' }}
+          HOURS: ${{ inputs.hours || '24' }}
+          SIDE: ${{ inputs.side || 'LONG' }}
+          CH_USER: ${{ secrets.CLICKHOUSE_USER || 'default' }}
+          CH_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          CH_DATABASE: ${{ secrets.CLICKHOUSE_DATABASE || 'aitos' }}
+        run: |
+          set -euo pipefail
+          [[ "$SYMBOL" =~ ^[A-Za-z0-9._-]+$ ]]
+          [[ "$HOURS" =~ ^[1-9][0-9]{0,2}$ ]] && (( HOURS <= 720 ))
+          START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
+          END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          ssh -i "$RUNNER_TEMP/aitos_key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -N -L 18123:127.0.0.1:8123 "${DEPLOY_USER}@${DEPLOY_HOST}" &
+          TUNNEL_PID=$!
+          trap 'kill "$TUNNEL_PID" 2>/dev/null || true; rm -f "$RUNNER_TEMP/aitos_key"' EXIT
+          sleep 2
+          python - <<'PY'
+          import base64
+          import os
+          import urllib.parse
+          import urllib.request
+          user = os.environ['CH_USER']
+          password = os.environ['CH_PASSWORD']
+          database = os.environ['CH_DATABASE']
+          query = urllib.parse.quote('SELECT 1')
+          req = urllib.request.Request(
+              f'http://127.0.0.1:18123/?database={urllib.parse.quote(database)}&query={query}'
+          )
+          token = f'{user}:{password}'.encode()
+          req.add_header('Authorization', 'Basic ' + base64.b64encode(token).decode())
+          with urllib.request.urlopen(req, timeout=10) as response:
+              body = response.read().decode().strip()
+          if body != '1':
+              raise SystemExit(f'Unexpected ClickHouse probe response: {body!r}')
+          print('ClickHouse authentication/connectivity: OK')
+          PY
+          python -m aitos.backtest.conditional_hedge_replay \
+            --symbol "$SYMBOL" --side "$SIDE" --start "$START" --end "$END" \
+            --timeframe 1m --host 127.0.0.1 --port 18123 \
+            --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DATABASE" \
+            > hedge-result.json
+          python -m json.tool hedge-result.json > hedge-result.pretty.json
+
+      - name: Publish benchmark summary
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d=json.load(open('hedge-result.pretty.json'))
+          print('## Conditional Hedge Historical Benchmark')
+          for key in ('symbol','side','start','end','net_pnl','hedge_pnl','hedge_cost','hedge_count','hedge_open_count','hedge_close_count','max_drawdown','mae','mfe','expectancy'):
+              print(f'- {key}: **{d[key]}**')
+          print('> Isolated hedge-overlay benchmark; this does not claim full entry-strategy profitability.')
+          PY
+
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: conditional-hedge-benchmark-${{ inputs.symbol || 'BTCUSDT' }}-${{ inputs.hours || '24' }}h-${{ github.run_id }}
+          path: hedge-result.pretty.json
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/aitos_key"
