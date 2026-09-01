@@ -1,4 +1,4 @@
-"""Position Manager — Market State, Path, Exit and Hedge orchestration."""
+"""Position Manager — Market State, Path, Exit, Hedge orchestration."""
 
 from __future__ import annotations
 
@@ -64,12 +64,12 @@ class PositionAction:
 class PositionManager:
     def __init__(
         self,
-        market_state_engine=None,
-        path_planner=None,
-        structural_risk_engine=None,
-        exit_intelligence_engine=None,
-        thesis_engine=None,
-        hedge_intelligence_engine=None,
+        market_state_engine: MarketStateEngine | None = None,
+        path_planner: MarketPathPlanner | None = None,
+        structural_risk_engine: StructuralRiskEngine | None = None,
+        exit_intelligence_engine: ExitIntelligenceEngine | None = None,
+        thesis_engine: TradeThesisEngine | None = None,
+        hedge_intelligence_engine: HedgeIntelligenceEngine | None = None,
         config: Mapping[str, Any] | None = None,
     ) -> None:
         self._mse = market_state_engine or MarketStateEngine()
@@ -91,7 +91,7 @@ class PositionManager:
         )
         self._hedge_enabled = bool(cfg.get("hedge_enabled", True))
         self._theses: dict[str, TradeThesis] = {}
-        self._allow_stop_tighten = bool(cfg.get("allow_stop_tighten", True))
+        self._allow_stop_tighten = bool(self._cfg.get("allow_stop_tighten", True))
 
     def register_thesis(self, thesis: TradeThesis) -> None:
         self._theses[thesis.trade_id] = thesis
@@ -122,6 +122,7 @@ class PositionManager:
     ) -> PositionAction:
         ts = timestamp or datetime.now(timezone.utc)
         side = trade.side.value
+
         market_state = self._mse.compute(
             symbol=trade.symbol,
             mid_price=current_price,
@@ -137,6 +138,7 @@ class PositionManager:
             timestamp=ts,
             extra_features=extra_features,
         )
+
         path_plan = self._mpp.plan(
             market_state=market_state,
             volume_profile=volume_profile,
@@ -146,6 +148,7 @@ class PositionManager:
             swing_highs=swing_highs,
             swing_lows=swing_lows,
         )
+
         structural_stop = self._sre.compute(
             symbol=trade.symbol,
             side=side,
@@ -159,14 +162,12 @@ class PositionManager:
             atr=atr,
             timestamp=ts,
         )
+
         thesis = self._theses.get(trade.trade_id)
         if thesis is None:
-            expected = tuple(
-                d.price
-                for d in (path_plan.upside if side == "LONG" else path_plan.downside)[
-                    :3
-                ]
-            )
+            upside = tuple(d.price for d in path_plan.upside[:3])
+            downside = tuple(d.price for d in path_plan.downside[:3])
+            expected = upside if side == "LONG" else downside
             thesis = self._thesis_engine.build_from_entry(
                 trade_id=trade.trade_id,
                 symbol=trade.symbol,
@@ -180,9 +181,11 @@ class PositionManager:
                 timestamp=ts,
             )
             self._theses[trade.trade_id] = thesis
+
         thesis_eval = self._thesis_engine.evaluate(
             thesis, market_state, current_price=current_price
         )
+
         exit_decision = self._eie.evaluate(
             symbol=trade.symbol,
             side=side,
@@ -195,6 +198,7 @@ class PositionManager:
             thesis_eval=thesis_eval,
             timestamp=ts,
         )
+
         hedge_decision = (
             self._hedge_engine.evaluate(
                 trade=trade,
@@ -206,19 +210,30 @@ class PositionManager:
             if self._hedge_enabled and exit_decision.action != ExitAction.EXIT
             else None
         )
-        new_stop = None
-        if self._allow_stop_tighten and exit_decision.action == ExitAction.MANAGE:
-            if (
-                trade.side == TradeSide.LONG
-                and structural_stop.stop_price > trade.sl_price
-            ) or (
-                trade.side == TradeSide.SHORT
-                and structural_stop.stop_price < trade.sl_price
-            ):
-                new_stop = structural_stop.stop_price
+
+        new_stop: float | None = None
+        if (
+            self._allow_stop_tighten
+            and exit_decision.action == ExitAction.MANAGE
+            and structural_stop is not None
+        ):
+            if trade.side == TradeSide.LONG:
+                if structural_stop.stop_price > trade.sl_price:
+                    new_stop = structural_stop.stop_price
+            else:
+                if structural_stop.stop_price < trade.sl_price:
+                    new_stop = structural_stop.stop_price
+
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
         hedge_text = f" hedge={hedge_decision.action}" if hedge_decision else ""
-        reason = f"EIE:{exit_decision.action.value} score={exit_decision.exit_score:.2f} ere={exit_decision.expected_remaining_edge:.4f} thesis={thesis_eval.health.value}{hedge_text} [{', '.join(reason_codes)}]"
+        reason = (
+            f"EIE:{exit_decision.action.value}"
+            f" score={exit_decision.exit_score:.2f}"
+            f" ere={exit_decision.expected_remaining_edge:.4f}"
+            f" thesis={thesis_eval.health.value}{hedge_text}"
+            f" [{', '.join(reason_codes)}]"
+        )
+
         return PositionAction(
             action=exit_decision.action,
             reason=reason,

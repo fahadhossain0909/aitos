@@ -47,24 +47,12 @@ class ClickHouseHistoricalSource:
             )
             logger.info(
                 "ClickHouse historical source connected",
-                extra={
-                    "aitos_extra": {
-                        "host": host,
-                        "port": port,
-                        "database": database,
-                    }
-                },
+                extra={"aitos_extra": {"host": host, "port": port, "database": database}},
             )
         except Exception:
             logger.exception(
                 "ClickHouse historical source connection failed",
-                extra={
-                    "aitos_extra": {
-                        "host": host,
-                        "port": port,
-                        "database": database,
-                    }
-                },
+                extra={"aitos_extra": {"host": host, "port": port, "database": database}},
             )
             raise
 
@@ -99,62 +87,23 @@ class ClickHouseHistoricalSource:
             parameters["timeframe"] = timeframe
             sql = (
                 "SELECT time, open, high, low, close, volume, quote_volume, trades_count FROM market_ohlcv WHERE "
-                + " AND ".join(
-                    filters
-                )  # nosec B608 - filters are fixed parameterized predicates
+                + " AND ".join(filters)
                 + " ORDER BY time LIMIT {limit:UInt32}"
             )
         elif table == "trades":
-            # Persisted trade streams can contain malformed placeholder rows.
-            # A zero/negative market price is not a valid observation and would
-            # make downstream MAE/MFE telemetry fail the replay. Filter it at
-            # the historical-source boundary so all consumers receive valid
-            # market-price observations.
             filters.append("price > 0")
             sql = (
                 "SELECT time, price, quantity, side, trade_id, is_buyer_maker FROM trade_ticks WHERE "
-                + " AND ".join(
-                    filters
-                )  # nosec B608 - filters are fixed parameterized predicates
+                + " AND ".join(filters)
                 + " ORDER BY time LIMIT {limit:UInt32}"
             )
         else:
             sql = (
                 "SELECT time, bid_levels, ask_levels, spread, depth_ratio, last_update_id FROM order_book_snapshots WHERE "
-                + " AND ".join(
-                    filters
-                )  # nosec B608 - filters are fixed parameterized predicates
+                + " AND ".join(filters)
                 + " ORDER BY time LIMIT {limit:UInt32}"
             )
-        logger.info(
-            "ClickHouse historical query started",
-            extra={
-                "aitos_extra": {
-                    "symbol": symbol,
-                    "table": source_table,
-                    "timeframe": timeframe if table == "ohlcv" else None,
-                    "start": start.isoformat() if start else None,
-                    "end": end.isoformat() if end else None,
-                    "limit": limit,
-                }
-            },
-        )
-        try:
-            result = self.client.query(sql, parameters=parameters)
-        except Exception:
-            logger.exception(
-                "ClickHouse historical query failed",
-                extra={
-                    "aitos_extra": {
-                        "symbol": symbol,
-                        "table": source_table,
-                        "limit": limit,
-                    }
-                },
-            )
-            raise
-
-        row_count = 0
+        result = self.client.query(sql, parameters=parameters)
         for row in result.result_rows:
             data = dict(zip(result.column_names, row))
             if table == "orderbook":
@@ -162,42 +111,11 @@ class ClickHouseHistoricalSource:
                 asks = json.loads(data.pop("ask_levels") or "[]")
                 best_bid = float(bids[0][0]) if bids else 0.0
                 best_ask = float(asks[0][0]) if asks else 0.0
-                price = (
-                    (best_bid + best_ask) / 2
-                    if best_bid and best_ask
-                    else (best_bid or best_ask)
-                )
+                price = (best_bid + best_ask) / 2 if best_bid and best_ask else (best_bid or best_ask)
                 data.update({"bids": bids, "asks": asks})
             else:
                 price = float(data["close"] if table == "ohlcv" else data["price"])
-            row_count += 1
-            yield HistoricalEvent(
-                _timestamp(data.pop("time")), price, {"symbol": symbol, **data}
-            )
-
-        if row_count == 0:
-            logger.warning(
-                "ClickHouse historical query returned no rows",
-                extra={
-                    "aitos_extra": {
-                        "symbol": symbol,
-                        "table": source_table,
-                        "start": start.isoformat() if start else None,
-                        "end": end.isoformat() if end else None,
-                    }
-                },
-            )
-        else:
-            logger.info(
-                "ClickHouse historical query completed",
-                extra={
-                    "aitos_extra": {
-                        "symbol": symbol,
-                        "table": source_table,
-                        "rows": row_count,
-                    }
-                },
-            )
+            yield HistoricalEvent(_timestamp(data.pop("time")), price, {"symbol": symbol, **data})
 
 
 def parse_optional_time(value: str | None) -> datetime | None:

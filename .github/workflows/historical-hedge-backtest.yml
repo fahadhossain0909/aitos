@@ -1,13 +1,6 @@
 name: Historical Hedge Backtest
 
 on:
-  push:
-    branches: [feat/automated-hedge-backtest]
-    paths:
-      - 'aitos/backtest/**'
-      - 'aitos/intelligence/**'
-      - 'aitos/trading/**'
-      - '.github/workflows/historical-hedge-backtest.yml'
   workflow_dispatch:
     inputs:
       symbol:
@@ -21,7 +14,7 @@ on:
         default: '24'
         type: string
       side:
-        description: Primary position side for isolated hedge overlay
+        description: Primary position side
         required: true
         default: LONG
         type: choice
@@ -31,23 +24,28 @@ permissions:
   contents: read
 
 env:
-  CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER || 'default' }}
-  CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
-  CLICKHOUSE_DATABASE: ${{ secrets.CLICKHOUSE_DATABASE || 'aitos' }}
+  BENCHMARK_REF: feat/automated-hedge-backtest
 
 jobs:
   hedge-backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: papertrade
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7.0.1
+      - name: Checkout validated benchmark branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/automated-hedge-backtest
+          fetch-depth: 1
+
       - name: Set up Python
-        uses: actions/setup-python@v7.0.0
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install backtest dependencies
         run: python -m pip install -r requirements-backtest.txt
+
       - name: Validate canonical hedge imports
         run: |
           set -euo pipefail
@@ -57,20 +55,28 @@ jobs:
           from aitos.trading.position_manager import PositionManager
           print('canonical hedge imports: OK')
           PY
-      - name: Validate ClickHouse credentials are configured
+
+      - name: Validate required secrets
         env:
           CH_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
-          test -n "$CH_PASSWORD" || { echo '::error::CLICKHOUSE_PASSWORD repository secret is missing'; exit 1; }
+          test -n "$CH_PASSWORD" || { echo '::error::CLICKHOUSE_PASSWORD is unavailable to the papertrade environment'; exit 1; }
+          test -n "$DEPLOY_HOST" || { echo '::error::DEPLOY_HOST is unavailable to the papertrade environment'; exit 1; }
+          test -n "$DEPLOY_USER" || { echo '::error::DEPLOY_USER is unavailable to the papertrade environment'; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo '::error::DEPLOY_SSH_KEY is unavailable to the papertrade environment'; exit 1; }
+
       - name: Prepare SSH key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
-          test -n "$DEPLOY_SSH_KEY"
           umask 077
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/aitos_key"
+
       - name: Run real ClickHouse replay through SSH tunnel
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -83,50 +89,41 @@ jobs:
           CH_DATABASE: ${{ secrets.CLICKHOUSE_DATABASE || 'aitos' }}
         run: |
           set -euo pipefail
-          test -n "$DEPLOY_HOST"; test -n "$DEPLOY_USER"
           [[ "$SYMBOL" =~ ^[A-Za-z0-9._-]+$ ]]
           [[ "$HOURS" =~ ^[1-9][0-9]{0,2}$ ]] && (( HOURS <= 720 ))
           START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
           END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          TUNNEL_LOG="$RUNNER_TEMP/clickhouse-tunnel.log"
-          ssh -i "$RUNNER_TEMP/aitos_key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ConnectTimeout=10 -N -L 18123:127.0.0.1:8123 "${DEPLOY_USER}@${DEPLOY_HOST}" >"$TUNNEL_LOG" 2>&1 &
+          ssh -i "$RUNNER_TEMP/aitos_key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -N -L 18123:127.0.0.1:8123 "${DEPLOY_USER}@${DEPLOY_HOST}" &
           TUNNEL_PID=$!
-          cleanup() { kill "$TUNNEL_PID" 2>/dev/null || true; rm -f "$RUNNER_TEMP/aitos_key"; }
-          trap cleanup EXIT
-          PROBE_OK=0
-          for attempt in {1..15}; do
-            if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
-              echo '::error::SSH tunnel process exited before the local port became ready'
-              cat "$TUNNEL_LOG" || true
-              exit 1
-            fi
-            if python - <<'PY'
-          import socket
-          s=socket.socket(); s.settimeout(1)
-          try: s.connect(('127.0.0.1',18123))
-          except OSError: raise SystemExit(1)
-          finally: s.close()
-          PY
-            then PROBE_OK=1; break; fi
-            sleep 1
-          done
-          if [[ "$PROBE_OK" != 1 ]]; then
-            echo '::error::SSH tunnel did not open 127.0.0.1:18123 within 15 seconds'
-            cat "$TUNNEL_LOG" || true
-            exit 1
-          fi
+          trap 'kill "$TUNNEL_PID" 2>/dev/null || true; rm -f "$RUNNER_TEMP/aitos_key"' EXIT
+          sleep 2
           python - <<'PY'
-          import base64, os, urllib.request, urllib.parse
-          user=os.environ['CH_USER']; password=os.environ['CH_PASSWORD']; database=os.environ['CH_DATABASE']
-          query=urllib.parse.quote('SELECT 1')
-          req=urllib.request.Request(f'http://127.0.0.1:18123/?database={urllib.parse.quote(database)}&query={query}')
-          req.add_header('Authorization','Basic '+base64.b64encode(f'{user}:{password}'.encode()).decode())
-          with urllib.request.urlopen(req, timeout=10) as response: body=response.read().decode().strip()
-          if body != '1': raise SystemExit(f'Unexpected ClickHouse probe response: {body!r}')
+          import base64
+          import os
+          import urllib.parse
+          import urllib.request
+          user = os.environ['CH_USER']
+          password = os.environ['CH_PASSWORD']
+          database = os.environ['CH_DATABASE']
+          query = urllib.parse.quote('SELECT 1')
+          req = urllib.request.Request(
+              f'http://127.0.0.1:18123/?database={urllib.parse.quote(database)}&query={query}'
+          )
+          token = f'{user}:{password}'.encode()
+          req.add_header('Authorization', 'Basic ' + base64.b64encode(token).decode())
+          with urllib.request.urlopen(req, timeout=10) as response:
+              body = response.read().decode().strip()
+          if body != '1':
+              raise SystemExit(f'Unexpected ClickHouse probe response: {body!r}')
           print('ClickHouse authentication/connectivity: OK')
           PY
-          python -m aitos.backtest.conditional_hedge_replay --symbol "$SYMBOL" --side "$SIDE" --start "$START" --end "$END" --timeframe 1m --host 127.0.0.1 --port 18123 --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DATABASE" > hedge-result.json
+          python -m aitos.backtest.conditional_hedge_replay \
+            --symbol "$SYMBOL" --side "$SIDE" --start "$START" --end "$END" \
+            --timeframe 1m --host 127.0.0.1 --port 18123 \
+            --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DATABASE" \
+            > hedge-result.json
           python -m json.tool hedge-result.json > hedge-result.pretty.json
+
       - name: Validate paired benchmark output
         run: |
           python - <<'PY'
@@ -134,17 +131,21 @@ jobs:
           d=json.load(open('hedge-result.pretty.json'))
           required=('baseline','hedged','delta_net_pnl','delta_max_drawdown','delta_mae','delta_mfe','hedge_net_contribution')
           missing=[k for k in required if k not in d]
-          if missing: raise SystemExit(f'Missing paired benchmark fields: {missing}')
+          if missing:
+              raise SystemExit(f'Missing paired benchmark fields: {missing}')
           for section in ('baseline','hedged'):
-            for key in ('final_cash','net_pnl','max_drawdown','mae','mfe','expectancy'):
-              if key not in d[section]: raise SystemExit(f'Missing {section}.{key}')
+              for key in ('final_cash','net_pnl','max_drawdown','mae','mfe','expectancy'):
+                  if key not in d[section]:
+                      raise SystemExit(f'Missing {section}.{key}')
           print('Paired benchmark schema: OK')
           PY
+
       - name: Publish benchmark summary
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
-          d=json.load(open('hedge-result.pretty.json')); b=d['baseline']; h=d['hedged']
+          d=json.load(open('hedge-result.pretty.json'))
+          b=d['baseline']; h=d['hedged']
           print('## Conditional Hedge Paired Historical Benchmark')
           print(f"- Symbol/side: **{d['symbol']} / {d['side']}**")
           print(f"- Window: **{d['start']} → {d['end']}**")
@@ -164,6 +165,7 @@ jobs:
           print('> Paired replay uses the same ClickHouse event window for baseline and hedged paths.')
           print('> This remains an isolated overlay benchmark, not a full entry-strategy profitability claim.')
           PY
+
       - name: Upload benchmark artifact
         uses: actions/upload-artifact@v4
         with:
@@ -171,6 +173,7 @@ jobs:
           path: hedge-result.pretty.json
           retention-days: 14
           if-no-files-found: error
+
       - name: Cleanup SSH key
         if: always()
         run: rm -f "$RUNNER_TEMP/aitos_key"
