@@ -143,7 +143,9 @@ class HedgeIntelligenceEngine:
             1.0,
             0.65 * adverse_score + 0.35 * conflict_score,
         )
-        expected_benefit = adverse_distance * trade.quantity * ratio * continuation_score
+        expected_benefit = (
+            adverse_distance * trade.quantity * ratio * continuation_score
+        )
         expected_cost = notional * self.estimated_roundtrip_cost_rate
         benefit_cost_ratio = (
             expected_benefit / expected_cost if expected_cost > 0 else float("inf")
