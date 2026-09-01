@@ -34,9 +34,9 @@ async def test_recovery_guard_rejects_new_id_with_old_timestamp(event_bus):
     )
     service._transport_rest_recovery_active = True
     service._last_trade_ids["BTCUSDT"] = 100
-    service._trade_recovery_source_timestamps["BTCUSDT"] = (
-        datetime.now(timezone.utc) - timedelta(seconds=2)
-    )
+    service._trade_recovery_source_timestamps["BTCUSDT"] = datetime.now(
+        timezone.utc
+    ) - timedelta(seconds=2)
 
     await service._process_trade_batch([trade(101, 30.0)])
 
@@ -51,9 +51,9 @@ async def test_recovery_guard_accepts_fresh_monotonic_trade(event_bus):
     )
     service._transport_rest_recovery_active = True
     service._last_trade_ids["BTCUSDT"] = 100
-    service._trade_recovery_source_timestamps["BTCUSDT"] = (
-        datetime.now(timezone.utc) - timedelta(seconds=5)
-    )
+    service._trade_recovery_source_timestamps["BTCUSDT"] = datetime.now(
+        timezone.utc
+    ) - timedelta(seconds=5)
 
     await service._process_trade_batch([trade(101, 1.0)])
 
