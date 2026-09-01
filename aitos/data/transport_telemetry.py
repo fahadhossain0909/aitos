@@ -25,8 +25,8 @@ _MODE_REST = "rest_fallback"
 _SOURCE_WEBSOCKET = "websocket"
 _SOURCE_REST = "rest_fallback"
 
-_current_context: contextvars.ContextVar[tuple[Any, str] | None] = contextvars.ContextVar(
-    "aitos_trade_transport_context", default=None
+_current_context: contextvars.ContextVar[tuple[Any, str] | None] = (
+    contextvars.ContextVar("aitos_trade_transport_context", default=None)
 )
 
 
@@ -250,7 +250,9 @@ def _health_details(service: Any) -> dict[str, Any]:
         "transport_last_fallback_started_at": service._transport_last_fallback_started_at,
         "transport_last_recovery_at": service._transport_last_recovery_at,
         "transport_fallback_active_seconds": round(active, 3),
-        "transport_fallback_total_seconds": round(service._transport_fallback_total_seconds, 3),
+        "transport_fallback_total_seconds": round(
+            service._transport_fallback_total_seconds, 3
+        ),
         "transport_ws_redis_events": service._transport_ws_redis_events,
         "transport_rest_redis_events": service._transport_rest_redis_events,
         "transport_ws_redis_errors": service._transport_ws_redis_errors,
