@@ -78,6 +78,16 @@ def install_trade_recovery_guard(service_cls: type[Any]) -> None:
         if hasattr(self, "_transport_rest_last_batch_count"):
             self._transport_rest_last_batch_count = len(trades)
         if trades:
+            trade_ids = [
+                int(trade.trade_id)
+                for trade in trades
+                if getattr(trade, "trade_id", None) is not None
+            ]
+            if trade_ids:
+                if hasattr(self, "_transport_rest_last_newest_trade_id"):
+                    self._transport_rest_last_newest_trade_id = max(trade_ids)
+                if hasattr(self, "_transport_rest_last_oldest_trade_id"):
+                    self._transport_rest_last_oldest_trade_id = min(trade_ids)
             timestamps = [
                 _utc(trade.timestamp)
                 for trade in trades
