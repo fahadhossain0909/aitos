@@ -159,9 +159,7 @@ class PositionManager:
         if thesis is None:
             expected = tuple(
                 d.price
-                for d in (path_plan.upside if side == "LONG" else path_plan.downside)[
-                    :3
-                ]
+                for d in (path_plan.upside if side == "LONG" else path_plan.downside)[:3]
             )
             thesis = self._thesis_engine.build_from_entry(
                 trade_id=trade.trade_id,
@@ -213,7 +211,9 @@ class PositionManager:
             ):
                 new_stop = structural_stop.stop_price
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
-        hedge_text = f" hedge={hedge_decision.action}" if hedge_decision else ""
+        hedge_text = (
+            f" hedge={hedge_decision.action}" if hedge_decision else ""
+        )
         reason = f"EIE:{exit_decision.action.value} score={exit_decision.exit_score:.2f} ere={exit_decision.expected_remaining_edge:.4f} thesis={thesis_eval.health.value}{hedge_text} [{', '.join(reason_codes)}]"
         return PositionAction(
             action=exit_decision.action,
