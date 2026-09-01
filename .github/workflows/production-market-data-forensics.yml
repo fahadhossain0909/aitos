@@ -1,0 +1,92 @@
+name: Production Market Data Forensics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  market-data-forensics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check required deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing required secret: $name"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ]
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_forensics_key
+          chmod 600 /tmp/aitos_forensics_key
+
+      - name: Run market-data forensic audit on VPS
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_forensics_key
+          command_timeout: 10m
+          script: |
+            set -euo pipefail
+            cd "$HOME/aitos"
+            test -f scripts/production_market_data_forensics.sh
+            mkdir -p "$HOME/aitos-production-market-data-forensics"
+            bash scripts/production_market_data_forensics.sh > "$HOME/aitos-production-market-data-forensics/report.txt" 2>&1
+            test -s "$HOME/aitos-production-market-data-forensics/report.txt"
+
+      - name: Retrieve forensic report
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p aitos-production-market-data-forensics
+          scp -i /tmp/aitos_forensics_key \
+            -o StrictHostKeyChecking=no \
+            -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-production-market-data-forensics/report.txt" \
+            aitos-production-market-data-forensics/report.txt
+          test -s aitos-production-market-data-forensics/report.txt
+
+      - name: Print forensic report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat aitos-production-market-data-forensics/report.txt
+
+      - name: Upload forensic report artifact
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: aitos-production-market-data-forensics
+          path: aitos-production-market-data-forensics/report.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f /tmp/aitos_forensics_key
