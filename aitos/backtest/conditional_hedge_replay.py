@@ -1,10 +1,4 @@
-"""Replay the canonical PositionManager hedge overlay on real ClickHouse prices.
-
-This is intentionally an overlay benchmark: it keeps one primary position fixed
-for the selected window so the isolated value/cost of conditional hedging can
-be measured without inventing an entry strategy. A future full-strategy replay
-can replace the primary-position generator without changing the hedge engine.
-"""
+"""Replay conditional hedging against an identical no-hedge baseline."""
 
 from __future__ import annotations
 
@@ -13,13 +7,20 @@ import json
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 
-from aitos.backtest.clickhouse_source import (
-    ClickHouseHistoricalSource,
-    parse_optional_time,
-)
+from aitos.backtest.clickhouse_source import ClickHouseHistoricalSource, parse_optional_time
 from aitos.intelligence.hedge_intelligence import HedgeDecision
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.position_manager import PositionManager
+
+
+@dataclass
+class RunMetrics:
+    final_cash: float
+    net_pnl: float
+    max_drawdown: float
+    mae: float
+    mfe: float
+    expectancy: float
 
 
 @dataclass
@@ -29,17 +30,18 @@ class RunResult:
     start: str
     end: str
     initial_cash: float
-    final_cash: float
-    net_pnl: float
+    baseline: RunMetrics
+    hedged: RunMetrics
+    delta_net_pnl: float
+    delta_max_drawdown: float
+    delta_mae: float
+    delta_mfe: float
     hedge_pnl: float
     hedge_cost: float
+    hedge_net_contribution: float
     hedge_count: int
     hedge_open_count: int
     hedge_close_count: int
-    max_drawdown: float
-    mae: float
-    mfe: float
-    expectancy: float
 
 
 def _drawdown(equity: list[float]) -> float:
@@ -60,19 +62,17 @@ def run(args: argparse.Namespace) -> RunResult:
     )
     try:
         events = source.events(args.symbol, start, end, "trades", args.timeframe)
-        first = next(iter(events), None)
+        events = iter(events)
+        first = next(events, None)
         if first is None:
             raise RuntimeError("No historical trade events returned by ClickHouse")
         entry = float(first.price)
         side = TradeSide[args.side]
-        sl = (
-            entry * (1.0 - args.stop_pct)
-            if side == TradeSide.LONG
-            else entry * (1.0 + args.stop_pct)
-        )
+        direction = 1 if side == TradeSide.LONG else -1
+        sl = entry * (1.0 - args.stop_pct) if direction == 1 else entry * (1.0 + args.stop_pct)
         tp = (
             entry * (1.0 + args.take_profit_pct)
-            if side == TradeSide.LONG
+            if direction == 1
             else entry * (1.0 - args.take_profit_pct)
         )
         trade = Trade(
@@ -107,20 +107,15 @@ def run(args: argparse.Namespace) -> RunResult:
         hedge_cost = 0.0
         hedge_count = hedge_open_count = hedge_close_count = 0
         prices = [entry]
-        equity = args.initial_cash
+        primary_fee = abs(entry * args.quantity) * args.fee_rate
+
         for event in events:
             price = float(event.price)
             prices.append(price)
             trade.record_excursion(price)
-            action = pm.evaluate(
-                trade=trade,
-                current_price=price,
-                timestamp=event.timestamp,
-            )
+            action = pm.evaluate(trade=trade, current_price=price, timestamp=event.timestamp)
             hd: HedgeDecision | None = action.hedge_decision
-            primary_move = (
-                (price - entry) * args.quantity * (1 if side == TradeSide.LONG else -1)
-            )
+            primary_move = (price - entry) * args.quantity * direction
             if hd and hd.action == "OPEN" and hedge_open_price is None:
                 hedge_open_price = price
                 hedge_ratio = hd.hedge_ratio
@@ -130,7 +125,7 @@ def run(args: argparse.Namespace) -> RunResult:
             elif hd and hd.action == "CLOSE" and hedge_open_price is not None:
                 hedge_move = (
                     (hedge_open_price - price) * args.quantity * hedge_ratio
-                    if side == TradeSide.LONG
+                    if direction == 1
                     else (price - hedge_open_price) * args.quantity * hedge_ratio
                 )
                 hedge_pnl += hedge_move
@@ -138,16 +133,13 @@ def run(args: argparse.Namespace) -> RunResult:
                 hedge_open_price = None
                 hedge_ratio = 0.0
                 hedge_close_count += 1
-            baseline_equity.append(
-                args.initial_cash
-                + primary_move
-                - abs(entry * args.quantity) * args.fee_rate
-            )
+
+            baseline_equity.append(args.initial_cash + primary_move - primary_fee)
             active_hedge = 0.0
             if hedge_open_price is not None:
                 active_hedge = (
                     (hedge_open_price - price) * args.quantity * hedge_ratio
-                    if side == TradeSide.LONG
+                    if direction == 1
                     else (price - hedge_open_price) * args.quantity * hedge_ratio
                 )
             hedged_equity.append(
@@ -156,52 +148,61 @@ def run(args: argparse.Namespace) -> RunResult:
                 + hedge_pnl
                 + active_hedge
                 - hedge_cost
-                - abs(entry * args.quantity) * args.fee_rate
+                - primary_fee
             )
-            equity = hedged_equity[-1]
+
         if hedge_open_price is not None:
             price = prices[-1]
             hedge_move = (
                 (hedge_open_price - price) * args.quantity * hedge_ratio
-                if side == TradeSide.LONG
+                if direction == 1
                 else (price - hedge_open_price) * args.quantity * hedge_ratio
             )
             hedge_pnl += hedge_move
             hedge_cost += price * args.quantity * hedge_ratio * args.fee_rate
             hedge_close_count += 1
-        final_hedged = (
-            args.initial_cash
-            + (prices[-1] - entry)
-            * args.quantity
-            * (1 if side == TradeSide.LONG else -1)
-            + hedge_pnl
-            - hedge_cost
-            - abs(entry * args.quantity) * args.fee_rate
+
+        primary_move_final = (prices[-1] - entry) * args.quantity * direction
+        final_baseline = args.initial_cash + primary_move_final - primary_fee
+        final_hedged = final_baseline + hedge_pnl - hedge_cost
+        baseline_pnl = final_baseline - args.initial_cash
+        hedged_pnl = final_hedged - args.initial_cash
+        baseline_mae = trade.mae_r or 0.0
+        baseline_mfe = trade.mfe_r or 0.0
+        baseline_metrics = RunMetrics(
+            final_cash=final_baseline,
+            net_pnl=baseline_pnl,
+            max_drawdown=_drawdown(baseline_equity),
+            mae=baseline_mae,
+            mfe=baseline_mfe,
+            expectancy=baseline_pnl,
         )
-        final_baseline = (
-            args.initial_cash
-            + (prices[-1] - entry)
-            * args.quantity
-            * (1 if side == TradeSide.LONG else -1)
-            - abs(entry * args.quantity) * args.fee_rate
+        hedged_metrics = RunMetrics(
+            final_cash=final_hedged,
+            net_pnl=hedged_pnl,
+            max_drawdown=_drawdown(hedged_equity),
+            mae=baseline_mae,
+            mfe=baseline_mfe,
+            expectancy=hedged_pnl,
         )
         return RunResult(
-            args.symbol,
-            args.side,
-            first.timestamp.isoformat(),
-            end.isoformat() if end else datetime.now(timezone.utc).isoformat(),
-            args.initial_cash,
-            final_hedged,
-            final_hedged - args.initial_cash,
-            hedge_pnl,
-            hedge_cost,
-            hedge_count,
-            hedge_open_count,
-            hedge_close_count,
-            _drawdown(hedged_equity),
-            trade.mae_r or 0.0,
-            trade.mfe_r or 0.0,
-            (final_hedged - args.initial_cash) / max(1, hedge_count),
+            symbol=args.symbol,
+            side=args.side,
+            start=first.timestamp.isoformat(),
+            end=end.isoformat() if end else datetime.now(timezone.utc).isoformat(),
+            initial_cash=args.initial_cash,
+            baseline=baseline_metrics,
+            hedged=hedged_metrics,
+            delta_net_pnl=hedged_pnl - baseline_pnl,
+            delta_max_drawdown=hedged_metrics.max_drawdown - baseline_metrics.max_drawdown,
+            delta_mae=hedged_metrics.mae - baseline_metrics.mae,
+            delta_mfe=hedged_metrics.mfe - baseline_metrics.mfe,
+            hedge_pnl=hedge_pnl,
+            hedge_cost=hedge_cost,
+            hedge_net_contribution=hedge_pnl - hedge_cost,
+            hedge_count=hedge_count,
+            hedge_open_count=hedge_open_count,
+            hedge_close_count=hedge_close_count,
         )
     finally:
         source.close()
