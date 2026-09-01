@@ -49,6 +49,7 @@ async def test_transport_telemetry_records_both_downstream_paths(event_bus):
     assert service._transport_fallback_count == 1
     assert service._transport_rest_batches == 1
     assert service._transport_rest_trades_recovered == 1
+    assert service._transport_rest_stale_trades_filtered == 0
     assert service._transport_rest_direct_events == 1
     assert service._transport_rest_direct_errors == 0
 
@@ -69,5 +70,42 @@ async def test_transport_telemetry_records_both_downstream_paths(event_bus):
     assert health.details["transport_rest_trades_recovered"] == 1
     assert health.details["transport_ws_direct_events"] == 1
     assert health.details["transport_rest_direct_events"] == 1
+
+    await service.shutdown(grace_period_seconds=2.0)
+
+
+class StaleTelemetryExchange(TelemetryExchange):
+    async def fetch_recent_trades(self, symbol: str, limit: int = 500):
+        return [trade(999, 120.0)]
+
+
+@pytest.mark.asyncio
+async def test_stale_rest_recovery_is_filtered_before_downstream_publish(event_bus):
+    direct_events: list[int] = []
+
+    async def direct_handler(item: TradeTick) -> None:
+        direct_events.append(item.trade_id)
+
+    service = DataIngestionService(
+        exchange=StaleTelemetryExchange(),
+        event_bus=event_bus,
+        symbols=["BTCUSDT"],
+        live_trade_handler=direct_handler,
+    )
+    await service.initialize({})
+
+    await service._recover_recent_trades()
+
+    assert service._transport_mode == "rest_fallback"
+    assert service._transport_rest_recovery_attempts == 1
+    assert service._transport_rest_batches == 0
+    assert service._transport_rest_trades_recovered == 0
+    assert service._transport_rest_stale_trades_filtered == 1
+    assert service._transport_rest_last_batch_count == 1
+    assert service._transport_rest_last_accepted_count == 0
+    assert service._transport_rest_last_max_source_age_sec >= 120.0
+    assert service._transport_rest_last_newest_trade_id == 999
+    assert service._transport_rest_last_oldest_trade_id == 999
+    assert direct_events == []
 
     await service.shutdown(grace_period_seconds=2.0)
