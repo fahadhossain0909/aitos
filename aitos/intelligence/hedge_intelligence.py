@@ -111,9 +111,7 @@ class HedgeIntelligenceEngine:
 
         primary_bias_aligned = (
             market_state.structure == StructureBias.BULLISH and primary_long
-        ) or (
-            market_state.structure == StructureBias.BEARISH and not primary_long
-        )
+        ) or (market_state.structure == StructureBias.BEARISH and not primary_long)
         recovery_score = min(
             1.0,
             0.45 * float(primary_bias_aligned)
