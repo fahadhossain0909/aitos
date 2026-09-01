@@ -142,6 +142,30 @@ def _enter_rest(service: Any, reason: str) -> None:
     )
 
 
+def _recover_to_websocket(service: Any) -> None:
+    """Mark the transport recovered after a successfully processed live batch."""
+    _install(service)
+    if service._transport_mode != MODE_REST:
+        return
+    started = service._transport_fallback_active_since
+    if started is not None:
+        elapsed = max(0.0, time.monotonic() - started)
+        service._transport_fallback_total_seconds += elapsed
+    service._transport_fallback_active_since = None
+    service._transport_fallback_active_seconds = 0.0
+    service._transport_mode = MODE_WEBSOCKET
+    service._transport_recovery_count += 1
+    service._transport_last_recovery_at = _now_iso()
+    logger.info(
+        "trade transport recovered to websocket",
+        extra={
+            "aitos_extra": {
+                "recovery_count": service._transport_recovery_count,
+            }
+        },
+    )
+
+
 def _record_ws_trade(service: Any, trade: Any) -> None:
     _install(service)
     now = _now_iso()
@@ -369,6 +393,11 @@ def install_transport_telemetry(service_cls: type[Any]) -> None:
         token = _context.set((self, source))
         try:
             await original_process(self, trades)
+        except Exception:
+            raise
+        else:
+            if source == SOURCE_WEBSOCKET:
+                _recover_to_websocket(self)
         finally:
             _context.reset(token)
 
