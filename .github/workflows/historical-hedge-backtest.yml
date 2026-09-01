@@ -88,94 +88,81 @@ jobs:
           [[ "$HOURS" =~ ^[1-9][0-9]{0,2}$ ]] && (( HOURS <= 720 ))
           START="$(date -u -d "-${HOURS} hours" '+%Y-%m-%dT%H:%M:%SZ')"
           END="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-
-          # Establish the tunnel in the background, but do not assume that a
-          # successful ssh process launch means the local forward is ready.
           TUNNEL_LOG="$RUNNER_TEMP/clickhouse-tunnel.log"
-          ssh -i "$RUNNER_TEMP/aitos_key" \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=accept-new \
-            -o ExitOnForwardFailure=yes \
-            -o ConnectTimeout=10 \
-            -N -L 18123:127.0.0.1:8123 \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" >"$TUNNEL_LOG" 2>&1 &
+          ssh -i "$RUNNER_TEMP/aitos_key" -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ExitOnForwardFailure=yes -o ConnectTimeout=10 -N -L 18123:127.0.0.1:8123 "${DEPLOY_USER}@${DEPLOY_HOST}" >"$TUNNEL_LOG" 2>&1 &
           TUNNEL_PID=$!
-          cleanup() {
-            kill "$TUNNEL_PID" 2>/dev/null || true
-            rm -f "$RUNNER_TEMP/aitos_key"
-          }
+          cleanup() { kill "$TUNNEL_PID" 2>/dev/null || true; rm -f "$RUNNER_TEMP/aitos_key"; }
           trap cleanup EXIT
-
-          # Wait for the local listener and the ClickHouse HTTP endpoint.
-          # Fail early with the SSH diagnostics instead of producing a vague
-          # ConnectionRefusedError from Python.
           PROBE_OK=0
           for attempt in {1..15}; do
             if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
               echo '::error::SSH tunnel process exited before the local port became ready'
-              echo '--- SSH tunnel diagnostics ---'
               cat "$TUNNEL_LOG" || true
               exit 1
             fi
             if python - <<'PY'
           import socket
-          s = socket.socket()
-          s.settimeout(1)
-          try:
-              s.connect(('127.0.0.1', 18123))
-          except OSError:
-              raise SystemExit(1)
-          finally:
-              s.close()
+          s=socket.socket(); s.settimeout(1)
+          try: s.connect(('127.0.0.1',18123))
+          except OSError: raise SystemExit(1)
+          finally: s.close()
           PY
-            then
-              PROBE_OK=1
-              break
-            fi
+            then PROBE_OK=1; break; fi
             sleep 1
           done
-
           if [[ "$PROBE_OK" != 1 ]]; then
             echo '::error::SSH tunnel did not open 127.0.0.1:18123 within 15 seconds'
-            echo '--- SSH tunnel diagnostics ---'
             cat "$TUNNEL_LOG" || true
             exit 1
           fi
-
           python - <<'PY'
-          import base64
-          import os
-          import urllib.request
-          import urllib.parse
-          user = os.environ['CH_USER']
-          password = os.environ['CH_PASSWORD']
-          database = os.environ['CH_DATABASE']
-          query = urllib.parse.quote('SELECT 1')
-          req = urllib.request.Request(f'http://127.0.0.1:18123/?database={urllib.parse.quote(database)}&query={query}')
-          token = (f'{user}:{password}').encode()
-          req.add_header('Authorization', 'Basic ' + base64.b64encode(token).decode())
-          with urllib.request.urlopen(req, timeout=10) as response:
-              body = response.read().decode().strip()
-          if body != '1':
-              raise SystemExit(f'Unexpected ClickHouse probe response: {body!r}')
+          import base64, os, urllib.request, urllib.parse
+          user=os.environ['CH_USER']; password=os.environ['CH_PASSWORD']; database=os.environ['CH_DATABASE']
+          query=urllib.parse.quote('SELECT 1')
+          req=urllib.request.Request(f'http://127.0.0.1:18123/?database={urllib.parse.quote(database)}&query={query}')
+          req.add_header('Authorization','Basic '+base64.b64encode(f'{user}:{password}'.encode()).decode())
+          with urllib.request.urlopen(req, timeout=10) as response: body=response.read().decode().strip()
+          if body != '1': raise SystemExit(f'Unexpected ClickHouse probe response: {body!r}')
           print('ClickHouse authentication/connectivity: OK')
           PY
-
-          python -m aitos.backtest.conditional_hedge_replay \
-            --symbol "$SYMBOL" --side "$SIDE" --start "$START" --end "$END" \
-            --timeframe 1m --host 127.0.0.1 --port 18123 \
-            --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DATABASE" \
-            > hedge-result.json
+          python -m aitos.backtest.conditional_hedge_replay --symbol "$SYMBOL" --side "$SIDE" --start "$START" --end "$END" --timeframe 1m --host 127.0.0.1 --port 18123 --user "$CH_USER" --password "$CH_PASSWORD" --database "$CH_DATABASE" > hedge-result.json
           python -m json.tool hedge-result.json > hedge-result.pretty.json
+      - name: Validate paired benchmark output
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('hedge-result.pretty.json'))
+          required=('baseline','hedged','delta_net_pnl','delta_max_drawdown','delta_mae','delta_mfe','hedge_net_contribution')
+          missing=[k for k in required if k not in d]
+          if missing: raise SystemExit(f'Missing paired benchmark fields: {missing}')
+          for section in ('baseline','hedged'):
+            for key in ('final_cash','net_pnl','max_drawdown','mae','mfe','expectancy'):
+              if key not in d[section]: raise SystemExit(f'Missing {section}.{key}')
+          print('Paired benchmark schema: OK')
+          PY
       - name: Publish benchmark summary
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
-          d=json.load(open('hedge-result.pretty.json'))
-          print('## Conditional Hedge Historical Benchmark')
-          for key in ('symbol','side','start','end','net_pnl','hedge_pnl','hedge_cost','hedge_count','hedge_open_count','hedge_close_count','max_drawdown','mae','mfe','expectancy'):
-              print(f'- {key}: **{d[key]}**')
-          print('> Isolated hedge-overlay benchmark; this does not claim full entry-strategy profitability.')
+          d=json.load(open('hedge-result.pretty.json')); b=d['baseline']; h=d['hedged']
+          print('## Conditional Hedge Paired Historical Benchmark')
+          print(f"- Symbol/side: **{d['symbol']} / {d['side']}**")
+          print(f"- Window: **{d['start']} → {d['end']}**")
+          print(f"- Baseline net PnL: **${b['net_pnl']:.2f}**")
+          print(f"- Hedged net PnL: **${h['net_pnl']:.2f}**")
+          print(f"- Δ net PnL: **${d['delta_net_pnl']:.2f}**")
+          print(f"- Baseline max DD: **{b['max_drawdown']:.4%}**")
+          print(f"- Hedged max DD: **{h['max_drawdown']:.4%}**")
+          print(f"- Δ max DD: **{d['delta_max_drawdown']:.4%}**")
+          print(f"- MAE baseline/hedged: **{b['mae']:.6f} / {h['mae']:.6f}**")
+          print(f"- MFE baseline/hedged: **{b['mfe']:.6f} / {h['mfe']:.6f}**")
+          print(f"- Hedge PnL: **${d['hedge_pnl']:.2f}**")
+          print(f"- Hedge cost: **${d['hedge_cost']:.2f}**")
+          print(f"- Hedge net contribution: **${d['hedge_net_contribution']:.2f}**")
+          print(f"- Hedge opens/closes: **{d['hedge_open_count']} / {d['hedge_close_count']}**")
+          print(f"- Expectancy baseline/hedged: **${b['expectancy']:.2f} / ${h['expectancy']:.2f}**")
+          print('> Paired replay uses the same ClickHouse event window for baseline and hedged paths.')
+          print('> This remains an isolated overlay benchmark, not a full entry-strategy profitability claim.')
           PY
       - name: Upload benchmark artifact
         uses: actions/upload-artifact@v4
