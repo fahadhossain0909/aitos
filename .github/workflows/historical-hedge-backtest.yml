@@ -30,6 +30,7 @@ jobs:
   hedge-backtest:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    environment: papertrade
     steps:
       - name: Checkout validated benchmark branch
         uses: actions/checkout@v4
@@ -63,10 +64,10 @@ jobs:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
-          test -n "$CH_PASSWORD" || { echo '::error::CLICKHOUSE_PASSWORD repository secret is missing'; exit 1; }
-          test -n "$DEPLOY_HOST" || { echo '::error::DEPLOY_HOST repository secret is missing'; exit 1; }
-          test -n "$DEPLOY_USER" || { echo '::error::DEPLOY_USER repository secret is missing'; exit 1; }
-          test -n "$DEPLOY_SSH_KEY" || { echo '::error::DEPLOY_SSH_KEY repository secret is missing'; exit 1; }
+          test -n "$CH_PASSWORD" || { echo '::error::CLICKHOUSE_PASSWORD is unavailable to the papertrade environment'; exit 1; }
+          test -n "$DEPLOY_HOST" || { echo '::error::DEPLOY_HOST is unavailable to the papertrade environment'; exit 1; }
+          test -n "$DEPLOY_USER" || { echo '::error::DEPLOY_USER is unavailable to the papertrade environment'; exit 1; }
+          test -n "$DEPLOY_SSH_KEY" || { echo '::error::DEPLOY_SSH_KEY is unavailable to the papertrade environment'; exit 1; }
 
       - name: Prepare SSH key
         env:
