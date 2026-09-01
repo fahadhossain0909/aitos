@@ -4,6 +4,7 @@ This benchmark deliberately does not connect to an exchange or Redis. It measure
 whether the CPU-bound normalization/aggregation model can keep up with configurable
 trade and order-book event rates, and reports queue growth and processing latency.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,7 +46,9 @@ def process_event(event: Event, book_work: int) -> int:
     return value
 
 
-def run(seconds: float, trade_rate: int, book_rate: int, book_work: int) -> dict[str, float]:
+def run(
+    seconds: float, trade_rate: int, book_rate: int, book_work: int
+) -> dict[str, float]:
     events = build_events(seconds, trade_rate, book_rate)
     queue: list[Event] = []
     latencies: list[float] = []
@@ -67,7 +70,11 @@ def run(seconds: float, trade_rate: int, book_rate: int, book_work: int) -> dict
         "throughput_events_per_second": processed / elapsed if elapsed else 0.0,
         "peak_queue": float(peak),
         "p50_processing_wall_ms": statistics.median(latencies) if latencies else 0.0,
-        "p99_processing_wall_ms": statistics.quantiles(latencies, n=100)[98] if len(latencies) >= 100 else (max(latencies) if latencies else 0.0),
+        "p99_processing_wall_ms": (
+            statistics.quantiles(latencies, n=100)[98]
+            if len(latencies) >= 100
+            else (max(latencies) if latencies else 0.0)
+        ),
     }
 
 
