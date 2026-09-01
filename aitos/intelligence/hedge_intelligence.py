@@ -1,9 +1,10 @@
 """Conditional hedge intelligence for ambiguous/adverse market states.
 
 The hedge is an overlay, never a replacement for the primary position. It
-opens only when the market state is sufficiently conflicted/adverse and closes
-when the primary thesis regains directional confirmation. The engine is
-stateful per trade so repeated evaluations cannot stack hedges unintentionally.
+opens only when the market state is sufficiently conflicted/adverse, the
+expected protection justifies its round-trip cost, and a minimum score is met.
+It closes when the primary thesis regains directional confirmation. The engine
+is stateful per trade so repeated evaluations cannot stack hedges.
 """
 
 from __future__ import annotations
@@ -31,6 +32,9 @@ class HedgeDecision:
     hedge_ratio: float
     score: float
     recovery_score: float
+    expected_benefit: float
+    expected_cost: float
+    benefit_cost_ratio: float
     reason: str
     timestamp: datetime
 
@@ -41,17 +45,16 @@ class HedgeDecision:
             "hedge_ratio": self.hedge_ratio,
             "score": self.score,
             "recovery_score": self.recovery_score,
+            "expected_benefit": self.expected_benefit,
+            "expected_cost": self.expected_cost,
+            "benefit_cost_ratio": self.benefit_cost_ratio,
             "reason": self.reason,
             "timestamp": self.timestamp.isoformat(),
         }
 
 
 class HedgeIntelligenceEngine:
-    """Conservative, explainable hedge overlay.
-
-    Scores are intentionally bounded and deterministic. A hedge requires both
-    ambiguity/adverse evidence and a minimum score; it is never unconditional.
-    """
+    """Conservative, explainable and cost-aware hedge overlay."""
 
     def __init__(
         self,
@@ -60,11 +63,15 @@ class HedgeIntelligenceEngine:
         close_threshold: float = 0.56,
         max_ratio: float = 0.50,
         min_ratio: float = 0.20,
+        min_benefit_cost_ratio: float = 2.0,
+        estimated_roundtrip_cost_rate: float = 0.0012,
     ) -> None:
         self.open_threshold = open_threshold
         self.close_threshold = close_threshold
         self.max_ratio = max_ratio
         self.min_ratio = min_ratio
+        self.min_benefit_cost_ratio = min_benefit_cost_ratio
+        self.estimated_roundtrip_cost_rate = estimated_roundtrip_cost_rate
         self._active: dict[str, float] = {}
 
     def reset(self, trade_id: str) -> None:
@@ -80,12 +87,13 @@ class HedgeIntelligenceEngine:
         atr: float | None = None,
     ) -> HedgeDecision:
         primary_long = trade.side == TradeSide.LONG
-        adverse = (
-            (trade.entry_price - current_price) / max(atr or 1.0, 1e-9)
+        adverse_distance = (
+            max(trade.entry_price - current_price, 0.0)
             if primary_long
-            else (current_price - trade.entry_price) / max(atr or 1.0, 1e-9)
+            else max(current_price - trade.entry_price, 0.0)
         )
-        adverse_score = min(max(adverse, 0.0) / 2.0, 1.0)
+        adverse_atr = adverse_distance / max(atr or 1.0, 1e-9)
+        adverse_score = min(adverse_atr / 2.0, 1.0)
 
         conflict = 0.0
         if market_state.regime in {Regime.RANGE, Regime.TRANSITION}:
@@ -106,7 +114,8 @@ class HedgeIntelligenceEngine:
         }:
             conflict += 0.08
 
-        score = min(1.0, 0.45 * conflict / 0.88 + 0.55 * adverse_score)
+        conflict_score = min(conflict / 0.88, 1.0)
+        score = min(1.0, 0.45 * conflict_score + 0.55 * adverse_score)
         active = trade.trade_id in self._active
 
         primary_bias_aligned = (
@@ -119,6 +128,27 @@ class HedgeIntelligenceEngine:
             + 0.25 * float(market_state.reversal_risk <= 0.40),
         )
 
+        ratio = min(
+            self.max_ratio,
+            max(
+                self.min_ratio,
+                self.min_ratio
+                + 0.30
+                * (score - self.open_threshold)
+                / max(1.0 - self.open_threshold, 1e-9),
+            ),
+        )
+        notional = max(current_price * trade.quantity * ratio, 0.0)
+        continuation_score = min(
+            1.0,
+            0.65 * adverse_score + 0.35 * conflict_score,
+        )
+        expected_benefit = adverse_distance * trade.quantity * ratio * continuation_score
+        expected_cost = notional * self.estimated_roundtrip_cost_rate
+        benefit_cost_ratio = (
+            expected_benefit / expected_cost if expected_cost > 0 else float("inf")
+        )
+
         if active and recovery_score >= self.close_threshold and adverse_score < 0.35:
             self._active.pop(trade.trade_id, None)
             return HedgeDecision(
@@ -127,6 +157,9 @@ class HedgeIntelligenceEngine:
                 0.0,
                 score,
                 recovery_score,
+                expected_benefit,
+                expected_cost,
+                benefit_cost_ratio,
                 "Primary-direction confirmation recovered; close protective hedge.",
                 timestamp,
             )
@@ -138,6 +171,9 @@ class HedgeIntelligenceEngine:
                 self._active[trade.trade_id],
                 score,
                 recovery_score,
+                expected_benefit,
+                expected_cost,
+                benefit_cost_ratio,
                 "Protective hedge remains active.",
                 timestamp,
             )
@@ -149,20 +185,27 @@ class HedgeIntelligenceEngine:
                 0.0,
                 score,
                 recovery_score,
+                expected_benefit,
+                expected_cost,
+                benefit_cost_ratio,
                 "Hedge conditions not strong enough.",
                 timestamp,
             )
 
-        ratio = min(
-            self.max_ratio,
-            max(
-                self.min_ratio,
-                self.min_ratio
-                + 0.30
-                * (score - self.open_threshold)
-                / max(1.0 - self.open_threshold, 1e-9),
-            ),
-        )
+        if benefit_cost_ratio < self.min_benefit_cost_ratio:
+            return HedgeDecision(
+                "NONE",
+                None,
+                0.0,
+                score,
+                recovery_score,
+                expected_benefit,
+                expected_cost,
+                benefit_cost_ratio,
+                "Expected hedge protection does not justify estimated round-trip cost.",
+                timestamp,
+            )
+
         self._active[trade.trade_id] = ratio
         return HedgeDecision(
             "OPEN",
@@ -170,6 +213,9 @@ class HedgeIntelligenceEngine:
             ratio,
             score,
             recovery_score,
-            "Conflicted/adverse state warrants a partial protective hedge.",
+            expected_benefit,
+            expected_cost,
+            benefit_cost_ratio,
+            "Adverse/conflicted state passes the economic hedge gate.",
             timestamp,
         )
