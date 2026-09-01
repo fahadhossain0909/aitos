@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
 
 from aitos.backtest.market_adapter import HistoricalMarketAdapter, HistoricalMarketState
 from aitos.intelligence.amt.volume_profile import VolumeProfile, build_volume_profile
@@ -61,7 +60,9 @@ class HistoricalPositionManagerAdapter:
             value_area_pct=self.value_area_pct,
         )
 
-    def context(self, timestamp: datetime, current_price: float) -> HistoricalPositionContext:
+    def context(
+        self, timestamp: datetime, current_price: float
+    ) -> HistoricalPositionContext:
         state = self.market.state()
         profile = self._volume_profile()
         order_flow = self.market.order_flow.snapshot()
@@ -81,7 +82,12 @@ class HistoricalPositionManagerAdapter:
         )
 
     def evaluate(
-        self, trade: Trade, *, timestamp: datetime, current_price: float, hedge_active: bool | None = None
+        self,
+        trade: Trade,
+        *,
+        timestamp: datetime,
+        current_price: float,
+        hedge_active: bool | None = None,
     ) -> PositionAction:
         ctx = self.context(timestamp, current_price)
         trade.record_excursion(current_price)
