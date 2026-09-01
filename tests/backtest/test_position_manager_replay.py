@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from aitos.backtest.hedge_metrics import excursions
+from aitos.intelligence.exit_intelligence.models import ExitAction
 from aitos.intelligence.hedge_intelligence import HedgeAction, HedgeIntelligenceEngine
 from aitos.intelligence.market_state.models import (
     AuctionState,
@@ -35,9 +36,11 @@ def _state(side: str, adverse: bool) -> MarketState:
 
 def _thesis() -> ThesisEvaluation:
     return ThesisEvaluation(
-        health=ThesisHealth.VALID,
-        score=0.8,
-        reasons=(),
+        health=ThesisHealth.INTACT,
+        consistency_score=0.8,
+        breached_invalidations=(),
+        lost_confirmations=(),
+        active_confirmations=(),
     )
 
 
@@ -48,7 +51,7 @@ def test_hedge_engine_opens_only_above_threshold() -> None:
         primary_side="LONG",
         market_state=_state("LONG", True),
         thesis_eval=_thesis(),
-        exit_action="MANAGE",
+        exit_action=ExitAction.MANAGE,
         current_price=99.0,
         primary_entry_price=100.0,
         primary_r_distance=2.0,
