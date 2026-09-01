@@ -1,7 +1,4 @@
-"""Position Manager — Phase E/G of Market-Path / Exit-Intelligence.
-
-Orchestrates: MarketState → PathPlan → StructuralStop → ThesisEval → ExitDecision
-"""
+"""Position Manager — Market State, Path, Exit, Hedge orchestration."""
 
 from __future__ import annotations
 
@@ -16,6 +13,7 @@ from aitos.intelligence.exit_intelligence import (
     ExitDecision,
     ExitIntelligenceEngine,
 )
+from aitos.intelligence.hedge_intelligence import HedgeDecision, HedgeIntelligenceEngine
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
 from aitos.intelligence.market_state import MarketState, MarketStateEngine
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
@@ -36,6 +34,7 @@ class PositionAction:
     reduce_fraction: float = 0.0
     new_stop_price: float | None = None
     exit_decision: ExitDecision | None = None
+    hedge_decision: HedgeDecision | None = None
     path_plan: PathPlan | None = None
     structural_stop: StructuralStop | None = None
     market_state: MarketState | None = None
@@ -52,6 +51,9 @@ class PositionAction:
             "exit_decision": (
                 self.exit_decision.to_dict() if self.exit_decision else None
             ),
+            "hedge_decision": (
+                self.hedge_decision.to_dict() if self.hedge_decision else None
+            ),
             "thesis_health": (
                 self.thesis_eval.health.value if self.thesis_eval else None
             ),
@@ -67,6 +69,7 @@ class PositionManager:
         structural_risk_engine: StructuralRiskEngine | None = None,
         exit_intelligence_engine: ExitIntelligenceEngine | None = None,
         thesis_engine: TradeThesisEngine | None = None,
+        hedge_intelligence_engine: HedgeIntelligenceEngine | None = None,
         config: Mapping[str, Any] | None = None,
     ) -> None:
         self._mse = market_state_engine or MarketStateEngine()
@@ -74,7 +77,19 @@ class PositionManager:
         self._sre = structural_risk_engine or StructuralRiskEngine()
         self._eie = exit_intelligence_engine or ExitIntelligenceEngine()
         self._thesis_engine = thesis_engine or TradeThesisEngine()
-        self._cfg = dict(config or {})
+        cfg = dict(config or {})
+        self._cfg = cfg
+        self._hedge_engine = hedge_intelligence_engine or HedgeIntelligenceEngine(
+            open_threshold=float(cfg.get("hedge_open_threshold", 0.68)),
+            close_threshold=float(cfg.get("hedge_close_threshold", 0.56)),
+            max_ratio=float(cfg.get("hedge_max_ratio", 0.50)),
+            min_ratio=float(cfg.get("hedge_min_ratio", 0.20)),
+            min_benefit_cost_ratio=float(cfg.get("hedge_min_benefit_cost_ratio", 2.0)),
+            estimated_roundtrip_cost_rate=float(
+                cfg.get("hedge_estimated_roundtrip_cost_rate", 0.0012)
+            ),
+        )
+        self._hedge_enabled = bool(cfg.get("hedge_enabled", True))
         self._theses: dict[str, TradeThesis] = {}
         self._allow_stop_tighten = bool(self._cfg.get("allow_stop_tighten", True))
 
@@ -83,6 +98,7 @@ class PositionManager:
 
     def clear_trade(self, trade_id: str, symbol: str | None = None) -> None:
         self._theses.pop(trade_id, None)
+        self._hedge_engine.reset(trade_id)
         if symbol:
             self._eie.reset_symbol(symbol)
 
@@ -183,6 +199,18 @@ class PositionManager:
             timestamp=ts,
         )
 
+        hedge_decision = (
+            self._hedge_engine.evaluate(
+                trade=trade,
+                market_state=market_state,
+                current_price=current_price,
+                timestamp=ts,
+                atr=atr,
+            )
+            if self._hedge_enabled and exit_decision.action != ExitAction.EXIT
+            else None
+        )
+
         new_stop: float | None = None
         if (
             self._allow_stop_tighten
@@ -197,11 +225,12 @@ class PositionManager:
                     new_stop = structural_stop.stop_price
 
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
+        hedge_text = f" hedge={hedge_decision.action}" if hedge_decision else ""
         reason = (
             f"EIE:{exit_decision.action.value}"
             f" score={exit_decision.exit_score:.2f}"
             f" ere={exit_decision.expected_remaining_edge:.4f}"
-            f" thesis={thesis_eval.health.value}"
+            f" thesis={thesis_eval.health.value}{hedge_text}"
             f" [{', '.join(reason_codes)}]"
         )
 
@@ -211,6 +240,7 @@ class PositionManager:
             reduce_fraction=exit_decision.suggested_reduce_fraction,
             new_stop_price=new_stop,
             exit_decision=exit_decision,
+            hedge_decision=hedge_decision,
             path_plan=path_plan,
             structural_stop=structural_stop,
             market_state=market_state,
