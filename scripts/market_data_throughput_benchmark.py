@@ -129,7 +129,11 @@ def run(
         event = events[i]
         if model == "batch" and event.kind == "trade":
             end = i
-            while end < len(events) and events[end].kind == "trade" and end - i < batch_size:
+            while (
+                end < len(events)
+                and events[end].kind == "trade"
+                and end - i < batch_size
+            ):
                 end += 1
             count = end - i
             service_ns = batch_trade_ns * count
@@ -167,9 +171,9 @@ def run(
         "strategy_book_updates": float(strategy_book_updates),
         "strategy_trade_updates": float(strategy_trade_updates),
         "arrival_rate_events_per_second": float(arrival_rate),
-        "service_throughput_events_per_second": processed / simulated_seconds
-        if simulated_seconds
-        else 0.0,
+        "service_throughput_events_per_second": (
+            processed / simulated_seconds if simulated_seconds else 0.0
+        ),
         "peak_queue": float(peak_queue),
         "mean_queue": queue_area / len(events) if events else 0.0,
         "p50_end_to_end_ms": percentile(latencies_ms, 0.50),
@@ -207,7 +211,9 @@ def main() -> None:
         )
         print("---")
         for key, value in result.items():
-            print(f"{key}={value:.6f}" if isinstance(value, float) else f"{key}={value}")
+            print(
+                f"{key}={value:.6f}" if isinstance(value, float) else f"{key}={value}"
+            )
 
 
 if __name__ == "__main__":
