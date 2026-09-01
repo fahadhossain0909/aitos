@@ -24,12 +24,38 @@ def _state(side: str, adverse: bool) -> MarketState:
         mid_price=100.0,
         regime=Regime.TRANSITION,
         trend_strength=0.2,
-        volatility_regime=VolatilityRegime.EXPANDING if adverse else VolatilityRegime.NORMAL,
+        volatility_regime=(
+            VolatilityRegime.EXPANDING if adverse else VolatilityRegime.NORMAL
+        ),
         auction_state=AuctionState.BALANCED,
-        order_flow_bias=(OrderFlowBias.SELLER_DOMINANT if long_side else OrderFlowBias.BUYER_DOMINANT) if adverse else (OrderFlowBias.BUYER_DOMINANT if long_side else OrderFlowBias.SELLER_DOMINANT),
-        liquidity_bias=(LiquidityBias.DOWNSIDE_LIQUIDITY_HIGH if long_side else LiquidityBias.UPSIDE_LIQUIDITY_HIGH) if adverse else LiquidityBias.BALANCED,
+        order_flow_bias=(
+            (
+                OrderFlowBias.SELLER_DOMINANT
+                if long_side
+                else OrderFlowBias.BUYER_DOMINANT
+            )
+            if adverse
+            else (
+                OrderFlowBias.BUYER_DOMINANT
+                if long_side
+                else OrderFlowBias.SELLER_DOMINANT
+            )
+        ),
+        liquidity_bias=(
+            (
+                LiquidityBias.DOWNSIDE_LIQUIDITY_HIGH
+                if long_side
+                else LiquidityBias.UPSIDE_LIQUIDITY_HIGH
+            )
+            if adverse
+            else LiquidityBias.BALANCED
+        ),
         momentum=MomentumState.WEAK if adverse else MomentumState.STRONG,
-        structure=(StructureBias.BEARISH if long_side else StructureBias.BULLISH) if adverse else (StructureBias.BULLISH if long_side else StructureBias.BEARISH),
+        structure=(
+            (StructureBias.BEARISH if long_side else StructureBias.BULLISH)
+            if adverse
+            else (StructureBias.BULLISH if long_side else StructureBias.BEARISH)
+        ),
         reversal_risk=0.8 if adverse else 0.1,
     )
 
