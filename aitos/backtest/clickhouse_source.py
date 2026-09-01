@@ -47,12 +47,16 @@ class ClickHouseHistoricalSource:
             )
             logger.info(
                 "ClickHouse historical source connected",
-                extra={"aitos_extra": {"host": host, "port": port, "database": database}},
+                extra={
+                    "aitos_extra": {"host": host, "port": port, "database": database}
+                },
             )
         except Exception:
             logger.exception(
                 "ClickHouse historical source connection failed",
-                extra={"aitos_extra": {"host": host, "port": port, "database": database}},
+                extra={
+                    "aitos_extra": {"host": host, "port": port, "database": database}
+                },
             )
             raise
 
@@ -111,11 +115,17 @@ class ClickHouseHistoricalSource:
                 asks = json.loads(data.pop("ask_levels") or "[]")
                 best_bid = float(bids[0][0]) if bids else 0.0
                 best_ask = float(asks[0][0]) if asks else 0.0
-                price = (best_bid + best_ask) / 2 if best_bid and best_ask else (best_bid or best_ask)
+                price = (
+                    (best_bid + best_ask) / 2
+                    if best_bid and best_ask
+                    else (best_bid or best_ask)
+                )
                 data.update({"bids": bids, "asks": asks})
             else:
                 price = float(data["close"] if table == "ohlcv" else data["price"])
-            yield HistoricalEvent(_timestamp(data.pop("time")), price, {"symbol": symbol, **data})
+            yield HistoricalEvent(
+                _timestamp(data.pop("time")), price, {"symbol": symbol, **data}
+            )
 
 
 def parse_optional_time(value: str | None) -> datetime | None:
