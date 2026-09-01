@@ -41,6 +41,8 @@ class RunResult:
     delta_mfe: float
     hedge_pnl: float
     hedge_cost: float
+    hedge_slippage_cost: float
+    hedge_funding_cost: float
     hedge_net_contribution: float
     hedge_count: int
     hedge_open_count: int
@@ -64,8 +66,9 @@ def run(args: argparse.Namespace) -> RunResult:
         args.host, args.port, args.user, args.password, args.database
     )
     try:
-        events = source.events(args.symbol, start, end, "trades", args.timeframe)
-        events = iter(events)
+        events = iter(
+            source.events(args.symbol, start, end, "trades", args.timeframe)
+        )
         first = next(events, None)
         if first is None:
             raise RuntimeError("No historical trade events returned by ClickHouse")
@@ -104,14 +107,23 @@ def run(args: argparse.Namespace) -> RunResult:
                 "hedge_enabled": True,
                 "hedge_max_ratio": args.max_hedge_ratio,
                 "hedge_min_ratio": args.min_hedge_ratio,
+                "hedge_min_benefit_cost_ratio": args.min_benefit_cost_ratio,
+                "hedge_estimated_roundtrip_cost_rate": (
+                    2 * args.fee_rate
+                    + 2 * args.slippage_bps / 10_000
+                    + args.funding_rate_per_8h * 0.125
+                ),
             }
         )
         baseline_equity = [args.initial_cash]
         hedged_equity = [args.initial_cash]
         hedge_open_price = None
+        hedge_open_time = None
         hedge_ratio = 0.0
         hedge_pnl = 0.0
         hedge_cost = 0.0
+        hedge_slippage_cost = 0.0
+        hedge_funding_cost = 0.0
         hedge_count = hedge_open_count = hedge_close_count = 0
         prices = [entry]
         primary_fee = abs(entry * args.quantity) * args.fee_rate
@@ -127,10 +139,18 @@ def run(args: argparse.Namespace) -> RunResult:
             primary_move = (price - entry) * args.quantity * direction
             if hd and hd.action == "OPEN" and hedge_open_price is None:
                 hedge_open_price = price
+                hedge_open_time = event.timestamp
                 hedge_ratio = hd.hedge_ratio
                 hedge_count += 1
                 hedge_open_count += 1
                 hedge_cost += price * args.quantity * hedge_ratio * args.fee_rate
+                hedge_slippage_cost += (
+                    price
+                    * args.quantity
+                    * hedge_ratio
+                    * args.slippage_bps
+                    / 10_000
+                )
             elif hd and hd.action == "CLOSE" and hedge_open_price is not None:
                 hedge_move = (
                     (hedge_open_price - price) * args.quantity * hedge_ratio
@@ -139,7 +159,27 @@ def run(args: argparse.Namespace) -> RunResult:
                 )
                 hedge_pnl += hedge_move
                 hedge_cost += price * args.quantity * hedge_ratio * args.fee_rate
+                hedge_slippage_cost += (
+                    price
+                    * args.quantity
+                    * hedge_ratio
+                    * args.slippage_bps
+                    / 10_000
+                )
+                duration_hours = max(
+                    (event.timestamp - hedge_open_time).total_seconds() / 3600.0,
+                    0.0,
+                )
+                hedge_funding_cost += (
+                    price
+                    * args.quantity
+                    * hedge_ratio
+                    * args.funding_rate_per_8h
+                    * duration_hours
+                    / 8.0
+                )
                 hedge_open_price = None
+                hedge_open_time = None
                 hedge_ratio = 0.0
                 hedge_close_count += 1
 
@@ -157,6 +197,8 @@ def run(args: argparse.Namespace) -> RunResult:
                 + hedge_pnl
                 + active_hedge
                 - hedge_cost
+                - hedge_slippage_cost
+                - hedge_funding_cost
                 - primary_fee
             )
 
@@ -169,11 +211,29 @@ def run(args: argparse.Namespace) -> RunResult:
             )
             hedge_pnl += hedge_move
             hedge_cost += price * args.quantity * hedge_ratio * args.fee_rate
+            hedge_slippage_cost += (
+                price * args.quantity * hedge_ratio * args.slippage_bps / 10_000
+            )
+            duration_hours = max(
+                (end - hedge_open_time).total_seconds() / 3600.0
+                if end and hedge_open_time
+                else 0.0,
+                0.0,
+            )
+            hedge_funding_cost += (
+                price
+                * args.quantity
+                * hedge_ratio
+                * args.funding_rate_per_8h
+                * duration_hours
+                / 8.0
+            )
             hedge_close_count += 1
 
         primary_move_final = (prices[-1] - entry) * args.quantity * direction
         final_baseline = args.initial_cash + primary_move_final - primary_fee
-        final_hedged = final_baseline + hedge_pnl - hedge_cost
+        total_hedge_cost = hedge_cost + hedge_slippage_cost + hedge_funding_cost
+        final_hedged = final_baseline + hedge_pnl - total_hedge_cost
         baseline_pnl = final_baseline - args.initial_cash
         hedged_pnl = final_hedged - args.initial_cash
         baseline_mae = trade.mae_r or 0.0
@@ -203,13 +263,16 @@ def run(args: argparse.Namespace) -> RunResult:
             baseline=baseline_metrics,
             hedged=hedged_metrics,
             delta_net_pnl=hedged_pnl - baseline_pnl,
-            delta_max_drawdown=hedged_metrics.max_drawdown
-            - baseline_metrics.max_drawdown,
+            delta_max_drawdown=(
+                hedged_metrics.max_drawdown - baseline_metrics.max_drawdown
+            ),
             delta_mae=hedged_metrics.mae - baseline_metrics.mae,
             delta_mfe=hedged_metrics.mfe - baseline_metrics.mfe,
             hedge_pnl=hedge_pnl,
-            hedge_cost=hedge_cost,
-            hedge_net_contribution=hedge_pnl - hedge_cost,
+            hedge_cost=total_hedge_cost,
+            hedge_slippage_cost=hedge_slippage_cost,
+            hedge_funding_cost=hedge_funding_cost,
+            hedge_net_contribution=hedge_pnl - total_hedge_cost,
             hedge_count=hedge_count,
             hedge_open_count=hedge_open_count,
             hedge_close_count=hedge_close_count,
@@ -229,10 +292,13 @@ def main() -> None:
     p.add_argument("--quantity", type=float, default=1.0)
     p.add_argument("--leverage", type=float, default=1.0)
     p.add_argument("--fee-rate", type=float, default=0.0004)
+    p.add_argument("--slippage-bps", type=float, default=2.0)
+    p.add_argument("--funding-rate-per-8h", type=float, default=0.0001)
     p.add_argument("--stop-pct", type=float, default=0.01)
     p.add_argument("--take-profit-pct", type=float, default=0.02)
     p.add_argument("--min-hedge-ratio", type=float, default=0.20)
     p.add_argument("--max-hedge-ratio", type=float, default=0.50)
+    p.add_argument("--min-benefit-cost-ratio", type=float, default=2.0)
     p.add_argument("--host", default="localhost")
     p.add_argument("--port", type=int, default=8123)
     p.add_argument("--user", default="default")
