@@ -43,3 +43,17 @@ def test_batch_keeps_all_trade_events() -> None:
     )
     assert result["strategy_trade_updates"] == 10
     assert result["raw_book_events"] == 20
+
+
+def test_coalesce_reduces_strategy_book_work() -> None:
+    result = run(
+        seconds=0.1,
+        trade_rate=100,
+        book_rate=200,
+        book_work=1,
+        model="coalesce",
+        coalesce_ms=10.0,
+    )
+    assert result["strategy_trade_updates"] == 10
+    assert result["raw_book_events"] == 20
+    assert result["strategy_book_updates"] < result["raw_book_events"]
