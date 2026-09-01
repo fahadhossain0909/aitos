@@ -6,7 +6,7 @@ on:
       ref:
         description: Git ref containing the strategy/backtest implementation
         required: true
-        default: main
+        default: feat/automated-hedge-backtest
         type: string
       module:
         description: Python module implementing the canonical backtest CLI
