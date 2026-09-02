@@ -47,13 +47,48 @@ jobs:
             type=ref,event=tag
             type=sha,prefix=sha-,format=long
             type=raw,value=latest,enable={{is_default_branch}}
-      - name: Build and push Docker image
+      - name: Build Docker image
         uses: docker/build-push-action@v7.3.0
         with:
           context: .
-          push: true
+          load: true
+          push: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: false
+          sbom: false
+      - name: Push Docker image to GHCR with retry
+        env:
+          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          max_attempts=5
+          attempt=1
+          while [ "$attempt" -le "$max_attempts" ]; do
+            echo "=== GHCR push attempt $attempt/$max_attempts ==="
+            failed=0
+            while IFS= read -r tag; do
+              [ -n "$tag" ] || continue
+              echo "Pushing $tag"
+              if ! docker push "$tag"; then
+                failed=1
+                echo "::warning::GHCR push failed for $tag (attempt $attempt/$max_attempts)."
+                break
+              fi
+            done <<< "$IMAGE_TAGS"
+            if [ "$failed" -eq 0 ]; then
+              echo "All Docker image tags pushed successfully."
+              exit 0
+            fi
+            if [ "$attempt" -eq "$max_attempts" ]; then
+              echo "::error::GHCR push failed after $max_attempts attempts."
+              exit 1
+            fi
+            sleep_seconds=$((attempt * 15))
+            echo "Waiting ${sleep_seconds}s before retrying GHCR push."
+            sleep "$sleep_seconds"
+            attempt=$((attempt + 1))
+          done
 
   deploy:
     runs-on: ubuntu-latest
