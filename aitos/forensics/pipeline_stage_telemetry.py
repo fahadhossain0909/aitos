@@ -1,4 +1,5 @@
 """Forensic telemetry for WebSocket receive and Redis write boundaries."""
+
 from __future__ import annotations
 
 import asyncio
@@ -44,7 +45,9 @@ class _WSReceiveProxy:
         received_at_ms = time.time() * 1000
         message = await self._websocket.__anext__()
         wait_ms = (time.perf_counter() - started) * 1000
-        self._adapter._e2e_ws_messages = getattr(self._adapter, "_e2e_ws_messages", 0) + 1
+        self._adapter._e2e_ws_messages = (
+            getattr(self._adapter, "_e2e_ws_messages", 0) + 1
+        )
         stream = ""
         event_ms = None
         trace_id = None
@@ -68,16 +71,18 @@ class _WSReceiveProxy:
         if source_age_ms is not None and source_age_ms >= 1000:
             _logger().warning(
                 "market-data websocket receive lag",
-                extra={"aitos_extra": {
-                    "stage": "ws_receive",
-                    "trace_id": trace_id,
-                    "stream": stream,
-                    "exchange_event_ms": event_ms,
-                    "received_at_ms": round(received_at_ms, 3),
-                    "source_age_ms": round(source_age_ms, 3),
-                    "receive_wait_ms": round(wait_ms, 3),
-                    "bytes": size,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "stage": "ws_receive",
+                        "trace_id": trace_id,
+                        "stream": stream,
+                        "exchange_event_ms": event_ms,
+                        "received_at_ms": round(received_at_ms, 3),
+                        "source_age_ms": round(source_age_ms, 3),
+                        "receive_wait_ms": round(wait_ms, 3),
+                        "bytes": size,
+                    }
+                },
             )
         return message
 
@@ -164,7 +169,12 @@ def _install_eventbus() -> None:
     @wraps(original_init)
     def init(self: Any, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
-        self._e2e_redis_stats = {"count": 0, "total_ms": 0.0, "max_ms": 0.0, "timeouts": 0}
+        self._e2e_redis_stats = {
+            "count": 0,
+            "total_ms": 0.0,
+            "max_ms": 0.0,
+            "timeouts": 0,
+        }
         redis = getattr(self, "_redis", None)
         original_xadd = getattr(redis, "xadd", None)
         if redis is None or original_xadd is None:
@@ -186,12 +196,18 @@ def _install_eventbus() -> None:
                 if elapsed >= 100:
                     _logger().warning(
                         "redis xadd latency",
-                        extra={"aitos_extra": {
-                            "stage": "redis_xadd",
-                            "stream": str(xargs[0]) if xargs else str(xkwargs.get("name", "")),
-                            "latency_ms": round(elapsed, 3),
-                            "cgroup_cpu": _cgroup_cpu(),
-                        }},
+                        extra={
+                            "aitos_extra": {
+                                "stage": "redis_xadd",
+                                "stream": (
+                                    str(xargs[0])
+                                    if xargs
+                                    else str(xkwargs.get("name", ""))
+                                ),
+                                "latency_ms": round(elapsed, 3),
+                                "cgroup_cpu": _cgroup_cpu(),
+                            }
+                        },
                     )
 
         redis.xadd = traced_xadd
@@ -205,7 +221,9 @@ def _install_eventbus() -> None:
             details = dict(status.details)
             stats = dict(getattr(self, "_e2e_redis_stats", {}))
             count = stats.get("count", 0)
-            stats["avg_ms"] = round(stats.get("total_ms", 0.0) / count, 3) if count else 0.0
+            stats["avg_ms"] = (
+                round(stats.get("total_ms", 0.0) / count, 3) if count else 0.0
+            )
             stats["total_ms"] = round(stats.get("total_ms", 0.0), 3)
             stats["max_ms"] = round(stats.get("max_ms", 0.0), 3)
             stats["cgroup_cpu"] = _cgroup_cpu()
