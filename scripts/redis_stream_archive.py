@@ -20,12 +20,14 @@ POLL = max(0.1, float(os.getenv("REDIS_ARCHIVE_POLL_SECONDS", "1")))
 RETRY = max(0.5, float(os.getenv("REDIS_ARCHIVE_RETRY_SECONDS", "2")))
 BATCH = max(1, int(os.getenv("REDIS_ARCHIVE_BATCH_SIZE", "1000")))
 DEFAULT_MAXLEN = max(1, int(os.getenv("REDIS_STREAM_MAXLEN_DEFAULT", "5000")))
+# Keep archive limits aligned with the production hot-working-set limits.
+# Prefixes are checked longest/most-specific first where necessary.
 STREAM_MAXLEN = {
-    "stream:market.trade.": 25000,
-    "stream:market.orderbook.": 25000,
-    "stream:market.liquidity.": 100000,
-    "stream:market.live_state.": 25000,
-    "stream:market.orderflow.": 25000,
+    "stream:market.trade.": 10000,
+    "stream:market.orderbook.": 10000,
+    "stream:market.liquidity.": 20000,
+    "stream:market.live_state.": 10000,
+    "stream:market.orderflow.": 10000,
     "stream:market.kline.": 10000,
     "stream:market.opportunity_scanned": 5000,
     "stream:decision.": 10000,
@@ -50,15 +52,6 @@ def safe_name(key: str) -> str:
 
 def decode(value: Any) -> str:
     return value.decode() if isinstance(value, bytes) else str(value)
-
-
-def id_tuple(value: str) -> tuple[int, int]:
-    millis, sequence = value.split("-", 1)
-    return int(millis), int(sequence)
-
-
-def id_lt(left: str, right: str) -> bool:
-    return id_tuple(left) < id_tuple(right)
 
 
 class ArchiveWriter:
@@ -201,15 +194,16 @@ async def archive_stream(
         return True
     if state.get("legacy"):
         return False
+
+    # An empty XREAD means the durable archive cursor has caught up to the
+    # current stream tail. At that point it is safe to enforce the hot-set
+    # limit directly. The previous implementation performed XREVRANGE
+    # COUNT (maxlen + 1) here on every polling cycle. On 20k-100k entry
+    # streams that became a sustained O(N) Redis CPU workload and was the
+    # source of the production XREVRANGE slowlog entries.
     maxlen = maxlen_for(key)
-    boundary_rows = await r.xrevrange(key, max="+", min="-", count=maxlen + 1)
-    if len(boundary_rows) <= maxlen:
-        return False
-    eviction_boundary = decode(boundary_rows[-1][0])
-    if id_lt(cursor, eviction_boundary):
-        return False
-    await r.xtrim(key, maxlen=maxlen, approximate=True)
-    return True
+    trimmed = await r.xtrim(key, maxlen=maxlen, approximate=True)
+    return bool(trimmed)
 
 
 async def archive_forever(
