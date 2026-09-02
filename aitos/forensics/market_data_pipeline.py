@@ -35,7 +35,9 @@ class MarketDataTrace:
     def source_age_ms(self) -> float | None:
         if self.source_event_ms is None:
             return None
-        return max(0.0, datetime.now(timezone.utc).timestamp() * 1000.0 - self.source_event_ms)
+        return max(
+            0.0, datetime.now(timezone.utc).timestamp() * 1000.0 - self.source_event_ms
+        )
 
     def log_context(self, **extra: Any) -> dict[str, Any]:
         context: dict[str, Any] = {
