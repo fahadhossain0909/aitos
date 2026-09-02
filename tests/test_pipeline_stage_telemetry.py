@@ -1,6 +1,6 @@
 import asyncio
 
-from aitos.forensics.pipeline_stage_telemetry import _WSReceiveProxy, _trace_id
+from aitos.forensics.pipeline_stage_telemetry import _trace_id, _WSReceiveProxy
 
 
 class _FakeWebSocket:
@@ -30,9 +30,7 @@ def test_ws_receive_timestamp_is_after_message_arrival(monkeypatch):
     adapter = _Adapter()
     proxy = _WSReceiveProxy(
         _FakeWebSocket(
-            [
-                '{"stream":"btcusdt@aggTrade","data":{"s":"BTCUSDT","l":123,"T":1000}}'
-            ]
+            ['{"stream":"btcusdt@aggTrade","data":{"s":"BTCUSDT","l":123,"T":1000}}']
         ),
         adapter,
     )
