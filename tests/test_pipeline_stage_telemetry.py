@@ -39,12 +39,17 @@ def test_ws_receive_timestamp_is_after_message_arrival(monkeypatch):
         adapter,
     )
 
-    wall_clock = iter([10.0])
-    perf_clock = iter([1.0, 1.1])
+    # The receive timestamp is sampled exactly once by the proxy. Stub the
+    # logger separately because logging itself may consult wall-clock time.
+    monkeypatch.setattr(
+        "aitos.forensics.pipeline_stage_telemetry._logger",
+        lambda: type("Logger", (), {"debug": lambda *args, **kwargs: None, "warning": lambda *args, **kwargs: None})(),
+    )
     monkeypatch.setattr(
         "aitos.forensics.pipeline_stage_telemetry.time.time",
-        lambda: next(wall_clock),
+        lambda: 10.0,
     )
+    perf_clock = iter([1.0, 1.1])
     monkeypatch.setattr(
         "aitos.forensics.pipeline_stage_telemetry.time.perf_counter",
         lambda: next(perf_clock),
