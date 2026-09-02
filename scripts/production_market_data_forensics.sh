@@ -54,9 +54,38 @@ else
   echo 'DLQ stream does not exist.'
 fi
 
-printf '%s\n' '--- LiveScanner log telemetry ---'
+printf '%s\n' '--- Live market-data stage telemetry ---'
 if docker inspect "$PAPER_CONTAINER" >/dev/null 2>&1; then
   logs="$(docker logs --since "${WINDOW_MINUTES}m" --timestamps "$PAPER_CONTAINER" 2>&1 || true)"
+
+  echo 'WebSocket receive boundary (all actionable receive-lag samples):'
+  printf '%s\n' "$logs" | grep -E 'market-data websocket receive lag|market-data websocket receive' | tail -n 300 || true
+  ws_lag_count="$(printf '%s\n' "$logs" | grep -c 'market-data websocket receive lag' || true)"
+  echo "websocket receive lag samples: $ws_lag_count"
+
+  echo 'Parser boundary:'
+  printf '%s\n' "$logs" | grep -E 'trade source/parser attribution|depth source/parser attribution' | tail -n 300 || true
+  parser_lag_count="$(printf '%s\n' "$logs" | grep -Ec 'trade source/parser attribution|depth source/parser attribution' || true)"
+  echo "parser attribution samples: $parser_lag_count"
+
+  echo 'Live-state CPU boundary:'
+  printf '%s\n' "$logs" | grep 'live state trade processing latency' | tail -n 300 || true
+  state_lag_count="$(printf '%s\n' "$logs" | grep -c 'live state trade processing latency' || true)"
+  echo "live-state latency samples: $state_lag_count"
+
+  echo 'Redis XADD boundary:'
+  printf '%s\n' "$logs" | grep 'redis xadd latency' | tail -n 300 || true
+  redis_lag_count="$(printf '%s\n' "$logs" | grep -c 'redis xadd latency' || true)"
+  echo "redis XADD latency samples: $redis_lag_count"
+
+  echo 'Event-loop boundary:'
+  printf '%s\n' "$logs" | grep 'event-loop scheduling lag' | tail -n 300 || true
+  loop_lag_count="$(printf '%s\n' "$logs" | grep -c 'event-loop scheduling lag' || true)"
+  echo "event-loop lag samples: $loop_lag_count"
+
+  echo 'Stage-lag correlation window (all warning-level forensic records):'
+  printf '%s\n' "$logs" | grep -E 'market-data websocket receive lag|trade source/parser attribution|depth source/parser attribution|live state trade processing latency|redis xadd latency|event-loop scheduling lag' | tail -n 500 || true
+
   echo 'Freshness telemetry:'
   printf '%s\n' "$logs" | grep 'live scanner freshness' | tail -n 200 || true
 

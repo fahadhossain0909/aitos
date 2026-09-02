@@ -6,9 +6,22 @@ from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, _stream_maxlen
 
 
+class RecordingRedis:
+    """Expose stable mock targets even when forensic telemetry wraps xadd."""
+
+    ping = AsyncMock(return_value=True)
+    xadd = AsyncMock()
+
+
+@pytest.fixture(autouse=True)
+def _reset_recording_redis() -> None:
+    RecordingRedis.ping.reset_mock()
+    RecordingRedis.xadd.reset_mock()
+
+
 @pytest.mark.asyncio
 async def test_high_volume_market_streams_are_bounded() -> None:
-    redis = AsyncMock()
+    redis = RecordingRedis()
     bus = EventBus(redis)
     await bus.initialize({})
 
@@ -16,7 +29,7 @@ async def test_high_volume_market_streams_are_bounded() -> None:
     await bus.publish(Event(topic="market.liquidity.BTCUSDT", payload={"depth": 1}))
     await bus.publish(Event(topic="market.live_state.BTCUSDT", payload={"mid": 1}))
 
-    calls = redis.xadd.await_args_list
+    calls = RecordingRedis.xadd.await_args_list
     assert calls[0].kwargs["maxlen"] == 25_000
     assert calls[0].kwargs["approximate"] is True
     assert calls[1].kwargs["maxlen"] == 100_000
@@ -25,7 +38,7 @@ async def test_high_volume_market_streams_are_bounded() -> None:
 
 @pytest.mark.asyncio
 async def test_protected_streams_remain_unbounded() -> None:
-    redis = AsyncMock()
+    redis = RecordingRedis()
     bus = EventBus(redis)
     await bus.initialize({})
 
@@ -36,7 +49,7 @@ async def test_protected_streams_remain_unbounded() -> None:
         Event(topic="journal.decision_recorded", payload={"decision": "hold"})
     )
 
-    for call in redis.xadd.await_args_list:
+    for call in RecordingRedis.xadd.await_args_list:
         assert "maxlen" not in call.kwargs
         assert "approximate" not in call.kwargs
 

@@ -161,10 +161,10 @@ async def test_fetch_before_connect_auto_connects():
 
 
 class FakeWebSocket:
-    """Minimal async-iterable fake standing in for a ``websockets`` connection."""
+    """Minimal async-iterator fake matching the websockets receive contract."""
 
     def __init__(self, messages: list[dict]):
-        self._messages = messages
+        self._messages = iter(messages)
         self.url = None
 
     def __call__(self, url: str):
@@ -178,12 +178,13 @@ class FakeWebSocket:
         return None
 
     def __aiter__(self):
-        return self._iter()
+        return self
 
-    async def _iter(self):
-        for msg in self._messages:
-            yield json.dumps(msg)
-        await asyncio.sleep(3600)
+    async def __anext__(self):
+        try:
+            return json.dumps(next(self._messages))
+        except StopIteration as exc:
+            raise StopAsyncIteration from exc
 
 
 @pytest.mark.asyncio
