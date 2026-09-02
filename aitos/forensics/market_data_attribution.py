@@ -50,6 +50,7 @@ def install_eventbus_attribution(eventbus_cls: type[Any]) -> None:
     ) -> None:
         try:
             from aitos.core.contracts import Event
+
             topic = Event.from_wire(fields).topic
         except Exception:
             topic = ""
@@ -78,9 +79,11 @@ def install_eventbus_attribution(eventbus_cls: type[Any]) -> None:
                 "count": counts.get(topic, 0),
                 "total_ms": round(total.get(topic, 0.0), 3),
                 "max_ms": round(maximum.get(topic, 0.0), 3),
-                "avg_ms": round(total.get(topic, 0.0) / count, 3)
-                if (count := counts.get(topic, 0))
-                else 0.0,
+                "avg_ms": (
+                    round(total.get(topic, 0.0) / count, 3)
+                    if (count := counts.get(topic, 0))
+                    else 0.0
+                ),
             }
             for topic in sorted(counts)
         }
