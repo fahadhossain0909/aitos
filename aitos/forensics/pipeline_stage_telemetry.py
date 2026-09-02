@@ -60,9 +60,7 @@ def _format(stats: dict[str, dict[str, float]]) -> dict[str, dict[str, float | i
         key: {
             "count": int(row["count"]),
             "total_ms": round(row["total_ms"], 3),
-            "avg_ms": round(row["total_ms"] / row["count"], 3)
-            if row["count"]
-            else 0.0,
+            "avg_ms": round(row["total_ms"] / row["count"], 3) if row["count"] else 0.0,
             "max_ms": round(row["max_ms"], 3),
             "min_ms": round(row["min_ms"], 3),
         }
@@ -131,7 +129,12 @@ class _WSReceiveProxy:
         stats = getattr(
             self._adapter,
             "_e2e_ws_stats",
-            {"messages": 0, "bytes": 0, "source_age_total_ms": 0.0, "source_age_max_ms": 0.0},
+            {
+                "messages": 0,
+                "bytes": 0,
+                "source_age_total_ms": 0.0,
+                "source_age_max_ms": 0.0,
+            },
         )
         self._adapter._e2e_ws_stats = stats
         stats["messages"] += 1
@@ -171,7 +174,9 @@ class _WSReceiveProxy:
             "stream": stream,
             "exchange_event_ms": event_number,
             "received_at_ms": round(received_at_ms, 3),
-            "source_age_ms": round(source_age_ms, 3) if source_age_ms is not None else None,
+            "source_age_ms": (
+                round(source_age_ms, 3) if source_age_ms is not None else None
+            ),
             "receive_wait_ms": round(wait_ms, 3),
             "bytes": size,
         }
@@ -185,7 +190,9 @@ class _WSReceiveProxy:
         # is reserved for actionable lag so telemetry itself does not flood logs.
         _logger().debug("market-data websocket receive", extra={"aitos_extra": sample})
         if source_age_ms is not None and source_age_ms >= 1000:
-            _logger().warning("market-data websocket receive lag", extra={"aitos_extra": sample})
+            _logger().warning(
+                "market-data websocket receive lag", extra={"aitos_extra": sample}
+            )
         return message
 
 
@@ -281,7 +288,11 @@ def _install_eventbus() -> None:
             try:
                 return await original_xadd(*xargs, **xkwargs)
             except Exception as exc:
-                if type(exc).__name__ in {"TimeoutError", "ConnectionError", "BusyLoadingError"}:
+                if type(exc).__name__ in {
+                    "TimeoutError",
+                    "ConnectionError",
+                    "BusyLoadingError",
+                }:
                     self._e2e_redis_stats["timeouts"] += 1
                 raise
             finally:
@@ -305,7 +316,9 @@ def _install_eventbus() -> None:
                 if elapsed >= 100:
                     sample["cgroup_cpu"] = _cgroup_stats()
                     sample["cgroup_memory"] = _cgroup_memory()
-                    _logger().warning("redis xadd latency", extra={"aitos_extra": sample})
+                    _logger().warning(
+                        "redis xadd latency", extra={"aitos_extra": sample}
+                    )
 
         # redis-py's async client exposes xadd as an ordinary instance attribute;
         # keep the original bound method in the closure so restoration is safe.
@@ -320,7 +333,9 @@ def _install_eventbus() -> None:
             details = dict(status.details)
             stats = dict(getattr(self, "_e2e_redis_stats", {}))
             count = stats.get("count", 0)
-            stats["avg_ms"] = round(stats.get("total_ms", 0.0) / count, 3) if count else 0.0
+            stats["avg_ms"] = (
+                round(stats.get("total_ms", 0.0) / count, 3) if count else 0.0
+            )
             stats["total_ms"] = round(stats.get("total_ms", 0.0), 3)
             stats["max_ms"] = round(stats.get("max_ms", 0.0), 3)
             if stats.get("min_ms") is not None:
@@ -361,7 +376,9 @@ def _install_live_state() -> None:
             "symbol": symbol,
             "trade_id": trade_id,
             "duration_ms": round(elapsed, 3),
-            "trade_timestamp": getattr(getattr(trade, "timestamp", None), "isoformat", lambda: None)(),
+            "trade_timestamp": getattr(
+                getattr(trade, "timestamp", None), "isoformat", lambda: None
+            )(),
             "at_ms": round(time.time() * 1000, 3),
         }
         stats = getattr(self, "_e2e_on_trade_stats", None)
@@ -371,7 +388,9 @@ def _install_live_state() -> None:
         _record(stats, symbol or "unknown", elapsed)
         _logger().debug("live state trade processing", extra={"aitos_extra": sample})
         if elapsed >= 10:
-            _logger().warning("live state trade processing latency", extra={"aitos_extra": sample})
+            _logger().warning(
+                "live state trade processing latency", extra={"aitos_extra": sample}
+            )
         return result
 
     cls.on_trade = on_trade
