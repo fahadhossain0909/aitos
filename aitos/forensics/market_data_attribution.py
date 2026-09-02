@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
+from dataclasses import replace
 from functools import wraps
 from typing import Any
 
@@ -73,21 +74,23 @@ def install_eventbus_attribution(eventbus_cls: type[Any]) -> None:
         counts = getattr(self, "_market_handler_count", {})
         total = getattr(self, "_market_handler_total_ms", {})
         maximum = getattr(self, "_market_handler_max_ms", {})
-        status.details = dict(status.details)
-        status.details["market_handler_latency"] = {
-            topic: {
-                "count": counts.get(topic, 0),
-                "total_ms": round(total.get(topic, 0.0), 3),
-                "max_ms": round(maximum.get(topic, 0.0), 3),
-                "avg_ms": (
-                    round(total.get(topic, 0.0) / count, 3)
-                    if (count := counts.get(topic, 0))
-                    else 0.0
-                ),
-            }
-            for topic in sorted(counts)
+        details = {
+            **status.details,
+            "market_handler_latency": {
+                topic: {
+                    "count": counts.get(topic, 0),
+                    "total_ms": round(total.get(topic, 0.0), 3),
+                    "max_ms": round(maximum.get(topic, 0.0), 3),
+                    "avg_ms": (
+                        round(total.get(topic, 0.0) / count, 3)
+                        if (count := counts.get(topic, 0))
+                        else 0.0
+                    ),
+                }
+                for topic in sorted(counts)
+            },
         }
-        return status
+        return replace(status, details=details)
 
     eventbus_cls.__init__ = init_wrapper
     eventbus_cls._process_message = process_wrapper
