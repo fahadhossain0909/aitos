@@ -37,14 +37,15 @@ def test_ws_receive_timestamp_is_after_message_arrival(monkeypatch):
         adapter,
     )
 
-    clock = iter([10.0, 10.25])
+    wall_clock = iter([10.0])
+    perf_clock = iter([1.0, 1.1])
     monkeypatch.setattr(
         "aitos.forensics.pipeline_stage_telemetry.time.time",
-        lambda: next(clock),
+        lambda: next(wall_clock),
     )
     monkeypatch.setattr(
         "aitos.forensics.pipeline_stage_telemetry.time.perf_counter",
-        lambda: next(iter([1.0, 1.1])),
+        lambda: next(perf_clock),
     )
 
     message = asyncio.run(proxy.__anext__())
