@@ -16,6 +16,15 @@ fi
 
 redis() { docker exec "$REDIS_CONTAINER" redis-cli "$@"; }
 
+printf '%s\n' '--- Redis pressure attribution snapshot ---'
+if [ -x scripts/redis_forensic_snapshot.sh ]; then
+  AITOS_DIAGNOSTIC_LOG_MINUTES="$WINDOW_MINUTES" \
+    AITOS_REDIS_CONTAINER="$REDIS_CONTAINER" \
+    bash scripts/redis_forensic_snapshot.sh || true
+else
+  echo 'WARNING: Redis pressure snapshot helper is missing.'
+fi
+
 printf '%s\n' '--- Critical consumer groups ---'
 for pattern in 'stream:market.trade.*' 'stream:market.orderbook.*' 'stream:market.liquidity.*' 'stream:market.live_state.*'; do
   while IFS= read -r key; do
