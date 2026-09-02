@@ -17,7 +17,7 @@ fi
 redis() { docker exec "$REDIS_CONTAINER" redis-cli "$@"; }
 
 printf '%s\n' '--- Redis pressure attribution snapshot ---'
-if [ -x scripts/redis_forensic_snapshot.sh ]; then
+if [ -f scripts/redis_forensic_snapshot.sh ]; then
   AITOS_DIAGNOSTIC_LOG_MINUTES="$WINDOW_MINUTES" \
     AITOS_REDIS_CONTAINER="$REDIS_CONTAINER" \
     bash scripts/redis_forensic_snapshot.sh || true
