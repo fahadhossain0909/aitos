@@ -5,10 +5,10 @@ from scripts.redis_stream_archive import ArchiveWriter, maxlen_for
 
 
 def test_known_stream_families_are_bounded() -> None:
-    assert maxlen_for("stream:market.trade.BTCUSDT") == 25_000
-    assert maxlen_for("stream:market.orderbook.BTCUSDT") == 25_000
-    assert maxlen_for("stream:market.liquidity.BTCUSDT") == 100_000
-    assert maxlen_for("stream:market.orderflow.BTCUSDT") == 25_000
+    assert maxlen_for("stream:market.trade.BTCUSDT") == 10_000
+    assert maxlen_for("stream:market.orderbook.BTCUSDT") == 10_000
+    assert maxlen_for("stream:market.liquidity.BTCUSDT") == 20_000
+    assert maxlen_for("stream:market.orderflow.BTCUSDT") == 10_000
     assert maxlen_for("stream:decision.generated") == 10_000
     assert maxlen_for("stream:journal.decision_recorded") == 10_000
     assert maxlen_for("stream:trade.position_opened") == 10_000
