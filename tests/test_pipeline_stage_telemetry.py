@@ -1,9 +1,9 @@
 import asyncio
 
 from aitos.forensics.pipeline_stage_telemetry import (
+    _WSReceiveProxy,
     _cgroup_stats,
     _trace_id,
-    _WSReceiveProxy,
 )
 
 
@@ -20,6 +20,14 @@ class _FakeWebSocket:
 
 class _Adapter:
     pass
+
+
+class _NoopLogger:
+    def debug(self, *args, **kwargs):
+        pass
+
+    def warning(self, *args, **kwargs):
+        pass
 
 
 def test_trace_id_uses_raw_trade_id_namespace():
@@ -43,7 +51,7 @@ def test_ws_receive_timestamp_is_after_message_arrival(monkeypatch):
     # logger separately because logging itself may consult wall-clock time.
     monkeypatch.setattr(
         "aitos.forensics.pipeline_stage_telemetry._logger",
-        lambda: type("Logger", (), {"debug": lambda *args, **kwargs: None, "warning": lambda *args, **kwargs: None})(),
+        lambda: _NoopLogger(),
     )
     monkeypatch.setattr(
         "aitos.forensics.pipeline_stage_telemetry.time.time",
