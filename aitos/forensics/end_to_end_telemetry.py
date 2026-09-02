@@ -2,17 +2,22 @@
 
 Tracks source age and local stage latency without changing event semantics.
 """
+
 from __future__ import annotations
 
 import asyncio
 import time
-from collections import defaultdict, deque
+from collections import deque
 from functools import wraps
 from typing import Any
 
 MARKET_PREFIXES = (
-    "market.trade.", "market.orderbook.", "market.orderflow.",
-    "market.liquidity.", "market.live_state.", "market.kline.",
+    "market.trade.",
+    "market.orderbook.",
+    "market.orderflow.",
+    "market.liquidity.",
+    "market.live_state.",
+    "market.kline.",
 )
 
 
@@ -25,7 +30,9 @@ def _key(payload: Any) -> str | None:
         return None
     symbol = payload.get("symbol") or payload.get("s")
     trade_id = payload.get("trade_id")
-    return f"{symbol}:{trade_id}" if symbol is not None and trade_id is not None else None
+    return (
+        f"{symbol}:{trade_id}" if symbol is not None and trade_id is not None else None
+    )
 
 
 def _stats_add(stats: dict[str, dict[str, float]], key: str, ms: float) -> None:
@@ -70,19 +77,36 @@ def install(eventbus_cls: type[Any]) -> None:
         payload = getattr(event, "payload", {})
         trace_key = _key(payload)
         if trace_key:
-            self._e2e_recent.append({"trace_key": trace_key, "stage": "publish_start", "ts": time.time()})
+            self._e2e_recent.append(
+                {"trace_key": trace_key, "stage": "publish_start", "ts": time.time()}
+            )
         try:
             await original_publish(self, event, *args, **kwargs)
         finally:
             elapsed = (time.perf_counter() - started) * 1000
             _stats_add(self._e2e_publish_stats, topic, elapsed)
             if trace_key:
-                self._e2e_recent.append({"trace_key": trace_key, "stage": "publish_end", "publish_ms": round(elapsed, 3), "ts": time.time()})
+                self._e2e_recent.append(
+                    {
+                        "trace_key": trace_key,
+                        "stage": "publish_end",
+                        "publish_ms": round(elapsed, 3),
+                        "ts": time.time(),
+                    }
+                )
 
     @wraps(original_process)
-    async def process(self: Any, stream_key: Any, entry_id: Any, fields: dict[str, Any], group: str, handler: Any) -> None:
+    async def process(
+        self: Any,
+        stream_key: Any,
+        entry_id: Any,
+        fields: dict[str, Any],
+        group: str,
+        handler: Any,
+    ) -> None:
         try:
             from aitos.core.contracts import Event
+
             event = Event.from_wire(fields)
             topic = event.topic
             payload = event.payload
@@ -99,11 +123,21 @@ def install(eventbus_cls: type[Any]) -> None:
             _stats_add(self._e2e_handler_stats, topic, elapsed)
             trace_key = _key(payload)
             if trace_key:
-                self._e2e_recent.append({"trace_key": trace_key, "stage": "consumer_end", "group": group, "entry_id": str(entry_id), "handler_ms": round(elapsed, 3), "ts": time.time()})
+                self._e2e_recent.append(
+                    {
+                        "trace_key": trace_key,
+                        "stage": "consumer_end",
+                        "group": group,
+                        "entry_id": str(entry_id),
+                        "handler_ms": round(elapsed, 3),
+                        "ts": time.time(),
+                    }
+                )
 
     @wraps(original_health)
     async def health(self: Any):
         from dataclasses import replace
+
         status = await original_health(self)
         details = dict(status.details)
         details["market_data_e2e"] = {
@@ -158,12 +192,16 @@ async def _watchdog(eventbus: Any) -> None:
         eventbus._e2e_loop_lag_max_ms = max(eventbus._e2e_loop_lag_max_ms, lag)
         if lag >= 100:
             from aitos.logging_setup import get_logger
-            get_logger("aitos.forensics.e2e").warning("event-loop scheduling lag", extra={"aitos_extra": {"lag_ms": round(lag, 3)}})
+
+            get_logger("aitos.forensics.e2e").warning(
+                "event-loop scheduling lag",
+                extra={"aitos_extra": {"lag_ms": round(lag, 3)}},
+            )
 
 
 def _install_parser_wrappers() -> None:
     try:
-        import aitos.exchange.binance as binance
+        from aitos.exchange import binance
     except Exception:
         return
     if getattr(binance, "_e2e_parser_telemetry_installed", False):
@@ -176,24 +214,54 @@ def _install_parser_wrappers() -> None:
     def trade(payload: dict[str, Any]) -> Any:
         started = time.perf_counter()
         event_ms = payload.get("T", payload.get("E"))
-        source_age = max(0.0, time.time() * 1000 - float(event_ms)) if event_ms is not None else None
+        source_age = (
+            max(0.0, time.time() * 1000 - float(event_ms))
+            if event_ms is not None
+            else None
+        )
         result = original_trade(payload)
         parse_ms = (time.perf_counter() - started) * 1000
         if source_age is not None and (source_age >= 1000 or parse_ms >= 10):
             from aitos.logging_setup import get_logger
-            get_logger("aitos.forensics.e2e").warning("trade source/parser attribution", extra={"aitos_extra": {"stage": "ws_to_parser", "symbol": payload.get("s"), "trade_id": payload.get("l"), "exchange_event_ms": event_ms, "source_age_ms": round(source_age, 3), "parse_ms": round(parse_ms, 3)}})
+
+            get_logger("aitos.forensics.e2e").warning(
+                "trade source/parser attribution",
+                extra={
+                    "aitos_extra": {
+                        "stage": "ws_to_parser",
+                        "symbol": payload.get("s"),
+                        "trade_id": payload.get("l"),
+                        "exchange_event_ms": event_ms,
+                        "source_age_ms": round(source_age, 3),
+                        "parse_ms": round(parse_ms, 3),
+                    }
+                },
+            )
         return result
 
     @wraps(original_depth)
     def depth(payload: dict[str, Any]) -> Any:
         started = time.perf_counter()
         event_ms = payload.get("E", payload.get("T"))
-        source_age = max(0.0, time.time() * 1000 - float(event_ms)) if event_ms else None
+        source_age = (
+            max(0.0, time.time() * 1000 - float(event_ms)) if event_ms else None
+        )
         result = original_depth(payload)
         parse_ms = (time.perf_counter() - started) * 1000
         if source_age is not None and (source_age >= 1000 or parse_ms >= 10):
             from aitos.logging_setup import get_logger
-            get_logger("aitos.forensics.e2e").warning("depth source/parser attribution", extra={"aitos_extra": {"stage": "ws_to_parser", "exchange_event_ms": event_ms, "source_age_ms": round(source_age, 3), "parse_ms": round(parse_ms, 3)}})
+
+            get_logger("aitos.forensics.e2e").warning(
+                "depth source/parser attribution",
+                extra={
+                    "aitos_extra": {
+                        "stage": "ws_to_parser",
+                        "exchange_event_ms": event_ms,
+                        "source_age_ms": round(source_age, 3),
+                        "parse_ms": round(parse_ms, 3),
+                    }
+                },
+            )
         return result
 
     binance.parse_agg_trade_ws = trade
