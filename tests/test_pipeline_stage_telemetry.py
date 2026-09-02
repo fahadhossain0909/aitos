@@ -34,9 +34,7 @@ def test_ws_receive_timestamp_is_after_message_arrival(monkeypatch):
     adapter = _Adapter()
     proxy = _WSReceiveProxy(
         _FakeWebSocket(
-            [
-                '{"stream":"btcusdt@aggTrade","data":{"s":"BTCUSDT","l":123,"T":1000}}'
-            ]
+            ['{"stream":"btcusdt@aggTrade","data":{"s":"BTCUSDT","l":123,"T":1000}}']
         ),
         adapter,
     )
