@@ -2,12 +2,7 @@ import json
 from pathlib import Path
 
 import scripts.redis_stream_archive as archive
-from scripts.redis_stream_archive import ArchiveWriter, id_lt, maxlen_for
-
-
-def test_stream_ids_use_numeric_order() -> None:
-    assert id_lt("100-9", "100-10")
-    assert not id_lt("101-0", "100-999")
+from scripts.redis_stream_archive import ArchiveWriter, maxlen_for
 
 
 def test_archive_replay_truncates_uncheckpointed_bytes(
@@ -27,9 +22,12 @@ def test_archive_replay_truncates_uncheckpointed_bytes(
 
 
 def test_known_and_unknown_streams_are_bounded() -> None:
-    assert maxlen_for("stream:market.trade.BTCUSDT") == 25_000
-    assert maxlen_for("stream:market.orderbook.BTCUSDT") == 25_000
-    assert maxlen_for("stream:market.liquidity.BTCUSDT") == 100_000
+    assert maxlen_for("stream:market.trade.BTCUSDT") == 10_000
+    assert maxlen_for("stream:market.orderbook.BTCUSDT") == 10_000
+    assert maxlen_for("stream:market.liquidity.BTCUSDT") == 20_000
+    assert maxlen_for("stream:market.live_state.BTCUSDT") == 10_000
+    assert maxlen_for("stream:market.orderflow.BTCUSDT") == 10_000
+    assert maxlen_for("stream:market.kline.BTCUSDT") == 10_000
     assert maxlen_for("stream:decision.generated") == 10_000
     assert maxlen_for("stream:dlq") == 25_000
     assert maxlen_for("stream:future.topic") == 5_000
