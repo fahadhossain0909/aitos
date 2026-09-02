@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 import pytest
 from aioresponses import aioresponses
@@ -50,9 +51,10 @@ async def test_fetch_order_book_parses_response():
 async def test_fetch_recent_trades_parses_response():
     async with BinanceFuturesAdapter() as adapter:
         with aioresponses() as m:
+            fresh_trade = {**SAMPLE_TRADE_REST, "time": int(time.time() * 1000)}
             m.get(
                 f"{REST_BASE_URL}/fapi/v1/trades?symbol=BTCUSDT&limit=1",
-                payload=[SAMPLE_TRADE_REST],
+                payload=[fresh_trade],
             )
             trades = await adapter.fetch_recent_trades("BTCUSDT", limit=1)
     assert len(trades) == 1
