@@ -1,6 +1,10 @@
 import asyncio
 
-from aitos.forensics.pipeline_stage_telemetry import _trace_id, _WSReceiveProxy
+from aitos.forensics.pipeline_stage_telemetry import (
+    _cgroup_stats,
+    _trace_id,
+    _WSReceiveProxy,
+)
 
 
 class _FakeWebSocket:
@@ -30,7 +34,9 @@ def test_ws_receive_timestamp_is_after_message_arrival(monkeypatch):
     adapter = _Adapter()
     proxy = _WSReceiveProxy(
         _FakeWebSocket(
-            ['{"stream":"btcusdt@aggTrade","data":{"s":"BTCUSDT","l":123,"T":1000}}']
+            [
+                '{"stream":"btcusdt@aggTrade","data":{"s":"BTCUSDT","l":123,"T":1000}}'
+            ]
         ),
         adapter,
     )
@@ -53,3 +59,11 @@ def test_ws_receive_timestamp_is_after_message_arrival(monkeypatch):
     assert adapter._e2e_ws_recent[0]["received_at_ms"] == 10000.0
     assert adapter._e2e_ws_recent[0]["source_age_ms"] == 9000.0
     assert adapter._e2e_ws_recent[0]["receive_wait_ms"] == 100.0
+
+
+def test_cgroup_stats_is_safe_when_procfs_is_unavailable(monkeypatch):
+    def missing_open(*args, **kwargs):
+        raise OSError("missing cgroup")
+
+    monkeypatch.setattr("builtins.open", missing_open)
+    assert _cgroup_stats() is None
