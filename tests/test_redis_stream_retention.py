@@ -7,13 +7,15 @@ from aitos.eventbus.redis_bus import EventBus, _stream_maxlen
 
 
 class RecordingRedis:
-    """Expose a stable mock target even when forensic telemetry wraps xadd."""
+    """Expose stable mock targets even when forensic telemetry wraps xadd."""
 
+    ping = AsyncMock(return_value=True)
     xadd = AsyncMock()
 
 
 @pytest.fixture(autouse=True)
 def _reset_recording_redis() -> None:
+    RecordingRedis.ping.reset_mock()
     RecordingRedis.xadd.reset_mock()
 
 
