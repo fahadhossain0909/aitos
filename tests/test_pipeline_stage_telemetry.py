@@ -1,9 +1,9 @@
 import asyncio
 
 from aitos.forensics.pipeline_stage_telemetry import (
-    _WSReceiveProxy,
     _cgroup_stats,
     _trace_id,
+    _WSReceiveProxy,
 )
 
 
