@@ -9,8 +9,8 @@ from aitos.market_data.bus import MarketDataBus
 from aitos.market_data.gateway import MarketDataGateway
 from aitos.market_data.runtime import CanonicalMarketDataRuntime
 
+from .ingestion_legacy import DataIngestionService as _LegacyDataIngestionService
 from .ingestion_legacy import (
-    DataIngestionService as _LegacyDataIngestionService,
     kline_topic,
     liquidity_topic,
     live_state_topic,
