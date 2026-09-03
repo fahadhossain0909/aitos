@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import datetime, timezone
 
 from aitos.models.market import Kline, OrderBookSnapshot as LegacyBook, TradeTick
@@ -14,7 +13,7 @@ def _received() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def trade_event(trade: TradeTick, *, market_type: str = "futures") -> MarketEvent:
+def trade_event(trade: TradeTick, *, market_type: str = "futures", source: MarketSource = MarketSource.WEBSOCKET) -> MarketEvent:
     received = _received()
     return MarketEvent(
         event_type=MarketEventType.TRADE,
@@ -23,7 +22,7 @@ def trade_event(trade: TradeTick, *, market_type: str = "futures") -> MarketEven
         symbol=trade.symbol,
         event_time=trade.timestamp,
         payload=trade.to_dict(),
-        source=MarketSource.WEBSOCKET,
+        source=source,
         ingest_time=received,
         sequence=trade.trade_id,
         correlation_id=f"binance:{market_type}:{trade.symbol}:{trade.trade_id}",
@@ -31,7 +30,7 @@ def trade_event(trade: TradeTick, *, market_type: str = "futures") -> MarketEven
     )
 
 
-def book_snapshot_event(book: LegacyBook, *, market_type: str = "futures") -> MarketEvent:
+def book_snapshot_event(book: LegacyBook, *, market_type: str = "futures", source: MarketSource = MarketSource.WEBSOCKET) -> MarketEvent:
     received = _received()
     return MarketEvent(
         event_type=MarketEventType.BOOK_SNAPSHOT,
@@ -44,7 +43,7 @@ def book_snapshot_event(book: LegacyBook, *, market_type: str = "futures") -> Ma
             "asks": [{"price": p, "quantity": q} for p, q in book.asks],
             "last_update_id": book.last_update_id,
         },
-        source=MarketSource.WEBSOCKET,
+        source=source,
         ingest_time=received,
         sequence=book.last_update_id,
         correlation_id=f"binance:{market_type}:{book.symbol}:book:{book.last_update_id}",
@@ -52,7 +51,7 @@ def book_snapshot_event(book: LegacyBook, *, market_type: str = "futures") -> Ma
     )
 
 
-def kline_event(kline: Kline, *, market_type: str = "futures") -> MarketEvent:
+def kline_event(kline: Kline, *, market_type: str = "futures", source: MarketSource = MarketSource.WEBSOCKET) -> MarketEvent:
     received = _received()
     return MarketEvent(
         event_type=MarketEventType.KLINE,
@@ -60,8 +59,8 @@ def kline_event(kline: Kline, *, market_type: str = "futures") -> MarketEvent:
         market=market_type,
         symbol=kline.symbol,
         event_time=kline.close_time,
-        payload=asdict(kline),
-        source=MarketSource.WEBSOCKET,
+        payload=kline.to_dict(),
+        source=source,
         ingest_time=received,
         correlation_id=f"binance:{market_type}:{kline.symbol}:kline:{kline.timeframe}",
         trace_id=kline.symbol,
