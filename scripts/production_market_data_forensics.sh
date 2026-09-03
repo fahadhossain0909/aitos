@@ -25,8 +25,8 @@ else
   echo 'WARNING: Redis pressure snapshot helper is missing.'
 fi
 
-printf '%s\n' '--- Critical consumer groups ---'
-for pattern in 'stream:market.trade.*' 'stream:market.orderbook.*' 'stream:market.liquidity.*' 'stream:market.live_state.*'; do
+printf '%s\n' '--- Critical semantic consumer groups ---'
+for pattern in 'stream:market.trade.*' 'stream:market.book.snapshot.*' 'stream:market.liquidity.*' 'stream:market.live_state.*'; do
   while IFS= read -r key; do
     [ -n "$key" ] || continue
     echo "STREAM $key"
@@ -34,21 +34,21 @@ for pattern in 'stream:market.trade.*' 'stream:market.orderbook.*' 'stream:marke
   done < <(redis --raw --scan --pattern "$pattern" 2>/dev/null || true)
 done
 
-printf '%s\n' '--- LiveScanner v3 PEL summary ---'
-for group in live-scanner-trades-v3 live-scanner-book-v3 live-scanner-liquidity-v3; do
-  echo "GROUP $group"
+printf '%s\n' '--- Canonical scanner PEL summary ---'
+SCANNER_GROUP="${AITOS_SCANNER_GROUP:-market-scanner}"
+for pattern in 'stream:market.trade.*' 'stream:market.book.snapshot.*'; do
   while IFS= read -r key; do
     [ -n "$key" ] || continue
-    if redis XINFO GROUPS "$key" 2>/dev/null | grep -q "$group"; then
-      pending="$(redis XPENDING "$key" "$group" 2>/dev/null | awk 'NR==1 {print $1}' || echo 0)"
-      echo "  $key pending=$pending"
-      redis --json XPENDING "$key" "$group" - + 20 2>/dev/null || true
+    if redis XINFO GROUPS "$key" 2>/dev/null | grep -q "$SCANNER_GROUP"; then
+      pending="$(redis XPENDING "$key" "$SCANNER_GROUP" 2>/dev/null | awk 'NR==1 {print $1}' || echo 0)"
+      echo "  $key group=$SCANNER_GROUP pending=$pending"
+      redis --json XPENDING "$key" "$SCANNER_GROUP" - + 20 2>/dev/null || true
       if [ "${pending:-0}" -gt 0 ]; then
-        echo "BLOCKER: $group has $pending pending entries on $key"
+        echo "BLOCKER: $SCANNER_GROUP has $pending pending entries on $key"
         FAILURES=$((FAILURES + 1))
       fi
     fi
-  done < <(redis --raw --scan --pattern 'stream:market.*' 2>/dev/null || true)
+  done < <(redis --raw --scan --pattern "$pattern" 2>/dev/null || true)
 done
 
 printf '%s\n' '--- DLQ forensic summary ---'
