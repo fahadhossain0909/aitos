@@ -1,5 +1,5 @@
-from aitos.market_data.subscription_manager import SubscriptionManager
 from aitos.market_data.stream_policy import build_subscription_plan
+from aitos.market_data.subscription_manager import SubscriptionManager
 
 
 def test_plan_keeps_btc_and_promotes_two_non_btc() -> None:
