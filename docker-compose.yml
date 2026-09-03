@@ -112,6 +112,7 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_MAX_CONNECTIONS: "256"
+      REDIS_CONSUMER_CONCURRENCY: "8"
       CLICKHOUSE_HOST: clickhouse
       NEO4J_URI: bolt://neo4j:7687
       # Keep the Redis hot working set small; the archive worker preserves history.
@@ -123,7 +124,7 @@ services:
       REDIS_STREAM_MAXLEN_MARKET_LIVE_STATE: "10000"
     volumes: [aitos_model_data:/models]
     ports: ["127.0.0.1:8090:8090"]
-    cpus: "0.75"
+    cpus: "1.0"
     mem_limit: 1.5g
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
     healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
