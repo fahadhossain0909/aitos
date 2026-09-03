@@ -142,11 +142,21 @@ class DataIngestionService(AITOSModule):
                 for i in range(TRADE_SINK_CONCURRENCY)
             ],
             asyncio.create_task(self._run_kline_stream(), name="aitos-kline-stream"),
-            asyncio.create_task(self._run_trade_stream(), name="aitos-trade-stream"),
-            asyncio.create_task(
-                self._run_orderbook_stream(), name="aitos-orderbook-stream"
-            ),
         ]
+        # Canonical MarketData V1 owns live trade/order-book transport when no
+        # legacy direct handlers are supplied. Keep the old streams available
+        # for compatibility callers/tests that explicitly provide handlers.
+        if self._live_trade_handler is not None or self._live_orderbook_handler is not None:
+            self._tasks.extend(
+                [
+                    asyncio.create_task(
+                        self._run_trade_stream(), name="aitos-trade-stream"
+                    ),
+                    asyncio.create_task(
+                        self._run_orderbook_stream(), name="aitos-orderbook-stream"
+                    ),
+                ]
+            )
         self._initialized = True
         logger.info(
             "data ingestion stream tasks started",
