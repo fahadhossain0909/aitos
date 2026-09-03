@@ -14,6 +14,7 @@ from aitos.exchange.base import ExchangeAdapter
 
 from .contracts import MarketEvent, MarketSource
 from .legacy_bridge import book_snapshot_event, trade_event
+from .venues import MarketType, Venue, VenueCapabilities
 
 
 class BinanceCanonicalMarketDataAdapter:
@@ -24,6 +25,23 @@ class BinanceCanonicalMarketDataAdapter:
     ) -> None:
         self.exchange = exchange
         self.market_type = market_type
+
+    @property
+    def venue(self) -> Venue:
+        return Venue.BINANCE
+
+    @property
+    def market_type_enum(self) -> MarketType:
+        return MarketType(self.market_type)
+
+    @property
+    def capabilities(self) -> VenueCapabilities:
+        return VenueCapabilities(
+            funding=True,
+            open_interest=True,
+            liquidations=True,
+            options=True,
+        )
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
         async for trade in self.exchange.stream_trades(symbols):
