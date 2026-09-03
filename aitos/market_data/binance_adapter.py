@@ -12,14 +12,16 @@ from datetime import datetime, timezone
 
 from aitos.exchange.base import ExchangeAdapter
 
-from .contracts import MarketEvent, MarketEventType, MarketSource
+from .contracts import MarketEvent, MarketSource
 from .legacy_bridge import book_snapshot_event, trade_event
 
 
 class BinanceCanonicalMarketDataAdapter:
     """Normalize Binance exchange streams into the canonical event contract."""
 
-    def __init__(self, exchange: ExchangeAdapter, market_type: str = "usd_m_futures") -> None:
+    def __init__(
+        self, exchange: ExchangeAdapter, market_type: str = "usd_m_futures"
+    ) -> None:
         self.exchange = exchange
         self.market_type = market_type
 
@@ -43,7 +45,9 @@ class BinanceCanonicalMarketDataAdapter:
             )
             yield event
 
-    async def recover_trade_events(self, symbol: str, limit: int = 500) -> list[MarketEvent]:
+    async def recover_trade_events(
+        self, symbol: str, limit: int = 500
+    ) -> list[MarketEvent]:
         trades = await self.exchange.fetch_recent_trades(symbol, limit=limit)
         return [
             trade_event(t, market_type=self.market_type, source=MarketSource.REST)
