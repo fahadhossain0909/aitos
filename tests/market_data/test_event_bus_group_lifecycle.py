@@ -22,7 +22,9 @@ async def test_group_creation_is_idempotent_within_bus_lifecycle():
 async def test_live_subscription_can_reset_existing_group_cursor():
     redis = AsyncMock()
     redis.ping.return_value = True
-    redis.xgroup_create.side_effect = Exception("BUSYGROUP Consumer Group name already exists")
+    redis.xgroup_create.side_effect = Exception(
+        "BUSYGROUP Consumer Group name already exists"
+    )
     bus = EventBus(redis)
     await bus.initialize({})
 
