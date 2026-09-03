@@ -17,12 +17,8 @@ services:
       - "50"
       - --auto-aof-rewrite-min-size
       - 64mb
-      # Keep Redis below the Docker cgroup limit so allocator/AOF/client
-      # overhead has headroom and the container does not reach an OOM kill.
       - --maxmemory
       - 2gb
-      # Trading streams and state are not disposable cache keys. Refuse new
-      # writes at the safety ceiling rather than silently evicting live state.
       - --maxmemory-policy
       - noeviction
     healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 120s}
@@ -54,7 +50,7 @@ services:
     command: ["python3", "scripts/redis_stream_archive.py"]
     environment:
       REDIS_HOST: redis
-      REDIS_PORT: "6379"
+      REDIS_PORT: 6379
       REDIS_ARCHIVE_DIR: /archive
       REDIS_ARCHIVE_POLL_SECONDS: "0.5"
       REDIS_ARCHIVE_BATCH_SIZE: "1000"
@@ -101,7 +97,7 @@ services:
       - "${NEO4J_LOG_DIR:-./.storage/others/neo4j-logs}:/logs"
     cpus: "0.5"
     mem_limit: 2.5g
-    healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10}
+    healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10, start_period: 60s}
     restart: unless-stopped
 
   aitos-paper:
@@ -114,9 +110,6 @@ services:
       REDIS_MAX_CONNECTIONS: "256"
       CLICKHOUSE_HOST: clickhouse
       NEO4J_URI: bolt://neo4j:7687
-      # Keep the Redis hot working set small; the archive worker preserves history.
-      # These values are deliberately below the previous 25k/100k defaults so a
-      # restart/replay burst cannot consume the full Redis cgroup before archival.
       REDIS_STREAM_MAXLEN_MARKET_TRADE: "10000"
       REDIS_STREAM_MAXLEN_MARKET_ORDERBOOK: "10000"
       REDIS_STREAM_MAXLEN_MARKET_LIQUIDITY: "20000"
