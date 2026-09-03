@@ -28,7 +28,6 @@ from .channels import (
 from .contracts import MarketEvent, MarketEventType, MarketSource
 from .retention import maxlen_for
 
-
 _CHANNEL_BY_TYPE = {
     MarketEventType.TRADE: CHANNEL_TRADE,
     MarketEventType.BOOK_DELTA: CHANNEL_BOOK_DELTA,
