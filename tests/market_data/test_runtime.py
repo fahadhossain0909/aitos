@@ -3,12 +3,18 @@ from datetime import datetime, timezone
 
 import pytest
 
+from aitos.market_data.adapter import CanonicalMarketDataAdapter
 from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
 from aitos.market_data.gateway import MarketDataGateway
 from aitos.market_data.runtime import CanonicalMarketDataRuntime
+from aitos.market_data.venues import MarketType, Venue, VenueCapabilities
 
 
 class FakeAdapter:
+    venue = Venue.BINANCE
+    market_type = MarketType.USD_M_FUTURES
+    capabilities = VenueCapabilities(trades=True, order_book=True)
+
     def __init__(self) -> None:
         self.trade_starts = 0
         self.book_starts = 0
@@ -41,6 +47,10 @@ class FakeAdapter:
 class NoopBus:
     async def publish(self, event):
         return None
+
+
+def test_fake_adapter_conforms_to_canonical_protocol():
+    assert isinstance(FakeAdapter(), CanonicalMarketDataAdapter)
 
 
 @pytest.mark.asyncio
