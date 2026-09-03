@@ -1,8 +1,8 @@
-"""Canonical market-data bus over the existing Redis Streams EventBus.
+"""Canonical market-data bus over Redis Streams.
 
-The adapter deliberately exposes semantic channels and a single envelope. It
-keeps the legacy EventBus implementation underneath while preventing new
-market-data consumers from creating v2/v3 topic families.
+The adapter exposes semantic channels and preserves the full canonical
+identity/timing envelope. It is the migration seam between the new market-data
+plane and the existing EventBus implementation.
 """
 
 from __future__ import annotations
@@ -55,32 +55,49 @@ def _datetime_from_wire(value: Any) -> datetime:
 
 
 def market_event_to_wire(event: MarketEvent) -> dict[str, Any]:
-    """Encode the canonical envelope as a Redis-safe Event payload."""
     return {
         "event_type": event.event_type.value,
         "exchange": event.exchange,
+        "venue": event.venue,
         "market": event.market,
+        "market_type": event.market_type,
         "symbol": event.symbol,
+        "instrument_id": event.instrument_id,
         "event_time": event.event_time.isoformat(),
+        "source_ts": event.source_ts.isoformat(),
         "ingest_time": event.ingest_time.isoformat(),
+        "received_ts": event.received_ts.isoformat(),
         "source": event.source.value,
         "event_id": event.event_id,
+        "sequence": event.sequence,
+        "correlation_id": event.correlation_id,
+        "trace_id": event.trace_id,
         "schema_version": event.schema_version,
         "payload": event.payload,
     }
 
 
 def market_event_from_wire(payload: dict[str, Any]) -> MarketEvent:
+    event_time = _datetime_from_wire(payload.get("event_time", payload["source_ts"]))
+    ingest_time = _datetime_from_wire(
+        payload.get("ingest_time", payload.get("received_ts"))
+    )
     return MarketEvent(
         event_type=MarketEventType(payload["event_type"]),
         exchange=str(payload["exchange"]),
+        venue=payload.get("venue"),
         market=str(payload["market"]),
+        market_type=payload.get("market_type"),
         symbol=str(payload["symbol"]),
-        event_time=_datetime_from_wire(payload["event_time"]),
+        instrument_id=payload.get("instrument_id"),
+        event_time=event_time,
         payload=dict(payload.get("payload") or {}),
         source=MarketSource(payload["source"]),
-        ingest_time=_datetime_from_wire(payload["ingest_time"]),
+        ingest_time=ingest_time,
         event_id=str(payload["event_id"]),
+        sequence=int(payload["sequence"]) if payload.get("sequence") is not None else None,
+        correlation_id=payload.get("correlation_id"),
+        trace_id=payload.get("trace_id"),
         schema_version=int(payload.get("schema_version", 1)),
     )
 
@@ -96,9 +113,6 @@ class MarketDataBus:
 
     async def publish(self, event: MarketEvent) -> None:
         channel = channel_for(event.event_type)
-        # The Redis EventBus has configurable channel retention. The explicit
-        # maxlen is kept in the payload metadata so persistence/diagnostics can
-        # verify the intended retention policy without relying on topic names.
         payload = market_event_to_wire(event)
         payload["retention_maxlen"] = maxlen_for(channel)
         await self._event_bus.publish(
@@ -107,7 +121,7 @@ class MarketDataBus:
                 payload=payload,
                 event_id=event.event_id,
                 source_module="market-data-gateway",
-                correlation_id=event.event_id,
+                correlation_id=event.correlation_id,
                 schema_version=event.schema_version,
             )
         )
