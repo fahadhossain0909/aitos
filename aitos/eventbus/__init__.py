@@ -4,8 +4,10 @@ from aitos.forensics.pipeline_stage_telemetry import (
     install as install_pipeline_stage_telemetry,
 )
 
+from .consumer_concurrency import install_eventbus_consumer_concurrency
 from .redis_bus import DLQ_STREAM, EventBus, Subscription, validate_event_schema
 
+install_eventbus_consumer_concurrency(EventBus)
 install_eventbus_attribution(EventBus)
 install_end_to_end_telemetry(EventBus)
 install_pipeline_stage_telemetry()
