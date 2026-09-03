@@ -38,7 +38,9 @@ class CanonicalMarketDataRuntime:
             return
         self._stopped = False
         self.gateway.begin_connect()
-        self._drain_task = asyncio.create_task(self._drain_loop(), name="market-data-gateway-drain")
+        self._drain_task = asyncio.create_task(
+            self._drain_loop(), name="market-data-gateway-drain"
+        )
         self._tasks = [
             asyncio.create_task(
                 self._run("trades", self.adapter.stream_trades(self.symbols)),
@@ -47,7 +49,9 @@ class CanonicalMarketDataRuntime:
             asyncio.create_task(
                 self._run(
                     "orderbook",
-                    self.adapter.stream_order_books(self.symbols, self.orderbook_levels),
+                    self.adapter.stream_order_books(
+                        self.symbols, self.orderbook_levels
+                    ),
                 ),
                 name="market-data-orderbook",
             ),
