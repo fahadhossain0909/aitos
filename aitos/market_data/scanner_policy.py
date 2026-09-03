@@ -29,7 +29,9 @@ class ScanLimits:
 
     def __post_init__(self) -> None:
         if not (0 < self.top_2 <= self.top_5 <= self.top_10 <= self.top_25):
-            raise ValueError("scan limits must satisfy 0 < top_2 <= top_5 <= top_10 <= top_25")
+            raise ValueError(
+                "scan limits must satisfy 0 < top_2 <= top_5 <= top_10 <= top_25"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +41,9 @@ class InstrumentScore:
     tier: ScanTier = ScanTier.UNIVERSE
 
 
-def promote(ranked: list[InstrumentScore], limits: ScanLimits | None = None) -> dict[ScanTier, list[str]]:
+def promote(
+    ranked: list[InstrumentScore], limits: ScanLimits | None = None
+) -> dict[ScanTier, list[str]]:
     """Return deterministic candidate tiers from an already-ranked universe."""
     limits = limits or ScanLimits()
     ordered = sorted(ranked, key=lambda item: (-item.score, item.symbol))
@@ -52,7 +56,11 @@ def promote(ranked: list[InstrumentScore], limits: ScanLimits | None = None) -> 
     }
 
 
-def deep_symbols(ranked: list[InstrumentScore], anchor: str = "BTCUSDT", limits: ScanLimits | None = None) -> list[str]:
+def deep_symbols(
+    ranked: list[InstrumentScore],
+    anchor: str = "BTCUSDT",
+    limits: ScanLimits | None = None,
+) -> list[str]:
     """Select BTC plus the strongest two non-BTC candidates."""
     limits = limits or ScanLimits()
     ordered = sorted(ranked, key=lambda item: (-item.score, item.symbol))
