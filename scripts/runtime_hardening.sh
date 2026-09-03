@@ -5,7 +5,7 @@ APP_DIR="${APP_DIR:-$HOME/aitos}"
 DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 REDIS_MAXMEMORY_BYTES="${REDIS_MAXMEMORY_BYTES:-2147483648}"
 REDIS_CPUS="${REDIS_CPUS:-0.75}"
-PAPER_CPUS="${PAPER_CPUS:-0.75}"
+PAPER_CPUS="${PAPER_CPUS:-1.0}"
 LOCK_FILE="${HOME}/.aitos-deploy.lock"
 
 cd "$APP_DIR"
@@ -27,10 +27,10 @@ for attempt in 1 2 3 4 5; do
   sleep 3
 done
 
-# Run-time CPU ceilings are reconciled explicitly because existing containers
+# Runtime CPU ceilings are reconciled explicitly because existing containers
 # may have been created from an older compose revision. Docker's --cpus value
-# is a CFS quota; the previous 0.5-core ceilings were producing throttling
-# during market-data bursts even though Redis command execution was fast.
+# is a CFS quota. Redis remains capped at 0.75 cores; the paper application gets
+# 1.0 core so market-data bursts are less likely to be throttled on the 2-vCPU VM.
 docker update --cpus "$REDIS_CPUS" aitos-redis >/dev/null
 echo "Redis CPU ceiling reconciled: $REDIS_CPUS cores"
 
