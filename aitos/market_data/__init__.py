@@ -26,9 +26,9 @@ from .venues import (
 )
 
 __all__ = [
+    "DEFAULT_VENUES",
     "BookLevel",
     "CanonicalMarketDataAdapter",
-    "DEFAULT_VENUES",
     "InstrumentKey",
     "MarketDataBus",
     "MarketEvent",
