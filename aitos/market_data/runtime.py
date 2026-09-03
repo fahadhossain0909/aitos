@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Callable
 
 from aitos.logging_setup import get_logger
 
-from .binance_adapter import BinanceCanonicalMarketDataAdapter
+from .adapter import CanonicalMarketDataAdapter
 from .bus import MarketDataBus
 from .gateway import MarketDataGateway
 
@@ -27,7 +27,7 @@ class CanonicalMarketDataRuntime:
 
     def __init__(
         self,
-        adapter: BinanceCanonicalMarketDataAdapter,
+        adapter: CanonicalMarketDataAdapter,
         market_bus: MarketDataBus,
         gateway: MarketDataGateway,
         symbols: list[str],
