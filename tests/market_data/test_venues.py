@@ -7,7 +7,6 @@ from aitos.market_data.venues import (
     MarketType,
     Venue,
     VenueConfig,
-    VenueCapabilities,
 )
 
 
