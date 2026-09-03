@@ -1,11 +1,6 @@
-"""Canonical market-data architecture for AITOS.
+"""Canonical market-data architecture for AITOS."""
 
-This package is deliberately infrastructure-neutral. Exchange adapters normalize
-venue-specific messages into the contracts in :mod:`aitos.market_data.contracts`.
-Storage, scanning and strategy layers consume these contracts without knowing
-Binance WebSocket/REST details.
-"""
-
+from .bus import MarketDataBus, channel_for, market_event_from_wire, market_event_to_wire
 from .contracts import (
     BookLevel,
     MarketEvent,
@@ -18,10 +13,14 @@ from .contracts import (
 
 __all__ = [
     "BookLevel",
+    "MarketDataBus",
     "MarketEvent",
     "MarketEventType",
     "MarketSource",
     "OrderBookDelta",
     "OrderBookSnapshot",
     "TradeEvent",
+    "channel_for",
+    "market_event_from_wire",
+    "market_event_to_wire",
 ]
