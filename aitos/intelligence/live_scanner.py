@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.logging_setup import get_logger
-from aitos.models.market import OrderBookSnapshot, TradeTick
-from aitos.market_data.bus import MarketDataBus, market_event_from_wire
+from aitos.market_data.bus import MarketDataBus
 from aitos.market_data.contracts import MarketEventType, MarketSource
+from aitos.models.market import OrderBookSnapshot, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")
 
@@ -38,7 +38,9 @@ class LiveSymbolCache:
 class LiveScannerCache:
     """Maintain scanner state from canonical semantic market-data channels."""
 
-    def __init__(self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000) -> None:
+    def __init__(
+        self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000
+    ) -> None:
         self._bus = MarketDataBus(event_bus)
         self._symbols = {s.upper() for s in symbols}
         self._max_trades = max(100, max_trades)
@@ -72,7 +74,12 @@ class LiveScannerCache:
         self._initialized = True
         logger.info(
             "canonical scanner subscriptions initialized",
-            extra={"aitos_extra": {"symbols": sorted(self._symbols), "group": LIVE_SCANNER_GROUP}},
+            extra={
+                "aitos_extra": {
+                    "symbols": sorted(self._symbols),
+                    "group": LIVE_SCANNER_GROUP,
+                }
+            },
         )
 
     async def shutdown(self) -> None:
@@ -82,10 +89,16 @@ class LiveScannerCache:
         self._initialized = False
 
     async def accept_live_trade(self, trade: TradeTick) -> None:
-        logger.debug("ignored legacy live trade callback", extra={"aitos_extra": {"symbol": trade.symbol}})
+        logger.debug(
+            "ignored legacy live trade callback",
+            extra={"aitos_extra": {"symbol": trade.symbol}},
+        )
 
     async def accept_live_order_book(self, book: OrderBookSnapshot) -> None:
-        logger.debug("ignored legacy live orderbook callback", extra={"aitos_extra": {"symbol": book.symbol}})
+        logger.debug(
+            "ignored legacy live orderbook callback",
+            extra={"aitos_extra": {"symbol": book.symbol}},
+        )
 
     async def _on_trade_event(self, event) -> None:
         if event.symbol not in self._symbols:
@@ -93,7 +106,10 @@ class LiveScannerCache:
         state = self._cache(event.symbol)
         received_at = datetime.now(timezone.utc)
         source_age = (received_at - event.event_time).total_seconds()
-        if event.source != MarketSource.WEBSOCKET or source_age > LIVE_TRADE_MAX_AGE_SECONDS:
+        if (
+            event.source != MarketSource.WEBSOCKET
+            or source_age > LIVE_TRADE_MAX_AGE_SECONDS
+        ):
             state.stale_trade_rejections += 1
             state.last_stale_trade_source_age_sec = round(max(0.0, source_age), 3)
             return
@@ -115,7 +131,11 @@ class LiveScannerCache:
         payload["symbol"] = event.symbol
         payload["timestamp"] = event.event_time.isoformat()
         book = OrderBookSnapshot.from_dict(payload)
-        if state.order_book is not None and state.order_book.last_update_id == book.last_update_id and state.order_book.timestamp == book.timestamp:
+        if (
+            state.order_book is not None
+            and state.order_book.last_update_id == book.last_update_id
+            and state.order_book.timestamp == book.timestamp
+        ):
             state.duplicate_book_rejections += 1
             return
         state.order_book = book
