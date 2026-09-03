@@ -7,6 +7,12 @@ import fnmatch
 import os
 from typing import Any
 
+from aitos.logging_setup import get_logger
+
+from .redis_bus import CONSUMER_BATCH_SIZE, CONSUMER_BLOCK_MS, POLL_INTERVAL_SECONDS
+
+logger = get_logger("aitos.eventbus")
+
 DEFAULT_CONSUMER_CONCURRENCY = 8
 MAX_CONSUMER_CONCURRENCY = 32
 
@@ -32,8 +38,6 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
     """
     if getattr(event_bus_cls, "_ordered_concurrency_installed", False):
         return
-
-    original_consume_loop = event_bus_cls._consume_loop
 
     async def _consume_loop(
         self: Any,
@@ -71,25 +75,24 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                             groupname=group,
                             consumername=consumer,
                             streams={stream_key: ">"},
-                            count=self.CONSUMER_BATCH_SIZE
-                            if hasattr(self, "CONSUMER_BATCH_SIZE")
-                            else 100,
-                            block=self.CONSUMER_BLOCK_MS
-                            if hasattr(self, "CONSUMER_BLOCK_MS")
-                            else 100,
+                            count=CONSUMER_BATCH_SIZE,
+                            block=CONSUMER_BLOCK_MS,
                         )
                     except Exception as exc:
-                        logger = getattr(self, "_consumer_concurrency_logger", None)
-                        if logger is not None:
-                            logger.error("xreadgroup error: %s", exc)
+                        logger.error(
+                            "xreadgroup error",
+                            extra={
+                                "aitos_extra": {
+                                    "stream": stream_key,
+                                    "group": group,
+                                    "error": str(exc),
+                                }
+                            },
+                        )
                         await asyncio.sleep(1.0)
                         continue
                     if not resp:
-                        await asyncio.sleep(
-                            self.POLL_INTERVAL_SECONDS
-                            if hasattr(self, "POLL_INTERVAL_SECONDS")
-                            else 0.15
-                        )
+                        await asyncio.sleep(POLL_INTERVAL_SECONDS)
                         continue
                     for returned_stream, messages in resp:
                         if isinstance(returned_stream, bytes):
