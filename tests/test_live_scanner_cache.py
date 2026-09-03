@@ -16,7 +16,9 @@ class FakeBus:
     def __init__(self):
         self.subscriptions = []
 
-    async def subscribe(self, topic, handler, group="default", start_id="$", live_only=False):
+    async def subscribe(
+        self, topic, handler, group="default", start_id="$", live_only=False
+    ):
         self.subscriptions.append((topic, group, handler, start_id, live_only))
         return FakeSubscription()
 
@@ -90,9 +92,7 @@ async def test_live_cache_rejects_stale_trade_and_book():
     await cache.initialize()
     stale_ts = datetime.now(timezone.utc) - timedelta(seconds=120)
     trade = TradeTick("BTCUSDT", 1, 100.0, 2.0, TradeSide.BUY, False, stale_ts)
-    book = OrderBookSnapshot(
-        "BTCUSDT", ((99.0, 5.0),), ((101.0, 4.0),), 7, stale_ts
-    )
+    book = OrderBookSnapshot("BTCUSDT", ((99.0, 5.0),), ((101.0, 4.0),), 7, stale_ts)
 
     await cache._on_trade_event(trade_event(trade))
     await cache._on_book_event(book_event(book))
