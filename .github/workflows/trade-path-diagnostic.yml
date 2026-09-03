@@ -22,7 +22,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_trace_key
           chmod 600 /tmp/aitos_trace_key
 
-      - name: Run read-only trade path diagnostic
+      - name: Run read-only canonical trade path diagnostic
         uses: appleboy/ssh-action@v1.2.5
         with:
           host: ${{ secrets.DEPLOY_HOST }}
@@ -33,25 +33,40 @@ jobs:
             set -euo pipefail
             REDIS_CONTAINER="aitos-redis"
             PAPER_CONTAINER="aitos-paper"
-            TRADE_GROUP="live-scanner-trades-v2"
+            TRADE_STREAM="stream:market.trade"
+            BOOK_STREAM="stream:market.book.snapshot"
+            SCANNER_GROUP="market-scanner"
             rcli() { docker exec "$REDIS_CONTAINER" redis-cli "$@"; }
-            echo '=== AITOS trade-path diagnostic (READ ONLY) ==='
+            echo '=== AITOS canonical trade-path diagnostic (READ ONLY) ==='
             echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-            for symbol in BTCUSDT ETHUSDT SOLUSDT BNBUSDT; do
-              key="stream:market.trade.${symbol}"
-              echo "--- ${symbol}: ${key} ---"
+            for key in "$TRADE_STREAM" "$BOOK_STREAM"; do
+              echo "--- ${key} ---"
               echo "XLEN=$(rcli XLEN "$key" 2>/dev/null || echo MISSING)"
               echo 'LATEST_ENTRY:'
-              rcli XREVRANGE "$key" + - COUNT 1 2>/dev/null || true
+              rcli --json XREVRANGE "$key" + - COUNT 1 2>/dev/null || true
               echo 'CONSUMER_GROUPS:'
               rcli XINFO GROUPS "$key" 2>/dev/null || true
-              echo 'GROUP_CONSUMERS:'
-              rcli XINFO CONSUMERS "$key" "$TRADE_GROUP" 2>/dev/null || true
+              echo "SCANNER_GROUP=${SCANNER_GROUP}"
+              rcli XINFO CONSUMERS "$key" "$SCANNER_GROUP" 2>/dev/null || true
+              pending="$(rcli XPENDING "$key" "$SCANNER_GROUP" 2>/dev/null | awk 'NR==1 {print $1}' || echo 0)"
+              echo "SCANNER_PENDING=${pending:-0}"
             done
-            echo '--- Paper logs: trade path markers (last 10m) ---'
-            docker logs --since 10m --timestamps "$PAPER_CONTAINER" 2>&1 | grep -E 'published event|trade downstream processing failed|trade state update failed|ignored stale trade in live scanner|live scanner freshness|REST trade recovery failed|aggregate-trade stream recovered|aggregate-trade stream idle|raw-trade fallback event invalid' | tail -n 400 || true
-            echo '--- Live scanner freshness (last 10m) ---'
-            docker logs --since 10m --timestamps "$PAPER_CONTAINER" 2>&1 | grep 'live scanner freshness' | tail -n 100 || true
+            echo '--- Paper logs: canonical trade path markers (last 10m) ---'
+            docker logs --since 10m --timestamps "$PAPER_CONTAINER" 2>&1 \
+              | grep -E 'canonical scanner subscriptions initialized|canonical market-data runtime started|market-data websocket receive lag|live scanner freshness|paper signal diagnostics|trade downstream processing failed|trade state update failed|REST trade recovery failed' \
+              | tail -n 500 || true
+            echo '--- Legacy V2/V3 consumer groups (should be absent) ---'
+            for pattern in 'live-scanner-trades-v2' 'live-scanner-book-v2' 'live-scanner-liquidity-v2' 'live-scanner-trades-v3' 'live-scanner-book-v3' 'live-scanner-liquidity-v3'; do
+              if rcli --scan --pattern "*" 2>/dev/null | grep -q .; then
+                echo "CHECK=${pattern} (inspect application logs/config if present)"
+              fi
+            done
+            echo '--- Interpretation ---'
+            echo '1. Canonical trade transport is stream:market.trade.'
+            echo '2. Canonical book transport is stream:market.book.snapshot.'
+            echo '3. market-scanner is the single live consumer group for trade/book.'
+            echo '4. REST recovery is degraded/non-live and must never establish live freshness.'
+            echo '5. Any V2/V3 consumer group indicates legacy topology is still active.'
 
       - name: Cleanup
         if: always()
