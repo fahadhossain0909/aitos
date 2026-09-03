@@ -1,7 +1,6 @@
 from datetime import datetime, timezone
 
 import pytest
-
 from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
 from aitos.market_data.gateway import MarketDataGateway
 from aitos.market_data.runtime import CanonicalMarketDataRuntime
