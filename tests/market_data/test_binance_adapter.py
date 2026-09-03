@@ -10,14 +10,21 @@ from aitos.models.market import OrderBookSnapshot, TradeTick
 class FakeExchange:
     async def stream_trades(self, symbols):
         yield TradeTick(
-            symbol=symbols[0], price=100.0, quantity=1.0,
-            timestamp=datetime.now(timezone.utc), trade_id=1, is_buyer_maker=False,
+            symbol=symbols[0],
+            price=100.0,
+            quantity=1.0,
+            timestamp=datetime.now(timezone.utc),
+            trade_id=1,
+            is_buyer_maker=False,
         )
 
     async def stream_order_book(self, symbols, levels=20):
         yield OrderBookSnapshot(
-            symbol=symbols[0], bids=[(99.0, 2.0)], asks=[(101.0, 2.0)],
-            timestamp=datetime.now(timezone.utc), last_update_id=7,
+            symbol=symbols[0],
+            bids=[(99.0, 2.0)],
+            asks=[(101.0, 2.0)],
+            timestamp=datetime.now(timezone.utc),
+            last_update_id=7,
         )
 
     async def fetch_recent_trades(self, symbol, limit=500):
@@ -25,8 +32,11 @@ class FakeExchange:
 
     async def fetch_order_book(self, symbol, limit=50):
         return OrderBookSnapshot(
-            symbol=symbol, bids=[(99.0, 2.0)], asks=[(101.0, 2.0)],
-            timestamp=datetime.now(timezone.utc), last_update_id=8,
+            symbol=symbol,
+            bids=[(99.0, 2.0)],
+            asks=[(101.0, 2.0)],
+            timestamp=datetime.now(timezone.utc),
+            last_update_id=8,
         )
 
 
