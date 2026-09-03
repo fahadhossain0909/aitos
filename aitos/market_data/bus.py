@@ -1,9 +1,4 @@
-"""Canonical market-data bus over Redis Streams.
-
-The adapter exposes semantic channels and preserves the full canonical
-identity/timing envelope. It is the migration seam between the new market-data
-plane and the existing EventBus implementation.
-"""
+"""Canonical market-data bus over Redis Streams."""
 
 from __future__ import annotations
 
@@ -12,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from aitos.core.contracts import Event
+from aitos.eventbus import redis_bus as redis_bus_module
 from aitos.eventbus.redis_bus import EventBus, Subscription
 
 from .channels import (
@@ -33,12 +29,19 @@ _CHANNEL_BY_TYPE = {
     MarketEventType.BOOK_DELTA: CHANNEL_BOOK_DELTA,
     MarketEventType.BOOK_SNAPSHOT: CHANNEL_BOOK_SNAPSHOT,
     MarketEventType.TICKER: CHANNEL_TICKER,
+    MarketEventType.KLINE: "market.kline",
     MarketEventType.FUNDING: CHANNEL_FUNDING,
     MarketEventType.OPEN_INTEREST: CHANNEL_OPEN_INTEREST,
     MarketEventType.LIQUIDATION: CHANNEL_LIQUIDATION,
     MarketEventType.OPTIONS: CHANNEL_OPTIONS,
     MarketEventType.INSTRUMENT: CHANNEL_INSTRUMENT,
 }
+
+# The legacy EventBus is intentionally retained as the transport primitive during
+# migration. Register v1 semantic channels with its bounded-retention policy so
+# a canonical stream can never grow without limit.
+for _channel in set(_CHANNEL_BY_TYPE.values()):
+    redis_bus_module.STREAM_MAXLEN_DEFAULTS.setdefault(_channel, maxlen_for(_channel))
 
 
 def channel_for(event_type: MarketEventType) -> str:
@@ -79,25 +82,21 @@ def market_event_to_wire(event: MarketEvent) -> dict[str, Any]:
 
 def market_event_from_wire(payload: dict[str, Any]) -> MarketEvent:
     event_time = _datetime_from_wire(payload.get("event_time", payload["source_ts"]))
-    ingest_time = _datetime_from_wire(
-        payload.get("ingest_time", payload.get("received_ts"))
-    )
+    ingest_time = _datetime_from_wire(payload.get("ingest_time", payload["received_ts"]))
     return MarketEvent(
         event_type=MarketEventType(payload["event_type"]),
         exchange=str(payload["exchange"]),
-        venue=payload.get("venue"),
+        venue=str(payload.get("venue") or payload["exchange"]),
         market=str(payload["market"]),
-        market_type=payload.get("market_type"),
+        market_type=str(payload.get("market_type") or payload["market"]),
         symbol=str(payload["symbol"]),
-        instrument_id=payload.get("instrument_id"),
+        instrument_id=str(payload.get("instrument_id") or payload["symbol"]),
         event_time=event_time,
         payload=dict(payload.get("payload") or {}),
         source=MarketSource(payload["source"]),
         ingest_time=ingest_time,
         event_id=str(payload["event_id"]),
-        sequence=(
-            int(payload["sequence"]) if payload.get("sequence") is not None else None
-        ),
+        sequence=int(payload["sequence"]) if payload.get("sequence") is not None else None,
         correlation_id=payload.get("correlation_id"),
         trace_id=payload.get("trace_id"),
         schema_version=int(payload.get("schema_version", 1)),
