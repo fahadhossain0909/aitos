@@ -1,6 +1,10 @@
 from datetime import datetime, timezone
 
-from aitos.market_data.bus import channel_for, market_event_from_wire, market_event_to_wire
+from aitos.market_data.bus import (
+    channel_for,
+    market_event_from_wire,
+    market_event_to_wire,
+)
 from aitos.market_data.channels import CHANNEL_BOOK_DELTA, CHANNEL_TRADE
 from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
 
