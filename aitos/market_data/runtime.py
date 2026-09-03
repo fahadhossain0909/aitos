@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 
 from aitos.logging_setup import get_logger
 
 from .binance_adapter import BinanceCanonicalMarketDataAdapter
 from .bus import MarketDataBus
-from .contracts import MarketEvent
 from .gateway import MarketDataGateway
 
 logger = get_logger("aitos.market_data.runtime")
@@ -44,10 +42,22 @@ class CanonicalMarketDataRuntime:
         self._stopped = False
         await self.gateway.start()
         self._tasks = [
-            asyncio.create_task(self._run("trades", self.adapter.stream_trades(self.symbols))),
-            asyncio.create_task(self._run("orderbook", self.adapter.stream_order_books(self.symbols, self.orderbook_levels))),
+            asyncio.create_task(
+                self._run("trades", self.adapter.stream_trades(self.symbols))
+            ),
+            asyncio.create_task(
+                self._run(
+                    "orderbook",
+                    self.adapter.stream_order_books(
+                        self.symbols, self.orderbook_levels
+                    ),
+                )
+            ),
         ]
-        logger.info("canonical market-data runtime started", extra={"aitos_extra": {"symbols": self.symbols}})
+        logger.info(
+            "canonical market-data runtime started",
+            extra={"aitos_extra": {"symbols": self.symbols}},
+        )
 
     async def stop(self) -> None:
         self._stopped = True
