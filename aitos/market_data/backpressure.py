@@ -14,19 +14,11 @@ class QueueStats:
     capacity: int
     accepted: int = 0
     dropped: int = 0
-
-    @property
-    def depth(self) -> int:
-        return 0
+    depth: int = 0
 
 
 class BoundedMarketQueue(Generic[T]):
-    """A bounded async queue that never grows without limit.
-
-    ``put_nowait`` is intentionally used at the gateway boundary so a slow
-    downstream consumer cannot silently turn market-data pressure into an
-    unbounded memory backlog.
-    """
+    """A bounded async queue that never grows without limit."""
 
     def __init__(self, capacity: int) -> None:
         if capacity <= 0:
@@ -39,23 +31,31 @@ class BoundedMarketQueue(Generic[T]):
             self._queue.put_nowait(item)
         except asyncio.QueueFull:
             self.stats.dropped += 1
+            self.stats.depth = self._queue.qsize()
             return False
         self.stats.accepted += 1
+        self.stats.depth = self._queue.qsize()
         return True
 
     async def get(self) -> T:
-        return await self._queue.get()
+        item = await self._queue.get()
+        self.stats.depth = self._queue.qsize()
+        return item
 
     def task_done(self) -> None:
         self._queue.task_done()
 
     def qsize(self) -> int:
-        return self._queue.qsize()
+        depth = self._queue.qsize()
+        self.stats.depth = depth
+        return depth
 
     def snapshot(self) -> dict[str, int]:
+        depth = self._queue.qsize()
+        self.stats.depth = depth
         return {
             "capacity": self.stats.capacity,
-            "depth": self._queue.qsize(),
+            "depth": depth,
             "accepted": self.stats.accepted,
             "dropped": self.stats.dropped,
         }
