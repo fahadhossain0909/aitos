@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Callable
 
 from aitos.logging_setup import get_logger
 
@@ -12,9 +13,17 @@ from .gateway import MarketDataGateway
 
 logger = get_logger("aitos.market_data.runtime")
 
+_RECONNECT_INITIAL_DELAY_SECONDS = 1.0
+_RECONNECT_MAX_DELAY_SECONDS = 30.0
+
 
 class CanonicalMarketDataRuntime:
-    """Own exchange sockets and publish normalized events through one gateway."""
+    """Own exchange sockets and publish normalized events through one gateway.
+
+    A stream ending or raising is treated as a transport failure, not as a
+    successful shutdown. The runtime recreates the adapter stream with bounded
+    exponential backoff until ``stop()`` is requested.
+    """
 
     def __init__(
         self,
@@ -43,13 +52,13 @@ class CanonicalMarketDataRuntime:
         )
         self._tasks = [
             asyncio.create_task(
-                self._run("trades", self.adapter.stream_trades(self.symbols)),
+                self._run("trades", lambda: self.adapter.stream_trades(self.symbols)),
                 name="market-data-trades",
             ),
             asyncio.create_task(
                 self._run(
                     "orderbook",
-                    self.adapter.stream_order_books(
+                    lambda: self.adapter.stream_order_books(
                         self.symbols, self.orderbook_levels
                     ),
                 ),
@@ -87,16 +96,47 @@ class CanonicalMarketDataRuntime:
                     extra={"aitos_extra": {"error": str(exc)}},
                 )
 
-    async def _run(self, stream_name: str, stream) -> None:
-        try:
-            async for event in stream:
-                self.gateway.accept(event)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            self.gateway.mark_reconnecting()
-            self.gateway.health.record_error(stream_name, str(exc))
-            logger.exception(
-                "canonical market-data stream stopped",
-                extra={"aitos_extra": {"stream": stream_name, "error": str(exc)}},
-            )
+    async def _run(
+        self,
+        stream_name: str,
+        stream_factory: Callable[[], AsyncIterator],
+    ) -> None:
+        delay = _RECONNECT_INITIAL_DELAY_SECONDS
+        while not self._stopped:
+            saw_event = False
+            try:
+                async for event in stream_factory():
+                    saw_event = True
+                    self.gateway.accept(event)
+                if self._stopped:
+                    return
+                self.gateway.mark_reconnecting()
+                self.gateway.health.record_error(
+                    stream_name, "stream ended unexpectedly"
+                )
+                logger.warning(
+                    "canonical market-data stream ended; reconnecting",
+                    extra={"aitos_extra": {"stream": stream_name, "delay": delay}},
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if self._stopped:
+                    return
+                self.gateway.mark_reconnecting()
+                self.gateway.health.record_error(stream_name, str(exc))
+                logger.exception(
+                    "canonical market-data stream failed; reconnecting",
+                    extra={
+                        "aitos_extra": {
+                            "stream": stream_name,
+                            "error": str(exc),
+                            "delay": delay,
+                        }
+                    },
+                )
+            if saw_event:
+                delay = _RECONNECT_INITIAL_DELAY_SECONDS
+            else:
+                delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+            await asyncio.sleep(delay)
