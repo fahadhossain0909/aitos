@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aitos.core.contracts import Event
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
