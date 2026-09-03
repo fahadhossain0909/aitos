@@ -49,7 +49,19 @@ CONSUMER_BATCH_SIZE = 100
 PENDING_RECLAIM_IDLE_MS = 5_000
 PENDING_RECLAIM_BATCH_SIZE = 100
 
+# Canonical market-data channels have bounded retention. Legacy prefixes are
+# retained temporarily so existing non-v1 consumers remain safe while the
+# market-data migration is completed.
 STREAM_MAXLEN_DEFAULTS = {
+    "market.trade": 25_000,
+    "market.book.delta": 25_000,
+    "market.book.snapshot": 5_000,
+    "market.ticker": 10_000,
+    "market.funding": 5_000,
+    "market.open_interest": 10_000,
+    "market.liquidation": 25_000,
+    "market.options": 10_000,
+    "market.instrument": 2_000,
     "market.trade.": 25_000,
     "market.orderbook.": 25_000,
     "market.liquidity.": 100_000,
@@ -62,9 +74,9 @@ def _stream_key(topic: str) -> str:
 
 
 def _stream_maxlen(topic: str) -> int | None:
-    for prefix, default in STREAM_MAXLEN_DEFAULTS.items():
-        if topic.startswith(prefix):
-            env_name = "REDIS_STREAM_MAXLEN_" + prefix[:-1].replace(".", "_").upper()
+    for prefix, default in sorted(STREAM_MAXLEN_DEFAULTS.items(), key=lambda item: -len(item[0])):
+        if topic == prefix or topic.startswith(prefix + ".") or topic.startswith(prefix):
+            env_name = "REDIS_STREAM_MAXLEN_" + prefix.replace(".", "_").upper().rstrip("_")
             raw_value = os.getenv(env_name)
             if raw_value is None:
                 return default
@@ -112,6 +124,7 @@ class EventBus(AITOSModule):
         self._started_at: float | None = None
         self._last_event_time: str | None = None
         self._known_topics: set[str] = set()
+        self._ensured_groups: set[tuple[str, str]] = set()
         self._subscriptions: list[Subscription] = []
         self._pending_replies: dict[str, asyncio.Future] = {}
 
@@ -224,8 +237,6 @@ class EventBus(AITOSModule):
         durable consumers. ``start_id='$'`` is an explicit live-only mode:
         the group cursor is moved to the current stream tail even when the
         group already exists, and abandoned pending entries are not reclaimed.
-        This prevents a restarted live scanner from replaying an old market
-        data backlog into its live state.
         """
         self._require_initialized()
         consumer_name = f"{group}-{id(handler)}"
@@ -304,6 +315,14 @@ class EventBus(AITOSModule):
         start_id: str = "0",
         reset_existing: bool = False,
     ) -> None:
+        key = (stream_key, group)
+        if key in self._ensured_groups:
+            if reset_existing:
+                # Live-only subscribers must move their cursor on every
+                # explicit subscription, even if this process already ensured
+                # the group earlier.
+                await self._redis.xgroup_setid(stream_key, group, id="$")
+            return
         try:
             await self._redis.xgroup_create(
                 stream_key, group, id=start_id, mkstream=True
@@ -312,14 +331,13 @@ class EventBus(AITOSModule):
             if "BUSYGROUP" not in str(exc):
                 raise
             if reset_existing:
-                # A live-only subscription must not inherit the previous
-                # deployment's group cursor. '$' means the current stream tail.
                 await self._redis.xgroup_setid(stream_key, group, id="$")
+        finally:
+            self._ensured_groups.add(key)
 
     async def _reclaim_pending(
         self, stream_key: str, group: str, consumer: str
     ) -> list[tuple[Any, dict[str, Any]]]:
-        """Claim abandoned pending entries so a restarted scanner can catch up."""
         try:
             result = await self._redis.xautoclaim(
                 stream_key,
@@ -360,141 +378,120 @@ class EventBus(AITOSModule):
         try:
             while True:
                 if "*" in topic_pattern:
-                    matching = {
-                        t
-                        for t in self._known_topics
-                        if fnmatch.fnmatch(t, topic_pattern)
-                    }
-                    new_streams = matching - streams_seen
-                    for t in new_streams:
+                    topics = [
+                        t for t in self._known_topics if fnmatch.fnmatch(t, topic_pattern)
+                    ]
+                else:
+                    topics = [topic_pattern]
+                stream_names = [_stream_key(t) for t in topics]
+                for stream_key in stream_names:
+                    if stream_key not in streams_seen:
                         await self._ensure_group(
-                            _stream_key(t),
+                            stream_key,
                             group,
                             start_id=start_id,
                             reset_existing=live_only,
                         )
-                    streams_seen |= matching
-                else:
-                    streams_seen = {topic_pattern}
-                if not streams_seen:
-                    await asyncio.sleep(0.2)
+                        streams_seen.add(stream_key)
+                if not stream_names:
+                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
                     continue
-
-                # Historical/durable consumers recover their own abandoned
-                # work. Live-only market consumers intentionally do not: those
-                # entries belong to an older processing epoch and may contain
-                # stale market timestamps.
+                pending_entries: list[tuple[str, Any, dict[str, Any]]] = []
                 if not live_only:
-                    for stream_topic in streams_seen:
-                        stream_key = _stream_key(stream_topic)
-                        pending = await self._reclaim_pending(
+                    for stream_key in stream_names:
+                        for entry_id, fields in await self._reclaim_pending(
                             stream_key, group, consumer
-                        )
-                        for entry_id, fields in pending:
-                            await self._process_message(
-                                stream_key, entry_id, fields, group, handler
-                            )
-
-                stream_map = {_stream_key(t): ">" for t in streams_seen}
-                try:
-                    resp = await self._redis.xreadgroup(
-                        groupname=group,
-                        consumername=consumer,
-                        streams=stream_map,
+                        ):
+                            pending_entries.append((stream_key, entry_id, fields))
+                if pending_entries:
+                    batches = [(s, i, f) for s, i, f in pending_entries]
+                else:
+                    result = await self._redis.xreadgroup(
+                        group,
+                        consumer,
+                        {s: ">" for s in stream_names},
                         count=CONSUMER_BATCH_SIZE,
                         block=CONSUMER_BLOCK_MS,
                     )
-                except Exception as exc:
-                    logger.error("xreadgroup error: %s", exc)
-                    await asyncio.sleep(1.0)
-                    continue
-                if not resp:
-                    await asyncio.sleep(POLL_INTERVAL_SECONDS)
-                    continue
-                for stream_key, messages in resp:
-                    stream_key = (
-                        stream_key.decode()
-                        if isinstance(stream_key, bytes)
-                        else stream_key
-                    )
-                    for entry_id, fields in messages:
-                        await self._process_message(
-                            stream_key, entry_id, fields, group, handler
+                    batches = [
+                        (stream_key, entry_id, fields)
+                        for stream_key, entries in result
+                        for entry_id, fields in entries
+                    ]
+                for stream_key, entry_id, fields in batches:
+                    try:
+                        event = Event.from_wire(fields)
+                        response = await handler(event)
+                        await self._redis.xack(stream_key, group, entry_id)
+                        if response is not None:
+                            await self._maybe_publish_response(event, response)
+                    except Exception as exc:
+                        logger.exception(
+                            "event handler failed",
+                            extra={
+                                "aitos_extra": {
+                                    "stream": stream_key,
+                                    "group": group,
+                                    "entry_id": entry_id,
+                                    "error": str(exc),
+                                }
+                            },
+                        )
+                        await self._handle_failed_event(
+                            stream_key, group, entry_id, fields, exc
                         )
         except asyncio.CancelledError:
-            return
-
-    async def _process_message(
-        self,
-        stream_key: str,
-        entry_id: Any,
-        fields: dict[str, Any],
-        group: str,
-        handler: EventHandler,
-    ) -> None:
-        event = Event.from_wire(fields)
-        try:
-            response = await handler(event)
-            await self._redis.xack(stream_key, group, entry_id)
-            if response is not None and event.correlation_id:
-                reply_event = Event(
-                    topic=f"{event.topic}.reply",
-                    payload=response.payload,
-                    source_module=response.responder_module,
-                    correlation_id=event.correlation_id,
-                )
-                await self.publish(reply_event)
+            raise
         except Exception as exc:
-            logger.error(
-                "handler failed for event",
-                extra={
-                    "aitos_extra": {
-                        "topic": event.topic,
-                        "event_id": event.event_id,
-                        "error": str(exc),
-                    }
-                },
-            )
-            await self._maybe_dead_letter(
-                stream_key, entry_id, fields, group, event, exc
-            )
+            logger.exception("event consumer stopped: %s", exc)
 
-    async def _maybe_dead_letter(
+    async def _maybe_publish_response(
+        self, request: Event, response: EventResponse
+    ) -> None:
+        if not response.success:
+            return
+        reply_topic = request.topic + ".reply"
+        reply_event = Event(
+            topic=reply_topic,
+            payload=response.payload,
+            source_module=response.responder_module,
+            correlation_id=request.correlation_id or request.event_id,
+        )
+        await self.publish(reply_event)
+
+    async def _handle_failed_event(
         self,
         stream_key: str,
+        group: str,
         entry_id: Any,
         fields: dict[str, Any],
-        group: str,
-        event: Event,
         exc: Exception,
     ) -> None:
-        pending = await self._redis.xpending_range(
-            stream_key, group, min="-", max="+", count=1, consumername=None
-        )
-        delivery_count = 1
-        for p in pending:
-            pid = p.get("message_id") if isinstance(p, dict) else None
-            if pid == entry_id:
-                delivery_count = p.get("times_delivered", 1)
-                break
-        if delivery_count >= MAX_DELIVERY_ATTEMPTS:
-            dlq_payload = dict(fields)
-            dlq_payload["dlq_reason"] = str(exc)
-            dlq_payload["original_stream"] = stream_key
-            await self._redis.xadd(DLQ_STREAM, dlq_payload)
+        attempts = int(fields.get("_delivery_attempts", 0)) + 1
+        if attempts >= MAX_DELIVERY_ATTEMPTS:
+            dlq_fields = dict(fields)
+            dlq_fields.update(
+                {
+                    "original_stream": stream_key,
+                    "consumer_group": group,
+                    "error": str(exc),
+                    "_delivery_attempts": attempts,
+                }
+            )
+            await self._redis.xadd(DLQ_STREAM, dlq_fields, maxlen=25_000, approximate=True)
             await self._redis.xack(stream_key, group, entry_id)
-            logger.error(
-                "event moved to DLQ",
-                extra={
-                    "aitos_extra": {"topic": event.topic, "event_id": event.event_id}
-                },
+        else:
+            # Keep the entry pending; the next reclaim will retry it.
+            await self._redis.xadd(
+                stream_key,
+                {**fields, "_delivery_attempts": attempts},
+                maxlen=_stream_maxlen(stream_key.removeprefix("stream:")) or 25_000,
+                approximate=True,
             )
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError(
-                "EventBus.initialize() must be called first"
-            )
+            raise ModuleNotInitializedError(f"{self.module_id} is not initialized")
 
 
 async def _await_cancelled(task: asyncio.Task) -> None:
