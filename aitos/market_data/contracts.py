@@ -1,8 +1,8 @@
 """Venue-neutral contracts for the AITOS market-data plane.
 
-The contracts intentionally separate *event time* from *ingest time* and
-identify the market explicitly. This prevents stale REST recovery data from
-being mistaken for live WebSocket data and makes transport failures observable.
+The contracts separate venue event time from AITOS receive time and carry
+stable identity, sequence, correlation, and tracing metadata. This makes a
+recovered REST event distinguishable from a live WebSocket event.
 """
 
 from __future__ import annotations
@@ -85,10 +85,11 @@ class OrderBookDelta:
 
 @dataclass(frozen=True, slots=True)
 class MarketEvent:
-    """Envelope used at the boundary between transport and processing.
+    """Canonical envelope shared by every market-data adapter.
 
-    ``event_time`` is the venue timestamp; ``ingest_time`` is when AITOS saw
-    the message. ``source`` is never inferred from the processing path.
+    ``event_time``/``source_ts`` is supplied by the venue. ``ingest_time`` /
+    ``received_ts`` is assigned by AITOS. ``source`` is explicit and is never
+    inferred from whether a downstream consumer happened to use REST.
     """
 
     event_type: MarketEventType
@@ -101,7 +102,31 @@ class MarketEvent:
     ingest_time: datetime = field(default_factory=utc_now)
     event_id: str = field(default_factory=lambda: uuid.uuid4().hex)
     schema_version: int = 1
+    venue: str | None = None
+    market_type: str | None = None
+    instrument_id: str | None = None
+    sequence: int | None = None
+    correlation_id: str | None = None
+    trace_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.venue is None:
+            object.__setattr__(self, "venue", self.exchange)
+        if self.instrument_id is None:
+            object.__setattr__(self, "instrument_id", self.symbol)
+        if self.correlation_id is None:
+            object.__setattr__(self, "correlation_id", self.event_id)
+        if self.trace_id is None:
+            object.__setattr__(self, "trace_id", self.event_id)
 
     @property
     def source_age_seconds(self) -> float:
         return max(0.0, (self.ingest_time - self.event_time).total_seconds())
+
+    @property
+    def source_ts(self) -> datetime:
+        return self.event_time
+
+    @property
+    def received_ts(self) -> datetime:
+        return self.ingest_time
