@@ -24,15 +24,15 @@ class BinanceCanonicalMarketDataAdapter:
         self, exchange: ExchangeAdapter, market_type: str = "usd_m_futures"
     ) -> None:
         self.exchange = exchange
-        self.market_type = market_type
+        self._market_type = MarketType(market_type)
 
     @property
     def venue(self) -> Venue:
         return Venue.BINANCE
 
     @property
-    def market_type_enum(self) -> MarketType:
-        return MarketType(self.market_type)
+    def market_type(self) -> MarketType:
+        return self._market_type
 
     @property
     def capabilities(self) -> VenueCapabilities:
