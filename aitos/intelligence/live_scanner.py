@@ -13,9 +13,7 @@ from aitos.models.market import OrderBookSnapshot, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")
 
-LIVE_TRADE_GROUP = "live-scanner-trades-v3"
-LIVE_BOOK_GROUP = "live-scanner-book-v3"
-LIVE_LIQUIDITY_GROUP = "live-scanner-liquidity-v3"
+LIVE_LIQUIDITY_GROUP = "market-scanner"
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 
 
@@ -37,19 +35,15 @@ class LiveSymbolCache:
 
 
 class LiveScannerCache:
-    """Consumes canonical EventBus market events and keeps a live view."""
+    """Maintain scanner state from one canonical market-data subscription path."""
 
-    def __init__(
-        self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000
-    ) -> None:
+    def __init__(self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000) -> None:
         self._bus = event_bus
         self._symbols = set(symbols)
         self._max_trades = max(100, max_trades)
         self._state: dict[str, LiveSymbolCache] = {}
         self._subscriptions: list[Subscription] = []
         self._initialized = False
-        self._direct_market_data = False
-        self._last_freshness_log_at: dict[str, datetime] = {}
 
     def _cache(self, symbol: str) -> LiveSymbolCache:
         if symbol not in self._state:
@@ -57,36 +51,16 @@ class LiveScannerCache:
         return self._state[symbol]
 
     async def initialize(self, direct_market_data: bool = False) -> None:
-        """Start live consumers; direct mode bypasses Redis for trade/book data."""
-        self._direct_market_data = direct_market_data
+        """Subscribe only to canonical V1 channels; direct mode is compatibility-only."""
         if self._initialized:
             return
         for symbol in self._symbols:
-            if not direct_market_data:
-                self._subscriptions.append(
-                    await self._bus.subscribe(
-                        f"market.trade.{symbol}",
-                        self._on_trade,
-                        group=LIVE_TRADE_GROUP,
-                        start_id="$",
-                    )
-                )
-                self._subscriptions.append(
-                    await self._bus.subscribe(
-                        f"market.orderbook.{symbol}",
-                        self._on_book,
-                        group=LIVE_BOOK_GROUP,
-                        start_id="$",
-                    )
-                )
             self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.liquidity.{symbol}",
-                    self._on_liquidity,
-                    group=LIVE_LIQUIDITY_GROUP,
-                    start_id="$",
-                )
-            )
+                await self._bus.subscribe(f"market.trade.{symbol}", self._on_trade, group="market-scanner", start_id="$"))
+            self._subscriptions.append(
+                await self._bus.subscribe(f"market.orderbook.{symbol}", self._on_book, group="market-scanner", start_id="$"))
+            self._subscriptions.append(
+                await self._bus.subscribe(f"market.liquidity.{symbol}", self._on_liquidity, group=LIVE_LIQUIDITY_GROUP, start_id="$"))
         self._initialized = True
 
     async def shutdown(self) -> None:
@@ -96,14 +70,10 @@ class LiveScannerCache:
         self._initialized = False
 
     async def accept_live_trade(self, trade: TradeTick) -> None:
-        await self._on_trade(
-            Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict())
-        )
+        await self._on_trade(Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict()))
 
     async def accept_live_order_book(self, book: OrderBookSnapshot) -> None:
-        await self._on_book(
-            Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict())
-        )
+        await self._on_book(Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict()))
 
     async def _on_trade(self, event: Event) -> None:
         trade = TradeTick.from_dict(event.payload)
@@ -113,20 +83,8 @@ class LiveScannerCache:
         if source_age > LIVE_TRADE_MAX_AGE_SECONDS:
             state.stale_trade_rejections += 1
             state.last_stale_trade_source_age_sec = round(max(0.0, source_age), 3)
-            logger.warning(
-                "discarded stale live trade",
-                extra={
-                    "aitos_extra": {
-                        "symbol": trade.symbol,
-                        "trade_id": trade.trade_id,
-                        "source_age_sec": round(max(0.0, source_age), 3),
-                        "max_source_age_seconds": LIVE_TRADE_MAX_AGE_SECONDS,
-                        "stale_trade_rejections": state.stale_trade_rejections,
-                    }
-                },
-            )
+            logger.warning("discarded stale canonical trade", extra={"aitos_extra": {"symbol": trade.symbol, "source_age_sec": round(max(0.0, source_age), 3)}})
             return
-
         if state.trades and trade.trade_id <= state.trades[-1].trade_id:
             state.duplicate_trade_rejections += 1
             return
@@ -134,24 +92,18 @@ class LiveScannerCache:
         state.last_trade_at = received_at
         state.last_trade_source_at = trade.timestamp
         state.last_trade_received_at = received_at
-        self._maybe_log_freshness(trade.symbol)
 
     async def _on_book(self, event: Event) -> None:
         book = OrderBookSnapshot.from_dict(event.payload)
         received_at = datetime.now(timezone.utc)
         state = self._cache(book.symbol)
-        if (
-            state.order_book is not None
-            and state.order_book.last_update_id == book.last_update_id
-            and state.order_book.timestamp == book.timestamp
-        ):
+        if state.order_book is not None and state.order_book.last_update_id == book.last_update_id and state.order_book.timestamp == book.timestamp:
             state.duplicate_book_rejections += 1
             return
         state.order_book = book
         state.last_book_at = received_at
         state.last_book_source_at = book.timestamp
         state.last_book_received_at = received_at
-        self._maybe_log_freshness(book.symbol)
 
     async def _on_liquidity(self, event: Event) -> None:
         payload = dict(event.payload)
@@ -159,150 +111,4 @@ class LiveScannerCache:
         self._cache(symbol).liquidity_events.append(payload)
 
     def snapshot(self, symbol: str) -> LiveSymbolCache | None:
-        self._maybe_log_freshness(symbol)
         return self._state.get(symbol)
-
-    @staticmethod
-    def _age_seconds(timestamp: datetime | None, now: datetime) -> float | None:
-        if timestamp is None:
-            return None
-        return max(0.0, (now - timestamp).total_seconds())
-
-    def freshness_snapshot(self, symbol: str) -> dict:
-        state = self._state.get(symbol)
-        if state is None:
-            return {
-                "cache_has_state": False,
-                "last_trade_at": None,
-                "last_book_at": None,
-                "last_trade_source_at": None,
-                "last_book_source_at": None,
-                "last_trade_received_at": None,
-                "last_book_received_at": None,
-                "trade_age_sec": None,
-                "book_age_sec": None,
-                "trade_receive_age_sec": None,
-                "book_receive_age_sec": None,
-                "trade_source_age_sec": None,
-                "book_source_age_sec": None,
-                "trade_consumer_lag_sec": None,
-                "book_consumer_lag_sec": None,
-                "stale_trade_rejections": 0,
-                "duplicate_trade_rejections": 0,
-                "duplicate_book_rejections": 0,
-                "last_stale_trade_source_age_sec": None,
-            }
-        now = datetime.now(timezone.utc)
-        trade_age = self._age_seconds(state.last_trade_at, now)
-        book_age = self._age_seconds(state.last_book_at, now)
-        trade_source_at = state.last_trade_source_at or state.last_trade_at
-        book_source_at = state.last_book_source_at or state.last_book_at
-        trade_source_age = self._age_seconds(trade_source_at, now)
-        book_source_age = self._age_seconds(book_source_at, now)
-        trade_receive_age = self._age_seconds(state.last_trade_received_at, now)
-        book_receive_age = self._age_seconds(state.last_book_received_at, now)
-        trade_lag = (
-            None
-            if trade_source_age is None or trade_receive_age is None
-            else max(0.0, trade_source_age - trade_receive_age)
-        )
-        book_lag = (
-            None
-            if book_source_age is None or book_receive_age is None
-            else max(0.0, book_source_age - book_receive_age)
-        )
-        return {
-            "cache_has_state": True,
-            "last_trade_at": (
-                state.last_trade_at.isoformat() if state.last_trade_at else None
-            ),
-            "last_book_at": (
-                state.last_book_at.isoformat() if state.last_book_at else None
-            ),
-            "last_trade_source_at": (
-                state.last_trade_source_at.isoformat()
-                if state.last_trade_source_at
-                else None
-            ),
-            "last_book_source_at": (
-                state.last_book_source_at.isoformat()
-                if state.last_book_source_at
-                else None
-            ),
-            "last_trade_received_at": (
-                state.last_trade_received_at.isoformat()
-                if state.last_trade_received_at
-                else None
-            ),
-            "last_book_received_at": (
-                state.last_book_received_at.isoformat()
-                if state.last_book_received_at
-                else None
-            ),
-            "trade_age_sec": round(trade_age, 3) if trade_age is not None else None,
-            "book_age_sec": round(book_age, 3) if book_age is not None else None,
-            "trade_receive_age_sec": (
-                round(trade_receive_age, 3) if trade_receive_age is not None else None
-            ),
-            "book_receive_age_sec": (
-                round(book_receive_age, 3) if book_receive_age is not None else None
-            ),
-            "trade_source_age_sec": (
-                round(trade_source_age, 3) if trade_source_age is not None else None
-            ),
-            "book_source_age_sec": (
-                round(book_source_age, 3) if book_source_age is not None else None
-            ),
-            "trade_consumer_lag_sec": (
-                round(trade_lag, 3) if trade_lag is not None else None
-            ),
-            "book_consumer_lag_sec": (
-                round(book_lag, 3) if book_lag is not None else None
-            ),
-            "stale_trade_rejections": state.stale_trade_rejections,
-            "duplicate_trade_rejections": state.duplicate_trade_rejections,
-            "duplicate_book_rejections": state.duplicate_book_rejections,
-            "last_stale_trade_source_age_sec": state.last_stale_trade_source_age_sec,
-        }
-
-    def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
-        state = self._state.get(symbol)
-        if state is None or state.last_trade_source_at is None:
-            return False
-        return (
-            datetime.now(timezone.utc) - state.last_trade_source_at
-        ).total_seconds() <= max_age_seconds
-
-    def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
-        state = self._state.get(symbol)
-        if state is None or state.last_book_source_at is None:
-            return False
-        return (
-            datetime.now(timezone.utc) - state.last_book_source_at
-        ).total_seconds() <= max_age_seconds
-
-    def _maybe_log_freshness(self, symbol: str) -> None:
-        now = datetime.now(timezone.utc)
-        previous = self._last_freshness_log_at.get(symbol)
-        if previous is not None and (now - previous).total_seconds() < 30.0:
-            return
-        self._last_freshness_log_at[symbol] = now
-        logger.info(
-            "live scanner freshness",
-            extra={
-                "aitos_extra": {"symbol": symbol, **self.freshness_snapshot(symbol)}
-            },
-        )
-
-    def recent_trades(self, symbol: str, limit: int | None = None) -> list[TradeTick]:
-        state = self._state.get(symbol)
-        trades = list(state.trades) if state else []
-        return trades[-limit:] if limit else trades
-
-    def order_book(self, symbol: str) -> OrderBookSnapshot | None:
-        state = self._state.get(symbol)
-        return state.order_book if state else None
-
-    def liquidity_events(self, symbol: str) -> list[dict]:
-        state = self._state.get(symbol)
-        return list(state.liquidity_events) if state else []
