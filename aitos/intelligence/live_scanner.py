@@ -16,6 +16,7 @@ logger = get_logger("aitos.intelligence.live_scanner")
 
 LIVE_SCANNER_GROUP = "market-scanner"
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
+LIVE_BOOK_MAX_AGE_SECONDS = 15.0
 
 
 @dataclass
@@ -30,9 +31,11 @@ class LiveSymbolCache:
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
     stale_trade_rejections: int = 0
+    stale_book_rejections: int = 0
     duplicate_trade_rejections: int = 0
     duplicate_book_rejections: int = 0
     last_stale_trade_source_age_sec: float | None = None
+    last_stale_book_source_age_sec: float | None = None
 
 
 class LiveScannerCache:
@@ -127,6 +130,14 @@ class LiveScannerCache:
             return
         state = self._cache(event.symbol)
         received_at = datetime.now(timezone.utc)
+        source_age = (received_at - event.event_time).total_seconds()
+        if (
+            event.source != MarketSource.WEBSOCKET
+            or source_age > LIVE_BOOK_MAX_AGE_SECONDS
+        ):
+            state.stale_book_rejections += 1
+            state.last_stale_book_source_age_sec = round(max(0.0, source_age), 3)
+            return
         payload = dict(event.payload)
         payload["symbol"] = event.symbol
         payload["timestamp"] = event.event_time.isoformat()
