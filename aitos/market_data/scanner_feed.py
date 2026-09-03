@@ -5,9 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any
 
-from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
@@ -29,17 +27,25 @@ class CanonicalScannerFeed:
         self._book_handler: BookHandler | None = None
         self._last_event_at: datetime | None = None
 
-    async def start(self, trade_handler: TradeHandler, book_handler: BookHandler) -> None:
+    async def start(
+        self, trade_handler: TradeHandler, book_handler: BookHandler
+    ) -> None:
         if self._subscriptions:
             return
         self._trade_handler = trade_handler
         self._book_handler = book_handler
         self._subscriptions = [
             await self._market_bus.subscribe(
-                MarketEventType.TRADE, self._on_trade, group="market-scanner", live_only=True
+                MarketEventType.TRADE,
+                self._on_trade,
+                group="market-scanner",
+                live_only=True,
             ),
             await self._market_bus.subscribe(
-                MarketEventType.BOOK_SNAPSHOT, self._on_book, group="market-scanner", live_only=True
+                MarketEventType.BOOK_SNAPSHOT,
+                self._on_book,
+                group="market-scanner",
+                live_only=True,
             ),
         ]
 

@@ -67,8 +67,13 @@ class MarketDataGateway:
         """
         self.health.record_event()
         age = event.source_age_seconds
-        if event.source == MarketSource.WEBSOCKET and age > self.config.max_source_age_seconds:
-            self.health.record_error("stale_websocket", f"source age {age:.3f}s exceeded limit")
+        if (
+            event.source == MarketSource.WEBSOCKET
+            and age > self.config.max_source_age_seconds
+        ):
+            self.health.record_error(
+                "stale_websocket", f"source age {age:.3f}s exceeded limit"
+            )
             self.state = GatewayState.DEGRADED
             return False
         if event.source == MarketSource.REST:
@@ -90,4 +95,8 @@ class MarketDataGateway:
             self.queue.task_done()
 
     def snapshot(self) -> dict[str, object]:
-        return {"state": self.state.value, "queue": self.queue.snapshot(), "health": self.health.snapshot()}
+        return {
+            "state": self.state.value,
+            "queue": self.queue.snapshot(),
+            "health": self.health.snapshot(),
+        }

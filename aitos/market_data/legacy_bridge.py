@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from aitos.models.market import Kline, OrderBookSnapshot as LegacyBook, TradeTick
+from aitos.models.market import Kline, TradeTick
+from aitos.models.market import OrderBookSnapshot as LegacyBook
 
 from .contracts import MarketEvent, MarketEventType, MarketSource
 
@@ -13,7 +14,12 @@ def _received() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def trade_event(trade: TradeTick, *, market_type: str = "futures", source: MarketSource = MarketSource.WEBSOCKET) -> MarketEvent:
+def trade_event(
+    trade: TradeTick,
+    *,
+    market_type: str = "futures",
+    source: MarketSource = MarketSource.WEBSOCKET,
+) -> MarketEvent:
     received = _received()
     return MarketEvent(
         event_type=MarketEventType.TRADE,
@@ -30,7 +36,12 @@ def trade_event(trade: TradeTick, *, market_type: str = "futures", source: Marke
     )
 
 
-def book_snapshot_event(book: LegacyBook, *, market_type: str = "futures", source: MarketSource = MarketSource.WEBSOCKET) -> MarketEvent:
+def book_snapshot_event(
+    book: LegacyBook,
+    *,
+    market_type: str = "futures",
+    source: MarketSource = MarketSource.WEBSOCKET,
+) -> MarketEvent:
     received = _received()
     return MarketEvent(
         event_type=MarketEventType.BOOK_SNAPSHOT,
@@ -51,7 +62,12 @@ def book_snapshot_event(book: LegacyBook, *, market_type: str = "futures", sourc
     )
 
 
-def kline_event(kline: Kline, *, market_type: str = "futures", source: MarketSource = MarketSource.WEBSOCKET) -> MarketEvent:
+def kline_event(
+    kline: Kline,
+    *,
+    market_type: str = "futures",
+    source: MarketSource = MarketSource.WEBSOCKET,
+) -> MarketEvent:
     received = _received()
     return MarketEvent(
         event_type=MarketEventType.KLINE,
