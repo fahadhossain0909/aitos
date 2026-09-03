@@ -31,7 +31,7 @@ from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
 
 logger = get_logger("aitos.run_paper_trading")
-SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+SYMBOLS = ["BTCUSDT", "SOLUSDT"]
 SCAN_INTERVAL_SECONDS = 60.0
 KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 10_000.0
