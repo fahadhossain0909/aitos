@@ -6,7 +6,13 @@ import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
-from aitos.core.contracts import AITOSModule, Event, EventResponse, HealthStatus, ModuleStatus
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.logging_setup import get_logger
 from aitos.models.market import Kline, OrderBookSnapshot, TradeTick
@@ -52,27 +58,39 @@ class LegacyMarketDataBridge(AITOSModule):
             self._subscriptions.extend(
                 [
                     await self._event_bus.subscribe(
-                        f"market.trade.{symbol}", self._on_trade,
-                        group="market-data-bridge", start_id="$"
+                        f"market.trade.{symbol}",
+                        self._on_trade,
+                        group="market-data-bridge",
+                        start_id="$",
                     ),
                     await self._event_bus.subscribe(
-                        f"market.orderbook.{symbol}", self._on_book,
-                        group="market-data-bridge", start_id="$"
+                        f"market.orderbook.{symbol}",
+                        self._on_book,
+                        group="market-data-bridge",
+                        start_id="$",
                     ),
                     await self._event_bus.subscribe(
-                        f"market.kline.{symbol}.*", self._on_kline,
-                        group="market-data-bridge", start_id="$"
+                        f"market.kline.{symbol}.*",
+                        self._on_kline,
+                        group="market-data-bridge",
+                        start_id="$",
                     ),
                 ]
             )
         self._initialized = True
-        logger.info("canonical market-data bridge initialized", extra={"aitos_extra": {"symbols": symbols}})
+        logger.info(
+            "canonical market-data bridge initialized",
+            extra={"aitos_extra": {"symbols": symbols}},
+        )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         for subscription in self._subscriptions:
             subscription.cancel()
         if self._subscriptions:
-            await asyncio.gather(*(self._wait_subscription(s) for s in self._subscriptions), return_exceptions=True)
+            await asyncio.gather(
+                *(self._wait_subscription(s) for s in self._subscriptions),
+                return_exceptions=True,
+            )
         self._subscriptions.clear()
         self._initialized = False
 
@@ -83,10 +101,21 @@ class LegacyMarketDataBridge(AITOSModule):
             pass
 
     async def health_check(self) -> HealthStatus:
-        status = ModuleStatus.HEALTHY if self._initialized and not self._errors else ModuleStatus.DEGRADED
-        return HealthStatus(module_id=self.module_id, status=status, latency_ms=0.0,
-                            details={"published": self._published, "errors": self._errors,
-                                     "subscriptions": len(self._subscriptions)})
+        status = (
+            ModuleStatus.HEALTHY
+            if self._initialized and not self._errors
+            else ModuleStatus.DEGRADED
+        )
+        return HealthStatus(
+            module_id=self.module_id,
+            status=status,
+            latency_ms=0.0,
+            details={
+                "published": self._published,
+                "errors": self._errors,
+                "subscriptions": len(self._subscriptions),
+            },
+        )
 
     async def emit_events(self) -> AsyncIterator[Event]:
         return
@@ -97,7 +126,11 @@ class LegacyMarketDataBridge(AITOSModule):
 
     @staticmethod
     def _source(event: Event) -> MarketSource:
-        raw = event.payload.get("_market_source") if isinstance(event.payload, dict) else None
+        raw = (
+            event.payload.get("_market_source")
+            if isinstance(event.payload, dict)
+            else None
+        )
         try:
             return MarketSource(str(raw)) if raw else MarketSource.WEBSOCKET
         except ValueError:
@@ -109,21 +142,41 @@ class LegacyMarketDataBridge(AITOSModule):
 
     async def _on_trade(self, event: Event) -> None:
         try:
-            await self._publish(trade_event(TradeTick.from_dict(event.payload), source=self._source(event)))
+            await self._publish(
+                trade_event(
+                    TradeTick.from_dict(event.payload), source=self._source(event)
+                )
+            )
         except Exception:
             self._errors += 1
-            logger.exception("failed to bridge trade event", extra={"aitos_extra": {"topic": event.topic}})
+            logger.exception(
+                "failed to bridge trade event",
+                extra={"aitos_extra": {"topic": event.topic}},
+            )
 
     async def _on_book(self, event: Event) -> None:
         try:
-            await self._publish(book_snapshot_event(OrderBookSnapshot.from_dict(event.payload), source=self._source(event)))
+            await self._publish(
+                book_snapshot_event(
+                    OrderBookSnapshot.from_dict(event.payload),
+                    source=self._source(event),
+                )
+            )
         except Exception:
             self._errors += 1
-            logger.exception("failed to bridge order-book event", extra={"aitos_extra": {"topic": event.topic}})
+            logger.exception(
+                "failed to bridge order-book event",
+                extra={"aitos_extra": {"topic": event.topic}},
+            )
 
     async def _on_kline(self, event: Event) -> None:
         try:
-            await self._publish(kline_event(Kline.from_dict(event.payload), source=self._source(event)))
+            await self._publish(
+                kline_event(Kline.from_dict(event.payload), source=self._source(event))
+            )
         except Exception:
             self._errors += 1
-            logger.exception("failed to bridge kline event", extra={"aitos_extra": {"topic": event.topic}})
+            logger.exception(
+                "failed to bridge kline event",
+                extra={"aitos_extra": {"topic": event.topic}},
+            )
