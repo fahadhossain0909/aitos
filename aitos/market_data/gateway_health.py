@@ -52,7 +52,9 @@ class GatewayHealth:
         now = datetime.now(timezone.utc)
         source_age_ms = None
         if self.last_event_at is not None:
-            source_age_ms = max(0, int((now - self.last_event_at).total_seconds() * 1000))
+            source_age_ms = max(
+                0, int((now - self.last_event_at).total_seconds() * 1000)
+            )
         return {
             "venue": self.venue,
             "market_type": self.market_type,
