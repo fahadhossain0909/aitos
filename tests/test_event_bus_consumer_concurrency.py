@@ -76,9 +76,7 @@ async def test_parallelizes_independent_streams_but_preserves_order(monkeypatch)
     install_eventbus_consumer_concurrency(_FakeBus)
     bus = _FakeBus()
     task = asyncio.create_task(
-        bus._consume_loop(
-            "market.trade.*", "group", "consumer", lambda _event: None
-        )
+        bus._consume_loop("market.trade.*", "group", "consumer", lambda _event: None)
     )
 
     for _ in range(100):
