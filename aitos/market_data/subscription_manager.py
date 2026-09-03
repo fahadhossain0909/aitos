@@ -27,7 +27,9 @@ class SubscriptionManager:
     def active(self) -> frozenset[str]:
         return frozenset(self._active)
 
-    def apply_ranked_symbols(self, ranked_symbols: list[str] | tuple[str, ...]) -> SubscriptionDelta:
+    def apply_ranked_symbols(
+        self, ranked_symbols: list[str] | tuple[str, ...]
+    ) -> SubscriptionDelta:
         plan: SubscriptionPlan = build_subscription_plan(
             ranked_symbols, btc_symbol=self._permanent[0]
         )
