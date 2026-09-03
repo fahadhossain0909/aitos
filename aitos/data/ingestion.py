@@ -146,7 +146,10 @@ class DataIngestionService(AITOSModule):
         # Canonical MarketData V1 owns live trade/order-book transport when no
         # legacy direct handlers are supplied. Keep the old streams available
         # for compatibility callers/tests that explicitly provide handlers.
-        if self._live_trade_handler is not None or self._live_orderbook_handler is not None:
+        if (
+            self._live_trade_handler is not None
+            or self._live_orderbook_handler is not None
+        ):
             self._tasks.extend(
                 [
                     asyncio.create_task(
