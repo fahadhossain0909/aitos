@@ -16,6 +16,7 @@ from .contracts import (
     OrderBookSnapshot,
     TradeEvent,
 )
+from .registry import VenueRegistry
 from .venues import (
     DEFAULT_VENUES,
     InstrumentKey,
@@ -41,6 +42,7 @@ __all__ = [
     "Venue",
     "VenueCapabilities",
     "VenueConfig",
+    "VenueRegistry",
     "channel_for",
     "market_event_from_wire",
     "market_event_to_wire",
