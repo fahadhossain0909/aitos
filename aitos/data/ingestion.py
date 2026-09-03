@@ -46,14 +46,17 @@ class DataIngestionService(_LegacyDataIngestionService):
         self._canonical_runtime: CanonicalMarketDataRuntime | None = None
         if self._canonical_mode:
             exchange = self._exchange
+            market_type = str(getattr(exchange, "market_type", "usd_m_futures"))
             market_bus = MarketDataBus(self._event_bus)
             gateway = MarketDataGateway(
                 venue="binance",
-                market_type=str(getattr(exchange, "market_type", "spot")),
+                market_type=market_type,
                 publisher=market_bus.publish,
             )
             self._canonical_runtime = CanonicalMarketDataRuntime(
-                adapter=BinanceCanonicalMarketDataAdapter(exchange),
+                adapter=BinanceCanonicalMarketDataAdapter(
+                    exchange, market_type=market_type
+                ),
                 market_bus=market_bus,
                 gateway=gateway,
                 symbols=self._symbols,
