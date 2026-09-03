@@ -37,9 +37,7 @@ class LiveSymbolCache:
 class LiveScannerCache:
     """Maintain scanner state from one canonical market-data subscription path."""
 
-    def __init__(
-        self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000
-    ) -> None:
+    def __init__(self, event_bus: EventBus, symbols: list[str], max_trades: int = 5000) -> None:
         self._bus = event_bus
         self._symbols = set(symbols)
         self._max_trades = max(100, max_trades)
@@ -53,34 +51,13 @@ class LiveScannerCache:
         return self._state[symbol]
 
     async def initialize(self, direct_market_data: bool = False) -> None:
-        """Subscribe only to canonical V1 channels; direct mode is compatibility-only."""
+        """Subscribe only to canonical V1 channels; direct mode is ignored."""
         if self._initialized:
             return
         for symbol in self._symbols:
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.trade.{symbol}",
-                    self._on_trade,
-                    group="market-scanner",
-                    start_id="$",
-                )
-            )
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.orderbook.{symbol}",
-                    self._on_book,
-                    group="market-scanner",
-                    start_id="$",
-                )
-            )
-            self._subscriptions.append(
-                await self._bus.subscribe(
-                    f"market.liquidity.{symbol}",
-                    self._on_liquidity,
-                    group=LIVE_LIQUIDITY_GROUP,
-                    start_id="$",
-                )
-            )
+            self._subscriptions.append(await self._bus.subscribe(f"market.trade.{symbol}", self._on_trade, group="market-scanner", start_id="$"))
+            self._subscriptions.append(await self._bus.subscribe(f"market.orderbook.{symbol}", self._on_book, group="market-scanner", start_id="$"))
+            self._subscriptions.append(await self._bus.subscribe(f"market.liquidity.{symbol}", self._on_liquidity, group=LIVE_LIQUIDITY_GROUP, start_id="$"))
         self._initialized = True
 
     async def shutdown(self) -> None:
@@ -90,14 +67,12 @@ class LiveScannerCache:
         self._initialized = False
 
     async def accept_live_trade(self, trade: TradeTick) -> None:
-        await self._on_trade(
-            Event(topic=f"market.trade.{trade.symbol}", payload=trade.to_dict())
-        )
+        """Deprecated compatibility hook; live state comes only from V1 Redis."""
+        logger.debug("ignored legacy live trade callback", extra={"aitos_extra": {"symbol": trade.symbol}})
 
     async def accept_live_order_book(self, book: OrderBookSnapshot) -> None:
-        await self._on_book(
-            Event(topic=f"market.orderbook.{book.symbol}", payload=book.to_dict())
-        )
+        """Deprecated compatibility hook; live state comes only from V1 Redis."""
+        logger.debug("ignored legacy live orderbook callback", extra={"aitos_extra": {"symbol": book.symbol}})
 
     async def _on_trade(self, event: Event) -> None:
         trade = TradeTick.from_dict(event.payload)
@@ -107,15 +82,7 @@ class LiveScannerCache:
         if source_age > LIVE_TRADE_MAX_AGE_SECONDS:
             state.stale_trade_rejections += 1
             state.last_stale_trade_source_age_sec = round(max(0.0, source_age), 3)
-            logger.warning(
-                "discarded stale canonical trade",
-                extra={
-                    "aitos_extra": {
-                        "symbol": trade.symbol,
-                        "source_age_sec": round(max(0.0, source_age), 3),
-                    }
-                },
-            )
+            logger.warning("discarded stale canonical trade", extra={"aitos_extra": {"symbol": trade.symbol, "source_age_sec": round(max(0.0, source_age), 3)}})
             return
         if state.trades and trade.trade_id <= state.trades[-1].trade_id:
             state.duplicate_trade_rejections += 1
@@ -129,11 +96,7 @@ class LiveScannerCache:
         book = OrderBookSnapshot.from_dict(event.payload)
         received_at = datetime.now(timezone.utc)
         state = self._cache(book.symbol)
-        if (
-            state.order_book is not None
-            and state.order_book.last_update_id == book.last_update_id
-            and state.order_book.timestamp == book.timestamp
-        ):
+        if state.order_book is not None and state.order_book.last_update_id == book.last_update_id and state.order_book.timestamp == book.timestamp:
             state.duplicate_book_rejections += 1
             return
         state.order_book = book
