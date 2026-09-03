@@ -70,18 +70,39 @@ class VenueConfig:
 DEFAULT_VENUES: tuple[VenueConfig, ...] = (
     VenueConfig(
         Venue.BINANCE,
-        (MarketType.SPOT, MarketType.USD_M_FUTURES, MarketType.COIN_M_FUTURES, MarketType.OPTIONS),
-        VenueCapabilities(funding=True, open_interest=True, liquidations=True, options=True),
+        (
+            MarketType.SPOT,
+            MarketType.USD_M_FUTURES,
+            MarketType.COIN_M_FUTURES,
+            MarketType.OPTIONS,
+        ),
+        VenueCapabilities(
+            funding=True, open_interest=True, liquidations=True, options=True
+        ),
     ),
     VenueConfig(
         Venue.BYBIT,
-        (MarketType.SPOT, MarketType.USD_M_FUTURES, MarketType.COIN_M_FUTURES, MarketType.OPTIONS),
-        VenueCapabilities(funding=True, open_interest=True, liquidations=True, options=True),
+        (
+            MarketType.SPOT,
+            MarketType.USD_M_FUTURES,
+            MarketType.COIN_M_FUTURES,
+            MarketType.OPTIONS,
+        ),
+        VenueCapabilities(
+            funding=True, open_interest=True, liquidations=True, options=True
+        ),
     ),
     VenueConfig(
         Venue.OKX,
-        (MarketType.SPOT, MarketType.USD_M_FUTURES, MarketType.COIN_M_FUTURES, MarketType.OPTIONS),
-        VenueCapabilities(funding=True, open_interest=True, liquidations=True, options=True),
+        (
+            MarketType.SPOT,
+            MarketType.USD_M_FUTURES,
+            MarketType.COIN_M_FUTURES,
+            MarketType.OPTIONS,
+        ),
+        VenueCapabilities(
+            funding=True, open_interest=True, liquidations=True, options=True
+        ),
     ),
     VenueConfig(
         Venue.KUCOIN,
@@ -96,11 +117,15 @@ DEFAULT_VENUES: tuple[VenueConfig, ...] = (
     VenueConfig(
         Venue.UNISWAP,
         (MarketType.DEX_POOL,),
-        VenueCapabilities(order_book=False, funding=False, open_interest=False, liquidations=False),
+        VenueCapabilities(
+            order_book=False, funding=False, open_interest=False, liquidations=False
+        ),
     ),
     VenueConfig(
         Venue.JUPITER,
         (MarketType.DEX_POOL,),
-        VenueCapabilities(order_book=False, funding=False, open_interest=False, liquidations=False),
+        VenueCapabilities(
+            order_book=False, funding=False, open_interest=False, liquidations=False
+        ),
     ),
 )
