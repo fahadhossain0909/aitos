@@ -95,7 +95,9 @@ def market_event_from_wire(payload: dict[str, Any]) -> MarketEvent:
         source=MarketSource(payload["source"]),
         ingest_time=ingest_time,
         event_id=str(payload["event_id"]),
-        sequence=int(payload["sequence"]) if payload.get("sequence") is not None else None,
+        sequence=(
+            int(payload["sequence"]) if payload.get("sequence") is not None else None
+        ),
         correlation_id=payload.get("correlation_id"),
         trace_id=payload.get("trace_id"),
         schema_version=int(payload.get("schema_version", 1)),

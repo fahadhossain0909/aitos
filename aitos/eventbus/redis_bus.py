@@ -74,9 +74,17 @@ def _stream_key(topic: str) -> str:
 
 
 def _stream_maxlen(topic: str) -> int | None:
-    for prefix, default in sorted(STREAM_MAXLEN_DEFAULTS.items(), key=lambda item: -len(item[0])):
-        if topic == prefix or topic.startswith(prefix + ".") or topic.startswith(prefix):
-            env_name = "REDIS_STREAM_MAXLEN_" + prefix.replace(".", "_").upper().rstrip("_")
+    for prefix, default in sorted(
+        STREAM_MAXLEN_DEFAULTS.items(), key=lambda item: -len(item[0])
+    ):
+        if (
+            topic == prefix
+            or topic.startswith(prefix + ".")
+            or topic.startswith(prefix)
+        ):
+            env_name = "REDIS_STREAM_MAXLEN_" + prefix.replace(".", "_").upper().rstrip(
+                "_"
+            )
             raw_value = os.getenv(env_name)
             if raw_value is None:
                 return default
@@ -379,7 +387,9 @@ class EventBus(AITOSModule):
             while True:
                 if "*" in topic_pattern:
                     topics = [
-                        t for t in self._known_topics if fnmatch.fnmatch(t, topic_pattern)
+                        t
+                        for t in self._known_topics
+                        if fnmatch.fnmatch(t, topic_pattern)
                     ]
                 else:
                     topics = [topic_pattern]
@@ -478,7 +488,9 @@ class EventBus(AITOSModule):
                     "_delivery_attempts": attempts,
                 }
             )
-            await self._redis.xadd(DLQ_STREAM, dlq_fields, maxlen=25_000, approximate=True)
+            await self._redis.xadd(
+                DLQ_STREAM, dlq_fields, maxlen=25_000, approximate=True
+            )
             await self._redis.xack(stream_key, group, entry_id)
         else:
             # Keep the entry pending; the next reclaim will retry it.
