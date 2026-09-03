@@ -101,7 +101,7 @@ services:
       - "${NEO4J_LOG_DIR:-./.storage/others/neo4j-logs}:/logs"
     cpus: "0.5"
     mem_limit: 2.5g
-    healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10}
+    healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10, start_period: 60s}
     restart: unless-stopped
 
   aitos-paper:
