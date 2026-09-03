@@ -1,5 +1,6 @@
 """Canonical market-data architecture for AITOS."""
 
+from .adapter import CanonicalMarketDataAdapter
 from .bus import (
     MarketDataBus,
     channel_for,
@@ -15,16 +16,31 @@ from .contracts import (
     OrderBookSnapshot,
     TradeEvent,
 )
+from .venues import (
+    DEFAULT_VENUES,
+    InstrumentKey,
+    MarketType,
+    Venue,
+    VenueCapabilities,
+    VenueConfig,
+)
 
 __all__ = [
     "BookLevel",
+    "CanonicalMarketDataAdapter",
+    "DEFAULT_VENUES",
+    "InstrumentKey",
     "MarketDataBus",
     "MarketEvent",
     "MarketEventType",
     "MarketSource",
+    "MarketType",
     "OrderBookDelta",
     "OrderBookSnapshot",
     "TradeEvent",
+    "Venue",
+    "VenueCapabilities",
+    "VenueConfig",
     "channel_for",
     "market_event_from_wire",
     "market_event_to_wire",
