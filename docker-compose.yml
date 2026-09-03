@@ -26,7 +26,7 @@ services:
       - --maxmemory-policy
       - noeviction
     healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 120s}
-    cpus: "0.5"
+    cpus: "0.75"
     mem_limit: 2.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
     restart: unless-stopped
@@ -123,7 +123,7 @@ services:
       REDIS_STREAM_MAXLEN_MARKET_LIVE_STATE: "10000"
     volumes: [aitos_model_data:/models]
     ports: ["127.0.0.1:8090:8090"]
-    cpus: "0.5"
+    cpus: "0.75"
     mem_limit: 1.5g
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
     healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
