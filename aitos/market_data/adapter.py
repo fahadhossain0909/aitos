@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from .contracts import MarketEvent
 from .venues import MarketType, Venue, VenueCapabilities
 
 
+@runtime_checkable
 class CanonicalMarketDataAdapter(Protocol):
     """Minimal transport contract consumed by the canonical runtime.
 
