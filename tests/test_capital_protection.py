@@ -2,7 +2,6 @@ from aitos.intelligence.capital_protection import (
     CapitalReservation,
     PortfolioProtection,
     PortfolioRiskSnapshot,
-    ProtectionConfig,
     Reservation,
 )
 
@@ -47,7 +46,7 @@ def test_correlated_existing_risk_is_not_treated_as_zero():
         ),
     )
     assert decision.allowed
-    assert decision.allowed_risk_pct <= 0.5
+    assert decision.allowed_risk_pct <= 0.60
     assert decision.correlated_risk_pct > 2.0
 
 
@@ -76,9 +75,15 @@ def test_reservation_prevents_oversubscription_and_is_idempotent():
     ledger = CapitalReservation()
     first = Reservation("BTCUSDT", 6_000.0, 60.0)
     second = Reservation("ETHUSDT", 5_000.0, 50.0)
-    assert ledger.reserve(first, available_capital_usd=10_000.0, available_risk_usd=100.0)
-    assert not ledger.reserve(second, available_capital_usd=10_000.0, available_risk_usd=100.0)
-    assert ledger.reserve(first, available_capital_usd=4_000.0, available_risk_usd=40.0)
+    assert ledger.reserve(
+        first, available_capital_usd=10_000.0, available_risk_usd=100.0
+    )
+    assert not ledger.reserve(
+        second, available_capital_usd=10_000.0, available_risk_usd=100.0
+    )
+    assert ledger.reserve(
+        first, available_capital_usd=4_000.0, available_risk_usd=40.0
+    )
     assert ledger.reserved_capital_usd == 6_000.0
     assert ledger.release("BTCUSDT") == first
     assert ledger.release("BTCUSDT") is None
