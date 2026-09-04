@@ -56,11 +56,18 @@ async def test_position_opened_creates_trade_symbol_strategy_nodes(event_bus):
     await writer.initialize({})
 
     payload = {
-        "trade_id": "t1", "symbol": "BTCUSDT", "strategy_id": "scanner-v1",
-        "side": "LONG", "entry_price": 100.0, "regime": "trending",
-        "state": "position_opened", "entry_time": "2026-07-11T00:00:00Z",
+        "trade_id": "t1",
+        "symbol": "BTCUSDT",
+        "strategy_id": "scanner-v1",
+        "side": "LONG",
+        "entry_price": 100.0,
+        "regime": "trending",
+        "state": "position_opened",
+        "entry_time": "2026-07-11T00:00:00Z",
     }
-    await event_bus.publish(Event(topic="trade.position_opened", payload=payload, source_module="test"))
+    await event_bus.publish(
+        Event(topic="trade.position_opened", payload=payload, source_module="test")
+    )
 
     assert await _wait_for(lambda: len(driver.calls) == 1)
     query, params = driver.calls[0]
@@ -80,10 +87,18 @@ async def test_position_closed_updates_trade_node(event_bus):
     writer = KnowledgeGraphWriter(event_bus=event_bus, driver=driver)
     await writer.initialize({})
 
-    payload = {"trade_id": "t1", "pnl": 150.0, "pnl_percent": 15.0,
-               "exit_price": 104.0, "exit_reason": "tp_triggered",
-               "exit_time": "x", "state": "position_closed"}
-    await event_bus.publish(Event(topic="trade.position_closed", payload=payload, source_module="test"))
+    payload = {
+        "trade_id": "t1",
+        "pnl": 150.0,
+        "pnl_percent": 15.0,
+        "exit_price": 104.0,
+        "exit_reason": "tp_triggered",
+        "exit_time": "x",
+        "state": "position_closed",
+    }
+    await event_bus.publish(
+        Event(topic="trade.position_closed", payload=payload, source_module="test")
+    )
 
     assert await _wait_for(lambda: len(driver.calls) == 1)
     query, params = driver.calls[0]
@@ -100,7 +115,9 @@ async def test_mistake_recorded_links_to_trade(event_bus):
     await writer.initialize({})
 
     payload = {"trade_id": "t1", "mistakes": ["entered too early"], "created_at": "x"}
-    await event_bus.publish(Event(topic="journal.mistake_recorded", payload=payload, source_module="test"))
+    await event_bus.publish(
+        Event(topic="journal.mistake_recorded", payload=payload, source_module="test")
+    )
 
     assert await _wait_for(lambda: len(driver.calls) == 1)
     query, params = driver.calls[0]
@@ -114,7 +131,13 @@ async def test_mistake_without_trade_id_is_skipped(event_bus):
     driver = FakeDriver()
     writer = KnowledgeGraphWriter(event_bus=event_bus, driver=driver)
     await writer.initialize({})
-    await event_bus.publish(Event(topic="journal.mistake_recorded", payload={"trade_id": None, "mistakes": [], "created_at": "x"}, source_module="test"))
+    await event_bus.publish(
+        Event(
+            topic="journal.mistake_recorded",
+            payload={"trade_id": None, "mistakes": [], "created_at": "x"},
+            source_module="test",
+        )
+    )
     await asyncio.sleep(0.3)
     assert driver.calls == []
     await writer.shutdown()
@@ -125,7 +148,9 @@ async def test_update_symbol_correlation_direct_call(event_bus):
     driver = FakeDriver()
     writer = KnowledgeGraphWriter(event_bus=event_bus, driver=driver)
     await writer.initialize({})
-    await writer.update_symbol_correlation("BTCUSDT", "ETHUSDT", 0.85, "2026-07-11T00:00:00Z")
+    await writer.update_symbol_correlation(
+        "BTCUSDT", "ETHUSDT", 0.85, "2026-07-11T00:00:00Z"
+    )
     assert len(driver.calls) == 1
     query, params = driver.calls[0]
     assert query == CORRELATION_QUERY
@@ -165,7 +190,11 @@ async def test_semantic_event_projects_decision_and_learning_lineage(event_bus):
             "liquidity_imbalance",
         ],
     }
-    await event_bus.publish(Event(topic="decision.generated", payload=payload, source_module="contextual-ai"))
+    await event_bus.publish(
+        Event(
+            topic="decision.generated", payload=payload, source_module="contextual-ai"
+        )
+    )
 
     assert await _wait_for(lambda: len(driver.calls) == 1)
     query, params = driver.calls[0]
