@@ -56,14 +56,14 @@ async def connect_clickhouse_repositories(
     )
     try:
         await retry_with_backoff(
-            market_repo.initialize,
+            lambda: market_repo.initialize({}),
             max_attempts=5,
             base_delay_seconds=2.0,
             max_delay_seconds=30.0,
             operation_name="ClickHouse market repository initialization",
         )
         await retry_with_backoff(
-            journal_repo.initialize,
+            lambda: journal_repo.initialize({}),
             max_attempts=5,
             base_delay_seconds=2.0,
             max_delay_seconds=30.0,
