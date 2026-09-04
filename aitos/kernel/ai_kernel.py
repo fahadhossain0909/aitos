@@ -280,7 +280,10 @@ class AIKernel(AITOSModule):
                 conflicts.append(
                     f"insufficient evidence: {', '.join(evidence.missing_components)}"
                 )
-            if contextual.get("action") == "no_trade" and evidence.direction != "neutral":
+            if (
+                contextual.get("action") == "no_trade"
+                and evidence.direction != "neutral"
+            ):
                 conflicts.append("contextual layer recommends no_trade")
             return FusedDecision(
                 symbol=context.symbol,
