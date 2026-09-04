@@ -20,15 +20,25 @@ class RiskDecision:
 class RiskEngine:
     """Apply universal risk limits before an execution intent reaches a venue."""
 
-    def __init__(self, *, max_gross_leverage: float = 2.0, max_single_position_fraction: float = 0.35) -> None:
+    def __init__(
+        self,
+        *,
+        max_gross_leverage: float = 2.0,
+        max_single_position_fraction: float = 0.35,
+    ) -> None:
         if max_gross_leverage <= 0 or not 0 < max_single_position_fraction <= 1:
             raise ValueError("invalid risk limits")
         self.max_gross_leverage = max_gross_leverage
         self.max_single_position_fraction = max_single_position_fraction
 
     def evaluate(
-        self, *, instrument: Instrument, requested_notional: float, portfolio: Portfolio,
-        state: GlobalMarketState, equity: float,
+        self,
+        *,
+        instrument: Instrument,
+        requested_notional: float,
+        portfolio: Portfolio,
+        state: GlobalMarketState,
+        equity: float,
     ) -> RiskDecision:
         if equity <= 0:
             return RiskDecision(False, 0.0, "non_positive_equity", 1.0)
@@ -38,7 +48,9 @@ class RiskEngine:
         concentration_limit = equity * self.max_single_position_fraction
         remaining_gross = max(0.0, gross_limit - portfolio.gross_notional)
         max_notional = min(remaining_gross, concentration_limit)
-        risk_score = min(1.0, state.volatility_score * 0.6 + (1.0 - state.liquidity_score) * 0.4)
+        risk_score = min(
+            1.0, state.volatility_score * 0.6 + (1.0 - state.liquidity_score) * 0.4
+        )
         # Volatility and the aggregate risk score are independent controls:
         # high volatility halves deployable size, then elevated composite risk
         # applies a second floor-capped reduction.
