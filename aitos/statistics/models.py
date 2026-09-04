@@ -11,6 +11,13 @@ def _clip(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, float(value)))
 
 
+def _finite(value: float, name: str) -> float:
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    return value
+
+
 @dataclass(frozen=True)
 class BayesianEvidence:
     name: str
@@ -65,6 +72,98 @@ class RegimeProbability:
 
 
 @dataclass(frozen=True)
+class HMMState:
+    """Serializable posterior state for the Markov-switching estimator."""
+
+    probabilities: tuple[float, ...]
+    most_likely_state: int
+    transition_matrix: tuple[tuple[float, ...], ...]
+    state_means: tuple[float, ...]
+    state_sigmas: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        if not self.probabilities:
+            raise ValueError("HMM must contain at least one state")
+        if len(self.state_means) != len(self.probabilities):
+            raise ValueError("state_means must match probabilities")
+        if len(self.state_sigmas) != len(self.probabilities):
+            raise ValueError("state_sigmas must match probabilities")
+        if not 0 <= self.most_likely_state < len(self.probabilities):
+            raise ValueError("most_likely_state is out of range")
+        probs = tuple(max(0.0, _finite(v, "probability")) for v in self.probabilities)
+        total = sum(probs)
+        if total <= 0:
+            raise ValueError("HMM probabilities must have positive mass")
+        object.__setattr__(self, "probabilities", tuple(v / total for v in probs))
+        for value in self.state_sigmas:
+            if _finite(value, "state_sigma") < 0:
+                raise ValueError("state_sigmas must be non-negative")
+        n = len(self.probabilities)
+        if len(self.transition_matrix) != n or any(len(row) != n for row in self.transition_matrix):
+            raise ValueError("transition_matrix must be square and match state count")
+
+
+@dataclass(frozen=True)
+class GARCHForecast:
+    """Serializable one-step conditional-volatility forecast."""
+
+    variance: float
+    volatility: float
+    long_run_variance: float
+    alpha: float
+    beta: float
+    omega: float
+    persistence: float
+
+    def __post_init__(self) -> None:
+        for name in (
+            "variance",
+            "volatility",
+            "long_run_variance",
+            "alpha",
+            "beta",
+            "omega",
+            "persistence",
+        ):
+            _finite(getattr(self, name), name)
+        if self.variance < 0 or self.volatility < 0 or self.long_run_variance < 0:
+            raise ValueError("GARCH variances and volatility must be non-negative")
+        if self.alpha < 0 or self.beta < 0 or self.omega < 0:
+            raise ValueError("GARCH parameters must be non-negative")
+        if not 0.0 <= self.persistence < 1.0:
+            raise ValueError("GARCH persistence must be in [0, 1)")
+
+
+@dataclass(frozen=True)
+class BayesianPosterior:
+    """Serializable hierarchical Normal-Normal posterior and predictive belief."""
+
+    global_mean: float
+    global_variance: float
+    contract_mean: float
+    contract_variance: float
+    predictive_probability_positive: float
+    posterior_strength: float
+
+    def __post_init__(self) -> None:
+        for name in (
+            "global_mean",
+            "global_variance",
+            "contract_mean",
+            "contract_variance",
+            "predictive_probability_positive",
+            "posterior_strength",
+        ):
+            _finite(getattr(self, name), name)
+        if self.global_variance < 0 or self.contract_variance < 0:
+            raise ValueError("Bayesian variances must be non-negative")
+        if not 0.0 <= self.predictive_probability_positive <= 1.0:
+            raise ValueError("predictive_probability_positive must be in [0, 1]")
+        if not 0.0 <= self.posterior_strength <= 1.0:
+            raise ValueError("posterior_strength must be in [0, 1]")
+
+
+@dataclass(frozen=True)
 class EVTTail:
     """Serializable Peaks-Over-Threshold extreme-tail estimate."""
 
@@ -87,15 +186,46 @@ class EVTTail:
             "tail_probability",
             "expected_shortfall",
         ):
-            value = float(getattr(self, name))
-            if not math.isfinite(value):
-                raise ValueError(f"{name} must be finite")
+            _finite(getattr(self, name), name)
         if not 0.0 <= self.exceedance_rate <= 1.0:
             raise ValueError("exceedance_rate must be in [0, 1]")
         if not 0.0 <= self.tail_probability <= 1.0:
             raise ValueError("tail_probability must be in [0, 1]")
         if self.threshold < 0 or self.scale < 0 or self.expected_shortfall < 0:
             raise ValueError("EVT loss magnitudes must be non-negative")
+
+
+@dataclass(frozen=True)
+class StatisticalModelResult:
+    """Unified output of the contract-level HMM/GARCH/EVT/Bayes stack."""
+
+    symbol: str
+    hmm: HMMState
+    garch: GARCHForecast
+    evt: EVTTail
+    bayesian: BayesianPosterior
+    expected_return: float
+    downside_probability: float
+    tail_probability: float
+    confidence: float
+
+    def __post_init__(self) -> None:
+        if not self.symbol:
+            raise ValueError("symbol must not be empty")
+        for name in (
+            "expected_return",
+            "downside_probability",
+            "tail_probability",
+            "confidence",
+        ):
+            _finite(getattr(self, name), name)
+        for name in ("downside_probability", "tail_probability", "confidence"):
+            if not 0.0 <= getattr(self, name) <= 1.0:
+                raise ValueError(f"{name} must be in [0, 1]")
+
+    @property
+    def expected_value(self) -> float:
+        return self.expected_return
 
 
 @dataclass(frozen=True)
