@@ -63,7 +63,10 @@ class GatewayHealth:
 
     def record_idle_timeout(self, stream: str, timeout_seconds: float) -> None:
         self.stream_idle_timeouts += 1
-        self.record_error("stream_idle", f"{stream} produced no canonical event for {timeout_seconds:.1f}s")
+        self.record_error(
+            "stream_idle",
+            f"{stream} produced no canonical event for {timeout_seconds:.1f}s",
+        )
 
     def record_error(self, stage: str, message: str) -> None:
         if stage == "decode":
@@ -105,7 +108,9 @@ class GatewayHealth:
             "dropped_events": self.dropped_events,
             "backpressure_events": self.backpressure_events,
             "stale_events": self.stale_events,
-            "source_age_ms": self._age_ms(now, self.last_event_source_at or self.last_event_at),
+            "source_age_ms": self._age_ms(
+                now, self.last_event_source_at or self.last_event_at
+            ),
             "receive_to_now_age_ms": self._age_ms(now, self.last_event_at),
             "accept_to_now_age_ms": self._age_ms(now, self.last_accepted_at),
             "publish_to_now_age_ms": self._age_ms(now, self.last_published_at),
