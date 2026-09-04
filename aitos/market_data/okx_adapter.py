@@ -75,13 +75,16 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
             sequence = int(trade_id)
         except ValueError:
             sequence = None
+        event_time = self._timestamp_ms(item.get("ts"))
         return MarketEvent(
             event_type=MarketEventType.TRADE,
             exchange=Venue.OKX.value,
             market=self.market_type.value,
             symbol=symbol,
-            event_time=self._timestamp_ms(item.get("ts")),
+            event_time=event_time,
             payload={
+                "symbol": symbol,
+                "timestamp": event_time.isoformat(),
                 "trade_id": trade_id,
                 "price": self._float(item["px"]),
                 "quantity": self._float(item["sz"]),
