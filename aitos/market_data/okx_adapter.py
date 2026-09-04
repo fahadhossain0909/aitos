@@ -34,7 +34,10 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         return VenueCapabilities(trades=True, order_book=True, rest_recovery=True)
 
     def _args(self, symbols: list[str], channel: str) -> list[dict[str, str]]:
-        return [{"channel": channel, "instId": self._instrument(s)} for s in dict.fromkeys(symbols)]
+        return [
+            {"channel": channel, "instId": self._instrument(s)}
+            for s in dict.fromkeys(symbols)
+        ]
 
     @staticmethod
     def _instrument(symbol: str) -> str:
@@ -118,8 +121,16 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         sequence = int(item.get("seqId") or 0)
         bids, asks, previous = self._books.get(symbol, ({}, {}, 0))
         if action == "snapshot" or symbol not in self._books:
-            bids = {float(row[0]): float(row[1]) for row in item.get("bids", []) if float(row[1]) > 0}
-            asks = {float(row[0]): float(row[1]) for row in item.get("asks", []) if float(row[1]) > 0}
+            bids = {
+                float(row[0]): float(row[1])
+                for row in item.get("bids", [])
+                if float(row[1]) > 0
+            }
+            asks = {
+                float(row[0]): float(row[1])
+                for row in item.get("asks", [])
+                if float(row[1]) > 0
+            }
         else:
             if sequence and previous and sequence <= previous:
                 return None
@@ -152,10 +163,7 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                     {"price": p, "quantity": q}
                     for p, q in sorted(bids.items(), reverse=True)
                 ],
-                "asks": [
-                    {"price": p, "quantity": q}
-                    for p, q in sorted(asks.items())
-                ],
+                "asks": [{"price": p, "quantity": q} for p, q in sorted(asks.items())],
                 "last_update_id": sequence or previous,
             },
             source=MarketSource.WEBSOCKET,
