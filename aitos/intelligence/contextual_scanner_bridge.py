@@ -80,9 +80,10 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
             )
 
         positioning: PositioningContext | None = getattr(candidate, "positioning", None)
+        regime = getattr(candidate.regime, "value", candidate.regime)
         graph_context = await retrieve_graph_context(
             symbol=candidate.symbol,
-            regime=str(candidate.regime),
+            regime=str(regime),
             direction=candidate.direction.value,
             strategy_id=str(getattr(candidate, "strategy_id", "") or ""),
             model_id=str(getattr(candidate, "model_id", "") or ""),
