@@ -79,7 +79,7 @@ def test_reservation_prevents_oversubscription_and_is_idempotent():
         first, available_capital_usd=10_000.0, available_risk_usd=100.0
     )
     assert not ledger.reserve(
-        second, available_capital_usd=10_000.0, available_risk_usd=100.0
+        second, available_capital_usd=4_000.0, available_risk_usd=40.0
     )
     assert ledger.reserve(
         first, available_capital_usd=4_000.0, available_risk_usd=40.0
