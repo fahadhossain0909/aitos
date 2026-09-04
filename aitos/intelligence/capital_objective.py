@@ -32,8 +32,10 @@ class CapitalObjectiveConfig:
     """Policy knobs for sustainable capital compounding.
 
     ``max_*`` fields are hard vetoes, not soft score penalties. Expected loss
-    is the adverse price move to the configured stop, so the default permits a
-    2% stop while the account-level risk budget remains independently capped.
+    is the adverse price move to the configured stop. The default 5% price
+    excursion cap is intentionally separate from the 1% account-level
+    ``max_trade_risk_pct`` cap enforced by the allocator; position sizing can
+    therefore keep a wider market stop inside the portfolio risk budget.
     """
 
     growth_weight: float = 0.60
@@ -41,7 +43,7 @@ class CapitalObjectiveConfig:
     min_net_edge_pct: float = 0.05
     min_expected_return_pct: float = 0.10
     max_loss_probability: float = 0.35
-    max_expected_loss_pct: float = 2.00
+    max_expected_loss_pct: float = 5.00
     max_cost_pct: float = 0.50
     min_liquidity_score: float = 4.0
     target_net_edge_pct: float = 1.00
