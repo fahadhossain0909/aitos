@@ -11,11 +11,11 @@ for placing orders.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
-import json
 from typing import Any, Literal
 
 Action = Literal["long", "short", "no_trade"]
@@ -41,7 +41,9 @@ class EvidenceItem:
 
     @property
     def usable(self) -> bool:
-        return self.available and self.reliability > 0.0 and self.freshness_seconds >= 0.0
+        return (
+            self.available and self.reliability > 0.0 and self.freshness_seconds >= 0.0
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -57,7 +59,12 @@ class KnowledgeSnapshot:
 
     @property
     def evidence_hash(self) -> str:
-        return _stable_hash({"state": self.market_state, "evidence": [e.to_dict() for e in self.evidence]})
+        return _stable_hash(
+            {
+                "state": self.market_state,
+                "evidence": [e.to_dict() for e in self.evidence],
+            }
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -193,7 +200,9 @@ class AutonomyPipeline:
         self,
         *,
         policy: FailClosedPolicy | None = None,
-        decision_fn: Callable[[KnowledgeSnapshot], tuple[Action, float, Sequence[str]]] | None = None,
+        decision_fn: (
+            Callable[[KnowledgeSnapshot], tuple[Action, float, Sequence[str]]] | None
+        ) = None,
         policy_version: str = "baseline",
     ) -> None:
         self.policy = policy or FailClosedPolicy()
@@ -203,7 +212,9 @@ class AutonomyPipeline:
         self.outcomes: list[LearningOutcome] = []
 
     @staticmethod
-    def _default_decision(knowledge: KnowledgeSnapshot) -> tuple[Action, float, Sequence[str]]:
+    def _default_decision(
+        knowledge: KnowledgeSnapshot,
+    ) -> tuple[Action, float, Sequence[str]]:
         usable = [e for e in knowledge.evidence if e.usable]
         if not usable:
             return "no_trade", 0.0, ("no usable evidence",)
@@ -214,7 +225,11 @@ class AutonomyPipeline:
         if confidence < 0.5:
             return "no_trade", confidence, ("evidence is not directionally decisive",)
         action: Action = "long" if score > 0 else "short"
-        return action, confidence, (f"weighted_evidence={score:.4f}", f"regime={knowledge.regime}")
+        return (
+            action,
+            confidence,
+            (f"weighted_evidence={score:.4f}", f"regime={knowledge.regime}"),
+        )
 
     def decide(
         self,
@@ -226,12 +241,14 @@ class AutonomyPipeline:
     ) -> AutonomyRecord:
         action, confidence, rationale = self.decision_fn(knowledge)
         confidence = max(0.0, min(1.0, float(confidence)))
-        decision_id = _stable_hash({
-            "knowledge": knowledge.evidence_hash,
-            "action": action,
-            "confidence": round(confidence, 8),
-            "policy": self.policy_version,
-        })
+        decision_id = _stable_hash(
+            {
+                "knowledge": knowledge.evidence_hash,
+                "action": action,
+                "confidence": round(confidence, 8),
+                "policy": self.policy_version,
+            }
+        )
         decision = DecisionRecord(
             action=action,
             confidence=confidence,
@@ -257,7 +274,11 @@ class AutonomyPipeline:
             decision_id=decision_id,
             policy_version=self.policy_version,
             risk_approved=policy_result.allowed,
-            reason="approved" if policy_result.allowed else "; ".join(policy_result.reasons),
+            reason=(
+                "approved"
+                if policy_result.allowed
+                else "; ".join(policy_result.reasons)
+            ),
         )
         record = AutonomyRecord(knowledge, decision, policy_result, intent)
         self.history.append(record)
@@ -278,5 +299,7 @@ class AutonomyPipeline:
             "policy_version": self.policy_version,
             "decisions": len(self.history),
             "outcomes": len(self.outcomes),
-            "last_decision": self.history[-1].decision.to_dict() if self.history else None,
+            "last_decision": (
+                self.history[-1].decision.to_dict() if self.history else None
+            ),
         }
