@@ -14,7 +14,10 @@ from aitos.models.market import OrderBookSnapshot, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")
 
-LIVE_SCANNER_GROUP = "market-scanner"
+# This cache is an independent consumer, not a worker in the scanner-feed
+# consumer group. Sharing a Redis Streams group would load-balance events and
+# silently starve one of the two consumers.
+LIVE_SCANNER_GROUP = "live-scanner-cache-v1"
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
 LIVE_BOOK_MAX_AGE_SECONDS = 15.0
 
@@ -116,7 +119,10 @@ class LiveScannerCache:
             state.stale_trade_rejections += 1
             state.last_stale_trade_source_age_sec = round(max(0.0, source_age), 3)
             return
-        trade = TradeTick.from_dict(dict(event.payload))
+        payload = dict(event.payload)
+        payload["symbol"] = event.symbol
+        payload["timestamp"] = event.event_time.isoformat()
+        trade = TradeTick.from_dict(payload)
         if state.trades and trade.trade_id <= state.trades[-1].trade_id:
             state.duplicate_trade_rejections += 1
             return
