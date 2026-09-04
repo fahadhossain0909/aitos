@@ -2,13 +2,13 @@
 
 from .adapter import CanonicalMarketDataAdapter
 from .binance_adapter import BinanceCanonicalMarketDataAdapter
-from .bybit_adapter import BybitCanonicalMarketDataAdapter
 from .bus import (
     MarketDataBus,
     channel_for,
     market_event_from_wire,
     market_event_to_wire,
 )
+from .bybit_adapter import BybitCanonicalMarketDataAdapter
 from .contracts import (
     BookLevel,
     MarketEvent,
