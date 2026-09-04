@@ -64,7 +64,7 @@ async def connect_redis_with_retry(settings) -> Redis:
         raise SystemExit(1) from exc
 
 
-async def try_connect_clickhouse_repositories(settings):
+async def connect_clickhouse_repositories(settings):
     market_repo = MarketDataRepository(
         host=settings.clickhouse.host,
         port=settings.clickhouse.port,
@@ -80,12 +80,26 @@ async def try_connect_clickhouse_repositories(settings):
         database=settings.clickhouse.database,
     )
     try:
-        await market_repo.initialize({})
-        await journal_repo.initialize({})
+        await retry_with_backoff(
+            lambda: market_repo.initialize({}),
+            max_attempts=5,
+            base_delay_seconds=2.0,
+            max_delay_seconds=30.0,
+            operation_name="ClickHouse market repository initialization",
+        )
+        await retry_with_backoff(
+            lambda: journal_repo.initialize({}),
+            max_attempts=5,
+            base_delay_seconds=2.0,
+            max_delay_seconds=30.0,
+            operation_name="ClickHouse journal repository initialization",
+        )
         return market_repo, journal_repo
-    except Exception as exp:
-        logger.error("ClickHouse persistence unavailable: %s", exp)
-        return None, None
+    except RetryExhaustedError as exc:
+        await market_repo.shutdown()
+        await journal_repo.shutdown()
+        logger.error("ClickHouse persistence unavailable after retries: %s", exc)
+        raise SystemExit(1) from exc
 
 
 async def try_connect_neo4j(settings):
@@ -116,15 +130,14 @@ async def main() -> None:
 
     event_bus = EventBus(redis_client=redis_client)
     await event_bus.initialize({})
-    market_repo, journal_repo = await try_connect_clickhouse_repositories(settings)
+    market_repo, journal_repo = await connect_clickhouse_repositories(settings)
     graph_driver = await try_connect_neo4j(settings)
     raw_order_executor = await prepare_live_executor(settings, SYMBOLS)
     order_executor = IdempotentOrderExecutor(raw_order_executor)
     exchange = BinanceFuturesAdapter()
     state_store = DurableTradingStateStore(market_repo)
+    await state_store.initialize()
     trade_state_persistence = None
-    if market_repo is not None:
-        await state_store.initialize()
     rl_scorer = DeepValueRLScorer()
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
@@ -150,14 +163,13 @@ async def main() -> None:
         attention_explainer=attention_explainer,
         use_exchange_side_stops=True,
     )
-    if market_repo is not None:
-        trade_state_persistence = TradeStatePersistence(
-            event_bus,
-            components.trade_lifecycle,
-            state_store,
-        )
-        await trade_state_persistence.restore()
-        await trade_state_persistence.initialize()
+    trade_state_persistence = TradeStatePersistence(
+        event_bus,
+        components.trade_lifecycle,
+        state_store,
+    )
+    await trade_state_persistence.restore()
+    await trade_state_persistence.initialize()
     await initialize_all(components)
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     await market_os_persistence.initialize({})
@@ -180,17 +192,8 @@ async def main() -> None:
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
-    tracker = (
-        PersistentLivePortfolioTracker(order_executor, state_store)
-        if market_repo is not None
-        else None
-    )
-    if tracker is not None:
-        await tracker.restore()
-    else:
-        from aitos.app import LivePortfolioTracker
-
-        tracker = LivePortfolioTracker(order_executor=order_executor)
+    tracker = PersistentLivePortfolioTracker(order_executor, state_store)
+    await tracker.restore()
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -212,9 +215,7 @@ async def main() -> None:
                     extra={
                         "aitos_extra": {
                             "submitted": submitted,
-                            "open_trades": len(
-                                components.trade_lifecycle.get_open_trades()
-                            ),
+                            "open_trades": len(components.trade_lifecycle.get_open_trades()),
                             "account_equity_usd": tracker._last_known_equity_usd,
                             "drawdown_peak_equity_usd": tracker._peak_equity_usd,
                             "rl_samples": rl_scorer.n_samples_seen,
@@ -243,10 +244,8 @@ async def main() -> None:
             await trade_state_persistence.shutdown()
         await shutdown_all(components)
         await order_executor.close()
-        if market_repo is not None:
-            await market_repo.shutdown()
-        if journal_repo is not None:
-            await journal_repo.shutdown()
+        await market_repo.shutdown()
+        await journal_repo.shutdown()
         await redis_client.aclose()
 
 
