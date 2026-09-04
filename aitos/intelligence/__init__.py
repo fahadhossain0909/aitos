@@ -30,6 +30,14 @@ from .capital_protection import (
     Reservation,
 )
 from .capital_runtime import install_capital_guard
+from .contextual_layers import (
+    ImbalanceZone,
+    OriginZone,
+    PositioningContext,
+    PriceLocationContext,
+    positioning_context,
+    positioning_evidence,
+)
 from .deep_rl_policy import DeepValueRLScorer
 from .funding import funding_rate_score
 from .historical_analogue import (
@@ -69,11 +77,15 @@ __all__ = [
     "CapitalReservation",
     "DeepValueRLScorer",
     "HistoricalAnalogue",
+    "ImbalanceZone",
     "NeutralRLScorer",
     "OpportunityEstimate",
     "OpportunityScanner",
+    "OriginZone",
+    "PositioningContext",
     "PortfolioProtection",
     "PortfolioRiskSnapshot",
+    "PriceLocationContext",
     "ProbabilityCalibrator",
     "ProtectionConfig",
     "ProtectionDecision",
@@ -92,5 +104,7 @@ __all__ = [
     "liquidity_quality_score",
     "oi_trend_score",
     "opportunity_age_seconds",
+    "positioning_context",
+    "positioning_evidence",
     "search_historical_analogues",
 ]
