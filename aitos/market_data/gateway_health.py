@@ -24,6 +24,7 @@ class GatewayHealth:
     published_events: int = 0
     publish_errors: int = 0
     dropped_events: int = 0
+    backpressure_events: int = 0
     stale_events: int = 0
     last_event_at: datetime | None = None
     last_accepted_at: datetime | None = None
@@ -101,6 +102,7 @@ class GatewayHealth:
             "published_events": self.published_events,
             "publish_errors": self.publish_errors,
             "dropped_events": self.dropped_events,
+            "backpressure_events": self.backpressure_events,
             "stale_events": self.stale_events,
             "receive_to_now_age_ms": self._age_ms(now, self.last_event_at),
             "accept_to_now_age_ms": self._age_ms(now, self.last_accepted_at),
