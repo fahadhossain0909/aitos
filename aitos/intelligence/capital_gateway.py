@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from math import isfinite
 from typing import Any
 
@@ -138,10 +138,25 @@ class CapitalGateway:
                 continue
             risk_budget = equity_usd * protection.allowed_risk_pct / 100.0
             capital = risk_budget / max(self.objective.config.max_trade_risk_pct / 100.0, 1e-9)
-            candidate = CapitalAllocation(allocation.symbol, round(capital, 8), round(risk_budget, 8), allocation.score)
-            available_capital = max(0.0, equity_usd - self.reservation.reserved_capital_usd)
-            available_risk = max(0.0, equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0 - self.reservation.reserved_risk_usd)
-            if self.reservation.reserve(Reservation(candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd), available_capital_usd=available_capital, available_risk_usd=available_risk):
+            candidate = CapitalAllocation(
+                allocation.symbol,
+                round(capital, 8),
+                round(risk_budget, 8),
+                allocation.score,
+            )
+            available_capital = max(
+                0.0, equity_usd - self.reservation.reserved_capital_usd
+            )
+            available_risk = max(
+                0.0,
+                equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
+                - self.reservation.reserved_risk_usd,
+            )
+            if self.reservation.reserve(
+                Reservation(candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd),
+                available_capital_usd=available_capital,
+                available_risk_usd=available_risk,
+            ):
                 protected.append(candidate)
         return CapitalGatewayResult(tuple(decisions), tuple(protected))
 
@@ -155,10 +170,15 @@ class CapitalGateway:
         funding_bps: float = 0.0,
     ) -> tuple[CapitalDecision, CapitalAllocation | None]:
         estimate = self.estimate_opportunity(
-            opportunity, fee_bps=fee_bps, slippage_bps=slippage_bps, funding_bps=funding_bps
+            opportunity,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+            funding_bps=funding_bps,
         )
         result = self.evaluate(equity_usd, [estimate], max_positions=1)
-        decision = next((d for d in result.decisions if d.symbol == opportunity.symbol), None)
+        decision = next(
+            (d for d in result.decisions if d.symbol == opportunity.symbol), None
+        )
         if decision is None:
             decision = self.objective.evaluate(estimate)
         return decision, result.allocation_for(opportunity.symbol)
