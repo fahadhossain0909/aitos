@@ -27,7 +27,10 @@ def test_result_is_strategy_agnostic_and_serialisable() -> None:
     )
     context = result.for_strategy("directional")
     assert 0.0 <= result.direction.up <= 1.0
-    assert abs(result.direction.up + result.direction.down + result.direction.flat - 1.0) < 1e-9
+    assert (
+        abs(result.direction.up + result.direction.down + result.direction.flat - 1.0)
+        < 1e-9
+    )
     assert 0.0 <= context.suitability <= 1.0
     payload = result.to_dict()
     assert payload["symbol"] == "BTCUSDT"
