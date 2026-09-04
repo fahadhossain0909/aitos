@@ -48,14 +48,17 @@ class RegimeProbability:
     high_volatility: float = 0.0
     low_volatility: float = 0.0
 
-    def normalised(self) -> "RegimeProbability":
-        values = tuple(_clip(v) for v in (
-            self.trend_up,
-            self.trend_down,
-            self.range,
-            self.high_volatility,
-            self.low_volatility,
-        ))
+    def normalised(self) -> RegimeProbability:
+        values = tuple(
+            _clip(v)
+            for v in (
+                self.trend_up,
+                self.trend_down,
+                self.range,
+                self.high_volatility,
+                self.low_volatility,
+            )
+        )
         total = sum(values)
         if total <= 0:
             return RegimeProbability(range=1.0)
@@ -97,7 +100,10 @@ class StrategyStatContext:
         upside = self.direction.up
         edge = max(0.0, self.expected_value)
         penalty = 0.5 * self.downside_probability + 0.5 * self.tail_loss_probability
-        return _clip((0.55 * upside + 0.45 * min(1.0, edge * 10.0)) * self.probability_confidence - penalty)
+        return _clip(
+            (0.55 * upside + 0.45 * min(1.0, edge * 10.0)) * self.probability_confidence
+            - penalty
+        )
 
 
 @dataclass(frozen=True)
