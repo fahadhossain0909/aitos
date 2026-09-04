@@ -15,7 +15,9 @@ The system must not select an asset merely because its directional return estima
 5. **Capital allocation is risk-budget based.** Position notional is derived from an approved risk budget, not from leverage appetite.
 6. **Portfolio protection is applied after opportunity ranking.** Correlation/concentration, regime/volatility and drawdown can reduce or veto an otherwise eligible allocation.
 7. **Capital is reserved before execution.** The reservation ledger prevents simultaneous opportunities from oversubscribing capital or the portfolio risk budget.
-8. **TradeLifecycle is the final capital boundary.** An opportunity that is not capital-authorized is returned as `REJECTED` and never reaches order submission.
+8. **Freshness and execution conditions remain hard gates.** An old opportunity or one whose realistic execution friction destroys its edge is not tradable.
+9. **Loss circuit breakers are independent hard stops.** Daily loss and repeated losses can veto new entries even when a strategy has positive expected edge.
+10. **TradeLifecycle is the final capital boundary.** An opportunity that is not capital-authorized is returned as `REJECTED` and never reaches order submission.
 
 ## Economic model
 
@@ -45,19 +47,29 @@ These are configuration defaults, not claims about future market performance. Th
 - **Drawdown-aware sizing:** risk is reduced at 3%, 5% and 8% drawdown levels (75%, 50%, 25% multipliers respectively), and new risk is stopped at 10% drawdown.
 - **Capital reservation:** a thread-safe, idempotent reservation ledger blocks simultaneous allocations that exceed available capital or the portfolio risk budget. Reservations are released on cancellation/close through `CapitalGateway.release()`.
 
+## Secondary deployment controls
+
+`aitos/intelligence/capital_controls.py` adds the remaining P1 controls at the same final boundary:
+
+- **Opportunity expiry:** default maximum age is 30 seconds. Invalid timestamps are treated as infinitely old. The intent is to prevent scanner signals from becoming stale while waiting for execution.
+- **Execution-aware edge:** expected slippage increases with poor liquidity and volatility before the net-edge calculation. The default runtime assumption remains 10 bps fee, while the slippage component is stress-adjusted.
+- **Daily-loss circuit breaker:** new entries stop at a 3% daily loss by default. This complements, rather than replaces, the existing Risk Engine daily/weekly hard limits.
+- **Consecutive-loss circuit breaker:** five consecutive losses stop new entries by default. If live streak telemetry is unavailable, this control does not invent a streak; the existing Risk Engine remains independently authoritative.
+- **Probability calibration:** model probability-like outputs can be calibrated against realized outcomes after a minimum sample count. Before sufficient observations, the raw probability is retained; calibration cannot manufacture an optimistic edge.
+
 These are conservative policy defaults and must be calibrated against AITOS paper-trading/backtest telemetry. They are not performance guarantees.
 
 ## Runtime enforcement
 
-`aitos/intelligence/capital_gateway.py` converts an executable `Opportunity` into the venue-neutral economic estimate. The nearest take-profit is used as the conservative gross-return target. The stop distance supplies loss severity. A calibrated `loss_probability` supplied in `agent_consensus` takes precedence; otherwise the kernel/scanner confidence is converted to a conservative probability-like signal.
+`aitos/intelligence/capital_gateway.py` converts an executable `Opportunity` into the venue-neutral economic estimate. The nearest take-profit is used as the conservative gross-return target. The stop distance supplies loss severity. A supplied `loss_probability` takes precedence; otherwise the kernel/scanner confidence is converted to a conservative probability-like signal.
 
-The gateway then applies portfolio protection and reserves the approved capital/risk budget. `aitos/intelligence/capital_runtime.py` installs the guard on `TradeLifecycle.submit_opportunity`. It is fail-closed: invalid/unavailable equity, malformed economic inputs, failed objective gates, protection failures, reservation failures and missing allocations cannot reach the original lifecycle submission path.
+The gateway applies opportunity freshness, execution-cost stress, loss circuit breakers, the capital objective, portfolio protection and capital reservation in that order. `aitos/intelligence/capital_runtime.py` installs the guard on `TradeLifecycle.submit_opportunity`. It is fail-closed: invalid/unavailable equity, malformed economic inputs, stale opportunities, circuit-breaker failures, failed objective gates, protection failures, reservation failures and missing allocations cannot reach the original lifecycle submission path.
 
-The guard also records the approved risk budget in `agent_consensus["capital_objective"]` so the authorization is auditable by the journal/telemetry layers.
+The guard records the approved risk budget and objective score in `agent_consensus["capital_objective"]` so authorization is auditable by journal/telemetry layers.
 
 ## Execution-cost defaults
 
-Until venue-specific fee/slippage/funding models are supplied, the runtime boundary uses conservative defaults of **10 bps fee + 5 bps slippage + 0 bps funding**. These are policy assumptions, not exchange guarantees. They should be replaced with live venue/account-specific estimates before production deployment.
+Until venue-specific fee/slippage/funding models are supplied, the runtime boundary uses conservative defaults of **10 bps fee + 5 bps base slippage + 0 bps funding**, with base slippage stress-adjusted for liquidity and volatility. These are policy assumptions, not exchange guarantees. They should be replaced with live venue/account-specific estimates before production deployment.
 
 ## Architecture placement
 
