@@ -294,6 +294,8 @@ class LiveScannerCache:
                 if state.last_book_at
                 else None
             ),
-            "trade_consumer_lag_sec": trade_lag / 1000 if trade_lag is not None else None,
+            "trade_consumer_lag_sec": (
+                trade_lag / 1000 if trade_lag is not None else None
+            ),
             "book_consumer_lag_sec": book_lag / 1000 if book_lag is not None else None,
         }
