@@ -20,5 +20,9 @@ def test_positioning_evidence_is_context_not_binary_signal():
         source="test",
     )
     evidence = positioning_evidence(context, "long")
-    assert set(evidence) >= {"open_interest_positioning", "funding_crowding", "basis_context"}
+    assert set(evidence) >= {
+        "open_interest_positioning",
+        "funding_crowding",
+        "basis_context",
+    }
     assert all(0.0 <= value <= 10.0 for value in evidence.values())
