@@ -27,15 +27,19 @@ class GatewayHealth:
     backpressure_events: int = 0
     stale_events: int = 0
     last_event_at: datetime | None = None
+    last_event_source_at: datetime | None = None
     last_accepted_at: datetime | None = None
     last_published_at: datetime | None = None
     last_error: str | None = None
     _updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
-    def record_event(self) -> None:
+    def record_event(self, source_at: datetime | None = None) -> None:
+        now = datetime.now(timezone.utc)
         self.received_events += 1
-        self.last_event_at = datetime.now(timezone.utc)
-        self._updated_at = self.last_event_at
+        self.last_event_at = now
+        if source_at is not None:
+            self.last_event_source_at = source_at
+        self._updated_at = now
 
     def record_accept(self) -> None:
         self.accepted_events += 1
@@ -59,10 +63,7 @@ class GatewayHealth:
 
     def record_idle_timeout(self, stream: str, timeout_seconds: float) -> None:
         self.stream_idle_timeouts += 1
-        self.record_error(
-            "stream_idle",
-            f"{stream} produced no canonical event for {timeout_seconds:.1f}s",
-        )
+        self.record_error("stream_idle", f"{stream} produced no canonical event for {timeout_seconds:.1f}s")
 
     def record_error(self, stage: str, message: str) -> None:
         if stage == "decode":
@@ -104,6 +105,7 @@ class GatewayHealth:
             "dropped_events": self.dropped_events,
             "backpressure_events": self.backpressure_events,
             "stale_events": self.stale_events,
+            "source_age_ms": self._age_ms(now, self.last_event_source_at or self.last_event_at),
             "receive_to_now_age_ms": self._age_ms(now, self.last_event_at),
             "accept_to_now_age_ms": self._age_ms(now, self.last_accepted_at),
             "publish_to_now_age_ms": self._age_ms(now, self.last_published_at),
