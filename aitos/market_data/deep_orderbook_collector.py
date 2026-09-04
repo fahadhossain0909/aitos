@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 
 from .contracts import MarketEvent
 from .deep_orderbook import DEEP_SYMBOLS, DeepOrderBookStore
@@ -38,7 +37,9 @@ class DeepOrderBookCollector:
             return
         await self._store.initialize()
         self._running = True
-        self._producer = asyncio.create_task(self._produce(), name="deep-orderbook-producer")
+        self._producer = asyncio.create_task(
+            self._produce(), name="deep-orderbook-producer"
+        )
         self._writer = asyncio.create_task(self._write(), name="deep-orderbook-writer")
 
     async def stop(self) -> None:
@@ -53,7 +54,7 @@ class DeepOrderBookCollector:
         self._writer = None
 
     async def _produce(self) -> None:
-        stream = getattr(self._adapter, "stream_order_book_deltas")
+        stream = self._adapter.stream_order_book_deltas
         while self._running:
             try:
                 async for event in stream(list(self._symbols)):
