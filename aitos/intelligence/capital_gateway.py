@@ -6,6 +6,13 @@ from dataclasses import dataclass
 from math import isfinite
 from typing import Any
 
+from aitos.intelligence.capital_controls import (
+    CapitalCircuitBreaker,
+    CapitalControlConfig,
+    ProbabilityCalibrator,
+    execution_cost_bps,
+    opportunity_age_seconds,
+)
 from aitos.intelligence.capital_objective import (
     CapitalAllocation,
     CapitalAllocator,
@@ -40,21 +47,26 @@ class CapitalGateway:
         allocator: CapitalAllocator | None = None,
         protection: PortfolioProtection | None = None,
         reservation: CapitalReservation | None = None,
+        controls: CapitalControlConfig | None = None,
+        calibrator: ProbabilityCalibrator | None = None,
     ) -> None:
         self.objective = objective or CapitalObjective()
         self.allocator = allocator or CapitalAllocator(self.objective)
         self.protection = protection or PortfolioProtection()
         self.reservation = reservation or CapitalReservation()
+        self.controls = controls or CapitalControlConfig()
+        self.circuit_breaker = CapitalCircuitBreaker(self.controls)
+        self.calibrator = calibrator or ProbabilityCalibrator(self.controls)
 
-    @staticmethod
     def estimate_opportunity(
+        self,
         opportunity: Opportunity,
         *,
         fee_bps: float = 10.0,
         slippage_bps: float = 5.0,
         funding_bps: float = 0.0,
     ) -> OpportunityEstimate:
-        """Convert an executable opportunity into a conservative economic estimate."""
+        """Build a conservative economic estimate using current execution conditions."""
         entry = float(opportunity.entry_price)
         if not isfinite(entry) or entry <= 0:
             raise ValueError("opportunity entry_price must be finite and positive")
@@ -71,45 +83,50 @@ class CapitalGateway:
             gross = (entry - tp) / entry * 100.0
         expected_loss = abs(entry - stop) / entry * 100.0
         consensus: dict[str, Any] = opportunity.agent_consensus
-        probability = consensus.get("loss_probability")
-        if probability is None:
-            probability = 1.0 - float(opportunity.confidence)
+        raw_probability = consensus.get("loss_probability")
+        if raw_probability is None:
+            raw_probability = 1.0 - float(opportunity.confidence)
+        probability = self.calibrator.calibrate(float(raw_probability))
+        liquidity = max(0.0, min(10.0, float(consensus.get("liquidity_score", 5.0))))
+        volatility = consensus.get("volatility_score")
+        effective_slippage = execution_cost_bps(
+            base_fee_bps=fee_bps,
+            base_slippage_bps=slippage_bps,
+            liquidity_score=liquidity,
+            volatility_score=volatility,
+            config=self.controls,
+        ) - max(0.0, float(fee_bps))
         return OpportunityEstimate(
             symbol=opportunity.symbol,
             expected_gross_return_pct=max(0.0, gross),
             expected_loss_pct=max(0.0, expected_loss),
-            loss_probability=max(0.0, min(1.0, float(probability))),
+            loss_probability=max(0.0, min(1.0, probability)),
             fee_bps=max(0.0, float(fee_bps)),
-            slippage_bps=max(0.0, float(slippage_bps)),
+            slippage_bps=max(0.0, effective_slippage),
             funding_bps=max(0.0, float(funding_bps)),
-            liquidity_score=max(
-                0.0, min(10.0, float(consensus.get("liquidity_score", 5.0)))
-            ),
+            liquidity_score=liquidity,
             confidence=max(0.0, min(1.0, float(opportunity.confidence))),
-            regime_fit=max(
-                0.0, min(10.0, float(consensus.get("regime_fit_score", 5.0)))
-            ),
+            regime_fit=max(0.0, min(10.0, float(consensus.get("regime_fit_score", 5.0)))),
             metadata={
                 "opportunity_id": opportunity.opportunity_id,
+                "detected_at": opportunity.detected_at,
                 "regime": opportunity.regime or consensus.get("runtime_regime"),
-                "volatility_score": consensus.get("volatility_score"),
+                "volatility_score": volatility,
                 "equity_peak_usd": consensus.get("equity_peak_usd"),
                 "position_risk_pct": consensus.get("position_risk_pct", {}),
                 "correlations": consensus.get("correlations", {}),
+                "daily_pnl_pct": consensus.get("daily_pnl_pct", 0.0),
+                "consecutive_losses": consensus.get("consecutive_losses", 0),
             },
         )
 
     @staticmethod
-    def _snapshot(
-        equity_usd: float, estimate: OpportunityEstimate
-    ) -> PortfolioRiskSnapshot:
+    def _snapshot(equity_usd: float, estimate: OpportunityEstimate) -> PortfolioRiskSnapshot:
         metadata = estimate.metadata
         peak = float(metadata.get("equity_peak_usd") or equity_usd)
-        raw_positions = metadata.get("position_risk_pct") or {}
-        positions = {str(k): float(v) for k, v in dict(raw_positions).items()}
-        raw_corr = metadata.get("correlations") or {}
+        positions = {str(k): float(v) for k, v in dict(metadata.get("position_risk_pct") or {}).items()}
         correlations: dict[tuple[str, str], float] = {}
-        for key, value in dict(raw_corr).items():
+        for key, value in dict(metadata.get("correlations") or {}).items():
             if isinstance(key, (tuple, list)) and len(key) == 2:
                 correlations[(str(key[0]), str(key[1]))] = float(value)
             elif isinstance(key, str) and ":" in key:
@@ -124,12 +141,43 @@ class CapitalGateway:
         *,
         max_positions: int = 3,
     ) -> CapitalGatewayResult:
-        decisions = self.objective.rank(estimates)
-        allocations = self.allocator.allocate(
-            equity_usd, decisions, max_positions=max_positions
-        )
+        decisions: list[CapitalDecision] = []
+        eligible_estimates: list[OpportunityEstimate] = []
+        for estimate in estimates:
+            metadata = estimate.metadata
+            age = opportunity_age_seconds(str(metadata.get("detected_at", "")))
+            if age > self.controls.opportunity_max_age_seconds:
+                decisions.append(
+                    CapitalDecision(
+                        estimate.symbol, False, 0.0, 0.0, 0.0,
+                        round(estimate.expected_net_edge_pct, 6),
+                        round(estimate.total_cost_pct, 6),
+                        ("opportunity_expired",),
+                        (f"age_seconds={age:.3f}",),
+                    )
+                )
+                continue
+            allowed, breaker_reason = self.circuit_breaker.check(
+                daily_pnl_pct=float(metadata.get("daily_pnl_pct", 0.0)),
+                consecutive_losses=int(metadata.get("consecutive_losses", 0)),
+            )
+            if not allowed:
+                decisions.append(
+                    CapitalDecision(
+                        estimate.symbol, False, 0.0, 0.0, 0.0,
+                        round(estimate.expected_net_edge_pct, 6),
+                        round(estimate.total_cost_pct, 6),
+                        (breaker_reason,),
+                        (),
+                    )
+                )
+                continue
+            eligible_estimates.append(estimate)
+        ranked = self.objective.rank(eligible_estimates)
+        decisions.extend(ranked)
+        allocations = self.allocator.allocate(equity_usd, ranked, max_positions=max_positions)
         protected: list[CapitalAllocation] = []
-        by_symbol = {item.symbol: item for item in estimates}
+        by_symbol = {item.symbol: item for item in eligible_estimates}
         for allocation in allocations:
             estimate = by_symbol[allocation.symbol]
             snapshot = self._snapshot(equity_usd, estimate)
@@ -145,27 +193,18 @@ class CapitalGateway:
             if not protection.allowed:
                 continue
             risk_budget = equity_usd * protection.allowed_risk_pct / 100.0
-            capital = risk_budget / max(
-                self.objective.config.max_trade_risk_pct / 100.0, 1e-9
-            )
+            capital = risk_budget / max(self.objective.config.max_trade_risk_pct / 100.0, 1e-9)
             candidate = CapitalAllocation(
-                allocation.symbol,
-                round(capital, 8),
-                round(risk_budget, 8),
-                allocation.score,
+                allocation.symbol, round(capital, 8), round(risk_budget, 8), allocation.score
             )
-            available_capital = max(
-                0.0, equity_usd - self.reservation.reserved_capital_usd
-            )
+            available_capital = max(0.0, equity_usd - self.reservation.reserved_capital_usd)
             available_risk = max(
                 0.0,
                 equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
                 - self.reservation.reserved_risk_usd,
             )
             if self.reservation.reserve(
-                Reservation(
-                    candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd
-                ),
+                Reservation(candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd),
                 available_capital_usd=available_capital,
                 available_risk_usd=available_risk,
             ):
@@ -182,15 +221,10 @@ class CapitalGateway:
         funding_bps: float = 0.0,
     ) -> tuple[CapitalDecision, CapitalAllocation | None]:
         estimate = self.estimate_opportunity(
-            opportunity,
-            fee_bps=fee_bps,
-            slippage_bps=slippage_bps,
-            funding_bps=funding_bps,
+            opportunity, fee_bps=fee_bps, slippage_bps=slippage_bps, funding_bps=funding_bps
         )
         result = self.evaluate(equity_usd, [estimate], max_positions=1)
-        decision = next(
-            (d for d in result.decisions if d.symbol == opportunity.symbol), None
-        )
+        decision = next((d for d in result.decisions if d.symbol == opportunity.symbol), None)
         if decision is None:
             decision = self.objective.evaluate(estimate)
         return decision, result.allocation_for(opportunity.symbol)
