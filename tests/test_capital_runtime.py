@@ -1,0 +1,69 @@
+import pytest
+
+from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_runtime import install_capital_guard
+from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
+from aitos.risk.models import PortfolioState
+from aitos.trading.lifecycle import TradeLifecycle
+
+
+def make_portfolio() -> PortfolioState:
+    return PortfolioState(equity_usd=10_000.0, peak_equity_usd=10_000.0)
+
+
+def make_opportunity(**overrides) -> Opportunity:
+    values = dict(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        stop_loss_price=99.0,
+        take_profit_levels=[104.0],
+        confidence=0.8,
+        strategy_id="capital-test",
+        rationale="capital objective test",
+    )
+    values.update(overrides)
+    return Opportunity(**values)
+
+
+def test_gateway_uses_nearest_target_and_costs():
+    estimate = CapitalGateway.estimate_opportunity(
+        make_opportunity(take_profit_levels=[103.0, 110.0]),
+        fee_bps=10.0,
+        slippage_bps=5.0,
+    )
+    assert estimate.expected_gross_return_pct == pytest.approx(3.0)
+    assert estimate.total_cost_pct == pytest.approx(0.15)
+    assert estimate.expected_net_edge_pct == pytest.approx(2.05)
+
+
+@pytest.mark.asyncio
+async def test_runtime_guard_blocks_fee_heavy_or_low_edge_trade(event_bus, risk_engine):
+    install_capital_guard()
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+
+    # A flat target cannot overcome the execution cost, so the lifecycle must
+    # never reach order submission/position opening.
+    opportunity = make_opportunity(
+        take_profit_levels=[100.05],
+        confidence=0.95,
+    )
+    trade = await lifecycle.submit_opportunity(opportunity, make_portfolio())
+
+    assert trade.state == TradeLifecycleState.REJECTED
+    assert trade.rejection_reason.startswith("capital_objective:")
+    assert lifecycle.get_open_trades() == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_guard_allows_eligible_trade(event_bus, risk_engine):
+    install_capital_guard()
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    assert trade.agent_consensus["capital_objective"]["eligible"] is True
+    assert trade.agent_consensus["capital_objective"]["risk_budget_usd"] <= 100.0
