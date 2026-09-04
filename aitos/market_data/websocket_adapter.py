@@ -155,9 +155,7 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
                     if task is not None and not task.done():
                         task.cancel()
                 tasks = [
-                    task
-                    for task in (heartbeat_task, lifetime_task)
-                    if task is not None
+                    task for task in (heartbeat_task, lifetime_task) if task is not None
                 ]
                 if tasks:
                     await asyncio.gather(*tasks, return_exceptions=True)
