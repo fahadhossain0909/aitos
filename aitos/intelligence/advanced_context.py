@@ -10,10 +10,10 @@ its required evidence is unavailable.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from math import isfinite
 from statistics import mean, pstdev
-from typing import Any, Sequence
 
 from aitos.models.market import Kline
 
@@ -106,14 +106,22 @@ def volume_profile(
         right_value = profile[right] if right < bins else -1.0
         if right_value >= left_value:
             if right < bins:
-                selected.add(right); covered += right_value; right += 1
+                selected.add(right)
+                covered += right_value
+                right += 1
             elif left >= 0:
-                selected.add(left); covered += left_value; left -= 1
+                selected.add(left)
+                covered += left_value
+                left -= 1
         else:
             if left >= 0:
-                selected.add(left); covered += left_value; left -= 1
+                selected.add(left)
+                covered += left_value
+                left -= 1
             elif right < bins:
-                selected.add(right); covered += right_value; right += 1
+                selected.add(right)
+                covered += right_value
+                right += 1
     va_low, va_high = min(selected), max(selected)
     centers = [low + (i + 0.5) * step for i in range(bins)]
     threshold_hvn = total / bins * 1.5
@@ -125,7 +133,9 @@ def volume_profile(
     val, vah = centers[va_low], centers[va_high]
     location = _clamp((price - val) / (vah - val)) if vah > val else 0.5
     acceptance = _clamp(profile[poc_idx] / (mean(profile) or 1.0) / 2.0)
-    return VolumeProfileContext(poc, vah, val, hvn, lvn, round(location, 4), round(acceptance, 4))
+    return VolumeProfileContext(
+        poc, vah, val, hvn, lvn, round(location, 4), round(acceptance, 4)
+    )
 
 
 def volatility_context(
@@ -133,14 +143,27 @@ def volatility_context(
 ) -> VolatilityContext:
     if len(klines) < 2:
         return VolatilityContext(0.0, 50.0, "normal", 0.0)
-    ranges = [max(k.high - k.low, abs(k.high - klines[i - 1].close), abs(k.low - klines[i - 1].close)) for i, k in enumerate(klines[1:], 1)]
+    ranges = [
+        max(
+            k.high - k.low,
+            abs(k.high - klines[i - 1].close),
+            abs(k.low - klines[i - 1].close),
+        )
+        for i, k in enumerate(klines[1:], 1)
+    ]
     current_window = ranges[-period:] if len(ranges) >= period else ranges
     atr = mean(current_window) if current_window else 0.0
     history: list[float] = []
     for end in range(period, len(ranges) + 1):
         history.append(mean(ranges[end - period : end]))
     history = history[-lookback:]
-    percentile = 50.0 if not history else 100.0 * (sum(x < atr for x in history) + 0.5 * sum(x == atr for x in history)) / len(history)
+    percentile = (
+        50.0
+        if not history
+        else 100.0
+        * (sum(x < atr for x in history) + 0.5 * sum(x == atr for x in history))
+        / len(history)
+    )
     previous = mean(ranges[-2 * period : -period]) if len(ranges) >= 2 * period else atr
     expansion_rate = (atr - previous) / previous if previous > 0 else 0.0
     if percentile >= 90:
@@ -151,7 +174,9 @@ def volatility_context(
         regime = "compression"
     else:
         regime = "normal"
-    return VolatilityContext(round(atr, 8), round(percentile, 2), regime, round(expansion_rate, 4))
+    return VolatilityContext(
+        round(atr, 8), round(percentile, 2), regime, round(expansion_rate, 4)
+    )
 
 
 def price_imbalance(klines: Sequence[Kline], max_zones: int = 8) -> ImbalanceContext:
@@ -177,7 +202,9 @@ def price_imbalance(klines: Sequence[Kline], max_zones: int = 8) -> ImbalanceCon
     price = klines[-1].close if klines else 0.0
     above = min((lo for lo, hi in compact if lo > price), default=None)
     below = max((hi for lo, hi in compact if hi < price), default=None)
-    displacement = _clamp(mean((z[2] / 3.0 for z in zones[:max_zones])) if zones else 0.0)
+    displacement = _clamp(
+        mean(z[2] / 3.0 for z in zones[:max_zones]) if zones else 0.0
+    )
     return ImbalanceContext(compact, above, below, round(displacement, 4))
 
 
@@ -202,7 +229,7 @@ def structural_symmetry(
     current_path = [(k.close - start_price) / abs(current_move) for k in current]
     candidates: list[tuple[float, int, float, float]] = []
     max_start = min(len(klines) - leg_bars - 1, lookback)
-    for start in range(0, max_start):
+    for start in range(max_start):
         hist = klines[start : start + leg_bars]
         hmove = hist[-1].close - hist[0].close
         if abs(hmove) <= 1e-12 or (hmove > 0) == (current_move > 0):
@@ -228,16 +255,23 @@ def structural_symmetry(
     if len(current) >= 3:
         expected_step = current_move / max(leg_bars - 1, 1)
         observed_step = (current[-1].close - current[-3].close) / 2.0
-        failure_distance = abs(observed_step - expected_step) / max(abs(expected_step), 1e-12)
+        failure_distance = abs(observed_step - expected_step) / max(
+            abs(expected_step), 1e-12
+        )
     return SymmetryMatch(
-        round(similarity, 4), round(scale, 6), round(time_scale, 4),
-        tuple(round(x, 8) for x in projection), True,
+        round(similarity, 4),
+        round(scale, 6),
+        round(time_scale, 4),
+        tuple(round(x, 8) for x in projection),
+        True,
         round(min(failure_distance, 10.0), 4),
     )
 
 
 def forced_flow_proxy(
-    klines: Sequence[Kline], current_cvd_score: float = 5.0, oi_change: float | None = None
+    klines: Sequence[Kline],
+    current_cvd_score: float = 5.0,
+    oi_change: float | None = None,
 ) -> float:
     """Return 0..10 pressure proxy for unusually forced directional flow.
 
@@ -251,10 +285,18 @@ def forced_flow_proxy(
     baseline = mean(volumes) if volumes else 0.0
     dispersion = pstdev(volumes) if len(volumes) > 1 else 0.0
     z = (klines[-1].volume - baseline) / dispersion if dispersion > 0 else 0.0
-    displacement = abs(klines[-1].close - klines[-1].open) / max(klines[-1].high - klines[-1].low, 1e-12)
+    displacement = abs(klines[-1].close - klines[-1].open) / max(
+        klines[-1].high - klines[-1].low, 1e-12
+    )
     flow = abs(current_cvd_score - 5.0) / 5.0
     positioning = min(1.0, abs(oi_change) * 10.0) if oi_change is not None else 0.5
-    return round(10.0 * _clamp((max(0.0, z) / 4.0) * 0.4 + displacement * 0.3 + flow * positioning * 0.3), 4)
+    return round(
+        10.0
+        * _clamp(
+            (max(0.0, z) / 4.0) * 0.4 + displacement * 0.3 + flow * positioning * 0.3
+        ),
+        4,
+    )
 
 
 def build_advanced_context(
