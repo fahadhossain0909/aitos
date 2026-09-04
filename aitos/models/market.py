@@ -46,41 +46,11 @@ class Kline:
     is_closed: bool = True
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "timeframe": self.timeframe,
-            "open_time": _iso(self.open_time),
-            "close_time": _iso(self.close_time),
-            "open": self.open,
-            "high": self.high,
-            "low": self.low,
-            "close": self.close,
-            "volume": self.volume,
-            "quote_volume": self.quote_volume,
-            "trades_count": self.trades_count,
-            "taker_buy_volume": self.taker_buy_volume,
-            "taker_buy_quote_volume": self.taker_buy_quote_volume,
-            "is_closed": self.is_closed,
-        }
+        return {"symbol": self.symbol, "timeframe": self.timeframe, "open_time": _iso(self.open_time), "close_time": _iso(self.close_time), "open": self.open, "high": self.high, "low": self.low, "close": self.close, "volume": self.volume, "quote_volume": self.quote_volume, "trades_count": self.trades_count, "taker_buy_volume": self.taker_buy_volume, "taker_buy_quote_volume": self.taker_buy_quote_volume, "is_closed": self.is_closed}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Kline:
-        return cls(
-            symbol=data["symbol"],
-            timeframe=data["timeframe"],
-            open_time=_dt(data["open_time"]),
-            close_time=_dt(data["close_time"]),
-            open=float(data["open"]),
-            high=float(data["high"]),
-            low=float(data["low"]),
-            close=float(data["close"]),
-            volume=float(data["volume"]),
-            quote_volume=float(data["quote_volume"]),
-            trades_count=int(data["trades_count"]),
-            taker_buy_volume=float(data["taker_buy_volume"]),
-            taker_buy_quote_volume=float(data["taker_buy_quote_volume"]),
-            is_closed=bool(data.get("is_closed", True)),
-        )
+        return cls(symbol=data["symbol"], timeframe=data["timeframe"], open_time=_dt(data["open_time"]), close_time=_dt(data["close_time"]), open=float(data["open"]), high=float(data["high"]), low=float(data["low"]), close=float(data["close"]), volume=float(data["volume"]), quote_volume=float(data["quote_volume"]), trades_count=int(data["trades_count"]), taker_buy_volume=float(data["taker_buy_volume"]), taker_buy_quote_volume=float(data["taker_buy_quote_volume"]), is_closed=bool(data.get("is_closed", True)))
 
 
 @dataclass(frozen=True)
@@ -110,33 +80,18 @@ class OrderBookSnapshot:
         return bid_depth / ask_depth if ask_depth else float("inf")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "bid_levels": [{"price": p, "qty": q} for p, q in self.bids],
-            "ask_levels": [{"price": p, "qty": q} for p, q in self.asks],
-            "spread": self.spread,
-            "depth_ratio": self.depth_ratio,
-            "last_update_id": self.last_update_id,
-            "timestamp": _iso(self.timestamp),
-        }
+        return {"symbol": self.symbol, "bid_levels": [{"price": p, "qty": q} for p, q in self.bids], "ask_levels": [{"price": p, "qty": q} for p, q in self.asks], "spread": self.spread, "depth_ratio": self.depth_ratio, "last_update_id": self.last_update_id, "timestamp": _iso(self.timestamp)}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OrderBookSnapshot:
-        bids = tuple(
-            (float(x["price"]), float(x["qty"]))
-            for x in data.get("bid_levels", data.get("bids", []))
-        )
-        asks = tuple(
-            (float(x["price"]), float(x["qty"]))
-            for x in data.get("ask_levels", data.get("asks", []))
-        )
-        return cls(
-            symbol=data["symbol"],
-            bids=bids,
-            asks=asks,
-            last_update_id=int(data["last_update_id"]),
-            timestamp=_dt(data["timestamp"]),
-        )
+        def level_value(item: dict[str, Any]) -> float:
+            value = item.get("qty", item.get("quantity"))
+            if value is None:
+                raise KeyError("qty")
+            return float(value)
+        bids = tuple((float(x["price"]), level_value(x)) for x in data.get("bid_levels", data.get("bids", [])) if level_value(x) > 0)
+        asks = tuple((float(x["price"]), level_value(x)) for x in data.get("ask_levels", data.get("asks", [])) if level_value(x) > 0)
+        return cls(symbol=data["symbol"], bids=bids, asks=asks, last_update_id=int(data["last_update_id"]), timestamp=_dt(data["timestamp"]))
 
 
 @dataclass(frozen=True)
@@ -150,27 +105,20 @@ class TradeTick:
     timestamp: datetime
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "trade_id": self.trade_id,
-            "price": self.price,
-            "quantity": self.quantity,
-            "side": self.side.value,
-            "is_buyer_maker": self.is_buyer_maker,
-            "timestamp": _iso(self.timestamp),
-        }
+        return {"symbol": self.symbol, "trade_id": self.trade_id, "price": self.price, "quantity": self.quantity, "side": self.side.value, "is_buyer_maker": self.is_buyer_maker, "timestamp": _iso(self.timestamp)}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TradeTick:
-        return cls(
-            symbol=data["symbol"],
-            trade_id=int(data["trade_id"]),
-            price=float(data["price"]),
-            quantity=float(data["quantity"]),
-            side=TradeSide(data["side"]),
-            is_buyer_maker=bool(data["is_buyer_maker"]),
-            timestamp=_dt(data["timestamp"]),
-        )
+        raw_side = data.get("side")
+        if isinstance(raw_side, TradeSide):
+            side = raw_side
+        elif raw_side is not None:
+            side = TradeSide(str(raw_side).lower())
+        elif "is_buyer_maker" in data:
+            side = TradeSide.SELL if bool(data["is_buyer_maker"]) else TradeSide.BUY
+        else:
+            raise KeyError("side")
+        return cls(symbol=data["symbol"], trade_id=int(data["trade_id"]), price=float(data["price"]), quantity=float(data["quantity"]), side=side, is_buyer_maker=bool(data.get("is_buyer_maker", side is TradeSide.SELL)), timestamp=_dt(data["timestamp"]))
 
 
 @dataclass(frozen=True)
@@ -181,40 +129,4 @@ class FundingRate:
     mark_price: float
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "funding_rate": self.funding_rate,
-            "funding_time": _iso(self.funding_time),
-            "mark_price": self.mark_price,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> FundingRate:
-        return cls(
-            symbol=data["symbol"],
-            funding_rate=float(data["funding_rate"]),
-            funding_time=_dt(data["funding_time"]),
-            mark_price=float(data["mark_price"]),
-        )
-
-
-@dataclass(frozen=True)
-class OpenInterest:
-    symbol: str
-    open_interest: float
-    timestamp: datetime
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "symbol": self.symbol,
-            "open_interest": float(self.open_interest),
-            "timestamp": _iso(self.timestamp),
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> OpenInterest:
-        return cls(
-            symbol=data["symbol"],
-            open_interest=float(data["open_interest"]),
-            timestamp=_dt(data["timestamp"]),
-        )
+        return {"symbol": self.symbol, "funding_rate": self.funding_rate, "funding_time": _iso(self.funding_time), "mark_price": self.mark_price}
