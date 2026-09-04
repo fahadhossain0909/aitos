@@ -53,6 +53,7 @@ WS_PING_TIMEOUT_SECONDS = 10.0
 WS_OPEN_TIMEOUT_SECONDS = 10.0
 TRADE_STREAM_IDLE_FALLBACK_SECONDS = 5.0
 TRADE_STREAM_PRIMARY_RETRY_SECONDS = 1.0
+BINANCE_MAX_STREAMS_PER_CONNECTION = 900
 
 
 class BinanceFuturesAdapter(ExchangeAdapter):
@@ -342,6 +343,18 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
                 )
 
+    @staticmethod
+    def _partition_streams(
+        streams: list[str], max_per_connection: int = BINANCE_MAX_STREAMS_PER_CONNECTION
+    ) -> list[list[str]]:
+        if max_per_connection <= 0:
+            raise ValueError("max_per_connection must be positive")
+        unique = list(dict.fromkeys(streams))
+        return [
+            unique[i : i + max_per_connection]
+            for i in range(0, len(unique), max_per_connection)
+        ]
+
     async def _get(self, path: str, params: dict[str, Any], weight: int) -> Any:
         await self._rate_limiter.acquire(weight)
         await self.connect()
@@ -369,9 +382,62 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     ) -> AsyncIterator[tuple[Any, str]]:
         if not streams:
             return
-        url = f"{self._ws_base_url(streams)}?streams={'/'.join(streams)}"
-        async for item in self._connect_raw(url, None, emit_reconnect, streams):
-            yield item
+        shards = self._partition_streams(streams)
+        if len(shards) == 1:
+            url = f"{self._ws_base_url(shards[0])}?streams={'/'.join(shards[0])}"
+            async for item in self._connect_raw(url, None, emit_reconnect, shards[0]):
+                yield item
+            return
+
+        # Binance permits at most 1024 streams per connection. Keep a safety
+        # margin and merge deterministic shards so all-market universes can scale
+        # without silently exceeding the venue limit.
+        iterators = [
+            self._connect_raw(
+                f"{self._ws_base_url(shard)}?streams={'/'.join(shard)}",
+                None,
+                emit_reconnect,
+                shard,
+            ).__aiter__()
+            for shard in shards
+        ]
+        tasks: dict[asyncio.Task, int] = {
+            asyncio.create_task(iterator.__anext__()): index
+            for index, iterator in enumerate(iterators)
+        }
+        try:
+            while tasks:
+                done, _ = await asyncio.wait(
+                    tasks, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done:
+                    index = tasks.pop(task)
+                    try:
+                        yield task.result()
+                    except StopAsyncIteration:
+                        continue
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        logger.error(
+                            "Binance sharded websocket iterator failed",
+                            extra={
+                                "aitos_extra": {
+                                    "shard_index": index,
+                                    "error": str(exc),
+                                }
+                            },
+                        )
+                    tasks[asyncio.create_task(iterators[index].__anext__())] = index
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await asyncio.gather(
+                *(iterator.aclose() for iterator in iterators),
+                return_exceptions=True,
+            )
 
     async def _connect_raw(
         self,
