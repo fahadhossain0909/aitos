@@ -5,7 +5,7 @@ from aitos.market_data.subscription_manager import SubscriptionManager
 def test_plan_keeps_btc_and_promotes_two_non_btc() -> None:
     plan = build_subscription_plan(["ETHUSDT", "BTCUSDT", "SOLUSDT", "BNBUSDT"])
     assert plan.deep == ("BTCUSDT", "ETHUSDT", "SOLUSDT")
-    assert plan.historical_book == ("BTCUSDT", "LTCUSDT")
+    assert plan.historical_book == ("BTCUSDT", "ETHUSDT", "SOLUSDT")
 
 
 def test_manager_emits_only_state_changes() -> None:
