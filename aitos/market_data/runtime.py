@@ -114,7 +114,9 @@ class CanonicalMarketDataRuntime:
             )
         )
 
-    async def update_orderbook_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
+    async def update_orderbook_symbols(
+        self, symbols: list[str] | tuple[str, ...]
+    ) -> bool:
         """Hot-switch the live order-book socket to a new symbol set.
 
         Trade ingestion remains untouched. The current socket is cancelled and
