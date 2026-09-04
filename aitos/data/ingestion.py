@@ -14,14 +14,7 @@ from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSin
 from aitos.market_data.runtime import CanonicalMarketDataRuntime
 
 from .ingestion_legacy import DataIngestionService as _LegacyDataIngestionService
-from .ingestion_legacy import (
-    kline_topic,
-    liquidity_topic,
-    live_state_topic,
-    orderbook_topic,
-    orderflow_topic,
-    trade_topic,
-)
+from .ingestion_legacy import kline_topic, liquidity_topic, live_state_topic, orderbook_topic, orderflow_topic, trade_topic
 
 DEEP_HISTORICAL_SYMBOLS = ("BTCUSDT", "LTCUSDT")
 DEEP_ORDERBOOK_LEVELS = 1000
@@ -35,14 +28,25 @@ class DataIngestionService(_LegacyDataIngestionService):
         live_trade_handler = kwargs.get("live_trade_handler")
         live_orderbook_handler = kwargs.get("live_orderbook_handler")
         self._canonical_mode = any(
-            getattr(getattr(handler, "__self__", None), "module_id", None)
-            == "opportunity-scanner"
+            getattr(getattr(handler, "__self__", None), "module_id", None) == "opportunity-scanner"
             for handler in (live_trade_handler, live_orderbook_handler)
             if handler is not None
         )
         if self._canonical_mode:
             kwargs["live_trade_handler"] = None
             kwargs["live_orderbook_handler"] = None
+        elif live_trade_handler is None and live_orderbook_handler is None:
+            # Compatibility callers still expect the legacy facade to expose
+            # trade/book topics. No-op handlers activate those streams without
+            # duplicating canonical scanner-owned handlers.
+            async def _legacy_trade_sink(_trade) -> None:
+                return None
+
+            async def _legacy_book_sink(_book) -> None:
+                return None
+
+            kwargs["live_trade_handler"] = _legacy_trade_sink
+            kwargs["live_orderbook_handler"] = _legacy_book_sink
         super().__init__(*args, **kwargs)
         self._canonical_runtime: CanonicalMarketDataRuntime | None = None
         self._deep_runtime: CanonicalMarketDataRuntime | None = None
@@ -51,30 +55,20 @@ class DataIngestionService(_LegacyDataIngestionService):
         if self._canonical_mode:
             market_type = str(getattr(self._exchange, "market_type", "usd_m_futures"))
             market_bus = MarketDataBus(self._event_bus)
-            gateway = MarketDataGateway(
-                venue="binance", market_type=market_type, publisher=market_bus.publish
-            )
+            gateway = MarketDataGateway(venue="binance", market_type=market_type, publisher=market_bus.publish)
             deep = set(DEEP_HISTORICAL_SYMBOLS)
-            standard_orderbooks = [
-                symbol for symbol in self._symbols if symbol.upper() not in deep
-            ]
+            standard_orderbooks = [symbol for symbol in self._symbols if symbol.upper() not in deep]
             self._canonical_runtime = CanonicalMarketDataRuntime(
-                adapter=BinanceCanonicalMarketDataAdapter(
-                    self._exchange, market_type=market_type
-                ),
+                adapter=BinanceCanonicalMarketDataAdapter(self._exchange, market_type=market_type),
                 market_bus=market_bus,
                 gateway=gateway,
                 symbols=self._symbols,
                 orderbook_symbols=standard_orderbooks,
                 orderbook_levels=STANDARD_ORDERBOOK_LEVELS,
             )
-            deep_adapter = BinanceCanonicalMarketDataAdapter(
-                self._exchange, market_type=market_type
-            )
+            deep_adapter = BinanceCanonicalMarketDataAdapter(self._exchange, market_type=market_type)
             deep_bus = MarketDataBus(self._event_bus)
-            deep_gateway = MarketDataGateway(
-                venue="binance", market_type=market_type, publisher=deep_bus.publish
-            )
+            deep_gateway = MarketDataGateway(venue="binance", market_type=market_type, publisher=deep_bus.publish)
             self._deep_runtime = CanonicalMarketDataRuntime(
                 adapter=deep_adapter,
                 market_bus=deep_bus,
@@ -101,11 +95,7 @@ class DataIngestionService(_LegacyDataIngestionService):
     async def initialize(self, config: dict[str, Any]) -> None:
         await super().initialize(config)
         if self._canonical_runtime is not None:
-            legacy_workers = [
-                task
-                for task in self._tasks
-                if task.get_name().startswith("aitos-trade-persistence-")
-            ]
+            legacy_workers = [task for task in self._tasks if task.get_name().startswith("aitos-trade-persistence-")]
             for task in legacy_workers:
                 task.cancel()
             if legacy_workers:
@@ -122,17 +112,13 @@ class DataIngestionService(_LegacyDataIngestionService):
     async def health_check(self):
         status = await super().health_check()
         if self._canonical_runtime is not None:
-            status.details["canonical_market_data"] = (
-                self._canonical_runtime.gateway.snapshot()
-            )
+            status.details["canonical_market_data"] = self._canonical_runtime.gateway.snapshot()
         if self._deep_runtime is not None:
             status.details["deep_market_data"] = self._deep_runtime.gateway.snapshot()
         if self._deep_collector is not None:
             status.details["deep_orderbook_collector"] = self._deep_collector.snapshot()
         if self._canonical_persistence is not None:
-            status.details["canonical_persistence"] = (
-                self._canonical_persistence.snapshot()
-            )
+            status.details["canonical_persistence"] = self._canonical_persistence.snapshot()
         return status
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
@@ -147,12 +133,4 @@ class DataIngestionService(_LegacyDataIngestionService):
         await super().shutdown(grace_period_seconds)
 
 
-__all__ = [
-    "DataIngestionService",
-    "kline_topic",
-    "liquidity_topic",
-    "live_state_topic",
-    "orderbook_topic",
-    "orderflow_topic",
-    "trade_topic",
-]
+__all__ = ["DataIngestionService", "kline_topic", "liquidity_topic", "live_state_topic", "orderbook_topic", "orderflow_topic", "trade_topic"]
