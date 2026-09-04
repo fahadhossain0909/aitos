@@ -1,5 +1,6 @@
 name: MARKET DATA SMOKE
 
+# Manual production gate: run only after the deployment workflow has completed.
 on:
   workflow_dispatch:
     inputs:
@@ -101,6 +102,7 @@ jobs:
 
             echo '=== CANONICAL REDIS STREAMS ==='
             REDIS_PASSWORD="$(grep '^REDIS_PASSWORD=' .env | cut -d= -f2-)"
+            test -n "$REDIS_PASSWORD"
             docker exec -e REDIS_PASSWORD="$REDIS_PASSWORD" aitos-redis sh -c '
               redis-cli --no-auth-warning -a "$REDIS_PASSWORD" XLEN stream:market.trade;
               redis-cli --no-auth-warning -a "$REDIS_PASSWORD" XLEN stream:market.book.snapshot;
