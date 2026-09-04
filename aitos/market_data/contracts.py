@@ -1,9 +1,4 @@
-"""Venue-neutral contracts for the AITOS market-data plane.
-
-The contracts separate venue event time from AITOS receive time and carry
-stable identity, sequence, correlation, and tracing metadata. This makes a
-recovered REST event distinguishable from a live WebSocket event.
-"""
+"""Venue-neutral contracts for the AITOS market-data plane."""
 
 from __future__ import annotations
 
@@ -85,12 +80,7 @@ class OrderBookDelta:
 
 @dataclass(frozen=True, slots=True)
 class MarketEvent:
-    """Canonical envelope shared by every market-data adapter.
-
-    ``event_time``/``source_ts`` is supplied by the venue. ``ingest_time`` /
-    ``received_ts`` is assigned by AITOS. ``source`` is explicit and is never
-    inferred from whether a downstream consumer happened to use REST.
-    """
+    """Canonical envelope shared by every market-data adapter."""
 
     event_type: MarketEventType
     exchange: str
@@ -132,3 +122,13 @@ class MarketEvent:
     @property
     def received_ts(self) -> datetime:
         return self.ingest_time
+
+    def __len__(self) -> int:
+        """Expose a singleton sequence view for legacy parser callers."""
+        return 1
+
+    def __getitem__(self, index: int) -> "MarketEvent":
+        """Return this event at index zero for legacy parser compatibility."""
+        if index in (0, -1):
+            return self
+        raise IndexError(index)
