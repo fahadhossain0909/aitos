@@ -34,11 +34,7 @@ def _rejected_trade(opportunity: Opportunity, reason: str) -> Trade:
         agent_consensus=dict(opportunity.agent_consensus),
         explanation=opportunity.rationale,
         sl_price=opportunity.stop_loss_price,
-        tp_price=(
-            opportunity.take_profit_levels[0]
-            if opportunity.take_profit_levels
-            else opportunity.entry_price
-        ),
+        tp_price=(opportunity.take_profit_levels[0] if opportunity.take_profit_levels else opportunity.entry_price),
         state=TradeLifecycleState.REJECTED,
         entry_time=now,
         take_profit_levels=list(opportunity.take_profit_levels),
@@ -55,21 +51,21 @@ def _capital_reason(decision: Any) -> str:
 
 
 def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, Any]:
-    """Normalize available portfolio state for the capital gateway.
-
-    PortfolioState exposes equity peak, regime, volatility percentile and open
-    positions. Existing position risk is conservatively represented at the
-    normal 1% per-position budget when explicit risk budgets are unavailable.
-    """
+    """Normalize portfolio state for the final capital boundary."""
     consensus = dict(opportunity.agent_consensus)
     if hasattr(portfolio, "peak_equity_usd"):
         consensus["equity_peak_usd"] = float(portfolio.peak_equity_usd)
-    if hasattr(portfolio, "regime") and not opportunity.regime:
+    if hasattr(portfolio, "regime"):
         consensus["runtime_regime"] = str(portfolio.regime)
     if hasattr(portfolio, "volatility_percentile"):
-        consensus["volatility_score"] = max(
-            0.0, min(1.0, float(portfolio.volatility_percentile) / 100.0)
-        )
+        consensus["volatility_score"] = max(0.0, min(1.0, float(portfolio.volatility_percentile) / 100.0))
+    if hasattr(portfolio, "daily_pnl_pct"):
+        consensus["daily_pnl_pct"] = float(portfolio.daily_pnl_pct)
+    # A lifecycle/portfolio integration may expose a live loss streak. Missing
+    # telemetry is intentionally zero here; the existing risk engine remains a
+    # separate hard safety layer for daily/weekly loss limits.
+    if hasattr(portfolio, "consecutive_losses"):
+        consensus["consecutive_losses"] = int(portfolio.consecutive_losses)
     positions = getattr(portfolio, "positions", ()) or ()
     if "position_risk_pct" not in consensus:
         consensus["position_risk_pct"] = {
@@ -81,14 +77,10 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
         pairwise = getattr(portfolio, "max_pairwise_correlation", None)
         if pairwise is not None and float(pairwise) > 0.0:
             consensus["correlations"] = {
-                f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": float(
-                    pairwise
-                )
+                f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": float(pairwise)
                 for position in positions
                 if getattr(position, "symbol", "")
             }
-        # When no pairwise estimate exists, omit the map so the protection
-        # layer deliberately falls back to its conservative unknown correlation.
     return consensus
 
 
@@ -111,18 +103,14 @@ def install_capital_guard() -> None:
     ) -> Trade:
         equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
         if equity <= 0:
-            return _rejected_trade(
-                opportunity, "capital_objective: invalid or unavailable equity"
-            )
+            return _rejected_trade(opportunity, "capital_objective: invalid or unavailable equity")
 
         protected_opportunity = replace(
             opportunity,
             agent_consensus=_portfolio_consensus(portfolio, opportunity),
         )
         try:
-            decision, allocation = gateway.authorize_opportunity(
-                equity, protected_opportunity
-            )
+            decision, allocation = gateway.authorize_opportunity(equity, protected_opportunity)
         except (TypeError, ValueError, ArithmeticError) as exc:
             return _rejected_trade(protected_opportunity, f"capital_objective: {exc}")
 
