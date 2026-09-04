@@ -88,9 +88,23 @@ jobs:
             --data-binary 'CREATE DATABASE IF NOT EXISTS aitos'
       - name: Verify integration services
         run: |
-          redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" -a "$REDIS_PASSWORD" --no-auth-warning ping
+          python - <<'PY'
+          import os
+          import redis
+
+          client = redis.Redis(
+              host=os.environ["REDIS_HOST"],
+              port=int(os.environ["REDIS_PORT"]),
+              password=os.environ["REDIS_PASSWORD"],
+              decode_responses=True,
+          )
+          if client.ping() is not True:
+              raise SystemExit("Redis health check failed")
+          print("Redis: PONG")
+          PY
           curl -fsS http://127.0.0.1:7474 >/dev/null
           curl -fsS http://127.0.0.1:8123/ping >/dev/null
+          echo "Neo4j HTTP and ClickHouse health checks passed"
       - name: Compile Python sources
         run: python -m compileall -q aitos run_live_trading.py run_paper_trading.py
       - name: Check formatting
