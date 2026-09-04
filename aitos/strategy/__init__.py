@@ -5,6 +5,13 @@ remain strategy-agnostic.  The package is deliberately independent of any
 single venue or asset class.
 """
 
+from .allocator import CapitalAllocator
+from .builtins import (
+    FundingBasisStrategy,
+    MarketMakingStrategy,
+    RegimeRouterStrategy,
+    StatisticalArbitrageStrategy,
+)
 from .contracts import (
     CapitalRequest,
     ExecutionIntent,
@@ -16,13 +23,6 @@ from .contracts import (
     StrategyResult,
 )
 from .registry import StrategyRegistry
-from .allocator import CapitalAllocator
-from .builtins import (
-    FundingBasisStrategy,
-    MarketMakingStrategy,
-    RegimeRouterStrategy,
-    StatisticalArbitrageStrategy,
-)
 
 __all__ = [
     "CapitalAllocator",
