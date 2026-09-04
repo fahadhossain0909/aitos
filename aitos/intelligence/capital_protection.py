@@ -26,10 +26,18 @@ class ProtectionConfig:
 
     def __post_init__(self) -> None:
         for name in (
-            "max_portfolio_risk_pct", "max_correlated_risk_pct", "max_single_cluster_pct",
-            "drawdown_1_pct", "drawdown_2_pct", "drawdown_3_pct", "drawdown_stop_pct",
-            "drawdown_mult_1", "drawdown_mult_2", "drawdown_mult_3",
-            "volatility_mult_high", "volatility_mult_extreme",
+            "max_portfolio_risk_pct",
+            "max_correlated_risk_pct",
+            "max_single_cluster_pct",
+            "drawdown_1_pct",
+            "drawdown_2_pct",
+            "drawdown_3_pct",
+            "drawdown_stop_pct",
+            "drawdown_mult_1",
+            "drawdown_mult_2",
+            "drawdown_mult_3",
+            "volatility_mult_high",
+            "volatility_mult_extreme",
         ):
             value = float(getattr(self, name))
             if not isfinite(value) or value < 0:
@@ -38,7 +46,12 @@ class ProtectionConfig:
             raise ValueError("unknown_correlation must be between 0 and 1")
         if not 0.0 <= self.high_correlation <= 1.0:
             raise ValueError("high_correlation must be between 0 and 1")
-        if not self.drawdown_1_pct <= self.drawdown_2_pct <= self.drawdown_3_pct <= self.drawdown_stop_pct:
+        if (
+            not self.drawdown_1_pct
+            <= self.drawdown_2_pct
+            <= self.drawdown_3_pct
+            <= self.drawdown_stop_pct
+        ):
             raise ValueError("drawdown thresholds must be ordered")
 
 
@@ -57,7 +70,9 @@ class PortfolioRiskSnapshot:
     def drawdown_pct(self) -> float:
         if self.equity_peak_usd <= 0:
             return 100.0
-        return max(0.0, (self.equity_peak_usd - self.equity_usd) / self.equity_peak_usd * 100.0)
+        return max(
+            0.0, (self.equity_peak_usd - self.equity_usd) / self.equity_peak_usd * 100.0
+        )
 
     def correlation(self, a: str, b: str, unknown: float) -> float:
         if a == b:
@@ -97,7 +112,11 @@ class PortfolioProtection:
 
     @staticmethod
     def regime_multiplier(regime: str | None, volatility_score: float | None) -> float:
-        volatility = 0.0 if volatility_score is None else max(0.0, min(1.0, float(volatility_score)))
+        volatility = (
+            0.0
+            if volatility_score is None
+            else max(0.0, min(1.0, float(volatility_score)))
+        )
         if volatility >= 0.90:
             return 0.25
         if volatility >= 0.75:
@@ -110,27 +129,72 @@ class PortfolioProtection:
         return 1.0
 
     def evaluate(
-        self, *, symbol: str, requested_risk_pct: float, snapshot: PortfolioRiskSnapshot,
-        regime: str | None = None, volatility_score: float | None = None,
+        self,
+        *,
+        symbol: str,
+        requested_risk_pct: float,
+        snapshot: PortfolioRiskSnapshot,
+        regime: str | None = None,
+        volatility_score: float | None = None,
     ) -> ProtectionDecision:
         if requested_risk_pct <= 0 or not isfinite(requested_risk_pct):
-            return ProtectionDecision(False, 0.0, requested_risk_pct, 0.0, snapshot.total_risk_pct, snapshot.drawdown_pct, "invalid_requested_risk")
+            return ProtectionDecision(
+                False,
+                0.0,
+                requested_risk_pct,
+                0.0,
+                snapshot.total_risk_pct,
+                snapshot.drawdown_pct,
+                "invalid_requested_risk",
+            )
         dd_mult = self.drawdown_multiplier(snapshot.drawdown_pct)
         regime_mult = self.regime_multiplier(regime, volatility_score)
         multiplier = min(dd_mult, regime_mult)
         if multiplier <= 0:
-            return ProtectionDecision(False, 0.0, requested_risk_pct, 0.0, snapshot.total_risk_pct, snapshot.drawdown_pct, "drawdown_protection_stop")
+            return ProtectionDecision(
+                False,
+                0.0,
+                requested_risk_pct,
+                0.0,
+                snapshot.total_risk_pct,
+                snapshot.drawdown_pct,
+                "drawdown_protection_stop",
+            )
         existing_correlated = 0.0
         for other, risk in snapshot.position_risk_pct.items():
-            existing_correlated += max(0.0, risk) * abs(snapshot.correlation(symbol, other, self.config.unknown_correlation))
+            existing_correlated += max(0.0, risk) * abs(
+                snapshot.correlation(symbol, other, self.config.unknown_correlation)
+            )
         correlated_risk = existing_correlated + requested_risk_pct * multiplier
-        portfolio_remaining = max(0.0, self.config.max_portfolio_risk_pct - snapshot.total_risk_pct)
-        correlated_remaining = max(0.0, self.config.max_correlated_risk_pct - existing_correlated)
-        allowed_risk = min(requested_risk_pct * multiplier, portfolio_remaining, correlated_remaining)
+        portfolio_remaining = max(
+            0.0, self.config.max_portfolio_risk_pct - snapshot.total_risk_pct
+        )
+        correlated_remaining = max(
+            0.0, self.config.max_correlated_risk_pct - existing_correlated
+        )
+        allowed_risk = min(
+            requested_risk_pct * multiplier, portfolio_remaining, correlated_remaining
+        )
         allowed_risk = max(0.0, round(allowed_risk, 12))
         if allowed_risk <= 0:
-            return ProtectionDecision(False, multiplier, requested_risk_pct, 0.0, correlated_risk, snapshot.drawdown_pct, "portfolio_correlation_or_risk_limit")
-        return ProtectionDecision(True, multiplier, requested_risk_pct, allowed_risk, correlated_risk, snapshot.drawdown_pct, "approved")
+            return ProtectionDecision(
+                False,
+                multiplier,
+                requested_risk_pct,
+                0.0,
+                correlated_risk,
+                snapshot.drawdown_pct,
+                "portfolio_correlation_or_risk_limit",
+            )
+        return ProtectionDecision(
+            True,
+            multiplier,
+            requested_risk_pct,
+            allowed_risk,
+            correlated_risk,
+            snapshot.drawdown_pct,
+            "approved",
+        )
 
 
 @dataclass(frozen=True)
@@ -145,7 +209,13 @@ class CapitalReservation:
         self._lock = RLock()
         self._reservations: dict[str, Reservation] = {}
 
-    def reserve(self, reservation: Reservation, *, available_capital_usd: float, available_risk_usd: float) -> bool:
+    def reserve(
+        self,
+        reservation: Reservation,
+        *,
+        available_capital_usd: float,
+        available_risk_usd: float,
+    ) -> bool:
         if reservation.capital_usd < 0 or reservation.risk_budget_usd < 0:
             raise ValueError("reservation values must be non-negative")
         with self._lock:
