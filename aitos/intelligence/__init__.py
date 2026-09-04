@@ -1,4 +1,5 @@
 from . import indicators
+from .capital_gateway import CapitalGateway, CapitalGatewayResult
 from .capital_objective import (
     CapitalAllocation,
     CapitalAllocator,
@@ -27,6 +28,8 @@ __all__ = [
     "CapitalAllocation",
     "CapitalAllocator",
     "CapitalDecision",
+    "CapitalGateway",
+    "CapitalGatewayResult",
     "CapitalObjective",
     "CapitalObjectiveConfig",
     "DeepValueRLScorer",
