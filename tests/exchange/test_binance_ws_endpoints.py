@@ -1,7 +1,7 @@
 from aitos.exchange.binance import (
-    BinanceFuturesAdapter,
     WS_MARKET_BASE_URL,
     WS_MARKET_RAW_BASE_URL,
+    BinanceFuturesAdapter,
 )
 
 

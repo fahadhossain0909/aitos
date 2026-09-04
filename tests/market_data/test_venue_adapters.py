@@ -1,4 +1,3 @@
-
 from aitos.market_data import (
     BybitCanonicalMarketDataAdapter,
     CanonicalMarketDataAdapter,
