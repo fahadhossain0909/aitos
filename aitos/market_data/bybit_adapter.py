@@ -51,9 +51,7 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         ):
             yield event
 
-    def _parse_trade(
-        self, message: dict[str, Any]
-    ) -> list[MarketEvent] | None:
+    def _parse_trade(self, message: dict[str, Any]) -> list[MarketEvent] | None:
         topic = str(message.get("topic", ""))
         if not topic.startswith("publicTrade."):
             return None

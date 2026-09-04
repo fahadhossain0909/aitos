@@ -60,9 +60,7 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         async for event in self._stream(symbols, message, self._parse_book):
             yield event
 
-    def _parse_trade(
-        self, message: dict[str, Any]
-    ) -> list[MarketEvent] | None:
+    def _parse_trade(self, message: dict[str, Any]) -> list[MarketEvent] | None:
         if message.get("arg", {}).get("channel") != "trades":
             return None
         data = message.get("data") or []
