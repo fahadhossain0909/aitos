@@ -16,14 +16,16 @@ logger = get_logger("aitos.market_data.runtime")
 
 _RECONNECT_INITIAL_DELAY_SECONDS = 1.0
 _RECONNECT_MAX_DELAY_SECONDS = 30.0
+DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
 
 
 class CanonicalMarketDataRuntime:
     """Own exchange sockets and publish normalized events through one gateway.
 
-    A stream ending or raising is treated as a transport failure, not as a
-    successful shutdown. The runtime recreates the adapter stream with bounded
-    exponential backoff until ``stop()`` is requested.
+    A stream ending, raising, or going silent is treated as a transport failure.
+    The runtime recreates the adapter stream with bounded exponential backoff.
+    This prevents a healthy TCP/WebSocket task with no data from silently
+    freezing the downstream pipeline forever.
     """
 
     def __init__(
@@ -33,12 +35,16 @@ class CanonicalMarketDataRuntime:
         gateway: MarketDataGateway,
         symbols: list[str],
         orderbook_levels: int = 20,
+        stream_idle_timeout_seconds: float = DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS,
     ) -> None:
+        if stream_idle_timeout_seconds <= 0:
+            raise ValueError("stream_idle_timeout_seconds must be positive")
         self.adapter = adapter
         self.market_bus = market_bus
         self.gateway = gateway
         self.symbols = list(dict.fromkeys(s.upper() for s in symbols))
         self.orderbook_levels = orderbook_levels
+        self.stream_idle_timeout_seconds = stream_idle_timeout_seconds
         self._tasks: list[asyncio.Task] = []
         self._drain_task: asyncio.Task | None = None
         self._stopped = True
@@ -73,6 +79,7 @@ class CanonicalMarketDataRuntime:
                     "venue": self.adapter.venue.value,
                     "market_type": self.adapter.market_type.value,
                     "symbols": self.symbols,
+                    "stream_idle_timeout_seconds": self.stream_idle_timeout_seconds,
                 }
             },
         )
@@ -110,8 +117,32 @@ class CanonicalMarketDataRuntime:
         delay = _RECONNECT_INITIAL_DELAY_SECONDS
         while not self._stopped:
             saw_event = False
+            stream = None
             try:
-                async for event in stream_factory():
+                stream = stream_factory().__aiter__()
+                while not self._stopped:
+                    try:
+                        event = await asyncio.wait_for(
+                            stream.__anext__(),
+                            timeout=self.stream_idle_timeout_seconds,
+                        )
+                    except StopAsyncIteration:
+                        break
+                    except asyncio.TimeoutError as exc:
+                        self.gateway.health.record_idle_timeout(
+                            stream_name, self.stream_idle_timeout_seconds
+                        )
+                        self.gateway.mark_reconnecting()
+                        logger.error(
+                            "canonical market-data stream watchdog timeout; reconnecting",
+                            extra={
+                                "aitos_extra": {
+                                    "stream": stream_name,
+                                    "timeout_seconds": self.stream_idle_timeout_seconds,
+                                }
+                            },
+                        )
+                        raise exc
                     saw_event = True
                     accepted = self.gateway.accept(event)
                     if accepted and event.source == MarketSource.WEBSOCKET:
@@ -143,6 +174,12 @@ class CanonicalMarketDataRuntime:
                         }
                     },
                 )
+            finally:
+                if stream is not None and hasattr(stream, "aclose"):
+                    try:
+                        await stream.aclose()
+                    except Exception:
+                        logger.debug("canonical stream close failed", exc_info=True)
             if saw_event:
                 delay = _RECONNECT_INITIAL_DELAY_SECONDS
             else:
