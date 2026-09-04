@@ -3,7 +3,7 @@ set -euo pipefail
 
 # AITOS host storage bootstrap. Durable data lives only on the configured
 # data disk; the boot disk is reserved for OS/Docker/deployment state.
-# Fail closed: never fall back to the boot disk.
+# Fail closed: never falls back to the boot disk; it never falls back to boot storage.
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 ENV_FILE="${AITOS_ENV_FILE:-$REPO_ROOT/.env}"
