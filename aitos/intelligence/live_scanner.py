@@ -83,7 +83,9 @@ class LiveScannerCache:
         state = self._state.get(symbol.upper())
         if state is None or state.last_trade_at is None:
             return False
-        age = self._source_age_seconds(state.last_trade_source_at or state.last_trade_at)
+        age = self._source_age_seconds(
+            state.last_trade_source_at or state.last_trade_at
+        )
         return age is not None and age <= max_age_seconds
 
     async def initialize(self, direct_market_data: bool = False) -> None:
