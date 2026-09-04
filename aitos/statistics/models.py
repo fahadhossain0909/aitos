@@ -99,7 +99,9 @@ class HMMState:
             if _finite(value, "state_sigma") < 0:
                 raise ValueError("state_sigmas must be non-negative")
         n = len(self.probabilities)
-        if len(self.transition_matrix) != n or any(len(row) != n for row in self.transition_matrix):
+        if len(self.transition_matrix) != n or any(
+            len(row) != n for row in self.transition_matrix
+        ):
             raise ValueError("transition_matrix must be square and match state count")
 
 
