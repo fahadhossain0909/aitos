@@ -90,22 +90,24 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     return consensus
 
 
-def _hard_limit_reason(self: TradeLifecycle, portfolio: Any) -> str | None:
-    """Return a blocking risk-engine hard-cap reason before capital allocation."""
+async def _hard_limit_reason(self: TradeLifecycle, portfolio: Any) -> str | None:
+    """Return a hard-cap reason while preserving RiskEngine emergency effects."""
     risk_engine = getattr(self, "_risk_engine", None)
     if risk_engine is None:
         return None
     try:
         breaches = risk_engine.check_limits(portfolio)
     except Exception:
-        # Capital enforcement must not hide a risk-engine implementation error;
-        # the original lifecycle remains responsible for its normal risk path.
         return None
     breach = next(
         (item for item in breaches if getattr(item, "is_hard_cap", False)), None
     )
     if breach is None:
         return None
+    try:
+        await risk_engine.assess(portfolio)
+    except Exception:
+        pass
     return f"hard limit breach: {breach.message}"
 
 
@@ -125,7 +127,7 @@ def install_capital_guard() -> None:
         *args: Any,
         **kwargs: Any,
     ) -> Trade:
-        hard_limit_reason = _hard_limit_reason(self, portfolio)
+        hard_limit_reason = await _hard_limit_reason(self, portfolio)
         if hard_limit_reason is not None:
             return _rejected_trade(opportunity, hard_limit_reason)
 
@@ -167,10 +169,8 @@ def install_capital_guard() -> None:
         try:
             return await original(self, authorized, portfolio, *args, **kwargs)
         finally:
-            # Reservation protects the authorization/execution window only.
-            # Once the lifecycle has accepted/rejected the trade, the portfolio
-            # state becomes the source of truth and the temporary reservation
-            # must not leak across subsequent lifecycle calls/tests.
+            # Reservations cover only the authorization/execution window. The
+            # live portfolio is the source of truth after lifecycle processing.
             gateway.release(opportunity.symbol)
 
     TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
