@@ -59,18 +59,28 @@ def _stream_maxlen(topic: str) -> int | None:
     for prefix, default in sorted(
         STREAM_MAXLEN_DEFAULTS.items(), key=lambda item: -len(item[0])
     ):
-        if topic == prefix or topic.startswith(prefix + ".") or topic.startswith(prefix):
-            env_name = "REDIS_STREAM_MAXLEN_" + prefix.replace(".", "_").upper().rstrip("_")
+        if (
+            topic == prefix
+            or topic.startswith(prefix + ".")
+            or topic.startswith(prefix)
+        ):
+            env_name = "REDIS_STREAM_MAXLEN_" + prefix.replace(".", "_").upper().rstrip(
+                "_"
+            )
             raw_value = os.getenv(env_name)
             if raw_value is None:
                 return default
             try:
                 value = int(raw_value)
             except ValueError:
-                logger.warning("Invalid %s=%r; using default %d", env_name, raw_value, default)
+                logger.warning(
+                    "Invalid %s=%r; using default %d", env_name, raw_value, default
+                )
                 return default
             if value < 1:
-                logger.warning("Invalid %s=%r; using default %d", env_name, raw_value, default)
+                logger.warning(
+                    "Invalid %s=%r; using default %d", env_name, raw_value, default
+                )
                 return default
             return value
     return None
@@ -170,7 +180,10 @@ class EventBus(AITOSModule):
             sub.cancel()
         if self._subscriptions:
             await asyncio.wait(
-                [asyncio.ensure_future(_await_cancelled(s._task)) for s in self._subscriptions],
+                [
+                    asyncio.ensure_future(_await_cancelled(s._task))
+                    for s in self._subscriptions
+                ],
                 timeout=grace_period_seconds,
             )
         self._subscriptions.clear()
@@ -206,7 +219,10 @@ class EventBus(AITOSModule):
             await self._redis.xadd(_stream_key(event.topic), event.to_wire())
         else:
             await self._redis.xadd(
-                _stream_key(event.topic), event.to_wire(), maxlen=maxlen, approximate=True
+                _stream_key(event.topic),
+                event.to_wire(),
+                maxlen=maxlen,
+                approximate=True,
             )
         self._published_events += 1
         if (
@@ -235,12 +251,16 @@ class EventBus(AITOSModule):
         consumer_name = f"{group}-{id(handler)}"
         live_only = start_id == "$"
         if "*" in topic:
-            resolved_topics = [t for t in self._known_topics if fnmatch.fnmatch(t, topic)]
+            resolved_topics = [
+                t for t in self._known_topics if fnmatch.fnmatch(t, topic)
+            ]
         else:
             resolved_topics = [topic]
             self._known_topics.add(topic)
         for t in resolved_topics or [topic]:
-            await self._ensure_group(_stream_key(t), group, start_id=start_id, reset_existing=live_only)
+            await self._ensure_group(
+                _stream_key(t), group, start_id=start_id, reset_existing=live_only
+            )
         task = asyncio.create_task(
             self._consume_loop(
                 topic_pattern=topic,
@@ -252,11 +272,15 @@ class EventBus(AITOSModule):
             ),
             name=f"eventbus-{group}-{topic}",
         )
-        sub = Subscription(topic_pattern=topic, group=group, consumer=consumer_name, _task=task)
+        sub = Subscription(
+            topic_pattern=topic, group=group, consumer=consumer_name, _task=task
+        )
         self._subscriptions.append(sub)
         return sub
 
-    async def request_reply(self, event: Event, timeout_ms: float = 5000) -> EventResponse:
+    async def request_reply(
+        self, event: Event, timeout_ms: float = 5000
+    ) -> EventResponse:
         self._require_initialized()
         correlation_id = event.correlation_id or event.event_id
         request_event = Event(
@@ -307,7 +331,9 @@ class EventBus(AITOSModule):
                 await self._redis.xgroup_setid(stream_key, group, id="$")
             return
         try:
-            await self._redis.xgroup_create(stream_key, group, id=start_id, mkstream=True)
+            await self._redis.xgroup_create(
+                stream_key, group, id=start_id, mkstream=True
+            )
         except Exception as exc:
             if "BUSYGROUP" not in str(exc):
                 raise
@@ -337,7 +363,13 @@ class EventBus(AITOSModule):
             self._last_error = str(exc)[:500]
             logger.warning(
                 "pending reclaim failed",
-                extra={"aitos_extra": {"stream": stream_key, "group": group, "error": str(exc)}},
+                extra={
+                    "aitos_extra": {
+                        "stream": stream_key,
+                        "group": group,
+                        "error": str(exc),
+                    }
+                },
             )
         return []
 
@@ -355,14 +387,21 @@ class EventBus(AITOSModule):
         try:
             while True:
                 if "*" in topic_pattern:
-                    topics = [t for t in self._known_topics if fnmatch.fnmatch(t, topic_pattern)]
+                    topics = [
+                        t
+                        for t in self._known_topics
+                        if fnmatch.fnmatch(t, topic_pattern)
+                    ]
                 else:
                     topics = [topic_pattern]
                 stream_names = [_stream_key(t) for t in topics]
                 for stream_key in stream_names:
                     if stream_key not in streams_seen:
                         await self._ensure_group(
-                            stream_key, group, start_id=start_id, reset_existing=live_only
+                            stream_key,
+                            group,
+                            start_id=start_id,
+                            reset_existing=live_only,
                         )
                         streams_seen.add(stream_key)
                 if not stream_names:
@@ -415,14 +454,18 @@ class EventBus(AITOSModule):
                                 }
                             },
                         )
-                        await self._handle_failed_event(stream_key, group, entry_id, fields, exc)
+                        await self._handle_failed_event(
+                            stream_key, group, entry_id, fields, exc
+                        )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             self._last_error = str(exc)[:500]
             logger.exception("event consumer stopped: %s", exc)
 
-    async def _maybe_publish_response(self, request: Event, response: EventResponse) -> None:
+    async def _maybe_publish_response(
+        self, request: Event, response: EventResponse
+    ) -> None:
         if not response.success:
             return
         reply_event = Event(
@@ -458,7 +501,9 @@ class EventBus(AITOSModule):
                     "_delivery_attempts": attempts,
                 }
             )
-            await self._redis.xadd(DLQ_STREAM, dlq_fields, maxlen=25_000, approximate=True)
+            await self._redis.xadd(
+                DLQ_STREAM, dlq_fields, maxlen=25_000, approximate=True
+            )
             await self._redis.xack(stream_key, group, entry_id)
             self._dlq_events += 1
             self._acked_events += 1
@@ -469,7 +514,9 @@ class EventBus(AITOSModule):
         retry_fields = dict(fields)
         retry_fields["_delivery_attempts"] = attempts
         maxlen = _stream_maxlen(stream_key.removeprefix("stream:")) or 25_000
-        await self._redis.xadd(stream_key, retry_fields, maxlen=maxlen, approximate=True)
+        await self._redis.xadd(
+            stream_key, retry_fields, maxlen=maxlen, approximate=True
+        )
         self._retry_events += 1
         self._acked_events += 1
         self._last_acked_at = datetime.now(timezone.utc).isoformat()
