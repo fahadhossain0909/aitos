@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from .contracts import Instrument
 
@@ -21,7 +20,11 @@ class Position:
 
     @property
     def unrealized_pnl(self) -> float:
-        return (self.mark_price - self.average_price) * self.quantity * (self.instrument.contract_size or 1.0)
+        return (
+            (self.mark_price - self.average_price)
+            * self.quantity
+            * (self.instrument.contract_size or 1.0)
+        )
 
 
 @dataclass(slots=True)
