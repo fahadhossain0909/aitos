@@ -1,21 +1,20 @@
-"""KnowledgeGraphWriter — spec's Neo4j Knowledge Graph module, built
-event-driven (subscribes to the Event Bus, same pattern as
-``JournalSystem``/``RLFeedbackLoop``) so the graph grows automatically as
-real trades happen — no separate ETL/batch job needed.
+"""Event-driven Neo4j knowledge graph for AITOS.
 
-Graph shape:
+Neo4j is deliberately a *semantic relationship layer*, not a high-frequency
+market-data store. Redis/EventBus is the live transport, ClickHouse is the
+canonical durable analytical store, and this writer projects selected,
+low-volume decision/intelligence/trade semantics into a graph.
 
-    (:Trade {id, side, entry_price, pnl, regime, state, ...})
-      -[:ON_SYMBOL]->        (:Symbol {name})
-      -[:USED_STRATEGY]->    (:Strategy {id})
-      -[:HAD_MISTAKE]->      (:Mistake {text})
-    (:Symbol)-[:CORRELATED_WITH {coefficient, updated_at}]->(:Symbol)
+The graph is useful for questions such as:
+- which strategies/market regimes produced similar outcomes?
+- which symbols co-move and which lead/lag each other?
+- which evidence/features were attached to a decision?
+- which risk decisions or journey states preceded an outcome?
+- which model/policy versions are associated with good/bad outcomes?
+- which mistakes recur for a strategy or market regime?
 
-The driver is injected (constructor arg) rather than created internally,
-matching the ``EventBus``/repository pattern elsewhere in this codebase —
-tests use a fake driver double that records the Cypher/parameters sent
-rather than needing a real Neo4j server (see ``docker-compose.yml`` for
-running one for real).
+High-frequency ticks, order-book deltas and raw feature streams remain out of
+Neo4j. They stay in Redis/ClickHouse and are referenced by IDs when needed.
 """
 
 from __future__ import annotations
@@ -42,9 +41,7 @@ class GraphSession(Protocol):
 
 
 class GraphDriver(Protocol):
-    def session(
-        self,
-    ) -> Any: ...  # returns an async context manager yielding a GraphSession
+    def session(self) -> Any: ...
 
     async def close(self) -> None: ...
 
@@ -79,8 +76,61 @@ MERGE (a)-[r:CORRELATED_WITH]->(b)
 SET r.coefficient = $coefficient, r.updated_at = $updated_at
 """
 
+# These are deliberately semantic/decision topics. Market ticks and L2
+# streams are excluded so Neo4j cannot become a hidden high-frequency sink.
+SEMANTIC_TOPICS = (
+    "decision.*",
+    "risk.*",
+    "scanner.*",
+    "statistics.*",
+    "intelligence.*",
+    "journey.*",
+    "execution.*",
+)
+
+PROJECT_SEMANTIC_EVENT_QUERY = """
+MERGE (e:KnowledgeEvent {id: $event_id})
+SET e.topic = $topic,
+    e.event_time = $event_time,
+    e.source_module = $source_module,
+    e.schema_version = $schema_version,
+    e.payload_json = $payload_json
+WITH e
+FOREACH (symbol IN CASE WHEN $symbol <> '' THEN [$symbol] ELSE [] END |
+    MERGE (s:Symbol {name: symbol})
+    MERGE (e)-[:ABOUT_SYMBOL]->(s))
+FOREACH (strategy_id IN CASE WHEN $strategy_id <> '' THEN [$strategy_id] ELSE [] END |
+    MERGE (st:Strategy {id: strategy_id})
+    MERGE (e)-[:INVOLVES_STRATEGY]->(st))
+FOREACH (model_id IN CASE WHEN $model_id <> '' THEN [$model_id] ELSE [] END |
+    MERGE (m:Model {id: model_id})
+    MERGE (e)-[:PRODUCED_BY_MODEL]->(m))
+FOREACH (policy_id IN CASE WHEN $policy_id <> '' THEN [$policy_id] ELSE [] END |
+    MERGE (p:Policy {id: policy_id})
+    MERGE (e)-[:GOVERNED_BY_POLICY]->(p))
+FOREACH (trade_id IN CASE WHEN $trade_id <> '' THEN [$trade_id] ELSE [] END |
+    MERGE (t:Trade {id: trade_id})
+    MERGE (e)-[:RELATES_TO_TRADE]->(t))
+FOREACH (decision_id IN CASE WHEN $decision_id <> '' THEN [$decision_id] ELSE [] END |
+    MERGE (d:Decision {id: decision_id})
+    MERGE (e)-[:RELATES_TO_DECISION]->(d))
+FOREACH (regime IN CASE WHEN $regime <> '' THEN [$regime] ELSE [] END |
+    MERGE (r:MarketRegime {name: regime})
+    MERGE (e)-[:OCCURRED_IN_REGIME]->(r))
+"""
+
+
+def _first(payload: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return str(value)
+    return ""
+
 
 class KnowledgeGraphWriter(AITOSModule):
+    """Projects selected AITOS semantics into Neo4j without blocking live flow."""
+
     def __init__(self, event_bus: EventBus, driver: GraphDriver) -> None:
         self._event_bus = event_bus
         self._driver = driver
@@ -90,52 +140,56 @@ class KnowledgeGraphWriter(AITOSModule):
         self._errors = 0
         self._last_event_time: str | None = None
 
-    # -- AITOSModule contract -------------------------------------------------
-
     @property
     def module_id(self) -> str:
         return "knowledge-graph-writer"
 
     @property
     def version(self) -> str:
-        return "1.0.0"
+        return "2.0.0"
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
-        self._subscriptions.append(
-            await self._event_bus.subscribe(
-                "trade.position_opened",
-                self._on_position_opened,
-                group="knowledge-graph",
-            )
+        self._subscriptions.extend(
+            [
+                await self._event_bus.subscribe(
+                    "trade.position_opened", self._on_position_opened, group="knowledge-graph"
+                ),
+                await self._event_bus.subscribe(
+                    "trade.position_closed", self._on_position_closed, group="knowledge-graph"
+                ),
+                await self._event_bus.subscribe(
+                    "journal.mistake_recorded", self._on_mistake_recorded, group="knowledge-graph"
+                ),
+            ]
         )
-        self._subscriptions.append(
-            await self._event_bus.subscribe(
-                "trade.position_closed",
-                self._on_position_closed,
-                group="knowledge-graph",
+        for topic in SEMANTIC_TOPICS:
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    topic,
+                    self._on_semantic_event,
+                    group="knowledge-graph-semantic",
+                    live_only=True,
+                )
             )
-        )
-        self._subscriptions.append(
-            await self._event_bus.subscribe(
-                "journal.mistake_recorded",
-                self._on_mistake_recorded,
-                group="knowledge-graph",
-            )
-        )
         self._initialized = True
-        logger.info("KnowledgeGraphWriter initialized")
+        logger.info(
+            "KnowledgeGraphWriter initialized",
+            extra={"aitos_extra": {"semantic_topics": SEMANTIC_TOPICS}},
+        )
 
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=(
-                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
-            ),
+            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
             latency_ms=0.0,
             last_event_time=self._last_event_time,
-            details={"writes_applied": self._writes_applied, "errors": self._errors},
+            details={
+                "writes_applied": self._writes_applied,
+                "errors": self._errors,
+                "semantic_topics": list(SEMANTIC_TOPICS),
+            },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
@@ -152,14 +206,9 @@ class KnowledgeGraphWriter(AITOSModule):
     async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
-    # -- Public API ---------------------------------------------------------------
-
     async def update_symbol_correlation(
         self, symbol_a: str, symbol_b: str, coefficient: float, updated_at: str
     ) -> None:
-        """Direct call (not event-driven) — pearson correlation between two
-        symbols isn't a single trade's business, it's computed from market
-        data by ``SymbolCorrelationUpdater`` and pushed here."""
         self._require_initialized()
         await self._run(
             CORRELATION_QUERY,
@@ -168,8 +217,6 @@ class KnowledgeGraphWriter(AITOSModule):
             coefficient=coefficient,
             updated_at=updated_at,
         )
-
-    # -- Event handlers -------------------------------------------------------------
 
     async def _on_position_opened(self, event: Event) -> EventResponse | None:
         trade_dict = event.payload
@@ -206,7 +253,7 @@ class KnowledgeGraphWriter(AITOSModule):
         entry = event.payload
         trade_id = entry.get("trade_id")
         if not trade_id or not entry.get("mistakes"):
-            return None  # daily/weekly review entries have no trade_id to attach to
+            return None
         for mistake_text in entry["mistakes"]:
             await self._run(
                 LINK_MISTAKE_QUERY,
@@ -217,7 +264,29 @@ class KnowledgeGraphWriter(AITOSModule):
         self._last_event_time = event.created_at
         return None
 
-    # -- Internals --------------------------------------------------------------
+    async def _on_semantic_event(self, event: Event) -> EventResponse | None:
+        """Project a bounded semantic event; never persist raw market streams."""
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        import json
+
+        await self._run(
+            PROJECT_SEMANTIC_EVENT_QUERY,
+            event_id=event.event_id,
+            topic=event.topic,
+            event_time=event.created_at,
+            source_module=event.source_module,
+            schema_version=str(payload.get("schema_version", "1")),
+            payload_json=json.dumps(payload, default=str, separators=(",", ":")),
+            symbol=_first(payload, "symbol", "instrument", "market_symbol"),
+            strategy_id=_first(payload, "strategy_id", "strategy", "strategy_version"),
+            model_id=_first(payload, "model_id", "model", "model_version"),
+            policy_id=_first(payload, "policy_id", "policy", "policy_version"),
+            trade_id=_first(payload, "trade_id", "position_id"),
+            decision_id=_first(payload, "decision_id", "decision_idempotency_key"),
+            regime=_first(payload, "regime", "market_regime", "regime_name"),
+        )
+        self._last_event_time = event.created_at
+        return None
 
     async def _run(self, query: str, **params: Any) -> None:
         try:
