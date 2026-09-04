@@ -18,7 +18,7 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
     heartbeat_interval_seconds = BYBIT_WS_HEARTBEAT_INTERVAL_SECONDS
     heartbeat_message = {"op": "ping"}
 
-    def __init__(self, market_type: MarketType = MarketType.USD_M_FUTURES) -> None:
+    def __init__(self, market_type: MarketType = MarketType.PERPETUAL) -> None:
         if market_type not in (MarketType.PERPETUAL, MarketType.USD_M_FUTURES):
             raise ValueError(
                 "Bybit public adapter currently supports linear derivatives only"
@@ -75,7 +75,7 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                 MarketEvent(
                     event_type=MarketEventType.TRADE,
                     exchange=Venue.BYBIT.value,
-                    market=self.market_type.value,
+                    market=self.market_type,
                     symbol=symbol,
                     event_time=event_time,
                     payload={
@@ -113,7 +113,7 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                 else MarketEventType.BOOK_DELTA
             ),
             exchange=Venue.BYBIT.value,
-            market=self.market_type.value,
+            market=self.market_type,
             symbol=symbol,
             event_time=event_time,
             payload={
