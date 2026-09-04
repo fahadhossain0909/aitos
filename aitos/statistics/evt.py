@@ -1,4 +1,5 @@
 """Extreme Value Theory via a lightweight Peaks-Over-Threshold GPD estimator."""
+
 from __future__ import annotations
 
 import math
@@ -26,7 +27,9 @@ class POTGPD:
         exc = [x - threshold for x in losses if x > threshold]
         k = len(exc)
         if k < 3 or sum(exc) <= 0:
-            return EVTTail(threshold, k, k / n, 0.0, max(threshold, 1e-8), k / n, threshold)
+            return EVTTail(
+                threshold, k, k / n, 0.0, max(threshold, 1e-8), k / n, threshold
+            )
         mean = sum(exc) / k
         second = sum(x * x for x in exc) / k
         # Method-of-moments GPD: var = beta^2 / (1-2xi).

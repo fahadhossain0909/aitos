@@ -1,4 +1,5 @@
 """Unified per-contract statistical stack."""
+
 from __future__ import annotations
 
 import math
@@ -17,7 +18,9 @@ class ContractStatisticalStack:
 
     def __init__(self, max_history: int = 4096) -> None:
         self.max_history = max_history
-        self._returns: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=max_history))
+        self._returns: dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=max_history)
+        )
         self._global: deque[float] = deque(maxlen=max_history * 2)
         self.hmm = MarkovSwitchingModel(states=3)
         self.garch = GARCH11()
@@ -32,7 +35,9 @@ class ContractStatisticalStack:
                 self._returns[symbol].append(value)
                 self._global.append(value)
 
-    def evaluate(self, symbol: str, returns: Sequence[float] = ()) -> StatisticalModelResult:
+    def evaluate(
+        self, symbol: str, returns: Sequence[float] = ()
+    ) -> StatisticalModelResult:
         if returns:
             self.update(symbol, returns)
         xs = tuple(self._returns[symbol])
@@ -47,7 +52,11 @@ class ContractStatisticalStack:
         z = expected_return / vol
         downside = 0.5 * (1.0 - math.erf(z / math.sqrt(2.0)))
         tail = evt.tail_probability
-        confidence = min(1.0, 0.25 * math.log1p(len(xs)) / math.log(1001.0) + 0.75 * bayes.posterior_strength)
+        confidence = min(
+            1.0,
+            0.25 * math.log1p(len(xs)) / math.log(1001.0)
+            + 0.75 * bayes.posterior_strength,
+        )
         return StatisticalModelResult(
             symbol=symbol,
             hmm=hmm,
@@ -60,5 +69,10 @@ class ContractStatisticalStack:
             confidence=max(0.0, min(1.0, confidence)),
         )
 
-    def evaluate_many(self, observations: Mapping[str, Sequence[float]]) -> dict[str, StatisticalModelResult]:
-        return {symbol: self.evaluate(symbol, values) for symbol, values in observations.items()}
+    def evaluate_many(
+        self, observations: Mapping[str, Sequence[float]]
+    ) -> dict[str, StatisticalModelResult]:
+        return {
+            symbol: self.evaluate(symbol, values)
+            for symbol, values in observations.items()
+        }

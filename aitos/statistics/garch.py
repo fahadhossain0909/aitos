@@ -1,4 +1,5 @@
 """GARCH(1,1) conditional-volatility estimator without scipy dependency."""
+
 from __future__ import annotations
 
 import math
