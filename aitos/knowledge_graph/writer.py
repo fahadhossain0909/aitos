@@ -154,13 +154,19 @@ class KnowledgeGraphWriter(AITOSModule):
         self._subscriptions.extend(
             [
                 await self._event_bus.subscribe(
-                    "trade.position_opened", self._on_position_opened, group="knowledge-graph"
+                    "trade.position_opened",
+                    self._on_position_opened,
+                    group="knowledge-graph",
                 ),
                 await self._event_bus.subscribe(
-                    "trade.position_closed", self._on_position_closed, group="knowledge-graph"
+                    "trade.position_closed",
+                    self._on_position_closed,
+                    group="knowledge-graph",
                 ),
                 await self._event_bus.subscribe(
-                    "journal.mistake_recorded", self._on_mistake_recorded, group="knowledge-graph"
+                    "journal.mistake_recorded",
+                    self._on_mistake_recorded,
+                    group="knowledge-graph",
                 ),
             ]
         )
@@ -182,7 +188,9 @@ class KnowledgeGraphWriter(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={
