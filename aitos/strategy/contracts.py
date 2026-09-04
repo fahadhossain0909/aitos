@@ -88,7 +88,7 @@ class PositionEffect:
 class StrategyContext:
     now_ns: int
     mode: StrategyMode
-    snapshots: Mapping[str, MarketSnapshot]
+    snapshots: Mapping[str, MarketSnapshot] = field(default_factory=dict)
     positions: Mapping[str, float] = field(default_factory=dict)
     available_capital: float = 0.0
     portfolio_delta: float = 0.0
