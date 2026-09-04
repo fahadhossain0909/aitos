@@ -62,6 +62,22 @@ class LiveScannerCache:
         """Return the current live state without creating a cache entry."""
         return self._state.get(symbol.upper())
 
+    def _source_age_seconds(
+        self, timestamp: datetime | None, now: datetime | None = None
+    ) -> float | None:
+        if timestamp is None:
+            return None
+        now = now or datetime.now(timezone.utc)
+        return max(0.0, (now - timestamp).total_seconds())
+
+    def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
+        """Return whether the cached book source timestamp is within the limit."""
+        state = self._state.get(symbol.upper())
+        if state is None or state.order_book is None:
+            return False
+        age = self._source_age_seconds(state.last_book_source_at)
+        return age is not None and age <= max_age_seconds
+
     async def initialize(self, direct_market_data: bool = False) -> None:
         if self._initialized:
             return
@@ -228,9 +244,13 @@ class LiveScannerCache:
                 "book_source_age_ms": None,
                 "trade_receive_lag_ms": None,
                 "book_receive_lag_ms": None,
+                "trade_consumer_lag_ms": None,
+                "book_consumer_lag_ms": None,
                 "source_age_ms": None,
                 "trade_age_sec": None,
                 "book_age_sec": None,
+                "trade_consumer_lag_sec": None,
+                "book_consumer_lag_sec": None,
             }
         trade_age = (
             (now - state.last_trade_source_at).total_seconds() * 1000
@@ -261,6 +281,8 @@ class LiveScannerCache:
             "book_source_age_ms": book_age,
             "trade_receive_lag_ms": trade_lag,
             "book_receive_lag_ms": book_lag,
+            "trade_consumer_lag_ms": trade_lag,
+            "book_consumer_lag_ms": book_lag,
             "source_age_ms": max(ages) if ages else None,
             "trade_age_sec": (
                 (now - state.last_trade_at).total_seconds()
@@ -272,4 +294,6 @@ class LiveScannerCache:
                 if state.last_book_at
                 else None
             ),
+            "trade_consumer_lag_sec": trade_lag / 1000 if trade_lag is not None else None,
+            "book_consumer_lag_sec": book_lag / 1000 if book_lag is not None else None,
         }
