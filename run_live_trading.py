@@ -26,6 +26,7 @@ from aitos.kernel.ai_kernel import AIKernel
 from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.live_trading import confirm_live_trading, prepare_live_executor
 from aitos.logging_setup import configure_logging, get_logger
+from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
@@ -38,7 +39,6 @@ from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
 
 logger = get_logger("aitos.run_live_trading")
-SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 SCAN_INTERVAL_SECONDS = 60.0
 KLINE_TIMEFRAME = "15m"
 HEALTH_SERVER_PORT = 8091
@@ -121,10 +121,6 @@ async def try_connect_neo4j(settings):
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
-    approved_by = confirm_live_trading(
-        SYMBOLS,
-        testnet=settings.binance.testnet,
-    )
     redis_client = await connect_redis_with_retry(settings)
     from aitos.eventbus.redis_bus import EventBus
 
@@ -132,9 +128,14 @@ async def main() -> None:
     await event_bus.initialize({})
     market_repo, journal_repo = await connect_clickhouse_repositories(settings)
     graph_driver = await try_connect_neo4j(settings)
-    raw_order_executor = await prepare_live_executor(settings, SYMBOLS)
-    order_executor = IdempotentOrderExecutor(raw_order_executor)
     exchange = BinanceFuturesAdapter()
+    symbols = await resolve_live_universe(exchange)
+    approved_by = confirm_live_trading(
+        symbols,
+        testnet=settings.binance.testnet,
+    )
+    raw_order_executor = await prepare_live_executor(settings, symbols)
+    order_executor = IdempotentOrderExecutor(raw_order_executor)
     state_store = DurableTradingStateStore(market_repo)
     await state_store.initialize()
     trade_state_persistence = None
@@ -148,7 +149,7 @@ async def main() -> None:
         event_bus=event_bus,
         exchange=exchange,
         order_executor=order_executor,
-        symbols=SYMBOLS,
+        symbols=symbols,
         kline_timeframe=KLINE_TIMEFRAME,
         scanner_timeframe=KLINE_TIMEFRAME,
         market_data_repository=market_repo,
@@ -162,6 +163,10 @@ async def main() -> None:
         outcome_classifier=outcome_classifier,
         attention_explainer=attention_explainer,
         use_exchange_side_stops=True,
+    )
+    logger.info(
+        "resolved dynamic live-trading universe",
+        extra={"aitos_extra": {"symbol_count": len(symbols)}},
     )
     trade_state_persistence = TradeStatePersistence(
         event_bus,
@@ -182,13 +187,13 @@ async def main() -> None:
     filter_refresher = SymbolFilterRefresher(
         exchange,
         raw_order_executor,
-        SYMBOLS,
+        symbols,
         ttl_seconds=SYMBOL_FILTER_TTL_SECONDS,
     )
     await filter_refresher.start()
     health_server = HealthServer(
         components.all_modules() + [experience_recorder, market_os_persistence],
-        host="0.0.0.0",  # nosec B104 - required for Docker port forwarding
+        host="0.0.0.0",
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
