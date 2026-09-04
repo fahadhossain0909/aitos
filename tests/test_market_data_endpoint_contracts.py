@@ -1,6 +1,11 @@
 """Pin venue WebSocket endpoints and transport contracts to current APIs."""
 
-from aitos.exchange.binance import WS_MARKET_BASE_URL, WS_MARKET_RAW_BASE_URL
+from aitos.exchange.binance import (
+    BINANCE_MAX_STREAMS_PER_CONNECTION,
+    BinanceFuturesAdapter,
+    WS_MARKET_BASE_URL,
+    WS_MARKET_RAW_BASE_URL,
+)
 from aitos.market_data.bybit_adapter import BybitCanonicalMarketDataAdapter
 from aitos.market_data.endpoints import (
     BINANCE_USDM_WS_COMBINED,
@@ -20,6 +25,23 @@ def test_binance_usdm_uses_current_market_stream_paths():
     assert BINANCE_USDM_WS_COMBINED == WS_MARKET_BASE_URL
     assert BINANCE_USDM_WS_RAW == WS_MARKET_RAW_BASE_URL
     assert BINANCE_WS_MAX_LIFETIME_SECONDS < 24 * 60 * 60
+
+
+def test_binance_all_market_streams_are_partitioned_below_venue_limit():
+    streams = [f"symbol{i}@aggTrade" for i in range(901)]
+    shards = BinanceFuturesAdapter._partition_streams(streams)
+    assert len(shards) == 2
+    assert len(shards[0]) == BINANCE_MAX_STREAMS_PER_CONNECTION
+    assert len(shards[1]) == 1
+    assert len({stream for shard in shards for stream in shard}) == 901
+    assert all(len(shard) <= 1024 for shard in shards)
+
+
+def test_binance_stream_partition_deduplicates_without_reordering():
+    streams = ["btcusdt@aggTrade", "ethusdt@aggTrade", "btcusdt@aggTrade"]
+    assert BinanceFuturesAdapter._partition_streams(streams, 2) == [
+        ["btcusdt@aggTrade", "ethusdt@aggTrade"]
+    ]
 
 
 def test_bybit_linear_uses_current_v5_public_path_and_heartbeat():
