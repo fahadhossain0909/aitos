@@ -6,6 +6,12 @@ from .capital_controls import (
     execution_cost_bps,
     opportunity_age_seconds,
 )
+from .capital_feedback import (
+    CapitalFeedback,
+    CapitalFeedbackConfig,
+    CapitalFeedbackSnapshot,
+    CapitalOutcome,
+)
 from .capital_gateway import CapitalGateway, CapitalGatewayResult
 from .capital_objective import (
     CapitalAllocation,
@@ -44,10 +50,14 @@ __all__ = [
     "CapitalCircuitBreaker",
     "CapitalControlConfig",
     "CapitalDecision",
+    "CapitalFeedback",
+    "CapitalFeedbackConfig",
+    "CapitalFeedbackSnapshot",
     "CapitalGateway",
     "CapitalGatewayResult",
     "CapitalObjective",
     "CapitalObjectiveConfig",
+    "CapitalOutcome",
     "CapitalReservation",
     "DeepValueRLScorer",
     "NeutralRLScorer",
