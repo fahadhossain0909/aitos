@@ -81,7 +81,9 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
         pairwise = getattr(portfolio, "max_pairwise_correlation", None)
         if pairwise is not None and float(pairwise) > 0.0:
             consensus["correlations"] = {
-                f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": float(pairwise)
+                f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": float(
+                    pairwise
+                )
                 for position in positions
                 if getattr(position, "symbol", "")
             }
