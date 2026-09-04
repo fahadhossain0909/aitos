@@ -34,7 +34,7 @@ jobs:
     name: Lint & Code Quality
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7.0.1
+        uses: actions/checkout@v7.0.0
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
@@ -52,7 +52,7 @@ jobs:
   test:
     needs: format
     runs-on: ubuntu-latest
-    name: Unit Tests
+    name: Unit & Integration Tests
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12']
@@ -64,7 +64,21 @@ jobs:
       CLICKHOUSE_PASSWORD: aitos_test_password
       CLICKHOUSE_DATABASE: aitos
       TESTING: 'true'
+      INTEGRATION_REDIS_URL: redis://:ci-only-not-used@127.0.0.1:6379/0
+      INTEGRATION_NEO4J_URI: bolt://127.0.0.1:7687
+      INTEGRATION_NEO4J_USER: neo4j
+      INTEGRATION_NEO4J_PASSWORD: ci-neo4j-password
     services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli --no-auth-warning -a ci-only-not-used ping | grep -q PONG"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+        command: ["redis-server", "--requirepass", "ci-only-not-used"]
       clickhouse:
         image: clickhouse/clickhouse-server:24.12-alpine
         env:
@@ -77,6 +91,18 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
+      neo4j:
+        image: neo4j:5.19-community
+        env:
+          NEO4J_AUTH: neo4j/ci-neo4j-password
+        ports:
+          - 7687:7687
+          - 7474:7474
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
@@ -113,7 +139,7 @@ jobs:
           CLICKHOUSE_DATABASE=$CLICKHOUSE_DATABASE
           REDIS_PASSWORD=ci-only-not-used
           EOF
-      - name: Run tests with pytest
+      - name: Run unit and integration tests with coverage
         env:
           PYTHONPATH: .
         run: pytest --cov=. --cov-report=xml --cov-report=html --junitxml=junit/test-results-${{ matrix.python-version }}.xml -v
