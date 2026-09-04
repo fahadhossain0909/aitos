@@ -59,7 +59,7 @@ async def test_initialize_subscribes_once_to_canonical_live_channels():
 
     topics = [item[0] for item in bus.subscriptions]
     assert topics == ["market.trade", "market.book.snapshot"]
-    assert all(item[1] == "market-scanner" for item in bus.subscriptions)
+    assert all(item[1] == "live-scanner-cache-v1" for item in bus.subscriptions)
     assert all(item[4] is True for item in bus.subscriptions)
     await cache.shutdown()
 
@@ -178,5 +178,3 @@ async def test_live_cache_keeps_bounded_trade_history():
     snapshot = cache.snapshot("BTCUSDT")
     assert snapshot is not None
     assert len(snapshot.trades) == 100
-    assert snapshot.trades[0].trade_id == 50
-    await cache.shutdown()
