@@ -198,7 +198,7 @@ class DeepOrderBookReplayer:
         if client is None:
             raise RuntimeError("repository ClickHouse client is not initialized")
         checkpoint = await client.query(
-            f"SELECT event_time, update_id, bids, asks FROM {DEEP_CHECKPOINT_TABLE} "
+            f"SELECT event_time, update_id, bids, asks FROM {DEEP_CHECKPOINT_TABLE} "  # nosec B608 - table name is a fixed internal constant; values are bound parameters
             "WHERE venue={venue:String} AND market_type={market:String} AND symbol={symbol:String} "
             "AND event_time <= {target:DateTime64(3, 'UTC')} "
             "ORDER BY event_time DESC, update_id DESC LIMIT 1",
@@ -217,7 +217,7 @@ class DeepOrderBookReplayer:
         bids = {float(p): float(q) for p, q in json.loads(bids_json) if float(q) > 0}
         asks = {float(p): float(q) for p, q in json.loads(asks_json) if float(q) > 0}
         rows = await client.query(
-            f"SELECT event_time, first_update_id, final_update_id, previous_update_id, bids, asks "
+            f"SELECT event_time, first_update_id, final_update_id, previous_update_id, bids, asks "  # nosec B608 - table name is a fixed internal constant; values are bound parameters
             f"FROM {DEEP_DELTA_TABLE} WHERE venue={{venue:String}} AND market_type={{market:String}} "
             f"AND symbol={{symbol:String}} AND event_time >= {{since:DateTime64(3, 'UTC')}} "
             f"AND event_time <= {{target:DateTime64(3, 'UTC')}} ORDER BY event_time, final_update_id",
