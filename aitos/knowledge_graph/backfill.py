@@ -27,7 +27,8 @@ SELECT_SQL = """
 SELECT event_time, ingest_time, event_id, category, symbol, source_module,
        schema_version, payload_json
 FROM {database}.live_analytics_events
-WHERE event_time >= {{start:DateTime64(3)}}
+WHERE (event_time > {{cursor_time:DateTime64(3)}}
+       OR (event_time = {{cursor_time:DateTime64(3)}} AND event_id > {{cursor_id:String}}))
   AND event_time < {{end:DateTime64(3)}}
   AND (category LIKE {{c0:String}} OR category LIKE {{c1:String}}
        OR category LIKE {{c2:String}} OR category LIKE {{c3:String}}
@@ -39,7 +40,7 @@ LIMIT {{batch_size:UInt32}}
 
 
 class ClickHouseNeo4jBackfill:
-    """Bounded, resumable-by-window semantic reconstruction job."""
+    """Bounded, keyset-paginated, idempotent semantic reconstruction job."""
 
     def __init__(self, clickhouse_client: Any, neo4j_driver: Any, database: str = "aitos") -> None:
         self._ch = clickhouse_client
@@ -66,7 +67,8 @@ class ClickHouseNeo4jBackfill:
             result = await self._ch.query(
                 SELECT_SQL.format(database=self._database),
                 parameters={
-                    "start": cursor_time,
+                    "cursor_time": cursor_time,
+                    "cursor_id": cursor_id,
                     "end": end,
                     "c0": SEMANTIC_CATEGORIES[0],
                     "c1": SEMANTIC_CATEGORIES[1],
