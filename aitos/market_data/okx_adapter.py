@@ -60,41 +60,45 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         async for event in self._stream(symbols, message, self._parse_book):
             yield event
 
-    def _parse_trade(self, message: dict[str, Any]) -> MarketEvent | None:
+    def _parse_trade(
+        self, message: dict[str, Any]
+    ) -> list[MarketEvent] | None:
         if message.get("arg", {}).get("channel") != "trades":
             return None
         data = message.get("data") or []
-        if not data:
-            return None
-        item = data[0]
-        symbol = str(item.get("instId", "")).upper()
-        if not symbol:
-            return None
-        trade_id = str(item.get("tradeId") or item.get("seqId") or "0")
-        try:
-            sequence = int(trade_id)
-        except ValueError:
-            sequence = None
-        event_time = self._timestamp_ms(item.get("ts"))
-        return MarketEvent(
-            event_type=MarketEventType.TRADE,
-            exchange=Venue.OKX.value,
-            market=self.market_type.value,
-            symbol=symbol,
-            event_time=event_time,
-            payload={
-                "symbol": symbol,
-                "timestamp": event_time.isoformat(),
-                "trade_id": trade_id,
-                "price": self._float(item["px"]),
-                "quantity": self._float(item["sz"]),
-                "side": item.get("side"),
-            },
-            source=MarketSource.WEBSOCKET,
-            sequence=sequence,
-            correlation_id=f"okx:{self.market_type.value}:{symbol}:{trade_id}",
-            trace_id=symbol,
-        )
+        events: list[MarketEvent] = []
+        for item in data:
+            symbol = str(item.get("instId", "")).upper()
+            if not symbol:
+                continue
+            trade_id = str(item.get("tradeId") or item.get("seqId") or "0")
+            try:
+                sequence = int(trade_id)
+            except (TypeError, ValueError):
+                sequence = None
+            event_time = self._timestamp_ms(item.get("ts"))
+            events.append(
+                MarketEvent(
+                    event_type=MarketEventType.TRADE,
+                    exchange=Venue.OKX.value,
+                    market=self.market_type.value,
+                    symbol=symbol,
+                    event_time=event_time,
+                    payload={
+                        "symbol": symbol,
+                        "timestamp": event_time.isoformat(),
+                        "trade_id": trade_id,
+                        "price": self._float(item["px"]),
+                        "quantity": self._float(item["sz"]),
+                        "side": item.get("side"),
+                    },
+                    source=MarketSource.WEBSOCKET,
+                    sequence=sequence,
+                    correlation_id=f"okx:{self.market_type.value}:{symbol}:{trade_id}",
+                    trace_id=symbol,
+                )
+            )
+        return events or None
 
     def _parse_book(self, message: dict[str, Any]) -> MarketEvent | None:
         channel = message.get("arg", {}).get("channel")
