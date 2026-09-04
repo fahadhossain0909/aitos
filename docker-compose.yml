@@ -3,6 +3,8 @@ services:
     image: redis:7.2-alpine
     container_name: aitos-redis
     ports: ["127.0.0.1:6379:6379"]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
     volumes:
       - "${REDIS_DATA_DIR:-/mnt/aitos-data/eventbus/redis}/live:/data"
     command:
@@ -21,8 +23,10 @@ services:
       - 2gb
       - --maxmemory-policy
       - noeviction
-    healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 120s}
-    cpus: "0.45"
+      - --requirepass
+      - "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+    healthcheck: {test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$REDIS_PASSWORD\" ping | grep -q PONG && test \"$(redis-cli --no-auth-warning -a \"$REDIS_PASSWORD\" INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 120s}
+    cpus: "0.75"
     mem_limit: 2.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
     restart: unless-stopped
@@ -33,6 +37,7 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
       REDIS_DLQ_MAXLEN: "25000"
       REDIS_DLQ_TRIM_INTERVAL_SECONDS: "5"
     volumes:
@@ -51,6 +56,7 @@ services:
     environment:
       REDIS_HOST: redis
       REDIS_PORT: 6379
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
       REDIS_ARCHIVE_DIR: /archive
       REDIS_ARCHIVE_POLL_SECONDS: "0.5"
       REDIS_ARCHIVE_BATCH_SIZE: "1000"
@@ -75,7 +81,7 @@ services:
       - "${CLICKHOUSE_DATA_DIR:-/mnt/aitos-data/databases/clickhouse}:/var/lib/clickhouse"
       - ./docker/clickhouse/config.d/aitos.xml:/etc/clickhouse-server/config.d/aitos.xml:ro
       - ./docker/clickhouse/users.d/aitos.xml:/etc/clickhouse-server/users.d/aitos.xml:ro
-    cpus: "0.40"
+    cpus: "0.35"
     mem_limit: 2.5g
     healthcheck: {test: ["CMD-SHELL", "wget --spider -q --timeout=5 http://127.0.0.1:8123/ping || exit 1"], interval: 10s, timeout: 7s, retries: 12, start_period: 120s}
     restart: unless-stopped
@@ -95,7 +101,7 @@ services:
     volumes:
       - "${NEO4J_DATA_DIR:-/mnt/aitos-data/databases/neo4j}:/data"
       - "${NEO4J_LOG_DIR:-/mnt/aitos-data/runtime/logs/neo4j}:/logs"
-    cpus: "0.30"
+    cpus: "0.25"
     mem_limit: 2.5g
     healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10, start_period: 60s}
     restart: unless-stopped
@@ -116,7 +122,7 @@ services:
       REDIS_STREAM_MAXLEN_MARKET_LIVE_STATE: "10000"
     volumes: ["${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models"]
     ports: ["127.0.0.1:8090:8090"]
-    cpus: "0.50"
+    cpus: "0.40"
     mem_limit: 1.5g
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
     healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
@@ -166,7 +172,7 @@ services:
     volumes: ["${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models"]
     ports: ["127.0.0.1:8091:8091"]
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
-    cpus: "0.50"
+    cpus: "0.40"
     mem_limit: 1.5g
     restart: "no"
     profiles: [live]
