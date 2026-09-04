@@ -25,6 +25,10 @@ Exchange
 ClickHouse
   -> backtest / statistics / calibration / ML-RL training
   -> controlled graph backfill / reconstruction
+
+Neo4j
+  -> read-only graph context retrieval
+  -> AI/contextual decision features
 ```
 
 ### Storage boundary
@@ -149,6 +153,36 @@ Trade -> Outcome
 
 This enables later retrieval of patterns such as which evidence combinations commonly precede `PROVING -> CONFIRMED`, or which model/regime combinations precede `DECAYING -> EXITING`.
 
+## V2.2 controlled backfill
+
+`aitos.knowledge_graph.backfill.ClickHouseNeo4jBackfill` is a maintenance/reconstruction component, not a live runtime worker.
+
+Properties:
+
+- Reads only `live_analytics_events` semantic namespaces (`decision.*`, `risk.*`, `scanner.*`, `statistics.*`, `intelligence.*`, `journey.*`, `execution.*`).
+- Uses bounded batches (default 500, maximum 5000).
+- Uses ClickHouse keyset pagination by `(event_time, event_id)` so large histories do not require `OFFSET` scans.
+- Uses the same `MERGE`-based semantic projection as live events, so replaying a window is idempotent.
+- Accepts `start`, `end`, and optional `max_batches`, allowing staged recovery/backfill.
+- Never reads or mirrors raw ticks/order-book rows into Neo4j.
+
+The job should be invoked by a maintenance/backfill process with its own resource limits. It must not be inserted into the latency-sensitive ingestion loop.
+
+## Graph schema hardening
+
+`aitos.knowledge_graph.schema` provides idempotent uniqueness constraints for stable entity IDs and indexes for symbol, regime, topic and event time. These are safe to apply during Neo4j maintenance/startup provisioning and are intentionally separate from high-frequency writes.
+
+## Graph retrieval for AI
+
+`aitos.knowledge_graph.retrieval.GraphContextRetriever` provides a read-only `similar_cases(...)` query. It ranks historical semantic cases by matching:
+
+1. symbol — strongest match,
+2. market regime,
+3. strategy,
+4. model.
+
+The result is deliberately compact: event/topic/time plus symbol, regime, strategy/model and realized outcome/PnL. The retrieved graph context is **evidence**, not an instruction. The AI contextual decision layer must combine it with current market state, statistical outputs and risk/policy governance before producing a decision.
+
 ## Operational rules
 
 1. Redis/EventBus = live transport and hot state.
@@ -179,12 +213,19 @@ This enables later retrieval of patterns such as which evidence combinations com
 - Idempotent trade/mistake node projection.
 - Failure isolation and health counters retained.
 
-### V2.2 — next research layer
+### V2.2 — implemented
 
 - Controlled ClickHouse -> Neo4j backfill/reconstruction worker.
-- Graph similarity/retrieval for regime/strategy/trade cases.
-- Graph-derived context exposed to the AI contextual decision layer.
-- Graph priors used as model features, subject to normal risk/policy governance.
+- Keyset pagination and bounded maintenance windows.
+- Idempotent graph reconstruction using the same semantic projection query.
+- Neo4j uniqueness constraints/index definitions.
+- Read-only graph similarity/context retrieval for regime/strategy/trade cases.
+
+### V2.3 — integration target
+
+- Wire `GraphContextRetriever` into the AI contextual decision layer as a governed context/evidence provider.
+- Add end-to-end integration tests covering ClickHouse event -> backfill -> Neo4j -> contextual retrieval.
+- Add scheduled maintenance entrypoint for controlled backfill, with explicit resource limits and observability.
 
 ### V3 — future
 
