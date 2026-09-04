@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 SIMILAR_CASES_QUERY = """
 MATCH (e:KnowledgeEvent)
 OPTIONAL MATCH (e)-[:ABOUT_SYMBOL]->(s:Symbol)
