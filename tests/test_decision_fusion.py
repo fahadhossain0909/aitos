@@ -67,7 +67,9 @@ def test_graph_historical_support_contributes_when_available():
     )
 
     graph = next(
-        item for item in result.contributions if item.source == "graph_historical_support"
+        item
+        for item in result.contributions
+        if item.source == "graph_historical_support"
     )
     assert graph.available is True
     assert graph.weight == 0.05
@@ -87,7 +89,9 @@ def test_graph_unavailable_does_not_dilute_confidence():
     assert unavailable.confidence == base.confidence
     assert "graph_historical_support" in unavailable.missing_components
     graph = next(
-        item for item in unavailable.contributions if item.source == "graph_historical_support"
+        item
+        for item in unavailable.contributions
+        if item.source == "graph_historical_support"
     )
     assert graph.available is False
 
