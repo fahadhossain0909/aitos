@@ -1,3 +1,5 @@
+from math import nan
+
 from aitos.intelligence.capital_feedback import (
     CapitalFeedback,
     CapitalFeedbackConfig,
@@ -51,11 +53,11 @@ def test_feedback_calibration_is_observational() -> None:
     assert feedback.snapshot().brier_score > 0.0
 
 
-def test_feedback_rejects_invalid_probability() -> None:
+def test_feedback_rejects_non_finite_probability() -> None:
     feedback = CapitalFeedback()
     try:
-        feedback.record(_outcome(1, probability=1.5))
+        feedback.record(_outcome(1, probability=nan))
     except ValueError as exc:
         assert "predicted_loss_probability" in str(exc)
     else:
-        raise AssertionError("invalid probability must be rejected")
+        raise AssertionError("non-finite probability must be rejected")
