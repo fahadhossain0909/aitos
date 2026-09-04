@@ -16,7 +16,7 @@ from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.models.market import Kline, OrderBookSnapshot, TradeTick
 
 from .bus import MarketDataBus
-from .channels import CHANNEL_BOOK_SNAPSHOT, GROUP_PERSISTENCE
+from .channels import GROUP_PERSISTENCE
 from .contracts import MarketEvent, MarketEventType
 
 
@@ -106,7 +106,10 @@ class CanonicalMarketDataPersistenceSink:
                 return
             now = datetime.now(timezone.utc)
             previous = self._last_book_persist.get(event.symbol)
-            if previous is not None and (now - previous).total_seconds() < self._book_interval:
+            if (
+                previous is not None
+                and (now - previous).total_seconds() < self._book_interval
+            ):
                 return
             self._last_book_persist[event.symbol] = now
         try:
