@@ -8,9 +8,9 @@ It is a contextual evidence source, never a standalone trade signal.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from statistics import mean
-from typing import Sequence
 
 from aitos.models.market import Kline
 
@@ -83,7 +83,9 @@ def _path(klines: Sequence[Kline]) -> list[float]:
     return [(k.close - base) / span for k in klines]
 
 
-def _return_distribution(klines: Sequence[Kline], starts: Sequence[int], horizon: int) -> AnalogueOutcome | None:
+def _return_distribution(
+    klines: Sequence[Kline], starts: Sequence[int], horizon: int
+) -> AnalogueOutcome | None:
     returns: list[float] = []
     for start in starts:
         end = start + horizon
@@ -127,7 +129,7 @@ def search_historical_analogues(
     current_direction = "up" if current_move > 0 else "down"
     candidates: list[tuple[float, int, float]] = []
     last_start = min(len(klines) - window - 1, search_back)
-    for start in range(0, last_start + 1):
+    for start in range(last_start + 1):
         if start + window >= len(klines) - forward_horizon:
             continue
         hist = klines[start : start + window]
@@ -147,7 +149,11 @@ def search_historical_analogues(
         HistoricalAnalogue(
             start_index=start,
             similarity=similarity,
-            direction=("up" if klines[start + window - 1].close > klines[start].close else "down"),
+            direction=(
+                "up"
+                if klines[start + window - 1].close > klines[start].close
+                else "down"
+            ),
             scale=scale,
             outcome=outcome,
         )
@@ -155,12 +161,20 @@ def search_historical_analogues(
     )
 
 
-def infer_state_transition(previous_state: str, current_state: str, persistence: float = 0.5) -> StateTransition:
+def infer_state_transition(
+    previous_state: str, current_state: str, persistence: float = 0.5
+) -> StateTransition:
     """Quantify a state change without assuming that transitions predict price."""
     previous = previous_state.lower().strip() or "unknown"
     current = current_state.lower().strip() or "unknown"
     changed = previous != current
-    reversal_terms = {"reversal", "transition", "distribution", "exhaustion", "compression"}
+    reversal_terms = {
+        "reversal",
+        "transition",
+        "distribution",
+        "exhaustion",
+        "compression",
+    }
     reversal = 1.0 if any(term in current for term in reversal_terms) else 0.0
     return StateTransition(
         previous_state=previous,
