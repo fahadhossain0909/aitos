@@ -113,23 +113,37 @@ class DeepOrderBookStore:
             p = event.payload
             await client.insert(
                 DEEP_DELTA_TABLE,
-                [[
-                    event.event_time,
-                    event.ingest_time,
-                    event.venue or event.exchange,
-                    event.market_type or event.market,
-                    event.symbol.upper(),
-                    int(p["first_update_id"]),
-                    int(p["final_update_id"]),
-                    int(p.get("previous_update_id", 0)),
-                    json.dumps(self._levels(p.get("bids", [])), separators=(",", ":")),
-                    json.dumps(self._levels(p.get("asks", [])), separators=(",", ":")),
-                    event.event_id,
-                ]],
+                [
+                    [
+                        event.event_time,
+                        event.ingest_time,
+                        event.venue or event.exchange,
+                        event.market_type or event.market,
+                        event.symbol.upper(),
+                        int(p["first_update_id"]),
+                        int(p["final_update_id"]),
+                        int(p.get("previous_update_id", 0)),
+                        json.dumps(
+                            self._levels(p.get("bids", [])), separators=(",", ":")
+                        ),
+                        json.dumps(
+                            self._levels(p.get("asks", [])), separators=(",", ":")
+                        ),
+                        event.event_id,
+                    ]
+                ],
                 column_names=[
-                    "event_time", "ingest_time", "venue", "market_type", "symbol",
-                    "first_update_id", "final_update_id", "previous_update_id",
-                    "bids", "asks", "event_id",
+                    "event_time",
+                    "ingest_time",
+                    "venue",
+                    "market_type",
+                    "symbol",
+                    "first_update_id",
+                    "final_update_id",
+                    "previous_update_id",
+                    "bids",
+                    "asks",
+                    "event_id",
                 ],
             )
             self.deltas_persisted += 1
@@ -137,20 +151,33 @@ class DeepOrderBookStore:
             p = event.payload
             await client.insert(
                 DEEP_CHECKPOINT_TABLE,
-                [[
-                    event.event_time,
-                    event.ingest_time,
-                    event.venue or event.exchange,
-                    event.market_type or event.market,
-                    event.symbol.upper(),
-                    int(p["last_update_id"]),
-                    json.dumps(self._levels(p.get("bids", [])), separators=(",", ":")),
-                    json.dumps(self._levels(p.get("asks", [])), separators=(",", ":")),
-                    event.event_id,
-                ]],
+                [
+                    [
+                        event.event_time,
+                        event.ingest_time,
+                        event.venue or event.exchange,
+                        event.market_type or event.market,
+                        event.symbol.upper(),
+                        int(p["last_update_id"]),
+                        json.dumps(
+                            self._levels(p.get("bids", [])), separators=(",", ":")
+                        ),
+                        json.dumps(
+                            self._levels(p.get("asks", [])), separators=(",", ":")
+                        ),
+                        event.event_id,
+                    ]
+                ],
                 column_names=[
-                    "event_time", "ingest_time", "venue", "market_type", "symbol",
-                    "update_id", "bids", "asks", "event_id",
+                    "event_time",
+                    "ingest_time",
+                    "venue",
+                    "market_type",
+                    "symbol",
+                    "update_id",
+                    "bids",
+                    "asks",
+                    "event_id",
                 ],
             )
             self.checkpoints_persisted += 1
@@ -170,7 +197,11 @@ class DeepOrderBookReplayer:
         self._repository = repository
 
     async def reconstruct(
-        self, symbol: str, target_time: datetime, *, venue: str = "binance",
+        self,
+        symbol: str,
+        target_time: datetime,
+        *,
+        venue: str = "binance",
         market_type: str = "usd_m_futures",
     ) -> ReplayBook:
         symbol = symbol.upper()
@@ -184,10 +215,17 @@ class DeepOrderBookReplayer:
             "WHERE venue={venue:String} AND market_type={market:String} AND symbol={symbol:String} "
             "AND event_time <= {target:DateTime64(3, 'UTC')} "
             "ORDER BY event_time DESC, update_id DESC LIMIT 1",
-            parameters={"venue": venue, "market": market_type, "symbol": symbol, "target": target_time},
+            parameters={
+                "venue": venue,
+                "market": market_type,
+                "symbol": symbol,
+                "target": target_time,
+            },
         )
         if not checkpoint.result_rows:
-            raise DeepOrderBookGap(f"no checkpoint exists before {target_time.isoformat()}")
+            raise DeepOrderBookGap(
+                f"no checkpoint exists before {target_time.isoformat()}"
+            )
         checkpoint_time, update_id, bids_json, asks_json = checkpoint.result_rows[0]
         bids = {float(p): float(q) for p, q in json.loads(bids_json) if float(q) > 0}
         asks = {float(p): float(q) for p, q in json.loads(asks_json) if float(q) > 0}
@@ -196,11 +234,28 @@ class DeepOrderBookReplayer:
             f"FROM {DEEP_DELTA_TABLE} WHERE venue={{venue:String}} AND market_type={{market:String}} "
             f"AND symbol={{symbol:String}} AND event_time >= {{since:DateTime64(3, 'UTC')}} "
             f"AND event_time <= {{target:DateTime64(3, 'UTC')}} ORDER BY event_time, final_update_id",
-            parameters={"venue": venue, "market": market_type, "symbol": symbol, "since": checkpoint_time, "target": target_time},
+            parameters={
+                "venue": venue,
+                "market": market_type,
+                "symbol": symbol,
+                "since": checkpoint_time,
+                "target": target_time,
+            },
         )
         current = int(update_id)
-        for event_time, first_id, final_id, previous_id, delta_bids, delta_asks in rows.result_rows:
-            first_id, final_id, previous_id = int(first_id), int(final_id), int(previous_id)
+        for (
+            event_time,
+            first_id,
+            final_id,
+            previous_id,
+            delta_bids,
+            delta_asks,
+        ) in rows.result_rows:
+            first_id, final_id, previous_id = (
+                int(first_id),
+                int(final_id),
+                int(previous_id),
+            )
             if final_id <= current:
                 continue
             if previous_id != current:
@@ -224,6 +279,8 @@ class DeepOrderBookReplayer:
             symbol=symbol,
             update_id=current,
             event_time=target_time.astimezone(timezone.utc),
-            bids=tuple(ReplayLevel(p, q) for p, q in sorted(bids.items(), reverse=True)),
+            bids=tuple(
+                ReplayLevel(p, q) for p, q in sorted(bids.items(), reverse=True)
+            ),
             asks=tuple(ReplayLevel(p, q) for p, q in sorted(asks.items())),
         )
