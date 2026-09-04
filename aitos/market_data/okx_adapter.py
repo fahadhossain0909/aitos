@@ -105,6 +105,7 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                     sequence=sequence,
                     correlation_id=f"okx:{self.market_type.value}:{symbol}:{trade_id}",
                     trace_id=symbol,
+                    instrument_id=f"okx:{self.market_type.value}:{instrument.upper()}",
                 )
             )
         if not events:
@@ -151,4 +152,5 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
             sequence=sequence,
             correlation_id=f"okx:{self.market_type.value}:{symbol}:book:{sequence}",
             trace_id=symbol,
+            instrument_id=f"okx:{self.market_type.value}:{instrument.upper()}",
         )
