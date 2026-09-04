@@ -9,11 +9,11 @@ or authorizes a trade by itself.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
 from statistics import mean
-from typing import Iterable
 
 
 @dataclass(frozen=True)
@@ -73,9 +73,7 @@ class CapitalFeedback:
             raise ValueError("min_samples must be positive")
         if self.config.probability_bins < 2:
             raise ValueError("probability_bins must be at least 2")
-        self._outcomes: deque[CapitalOutcome] = deque(
-            maxlen=self.config.window_size
-        )
+        self._outcomes: deque[CapitalOutcome] = deque(maxlen=self.config.window_size)
 
     @staticmethod
     def _probability(value: float) -> float:
