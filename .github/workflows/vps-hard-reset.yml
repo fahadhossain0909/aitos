@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirmation:
-        description: 'Type HARD_RESET_VPS to permanently wipe AITOS Docker/data state on the VPS'
+        description: 'Type HARD_RESET_VPS to permanently wipe AITOS Docker/data state on the dedicated VPS'
         required: true
         type: string
       reboot:
@@ -88,9 +88,19 @@ jobs:
 
             echo '=== PRE-RESET INVENTORY ==='
             hostname || true
+            date -u || true
             df -h || true
+            findmnt --target "$AITOS_DATA_ROOT" || true
             docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}' 2>/dev/null || true
             docker system df 2>/dev/null || true
+
+            echo '=== DATA-DISK SAFETY GATE ==='
+            test -d "$AITOS_DATA_ROOT" || { echo '::error::AITOS data root does not exist'; exit 1; }
+            mountpoint -q "$AITOS_DATA_ROOT" || { echo '::error::AITOS data root is NOT mounted; refusing to delete the boot-disk directory'; exit 1; }
+            DATA_SOURCE="$(findmnt -rn -o SOURCE --target "$AITOS_DATA_ROOT" | head -n1)"
+            DATA_DEVICE="$(readlink -f "$DATA_SOURCE" 2>/dev/null || true)"
+            test -n "$DATA_DEVICE" || { echo '::error::Could not resolve mounted data device'; exit 1; }
+            echo "Mounted AITOS data device: $DATA_DEVICE"
 
             echo '=== STOPPING AITOS COMPOSE ==='
             if [ -d "$DEPLOY_PATH" ]; then
@@ -104,35 +114,51 @@ jobs:
             docker ps -aq --filter 'name=aitos-' | xargs -r docker rm -f || true
 
             echo '=== REMOVING AITOS IMAGES ==='
-            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | awk '$1 ~ /^(aitos|ghcr\.io\/fahadhossain0909\/aitos)([:/]|$)/ {print $2}' | sort -u | xargs -r docker rmi -f || true
+            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' \
+              | awk '$1 ~ /^(aitos|ghcr\.io\/fahadhossain0909\/aitos)([:/]|$)/ {print $2}' \
+              | sort -u | xargs -r docker rmi -f || true
 
             echo '=== REMOVING AITOS VOLUMES ==='
-            docker volume ls -q | grep -E '(^|_)aitos([_-]|$)' | xargs -r docker volume rm -f || true
+            docker volume ls -q \
+              | grep -E '(^|_)aitos([_-]|$)' \
+              | xargs -r docker volume rm -f || true
 
             echo '=== REMOVING AITOS NETWORKS ==='
-            docker network ls --format '{{.Name}}' | grep -E '(^|_)aitos([_-]|$)' | xargs -r docker network rm || true
+            docker network ls --format '{{.Name}}' \
+              | grep -E '(^|_)aitos([_-]|$)' \
+              | xargs -r docker network rm || true
 
             echo '=== REMOVING DEPLOYMENT TREE ==='
             if [ -d "$DEPLOY_PATH" ]; then
               find "$DEPLOY_PATH" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+              rmdir "$DEPLOY_PATH" 2>/dev/null || true
             fi
 
             echo '=== REMOVING AITOS DATA TREE ==='
-            if [ -d "$AITOS_DATA_ROOT" ]; then
-              find "$AITOS_DATA_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-            fi
+            # This is deliberately allowed only after the mount safety gate above.
+            # The mount itself, filesystem, fstab entry, and parent /mnt are kept.
+            find "$AITOS_DATA_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 
             echo '=== PRUNING UNUSED DOCKER STATE ==='
+            # Removes unused images, containers, networks, volumes and build cache
+            # on this dedicated AITOS Docker host. Running unrelated containers are
+            # not touched by prune; only unused resources are eligible.
             docker system prune -af --volumes
             docker builder prune -af || true
 
             echo '=== POST-RESET VERIFICATION ==='
             test ! -d "$DEPLOY_PATH" || [ -z "$(find "$DEPLOY_PATH" -mindepth 1 -print -quit 2>/dev/null)" ]
-            test ! -d "$AITOS_DATA_ROOT" || [ -z "$(find "$AITOS_DATA_ROOT" -mindepth 1 -print -quit 2>/dev/null)" ]
+            test -d "$AITOS_DATA_ROOT"
+            mountpoint -q "$AITOS_DATA_ROOT"
+            test -z "$(find "$AITOS_DATA_ROOT" -mindepth 1 -print -quit 2>/dev/null)"
             test -z "$(docker ps -aq --filter 'name=aitos-')"
+            echo '=== POST-RESET DOCKER INVENTORY ==='
+            docker ps -a || true
             docker system df || true
-            df -h || true
-            echo 'HARD_RESET_VPS completed: AITOS Docker resources, deployment tree, and AITOS data tree are empty.'
+            echo '=== POST-RESET STORAGE INVENTORY ==='
+            df -h "$AITOS_DATA_ROOT" || true
+            findmnt --target "$AITOS_DATA_ROOT" || true
+            echo 'HARD_RESET_VPS completed: AITOS deployment/data state is empty and the data-disk mount remains intact.'
 
             if [ "$REBOOT" = "true" ]; then
               echo '=== REBOOTING VPS ==='
