@@ -1,7 +1,7 @@
 """Runtime enforcement for the capital-growth objective.
 
 The guard is installed when the intelligence package is imported, which is
-already part of the normal AITOS application bootstrap.  It protects the
+already part of the normal AITOS application bootstrap. It protects the
 TradeLifecycle boundary itself so a caller cannot bypass capital authorization
 by skipping the scanner/application helper.
 """
@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from functools import wraps
-from inspect import isawaitable
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
@@ -75,8 +74,9 @@ def install_capital_guard() -> None:
     ) -> Trade:
         equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
         if equity <= 0:
-            reason = "capital_objective: invalid or unavailable equity"
-            return _rejected_trade(opportunity, reason)
+            return _rejected_trade(
+                opportunity, "capital_objective: invalid or unavailable equity"
+            )
 
         try:
             decision, allocation = gateway.authorize_opportunity(
