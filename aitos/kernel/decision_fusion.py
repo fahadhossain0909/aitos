@@ -18,13 +18,11 @@ DEFAULT_EVIDENCE_WEIGHTS: dict[str, float] = {
     "open_interest_trend": 0.08,
     "rl_confidence": 0.04,
     "footprint_interaction": 0.09,
+    "graph_historical_support": 0.05,
 }
-
 
 @dataclass(frozen=True)
 class EvidenceContribution:
-    """One normalized contribution to the fused decision."""
-
     source: str
     score: float
     weight: float
@@ -32,19 +30,10 @@ class EvidenceContribution:
     available: bool = True
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "source": self.source,
-            "score": self.score,
-            "weight": self.weight,
-            "weighted_score": self.weighted_score,
-            "available": self.available,
-        }
-
+        return {"source": self.source, "score": self.score, "weight": self.weight, "weighted_score": self.weighted_score, "available": self.available}
 
 @dataclass(frozen=True)
 class EvidenceFusionResult:
-    """Transparent result of component-evidence fusion."""
-
     direction: str
     confidence: float
     contributions: tuple[EvidenceContribution, ...]
@@ -55,28 +44,12 @@ class EvidenceFusionResult:
         return self.confidence > 0.0
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "direction": self.direction,
-            "confidence": self.confidence,
-            "contributions": [c.to_dict() for c in self.contributions],
-            "missing_components": list(self.missing_components),
-        }
-
+        return {"direction": self.direction, "confidence": self.confidence, "contributions": [c.to_dict() for c in self.contributions], "missing_components": list(self.missing_components)}
 
 class DecisionFusionEngine:
-    """Fuse directional evidence without hiding the underlying signals.
+    """Fuse directional evidence; graph history is optional context evidence."""
 
-    Missing features are excluded from the denominator (Phase B of the
-    strategy audit): ``missing feature != neutral 5.0``. Callers may pass
-    ``component_availability`` (mapping name -> bool) or omit a key / pass
-    ``None`` to mark a component unavailable.
-    """
-
-    def __init__(
-        self,
-        weights: Mapping[str, float] | None = None,
-        min_confidence: float = 0.60,
-    ) -> None:
+    def __init__(self, weights: Mapping[str, float] | None = None, min_confidence: float = 0.60) -> None:
         selected = dict(weights or DEFAULT_EVIDENCE_WEIGHTS)
         if not selected or any(weight < 0 for weight in selected.values()):
             raise ValueError("Fusion weights must be non-empty and non-negative")
@@ -100,72 +73,33 @@ class DecisionFusionEngine:
         if not isinstance(direction, str):
             raise ValueError(f"Unsupported direction: {direction}")
         normalized = direction.strip().lower()
-        aliases = {"buy": "long", "sell": "short"}
-        normalized = aliases.get(normalized, normalized)
+        normalized = {"buy": "long", "sell": "short"}.get(normalized, normalized)
         if normalized not in {"long", "short", "neutral"}:
             raise ValueError(f"Unsupported direction: {direction}")
         return normalized
 
-    def fuse(
-        self,
-        direction: str,
-        component_scores: Mapping[str, Any],
-        component_availability: Mapping[str, bool] | None = None,
-    ) -> EvidenceFusionResult:
+    def fuse(self, direction: str, component_scores: Mapping[str, Any], component_availability: Mapping[str, bool] | None = None) -> EvidenceFusionResult:
         direction = self._normalize_direction(direction)
         if direction == "neutral":
-            return EvidenceFusionResult(
-                direction="neutral",
-                confidence=0.0,
-                contributions=(),
-                missing_components=tuple(self._weights),
-            )
-
+            return EvidenceFusionResult("neutral", 0.0, (), tuple(self._weights))
         availability = dict(component_availability or {})
         contributions: list[EvidenceContribution] = []
         missing: list[str] = []
-        denominator = 0.0
-        numerator = 0.0
+        denominator = numerator = 0.0
         for name, weight in self._weights.items():
             raw = component_scores.get(name)
             is_available = availability.get(name, True)
-            if (
-                raw is None
-                or is_available is False
-                or not isinstance(raw, (int, float))
-            ):
+            if raw is None or is_available is False or not isinstance(raw, (int, float)):
                 missing.append(name)
-                contributions.append(
-                    EvidenceContribution(
-                        source=name,
-                        score=0.0,
-                        weight=weight,
-                        weighted_score=0.0,
-                        available=False,
-                    )
-                )
+                contributions.append(EvidenceContribution(name, 0.0, weight, 0.0, False))
                 continue
             score = max(0.0, min(10.0, float(raw)))
-            contributions.append(
-                EvidenceContribution(
-                    source=name,
-                    score=round(score, 4),
-                    weight=weight,
-                    weighted_score=round(score * weight, 4),
-                    available=True,
-                )
-            )
+            contributions.append(EvidenceContribution(name, round(score, 4), weight, round(score * weight, 4), True))
             numerator += score * weight
             denominator += weight
-
         confidence = (numerator / denominator) / 10.0 if denominator else 0.0
         fused_direction = direction if confidence >= self._min_confidence else "neutral"
-        return EvidenceFusionResult(
-            direction=fused_direction,
-            confidence=round(confidence, 4),
-            contributions=tuple(contributions),
-            missing_components=tuple(missing),
-        )
+        return EvidenceFusionResult(fused_direction, round(confidence, 4), tuple(contributions), tuple(missing))
 
     def fuse_context(self, context: Mapping[str, Any]) -> EvidenceFusionResult | None:
         direction = context.get("direction")
