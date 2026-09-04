@@ -22,7 +22,7 @@ services:
       - --maxmemory-policy
       - noeviction
     healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 120s}
-    cpus: "0.75"
+    cpus: "0.45"
     mem_limit: 2.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
     restart: unless-stopped
@@ -39,7 +39,7 @@ services:
       - ./scripts/redis_dlq_retention.sh:/usr/local/bin/redis_dlq_retention.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/redis_dlq_retention.sh"]
     depends_on: {redis: {condition: service_healthy}}
-    cpus: "0.05"
+    cpus: "0.02"
     mem_limit: 64m
     restart: unless-stopped
 
@@ -58,7 +58,7 @@ services:
     volumes:
       - "${REDIS_DATA_DIR:-/mnt/aitos-data/eventbus/redis}/archive:/archive"
     depends_on: {redis: {condition: service_healthy}}
-    cpus: "0.10"
+    cpus: "0.05"
     mem_limit: 256m
     restart: unless-stopped
 
@@ -75,7 +75,7 @@ services:
       - "${CLICKHOUSE_DATA_DIR:-/mnt/aitos-data/databases/clickhouse}:/var/lib/clickhouse"
       - ./docker/clickhouse/config.d/aitos.xml:/etc/clickhouse-server/config.d/aitos.xml:ro
       - ./docker/clickhouse/users.d/aitos.xml:/etc/clickhouse-server/users.d/aitos.xml:ro
-    cpus: "0.5"
+    cpus: "0.40"
     mem_limit: 2.5g
     healthcheck: {test: ["CMD-SHELL", "wget --spider -q --timeout=5 http://127.0.0.1:8123/ping || exit 1"], interval: 10s, timeout: 7s, retries: 12, start_period: 120s}
     restart: unless-stopped
@@ -95,7 +95,7 @@ services:
     volumes:
       - "${NEO4J_DATA_DIR:-/mnt/aitos-data/databases/neo4j}:/data"
       - "${NEO4J_LOG_DIR:-/mnt/aitos-data/runtime/logs/neo4j}:/logs"
-    cpus: "0.5"
+    cpus: "0.30"
     mem_limit: 2.5g
     healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10, start_period: 60s}
     restart: unless-stopped
@@ -116,7 +116,7 @@ services:
       REDIS_STREAM_MAXLEN_MARKET_LIVE_STATE: "10000"
     volumes: ["${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models"]
     ports: ["127.0.0.1:8090:8090"]
-    cpus: "0.75"
+    cpus: "0.50"
     mem_limit: 1.5g
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
     healthcheck: {test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8090/health')"], interval: 30s, timeout: 10s, retries: 5, start_period: 30s}
@@ -130,7 +130,7 @@ services:
     environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/online_rl/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
     volumes: ["${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models"]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
-    cpus: "0.25"
+    cpus: "0.10"
     mem_limit: 512m
     restart: unless-stopped
 
@@ -150,10 +150,10 @@ services:
     container_name: aitos-storage-maintenance
     command: ["python3", "-m", "aitos.storage.maintenance"]
     env_file: [.env]
-    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}", CLICKHOUSE_STORAGE_BUDGET_GB: "130", CLICKHOUSE_STORAGE_TARGET_GB: "120", OTHERS_DATA_DIR: /others, BOOT_FREE_BUFFER_GB: "7.5", DATA_DISK_DIR: /data-disk, DATA_DISK_MIN_FREE_GB: "2.5", DATA_DISK_TARGET_FREE_GB: "25", STORAGE_AUTO_DELETE_PERCENT: "2.5", STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300", STORAGE_MAINTENANCE_DRY_RUN: "false"}
-    volumes: ["${OTHERS_DATA_DIR:-/mnt/aitos-data/artifacts}:/others", "${AITOS_DATA_ROOT:-/mnt/aitos-data}:/data-disk"]
+    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}", AITOS_BOOT_RUNTIME_DIR: /boot-runtime, DATA_DISK_DIR: /data-disk, DATA_DISK_MIN_FREE_GB: "2.5", DATA_DISK_TARGET_FREE_GB: "25", STORAGE_AUTO_DELETE_PERCENT: "2.5", STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300", STORAGE_MAINTENANCE_DRY_RUN: "false"}
+    volumes: ["${AITOS_BOOT_RUNTIME_DIR:-/var/lib/aitos}:/boot-runtime", "${AITOS_DATA_ROOT:-/mnt/aitos-data}:/data-disk"]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
-    cpus: "0.25"
+    cpus: "0.05"
     mem_limit: 256m
     restart: unless-stopped
 
@@ -166,7 +166,7 @@ services:
     volumes: ["${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models"]
     ports: ["127.0.0.1:8091:8091"]
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
-    cpus: "0.5"
+    cpus: "0.50"
     mem_limit: 1.5g
     restart: "no"
     profiles: [live]
