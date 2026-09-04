@@ -83,7 +83,10 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
                             }
                         },
                     )
-                    if self.heartbeat_interval_seconds and self.heartbeat_message is not None:
+                    if (
+                        self.heartbeat_interval_seconds
+                        and self.heartbeat_message is not None
+                    ):
                         heartbeat_task = asyncio.create_task(self._heartbeat(ws))
                     backoff = 1.0
                     async for raw in ws:

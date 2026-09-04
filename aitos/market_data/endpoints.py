@@ -17,9 +17,7 @@ BYBIT_LINEAR_WS = os.getenv(
     "BYBIT_LINEAR_WS_URL", "wss://stream.bybit.com/v5/public/linear"
 )
 
-OKX_PUBLIC_WS = os.getenv(
-    "OKX_WS_PUBLIC_URL", "wss://ws.okx.com:8443/ws/v5/public"
-)
+OKX_PUBLIC_WS = os.getenv("OKX_WS_PUBLIC_URL", "wss://ws.okx.com:8443/ws/v5/public")
 
 # Exchange lifecycle/heartbeat contracts documented by the venues.
 BINANCE_WS_MAX_LIFETIME_SECONDS = 23 * 60 * 60 + 50 * 60
