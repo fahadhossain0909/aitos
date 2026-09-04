@@ -86,9 +86,13 @@ class DataIngestionService(_LegacyDataIngestionService):
     async def health_check(self):
         status = await super().health_check()
         if self._canonical_runtime is not None:
-            status.details["canonical_market_data"] = self._canonical_runtime.gateway.snapshot()
+            status.details["canonical_market_data"] = (
+                self._canonical_runtime.gateway.snapshot()
+            )
         if self._canonical_persistence is not None:
-            status.details["canonical_persistence"] = self._canonical_persistence.snapshot()
+            status.details["canonical_persistence"] = (
+                self._canonical_persistence.snapshot()
+            )
         return status
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
