@@ -111,6 +111,7 @@ jobs:
           CLICKHOUSE_USER=$CLICKHOUSE_USER
           CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD
           CLICKHOUSE_DATABASE=$CLICKHOUSE_DATABASE
+          REDIS_PASSWORD=ci-only-not-used
           EOF
       - name: Run tests with pytest
         env:
@@ -166,7 +167,9 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
       - name: Prepare safe CI environment
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          printf '\nREDIS_PASSWORD=ci-only-not-used\n' >> .env
       - name: Validate Docker Compose configuration
         run: docker compose config >/dev/null
       - name: Lowercase repository name
