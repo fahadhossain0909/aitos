@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aitos.market_data.contracts import MarketEvent, MarketSource
+from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
 from aitos.market_data.gateway import GatewayConfig, GatewayState, MarketDataGateway
 
 
@@ -10,8 +10,10 @@ def event(source=MarketSource.WEBSOCKET, age_seconds=0.0):
     now = datetime.now(timezone.utc)
     return MarketEvent(
         event_id="test-event",
+        exchange="binance",
+        market="usd_m_futures",
         symbol="BTCUSDT",
-        event_type="trade",
+        event_type=MarketEventType.TRADE,
         event_time=now - timedelta(seconds=age_seconds),
         ingest_time=now,
         source=source,
@@ -30,10 +32,7 @@ def test_stale_websocket_is_rejected_and_observable():
 
 def test_full_queue_is_rejected_without_unbounded_growth():
     gateway = MarketDataGateway(
-        "binance",
-        "usd_m_futures",
-        lambda _: None,
-        GatewayConfig(queue_capacity=1),
+        "binance", "usd_m_futures", lambda _: None, GatewayConfig(queue_capacity=1)
     )
     assert gateway.accept(event()) is True
     assert gateway.accept(event()) is False
