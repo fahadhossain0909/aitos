@@ -51,42 +51,46 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         ):
             yield event
 
-    def _parse_trade(self, message: dict[str, Any]) -> MarketEvent | None:
+    def _parse_trade(
+        self, message: dict[str, Any]
+    ) -> list[MarketEvent] | None:
         topic = str(message.get("topic", ""))
         if not topic.startswith("publicTrade."):
             return None
         data = message.get("data") or []
-        if not data:
-            return None
-        item = data[0]
-        symbol = str(item.get("s", "")).upper()
-        if not symbol:
-            return None
-        trade_id = str(item.get("i") or item.get("seq") or "0")
-        try:
-            sequence = int(trade_id)
-        except ValueError:
-            sequence = None
-        event_time = self._timestamp_ms(item.get("T") or message.get("ts"))
-        return MarketEvent(
-            event_type=MarketEventType.TRADE,
-            exchange=Venue.BYBIT.value,
-            market=self.market_type.value,
-            symbol=symbol,
-            event_time=event_time,
-            payload={
-                "symbol": symbol,
-                "timestamp": event_time.isoformat(),
-                "trade_id": trade_id,
-                "price": self._float(item["p"]),
-                "quantity": self._float(item["v"]),
-                "side": item.get("S"),
-            },
-            source=MarketSource.WEBSOCKET,
-            sequence=sequence,
-            correlation_id=f"bybit:{self.market_type.value}:{symbol}:{trade_id}",
-            trace_id=symbol,
-        )
+        events: list[MarketEvent] = []
+        for item in data:
+            symbol = str(item.get("s", "")).upper()
+            if not symbol:
+                continue
+            trade_id = str(item.get("i") or item.get("seq") or "0")
+            try:
+                sequence = int(item.get("seq") or trade_id)
+            except (TypeError, ValueError):
+                sequence = None
+            event_time = self._timestamp_ms(item.get("T") or message.get("ts"))
+            events.append(
+                MarketEvent(
+                    event_type=MarketEventType.TRADE,
+                    exchange=Venue.BYBIT.value,
+                    market=self.market_type.value,
+                    symbol=symbol,
+                    event_time=event_time,
+                    payload={
+                        "symbol": symbol,
+                        "timestamp": event_time.isoformat(),
+                        "trade_id": trade_id,
+                        "price": self._float(item["p"]),
+                        "quantity": self._float(item["v"]),
+                        "side": item.get("S"),
+                    },
+                    source=MarketSource.WEBSOCKET,
+                    sequence=sequence,
+                    correlation_id=f"bybit:{self.market_type.value}:{symbol}:{trade_id}",
+                    trace_id=symbol,
+                )
+            )
+        return events or None
 
     def _parse_book(self, message: dict[str, Any]) -> MarketEvent | None:
         topic = str(message.get("topic", ""))
