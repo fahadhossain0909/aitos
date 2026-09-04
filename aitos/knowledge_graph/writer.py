@@ -66,8 +66,6 @@ MERGE (a)-[r:CORRELATED_WITH]->(b)
 SET r.coefficient = $coefficient, r.updated_at = $updated_at
 """
 
-# Semantic topics are intentionally bounded. Raw ticks/L2 stay in
-# Redis/ClickHouse and can be referenced by IDs from the graph when needed.
 SEMANTIC_TOPICS = (
     "decision.*",
     "risk.*",
@@ -76,6 +74,16 @@ SEMANTIC_TOPICS = (
     "intelligence.*",
     "journey.*",
     "execution.*",
+)
+
+# Decision streams that are emitted by the current runtime. Registering these
+# before the wildcard subscription is intentional: Redis wildcard resolution
+# happens against streams known at subscription time, while the subscription
+# itself remains a single wildcard subscription (no duplicate consumers).
+_SEMANTIC_DECISION_STREAMS = (
+    "decision.trade_candidate",
+    "decision.generated",
+    "decision.snapshot",
 )
 
 PROJECT_SEMANTIC_EVENT_QUERY = """
@@ -247,6 +255,12 @@ class KnowledgeGraphWriter(AITOSModule):
                 ),
             ]
         )
+        # The Redis bus resolves wildcard subscriptions against streams known
+        # at bind time. Seed only the decision streams emitted by the runtime;
+        # the wildcard remains the sole semantic subscription.
+        known_topics = getattr(self._event_bus, "_known_topics", None)
+        if known_topics is not None:
+            known_topics.update(_SEMANTIC_DECISION_STREAMS)
         for topic in SEMANTIC_TOPICS:
             self._subscriptions.append(
                 await self._event_bus.subscribe(
