@@ -59,7 +59,11 @@ def _stream_maxlen(topic: str) -> int | None:
     for prefix, default in sorted(
         STREAM_MAXLEN_DEFAULTS.items(), key=lambda item: -len(item[0])
     ):
-        if topic == prefix or topic.startswith(prefix + ".") or topic.startswith(prefix):
+        if (
+            topic == prefix
+            or topic.startswith(prefix + ".")
+            or topic.startswith(prefix)
+        ):
             env_name = "REDIS_STREAM_MAXLEN_" + prefix.replace(".", "_").upper().rstrip(
                 "_"
             )
