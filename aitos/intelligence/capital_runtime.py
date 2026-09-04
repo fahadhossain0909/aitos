@@ -8,6 +8,7 @@ by skipping the scanner/application helper.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from functools import wraps
 from typing import Any
@@ -94,13 +95,11 @@ def install_capital_guard() -> None:
         consensus["capital_objective"] = {
             "eligible": True,
             "composite_score": decision.composite_score,
-            "expected_net_edge_pct": decision.estimate.expected_net_edge_pct,
-            "risk_budget_pct": allocation.risk_budget_pct,
-            "risk_amount_usd": allocation.risk_amount_usd,
-            "position_notional_usd": allocation.position_notional_usd,
+            "expected_net_edge_pct": decision.expected_net_edge_pct,
+            "risk_budget_usd": allocation.risk_budget_usd,
+            "capital_usd": allocation.capital_usd,
+            "risk_budget_pct": (allocation.risk_budget_usd / equity) * 100.0,
         }
-        from dataclasses import replace
-
         authorized = replace(opportunity, agent_consensus=consensus)
         return await original(self, authorized, portfolio, *args, **kwargs)
 
