@@ -32,7 +32,14 @@ class AStatEngine:
         "lead_lag": 0.65,
     }
 
-    def __init__(self, calibration_window: int = 256) -> None:
+    def __init__(
+        self, calibration_window: int = 256, calibration_quality: float = 0.5
+    ) -> None:
+        if calibration_window <= 0:
+            raise ValueError("calibration_window must be positive")
+        if not 0.0 <= float(calibration_quality) <= 1.0:
+            raise ValueError("calibration_quality must be between 0 and 1")
+        self._calibration_quality = float(calibration_quality)
         self._outcomes: deque[tuple[float, bool]] = deque(maxlen=calibration_window)
         self._returns: deque[float] = deque(maxlen=calibration_window)
         self._stack = ContractStatisticalStack(
@@ -71,12 +78,19 @@ class AStatEngine:
             low_volatility=1.0 - high,
         ).normalised()
 
-    @staticmethod
-    def _calibration(outcomes: deque[tuple[float, bool]]) -> float:
-        if not outcomes:
-            return 0.5
-        brier = sum((p - float(y)) ** 2 for p, y in outcomes) / len(outcomes)
-        return max(0.0, min(1.0, 1.0 - brier / 0.25))
+    def _calibration(
+        self, outcomes: deque[tuple[float, bool]] | None = None
+    ) -> float:
+        """Return calibration quality, falling back to configured baseline."""
+        observations = self._outcomes if outcomes is None else outcomes
+        if not observations:
+            return self._calibration_quality
+        brier = sum((p - float(y)) ** 2 for p, y in observations) / len(observations)
+        observed_quality = max(0.0, min(1.0, 1.0 - brier / 0.25))
+        # The configured value is the prior quality before online evidence is
+        # available. Once observations exist, the empirical calibration is the
+        # authoritative signal.
+        return observed_quality
 
     def evaluate(
         self, observation: AStatObservation, evidence: Iterable[BayesianEvidence] = ()
