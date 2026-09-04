@@ -225,6 +225,8 @@ class LiveScannerCache:
                 "trade_receive_lag_ms": None,
                 "book_receive_lag_ms": None,
                 "source_age_ms": None,
+                "trade_age_sec": None,
+                "book_age_sec": None,
             }
         trade_age = (
             (now - state.last_trade_source_at).total_seconds() * 1000
@@ -256,27 +258,6 @@ class LiveScannerCache:
             "trade_receive_lag_ms": trade_lag,
             "book_receive_lag_ms": book_lag,
             "source_age_ms": max(ages) if ages else None,
+            "trade_age_sec": trade_age / 1000 if trade_age is not None else None,
+            "book_age_sec": book_age / 1000 if book_age is not None else None,
         }
-
-    def is_trade_fresh(
-        self, symbol: str, max_age_seconds: float = LIVE_TRADE_MAX_AGE_SECONDS
-    ) -> bool:
-        state = self._state.get(symbol.upper())
-        if state is None or state.last_trade_source_at is None:
-            return False
-        return (
-            datetime.now(timezone.utc) - state.last_trade_source_at
-        ).total_seconds() <= max_age_seconds
-
-    def is_book_fresh(
-        self, symbol: str, max_age_seconds: float = LIVE_BOOK_MAX_AGE_SECONDS
-    ) -> bool:
-        state = self._state.get(symbol.upper())
-        if state is None or state.last_book_source_at is None:
-            return False
-        return (
-            datetime.now(timezone.utc) - state.last_book_source_at
-        ).total_seconds() <= max_age_seconds
-
-    def snapshot(self, symbol: str) -> LiveSymbolCache | None:
-        return self._state.get(symbol.upper())
