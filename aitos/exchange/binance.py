@@ -36,6 +36,8 @@ logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
 WS_MARKET_BASE_URL = "wss://fstream.binance.com/stream"
 WS_MARKET_RAW_BASE_URL = "wss://fstream.binance.com/ws"
+# Backwards-compatible name retained for existing routing tests and callers.
+WS_PUBLIC_BASE_URL = WS_MARKET_BASE_URL
 DEFAULT_RATE_LIMIT_CAPACITY = 2000
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2000 / 60
 MAX_BACKOFF_SECONDS = 60.0
@@ -117,46 +119,17 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             await self._get("/fapi/v1/openInterest", {"symbol": symbol}, 1)
         )
 
-    async def fetch_exchange_info(
-        self, symbols: list[str] | None = None
-    ) -> dict[str, SymbolFilters]:
-        all_filters = parse_exchange_info(
-            await self._get("/fapi/v1/exchangeInfo", {}, 1)
-        )
-        return (
-            all_filters
-            if symbols is None
-            else {s: all_filters[s] for s in symbols if s in all_filters}
-        )
-
-    async def stream_klines(
-        self, symbols: list[str], timeframe: str
-    ) -> AsyncIterator[Kline]:
-        async for item in self._stream(
-            [f"{s.lower()}@kline_{timeframe}" for s in symbols], parse_kline_ws
-        ):
-            yield item
+    async def fetch_exchange_info(self) -> list[SymbolFilters]:
+        return parse_exchange_info(await self._get("/fapi/v1/exchangeInfo", {}, 1))
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
-        if not symbols:
-            return
-        async for data, _ in self._raw_stream(
-            [f"{s.lower()}@aggTrade" for s in dict.fromkeys(symbols)],
-            emit_reconnect=True,
-        ):
-            try:
-                yield parse_agg_trade_ws(data)
-            except Exception as exc:
-                logger.error(
-                    "Binance aggregate-trade event invalid",
-                    extra={"aitos_extra": {"error": str(exc)}},
-                )
+        streams = [f"{s.lower()}@aggTrade" for s in dict.fromkeys(symbols)]
+        async for data, _ in self._raw_stream(streams, emit_reconnect=True):
+            yield parse_agg_trade_ws(data)
 
-    async def stream_order_book(
+    async def stream_order_books(
         self, symbols: list[str], levels: int = 20
     ) -> AsyncIterator[OrderBookSnapshot]:
-        if not symbols:
-            return
         streams = [f"{s.lower()}@depth@100ms" for s in dict.fromkeys(symbols)]
         symbol_by_stream = {f"{s.lower()}@depth@100ms": s for s in symbols}
         books: dict[str, LocalOrderBook] = {}
