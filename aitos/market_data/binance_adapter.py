@@ -1,9 +1,4 @@
-"""Canonical Binance market-data adapter facade.
-
-The existing exchange adapter owns the actual socket/REST implementation. This
-facade converts its normalized legacy models into the canonical MarketEvent
-contract, keeping transport details out of consumers.
-"""
+"""Canonical Binance market-data adapter facade."""
 
 from __future__ import annotations
 
@@ -13,7 +8,7 @@ from datetime import datetime, timezone
 from aitos.exchange.base import ExchangeAdapter
 
 from .contracts import MarketEvent, MarketSource
-from .legacy_bridge import book_snapshot_event, trade_event
+from .legacy_bridge import book_delta_event, book_snapshot_event, trade_event
 from .venues import MarketType, Venue, VenueCapabilities
 
 
@@ -37,6 +32,8 @@ class BinanceCanonicalMarketDataAdapter:
     @property
     def capabilities(self) -> VenueCapabilities:
         return VenueCapabilities(
+            trades=True,
+            order_book=True,
             funding=True,
             open_interest=True,
             liquidations=True,
@@ -45,23 +42,36 @@ class BinanceCanonicalMarketDataAdapter:
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
         async for trade in self.exchange.stream_trades(symbols):
-            event = trade_event(
+            yield trade_event(
                 trade,
                 market_type=self.market_type,
                 source=MarketSource.WEBSOCKET,
             )
-            yield event
 
     async def stream_order_books(
         self, symbols: list[str], levels: int = 20
     ) -> AsyncIterator[MarketEvent]:
         async for book in self.exchange.stream_order_book(symbols, levels=levels):
-            event = book_snapshot_event(
+            yield book_snapshot_event(
                 book,
                 market_type=self.market_type,
                 source=MarketSource.WEBSOCKET,
             )
-            yield event
+
+    async def stream_order_book_deltas(
+        self, symbols: list[str]
+    ) -> AsyncIterator[MarketEvent]:
+        """Emit every Binance diff-depth update without sampling or aggregation."""
+        stream = getattr(self.exchange, "stream_order_book_deltas", None)
+        if stream is None:
+            raise RuntimeError("Binance exchange adapter lacks raw depth-delta support")
+        async for symbol, delta in stream(symbols):
+            yield book_delta_event(
+                delta,
+                symbol=symbol,
+                market_type=self.market_type,
+                source=MarketSource.WEBSOCKET,
+            )
 
     async def recover_trade_events(
         self, symbol: str, limit: int = 500
