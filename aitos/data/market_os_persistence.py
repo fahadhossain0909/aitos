@@ -102,26 +102,65 @@ class MarketOSPersistence(AITOSModule):
         }
         self._column_names = {
             "market_orderflow": [
-                "time", "event_id", "symbol", "trade_count", "buy_volume",
-                "sell_volume", "delta", "cvd", "buy_ratio", "aggression",
-                "imbalance", "vwap", "last_price", "direction",
+                "time",
+                "event_id",
+                "symbol",
+                "trade_count",
+                "buy_volume",
+                "sell_volume",
+                "delta",
+                "cvd",
+                "buy_ratio",
+                "aggression",
+                "imbalance",
+                "vwap",
+                "last_price",
+                "direction",
             ],
             "market_liquidity_events": [
-                "time", "event_id", "symbol", "kind", "side", "score",
-                "price", "details_json", "last_update_id",
+                "time",
+                "event_id",
+                "symbol",
+                "kind",
+                "side",
+                "score",
+                "price",
+                "details_json",
+                "last_update_id",
             ],
             "market_live_state": [
-                "time", "event_id", "symbol", "trade_count", "order_flow_json",
-                "liquidity_events_json", "best_bid", "best_ask", "state_timestamp",
+                "time",
+                "event_id",
+                "symbol",
+                "trade_count",
+                "order_flow_json",
+                "liquidity_events_json",
+                "best_bid",
+                "best_ask",
+                "state_timestamp",
             ],
             "order_book_events": [
-                "time", "event_id", "symbol", "bid_levels", "ask_levels",
-                "spread", "depth_ratio", "last_update_id",
+                "time",
+                "event_id",
+                "symbol",
+                "bid_levels",
+                "ask_levels",
+                "spread",
+                "depth_ratio",
+                "last_update_id",
             ],
             "live_analytics_events": [
-                "event_time", "ingest_time", "event_id", "category", "exchange",
-                "market", "symbol", "source_module", "correlation_id",
-                "schema_version", "payload_json",
+                "event_time",
+                "ingest_time",
+                "event_id",
+                "category",
+                "exchange",
+                "market",
+                "symbol",
+                "source_module",
+                "correlation_id",
+                "schema_version",
+                "payload_json",
             ],
         }
         self._flush_lock = asyncio.Lock()
@@ -146,17 +185,25 @@ class MarketOSPersistence(AITOSModule):
             return
         self._subscriptions = [
             await self._event_bus.subscribe(
-                "market.orderflow.*", self._handle_orderflow, group="market-os-orderflow"
+                "market.orderflow.*",
+                self._handle_orderflow,
+                group="market-os-orderflow",
             ),
             await self._event_bus.subscribe(
-                "market.liquidity.*", self._handle_liquidity, group="market-os-liquidity"
+                "market.liquidity.*",
+                self._handle_liquidity,
+                group="market-os-liquidity",
             ),
             await self._event_bus.subscribe(
-                "market.live_state.*", self._handle_live_state, group="market-os-live-state"
+                "market.live_state.*",
+                self._handle_live_state,
+                group="market-os-live-state",
             ),
             await self._event_bus.subscribe(
-                "market.orderbook.*", self._handle_orderbook,
-                group="clickhouse-orderbook-history-v1", start_id="0"
+                "market.orderbook.*",
+                self._handle_orderbook,
+                group="clickhouse-orderbook-history-v1",
+                start_id="0",
             ),
         ]
         for topic in self.LIVE_ANALYTICS_TOPICS:
@@ -178,7 +225,11 @@ class MarketOSPersistence(AITOSModule):
         )
 
     async def health_check(self) -> HealthStatus:
-        status = ModuleStatus.HEALTHY if self._repository is not None else ModuleStatus.DEGRADED
+        status = (
+            ModuleStatus.HEALTHY
+            if self._repository is not None
+            else ModuleStatus.DEGRADED
+        )
         return HealthStatus(
             module_id=self.module_id,
             status=status,
@@ -215,12 +266,19 @@ class MarketOSPersistence(AITOSModule):
     async def _handle_orderflow(self, event: Event) -> EventResponse | None:
         p = event.payload
         row = [
-            event.created_at, event.event_id, _symbol_from_topic(event.topic),
-            int(p.get("trade_count", 0)), float(p.get("buy_volume", 0.0)),
-            float(p.get("sell_volume", 0.0)), float(p.get("delta", 0.0)),
-            float(p.get("cvd", 0.0)), float(p.get("buy_ratio", 0.0)),
-            float(p.get("aggression", 0.0)), float(p.get("imbalance", 0.0)),
-            float(p.get("vwap", 0.0)), float(p.get("last_price", 0.0)),
+            event.created_at,
+            event.event_id,
+            _symbol_from_topic(event.topic),
+            int(p.get("trade_count", 0)),
+            float(p.get("buy_volume", 0.0)),
+            float(p.get("sell_volume", 0.0)),
+            float(p.get("delta", 0.0)),
+            float(p.get("cvd", 0.0)),
+            float(p.get("buy_ratio", 0.0)),
+            float(p.get("aggression", 0.0)),
+            float(p.get("imbalance", 0.0)),
+            float(p.get("vwap", 0.0)),
+            float(p.get("last_price", 0.0)),
             str(p.get("direction", "")),
         ]
         await self._enqueue("market_orderflow", row, event)
@@ -229,9 +287,13 @@ class MarketOSPersistence(AITOSModule):
     async def _handle_liquidity(self, event: Event) -> EventResponse | None:
         p = event.payload
         row = [
-            event.created_at, event.event_id, _symbol_from_topic(event.topic),
-            str(p.get("kind", "")), str(p.get("side", "")),
-            float(p.get("score", 0.0)), float(p.get("price", 0.0)),
+            event.created_at,
+            event.event_id,
+            _symbol_from_topic(event.topic),
+            str(p.get("kind", "")),
+            str(p.get("side", "")),
+            float(p.get("score", 0.0)),
+            float(p.get("price", 0.0)),
             json.dumps(p.get("details", {}), sort_keys=True, default=str),
             int(p.get("last_update_id", 0)),
         ]
@@ -241,11 +303,14 @@ class MarketOSPersistence(AITOSModule):
     async def _handle_live_state(self, event: Event) -> EventResponse | None:
         p = event.payload
         row = [
-            event.created_at, event.event_id, _symbol_from_topic(event.topic),
+            event.created_at,
+            event.event_id,
+            _symbol_from_topic(event.topic),
             int(p.get("trade_count", 0)),
             json.dumps(p.get("order_flow"), sort_keys=True, default=str),
             json.dumps(p.get("liquidity_events", []), sort_keys=True, default=str),
-            _optional_float(p.get("best_bid")), _optional_float(p.get("best_ask")),
+            _optional_float(p.get("best_bid")),
+            _optional_float(p.get("best_ask")),
             _parse_timestamp(p.get("timestamp")),
         ]
         await self._enqueue("market_live_state", row, event)
@@ -254,10 +319,13 @@ class MarketOSPersistence(AITOSModule):
     async def _handle_orderbook(self, event: Event) -> EventResponse | None:
         p = event.payload
         row = [
-            event.created_at, event.event_id, _symbol_from_topic(event.topic),
+            event.created_at,
+            event.event_id,
+            _symbol_from_topic(event.topic),
             json.dumps(p.get("bids", []), sort_keys=True, default=str),
             json.dumps(p.get("asks", []), sort_keys=True, default=str),
-            float(p.get("spread", 0.0)), float(p.get("depth_ratio", 0.0)),
+            float(p.get("spread", 0.0)),
+            float(p.get("depth_ratio", 0.0)),
             int(p.get("last_update_id", 0)),
         ]
         await self._enqueue("order_book_events", row, event)
