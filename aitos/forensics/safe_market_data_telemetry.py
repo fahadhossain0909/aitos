@@ -44,9 +44,7 @@ def _format(stats: dict[str, dict[str, float]]) -> dict[str, dict[str, float | i
         topic: {
             "count": int(row["count"]),
             "total_ms": round(row["total_ms"], 3),
-            "avg_ms": round(row["total_ms"] / row["count"], 3)
-            if row["count"]
-            else 0.0,
+            "avg_ms": round(row["total_ms"] / row["count"], 3) if row["count"] else 0.0,
             "max_ms": round(row["max_ms"], 3),
         }
         for topic, row in sorted(stats.items())
