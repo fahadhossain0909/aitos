@@ -9,10 +9,10 @@ reason that is independent of a static TP/SL.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from math import isfinite
-from typing import Sequence
 
 
 class TradeJourneyState(str, Enum):
@@ -93,7 +93,9 @@ class TradeJourneyEngine:
     ) -> None:
         self.proving_max_r = max(0.0, proving_max_r)
         self.healthy_threshold = min(1.0, max(0.0, healthy_threshold))
-        self.uncertain_threshold = min(self.healthy_threshold, max(0.0, uncertain_threshold))
+        self.uncertain_threshold = min(
+            self.healthy_threshold, max(0.0, uncertain_threshold)
+        )
         self.decay_threshold = min(self.uncertain_threshold, max(0.0, decay_threshold))
         self.stale_after_seconds = max(1.0, stale_after_seconds)
         self.reduce_health_threshold = min(1.0, max(0.0, reduce_health_threshold))
@@ -117,7 +119,9 @@ class TradeJourneyEngine:
             return 0.5, 0.0, 0.0
         direction = 1.0 if side == "LONG" else -1.0
         actual = max(0.0, (current_price - entry_price) * direction)
-        distances = [max(0.0, (p - entry_price) * direction) for p in expected_path_prices]
+        distances = [
+            max(0.0, (p - entry_price) * direction) for p in expected_path_prices
+        ]
         distances = [d for d in distances if d > 0]
         if not distances:
             return 0.5, 0.0, 0.0
@@ -160,7 +164,9 @@ class TradeJourneyEngine:
         else:
             # A modest time-based expectation prevents a trade from being
             # considered healthy forever simply because its thesis is intact.
-            expected_progress = min(1.0, max(0.0, age_seconds / self.stale_after_seconds))
+            expected_progress = min(
+                1.0, max(0.0, age_seconds / self.stale_after_seconds)
+            )
 
         time_efficiency = 1.0
         if expected_progress > 0:
