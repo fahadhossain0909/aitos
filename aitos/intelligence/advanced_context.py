@@ -202,9 +202,7 @@ def price_imbalance(klines: Sequence[Kline], max_zones: int = 8) -> ImbalanceCon
     price = klines[-1].close if klines else 0.0
     above = min((lo for lo, hi in compact if lo > price), default=None)
     below = max((hi for lo, hi in compact if hi < price), default=None)
-    displacement = _clamp(
-        mean(z[2] / 3.0 for z in zones[:max_zones]) if zones else 0.0
-    )
+    displacement = _clamp(mean(z[2] / 3.0 for z in zones[:max_zones]) if zones else 0.0)
     return ImbalanceContext(compact, above, below, round(displacement, 4))
 
 
