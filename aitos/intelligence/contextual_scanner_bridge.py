@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from aitos.intelligence.advanced_context import AdvancedMarketContext, build_advanced_context
+from aitos.intelligence.advanced_context import (
+    AdvancedMarketContext,
+    build_advanced_context,
+)
 from aitos.intelligence.contextual_layers import PositioningContext
 from aitos.intelligence.graph_context import retrieve_graph_context
 
@@ -27,10 +30,16 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
         if candidate is None:
             return None
         try:
-            klines = await self._exchange.fetch_klines(symbol, self._timeframe, limit=self._kline_lookback)
+            klines = await self._exchange.fetch_klines(
+                symbol, self._timeframe, limit=self._kline_lookback
+            )
             if len(klines) >= 20:
-                flow_score = float(candidate.component_scores.get("order_flow_bias", 5.0))
-                advanced = build_advanced_context(klines, current_cvd_score=flow_score, oi_change=None)
+                flow_score = float(
+                    candidate.component_scores.get("order_flow_bias", 5.0)
+                )
+                advanced = build_advanced_context(
+                    klines, current_cvd_score=flow_score, oi_change=None
+                )
                 object.__setattr__(candidate, "_aitos_klines", tuple(klines))
                 object.__setattr__(candidate, "_aitos_advanced_context", advanced)
         except Exception:
@@ -44,19 +53,31 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
         advanced = getattr(candidate, "_aitos_advanced_context", None)
         if isinstance(advanced, AdvancedMarketContext):
             if advanced.volume_profile is not None:
-                context_scores["volume_profile"] = round(advanced.volume_profile.price_location * 10.0, 4)
-            context_scores["price_imbalance"] = round(5.0 + advanced.imbalance.displacement_score * 5.0, 4)
-            context_scores["structural_symmetry"] = round(5.0 + (advanced.symmetry.similarity * 5.0 if advanced.symmetry else 0.0), 4)
-            context_scores["forced_flow"] = round(5.0 + min(5.0, advanced.forced_flow_score / 2.0), 4)
+                context_scores["volume_profile"] = round(
+                    advanced.volume_profile.price_location * 10.0, 4
+                )
+            context_scores["price_imbalance"] = round(
+                5.0 + advanced.imbalance.displacement_score * 5.0, 4
+            )
+            context_scores["structural_symmetry"] = round(
+                5.0
+                + (advanced.symmetry.similarity * 5.0 if advanced.symmetry else 0.0),
+                4,
+            )
+            context_scores["forced_flow"] = round(
+                5.0 + min(5.0, advanced.forced_flow_score / 2.0), 4
+            )
 
         availability = dict(candidate.component_availability)
         if isinstance(advanced, AdvancedMarketContext):
-            availability.update({
-                "volume_profile": advanced.volume_profile is not None,
-                "price_imbalance": bool(advanced.imbalance.zones),
-                "structural_symmetry": advanced.symmetry is not None,
-                "forced_flow": True,
-            })
+            availability.update(
+                {
+                    "volume_profile": advanced.volume_profile is not None,
+                    "price_imbalance": bool(advanced.imbalance.zones),
+                    "structural_symmetry": advanced.symmetry is not None,
+                    "forced_flow": True,
+                }
+            )
 
         positioning: PositioningContext | None = getattr(candidate, "positioning", None)
         graph_context = await retrieve_graph_context(
@@ -80,7 +101,9 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
             "positioning": positioning,
             "graph_context": graph_context,
         }
-        return await kernel.request_decision(DecisionContext(symbol=candidate.symbol, context=context))
+        return await kernel.request_decision(
+            DecisionContext(symbol=candidate.symbol, context=context)
+        )
 
     scanner_cls.scan_symbol = scan_symbol
     scanner_cls.decide_with_kernel = decide_with_kernel
