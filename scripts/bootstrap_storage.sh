@@ -115,7 +115,7 @@ done
 # Keep only a tiny compatibility surface on the deployment checkout. Large
 # backtest/backup/snapshot/log payloads physically live on the data disk.
 STORAGE_DIR="$REPO_ROOT/.storage"
-${SUDO[@]} mkdir -p "$STORAGE_DIR"
+${SUDO[@]} mkdir -p "$STORAGE_DIR/others"
 for pair in \
   "backtest:$DATA_ROOT/research/backtest" \
   "backups:$DATA_ROOT/artifacts/backups" \
@@ -123,7 +123,7 @@ for pair in \
   "neo4j-logs:$DATA_ROOT/runtime/logs/neo4j"; do
   name="${pair%%:*}"
   target="${pair#*:}"
-  link="$STORAGE_DIR/$name"
+  link="$STORAGE_DIR/others/$name"
   if [[ -e "$link" && ! -L "$link" ]]; then
     die "Deployment storage compatibility path exists as a real directory: $link; explicit migration required."
   fi
@@ -157,7 +157,7 @@ for link in clickhouse neo4j redis; do
   [[ -L "$DATA_ROOT/$link" ]] || die "Missing required compatibility symlink: $DATA_ROOT/$link"
 done
 for link in backtest backups snapshots neo4j-logs; do
-  [[ -L "$STORAGE_DIR/$link" ]] || die "Missing deployment storage symlink: $STORAGE_DIR/$link"
+  [[ -L "$STORAGE_DIR/others/$link" ]] || die "Missing deployment storage symlink: $STORAGE_DIR/others/$link"
 done
 
 TMP_FILE="$DATA_ROOT/.aitos-storage-write-test"
