@@ -4,7 +4,7 @@ services:
     container_name: aitos-redis
     ports: ["127.0.0.1:6379:6379"]
     volumes:
-      - "${REDIS_DATA_DIR:-./.storage/data/redis}/live:/data"
+      - "${REDIS_DATA_DIR:-/mnt/aitos-data/eventbus/redis}/live:/data"
     command:
       - redis-server
       - --appendonly
@@ -17,12 +17,8 @@ services:
       - "50"
       - --auto-aof-rewrite-min-size
       - 64mb
-      # Keep Redis below the Docker cgroup limit so allocator/AOF/client
-      # overhead has headroom and the container does not reach an OOM kill.
       - --maxmemory
       - 2gb
-      # Trading streams and state are not disposable cache keys. Refuse new
-      # writes at the safety ceiling rather than silently evicting live state.
       - --maxmemory-policy
       - noeviction
     healthcheck: {test: ["CMD-SHELL", "redis-cli ping | grep -q PONG && test \"$(redis-cli INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 120s}
@@ -36,7 +32,7 @@ services:
     container_name: aitos-redis-dlq-retention
     environment:
       REDIS_HOST: redis
-      REDIS_PORT: "6379"
+      REDIS_PORT: 6379
       REDIS_DLQ_MAXLEN: "25000"
       REDIS_DLQ_TRIM_INTERVAL_SECONDS: "5"
     volumes:
@@ -54,13 +50,13 @@ services:
     command: ["python3", "scripts/redis_stream_archive.py"]
     environment:
       REDIS_HOST: redis
-      REDIS_PORT: "6379"
+      REDIS_PORT: 6379
       REDIS_ARCHIVE_DIR: /archive
       REDIS_ARCHIVE_POLL_SECONDS: "0.5"
       REDIS_ARCHIVE_BATCH_SIZE: "1000"
       REDIS_STREAM_MAXLEN_DEFAULT: "3000"
     volumes:
-      - "${REDIS_DATA_DIR:-./.storage/data/redis}/archive:/archive"
+      - "${REDIS_DATA_DIR:-/mnt/aitos-data/eventbus/redis}/archive:/archive"
     depends_on: {redis: {condition: service_healthy}}
     cpus: "0.10"
     mem_limit: 256m
@@ -76,7 +72,7 @@ services:
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - "${CLICKHOUSE_DATA_DIR:-./.storage/data/clickhouse}:/var/lib/clickhouse"
+      - "${CLICKHOUSE_DATA_DIR:-/mnt/aitos-data/databases/clickhouse}:/var/lib/clickhouse"
       - ./docker/clickhouse/config.d/aitos.xml:/etc/clickhouse-server/config.d/aitos.xml:ro
       - ./docker/clickhouse/users.d/aitos.xml:/etc/clickhouse-server/users.d/aitos.xml:ro
     cpus: "0.5"
@@ -97,8 +93,8 @@ services:
     ports: ["127.0.0.1:7474:7474", "127.0.0.1:7687:7687"]
     environment: {NEO4J_AUTH: "${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:-changeme}", NEO4J_dbms_memory_pagecache_size: 1G, NEO4J_dbms_memory_heap_max__size: 1G}
     volumes:
-      - "${NEO4J_DATA_DIR:-./.storage/data/neo4j}:/data"
-      - "${NEO4J_LOG_DIR:-./.storage/others/neo4j-logs}:/logs"
+      - "${NEO4J_DATA_DIR:-/mnt/aitos-data/databases/neo4j}:/data"
+      - "${NEO4J_LOG_DIR:-/mnt/aitos-data/runtime/logs/neo4j}:/logs"
     cpus: "0.5"
     mem_limit: 2.5g
     healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10, start_period: 60s}
@@ -114,14 +110,11 @@ services:
       REDIS_MAX_CONNECTIONS: "256"
       CLICKHOUSE_HOST: clickhouse
       NEO4J_URI: bolt://neo4j:7687
-      # Keep the Redis hot working set small; the archive worker preserves history.
-      # These values are deliberately below the previous 25k/100k defaults so a
-      # restart/replay burst cannot consume the full Redis cgroup before archival.
       REDIS_STREAM_MAXLEN_MARKET_TRADE: "10000"
       REDIS_STREAM_MAXLEN_MARKET_ORDERBOOK: "10000"
       REDIS_STREAM_MAXLEN_MARKET_LIQUIDITY: "20000"
       REDIS_STREAM_MAXLEN_MARKET_LIVE_STATE: "10000"
-    volumes: [aitos_model_data:/models]
+    volumes: ["${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models"]
     ports: ["127.0.0.1:8090:8090"]
     cpus: "0.75"
     mem_limit: 1.5g
@@ -135,7 +128,7 @@ services:
     command: ["python3", "run_continual_learning.py"]
     env_file: [.env]
     environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/online_rl/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
-    volumes: [aitos_model_data:/models]
+    volumes: ["${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models"]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "0.25"
     mem_limit: 512m
@@ -144,7 +137,7 @@ services:
   aitos-backtest:
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     command: ["python3", "-m", "aitos.backtest.cli"]
-    volumes: ["${BACKTEST_DATA_DIR:-./.storage/others/backtest}:/data:rw", aitos_model_data:/models:ro]
+    volumes: ["${BACKTEST_DATA_DIR:-/mnt/aitos-data/research/backtest}:/data:rw", "${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models:ro"]
     environment: {PYTHONUNBUFFERED: "1", CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"}
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "1.5"
@@ -158,7 +151,7 @@ services:
     command: ["python3", "-m", "aitos.storage.maintenance"]
     env_file: [.env]
     environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}", CLICKHOUSE_STORAGE_BUDGET_GB: "130", CLICKHOUSE_STORAGE_TARGET_GB: "120", OTHERS_DATA_DIR: /others, BOOT_FREE_BUFFER_GB: "7.5", DATA_DISK_DIR: /data-disk, DATA_DISK_MIN_FREE_GB: "2.5", DATA_DISK_TARGET_FREE_GB: "25", STORAGE_AUTO_DELETE_PERCENT: "2.5", STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300", STORAGE_MAINTENANCE_DRY_RUN: "false"}
-    volumes: ["${OTHERS_DATA_DIR:-./.storage/others}:/others", "${AITOS_DATA_ROOT:-/mnt/aitos-data}:/data-disk"]
+    volumes: ["${OTHERS_DATA_DIR:-/mnt/aitos-data/artifacts}:/others", "${AITOS_DATA_ROOT:-/mnt/aitos-data}:/data-disk"]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "0.25"
     mem_limit: 256m
@@ -170,7 +163,7 @@ services:
     command: ["python3", "run_live_trading.py"]
     env_file: [.env]
     environment: {REDIS_HOST: redis, CLICKHOUSE_HOST: clickhouse, NEO4J_URI: bolt://neo4j:7687}
-    volumes: [aitos_model_data:/models]
+    volumes: ["${MODEL_DATA_DIR:-/mnt/aitos-data/runtime/models}:/models"]
     ports: ["127.0.0.1:8091:8091"]
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}
     cpus: "0.5"
@@ -178,5 +171,4 @@ services:
     restart: "no"
     profiles: [live]
 
-volumes:
-  aitos_model_data:
+volumes: {}
