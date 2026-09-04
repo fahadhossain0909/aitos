@@ -15,6 +15,7 @@ class GatewayHealth:
     connected: bool = False
     degraded: bool = False
     reconnect_count: int = 0
+    stream_idle_timeouts: int = 0
     decode_errors: int = 0
     sequence_errors: int = 0
     received_events: int = 0
@@ -55,6 +56,13 @@ class GatewayHealth:
         self.publish_errors += 1
         self.record_error("publish", message)
 
+    def record_idle_timeout(self, stream: str, timeout_seconds: float) -> None:
+        self.stream_idle_timeouts += 1
+        self.record_error(
+            "stream_idle",
+            f"{stream} produced no canonical event for {timeout_seconds:.1f}s",
+        )
+
     def record_error(self, stage: str, message: str) -> None:
         if stage == "decode":
             self.decode_errors += 1
@@ -84,6 +92,7 @@ class GatewayHealth:
             "connected": self.connected,
             "degraded": self.degraded,
             "reconnect_count": self.reconnect_count,
+            "stream_idle_timeouts": self.stream_idle_timeouts,
             "decode_errors": self.decode_errors,
             "sequence_errors": self.sequence_errors,
             "received_events": self.received_events,
