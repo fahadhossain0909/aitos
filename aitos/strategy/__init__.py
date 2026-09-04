@@ -1,7 +1,7 @@
 """Universal strategy layer for AITOS.
 
 Strategies emit execution intents; shared portfolio, risk and execution layers
-remain strategy-agnostic.  The package is deliberately independent of any
+remain strategy-agnostic. The package is deliberately independent of any
 single venue or asset class.
 """
 
@@ -22,6 +22,7 @@ from .contracts import (
     StrategyMode,
     StrategyResult,
 )
+from .engine import StrategyCycle, StrategyEngine
 from .registry import StrategyRegistry
 
 __all__ = [
@@ -35,6 +36,8 @@ __all__ = [
     "RegimeRouterStrategy",
     "StatisticalArbitrageStrategy",
     "StrategyContext",
+    "StrategyCycle",
+    "StrategyEngine",
     "StrategyFamily",
     "StrategyMode",
     "StrategyRegistry",
