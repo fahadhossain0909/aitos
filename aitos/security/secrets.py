@@ -46,10 +46,18 @@ class VaultSecretProvider(SecretProvider):
             headers={"X-Vault-Token": self.token, "Accept": "application/json"},
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310
+            with urlopen(
+                request, timeout=self.timeout_seconds
+            ) as response:
                 document = json.loads(response.read().decode("utf-8"))
             value = document.get("data", {}).get("data", {}).get(name)
-        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+        except (
+            HTTPError,
+            URLError,
+            TimeoutError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
             raise RuntimeError(f"Vault secret lookup failed for {name!r}") from exc
         if required and not value:
             raise RuntimeError(f"required secret {name!r} is missing from Vault")
@@ -66,7 +74,7 @@ def build_secret_provider() -> SecretProvider:
         if not address:
             raise RuntimeError("VAULT_ADDR is required when SECRETS_BACKEND=vault")
         try:
-            token = open(token_file, encoding="utf-8").read().strip()  # noqa: PTH123
+            token = open(token_file, encoding="utf-8").read().strip()
         except OSError as exc:
             raise RuntimeError("Vault token file is unavailable") from exc
         if not token:
