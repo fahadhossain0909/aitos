@@ -47,7 +47,9 @@ async def test_retry_exhaustion_preserves_cause() -> None:
         raise TimeoutError("downstream")
 
     with pytest.raises(RetryExhaustedError) as exc:
-        await retry_async(op, policy=BackoffPolicy(attempts=2, initial_delay=0), sleep=asyncio.sleep)
+        await retry_async(
+            op, policy=BackoffPolicy(attempts=2, initial_delay=0), sleep=asyncio.sleep
+        )
     assert isinstance(exc.value.__cause__, TimeoutError)
 
 
