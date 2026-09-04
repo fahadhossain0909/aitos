@@ -15,6 +15,8 @@ from .contracts import MarketEvent, MarketEventType
 TradeHandler = Callable[[TradeTick], Awaitable[None]]
 BookHandler = Callable[[OrderBookSnapshot], Awaitable[None]]
 
+SCANNER_FEED_GROUP = "canonical-scanner-feed-v1"
+
 
 class CanonicalScannerFeed:
     """Feeds scanner callbacks exclusively from canonical semantic channels."""
@@ -38,13 +40,13 @@ class CanonicalScannerFeed:
             await self._market_bus.subscribe(
                 MarketEventType.TRADE,
                 self._on_trade,
-                group="market-scanner",
+                group=SCANNER_FEED_GROUP,
                 live_only=True,
             ),
             await self._market_bus.subscribe(
                 MarketEventType.BOOK_SNAPSHOT,
                 self._on_book,
-                group="market-scanner",
+                group=SCANNER_FEED_GROUP,
                 live_only=True,
             ),
         ]
@@ -70,6 +72,8 @@ class CanonicalScannerFeed:
             return
         payload = dict(event.payload)
         payload.pop("_market_source", None)
+        payload["symbol"] = event.symbol
+        payload["timestamp"] = event.event_time.isoformat()
         await self._trade_handler(TradeTick.from_dict(payload))
         self._last_event_at = datetime.now(timezone.utc)
 
