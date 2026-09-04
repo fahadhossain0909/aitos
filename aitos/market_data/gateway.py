@@ -22,9 +22,10 @@ class GatewayState(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class GatewayConfig:
-    queue_capacity: int = 2048
+    queue_capacity: int = 8192
     max_source_age_seconds: float = 15.0
     publish_timeout_seconds: float = 10.0
+    backpressure_poll_seconds: float = 0.005
 
 
 class MarketDataGateway:
@@ -60,13 +61,7 @@ class MarketDataGateway:
         self.state = GatewayState.STOPPED
         self.health.connected = False
 
-    def accept(self, event: MarketEvent) -> bool:
-        """Accept normalized data without blocking the exchange transport.
-
-        Stale WebSocket data is rejected because it cannot represent live state.
-        REST data is allowed through as explicit degraded recovery: it may repair
-        state/history, but it can never make the gateway appear live.
-        """
+    def _validate_event(self, event: MarketEvent) -> bool:
         self.health.record_event()
         age = event.source_age_seconds
         if (
@@ -82,6 +77,12 @@ class MarketDataGateway:
             self.health.degraded = True
             if self.state == GatewayState.CONNECTED:
                 self.state = GatewayState.DEGRADED
+        return True
+
+    def accept(self, event: MarketEvent) -> bool:
+        """Accept synchronously for compatibility; use ``accept_async`` in runtime."""
+        if not self._validate_event(event):
+            return False
         accepted = self.queue.put_nowait(event)
         if not accepted:
             self.health.record_reject("backpressure", "gateway queue is full")
@@ -90,6 +91,22 @@ class MarketDataGateway:
             return False
         self.health.record_accept()
         return True
+
+    async def accept_async(self, event: MarketEvent) -> bool:
+        """Accept without dropping when the bounded queue reaches capacity."""
+        if not self._validate_event(event):
+            return False
+        while not self._stopped_for_accept():
+            if self.queue.put_nowait(event):
+                self.health.record_accept()
+                return True
+            self.health.backpressure_events += 1
+            self.state = GatewayState.DEGRADED
+            await asyncio.sleep(self.config.backpressure_poll_seconds)
+        return False
+
+    def _stopped_for_accept(self) -> bool:
+        return self.state is GatewayState.STOPPED
 
     async def drain_once(self) -> None:
         event = await self.queue.get()
@@ -102,13 +119,11 @@ class MarketDataGateway:
         except Exception as exc:
             self.health.record_publish_error(str(exc))
             self.state = GatewayState.DEGRADED
-            # Do not acknowledge/drop the event merely because the downstream
-            # publisher failed. Put it back so a later drain attempt can retry.
-            if not self.queue.put_nowait(event):
-                self.health.record_reject(
-                    "publish_requeue", "queue full while requeueing failed event"
-                )
-                self.health.dropped_events += 1
+            while not self._stopped_for_accept():
+                if self.queue.put_nowait(event):
+                    break
+                self.health.backpressure_events += 1
+                await asyncio.sleep(self.config.backpressure_poll_seconds)
             raise
         else:
             self.health.record_publish()
