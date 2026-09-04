@@ -26,6 +26,10 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
     websocket_url: str
     heartbeat_interval_seconds: float | None = None
     heartbeat_message: str | dict[str, Any] | None = None
+    # Exchanges may impose a hard/soft connection lifetime. Closing slightly
+    # before that limit lets the reconnect loop establish a fresh connection
+    # instead of waiting for an exchange-side forced disconnect.
+    max_connection_lifetime_seconds: float | None = None
 
     def _connect(self, url: str):
         # Venue-level heartbeats are handled explicitly below. Keep protocol
@@ -50,6 +54,17 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
             else:
                 await ws.send(json.dumps(payload))
 
+    async def _lifetime_guard(self, ws: Any) -> None:
+        lifetime = self.max_connection_lifetime_seconds
+        if lifetime is None:
+            return
+        await asyncio.sleep(lifetime)
+        logger.info(
+            "canonical websocket lifetime reached; rotating connection",
+            extra={"aitos_extra": {"url": self.websocket_url}},
+        )
+        await ws.close(code=1000, reason="planned connection rotation")
+
     async def _stream(
         self,
         symbols: list[str],
@@ -62,6 +77,7 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
         backoff = 1.0
         while True:
             heartbeat_task: asyncio.Task | None = None
+            lifetime_task: asyncio.Task | None = None
             try:
                 logger.info(
                     "opening canonical websocket",
@@ -88,10 +104,19 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
                         and self.heartbeat_message is not None
                     ):
                         heartbeat_task = asyncio.create_task(self._heartbeat(ws))
+                    if self.max_connection_lifetime_seconds is not None:
+                        lifetime_task = asyncio.create_task(self._lifetime_guard(ws))
                     backoff = 1.0
                     async for raw in ws:
+                        # OKX uses text control frames such as "pong". They
+                        # are transport/control messages, not market events.
                         if isinstance(raw, bytes):
                             raw = raw.decode("utf-8")
+                        if isinstance(raw, str) and raw.strip().lower() in {
+                            "ping",
+                            "pong",
+                        }:
+                            continue
                         try:
                             message = json.loads(raw)
                         except (TypeError, ValueError) as exc:
@@ -126,9 +151,16 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2.0, 60.0)
             finally:
-                if heartbeat_task is not None and not heartbeat_task.done():
-                    heartbeat_task.cancel()
-                    await asyncio.gather(heartbeat_task, return_exceptions=True)
+                for task in (heartbeat_task, lifetime_task):
+                    if task is not None and not task.done():
+                        task.cancel()
+                tasks = [
+                    task
+                    for task in (heartbeat_task, lifetime_task)
+                    if task is not None
+                ]
+                if tasks:
+                    await asyncio.gather(*tasks, return_exceptions=True)
 
     @staticmethod
     def _timestamp_ms(value: Any) -> datetime:
