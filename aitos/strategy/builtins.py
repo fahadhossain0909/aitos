@@ -90,14 +90,14 @@ class MarketMakingStrategy(Strategy):
                 continue
             buy_qty = quote_notional / snap.mid
             sell_qty = quote_notional / snap.mid
-            # The execution adapter decides the actual bid/ask prices from these intents.
+            half_spread = snap.mid * snap.spread_bps / 20000
             return StrategyResult(
                 self.strategy_id,
                 self.family,
                 (
-                    ExecutionIntent(snap.instrument_id, "buy", buy_qty, "limit", snap.mid,
+                    ExecutionIntent(snap.instrument_id, "buy", buy_qty, "limit", snap.mid - half_spread,
                                     strategy_id=self.strategy_id, rationale="liquid spread capture"),
-                    ExecutionIntent(snap.instrument_id, "sell", sell_qty, "limit", snap.mid,
+                    ExecutionIntent(snap.instrument_id, "sell", sell_qty, "limit", snap.mid + half_spread,
                                     strategy_id=self.strategy_id, rationale="liquid spread capture"),
                 ),
                 CapitalRequest(self.strategy_id, quote_notional, quote_notional * 0.01, snap.spread_bps / 10_000),
