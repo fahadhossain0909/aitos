@@ -13,6 +13,7 @@ The system must not select an asset merely because its directional return estima
 3. **No-trade is a valid decision.** If no opportunity clears the objective, capital remains undeployed.
 4. **Among eligible opportunities, maximize sustainable growth.** Growth is weighted 60% and protection 40% by default.
 5. **Capital allocation is risk-budget based.** Position notional is derived from an approved risk budget, not from leverage appetite.
+6. **TradeLifecycle is the final capital boundary.** An opportunity that is not capital-authorized is returned as `REJECTED` and never reaches order submission.
 
 ## Economic model
 
@@ -32,6 +33,18 @@ The default hard gates are:
 - minimum liquidity score: 4/10
 
 These are configuration defaults, not claims about future market performance. They should be calibrated from AITOS backtests and paper-trading telemetry before any production policy change.
+
+## Runtime enforcement
+
+`aitos/intelligence/capital_gateway.py` converts an executable `Opportunity` into the venue-neutral economic estimate. The nearest take-profit is used as the conservative gross-return target. The stop distance supplies loss severity. A calibrated `loss_probability` supplied in `agent_consensus` takes precedence; otherwise the kernel/scanner confidence is converted to a conservative probability-like signal.
+
+`aitos/intelligence/capital_runtime.py` installs the guard on `TradeLifecycle.submit_opportunity`. It is fail-closed: invalid/unavailable equity, malformed economic inputs, failed objective gates, and missing allocations cannot reach the original lifecycle submission path.
+
+The guard also records the approved risk budget in `agent_consensus["capital_objective"]` so the authorization is auditable by the journal/telemetry layers.
+
+## Execution-cost defaults
+
+Until venue-specific fee/slippage/funding models are supplied, the runtime boundary uses conservative defaults of **10 bps fee + 5 bps slippage + 0 bps funding**. These are policy assumptions, not exchange guarantees. They should be replaced with live venue/account-specific estimates before production deployment.
 
 ## Architecture placement
 
