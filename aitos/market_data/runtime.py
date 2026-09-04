@@ -58,6 +58,7 @@ class CanonicalMarketDataRuntime:
         self._tasks: list[asyncio.Task] = []
         self._drain_tasks: list[asyncio.Task] = []
         self._stopped = True
+        self._reconfigure_lock = asyncio.Lock()
 
     async def start(self) -> None:
         if not self._stopped:
@@ -80,18 +81,7 @@ class CanonicalMarketDataRuntime:
                     name="market-data-trades",
                 )
             )
-        if self.enable_orderbooks and self.orderbook_symbols:
-            self._tasks.append(
-                asyncio.create_task(
-                    self._run(
-                        "orderbook",
-                        lambda: self.adapter.stream_order_books(
-                            self.orderbook_symbols, self.orderbook_levels
-                        ),
-                    ),
-                    name="market-data-orderbook",
-                )
-            )
+        self._start_orderbook_task()
         logger.info(
             "canonical market-data runtime started",
             extra={
@@ -108,6 +98,52 @@ class CanonicalMarketDataRuntime:
                 }
             },
         )
+
+    def _start_orderbook_task(self) -> None:
+        if not self.enable_orderbooks or not self.orderbook_symbols:
+            return
+        self._tasks.append(
+            asyncio.create_task(
+                self._run(
+                    "orderbook",
+                    lambda: self.adapter.stream_order_books(
+                        self.orderbook_symbols, self.orderbook_levels
+                    ),
+                ),
+                name="market-data-orderbook",
+            )
+        )
+
+    async def update_orderbook_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
+        """Hot-switch the live order-book socket to a new symbol set.
+
+        Trade ingestion remains untouched. The current socket is cancelled and
+        closed before the replacement starts, so the gateway never has two live
+        order-book subscriptions competing for the same stream.
+        """
+        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))
+        async with self._reconfigure_lock:
+            if normalized == self.orderbook_symbols:
+                return False
+            self.orderbook_symbols = normalized
+            if self._stopped:
+                return True
+            orderbook_tasks = [
+                task
+                for task in self._tasks
+                if task.get_name() == "market-data-orderbook"
+            ]
+            for task in orderbook_tasks:
+                task.cancel()
+            if orderbook_tasks:
+                await asyncio.gather(*orderbook_tasks, return_exceptions=True)
+            self._tasks = [task for task in self._tasks if task not in orderbook_tasks]
+            self._start_orderbook_task()
+            logger.info(
+                "live orderbook subscription reconfigured",
+                extra={"aitos_extra": {"orderbook_symbols": normalized}},
+            )
+            return True
 
     async def stop(self) -> None:
         self._stopped = True
