@@ -64,6 +64,46 @@ class RegimeProbability:
 
 
 @dataclass(frozen=True)
+class EVTTail:
+    """Serializable Peaks-Over-Threshold extreme-tail estimate.
+
+    ``tail_probability`` is the empirical probability of exceeding the fitted
+    threshold. ``expected_shortfall`` is the estimated mean loss conditional on
+    a threshold exceedance. Keeping the full estimator state here makes EVT
+    output stable for stack consumers and replay/serialization paths.
+    """
+
+    threshold: float
+    exceedances: int
+    exceedance_rate: float
+    shape: float
+    scale: float
+    tail_probability: float
+    expected_shortfall: float
+
+    def __post_init__(self) -> None:
+        if self.exceedances < 0:
+            raise ValueError("exceedances must be non-negative")
+        for name in (
+            "threshold",
+            "exceedance_rate",
+            "shape",
+            "scale",
+            "tail_probability",
+            "expected_shortfall",
+        ):
+            value = float(getattr(self, name))
+            if not __import__("math").isfinite(value):
+                raise ValueError(f"{name} must be finite")
+        if not 0.0 <= self.exceedance_rate <= 1.0:
+            raise ValueError("exceedance_rate must be in [0, 1]")
+        if not 0.0 <= self.tail_probability <= 1.0:
+            raise ValueError("tail_probability must be in [0, 1]")
+        if self.threshold < 0 or self.scale < 0 or self.expected_shortfall < 0:
+            raise ValueError("EVT loss magnitudes must be non-negative")
+
+
+@dataclass(frozen=True)
 class AStatObservation:
     symbol: str
     features: dict[str, Any] = field(default_factory=dict)
