@@ -21,5 +21,8 @@ OKX_PUBLIC_WS = os.getenv("OKX_WS_PUBLIC_URL", "wss://ws.okx.com:8443/ws/v5/publ
 
 # Exchange lifecycle/heartbeat contracts documented by the venues.
 BINANCE_WS_MAX_LIFETIME_SECONDS = 23 * 60 * 60 + 50 * 60
+# Backward-compatible name used by older Binance adapter/test code. Keep the
+# canonical constant above so new code has one source of truth.
+BINANCE_USDM_WS_MAX_LIFETIME_SECONDS = BINANCE_WS_MAX_LIFETIME_SECONDS
 BYBIT_WS_HEARTBEAT_INTERVAL_SECONDS = 20.0
 OKX_WS_HEARTBEAT_INTERVAL_SECONDS = 20.0
