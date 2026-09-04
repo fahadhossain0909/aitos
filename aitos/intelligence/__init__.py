@@ -23,12 +23,12 @@ from .scanner import (
 # Keep the intelligence package import surface explicit; indicators.py is restored.
 
 __all__ = [
+    "DEFAULT_WEIGHTS",
     "CapitalAllocation",
     "CapitalAllocator",
     "CapitalDecision",
     "CapitalObjective",
     "CapitalObjectiveConfig",
-    "DEFAULT_WEIGHTS",
     "DeepValueRLScorer",
     "NeutralRLScorer",
     "OpportunityEstimate",

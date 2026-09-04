@@ -67,7 +67,9 @@ def test_allocator_never_exceeds_trade_or_portfolio_risk_caps():
         CapitalObjectiveConfig(max_trade_risk_pct=1.0, max_portfolio_risk_pct=2.0)
     )
     decisions = objective.rank([_estimate("A"), _estimate("B"), _estimate("C")])
-    allocations = CapitalAllocator(objective).allocate(10_000, decisions, max_positions=3)
+    allocations = CapitalAllocator(objective).allocate(
+        10_000, decisions, max_positions=3
+    )
     assert allocations
     assert all(a.risk_budget_usd <= 100.0 + 1e-9 for a in allocations)
     assert sum(a.risk_budget_usd for a in allocations) <= 200.0 + 1e-9
