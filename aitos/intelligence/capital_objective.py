@@ -14,7 +14,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from math import isfinite
 
-
 _BPS_TO_PCT = 0.01
 
 
@@ -162,15 +161,16 @@ class CapitalObjective:
         if estimate.liquidity_score < cfg.min_liquidity_score:
             reasons.append("liquidity_below_minimum")
 
-        growth_score = _clamp(
-            100.0 * edge / max(cfg.target_net_edge_pct, 1e-9)
-        )
+        growth_score = _clamp(100.0 * edge / max(cfg.target_net_edge_pct, 1e-9))
         # Lower probability and lower loss severity are better. Liquidity and
         # confidence are included because fragile execution can turn paper edge
         # into realized loss.
         probability_score = 100.0 * (1.0 - estimate.loss_probability)
         loss_score = 100.0 * (
-            1.0 - min(1.0, estimate.expected_loss_pct / max(cfg.max_expected_loss_pct, 1e-9))
+            1.0
+            - min(
+                1.0, estimate.expected_loss_pct / max(cfg.max_expected_loss_pct, 1e-9)
+            )
         )
         liquidity_score = estimate.liquidity_score * 10.0
         confidence_score = estimate.confidence * 100.0
@@ -182,8 +182,7 @@ class CapitalObjective:
         )
         weight_total = cfg.growth_weight + cfg.protection_weight
         composite = (
-            growth_score * cfg.growth_weight
-            + protection_score * cfg.protection_weight
+            growth_score * cfg.growth_weight + protection_score * cfg.protection_weight
         ) / weight_total
         rationale = (
             f"gross_return={estimate.expected_gross_return_pct:.4f}%",
@@ -206,7 +205,9 @@ class CapitalObjective:
             rationale=rationale,
         )
 
-    def rank(self, estimates: list[OpportunityEstimate], limit: int | None = None) -> list[CapitalDecision]:
+    def rank(
+        self, estimates: list[OpportunityEstimate], limit: int | None = None
+    ) -> list[CapitalDecision]:
         decisions = [self.evaluate(item) for item in estimates]
         decisions.sort(key=lambda item: item.composite_score, reverse=True)
         eligible = [item for item in decisions if item.eligible]
