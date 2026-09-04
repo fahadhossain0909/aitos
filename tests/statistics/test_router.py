@@ -10,5 +10,9 @@ def test_router_returns_all_strategy_families_without_execution_side_effects() -
         )
     )
     ranked = StatisticalStrategyRouter().rank(result)
-    assert {item.strategy_id for item in ranked} == {"directional", "hedging", "options"}
+    assert {item.strategy_id for item in ranked} == {
+        "directional",
+        "hedging",
+        "options",
+    }
     assert all(0.0 <= item.score <= 1.0 for item in ranked)
