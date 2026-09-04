@@ -33,7 +33,6 @@ __all__ = [
     "NeutralRLScorer",
     "OpportunityEstimate",
     "OpportunityScanner",
-    "OpportunityEstimate",
     "RLFeedbackLoop",
     "RLPolicyScorer",
     "ScanCandidate",
