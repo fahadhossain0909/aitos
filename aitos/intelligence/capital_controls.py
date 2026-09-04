@@ -68,13 +68,13 @@ def execution_cost_bps(
     # A missing volatility estimate still carries a small model-risk buffer;
     # zero friction must never be assumed merely because telemetry is absent.
     volatility = (
-        0.01 if volatility_score is None else max(0.0, min(1.0, float(volatility_score)))
+        0.01
+        if volatility_score is None
+        else max(0.0, min(1.0, float(volatility_score)))
     )
     fee = max(0.0, float(base_fee_bps))
     slippage = (
-        max(0.0, float(base_slippage_bps))
-        * liquidity_multiplier
-        * (1.0 + volatility)
+        max(0.0, float(base_slippage_bps)) * liquidity_multiplier * (1.0 + volatility)
     )
     return fee + slippage
 
