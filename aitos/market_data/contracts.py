@@ -112,6 +112,8 @@ class MarketEvent:
     def __post_init__(self) -> None:
         if self.venue is None:
             object.__setattr__(self, "venue", self.exchange)
+        if self.market_type is None:
+            object.__setattr__(self, "market_type", self.market)
         if self.instrument_id is None:
             object.__setattr__(self, "instrument_id", self.symbol)
         if self.correlation_id is None:
