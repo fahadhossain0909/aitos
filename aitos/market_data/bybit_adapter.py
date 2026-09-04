@@ -106,7 +106,11 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
             return None
         update_id = int(data.get("u") or 0)
         bids, asks, previous = self._books.get(symbol, ({}, {}, 0))
-        if message.get("type") == "snapshot" or symbol not in self._books or update_id <= 1:
+        if (
+            message.get("type") == "snapshot"
+            or symbol not in self._books
+            or update_id <= 1
+        ):
             bids = {float(p): float(q) for p, q in data.get("b", []) if float(q) > 0}
             asks = {float(p): float(q) for p, q in data.get("a", []) if float(q) > 0}
         else:
@@ -141,10 +145,7 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                     {"price": p, "quantity": q}
                     for p, q in sorted(bids.items(), reverse=True)
                 ],
-                "asks": [
-                    {"price": p, "quantity": q}
-                    for p, q in sorted(asks.items())
-                ],
+                "asks": [{"price": p, "quantity": q} for p, q in sorted(asks.items())],
                 "last_update_id": update_id,
             },
             source=MarketSource.WEBSOCKET,
