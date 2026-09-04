@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-
 # Historical deep-book capture is intentionally fixed so historical storage
 # remains stable across live-ranking changes and replay datasets remain
 # comparable over time.
