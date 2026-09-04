@@ -6,6 +6,8 @@ from __future__ import annotations
 import asyncio
 import signal
 
+from redis.asyncio import Redis
+
 from aitos.app import (
     PaperPortfolioTracker,
     build_system,
@@ -35,6 +37,25 @@ KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 10_000.0
 HEALTH_SERVER_PORT = 8090
 PAPER_MIN_SCORE_THRESHOLD = 50.0
+
+
+async def connect_redis_with_retry(settings) -> Redis:
+    async def _attempt() -> Redis:
+        client = Redis.from_url(settings.redis.url)
+        await client.ping()
+        return client
+
+    try:
+        return await retry_with_backoff(
+            _attempt,
+            max_attempts=5,
+            base_delay_seconds=2.0,
+            max_delay_seconds=30.0,
+            operation_name="Redis connection",
+        )
+    except RetryExhaustedError as exc:
+        logger.error("could not connect to Redis: %s", exc)
+        raise SystemExit(1) from exc
 
 
 async def connect_clickhouse_repositories(
