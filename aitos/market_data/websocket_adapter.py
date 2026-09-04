@@ -9,18 +9,18 @@ from typing import Any
 
 import websockets
 
+from aitos.logging_setup import get_logger
+
 from .adapter import CanonicalMarketDataAdapter
 from .contracts import MarketEvent
 
+logger = get_logger("aitos.market_data.websocket")
 Connect = Callable[[str], Awaitable[Any]]
+ParserResult = MarketEvent | list[MarketEvent] | None
 
 
 class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
-    """Small transport base shared by venue-specific JSON WebSocket adapters.
-
-    Venue adapters provide endpoint construction, subscription messages, and
-    payload parsing. The base deliberately owns no venue semantics.
-    """
+    """Small transport base shared by venue-specific JSON WebSocket adapters."""
 
     websocket_url: str
 
@@ -38,22 +38,42 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
         self,
         symbols: list[str],
         subscribe_message: dict[str, Any],
-        parser: Callable[[dict[str, Any]], MarketEvent | None],
+        parser: Callable[[dict[str, Any]], ParserResult],
     ) -> AsyncIterator[MarketEvent]:
         normalized = list(dict.fromkeys(s.upper() for s in symbols))
         if not normalized:
             return
+        logger.info(
+            "opening canonical websocket",
+            extra={"aitos_extra": {"url": self.websocket_url, "symbols": normalized}},
+        )
         async with self._connect(self.websocket_url) as ws:
             await ws.send(json.dumps(subscribe_message))
+            logger.info(
+                "canonical websocket subscription sent",
+                extra={"aitos_extra": {"url": self.websocket_url, "symbols": normalized}},
+            )
             async for raw in ws:
                 if isinstance(raw, bytes):
                     raw = raw.decode("utf-8")
-                message = json.loads(raw)
+                try:
+                    message = json.loads(raw)
+                except (TypeError, ValueError) as exc:
+                    logger.warning(
+                        "canonical websocket message decode failed",
+                        extra={"aitos_extra": {"error": str(exc)}},
+                    )
+                    continue
                 if not isinstance(message, dict):
                     continue
-                event = parser(message)
-                if event is not None:
-                    yield event
+                parsed = parser(message)
+                if parsed is None:
+                    continue
+                if isinstance(parsed, list):
+                    for event in parsed:
+                        yield event
+                else:
+                    yield parsed
 
     @staticmethod
     def _timestamp_ms(value: Any) -> datetime:
