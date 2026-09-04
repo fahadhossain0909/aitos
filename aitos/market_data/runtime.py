@@ -17,6 +17,7 @@ _RECONNECT_INITIAL_DELAY_SECONDS = 1.0
 _RECONNECT_MAX_DELAY_SECONDS = 30.0
 PUBLISH_RETRY_DELAY_SECONDS = 0.5
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
+GATEWAY_DRAIN_WORKERS = 4
 
 
 class CanonicalMarketDataRuntime:
@@ -55,7 +56,7 @@ class CanonicalMarketDataRuntime:
         self.enable_trades = enable_trades
         self.enable_orderbooks = enable_orderbooks
         self._tasks: list[asyncio.Task] = []
-        self._drain_task: asyncio.Task | None = None
+        self._drain_tasks: list[asyncio.Task] = []
         self._stopped = True
 
     async def start(self) -> None:
@@ -63,9 +64,12 @@ class CanonicalMarketDataRuntime:
             return
         self._stopped = False
         self.gateway.begin_connect()
-        self._drain_task = asyncio.create_task(
-            self._drain_loop(), name="market-data-gateway-drain"
-        )
+        self._drain_tasks = [
+            asyncio.create_task(
+                self._drain_loop(i), name=f"market-data-gateway-drain-{i}"
+            )
+            for i in range(GATEWAY_DRAIN_WORKERS)
+        ]
         self._tasks = []
         if self.enable_trades and self.symbols:
             self._tasks.append(
@@ -100,6 +104,7 @@ class CanonicalMarketDataRuntime:
                     "enable_trades": self.enable_trades,
                     "enable_orderbooks": self.enable_orderbooks,
                     "stream_idle_timeout_seconds": self.stream_idle_timeout_seconds,
+                    "gateway_drain_workers": GATEWAY_DRAIN_WORKERS,
                 }
             },
         )
@@ -110,13 +115,14 @@ class CanonicalMarketDataRuntime:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
-        if self._drain_task is not None:
-            self._drain_task.cancel()
-            await asyncio.gather(self._drain_task, return_exceptions=True)
-            self._drain_task = None
+        for task in self._drain_tasks:
+            task.cancel()
+        if self._drain_tasks:
+            await asyncio.gather(*self._drain_tasks, return_exceptions=True)
+        self._drain_tasks.clear()
         self.gateway.stop()
 
-    async def _drain_loop(self) -> None:
+    async def _drain_loop(self, worker_id: int) -> None:
         while not self._stopped:
             try:
                 await self.gateway.drain_once()
@@ -126,7 +132,12 @@ class CanonicalMarketDataRuntime:
                 self.gateway.health.record_error("publish", str(exc))
                 logger.exception(
                     "canonical market-data publish failed; retrying without dropping event",
-                    extra={"aitos_extra": {"error": str(exc)}},
+                    extra={
+                        "aitos_extra": {
+                            "error": str(exc),
+                            "worker_id": worker_id,
+                        }
+                    },
                 )
                 await asyncio.sleep(PUBLISH_RETRY_DELAY_SECONDS)
 
@@ -162,7 +173,7 @@ class CanonicalMarketDataRuntime:
                         )
                         raise exc
                     saw_event = True
-                    accepted = self.gateway.accept(event)
+                    accepted = await self.gateway.accept_async(event)
                     if accepted and event.source == MarketSource.WEBSOCKET:
                         self.gateway.mark_connected()
                 if self._stopped:
