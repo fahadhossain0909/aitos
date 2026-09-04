@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from .contracts import MarketEvent, MarketEventType, MarketSource
+from .endpoints import BYBIT_LINEAR_WS, BYBIT_WS_HEARTBEAT_INTERVAL_SECONDS
 from .venues import MarketType, Venue, VenueCapabilities
 from .websocket_adapter import JsonWebSocketAdapter
 
@@ -13,7 +14,9 @@ from .websocket_adapter import JsonWebSocketAdapter
 class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
     """Normalize Bybit public linear perpetual streams into MarketEvent."""
 
-    websocket_url = "wss://stream.bybit.com/v5/public/linear"
+    websocket_url = BYBIT_LINEAR_WS
+    heartbeat_interval_seconds = BYBIT_WS_HEARTBEAT_INTERVAL_SECONDS
+    heartbeat_message = {"op": "ping"}
 
     def __init__(self, market_type: MarketType = MarketType.USD_M_FUTURES) -> None:
         if market_type not in (MarketType.PERPETUAL, MarketType.USD_M_FUTURES):
