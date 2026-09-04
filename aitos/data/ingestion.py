@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any
 
 from aitos.market_data.binance_adapter import BinanceCanonicalMarketDataAdapter
@@ -26,6 +27,8 @@ from .ingestion_legacy import (
 DEEP_HISTORICAL_SYMBOLS = ("BTCUSDT", "LTCUSDT")
 DEEP_ORDERBOOK_LEVELS = 1000
 STANDARD_ORDERBOOK_LEVELS = 100
+LIVE_DEEP_ANCHOR = "BTCUSDT"
+LIVE_DEEP_NON_BTC = 2
 
 
 class DataIngestionService(_LegacyDataIngestionService):
@@ -34,19 +37,20 @@ class DataIngestionService(_LegacyDataIngestionService):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         live_trade_handler = kwargs.get("live_trade_handler")
         live_orderbook_handler = kwargs.get("live_orderbook_handler")
-        self._canonical_mode = any(
-            getattr(getattr(handler, "__self__", None), "module_id", None)
-            == "opportunity-scanner"
-            for handler in (live_trade_handler, live_orderbook_handler)
-            if handler is not None
+        scanner = next(
+            (
+                getattr(handler, "__self__", None)
+                for handler in (live_trade_handler, live_orderbook_handler)
+                if getattr(getattr(handler, "__self__", None), "module_id", None)
+                == "opportunity-scanner"
+            ),
+            None,
         )
+        self._canonical_mode = scanner is not None
         if self._canonical_mode:
             kwargs["live_trade_handler"] = None
             kwargs["live_orderbook_handler"] = None
         elif live_trade_handler is None and live_orderbook_handler is None:
-            # Compatibility callers still expect the legacy facade to expose
-            # trade/book topics. No-op handlers activate those streams without
-            # duplicating canonical scanner-owned handlers.
             async def _legacy_trade_sink(_trade) -> None:
                 return None
 
@@ -60,15 +64,17 @@ class DataIngestionService(_LegacyDataIngestionService):
         self._deep_runtime: CanonicalMarketDataRuntime | None = None
         self._canonical_persistence: CanonicalMarketDataPersistenceSink | None = None
         self._deep_collector: DeepOrderBookCollector | None = None
+        self._ranking_hook_installed = False
         if self._canonical_mode:
             market_type = str(getattr(self._exchange, "market_type", "usd_m_futures"))
             market_bus = MarketDataBus(self._event_bus)
             gateway = MarketDataGateway(
                 venue="binance", market_type=market_type, publisher=market_bus.publish
             )
-            deep = set(DEEP_HISTORICAL_SYMBOLS)
-            standard_orderbooks = [
-                symbol for symbol in self._symbols if symbol.upper() not in deep
+            initial_orderbooks = [
+                LIVE_DEEP_ANCHOR
+                if LIVE_DEEP_ANCHOR in {s.upper() for s in self._symbols}
+                else self._symbols[0]
             ]
             self._canonical_runtime = CanonicalMarketDataRuntime(
                 adapter=BinanceCanonicalMarketDataAdapter(
@@ -77,7 +83,7 @@ class DataIngestionService(_LegacyDataIngestionService):
                 market_bus=market_bus,
                 gateway=gateway,
                 symbols=self._symbols,
-                orderbook_symbols=standard_orderbooks,
+                orderbook_symbols=initial_orderbooks,
                 orderbook_levels=STANDARD_ORDERBOOK_LEVELS,
             )
             deep_adapter = BinanceCanonicalMarketDataAdapter(
@@ -109,6 +115,40 @@ class DataIngestionService(_LegacyDataIngestionService):
                     DeepOrderBookStore(self._repository),
                     symbols=DEEP_HISTORICAL_SYMBOLS,
                 )
+            self._install_ranking_hook(scanner)
+
+    def _install_ranking_hook(self, scanner: Any) -> None:
+        """Bridge scanner ranking to the canonical runtime without coupling modules."""
+        if scanner is None or self._ranking_hook_installed:
+            return
+        original_rank = scanner.rank
+        ingestion = self
+
+        async def rank_with_market_promotion(*args: Any, **kwargs: Any):
+            ranked = await original_rank(*args, **kwargs)
+            await ingestion.update_live_deep_orderbooks(
+                [c.symbol for c in ranked[:LIVE_DEEP_NON_BTC]]
+            )
+            return ranked
+
+        scanner.rank = rank_with_market_promotion
+        self._ranking_hook_installed = True
+
+    async def update_live_deep_orderbooks(
+        self, ranked_non_btc_symbols: list[str] | tuple[str, ...]
+    ) -> bool:
+        """Keep BTC plus the two highest-ranked non-BTC symbols on the WS book feed."""
+        candidates = [
+            s.upper()
+            for s in ranked_non_btc_symbols
+            if s and s.upper() != LIVE_DEEP_ANCHOR
+        ][:LIVE_DEEP_NON_BTC]
+        symbols = list(dict.fromkeys([LIVE_DEEP_ANCHOR, *candidates]))
+        if LIVE_DEEP_ANCHOR not in {s.upper() for s in self._symbols}:
+            symbols = candidates
+        if self._canonical_runtime is None:
+            return False
+        return await self._canonical_runtime.update_orderbook_symbols(symbols)
 
     async def initialize(self, config: dict[str, Any]) -> None:
         await super().initialize(config)
@@ -136,6 +176,9 @@ class DataIngestionService(_LegacyDataIngestionService):
         if self._canonical_runtime is not None:
             status.details["canonical_market_data"] = (
                 self._canonical_runtime.gateway.snapshot()
+            )
+            status.details["live_deep_orderbook_symbols"] = list(
+                self._canonical_runtime.orderbook_symbols
             )
         if self._deep_runtime is not None:
             status.details["deep_market_data"] = self._deep_runtime.gateway.snapshot()
