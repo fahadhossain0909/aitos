@@ -407,9 +407,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         }
         try:
             while tasks:
-                done, _ = await asyncio.wait(
-                    tasks, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
                     index = tasks.pop(task)
                     try:

@@ -2,9 +2,9 @@
 
 from aitos.exchange.binance import (
     BINANCE_MAX_STREAMS_PER_CONNECTION,
-    BinanceFuturesAdapter,
     WS_MARKET_BASE_URL,
     WS_MARKET_RAW_BASE_URL,
+    BinanceFuturesAdapter,
 )
 from aitos.market_data.bybit_adapter import BybitCanonicalMarketDataAdapter
 from aitos.market_data.endpoints import (
