@@ -1,4 +1,11 @@
 from . import indicators
+from .capital_controls import (
+    CapitalCircuitBreaker,
+    CapitalControlConfig,
+    ProbabilityCalibrator,
+    execution_cost_bps,
+    opportunity_age_seconds,
+)
 from .capital_gateway import CapitalGateway, CapitalGatewayResult
 from .capital_objective import (
     CapitalAllocation,
@@ -30,12 +37,12 @@ from .scanner import (
     determine_direction,
 )
 
-# Keep the intelligence package import surface explicit; indicators.py is restored.
-
 __all__ = [
     "DEFAULT_WEIGHTS",
     "CapitalAllocation",
     "CapitalAllocator",
+    "CapitalCircuitBreaker",
+    "CapitalControlConfig",
     "CapitalDecision",
     "CapitalGateway",
     "CapitalGatewayResult",
@@ -48,6 +55,7 @@ __all__ = [
     "OpportunityScanner",
     "PortfolioProtection",
     "PortfolioRiskSnapshot",
+    "ProbabilityCalibrator",
     "ProtectionConfig",
     "ProtectionDecision",
     "RLFeedbackLoop",
@@ -56,9 +64,11 @@ __all__ = [
     "ScanCandidate",
     "TabularBanditRLScorer",
     "determine_direction",
+    "execution_cost_bps",
     "funding_rate_score",
     "indicators",
     "install_capital_guard",
     "liquidity_quality_score",
     "oi_trend_score",
+    "opportunity_age_seconds",
 ]
