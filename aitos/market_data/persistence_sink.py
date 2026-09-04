@@ -37,8 +37,8 @@ class CanonicalMarketDataPersistenceSink:
         self._repository = repository
         self._historical_books = {s.upper() for s in historical_book_symbols}
         self._book_interval = max(0.1, book_interval_seconds)
-        self._queue: asyncio.Queue[tuple[MarketEvent, asyncio.Future[None]]] = asyncio.Queue(
-            maxsize=queue_capacity
+        self._queue: asyncio.Queue[tuple[MarketEvent, asyncio.Future[None]]] = (
+            asyncio.Queue(maxsize=queue_capacity)
         )
         self._workers_count = max(1, workers)
         self._subscriptions: list[Subscription] = []
@@ -108,7 +108,10 @@ class CanonicalMarketDataPersistenceSink:
                 return
             now = datetime.now(timezone.utc)
             previous = self._last_book_persist.get(event.symbol)
-            if previous is not None and (now - previous).total_seconds() < self._book_interval:
+            if (
+                previous is not None
+                and (now - previous).total_seconds() < self._book_interval
+            ):
                 return
             self._last_book_persist[event.symbol] = now
         loop = asyncio.get_running_loop()
