@@ -6,8 +6,6 @@ from __future__ import annotations
 import asyncio
 import signal
 
-from redis.asyncio import Redis
-
 from aitos.app import (
     PaperPortfolioTracker,
     build_system,
@@ -39,7 +37,9 @@ HEALTH_SERVER_PORT = 8090
 PAPER_MIN_SCORE_THRESHOLD = 50.0
 
 
-async def connect_clickhouse_repositories(settings) -> tuple[MarketDataRepository, JournalRepository]:
+async def connect_clickhouse_repositories(
+    settings,
+) -> tuple[MarketDataRepository, JournalRepository]:
     market_repo = MarketDataRepository(
         host=settings.clickhouse.host,
         port=settings.clickhouse.port,
@@ -165,8 +165,12 @@ async def main() -> None:
                     extra={
                         "aitos_extra": {
                             "submitted": submitted,
-                            "open_trades": len(components.trade_lifecycle.get_open_trades()),
-                            "closed_trades": len(components.trade_lifecycle.get_closed_trades()),
+                            "open_trades": len(
+                                components.trade_lifecycle.get_open_trades()
+                            ),
+                            "closed_trades": len(
+                                components.trade_lifecycle.get_closed_trades()
+                            ),
                             "rl_samples": rl_scorer.n_samples_seen,
                             "ml_samples": outcome_classifier.n_samples_seen,
                             "attention_samples": attention_explainer.n_samples_seen,
