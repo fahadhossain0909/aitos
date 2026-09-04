@@ -87,7 +87,7 @@ class CapitalGateway:
             regime_fit=max(0.0, min(10.0, float(consensus.get("regime_fit_score", 5.0)))),
             metadata={
                 "opportunity_id": opportunity.opportunity_id,
-                "regime": opportunity.regime,
+                "regime": opportunity.regime or consensus.get("runtime_regime"),
                 "volatility_score": consensus.get("volatility_score"),
                 "equity_peak_usd": consensus.get("equity_peak_usd"),
                 "position_risk_pct": consensus.get("position_risk_pct", {}),
