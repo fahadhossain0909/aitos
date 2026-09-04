@@ -1,9 +1,8 @@
 """Historical analogue search and temporal state-transition context.
 
-The engine is intentionally deterministic and model-agnostic.  It compares
-normalized OHLC paths and lightweight market-state features, then reports the
-empirical distribution of forward returns for the matched historical states.
-It is a contextual evidence source, never a standalone trade signal.
+The engine is deterministic and model-agnostic. It compares normalized OHLC
+paths and reports the empirical distribution of forward returns for matched
+historical states. It is contextual evidence, never a standalone trade signal.
 """
 
 from __future__ import annotations
@@ -113,34 +112,43 @@ def search_historical_analogues(
     top_k: int = 20,
     forward_horizon: int = 12,
 ) -> tuple[HistoricalAnalogue, ...]:
-    """Find the closest prior normalized price-state analogues.
+    """Find closest non-overlapping historical states before the current state.
 
-    Candidates are strictly prior to the current window and do not overlap it,
-    preventing look-ahead leakage.  The returned outcome distribution is built
-    only from prices after each historical match.
+    The current window starts at ``len(klines) - window``. Candidate windows
+    must finish before that index, and each candidate must have a complete
+    forward horizon. Thus neither the current state nor its future can leak
+    into matching or outcome statistics.
     """
-    if len(klines) < window * 2 + 1 or window < 5 or top_k < 1:
+    n = len(klines)
+    if n < window * 2 + 1 or window < 5 or top_k < 1 or forward_horizon < 1:
         return ()
-    current = klines[-window:]
+
+    current_start = n - window
+    current = klines[current_start:]
     current_path = _path(current)
     current_move = current[-1].close - current[0].close
     if abs(current_move) <= 1e-12:
         return ()
-    current_direction = "up" if current_move > 0 else "down"
+
+    earliest = max(0, current_start - max(0, search_back))
+    latest = current_start - window
     candidates: list[tuple[float, int, float]] = []
-    last_start = min(len(klines) - window - 1, search_back)
-    for start in range(last_start + 1):
-        if start + window >= len(klines) - forward_horizon:
+    for start in range(earliest, latest + 1):
+        forward_end = start + window + forward_horizon - 1
+        if forward_end >= current_start:
             continue
         hist = klines[start : start + window]
+        if len(hist) != window:
+            continue
         hist_move = hist[-1].close - hist[0].close
         if abs(hist_move) <= 1e-12:
             continue
         hist_path = _path(hist)
-        rmse = (mean((a - b) ** 2 for a, b in zip(current_path, hist_path))) ** 0.5
+        rmse = mean((a - b) ** 2 for a, b in zip(current_path, hist_path)) ** 0.5
         similarity = _clamp(1.0 - rmse / 1.25)
         scale = abs(current_move / hist_move)
         candidates.append((similarity, start, scale))
+
     candidates.sort(reverse=True)
     selected = candidates[:top_k]
     starts = [x[1] for x in selected]
