@@ -27,11 +27,14 @@ SELECT_SQL = """
 SELECT event_time, ingest_time, event_id, category, symbol, source_module,
        schema_version, payload_json
 FROM {database}.live_analytics_events
-WHERE event_time >= {start:DateTime64(3)}
-  AND event_time < {end:DateTime64(3)}
-  AND category LIKE {c0:String}
+WHERE event_time >= {{start:DateTime64(3)}}
+  AND event_time < {{end:DateTime64(3)}}
+  AND (category LIKE {{c0:String}} OR category LIKE {{c1:String}}
+       OR category LIKE {{c2:String}} OR category LIKE {{c3:String}}
+       OR category LIKE {{c4:String}} OR category LIKE {{c5:String}}
+       OR category LIKE {{c6:String}})
 ORDER BY event_time ASC, event_id ASC
-LIMIT {batch_size:UInt32}
+LIMIT {{batch_size:UInt32}}
 """
 
 
@@ -66,6 +69,12 @@ class ClickHouseNeo4jBackfill:
                     "start": cursor_time,
                     "end": end,
                     "c0": SEMANTIC_CATEGORIES[0],
+                    "c1": SEMANTIC_CATEGORIES[1],
+                    "c2": SEMANTIC_CATEGORIES[2],
+                    "c3": SEMANTIC_CATEGORIES[3],
+                    "c4": SEMANTIC_CATEGORIES[4],
+                    "c5": SEMANTIC_CATEGORIES[5],
+                    "c6": SEMANTIC_CATEGORIES[6],
                     "batch_size": batch_size,
                 },
             )
@@ -73,37 +82,21 @@ class ClickHouseNeo4jBackfill:
             if not rows:
                 break
 
-            # The query uses one LIKE predicate for portability. Filter the
-            # remaining semantic namespaces in Python before graph writes.
-            rows = [row for row in rows if self._is_semantic_category(str(row[3]))]
-            if not rows:
-                # Advance from the raw page to avoid getting stuck on a batch
-                # containing only non-semantic categories.
-                raw = result.result_rows
-                cursor_time = raw[-1][0]
-                cursor_id = str(raw[-1][2])
-                continue
-
             async with self._neo4j.session() as session:
                 for row in rows:
-                    params = self._params(row)
-                    await session.run(PROJECT_SEMANTIC_EVENT_QUERY, **params)
+                    await session.run(PROJECT_SEMANTIC_EVENT_QUERY, **self._params(row))
                     total += 1
 
-            last = result.result_rows[-1]
+            last = rows[-1]
             next_time, next_id = last[0], str(last[2])
             if next_time == cursor_time and next_id == cursor_id:
                 break
             cursor_time, cursor_id = next_time, next_id
             batches += 1
-            if len(result.result_rows) < batch_size:
+            if len(rows) < batch_size:
                 break
 
         return total
-
-    @staticmethod
-    def _is_semantic_category(category: str) -> bool:
-        return any(category.startswith(prefix[:-1]) for prefix in SEMANTIC_CATEGORIES)
 
     @staticmethod
     def _params(row: tuple[Any, ...]) -> dict[str, Any]:
