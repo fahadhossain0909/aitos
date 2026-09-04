@@ -159,6 +159,17 @@ class DataIngestionService(_LegacyDataIngestionService):
         await super().shutdown(grace_period_seconds)
 
 
+# Apply the cross-cutting instrumentation after the concrete facade exists.
+# Keeping this here preserves the historical runtime behavior while allowing
+# aitos.data.__init__ to avoid eagerly importing this module (which would
+# reintroduce the persistence_sink <-> aitos.data.repository cycle).
+from .trade_recovery_guard import install_trade_recovery_guard
+from .transport_telemetry import install_transport_telemetry
+
+install_transport_telemetry(DataIngestionService)
+install_trade_recovery_guard(DataIngestionService)
+
+
 __all__ = [
     "DataIngestionService",
     "kline_topic",
