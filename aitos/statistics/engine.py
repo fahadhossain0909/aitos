@@ -78,9 +78,7 @@ class AStatEngine:
             low_volatility=1.0 - high,
         ).normalised()
 
-    def _calibration(
-        self, outcomes: deque[tuple[float, bool]] | None = None
-    ) -> float:
+    def _calibration(self, outcomes: deque[tuple[float, bool]] | None = None) -> float:
         """Return calibration quality, falling back to configured baseline."""
         observations = self._outcomes if outcomes is None else outcomes
         if not observations:
