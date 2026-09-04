@@ -1,8 +1,11 @@
-"""Durable ClickHouse sink for canonical market-data events.
+"""Best-effort ClickHouse sink for canonical market-data events.
 
-Redis remains the bounded transport. This sink is the only market-data history
-writer used by the V1 path; it keeps a bounded work queue and acknowledges a
-Redis event only after its durable ClickHouse write succeeds.
+Historical persistence is deliberately isolated from the live trading path.
+The Redis handler never waits for ClickHouse I/O: events are copied into a
+small bounded in-process queue and acknowledged immediately. If the queue is
+full, the historical event is dropped. Live consumers therefore cannot become
+backlogged because ClickHouse is slow, unavailable, or catching up after a
+restart.
 """
 
 from __future__ import annotations
@@ -21,7 +24,7 @@ from .contracts import MarketEvent, MarketEventType
 
 
 class CanonicalMarketDataPersistenceSink:
-    """Bounded asynchronous ClickHouse writer with durable acknowledgement."""
+    """Bounded, best-effort ClickHouse writer that never blocks live ingestion."""
 
     def __init__(
         self,
@@ -37,9 +40,7 @@ class CanonicalMarketDataPersistenceSink:
         self._repository = repository
         self._historical_books = {s.upper() for s in historical_book_symbols}
         self._book_interval = max(0.1, book_interval_seconds)
-        self._queue: asyncio.Queue[tuple[MarketEvent, asyncio.Future[None]]] = (
-            asyncio.Queue(maxsize=queue_capacity)
-        )
+        self._queue: asyncio.Queue[MarketEvent] = asyncio.Queue(maxsize=queue_capacity)
         self._workers_count = max(1, workers)
         self._subscriptions: list[Subscription] = []
         self._workers: list[asyncio.Task] = []
@@ -101,6 +102,7 @@ class CanonicalMarketDataPersistenceSink:
             pass
 
     async def _enqueue(self, event: MarketEvent) -> None:
+        """Queue history work without ever waiting on the persistence layer."""
         if self._repository is None:
             return
         if event.event_type is MarketEventType.BOOK_SNAPSHOT:
@@ -114,31 +116,26 @@ class CanonicalMarketDataPersistenceSink:
             ):
                 return
             self._last_book_persist[event.symbol] = now
-        loop = asyncio.get_running_loop()
-        completion: asyncio.Future[None] = loop.create_future()
         try:
-            self._queue.put_nowait((event, completion))
+            self._queue.put_nowait(event)
         except asyncio.QueueFull:
+            # Historical persistence is explicitly lossy under pressure. Never
+            # await here: a full history queue must not propagate backpressure to
+            # the live market-data consumer.
             self._rejected += 1
-            raise
-        await completion
 
     async def _worker(self, worker_id: int) -> None:
         while True:
-            event, completion = await self._queue.get()
+            event = await self._queue.get()
             try:
                 try:
                     await self._persist(event)
                 except asyncio.CancelledError:
                     raise
-                except Exception as exc:
+                except Exception:
                     self._errors += 1
-                    if not completion.done():
-                        completion.set_exception(exc)
-                    continue
-                self._processed += 1
-                if not completion.done():
-                    completion.set_result(None)
+                else:
+                    self._processed += 1
             finally:
                 self._queue.task_done()
 
@@ -168,4 +165,5 @@ class CanonicalMarketDataPersistenceSink:
             "rejected": self._rejected,
             "workers": len(self._workers),
             "historical_book_symbols": sorted(self._historical_books),
+            "backpressure_policy": "drop_history_never_block_live",
         }
