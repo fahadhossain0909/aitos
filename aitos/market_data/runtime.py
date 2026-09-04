@@ -9,6 +9,7 @@ from aitos.logging_setup import get_logger
 
 from .adapter import CanonicalMarketDataAdapter
 from .bus import MarketDataBus
+from .contracts import MarketSource
 from .gateway import MarketDataGateway
 
 logger = get_logger("aitos.market_data.runtime")
@@ -65,10 +66,15 @@ class CanonicalMarketDataRuntime:
                 name="market-data-orderbook",
             ),
         ]
-        self.gateway.mark_connected()
         logger.info(
             "canonical market-data runtime started",
-            extra={"aitos_extra": {"symbols": self.symbols}},
+            extra={
+                "aitos_extra": {
+                    "venue": self.adapter.venue.value,
+                    "market_type": self.adapter.market_type.value,
+                    "symbols": self.symbols,
+                }
+            },
         )
 
     async def stop(self) -> None:
@@ -107,7 +113,9 @@ class CanonicalMarketDataRuntime:
             try:
                 async for event in stream_factory():
                     saw_event = True
-                    self.gateway.accept(event)
+                    accepted = self.gateway.accept(event)
+                    if accepted and event.source == MarketSource.WEBSOCKET:
+                        self.gateway.mark_connected()
                 if self._stopped:
                     return
                 self.gateway.mark_reconnecting()
