@@ -2,7 +2,10 @@ from datetime import datetime, timezone
 
 import pytest
 
-from aitos.market_data.deep_orderbook import DeepOrderBookGap, DeepOrderBookReplayer
+from aitos.market_data.deep_orderbook import (
+    DeepOrderBookGap,
+    DeepOrderBookReplayer,
+)
 
 
 class _Result:
