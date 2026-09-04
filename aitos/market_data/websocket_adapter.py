@@ -12,7 +12,6 @@ import websockets
 from .adapter import CanonicalMarketDataAdapter
 from .contracts import MarketEvent
 
-
 Connect = Callable[[str], Awaitable[Any]]
 
 
