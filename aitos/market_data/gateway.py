@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -23,6 +24,7 @@ class GatewayState(str, Enum):
 class GatewayConfig:
     queue_capacity: int = 2048
     max_source_age_seconds: float = 15.0
+    publish_timeout_seconds: float = 10.0
 
 
 class MarketDataGateway:
@@ -71,7 +73,7 @@ class MarketDataGateway:
             event.source == MarketSource.WEBSOCKET
             and age > self.config.max_source_age_seconds
         ):
-            self.health.record_error(
+            self.health.record_reject(
                 "stale_websocket", f"source age {age:.3f}s exceeded limit"
             )
             self.state = GatewayState.DEGRADED
@@ -82,14 +84,33 @@ class MarketDataGateway:
                 self.state = GatewayState.DEGRADED
         accepted = self.queue.put_nowait(event)
         if not accepted:
+            self.health.record_reject("backpressure", "gateway queue is full")
             self.health.dropped_events += 1
             self.state = GatewayState.DEGRADED
-        return accepted
+            return False
+        self.health.record_accept()
+        return True
 
     async def drain_once(self) -> None:
         event = await self.queue.get()
         try:
-            await self._publisher(event)
+            await asyncio.wait_for(
+                self._publisher(event), timeout=self.config.publish_timeout_seconds
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.health.record_publish_error(str(exc))
+            self.state = GatewayState.DEGRADED
+            # Do not acknowledge/drop the event merely because the downstream
+            # publisher failed. Put it back so a later drain attempt can retry.
+            if not self.queue.put_nowait(event):
+                self.health.record_reject(
+                    "publish_requeue", "queue full while requeueing failed event"
+                )
+                self.health.dropped_events += 1
+            raise
+        else:
             self.health.record_publish()
         finally:
             self.queue.task_done()
