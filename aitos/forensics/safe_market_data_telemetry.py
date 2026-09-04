@@ -1,28 +1,56 @@
 """Public-API-only market-data telemetry for production diagnostics.
 
-This module deliberately avoids private EventBus internals.  It observes
-publish latency and lightweight counters without changing delivery semantics.
+This module deliberately avoids private EventBus delivery internals. It observes
+publish/handler latency and lightweight counters without changing delivery
+semantics.
 """
 
 from __future__ import annotations
 
+import asyncio
 import time
+from collections import deque
 from dataclasses import replace
 from functools import wraps
 from typing import Any
 
-_MARKET_PREFIXES = (
+MARKET_PREFIXES = (
+    "market.trade.",
     "market.trade",
+    "market.book.",
     "market.book",
+    "market.orderbook.",
     "market.orderbook",
-    "market.liquidity",
-    "market.live_state",
-    "market.kline",
+    "market.orderflow.",
+    "market.liquidity.",
+    "market.live_state.",
+    "market.kline.",
 )
 
 
 def _is_market_topic(topic: str) -> bool:
-    return topic.startswith(_MARKET_PREFIXES)
+    return topic.startswith(MARKET_PREFIXES)
+
+
+def _stats_add(stats: dict[str, dict[str, float]], topic: str, ms: float) -> None:
+    row = stats.setdefault(topic, {"count": 0.0, "total_ms": 0.0, "max_ms": 0.0})
+    row["count"] += 1
+    row["total_ms"] += ms
+    row["max_ms"] = max(row["max_ms"], ms)
+
+
+def _format(stats: dict[str, dict[str, float]]) -> dict[str, dict[str, float | int]]:
+    return {
+        topic: {
+            "count": int(row["count"]),
+            "total_ms": round(row["total_ms"], 3),
+            "avg_ms": round(row["total_ms"] / row["count"], 3)
+            if row["count"]
+            else 0.0,
+            "max_ms": round(row["max_ms"], 3),
+        }
+        for topic, row in sorted(stats.items())
+    }
 
 
 def install(eventbus_cls: type[Any]) -> None:
@@ -33,7 +61,9 @@ def install(eventbus_cls: type[Any]) -> None:
 
     original_init = eventbus_cls.__init__
     original_publish = eventbus_cls.publish
+    original_subscribe = eventbus_cls.subscribe
     original_health = eventbus_cls.health_check
+    original_shutdown = eventbus_cls.shutdown
 
     @wraps(original_init)
     def init_wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -43,6 +73,16 @@ def install(eventbus_cls: type[Any]) -> None:
         self._market_publish_total_ms = 0.0
         self._market_publish_max_ms = 0.0
         self._market_last_publish_ms = 0.0
+        self._safe_market_publish_stats: dict[str, dict[str, float]] = {}
+        self._safe_market_handler_stats: dict[str, dict[str, float]] = {}
+        self._safe_market_recent: deque[dict[str, Any]] = deque(maxlen=100)
+        self._safe_market_loop_lag_ms = 0.0
+        self._safe_market_loop_lag_max_ms = 0.0
+        self._safe_market_loop_samples = 0
+        try:
+            self._safe_market_watchdog = asyncio.create_task(_watchdog(self))
+        except RuntimeError:
+            self._safe_market_watchdog = None
 
     @wraps(original_publish)
     async def publish_wrapper(self: Any, event: Any, *args: Any, **kwargs: Any) -> Any:
@@ -61,7 +101,43 @@ def install(eventbus_cls: type[Any]) -> None:
             self._market_publish_total_ms += elapsed_ms
             self._market_publish_max_ms = max(self._market_publish_max_ms, elapsed_ms)
             self._market_last_publish_ms = elapsed_ms
+            _stats_add(self._safe_market_publish_stats, topic, elapsed_ms)
 
+    @wraps(original_subscribe)
+    async def subscribe_wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        handler = kwargs.get("handler")
+        if handler is None and len(args) >= 2:
+            handler = args[1]
+        if handler is None:
+            return await original_subscribe(self, *args, **kwargs)
+
+        @wraps(handler)
+        async def observed(event: Any) -> Any:
+            topic = getattr(event, "topic", "")
+            if not _is_market_topic(topic):
+                return await handler(event)
+            started = time.perf_counter()
+            try:
+                return await handler(event)
+            finally:
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                _stats_add(self._safe_market_handler_stats, topic, elapsed_ms)
+                self._safe_market_recent.append(
+                    {
+                        "topic": topic,
+                        "stage": "handler",
+                        "latency_ms": round(elapsed_ms, 3),
+                        "ts": time.time(),
+                    }
+                )
+
+        if "handler" in kwargs:
+            kwargs = {**kwargs, "handler": observed}
+        else:
+            args = (*args[:1], observed, *args[2:])
+        return await original_subscribe(self, *args, **kwargs)
+
+    @wraps(original_health)
     async def health_wrapper(self: Any):
         status = await original_health(self)
         count = getattr(self, "_market_publish_count", 0)
@@ -76,12 +152,46 @@ def install(eventbus_cls: type[Any]) -> None:
                 "last_ms": round(getattr(self, "_market_last_publish_ms", 0.0), 3),
                 "errors": getattr(self, "_market_publish_errors", 0),
             },
+            "market_data_e2e": {
+                "publish_latency": _format(self._safe_market_publish_stats),
+                "handler_latency": _format(self._safe_market_handler_stats),
+                "event_loop": {
+                    "samples": self._safe_market_loop_samples,
+                    "last_lag_ms": round(self._safe_market_loop_lag_ms, 3),
+                    "max_lag_ms": round(self._safe_market_loop_lag_max_ms, 3),
+                },
+                "recent_traces": list(self._safe_market_recent),
+            },
         }
         return replace(status, details=details)
 
+    @wraps(original_shutdown)
+    async def shutdown_wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
+        task = getattr(self, "_safe_market_watchdog", None)
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await original_shutdown(self, *args, **kwargs)
+
     eventbus_cls.__init__ = init_wrapper
     eventbus_cls.publish = publish_wrapper
+    eventbus_cls.subscribe = subscribe_wrapper
     eventbus_cls.health_check = health_wrapper
+    eventbus_cls.shutdown = shutdown_wrapper
+
+
+async def _watchdog(eventbus: Any) -> None:
+    loop = asyncio.get_running_loop()
+    interval = 1.0
+    while True:
+        expected = loop.time() + interval
+        await asyncio.sleep(interval)
+        lag = max(0.0, (loop.time() - expected) * 1000.0)
+        eventbus._safe_market_loop_samples += 1
+        eventbus._safe_market_loop_lag_ms = lag
+        eventbus._safe_market_loop_lag_max_ms = max(
+            eventbus._safe_market_loop_lag_max_ms, lag
+        )
 
 
 __all__ = ["install"]
