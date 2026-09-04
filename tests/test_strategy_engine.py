@@ -4,6 +4,7 @@ from aitos.strategy import (
     MarketMakingStrategy,
     MarketSnapshot,
     RegimeRouterStrategy,
+    StatisticalArbitrageStrategy,
     StrategyContext,
     StrategyEngine,
     StrategyMode,
@@ -16,7 +17,7 @@ def test_regime_router_controls_strategy_families():
     registry.register(RegimeRouterStrategy())
     registry.register(MarketMakingStrategy())
     registry.register(FundingBasisStrategy())
-    registry.register(__import__("aitos.strategy", fromlist=["StatisticalArbitrageStrategy"]).StatisticalArbitrageStrategy())
+    registry.register(StatisticalArbitrageStrategy())
 
     snap = MarketSnapshot(
         "BTC-PERP",
