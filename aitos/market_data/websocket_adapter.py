@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
@@ -23,8 +24,12 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
     """Small transport base shared by venue-specific JSON WebSocket adapters."""
 
     websocket_url: str
+    heartbeat_interval_seconds: float | None = None
+    heartbeat_message: str | dict[str, Any] | None = None
 
     def _connect(self, url: str):
+        # Venue-level heartbeats are handled explicitly below. Keep protocol
+        # ping/pong enabled as a transport-level safety net.
         return websockets.connect(
             url,
             ping_interval=20,
@@ -33,6 +38,17 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
             close_timeout=5,
             max_queue=4096,
         )
+
+    async def _heartbeat(self, ws: Any) -> None:
+        if self.heartbeat_interval_seconds is None or self.heartbeat_message is None:
+            return
+        while True:
+            await asyncio.sleep(self.heartbeat_interval_seconds)
+            payload = self.heartbeat_message
+            if isinstance(payload, str):
+                await ws.send(payload)
+            else:
+                await ws.send(json.dumps(payload))
 
     async def _stream(
         self,
@@ -43,39 +59,73 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
         normalized = list(dict.fromkeys(s.upper() for s in symbols))
         if not normalized:
             return
-        logger.info(
-            "opening canonical websocket",
-            extra={"aitos_extra": {"url": self.websocket_url, "symbols": normalized}},
-        )
-        async with self._connect(self.websocket_url) as ws:
-            await ws.send(json.dumps(subscribe_message))
-            logger.info(
-                "canonical websocket subscription sent",
-                extra={
-                    "aitos_extra": {"url": self.websocket_url, "symbols": normalized}
-                },
-            )
-            async for raw in ws:
-                if isinstance(raw, bytes):
-                    raw = raw.decode("utf-8")
-                try:
-                    message = json.loads(raw)
-                except (TypeError, ValueError) as exc:
-                    logger.warning(
-                        "canonical websocket message decode failed",
-                        extra={"aitos_extra": {"error": str(exc)}},
+        backoff = 1.0
+        while True:
+            heartbeat_task: asyncio.Task | None = None
+            try:
+                logger.info(
+                    "opening canonical websocket",
+                    extra={
+                        "aitos_extra": {
+                            "url": self.websocket_url,
+                            "symbols": normalized,
+                        }
+                    },
+                )
+                async with self._connect(self.websocket_url) as ws:
+                    await ws.send(json.dumps(subscribe_message))
+                    logger.info(
+                        "canonical websocket subscription sent",
+                        extra={
+                            "aitos_extra": {
+                                "url": self.websocket_url,
+                                "symbols": normalized,
+                            }
+                        },
                     )
-                    continue
-                if not isinstance(message, dict):
-                    continue
-                parsed = parser(message)
-                if parsed is None:
-                    continue
-                if isinstance(parsed, list):
-                    for event in parsed:
-                        yield event
-                else:
-                    yield parsed
+                    if self.heartbeat_interval_seconds and self.heartbeat_message is not None:
+                        heartbeat_task = asyncio.create_task(self._heartbeat(ws))
+                    backoff = 1.0
+                    async for raw in ws:
+                        if isinstance(raw, bytes):
+                            raw = raw.decode("utf-8")
+                        try:
+                            message = json.loads(raw)
+                        except (TypeError, ValueError) as exc:
+                            logger.warning(
+                                "canonical websocket message decode failed",
+                                extra={"aitos_extra": {"error": str(exc)}},
+                            )
+                            continue
+                        if not isinstance(message, dict):
+                            continue
+                        parsed = parser(message)
+                        if parsed is None:
+                            continue
+                        if isinstance(parsed, list):
+                            for event in parsed:
+                                yield event
+                        else:
+                            yield parsed
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "canonical websocket disconnected; reconnecting",
+                    extra={
+                        "aitos_extra": {
+                            "url": self.websocket_url,
+                            "error": str(exc),
+                            "backoff_seconds": backoff,
+                        }
+                    },
+                )
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2.0, 60.0)
+            finally:
+                if heartbeat_task is not None and not heartbeat_task.done():
+                    heartbeat_task.cancel()
+                    await asyncio.gather(heartbeat_task, return_exceptions=True)
 
     @staticmethod
     def _timestamp_ms(value: Any) -> datetime:
