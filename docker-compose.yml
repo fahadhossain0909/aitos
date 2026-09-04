@@ -27,7 +27,7 @@ services:
       - "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
     healthcheck: {test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$REDIS_PASSWORD\" ping | grep -q PONG && test \"$(redis-cli --no-auth-warning -a \"$REDIS_PASSWORD\" INFO persistence | awk -F: '/^loading:/{print $2}' | tr -d '\\r')\" = 0"], interval: 5s, timeout: 3s, retries: 20, start_period: 120s}
     cpus: "${REDIS_CPUS:-0.75}"
-    mem_limit: "${REDIS_MEM_LIMIT:-2.5g}"
+    mem_limit: 2.5g
     logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
     restart: unless-stopped
 
