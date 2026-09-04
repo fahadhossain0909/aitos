@@ -75,7 +75,15 @@ class LiveScannerCache:
         state = self._state.get(symbol.upper())
         if state is None or state.order_book is None:
             return False
-        age = self._source_age_seconds(state.last_book_source_at)
+        age = self._source_age_seconds(state.last_book_source_at or state.last_book_at)
+        return age is not None and age <= max_age_seconds
+
+    def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
+        """Return whether the cached trade source timestamp is within the limit."""
+        state = self._state.get(symbol.upper())
+        if state is None or state.last_trade_at is None:
+            return False
+        age = self._source_age_seconds(state.last_trade_source_at or state.last_trade_at)
         return age is not None and age <= max_age_seconds
 
     async def initialize(self, direct_market_data: bool = False) -> None:
@@ -253,26 +261,38 @@ class LiveScannerCache:
                 "book_consumer_lag_sec": None,
             }
         trade_age = (
-            (now - state.last_trade_source_at).total_seconds() * 1000
-            if state.last_trade_source_at
+            (now - (state.last_trade_source_at or state.last_trade_at)).total_seconds()
+            * 1000
+            if (state.last_trade_source_at or state.last_trade_at)
             else None
         )
         book_age = (
-            (now - state.last_book_source_at).total_seconds() * 1000
-            if state.last_book_source_at
+            (now - (state.last_book_source_at or state.last_book_at)).total_seconds()
+            * 1000
+            if (state.last_book_source_at or state.last_book_at)
             else None
         )
         trade_lag = (
             (state.last_trade_received_at - state.last_trade_source_at).total_seconds()
             * 1000
             if state.last_trade_received_at and state.last_trade_source_at
-            else None
+            else (
+                (state.last_trade_received_at - state.last_trade_at).total_seconds()
+                * 1000
+                if state.last_trade_received_at and state.last_trade_at
+                else None
+            )
         )
         book_lag = (
             (state.last_book_received_at - state.last_book_source_at).total_seconds()
             * 1000
             if state.last_book_received_at and state.last_book_source_at
-            else None
+            else (
+                (state.last_book_received_at - state.last_book_at).total_seconds()
+                * 1000
+                if state.last_book_received_at and state.last_book_at
+                else None
+            )
         )
         ages = [v for v in (trade_age, book_age) if v is not None]
         return {
