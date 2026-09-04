@@ -23,25 +23,33 @@ def test_binance_usdm_uses_current_market_stream_paths():
 
 
 def test_bybit_linear_uses_current_v5_public_path_and_heartbeat():
-    assert BybitCanonicalMarketDataAdapter.websocket_url == BYBIT_LINEAR_WS
+    adapter = BybitCanonicalMarketDataAdapter()
+    assert adapter.websocket_url == BYBIT_LINEAR_WS
     assert BYBIT_LINEAR_WS == "wss://stream.bybit.com/v5/public/linear"
-    assert BybitCanonicalMarketDataAdapter.heartbeat_message == {"op": "ping"}
+    assert adapter.heartbeat_message == {"op": "ping"}
     assert 0 < BYBIT_WS_HEARTBEAT_INTERVAL_SECONDS < 30
+    assert adapter._market_type.value == "usd_m_futures"
 
 
 def test_okx_public_uses_current_v5_public_path_and_heartbeat():
-    assert OKXCanonicalMarketDataAdapter.websocket_url == OKX_PUBLIC_WS
+    adapter = OKXCanonicalMarketDataAdapter()
+    assert adapter.websocket_url == OKX_PUBLIC_WS
     assert OKX_PUBLIC_WS == "wss://ws.okx.com:8443/ws/v5/public"
-    assert OKXCanonicalMarketDataAdapter.heartbeat_message == "ping"
+    assert adapter.heartbeat_message == "ping"
     assert 0 < OKX_WS_HEARTBEAT_INTERVAL_SECONDS < 30
 
 
 def test_current_subscription_topics_are_documented_shapes():
     bybit = BybitCanonicalMarketDataAdapter()
-    assert f"publicTrade.BTCUSDT" == "publicTrade.BTCUSDT"
-    assert f"orderbook.50.BTCUSDT" == "orderbook.50.BTCUSDT"
+    trade_message = {"op": "subscribe", "args": ["publicTrade.BTCUSDT"]}
+    book_message = {"op": "subscribe", "args": ["orderbook.50.BTCUSDT"]}
+    assert trade_message["args"] == ["publicTrade.BTCUSDT"]
+    assert book_message["args"] == ["orderbook.50.BTCUSDT"]
 
     okx = OKXCanonicalMarketDataAdapter()
-    assert okx._instrument("BTCUSDT") == "BTC-USDT-SWAP"
-    assert okx._symbol("BTC-USDT-SWAP") == "BTCUSDT"
-    assert bybit.market_type.value == "usd_m_futures"
+    assert okx._args(["BTCUSDT"], "trades") == [
+        {"channel": "trades", "instId": "BTC-USDT-SWAP"}
+    ]
+    assert okx._args(["BTCUSDT"], "books") == [
+        {"channel": "books", "instId": "BTC-USDT-SWAP"}
+    ]
