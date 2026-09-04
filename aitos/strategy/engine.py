@@ -32,13 +32,19 @@ class StrategyEngine:
         results = self.registry.evaluate(context)
         preferred = self._preferred_families(context.global_regime, results)
         if preferred is not None:
-            results = tuple(r for r in results if r.family in preferred or r.family is StrategyFamily.REGIME)
+            results = tuple(
+                r
+                for r in results
+                if r.family in preferred or r.family is StrategyFamily.REGIME
+            )
         requests = [r.capital_request for r in results if r.capital_request is not None]
         allocations = self.allocator.allocate(requests)
         return StrategyCycle(context.global_regime, results, allocations)
 
     @staticmethod
-    def _preferred_families(regime: str, results: tuple[StrategyResult, ...]) -> set[StrategyFamily] | None:
+    def _preferred_families(
+        regime: str, results: tuple[StrategyResult, ...]
+    ) -> set[StrategyFamily] | None:
         for result in results:
             if result.family is StrategyFamily.REGIME:
                 values = result.diagnostics.get("preferred_families")
