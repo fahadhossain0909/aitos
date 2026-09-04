@@ -38,6 +38,7 @@ from .contextual_layers import (
     positioning_context,
     positioning_evidence,
 )
+from .contextual_scanner_bridge import install_contextual_scanner_bridge
 from .deep_rl_policy import DeepValueRLScorer
 from .funding import funding_rate_score
 from .historical_analogue import (
@@ -57,6 +58,9 @@ from .scanner import (
     ScanCandidate,
     determine_direction,
 )
+
+# Activate only after scanner import completes, avoiding a circular import.
+install_contextual_scanner_bridge(OpportunityScanner)
 
 __all__ = [
     "DEFAULT_WEIGHTS",
@@ -101,6 +105,7 @@ __all__ = [
     "indicators",
     "infer_state_transition",
     "install_capital_guard",
+    "install_contextual_scanner_bridge",
     "liquidity_quality_score",
     "oi_trend_score",
     "opportunity_age_seconds",
