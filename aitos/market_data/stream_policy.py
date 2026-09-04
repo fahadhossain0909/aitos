@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-HISTORICAL_DEEP_SYMBOLS = ("BTCUSDT", "LTCUSDT")
-
 
 @dataclass(frozen=True, slots=True)
 class SubscriptionPlan:
@@ -20,12 +18,11 @@ class SubscriptionPlan:
 def build_subscription_plan(
     ranked_symbols: list[str] | tuple[str, ...], *, btc_symbol: str = "BTCUSDT"
 ) -> SubscriptionPlan:
-    """Build the full ranked universe and promote BTC plus the best two others.
+    """Build the ranked universe and promote BTC plus the strongest two others.
 
-    Live expensive analysis is dynamic: BTC is always retained as the anchor and
-    the strongest two non-BTC ranked symbols are promoted into the live deep tier.
-    Historical deep-order-book collection is intentionally independent of live
-    ranking and remains fixed to BTCUSDT/LTCUSDT for reproducible research data.
+    Both live deep analysis and historical deep-book capture follow the same
+    deterministic promotion policy. This keeps research replay aligned with
+    the instruments that the canonical market-data plane actually promotes.
     """
     universe = tuple(dict.fromkeys(s.upper() for s in ranked_symbols if s))
     candidate25 = universe[:25]
@@ -40,5 +37,5 @@ def build_subscription_plan(
         candidate10=candidate10,
         candidate5=candidate5,
         deep=deep,
-        historical_book=HISTORICAL_DEEP_SYMBOLS,
+        historical_book=deep,
     )
