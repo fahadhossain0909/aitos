@@ -36,14 +36,10 @@ SCAN_INTERVAL_SECONDS = 60.0
 KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 10_000.0
 HEALTH_SERVER_PORT = 8090
-# Deliberately relaxed for paper-only functional validation. Live/production
-# defaults remain unchanged until the signal path has been validated.
 PAPER_MIN_SCORE_THRESHOLD = 50.0
 
 
-async def try_connect_clickhouse_repositories(
-    settings,
-) -> tuple[MarketDataRepository | None, JournalRepository | None]:
+async def connect_clickhouse_repositories(settings) -> tuple[MarketDataRepository, JournalRepository]:
     market_repo = MarketDataRepository(
         host=settings.clickhouse.host,
         port=settings.clickhouse.port,
@@ -59,12 +55,26 @@ async def try_connect_clickhouse_repositories(
         database=settings.clickhouse.database,
     )
     try:
-        await market_repo.initialize({})
-        await journal_repo.initialize({})
+        await retry_with_backoff(
+            market_repo.initialize,
+            max_attempts=5,
+            base_delay_seconds=2.0,
+            max_delay_seconds=30.0,
+            operation_name="ClickHouse market repository initialization",
+        )
+        await retry_with_backoff(
+            journal_repo.initialize,
+            max_attempts=5,
+            base_delay_seconds=2.0,
+            max_delay_seconds=30.0,
+            operation_name="ClickHouse journal repository initialization",
+        )
         return market_repo, journal_repo
-    except Exception as exc:
-        logger.warning("ClickHouse unavailable: %s", exc)
-        return None, None
+    except RetryExhaustedError as exc:
+        await market_repo.shutdown()
+        await journal_repo.shutdown()
+        logger.error("ClickHouse persistence unavailable after retries: %s", exc)
+        raise SystemExit(1) from exc
 
 
 async def try_connect_neo4j(settings):
@@ -82,36 +92,6 @@ async def try_connect_neo4j(settings):
         return None
 
 
-async def connect_redis_with_retry(settings) -> Redis:
-    async def _attempt() -> Redis:
-        client = Redis.from_url(
-            settings.redis.url,
-            max_connections=settings.redis.max_connections,
-        )
-        await client.ping()
-        logger.info(
-            "Redis connection established",
-            extra={
-                "aitos_extra": {
-                    "max_connections": settings.redis.max_connections,
-                }
-            },
-        )
-        return client
-
-    try:
-        return await retry_with_backoff(
-            _attempt,
-            max_attempts=5,
-            base_delay_seconds=2.0,
-            max_delay_seconds=30.0,
-            operation_name="Redis connection",
-        )
-    except RetryExhaustedError as exc:
-        logger.error("could not connect to Redis: %s", exc)
-        raise SystemExit(1) from exc
-
-
 async def main() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
@@ -120,7 +100,7 @@ async def main() -> None:
 
     event_bus = EventBus(redis_client=redis_client)
     await event_bus.initialize({})
-    market_repo, journal_repo = await try_connect_clickhouse_repositories(settings)
+    market_repo, journal_repo = await connect_clickhouse_repositories(settings)
     graph_driver = await try_connect_neo4j(settings)
     rl_scorer = DeepValueRLScorer()
     rl_scorer.load_state()
@@ -185,12 +165,8 @@ async def main() -> None:
                     extra={
                         "aitos_extra": {
                             "submitted": submitted,
-                            "open_trades": len(
-                                components.trade_lifecycle.get_open_trades()
-                            ),
-                            "closed_trades": len(
-                                components.trade_lifecycle.get_closed_trades()
-                            ),
+                            "open_trades": len(components.trade_lifecycle.get_open_trades()),
+                            "closed_trades": len(components.trade_lifecycle.get_closed_trades()),
                             "rl_samples": rl_scorer.n_samples_seen,
                             "ml_samples": outcome_classifier.n_samples_seen,
                             "attention_samples": attention_explainer.n_samples_seen,
@@ -211,10 +187,8 @@ async def main() -> None:
         await experience_recorder.shutdown()
         await market_os_persistence.shutdown()
         await shutdown_all(components)
-        if market_repo is not None:
-            await market_repo.shutdown()
-        if journal_repo is not None:
-            await journal_repo.shutdown()
+        await market_repo.shutdown()
+        await journal_repo.shutdown()
         await redis_client.aclose()
 
 
