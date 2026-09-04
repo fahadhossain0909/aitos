@@ -7,12 +7,13 @@ scanner to every intelligence implementation.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from typing import Any
 
-from aitos.intelligence.advanced_context import AdvancedMarketContext, build_advanced_context
+from aitos.intelligence.advanced_context import (
+    AdvancedMarketContext,
+    build_advanced_context,
+)
 from aitos.intelligence.contextual_layers import PositioningContext
-
 
 _PATCHED = "_aitos_contextual_bridge_patched"
 _ORIGINAL_SCAN = "_aitos_original_scan_symbol"
@@ -38,7 +39,9 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                 symbol, self._timeframe, limit=self._kline_lookback
             )
             if len(klines) >= 20:
-                flow_score = float(candidate.component_scores.get("order_flow_bias", 5.0))
+                flow_score = float(
+                    candidate.component_scores.get("order_flow_bias", 5.0)
+                )
                 advanced = build_advanced_context(
                     klines, current_cvd_score=flow_score, oi_change=None
                 )
@@ -64,7 +67,8 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                 5.0 + advanced.imbalance.displacement_score * 5.0, 4
             )
             context_scores["structural_symmetry"] = round(
-                5.0 + (advanced.symmetry.similarity * 5.0 if advanced.symmetry else 0.0),
+                5.0
+                + (advanced.symmetry.similarity * 5.0 if advanced.symmetry else 0.0),
                 4,
             )
             context_scores["forced_flow"] = round(
@@ -82,9 +86,7 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                 }
             )
 
-        positioning: PositioningContext | None = getattr(
-            candidate, "positioning", None
-        )
+        positioning: PositioningContext | None = getattr(candidate, "positioning", None)
         context = {
             "direction": candidate.direction.value,
             "component_scores": context_scores,
