@@ -58,6 +58,10 @@ class LiveScannerCache:
             self._state[symbol] = LiveSymbolCache(trades=deque(maxlen=self._max_trades))
         return self._state[symbol]
 
+    def snapshot(self, symbol: str) -> LiveSymbolCache | None:
+        """Return the current live state without creating a cache entry."""
+        return self._state.get(symbol.upper())
+
     async def initialize(self, direct_market_data: bool = False) -> None:
         if self._initialized:
             return
@@ -258,6 +262,14 @@ class LiveScannerCache:
             "trade_receive_lag_ms": trade_lag,
             "book_receive_lag_ms": book_lag,
             "source_age_ms": max(ages) if ages else None,
-            "trade_age_sec": trade_age / 1000 if trade_age is not None else None,
-            "book_age_sec": book_age / 1000 if book_age is not None else None,
+            "trade_age_sec": (
+                (now - state.last_trade_at).total_seconds()
+                if state.last_trade_at
+                else None
+            ),
+            "book_age_sec": (
+                (now - state.last_book_at).total_seconds()
+                if state.last_book_at
+                else None
+            ),
         }
