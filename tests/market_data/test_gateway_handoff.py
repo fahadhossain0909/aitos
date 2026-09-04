@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from aitos.market_data.contracts import MarketEvent, MarketSource
-from aitos.market_data.gateway import GatewayConfig, MarketDataGateway, GatewayState
+from aitos.market_data.gateway import GatewayConfig, GatewayState, MarketDataGateway
 
 
 def event(source=MarketSource.WEBSOCKET, age_seconds=0.0):
