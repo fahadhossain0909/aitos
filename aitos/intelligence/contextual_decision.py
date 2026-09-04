@@ -118,7 +118,9 @@ class ContextualDecisionEngine:
         "state_transition": 0.78,
     }
 
-    def __init__(self, min_confidence: float = 0.60, no_trade_margin: float = 0.08) -> None:
+    def __init__(
+        self, min_confidence: float = 0.60, no_trade_margin: float = 0.08
+    ) -> None:
         if not 0.0 <= min_confidence <= 1.0:
             raise ValueError("min_confidence must be between 0 and 1")
         if no_trade_margin < 0:
@@ -175,7 +177,11 @@ class ContextualDecisionEngine:
     def _market_state(self, context: Mapping[str, Any]) -> str:
         regime = str(context.get("regime", "unknown"))
         vol = context.get("volatility_regime") or context.get("volatility_state")
-        return f"{regime}:{vol}" if vol in {"compression", "expansion", "extreme"} else regime
+        return (
+            f"{regime}:{vol}"
+            if vol in {"compression", "expansion", "extreme"}
+            else regime
+        )
 
     def build(
         self,
@@ -189,14 +195,21 @@ class ContextualDecisionEngine:
         direction = direction.lower()
         if direction not in {"long", "short"}:
             return ContextualDecision(
-                "no_trade", 0.0, "unknown", (), (), (),
-                ("no directional thesis",), (),
+                "no_trade",
+                0.0,
+                "unknown",
+                (),
+                (),
+                (),
+                ("no directional thesis",),
+                (),
                 ("No directional thesis was supplied.",),
             )
         context = context or {}
         availability = component_availability or {}
         usable = {
-            k: v for k, v in component_scores.items()
+            k: v
+            for k, v in component_scores.items()
             if availability.get(k, True) and isinstance(v, (int, float))
         }
         evidence = list(self.assess_evidence(usable, direction))
@@ -206,38 +219,75 @@ class ContextualDecisionEngine:
         # when the caller supplied it; no synthetic values are invented.
         if advanced is not None:
             derived = {
-                "volume_profile": advanced.volume_profile.price_location * 10.0 if advanced.volume_profile else 5.0,
+                "volume_profile": (
+                    advanced.volume_profile.price_location * 10.0
+                    if advanced.volume_profile
+                    else 5.0
+                ),
                 "price_imbalance": 5.0 + advanced.imbalance.displacement_score * 5.0,
-                "structural_symmetry": 5.0 + (advanced.symmetry.similarity * 5.0 if advanced.symmetry else 0.0),
+                "structural_symmetry": 5.0
+                + (advanced.symmetry.similarity * 5.0 if advanced.symmetry else 0.0),
                 "forced_flow": advanced.forced_flow_score,
             }
             evidence.extend(self.assess_evidence(derived, direction))
             if advanced.volatility.regime == "extreme":
-                contradictions.append("extreme volatility reduces directional reliability")
-            if advanced.symmetry and advanced.symmetry.similarity >= 0.65 and advanced.symmetry.failure_distance >= 1.5:
+                contradictions.append(
+                    "extreme volatility reduces directional reliability"
+                )
+            if (
+                advanced.symmetry
+                and advanced.symmetry.similarity >= 0.65
+                and advanced.symmetry.failure_distance >= 1.5
+            ):
                 contradictions.append("historical symmetry is currently failing")
-            if advanced.volume_profile and advanced.volume_profile.acceptance_score < 0.35:
-                contradictions.append("price is not strongly accepted around the profile")
+            if (
+                advanced.volume_profile
+                and advanced.volume_profile.acceptance_score < 0.35
+            ):
+                contradictions.append(
+                    "price is not strongly accepted around the profile"
+                )
 
         klines = self._parse_klines(context.get("klines"))
-        analogues = search_historical_analogues(
-            klines,
-            window=int(context.get("analogue_window", 20)),
-            search_back=int(context.get("analogue_search_back", 500)),
-            top_k=int(context.get("analogue_top_k", 20)),
-            forward_horizon=int(context.get("analogue_horizon", 12)),
-        ) if klines else ()
+        analogues = (
+            search_historical_analogues(
+                klines,
+                window=int(context.get("analogue_window", 20)),
+                search_back=int(context.get("analogue_search_back", 500)),
+                top_k=int(context.get("analogue_top_k", 20)),
+                forward_horizon=int(context.get("analogue_horizon", 12)),
+            )
+            if klines
+            else ()
+        )
         if analogues:
             best_outcome = analogues[0].outcome
             if best_outcome:
-                directional = best_outcome.up_probability if direction == "long" else best_outcome.down_probability
-                evidence.append(EvidenceAssessment(
-                    "historical_analogue", directional * 10.0, 0.72,
-                    max(0.25, analogues[0].similarity), (directional - 0.5) * 2.0,
-                ))
+                directional = (
+                    best_outcome.up_probability
+                    if direction == "long"
+                    else best_outcome.down_probability
+                )
+                evidence.append(
+                    EvidenceAssessment(
+                        "historical_analogue",
+                        directional * 10.0,
+                        0.72,
+                        max(0.25, analogues[0].similarity),
+                        (directional - 0.5) * 2.0,
+                    )
+                )
 
-        previous_state = str(context.get("previous_market_state", context.get("previous_regime", "unknown")))
-        transition = infer_state_transition(previous_state, self._market_state(context), float(context.get("state_persistence", 0.5)))
+        previous_state = str(
+            context.get(
+                "previous_market_state", context.get("previous_regime", "unknown")
+            )
+        )
+        transition = infer_state_transition(
+            previous_state,
+            self._market_state(context),
+            float(context.get("state_persistence", 0.5)),
+        )
         transition_dict = transition.to_dict()
         if transition.transition_score and transition.reversal_pressure:
             contradictions.append("market-state transition carries reversal pressure")
@@ -245,27 +295,47 @@ class ContextualDecisionEngine:
         positives = [x for x in evidence if x.effective_support > 0.15]
         negatives = [x for x in evidence if x.effective_support < -0.15]
         if positives and negatives:
-            contradictions.append("supporting and opposing evidence are materially mixed")
+            contradictions.append(
+                "supporting and opposing evidence are materially mixed"
+            )
         support = sum(x.effective_support for x in evidence)
         denom = sum(x.reliability * x.relevance for x in evidence) or 1.0
         confidence = max(0.0, min(1.0, 0.5 + 0.5 * support / denom))
-        scenarios = self._scenarios(direction, confidence, advanced, analogues, contradictions)
+        scenarios = self._scenarios(
+            direction, confidence, advanced, analogues, contradictions
+        )
         best = scenarios[0]
-        action = direction if best.probability >= self.min_confidence and not (
-            len(contradictions) >= 2 and best.probability < self.min_confidence + self.no_trade_margin
-        ) else "no_trade"
-        final_confidence = best.probability if action != "no_trade" else min(confidence, 0.59)
+        action = (
+            direction
+            if best.probability >= self.min_confidence
+            and not (
+                len(contradictions) >= 2
+                and best.probability < self.min_confidence + self.no_trade_margin
+            )
+            else "no_trade"
+        )
+        final_confidence = (
+            best.probability if action != "no_trade" else min(confidence, 0.59)
+        )
 
         targets: list[float] = []
         if advanced and advanced.symmetry:
             targets.extend(advanced.symmetry.projected_levels)
         if advanced and advanced.volume_profile:
-            targets.extend([advanced.volume_profile.poc, advanced.volume_profile.vah, advanced.volume_profile.val])
+            targets.extend(
+                [
+                    advanced.volume_profile.poc,
+                    advanced.volume_profile.vah,
+                    advanced.volume_profile.val,
+                ]
+            )
         for match in analogues[:3]:
             if match.outcome and klines:
                 base = klines[-1].close
                 targets.append(base * (1.0 + match.outcome.median_return))
-        targets = list(dict.fromkeys(round(x, 8) for x in targets if isinstance(x, (int, float))))
+        targets = list(
+            dict.fromkeys(round(x, 8) for x in targets if isinstance(x, (int, float)))
+        )
 
         invalidations = [
             "opposing market-structure break",
@@ -284,10 +354,17 @@ class ContextualDecisionEngine:
             f"action={action}",
         )
         return ContextualDecision(
-            action, round(final_confidence, 4), self._market_state(context),
-            tuple(scenarios), tuple(evidence), tuple(contradictions),
-            tuple(invalidations), tuple(targets), rationale,
-            tuple(analogues), transition_dict,
+            action,
+            round(final_confidence, 4),
+            self._market_state(context),
+            tuple(scenarios),
+            tuple(evidence),
+            tuple(contradictions),
+            tuple(invalidations),
+            tuple(targets),
+            rationale,
+            tuple(analogues),
+            transition_dict,
         )
 
     def _scenarios(
@@ -305,20 +382,51 @@ class ContextualDecisionEngine:
             analogue_bias = (o.up_probability - o.down_probability) * 0.10
             if direction == "short":
                 analogue_bias = -analogue_bias
-        symmetry_bonus = advanced.symmetry.similarity * 0.08 if advanced and advanced.symmetry else 0.0
-        continuation = max(0.0, min(1.0, confidence + analogue_bias + symmetry_bonus - 0.04 * len(contradictions)))
+        symmetry_bonus = (
+            advanced.symmetry.similarity * 0.08
+            if advanced and advanced.symmetry
+            else 0.0
+        )
+        continuation = max(
+            0.0,
+            min(
+                1.0,
+                confidence
+                + analogue_bias
+                + symmetry_bonus
+                - 0.04 * len(contradictions),
+            ),
+        )
         reversal = max(0.0, min(1.0, 1.0 - confidence + 0.08 * bool(contradictions)))
         range_prob = max(0.0, 1.0 - max(continuation, reversal))
         total = continuation + reversal + range_prob or 1.0
         scenarios = [
-            Scenario("continuation", continuation / total, direction, confidence, 1.0 - confidence,
-                     ("flow confirmation", "structure remains intact"),
-                     ("retest", "liquidity interaction", "continuation")),
-            Scenario("reversal", reversal / total, opposite, 1.0 - confidence, confidence,
-                     ("structural break", "opposing flow confirmation"),
-                     ("failure", "reclaim/rejection", "reversal")),
-            Scenario("range", range_prob / total, "neutral", 0.5, 0.5,
-                     ("failed displacement", "balanced auction"),
-                     ("mean reversion", "range continuation")),
+            Scenario(
+                "continuation",
+                continuation / total,
+                direction,
+                confidence,
+                1.0 - confidence,
+                ("flow confirmation", "structure remains intact"),
+                ("retest", "liquidity interaction", "continuation"),
+            ),
+            Scenario(
+                "reversal",
+                reversal / total,
+                opposite,
+                1.0 - confidence,
+                confidence,
+                ("structural break", "opposing flow confirmation"),
+                ("failure", "reclaim/rejection", "reversal"),
+            ),
+            Scenario(
+                "range",
+                range_prob / total,
+                "neutral",
+                0.5,
+                0.5,
+                ("failed displacement", "balanced auction"),
+                ("mean reversion", "range continuation"),
+            ),
         ]
         return sorted(scenarios, key=lambda x: x.probability, reverse=True)
