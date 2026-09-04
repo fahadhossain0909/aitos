@@ -1,6 +1,8 @@
 """Canonical market-data architecture for AITOS."""
 
 from .adapter import CanonicalMarketDataAdapter
+from .binance_adapter import BinanceCanonicalMarketDataAdapter
+from .bybit_adapter import BybitCanonicalMarketDataAdapter
 from .bus import (
     MarketDataBus,
     channel_for,
@@ -16,6 +18,7 @@ from .contracts import (
     OrderBookSnapshot,
     TradeEvent,
 )
+from .okx_adapter import OKXCanonicalMarketDataAdapter
 from .registry import VenueRegistry
 from .venues import (
     DEFAULT_VENUES,
@@ -28,7 +31,9 @@ from .venues import (
 
 __all__ = [
     "DEFAULT_VENUES",
+    "BinanceCanonicalMarketDataAdapter",
     "BookLevel",
+    "BybitCanonicalMarketDataAdapter",
     "CanonicalMarketDataAdapter",
     "InstrumentKey",
     "MarketDataBus",
@@ -36,6 +41,7 @@ __all__ = [
     "MarketEventType",
     "MarketSource",
     "MarketType",
+    "OKXCanonicalMarketDataAdapter",
     "OrderBookDelta",
     "OrderBookSnapshot",
     "TradeEvent",
