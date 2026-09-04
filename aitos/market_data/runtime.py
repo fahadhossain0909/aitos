@@ -22,17 +22,7 @@ DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
 class CanonicalMarketDataRuntime:
     """Own exchange sockets and publish normalized events through one gateway."""
 
-    def __init__(
-        self,
-        adapter: CanonicalMarketDataAdapter,
-        market_bus: MarketDataBus,
-        gateway: MarketDataGateway,
-        symbols: list[str],
-        orderbook_levels: int = 20,
-        stream_idle_timeout_seconds: float = DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS,
-        enable_trades: bool = True,
-        enable_orderbooks: bool = True,
-    ) -> None:
+    def __init__(self, adapter: CanonicalMarketDataAdapter, market_bus: MarketDataBus, gateway: MarketDataGateway, symbols: list[str], orderbook_levels: int = 20, stream_idle_timeout_seconds: float = DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS, enable_trades: bool = True, enable_orderbooks: bool = True, orderbook_symbols: list[str] | None = None) -> None:
         if stream_idle_timeout_seconds <= 0:
             raise ValueError("stream_idle_timeout_seconds must be positive")
         if not enable_trades and not enable_orderbooks:
@@ -41,6 +31,7 @@ class CanonicalMarketDataRuntime:
         self.market_bus = market_bus
         self.gateway = gateway
         self.symbols = list(dict.fromkeys(s.upper() for s in symbols))
+        self.orderbook_symbols = list(dict.fromkeys(s.upper() for s in (orderbook_symbols if orderbook_symbols is not None else symbols)))
         self.orderbook_levels = max(20, orderbook_levels)
         self.stream_idle_timeout_seconds = stream_idle_timeout_seconds
         self.enable_trades = enable_trades
@@ -56,11 +47,11 @@ class CanonicalMarketDataRuntime:
         self.gateway.begin_connect()
         self._drain_task = asyncio.create_task(self._drain_loop(), name="market-data-gateway-drain")
         self._tasks = []
-        if self.enable_trades:
+        if self.enable_trades and self.symbols:
             self._tasks.append(asyncio.create_task(self._run("trades", lambda: self.adapter.stream_trades(self.symbols)), name="market-data-trades"))
-        if self.enable_orderbooks:
-            self._tasks.append(asyncio.create_task(self._run("orderbook", lambda: self.adapter.stream_order_books(self.symbols, self.orderbook_levels)), name="market-data-orderbook"))
-        logger.info("canonical market-data runtime started", extra={"aitos_extra": {"venue": self.adapter.venue.value, "market_type": self.adapter.market_type.value, "symbols": self.symbols, "orderbook_levels": self.orderbook_levels, "enable_trades": self.enable_trades, "enable_orderbooks": self.enable_orderbooks, "stream_idle_timeout_seconds": self.stream_idle_timeout_seconds}})
+        if self.enable_orderbooks and self.orderbook_symbols:
+            self._tasks.append(asyncio.create_task(self._run("orderbook", lambda: self.adapter.stream_order_books(self.orderbook_symbols, self.orderbook_levels)), name="market-data-orderbook"))
+        logger.info("canonical market-data runtime started", extra={"aitos_extra": {"venue": self.adapter.venue.value, "market_type": self.adapter.market_type.value, "trade_symbols": self.symbols, "orderbook_symbols": self.orderbook_symbols, "orderbook_levels": self.orderbook_levels, "enable_trades": self.enable_trades, "enable_orderbooks": self.enable_orderbooks, "stream_idle_timeout_seconds": self.stream_idle_timeout_seconds}})
 
     async def stop(self) -> None:
         self._stopped = True
