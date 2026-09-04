@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 
 from aitos.market_data import (
     BybitCanonicalMarketDataAdapter,
@@ -18,7 +17,14 @@ def test_bybit_adapter_conforms_and_parses_trade():
             "topic": "publicTrade.BTCUSDT",
             "ts": 1000,
             "data": [
-                {"T": "2000", "s": "BTCUSDT", "p": "100.5", "v": "0.25", "S": "Buy", "i": "42"}
+                {
+                    "T": "2000",
+                    "s": "BTCUSDT",
+                    "p": "100.5",
+                    "v": "0.25",
+                    "S": "Buy",
+                    "i": "42",
+                }
             ],
         }
     )
@@ -58,7 +64,14 @@ def test_okx_adapter_normalizes_usdt_symbol_and_parses_trade():
         {
             "arg": {"channel": "trades", "instId": "BTC-USDT-SWAP"},
             "data": [
-                {"instId": "BTC-USDT-SWAP", "tradeId": "77", "px": "100.5", "sz": "1.5", "side": "buy", "ts": "2000"}
+                {
+                    "instId": "BTC-USDT-SWAP",
+                    "tradeId": "77",
+                    "px": "100.5",
+                    "sz": "1.5",
+                    "side": "buy",
+                    "ts": "2000",
+                }
             ],
         }
     )
