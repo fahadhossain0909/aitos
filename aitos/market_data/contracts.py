@@ -127,7 +127,7 @@ class MarketEvent:
         """Expose a singleton sequence view for legacy parser callers."""
         return 1
 
-    def __getitem__(self, index: int) -> "MarketEvent":
+    def __getitem__(self, index: int) -> MarketEvent:
         """Return this event at index zero for legacy parser compatibility."""
         if index in (0, -1):
             return self
