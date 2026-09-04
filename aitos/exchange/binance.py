@@ -34,9 +34,12 @@ from aitos.models.market import (
 
 logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
-WS_MARKET_BASE_URL = "wss://fstream.binance.com/market/stream"
-WS_MARKET_RAW_BASE_URL = "wss://fstream.binance.com/market/ws"
-WS_PUBLIC_BASE_URL = "wss://fstream.binance.com/public/stream"
+# Binance Futures market streams use /ws/<stream> for raw and
+# /stream?streams=... for combined connections. Keep these as separate
+# constants so endpoint migrations cannot silently route one stream family to
+# an obsolete path.
+WS_MARKET_BASE_URL = "wss://fstream.binance.com/stream"
+WS_MARKET_RAW_BASE_URL = "wss://fstream.binance.com/ws"
 DEFAULT_RATE_LIMIT_CAPACITY = 2000
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2000 / 60
 MAX_BACKOFF_SECONDS = 60.0
@@ -156,9 +159,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             f"{symbol.lower()}@aggTrade" for symbol in normalized_symbols
         ]
         primary = self._raw_stream(primary_streams, emit_reconnect=True).__aiter__()
-        # Binance Futures' current split routes trade/aggTrade through /market.
-        # Keep the historical direct-socket fallback, but do not use @trade:
-        # the current documented Futures market-stream surface is @aggTrade.
         fallback_streams = {
             symbol: self._direct_raw_stream(
                 f"{symbol.lower()}@aggTrade", emit_reconnect=True
@@ -204,7 +204,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             while True:
                 if primary_task is None:
                     primary_task = asyncio.create_task(primary.__anext__())
-
                 now = loop.time()
                 for symbol in normalized_symbols:
                     if (
@@ -213,7 +212,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         >= TRADE_STREAM_IDLE_FALLBACK_SECONDS
                     ):
                         activate_fallback(symbol)
-
                 tasks: set[asyncio.Task] = {primary_task}
                 tasks.update(
                     task for task in fallback_tasks.values() if task is not None
@@ -227,16 +225,11 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                             - (loop.time() - primary_last_data[symbol]),
                         )
                         timeout = min(timeout, remaining)
-
                 done, _ = await asyncio.wait(
                     tasks, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
                 )
                 if not done:
                     continue
-
-                # Primary recovery has precedence over fallback events when both
-                # are ready in the same wait cycle. This makes failover deterministic
-                # and prevents a stale fallback event from winning a recovery race.
                 if primary_task in done:
                     primary_ready = primary_task
                     primary_task = None
@@ -249,12 +242,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                             except Exception as exc:
                                 logger.error(
                                     "Binance aggregate-trade event invalid; keeping primary under watchdog",
-                                    extra={
-                                        "aitos_extra": {
-                                            "symbol": symbol,
-                                            "error": str(exc),
-                                        }
-                                    },
+                                    extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
                                 )
                             else:
                                 primary_last_data[symbol] = loop.time()
@@ -262,14 +250,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                                     fallback_active.discard(symbol)
                                     fallback_task = fallback_tasks[symbol]
                                     fallback_tasks[symbol] = None
-                                    if (
-                                        fallback_task is not None
-                                        and not fallback_task.done()
-                                    ):
+                                    if fallback_task is not None and not fallback_task.done():
                                         fallback_task.cancel()
-                                        await asyncio.gather(
-                                            fallback_task, return_exceptions=True
-                                        )
+                                        await asyncio.gather(fallback_task, return_exceptions=True)
                                     logger.info(
                                         "Binance aggregate-trade stream recovered; returning from direct per-symbol fallback",
                                         extra={"aitos_extra": {"symbol": symbol}},
@@ -283,14 +266,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                             "Binance combined aggregate-trade stream event failed",
                             extra={"aitos_extra": {"error": str(exc)}},
                         )
-
                 for symbol in normalized_symbols:
                     task = fallback_tasks[symbol]
-                    if (
-                        task is None
-                        or task not in done
-                        or symbol not in fallback_active
-                    ):
+                    if task is None or task not in done or symbol not in fallback_active:
                         continue
                     try:
                         data, _ = task.result()
@@ -300,9 +278,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         except Exception as exc:
                             logger.error(
                                 "Binance direct aggTrade fallback event invalid",
-                                extra={
-                                    "aitos_extra": {"symbol": symbol, "error": str(exc)}
-                                },
+                                extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
                             )
                     except StopAsyncIteration:
                         fallback_tasks[symbol] = None
@@ -310,9 +286,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         fallback_tasks[symbol] = None
                         logger.error(
                             "Binance direct aggTrade fallback stream failed",
-                            extra={
-                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
-                            },
+                            extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
                         )
                     finally:
                         if symbol in fallback_active and fallback_tasks[symbol] is None:
@@ -347,16 +321,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             return
         streams = [f"{s.lower()}@depth@100ms" for s in symbols]
         symbol_by_stream = {f"{s.lower()}@depth@100ms": s for s in symbols}
-        queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(
-            maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE
-        )
+        queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE)
         producer_ready = asyncio.Event()
 
         async def producer() -> None:
             try:
-                async for data, stream_name in self._raw_stream(
-                    streams, emit_reconnect=True
-                ):
+                async for data, stream_name in self._raw_stream(streams, emit_reconnect=True):
                     producer_ready.set()
                     try:
                         queue.put_nowait((data, stream_name))
@@ -380,16 +350,11 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             book.seed(snapshot)
             return book
 
-        producer_task = asyncio.create_task(
-            producer(), name="binance-orderbook-producer"
-        )
+        producer_task = asyncio.create_task(producer(), name="binance-orderbook-producer")
         books: dict[str, LocalOrderBook] = {}
         try:
             try:
-                await asyncio.wait_for(
-                    producer_ready.wait(),
-                    timeout=ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS,
-                )
+                await asyncio.wait_for(producer_ready.wait(), timeout=ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS)
             except asyncio.TimeoutError:
                 raise RuntimeError("Binance order-book stream did not become ready")
             for symbol in symbols:
@@ -421,25 +386,13 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
-        async with self._session.get(
-            f"{REST_BASE_URL}{path}", params=params
-        ) as response:
+        async with self._session.get(f"{REST_BASE_URL}{path}", params=params) as response:
             response.raise_for_status()
             return await response.json()
 
-    async def _stream(
-        self, streams: list[str], parser: Callable[[Any], Any]
-    ) -> AsyncIterator[Any]:
+    async def _stream(self, streams: list[str], parser: Callable[[Any], Any]) -> AsyncIterator[Any]:
         async for data, _stream_name in self._raw_stream(streams):
             yield await parser(data)
-
-    @staticmethod
-    def _ws_base_url(streams: list[str]) -> str:
-        if not streams:
-            return WS_MARKET_BASE_URL
-        if all("@depth" in stream or "@bookTicker" in stream for stream in streams):
-            return WS_PUBLIC_BASE_URL
-        return WS_MARKET_BASE_URL
 
     async def _direct_raw_stream(
         self, stream: str, emit_reconnect: bool = False
@@ -456,25 +409,14 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 if emit_reconnect:
                     logger.warning(
                         "Binance direct market stream closed, reconnecting",
-                        extra={
-                            "aitos_extra": {
-                                "stream": stream,
-                                "backoff_seconds": backoff,
-                            }
-                        },
+                        extra={"aitos_extra": {"stream": stream, "backoff_seconds": backoff}},
                     )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.error(
                     "Binance direct market stream disconnected, reconnecting",
-                    extra={
-                        "aitos_extra": {
-                            "stream": stream,
-                            "error": str(exc),
-                            "backoff_seconds": backoff,
-                        }
-                    },
+                    extra={"aitos_extra": {"stream": stream, "error": str(exc), "backoff_seconds": backoff}},
                 )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
@@ -484,8 +426,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     ) -> AsyncIterator[tuple[Any, str]]:
         if not streams:
             return
-        base_url = self._ws_base_url(streams)
-        url = f"{base_url}?streams={'/'.join(streams)}"
+        url = f"{WS_MARKET_BASE_URL}?streams={'/'.join(streams)}"
         backoff = INITIAL_BACKOFF_SECONDS
         while True:
             try:
@@ -498,25 +439,14 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 if emit_reconnect:
                     logger.warning(
                         "Binance combined stream closed, reconnecting",
-                        extra={
-                            "aitos_extra": {
-                                "streams": streams,
-                                "backoff_seconds": backoff,
-                            }
-                        },
+                        extra={"aitos_extra": {"streams": streams, "backoff_seconds": backoff}},
                     )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 logger.error(
                     "Binance combined stream disconnected, reconnecting",
-                    extra={
-                        "aitos_extra": {
-                            "streams": streams,
-                            "error": str(exc),
-                            "backoff_seconds": backoff,
-                        }
-                    },
+                    extra={"aitos_extra": {"streams": streams, "error": str(exc), "backoff_seconds": backoff}},
                 )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
