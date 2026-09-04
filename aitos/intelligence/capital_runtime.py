@@ -1,8 +1,7 @@
 """Runtime enforcement for the capital-growth objective.
 
-The guard is installed when the intelligence package is imported, which is
-already part of the normal AITOS application bootstrap. It protects the
-TradeLifecycle boundary itself so a caller cannot bypass capital authorization
+The guard is installed when the intelligence package is imported. It protects
+the TradeLifecycle boundary itself so a caller cannot bypass the capital gate
 by skipping the scanner/application helper.
 """
 
@@ -55,6 +54,39 @@ def _capital_reason(decision: Any) -> str:
     return "capital_objective: opportunity not allocated"
 
 
+def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, Any]:
+    """Normalize available portfolio state for the capital gateway.
+
+    PortfolioState exposes equity peak, regime, volatility percentile and open
+    positions. Existing position risk is conservatively represented at the
+    normal 1% per-position budget when explicit risk budgets are unavailable.
+    """
+    consensus = dict(opportunity.agent_consensus)
+    if hasattr(portfolio, "peak_equity_usd"):
+        consensus["equity_peak_usd"] = float(portfolio.peak_equity_usd)
+    if hasattr(portfolio, "regime") and not opportunity.regime:
+        consensus["runtime_regime"] = str(portfolio.regime)
+    if hasattr(portfolio, "volatility_percentile"):
+        consensus["volatility_score"] = max(
+            0.0, min(1.0, float(portfolio.volatility_percentile) / 100.0)
+        )
+    positions = getattr(portfolio, "positions", ()) or ()
+    if "position_risk_pct" not in consensus:
+        consensus["position_risk_pct"] = {
+            str(getattr(position, "symbol", "")): 1.0
+            for position in positions
+            if getattr(position, "symbol", "")
+        }
+    if "correlations" not in consensus and positions:
+        pairwise = float(getattr(portfolio, "max_pairwise_correlation", 0.0) or 0.0)
+        consensus["correlations"] = {
+            f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": pairwise
+            for position in positions
+            if getattr(position, "symbol", "")
+        }
+    return consensus
+
+
 def install_capital_guard() -> None:
     """Install the capital gate exactly once on TradeLifecycle."""
     if hasattr(TradeLifecycle, _ORIGINAL_ATTR):
@@ -78,17 +110,21 @@ def install_capital_guard() -> None:
                 opportunity, "capital_objective: invalid or unavailable equity"
             )
 
+        protected_opportunity = replace(
+            opportunity,
+            agent_consensus=_portfolio_consensus(portfolio, opportunity),
+        )
         try:
-            decision, allocation = gateway.authorize_opportunity(equity, opportunity)
+            decision, allocation = gateway.authorize_opportunity(
+                equity, protected_opportunity
+            )
         except (TypeError, ValueError, ArithmeticError) as exc:
-            return _rejected_trade(opportunity, f"capital_objective: {exc}")
+            return _rejected_trade(protected_opportunity, f"capital_objective: {exc}")
 
         if not decision.eligible or allocation is None:
-            return _rejected_trade(opportunity, _capital_reason(decision))
+            return _rejected_trade(protected_opportunity, _capital_reason(decision))
 
-        # Preserve the approved allocation on the opportunity so downstream
-        # lifecycle/risk code and journal consumers can audit the authorization.
-        consensus = dict(opportunity.agent_consensus)
+        consensus = dict(protected_opportunity.agent_consensus)
         consensus["capital_objective"] = {
             "eligible": True,
             "composite_score": decision.composite_score,
@@ -97,7 +133,7 @@ def install_capital_guard() -> None:
             "capital_usd": allocation.capital_usd,
             "risk_budget_pct": (allocation.risk_budget_usd / equity) * 100.0,
         }
-        authorized = replace(opportunity, agent_consensus=consensus)
+        authorized = replace(protected_opportunity, agent_consensus=consensus)
         return await original(self, authorized, portfolio, *args, **kwargs)
 
     TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
