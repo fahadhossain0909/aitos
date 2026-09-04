@@ -81,9 +81,7 @@ def test_reservation_prevents_oversubscription_and_is_idempotent():
     assert not ledger.reserve(
         second, available_capital_usd=4_000.0, available_risk_usd=40.0
     )
-    assert ledger.reserve(
-        first, available_capital_usd=4_000.0, available_risk_usd=40.0
-    )
+    assert ledger.reserve(first, available_capital_usd=4_000.0, available_risk_usd=40.0)
     assert ledger.reserved_capital_usd == 6_000.0
     assert ledger.release("BTCUSDT") == first
     assert ledger.release("BTCUSDT") is None

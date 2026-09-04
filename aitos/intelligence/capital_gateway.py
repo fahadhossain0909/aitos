@@ -82,9 +82,13 @@ class CapitalGateway:
             fee_bps=max(0.0, float(fee_bps)),
             slippage_bps=max(0.0, float(slippage_bps)),
             funding_bps=max(0.0, float(funding_bps)),
-            liquidity_score=max(0.0, min(10.0, float(consensus.get("liquidity_score", 5.0)))),
+            liquidity_score=max(
+                0.0, min(10.0, float(consensus.get("liquidity_score", 5.0)))
+            ),
             confidence=max(0.0, min(1.0, float(opportunity.confidence))),
-            regime_fit=max(0.0, min(10.0, float(consensus.get("regime_fit_score", 5.0)))),
+            regime_fit=max(
+                0.0, min(10.0, float(consensus.get("regime_fit_score", 5.0)))
+            ),
             metadata={
                 "opportunity_id": opportunity.opportunity_id,
                 "regime": opportunity.regime or consensus.get("runtime_regime"),
@@ -96,7 +100,9 @@ class CapitalGateway:
         )
 
     @staticmethod
-    def _snapshot(equity_usd: float, estimate: OpportunityEstimate) -> PortfolioRiskSnapshot:
+    def _snapshot(
+        equity_usd: float, estimate: OpportunityEstimate
+    ) -> PortfolioRiskSnapshot:
         metadata = estimate.metadata
         peak = float(metadata.get("equity_peak_usd") or equity_usd)
         raw_positions = metadata.get("position_risk_pct") or {}
@@ -119,7 +125,9 @@ class CapitalGateway:
         max_positions: int = 3,
     ) -> CapitalGatewayResult:
         decisions = self.objective.rank(estimates)
-        allocations = self.allocator.allocate(equity_usd, decisions, max_positions=max_positions)
+        allocations = self.allocator.allocate(
+            equity_usd, decisions, max_positions=max_positions
+        )
         protected: list[CapitalAllocation] = []
         by_symbol = {item.symbol: item for item in estimates}
         for allocation in allocations:
@@ -137,7 +145,9 @@ class CapitalGateway:
             if not protection.allowed:
                 continue
             risk_budget = equity_usd * protection.allowed_risk_pct / 100.0
-            capital = risk_budget / max(self.objective.config.max_trade_risk_pct / 100.0, 1e-9)
+            capital = risk_budget / max(
+                self.objective.config.max_trade_risk_pct / 100.0, 1e-9
+            )
             candidate = CapitalAllocation(
                 allocation.symbol,
                 round(capital, 8),
@@ -153,7 +163,9 @@ class CapitalGateway:
                 - self.reservation.reserved_risk_usd,
             )
             if self.reservation.reserve(
-                Reservation(candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd),
+                Reservation(
+                    candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd
+                ),
                 available_capital_usd=available_capital,
                 available_risk_usd=available_risk,
             ):
