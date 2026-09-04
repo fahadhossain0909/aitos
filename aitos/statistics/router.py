@@ -7,8 +7,8 @@ execution decision.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 from .models import AStatResult
 
@@ -48,9 +48,15 @@ class StatisticalStrategyRouter:
         )
 
         scores = (
-            StrategyScore("directional", min(1.0, directional), self._directional_rationale(result)),
+            StrategyScore(
+                "directional",
+                min(1.0, directional),
+                self._directional_rationale(result),
+            ),
             StrategyScore("hedging", min(1.0, hedge), self._hedge_rationale(result)),
-            StrategyScore("options", min(1.0, options), self._options_rationale(result)),
+            StrategyScore(
+                "options", min(1.0, options), self._options_rationale(result)
+            ),
         )
         return tuple(sorted(scores, key=lambda item: item.score, reverse=True))
 
@@ -80,7 +86,15 @@ class StatisticalStrategyRouter:
         )
 
 
-def strategy_contexts(result: AStatResult, strategy_ids: Mapping[str, str] | None = None) -> dict[str, object]:
+def strategy_contexts(
+    result: AStatResult, strategy_ids: Mapping[str, str] | None = None
+) -> dict[str, object]:
     """Expose the same statistical state to named strategy implementations."""
-    ids = strategy_ids or {"directional": "directional", "hedging": "hedging", "options": "options"}
-    return {family: result.for_strategy(strategy_id) for family, strategy_id in ids.items()}
+    ids = strategy_ids or {
+        "directional": "directional",
+        "hedging": "hedging",
+        "options": "options",
+    }
+    return {
+        family: result.for_strategy(strategy_id) for family, strategy_id in ids.items()
+    }
