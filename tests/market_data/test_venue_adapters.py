@@ -29,7 +29,7 @@ def test_bybit_adapter_conforms_and_parses_trade():
     )
     assert event is not None
     assert event.venue == Venue.BYBIT
-    assert event.market_type == MarketType.PERPETUAL
+    assert event.market_type == MarketType.USD_M_FUTURES
     assert event.event_type is MarketEventType.TRADE
     assert event.sequence == 42
     assert event.payload["price"] == 100.5
