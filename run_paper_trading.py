@@ -25,13 +25,13 @@ from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.journal.repository import JournalRepository
 from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.logging_setup import configure_logging, get_logger
+from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
 
 logger = get_logger("aitos.run_paper_trading")
-SYMBOLS = ["BTCUSDT", "SOLUSDT"]
 SCAN_INTERVAL_SECONDS = 60.0
 KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 10_000.0
@@ -123,6 +123,12 @@ async def main() -> None:
     await event_bus.initialize({})
     market_repo, journal_repo = await connect_clickhouse_repositories(settings)
     graph_driver = await try_connect_neo4j(settings)
+    exchange = BinanceFuturesAdapter()
+    symbols = await resolve_live_universe(exchange)
+    logger.info(
+        "resolved dynamic paper-trading universe",
+        extra={"aitos_extra": {"symbol_count": len(symbols)}},
+    )
     rl_scorer = DeepValueRLScorer()
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
@@ -131,9 +137,9 @@ async def main() -> None:
     attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
     components = await build_system(
         event_bus=event_bus,
-        exchange=BinanceFuturesAdapter(),
+        exchange=exchange,
         order_executor=SimulatedOrderExecutor(),
-        symbols=SYMBOLS,
+        symbols=symbols,
         kline_timeframe=KLINE_TIMEFRAME,
         scanner_timeframe=KLINE_TIMEFRAME,
         market_data_repository=market_repo,
@@ -165,7 +171,7 @@ async def main() -> None:
     await experience_recorder.initialize({})
     health_server = HealthServer(
         components.all_modules() + [experience_recorder, market_os_persistence],
-        host="0.0.0.0",  # nosec B104 - required for Docker port forwarding
+        host="0.0.0.0",
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
