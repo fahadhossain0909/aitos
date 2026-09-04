@@ -101,7 +101,9 @@ def _hard_limit_reason(self: TradeLifecycle, portfolio: Any) -> str | None:
         # Capital enforcement must not hide a risk-engine implementation error;
         # the original lifecycle remains responsible for its normal risk path.
         return None
-    breach = next((item for item in breaches if getattr(item, "is_hard_cap", False)), None)
+    breach = next(
+        (item for item in breaches if getattr(item, "is_hard_cap", False)), None
+    )
     if breach is None:
         return None
     return f"hard limit breach: {breach.message}"
