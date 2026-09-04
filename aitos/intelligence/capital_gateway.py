@@ -106,7 +106,9 @@ class CapitalGateway:
             funding_bps=max(0.0, float(funding_bps)),
             liquidity_score=liquidity,
             confidence=max(0.0, min(1.0, float(opportunity.confidence))),
-            regime_fit=max(0.0, min(10.0, float(consensus.get("regime_fit_score", 5.0)))),
+            regime_fit=max(
+                0.0, min(10.0, float(consensus.get("regime_fit_score", 5.0)))
+            ),
             metadata={
                 "opportunity_id": opportunity.opportunity_id,
                 "detected_at": opportunity.detected_at,
@@ -121,10 +123,15 @@ class CapitalGateway:
         )
 
     @staticmethod
-    def _snapshot(equity_usd: float, estimate: OpportunityEstimate) -> PortfolioRiskSnapshot:
+    def _snapshot(
+        equity_usd: float, estimate: OpportunityEstimate
+    ) -> PortfolioRiskSnapshot:
         metadata = estimate.metadata
         peak = float(metadata.get("equity_peak_usd") or equity_usd)
-        positions = {str(k): float(v) for k, v in dict(metadata.get("position_risk_pct") or {}).items()}
+        positions = {
+            str(k): float(v)
+            for k, v in dict(metadata.get("position_risk_pct") or {}).items()
+        }
         correlations: dict[tuple[str, str], float] = {}
         for key, value in dict(metadata.get("correlations") or {}).items():
             if isinstance(key, (tuple, list)) and len(key) == 2:
@@ -149,7 +156,11 @@ class CapitalGateway:
             if age > self.controls.opportunity_max_age_seconds:
                 decisions.append(
                     CapitalDecision(
-                        estimate.symbol, False, 0.0, 0.0, 0.0,
+                        estimate.symbol,
+                        False,
+                        0.0,
+                        0.0,
+                        0.0,
                         round(estimate.expected_net_edge_pct, 6),
                         round(estimate.total_cost_pct, 6),
                         ("opportunity_expired",),
@@ -164,7 +175,11 @@ class CapitalGateway:
             if not allowed:
                 decisions.append(
                     CapitalDecision(
-                        estimate.symbol, False, 0.0, 0.0, 0.0,
+                        estimate.symbol,
+                        False,
+                        0.0,
+                        0.0,
+                        0.0,
                         round(estimate.expected_net_edge_pct, 6),
                         round(estimate.total_cost_pct, 6),
                         (breaker_reason,),
@@ -175,7 +190,9 @@ class CapitalGateway:
             eligible_estimates.append(estimate)
         ranked = self.objective.rank(eligible_estimates)
         decisions.extend(ranked)
-        allocations = self.allocator.allocate(equity_usd, ranked, max_positions=max_positions)
+        allocations = self.allocator.allocate(
+            equity_usd, ranked, max_positions=max_positions
+        )
         protected: list[CapitalAllocation] = []
         by_symbol = {item.symbol: item for item in eligible_estimates}
         for allocation in allocations:
@@ -193,18 +210,27 @@ class CapitalGateway:
             if not protection.allowed:
                 continue
             risk_budget = equity_usd * protection.allowed_risk_pct / 100.0
-            capital = risk_budget / max(self.objective.config.max_trade_risk_pct / 100.0, 1e-9)
-            candidate = CapitalAllocation(
-                allocation.symbol, round(capital, 8), round(risk_budget, 8), allocation.score
+            capital = risk_budget / max(
+                self.objective.config.max_trade_risk_pct / 100.0, 1e-9
             )
-            available_capital = max(0.0, equity_usd - self.reservation.reserved_capital_usd)
+            candidate = CapitalAllocation(
+                allocation.symbol,
+                round(capital, 8),
+                round(risk_budget, 8),
+                allocation.score,
+            )
+            available_capital = max(
+                0.0, equity_usd - self.reservation.reserved_capital_usd
+            )
             available_risk = max(
                 0.0,
                 equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
                 - self.reservation.reserved_risk_usd,
             )
             if self.reservation.reserve(
-                Reservation(candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd),
+                Reservation(
+                    candidate.symbol, candidate.capital_usd, candidate.risk_budget_usd
+                ),
                 available_capital_usd=available_capital,
                 available_risk_usd=available_risk,
             ):
@@ -221,10 +247,15 @@ class CapitalGateway:
         funding_bps: float = 0.0,
     ) -> tuple[CapitalDecision, CapitalAllocation | None]:
         estimate = self.estimate_opportunity(
-            opportunity, fee_bps=fee_bps, slippage_bps=slippage_bps, funding_bps=funding_bps
+            opportunity,
+            fee_bps=fee_bps,
+            slippage_bps=slippage_bps,
+            funding_bps=funding_bps,
         )
         result = self.evaluate(equity_usd, [estimate], max_positions=1)
-        decision = next((d for d in result.decisions if d.symbol == opportunity.symbol), None)
+        decision = next(
+            (d for d in result.decisions if d.symbol == opportunity.symbol), None
+        )
         if decision is None:
             decision = self.objective.evaluate(estimate)
         return decision, result.allocation_for(opportunity.symbol)

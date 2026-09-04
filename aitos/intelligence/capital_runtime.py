@@ -34,7 +34,11 @@ def _rejected_trade(opportunity: Opportunity, reason: str) -> Trade:
         agent_consensus=dict(opportunity.agent_consensus),
         explanation=opportunity.rationale,
         sl_price=opportunity.stop_loss_price,
-        tp_price=(opportunity.take_profit_levels[0] if opportunity.take_profit_levels else opportunity.entry_price),
+        tp_price=(
+            opportunity.take_profit_levels[0]
+            if opportunity.take_profit_levels
+            else opportunity.entry_price
+        ),
         state=TradeLifecycleState.REJECTED,
         entry_time=now,
         take_profit_levels=list(opportunity.take_profit_levels),
@@ -58,7 +62,9 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     if hasattr(portfolio, "regime"):
         consensus["runtime_regime"] = str(portfolio.regime)
     if hasattr(portfolio, "volatility_percentile"):
-        consensus["volatility_score"] = max(0.0, min(1.0, float(portfolio.volatility_percentile) / 100.0))
+        consensus["volatility_score"] = max(
+            0.0, min(1.0, float(portfolio.volatility_percentile) / 100.0)
+        )
     if hasattr(portfolio, "daily_pnl_pct"):
         consensus["daily_pnl_pct"] = float(portfolio.daily_pnl_pct)
     # A lifecycle/portfolio integration may expose a live loss streak. Missing
@@ -77,7 +83,9 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
         pairwise = getattr(portfolio, "max_pairwise_correlation", None)
         if pairwise is not None and float(pairwise) > 0.0:
             consensus["correlations"] = {
-                f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": float(pairwise)
+                f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": float(
+                    pairwise
+                )
                 for position in positions
                 if getattr(position, "symbol", "")
             }
@@ -103,14 +111,18 @@ def install_capital_guard() -> None:
     ) -> Trade:
         equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
         if equity <= 0:
-            return _rejected_trade(opportunity, "capital_objective: invalid or unavailable equity")
+            return _rejected_trade(
+                opportunity, "capital_objective: invalid or unavailable equity"
+            )
 
         protected_opportunity = replace(
             opportunity,
             agent_consensus=_portfolio_consensus(portfolio, opportunity),
         )
         try:
-            decision, allocation = gateway.authorize_opportunity(equity, protected_opportunity)
+            decision, allocation = gateway.authorize_opportunity(
+                equity, protected_opportunity
+            )
         except (TypeError, ValueError, ArithmeticError) as exc:
             return _rejected_trade(protected_opportunity, f"capital_objective: {exc}")
 
