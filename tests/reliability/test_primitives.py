@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 
@@ -55,10 +56,10 @@ async def test_circuit_breaker_opens_and_recovers() -> None:
     breaker = CircuitBreaker(failure_threshold=2, recovery_timeout=5)
     for _ in range(2):
         with pytest.raises(RuntimeError):
-            await breaker.call(lambda: _fail())
-    assert breaker.allow(now=0) is False
-    assert breaker.allow(now=5) is True
-    await breaker.call(lambda: _ok())
+            await breaker.call(_fail)
+    assert breaker.allow(now=time.monotonic()) is False
+    assert breaker.allow(now=(breaker._opened_at or time.monotonic()) + 5) is True
+    await breaker.call(_ok)
     assert breaker.state.value == "closed"
 
 
@@ -73,7 +74,7 @@ async def _ok() -> str:
 @pytest.mark.asyncio
 async def test_open_circuit_rejects_without_calling_operation() -> None:
     breaker = CircuitBreaker(failure_threshold=1, recovery_timeout=30)
-    breaker.failure(now=100)
+    breaker.failure()
     called = False
 
     async def op() -> None:
@@ -104,8 +105,12 @@ async def test_bulkhead_bounds_concurrency() -> None:
 
 def test_append_only_journal_replays_and_detects_tampering(tmp_path) -> None:
     journal = AppendOnlyJournal(tmp_path / "events.jsonl")
-    first = journal.append("position.opened", {"symbol": "BTCUSDT", "qty": 1}, "2026-09-04T00:00:00Z")
-    second = journal.append("position.closed", {"symbol": "BTCUSDT", "pnl": 12.5}, "2026-09-04T00:01:00Z")
+    first = journal.append(
+        "position.opened", {"symbol": "BTCUSDT", "qty": 1}, "2026-09-04T00:00:00Z"
+    )
+    second = journal.append(
+        "position.closed", {"symbol": "BTCUSDT", "pnl": 12.5}, "2026-09-04T00:01:00Z"
+    )
     records = journal.replay()
     assert [r.sequence for r in records] == [1, 2]
     assert first.record_hash == second.previous_hash
