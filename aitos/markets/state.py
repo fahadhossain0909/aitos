@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
 from datetime import datetime, timezone
+from enum import Enum
 
 
 class MarketRegime(str, Enum):
@@ -33,7 +33,16 @@ class GlobalMarketState:
     as_of: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
-        for name in ("risk_score", "volatility_score", "liquidity_score", "usd_score", "rates_score", "equity_score", "crypto_score", "confidence"):
+        for name in (
+            "risk_score",
+            "volatility_score",
+            "liquidity_score",
+            "usd_score",
+            "rates_score",
+            "equity_score",
+            "crypto_score",
+            "confidence",
+        ):
             value = float(getattr(self, name))
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"{name} must be between 0 and 1")
@@ -43,7 +52,14 @@ class MarketStateBuilder:
     """Deterministic baseline state classifier; ML can replace this later."""
 
     @staticmethod
-    def build(*, volatility: float, risk: float, liquidity: float, confidence: float = 0.5, features: dict[str, float] | None = None) -> GlobalMarketState:
+    def build(
+        *,
+        volatility: float,
+        risk: float,
+        liquidity: float,
+        confidence: float = 0.5,
+        features: dict[str, float] | None = None,
+    ) -> GlobalMarketState:
         volatility = min(1.0, max(0.0, volatility))
         risk = min(1.0, max(0.0, risk))
         liquidity = min(1.0, max(0.0, liquidity))
