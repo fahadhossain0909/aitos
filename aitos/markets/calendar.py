@@ -33,13 +33,23 @@ class MacroEvent:
 class TradingCalendar:
     """Explicit session/event boundary; 24/7 is the safe default."""
 
-    def __init__(self, sessions: tuple[MarketSession, ...] = (), events: tuple[MacroEvent, ...] = ()) -> None:
+    def __init__(
+        self,
+        sessions: tuple[MarketSession, ...] = (),
+        events: tuple[MacroEvent, ...] = (),
+    ) -> None:
         self.sessions = sessions
         self.events = events
 
     def is_open(self, when: datetime) -> bool:
-        return not self.sessions or any(session.contains(when) for session in self.sessions)
+        return not self.sessions or any(
+            session.contains(when) for session in self.sessions
+        )
 
-    def upcoming(self, when: datetime, horizon: timedelta = timedelta(hours=24)) -> tuple[MacroEvent, ...]:
+    def upcoming(
+        self, when: datetime, horizon: timedelta = timedelta(hours=24)
+    ) -> tuple[MacroEvent, ...]:
         end = when + horizon
-        return tuple(event for event in self.events if when <= event.scheduled_at <= end)
+        return tuple(
+            event for event in self.events if when <= event.scheduled_at <= end
+        )

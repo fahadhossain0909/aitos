@@ -40,9 +40,7 @@ class CrossMarketIntelligenceEngine:
 
     def returns(self, instrument_id: str) -> tuple[float, ...]:
         values = self._series[instrument_id]
-        return tuple(
-            (b / a) - 1.0 for a, b in zip(values, list(values)[1:]) if a > 0
-        )
+        return tuple((b / a) - 1.0 for a, b in zip(values, list(values)[1:]) if a > 0)
 
     def correlation(self, left: str, right: str, lag: int = 0) -> float:
         a, b = self.returns(left), self.returns(right)
