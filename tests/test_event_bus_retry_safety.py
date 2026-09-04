@@ -1,6 +1,6 @@
 import pytest
 
-from aitos.eventbus.redis_bus import EventBus, MAX_DELIVERY_ATTEMPTS
+from aitos.eventbus.redis_bus import MAX_DELIVERY_ATTEMPTS, EventBus
 
 
 class FakeRedis:
@@ -21,7 +21,11 @@ async def test_failed_event_is_acked_before_retry_replacement():
     redis = FakeRedis()
     bus = EventBus(redis)
     await bus._handle_failed_event(
-        "stream:market.trade", "market-scanner", "1-0", {"topic": "market.trade"}, RuntimeError("x")
+        "stream:market.trade",
+        "market-scanner",
+        "1-0",
+        {"topic": "market.trade"},
+        RuntimeError("x"),
     )
     assert redis.acks == [("stream:market.trade", "market-scanner", "1-0")]
     assert redis.adds[0][1]["_delivery_attempts"] == 1
@@ -35,7 +39,11 @@ async def test_terminal_failure_goes_to_dlq_and_clears_pel():
     bus = EventBus(redis)
     fields = {"topic": "market.trade", "_delivery_attempts": MAX_DELIVERY_ATTEMPTS - 1}
     await bus._handle_failed_event(
-        "stream:market.trade", "market-scanner", "2-0", fields, RuntimeError("bad payload")
+        "stream:market.trade",
+        "market-scanner",
+        "2-0",
+        fields,
+        RuntimeError("bad payload"),
     )
     assert redis.acks == [("stream:market.trade", "market-scanner", "2-0")]
     assert redis.adds[0][0] == "stream:dlq"
