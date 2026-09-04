@@ -15,6 +15,7 @@ from .models import (
     AStatResult,
     BayesianEvidence,
     DirectionProbability,
+    EVTTail,
     RegimeProbability,
     StrategyStatContext,
 )
@@ -30,6 +31,7 @@ __all__ = [
     "BayesianEvidence",
     "ContractStatisticalStack",
     "DirectionProbability",
+    "EVTTail",
     "HierarchicalBayes",
     "MarkovSwitchingModel",
     "RegimeProbability",
