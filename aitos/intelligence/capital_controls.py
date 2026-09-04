@@ -57,12 +57,7 @@ def execution_cost_bps(
     volatility_score: float | None,
     config: CapitalControlConfig | None = None,
 ) -> float:
-    """Estimate execution friction without pretending quoted liquidity is free.
-
-    Poor liquidity and high volatility increase expected slippage. The result is
-    deliberately conservative and is intended to be fed back into the net-edge
-    calculation before capital authorization.
-    """
+    """Estimate execution friction conservatively before capital authorization."""
     cfg = config or CapitalControlConfig()
     liquidity = max(0.0, min(10.0, float(liquidity_score)))
     liquidity_multiplier = (
@@ -70,27 +65,22 @@ def execution_cost_bps(
         if liquidity >= cfg.min_liquidity_for_execution
         else cfg.adverse_slippage_multiplier
     )
+    # A missing volatility estimate still carries a small model-risk buffer;
+    # zero friction must never be assumed merely because telemetry is absent.
     volatility = (
-        0.0 if volatility_score is None else max(0.0, min(1.0, float(volatility_score)))
+        0.01 if volatility_score is None else max(0.0, min(1.0, float(volatility_score)))
     )
-    volatility_multiplier = 1.0 + volatility
     fee = max(0.0, float(base_fee_bps))
     slippage = (
         max(0.0, float(base_slippage_bps))
         * liquidity_multiplier
-        * volatility_multiplier
+        * (1.0 + volatility)
     )
     return fee + slippage
 
 
 class ProbabilityCalibrator:
-    """Online reliability calibration for probability-like model outputs.
-
-    Until enough observations exist, the raw probability is retained. After
-    the minimum sample count, each prediction is shrunk toward its empirical
-    bin hit-rate, reducing systematic overconfidence without allowing the
-    calibrator to create a more optimistic probability than observed data.
-    """
+    """Online reliability calibration for probability-like model outputs."""
 
     def __init__(self, config: CapitalControlConfig | None = None) -> None:
         self.config = config or CapitalControlConfig()
