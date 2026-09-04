@@ -46,9 +46,7 @@ class VaultSecretProvider(SecretProvider):
             headers={"X-Vault-Token": self.token, "Accept": "application/json"},
         )
         try:
-            with urlopen(
-                request, timeout=self.timeout_seconds
-            ) as response:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
                 document = json.loads(response.read().decode("utf-8"))
             value = document.get("data", {}).get("data", {}).get(name)
         except (
