@@ -1,7 +1,5 @@
 from datetime import datetime, timezone
 
-import pytest
-
 from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
 from aitos.market_data.deep_orderbook import (
     DEEP_SYMBOLS,
@@ -39,7 +37,12 @@ def test_store_rejects_non_deep_symbol_without_write():
             _event(
                 MarketEventType.BOOK_DELTA,
                 symbol="ETHUSDT",
-                payload={"first_update_id": 1, "final_update_id": 1, "bids": [], "asks": []},
+                payload={
+                    "first_update_id": 1,
+                    "final_update_id": 1,
+                    "bids": [],
+                    "asks": [],
+                },
             )
         )
     )
