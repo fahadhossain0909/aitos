@@ -24,6 +24,11 @@ from aitos.exchange.parsing import (
 from aitos.exchange.rate_limiter import TokenBucketRateLimiter
 from aitos.exchange.symbol_filters import SymbolFilters, parse_exchange_info
 from aitos.logging_setup import get_logger
+from aitos.market_data.endpoints import (
+    BINANCE_USDM_WS_COMBINED,
+    BINANCE_USDM_WS_MAX_LIFETIME_SECONDS,
+    BINANCE_USDM_WS_RAW,
+)
 from aitos.models.market import (
     FundingRate,
     Kline,
@@ -34,9 +39,8 @@ from aitos.models.market import (
 
 logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
-# Binance USD-M Futures combined/raw market streams are /stream and /ws.
-WS_MARKET_BASE_URL = "wss://fstream.binance.com/stream"
-WS_MARKET_RAW_BASE_URL = "wss://fstream.binance.com/ws"
+WS_MARKET_BASE_URL = BINANCE_USDM_WS_COMBINED
+WS_MARKET_RAW_BASE_URL = BINANCE_USDM_WS_RAW
 WS_PUBLIC_BASE_URL = WS_MARKET_BASE_URL
 DEFAULT_RATE_LIMIT_CAPACITY = 2000
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2000 / 60
@@ -238,7 +242,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         fallback_tasks[symbol] = asyncio.create_task(
                             fallback[symbol].__anext__()
                         )
-                    break
                 if primary_task is None:
                     primary_task = asyncio.create_task(primary.__anext__())
         finally:
@@ -349,19 +352,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             response.raise_for_status()
             return await response.json()
 
-    async def _stream(
-        self, streams: list[str], parser: Callable[[Any], Any]
-    ) -> AsyncIterator[Any]:
-        async for data, _ in self._raw_stream(streams):
-            yield parser(data)
-
     @staticmethod
     def _ws_base_url(streams: list[str]) -> str:
-        return (
-            WS_PUBLIC_BASE_URL
-            if streams and all("@depth" in s or "@bookTicker" in s for s in streams)
-            else WS_MARKET_BASE_URL
-        )
+        return WS_PUBLIC_BASE_URL
 
     async def _direct_raw_stream(
         self, stream: str, emit_reconnect: bool = False
@@ -392,16 +385,24 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             try:
                 async with self._ws_connector(url) as ws:
                     backoff = INITIAL_BACKOFF_SECONDS
-                    async for raw_message in ws:
-                        envelope = json.loads(raw_message)
-                        if direct_stream is not None:
-                            yield envelope, direct_stream
-                        else:
-                            yield envelope.get("data", envelope), envelope.get(
-                                "stream", ""
-                            )
+                    # Binance documents a hard 24h connection lifetime. Recycle
+                    # before that limit so the exchange does not choose the cutover.
+                    async with asyncio.timeout(BINANCE_USDM_WS_MAX_LIFETIME_SECONDS):
+                        async for raw_message in ws:
+                            envelope = json.loads(raw_message)
+                            if direct_stream is not None:
+                                yield envelope, direct_stream
+                            else:
+                                yield envelope.get("data", envelope), envelope.get(
+                                    "stream", ""
+                                )
             except asyncio.CancelledError:
                 raise
+            except TimeoutError:
+                logger.info(
+                    "Binance websocket reached proactive lifecycle rotation",
+                    extra={"aitos_extra": {"url": url}},
+                )
             except Exception as exc:
                 logger.error(
                     "Binance websocket disconnected; reconnecting",
