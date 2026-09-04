@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from .contracts import MarketEvent, MarketEventType, MarketSource
+from .endpoints import OKX_PUBLIC_WS, OKX_WS_HEARTBEAT_INTERVAL_SECONDS
 from .venues import MarketType, Venue, VenueCapabilities
 from .websocket_adapter import JsonWebSocketAdapter
 
@@ -13,7 +14,10 @@ from .websocket_adapter import JsonWebSocketAdapter
 class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
     """Normalize OKX public perpetual streams into venue-neutral events."""
 
-    websocket_url = "wss://ws.okx.com:8443/ws/v5/public"
+    websocket_url = OKX_PUBLIC_WS
+    heartbeat_interval_seconds = OKX_WS_HEARTBEAT_INTERVAL_SECONDS
+    # OKX documents a text "ping" heartbeat for public WebSocket connections.
+    heartbeat_message = "ping"
 
     def __init__(self, market_type: MarketType = MarketType.PERPETUAL) -> None:
         if market_type not in (MarketType.PERPETUAL, MarketType.USD_M_FUTURES):
