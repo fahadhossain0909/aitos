@@ -40,7 +40,9 @@ def event(event_type, payload, symbol="BTCUSDT"):
 @pytest.mark.asyncio
 async def test_persistence_sink_persists_trade():
     repo = FakeRepository()
-    sink = CanonicalMarketDataPersistenceSink.__new__(CanonicalMarketDataPersistenceSink)
+    sink = CanonicalMarketDataPersistenceSink.__new__(
+        CanonicalMarketDataPersistenceSink
+    )
     sink._repository = repo
     await sink._persist(
         event(
@@ -63,7 +65,9 @@ async def test_persistence_sink_persists_trade():
 @pytest.mark.asyncio
 async def test_persistence_sink_does_not_persist_non_anchor_books():
     repo = FakeRepository()
-    sink = CanonicalMarketDataPersistenceSink.__new__(CanonicalMarketDataPersistenceSink)
+    sink = CanonicalMarketDataPersistenceSink.__new__(
+        CanonicalMarketDataPersistenceSink
+    )
     sink._repository = repo
     sink._historical_books = {"BTCUSDT", "LTCUSDT"}
     sink._book_interval = 1.0
