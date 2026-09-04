@@ -16,7 +16,9 @@ class Allocation:
 class CapitalAllocator:
     """Allocate a shared capital budget without coupling strategies together."""
 
-    def __init__(self, total_capital: float, *, max_strategy_fraction: float = 0.50) -> None:
+    def __init__(
+        self, total_capital: float, *, max_strategy_fraction: float = 0.50
+    ) -> None:
         if total_capital < 0:
             raise ValueError("total_capital must be non-negative")
         if not 0 < max_strategy_fraction <= 1:

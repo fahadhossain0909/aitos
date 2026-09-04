@@ -35,8 +35,7 @@ class StrategyRegistry:
 
     def enabled(self) -> tuple[Strategy, ...]:
         return tuple(
-            self._strategies[strategy_id]
-            for strategy_id in sorted(self._enabled)
+            self._strategies[strategy_id] for strategy_id in sorted(self._enabled)
         )
 
     def evaluate(self, context: StrategyContext) -> tuple[StrategyResult, ...]:
