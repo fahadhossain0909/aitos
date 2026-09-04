@@ -42,7 +42,9 @@ LIMIT {{batch_size:UInt32}}
 class ClickHouseNeo4jBackfill:
     """Bounded, keyset-paginated, idempotent semantic reconstruction job."""
 
-    def __init__(self, clickhouse_client: Any, neo4j_driver: Any, database: str = "aitos") -> None:
+    def __init__(
+        self, clickhouse_client: Any, neo4j_driver: Any, database: str = "aitos"
+    ) -> None:
         self._ch = clickhouse_client
         self._neo4j = neo4j_driver
         self._database = database
@@ -102,7 +104,16 @@ class ClickHouseNeo4jBackfill:
 
     @staticmethod
     def _params(row: tuple[Any, ...]) -> dict[str, Any]:
-        event_time, _ingest_time, event_id, category, symbol, source_module, schema_version, payload_json = row
+        (
+            event_time,
+            _ingest_time,
+            event_id,
+            category,
+            symbol,
+            source_module,
+            schema_version,
+            payload_json,
+        ) = row
         try:
             payload = json.loads(payload_json) if payload_json else {}
         except (TypeError, ValueError):
@@ -113,12 +124,19 @@ class ClickHouseNeo4jBackfill:
         return {
             "event_id": event_id,
             "topic": str(category),
-            "event_time": event_time.isoformat() if hasattr(event_time, "isoformat") else str(event_time),
+            "event_time": (
+                event_time.isoformat()
+                if hasattr(event_time, "isoformat")
+                else str(event_time)
+            ),
             "source_module": str(source_module or "unknown"),
             "schema_version": str(schema_version or payload.get("schema_version", "1")),
             "payload_json": json.dumps(payload, default=str, separators=(",", ":")),
-            "symbol": _first(payload, "symbol", "instrument", "market_symbol") or str(symbol or ""),
-            "strategy_id": _first(payload, "strategy_id", "strategy", "strategy_version"),
+            "symbol": _first(payload, "symbol", "instrument", "market_symbol")
+            or str(symbol or ""),
+            "strategy_id": _first(
+                payload, "strategy_id", "strategy", "strategy_version"
+            ),
             "model_id": _first(payload, "model_id", "model", "model_version"),
             "policy_id": _first(payload, "policy_id", "policy", "policy_version"),
             "trade_id": _first(payload, "trade_id", "position_id"),
@@ -131,12 +149,18 @@ class ClickHouseNeo4jBackfill:
             "execution_id": _first(payload, "execution_id", "fill_id", "order_id"),
             "execution_side": _first(payload, "side", "execution_side"),
             "execution_status": _first(payload, "execution_status", "status"),
-            "execution_price": _number(payload, "execution_price", "fill_price", "price"),
-            "execution_quantity": _number(payload, "execution_quantity", "fill_quantity", "quantity"),
+            "execution_price": _number(
+                payload, "execution_price", "fill_price", "price"
+            ),
+            "execution_quantity": _number(
+                payload, "execution_quantity", "fill_quantity", "quantity"
+            ),
             "journey_id": _first(payload, "journey_id", "trade_journey_id"),
             "journey_state": _first(payload, "journey_state", "journey_status"),
             "forecast_id": _first(payload, "forecast_id", "prediction_id"),
-            "forecast_probability": _number(payload, "probability", "forecast_probability", "confidence"),
+            "forecast_probability": _number(
+                payload, "probability", "forecast_probability", "confidence"
+            ),
             "forecast_target": _first(payload, "target", "forecast_target"),
             "forecast_horizon": _first(payload, "horizon", "forecast_horizon"),
             "outcome_id": _first(payload, "outcome_id", "result_id"),
@@ -144,7 +168,9 @@ class ClickHouseNeo4jBackfill:
             "outcome_pnl": _number(payload, "pnl", "outcome_pnl", "reward"),
             "run_id": _first(payload, "model_run_id", "run_id", "training_run_id"),
             "dataset_id": _first(payload, "dataset_id", "training_dataset_id"),
-            "feature_set_version": _first(payload, "feature_set_version", "features_version"),
+            "feature_set_version": _first(
+                payload, "feature_set_version", "features_version"
+            ),
             "artifact_id": _first(payload, "artifact_id", "model_artifact_id"),
             "run_status": _first(payload, "run_status", "training_status"),
             "calibration_id": _first(payload, "calibration_id", "calibration_run_id"),
