@@ -7,6 +7,8 @@ from typing import Any
 
 from aitos.market_data.binance_adapter import BinanceCanonicalMarketDataAdapter
 from aitos.market_data.bus import MarketDataBus
+from aitos.market_data.deep_orderbook import DeepOrderBookStore
+from aitos.market_data.deep_orderbook_collector import DeepOrderBookCollector
 from aitos.market_data.gateway import MarketDataGateway
 from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSink
 from aitos.market_data.runtime import CanonicalMarketDataRuntime
@@ -45,6 +47,7 @@ class DataIngestionService(_LegacyDataIngestionService):
         self._canonical_runtime: CanonicalMarketDataRuntime | None = None
         self._deep_runtime: CanonicalMarketDataRuntime | None = None
         self._canonical_persistence: CanonicalMarketDataPersistenceSink | None = None
+        self._deep_collector: DeepOrderBookCollector | None = None
         if self._canonical_mode:
             market_type = str(getattr(self._exchange, "market_type", "usd_m_futures"))
             market_bus = MarketDataBus(self._event_bus)
@@ -65,14 +68,15 @@ class DataIngestionService(_LegacyDataIngestionService):
                 orderbook_symbols=standard_orderbooks,
                 orderbook_levels=STANDARD_ORDERBOOK_LEVELS,
             )
+            deep_adapter = BinanceCanonicalMarketDataAdapter(
+                self._exchange, market_type=market_type
+            )
             deep_bus = MarketDataBus(self._event_bus)
             deep_gateway = MarketDataGateway(
                 venue="binance", market_type=market_type, publisher=deep_bus.publish
             )
             self._deep_runtime = CanonicalMarketDataRuntime(
-                adapter=BinanceCanonicalMarketDataAdapter(
-                    self._exchange, market_type=market_type
-                ),
+                adapter=deep_adapter,
                 market_bus=deep_bus,
                 gateway=deep_gateway,
                 symbols=[],
@@ -87,6 +91,12 @@ class DataIngestionService(_LegacyDataIngestionService):
                 historical_book_symbols=DEEP_HISTORICAL_SYMBOLS,
                 book_interval_seconds=1.0,
             )
+            if self._repository is not None:
+                self._deep_collector = DeepOrderBookCollector(
+                    deep_adapter,
+                    DeepOrderBookStore(self._repository),
+                    symbols=DEEP_HISTORICAL_SYMBOLS,
+                )
 
     async def initialize(self, config: dict[str, Any]) -> None:
         await super().initialize(config)
@@ -106,22 +116,24 @@ class DataIngestionService(_LegacyDataIngestionService):
             await self._canonical_runtime.start()
             if self._deep_runtime is not None:
                 await self._deep_runtime.start()
+            if self._deep_collector is not None:
+                await self._deep_collector.start()
 
     async def health_check(self):
         status = await super().health_check()
         if self._canonical_runtime is not None:
-            status.details["canonical_market_data"] = (
-                self._canonical_runtime.gateway.snapshot()
-            )
+            status.details["canonical_market_data"] = self._canonical_runtime.gateway.snapshot()
         if self._deep_runtime is not None:
             status.details["deep_market_data"] = self._deep_runtime.gateway.snapshot()
+        if self._deep_collector is not None:
+            status.details["deep_orderbook_collector"] = self._deep_collector.snapshot()
         if self._canonical_persistence is not None:
-            status.details["canonical_persistence"] = (
-                self._canonical_persistence.snapshot()
-            )
+            status.details["canonical_persistence"] = self._canonical_persistence.snapshot()
         return status
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        if self._deep_collector is not None:
+            await self._deep_collector.stop()
         if self._canonical_persistence is not None:
             await self._canonical_persistence.shutdown()
         if self._deep_runtime is not None:
