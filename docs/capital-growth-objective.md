@@ -59,6 +59,23 @@ These are configuration defaults, not claims about future market performance. Th
 
 These are conservative policy defaults and must be calibrated against AITOS paper-trading/backtest telemetry. They are not performance guarantees.
 
+## P2 closed-loop learning and feedback
+
+`aitos/intelligence/capital_feedback.py` completes the capital layer with a bounded post-trade outcome ledger. Each closed trade can retain realized return/cost, decision-time loss probability and net edge, regime and model identity. The feedback window is bounded so it cannot grow without limit.
+
+The feedback layer exposes:
+
+- realized win/loss rate and return statistics;
+- realized cost and predicted-edge diagnostics;
+- Brier-score probability quality;
+- empirical probability-bin outcomes;
+- outcome counts by regime and model;
+- a minimum-sample readiness signal before feedback is treated as statistically useful.
+
+**P2 is intentionally model-agnostic. It is not a prerequisite for Deep Learning.** Deep Learning/RL may consume the feedback as training evidence, but it cannot use feedback to bypass the capital objective, portfolio protection, circuit breakers or the final lifecycle gate. Existing `RLFeedbackLoop`/`DeepValueRLScorer` remains the model-learning path; P2 supplies a broader capital-level outcome contract that can also be consumed by future statistical or DL models.
+
+Most importantly, P2 does **not** automatically relax hard limits after good performance and does not manufacture optimistic probabilities. Adaptive learning can improve estimates, but capital-protection constraints remain authoritative.
+
 ## Runtime enforcement
 
 `aitos/intelligence/capital_gateway.py` converts an executable `Opportunity` into the venue-neutral economic estimate. The nearest take-profit is used as the conservative gross-return target. The stop distance supplies loss severity. A supplied `loss_probability` takes precedence; otherwise the kernel/scanner confidence is converted to a conservative probability-like signal.
