@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+from aitos.exchange.orderbook import DepthUpdate
 from aitos.models.market import Kline, TradeTick
 from aitos.models.market import OrderBookSnapshot as LegacyBook
 
@@ -59,6 +60,37 @@ def book_snapshot_event(
         sequence=book.last_update_id,
         correlation_id=f"binance:{market_type}:{book.symbol}:book:{book.last_update_id}",
         trace_id=book.symbol,
+    )
+
+
+def book_delta_event(
+    delta: DepthUpdate,
+    *,
+    symbol: str,
+    market_type: str = "futures",
+    source: MarketSource = MarketSource.WEBSOCKET,
+) -> MarketEvent:
+    """Convert a raw Binance depth update without losing exchange sequence data."""
+    received = _received()
+    event_time = datetime.fromtimestamp(delta.event_time_ms / 1000, tz=timezone.utc)
+    return MarketEvent(
+        event_type=MarketEventType.BOOK_DELTA,
+        exchange="binance",
+        market=market_type,
+        symbol=symbol,
+        event_time=event_time,
+        payload={
+            "first_update_id": delta.first_update_id,
+            "final_update_id": delta.final_update_id,
+            "previous_update_id": delta.previous_update_id,
+            "bids": [{"price": p, "quantity": q} for p, q in delta.bids],
+            "asks": [{"price": p, "quantity": q} for p, q in delta.asks],
+        },
+        source=source,
+        ingest_time=received,
+        sequence=delta.final_update_id,
+        correlation_id=f"binance:{market_type}:{symbol}:depth:{delta.final_update_id}",
+        trace_id=symbol,
     )
 
 
