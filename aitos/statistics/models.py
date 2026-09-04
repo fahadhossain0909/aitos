@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
@@ -65,13 +66,7 @@ class RegimeProbability:
 
 @dataclass(frozen=True)
 class EVTTail:
-    """Serializable Peaks-Over-Threshold extreme-tail estimate.
-
-    ``tail_probability`` is the empirical probability of exceeding the fitted
-    threshold. ``expected_shortfall`` is the estimated mean loss conditional on
-    a threshold exceedance. Keeping the full estimator state here makes EVT
-    output stable for stack consumers and replay/serialization paths.
-    """
+    """Serializable Peaks-Over-Threshold extreme-tail estimate."""
 
     threshold: float
     exceedances: int
@@ -93,7 +88,7 @@ class EVTTail:
             "expected_shortfall",
         ):
             value = float(getattr(self, name))
-            if not __import__("math").isfinite(value):
+            if not math.isfinite(value):
                 raise ValueError(f"{name} must be finite")
         if not 0.0 <= self.exceedance_rate <= 1.0:
             raise ValueError("exceedance_rate must be in [0, 1]")
