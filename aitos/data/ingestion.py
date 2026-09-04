@@ -50,6 +50,7 @@ class DataIngestionService(_LegacyDataIngestionService):
             kwargs["live_trade_handler"] = None
             kwargs["live_orderbook_handler"] = None
         elif live_trade_handler is None and live_orderbook_handler is None:
+
             async def _legacy_trade_sink(_trade) -> None:
                 return None
 
@@ -71,9 +72,11 @@ class DataIngestionService(_LegacyDataIngestionService):
                 venue="binance", market_type=market_type, publisher=market_bus.publish
             )
             initial_orderbooks = [
-                LIVE_DEEP_ANCHOR
-                if LIVE_DEEP_ANCHOR in {s.upper() for s in self._symbols}
-                else self._symbols[0]
+                (
+                    LIVE_DEEP_ANCHOR
+                    if LIVE_DEEP_ANCHOR in {s.upper() for s in self._symbols}
+                    else self._symbols[0]
+                )
             ]
             self._canonical_runtime = CanonicalMarketDataRuntime(
                 adapter=BinanceCanonicalMarketDataAdapter(
