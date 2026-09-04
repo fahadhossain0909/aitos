@@ -151,7 +151,9 @@ async def test_persists_decision_risk_and_trade_analytics():
         await service._handle_live_analytics(event)
 
     assert len(repository._client.inserts) == 4
-    assert all(item[0] == "live_analytics_events" for item in repository._client.inserts)
+    assert all(
+        item[0] == "live_analytics_events" for item in repository._client.inserts
+    )
     rows = [item[1][0] for item in repository._client.inserts]
     assert [row[3] for row in rows] == [
         "decision.snapshot",
@@ -179,7 +181,9 @@ async def test_live_analytics_subscriptions_are_live_only():
     await service.initialize({})
 
     analytics_calls = [
-        kwargs for args, kwargs in bus.calls if args and args[0] in service.LIVE_ANALYTICS_TOPICS
+        kwargs
+        for args, kwargs in bus.calls
+        if args and args[0] in service.LIVE_ANALYTICS_TOPICS
     ]
     assert len(analytics_calls) == len(service.LIVE_ANALYTICS_TOPICS)
     assert all(call["live_only"] is True for call in analytics_calls)
