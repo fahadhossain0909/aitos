@@ -17,7 +17,6 @@ from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 from aitos.trading.lifecycle import TradeLifecycle
 
-
 _ORIGINAL_ATTR = "_aitos_capital_original_submit_opportunity"
 
 
@@ -80,9 +79,7 @@ def install_capital_guard() -> None:
             )
 
         try:
-            decision, allocation = gateway.authorize_opportunity(
-                equity, opportunity
-            )
+            decision, allocation = gateway.authorize_opportunity(equity, opportunity)
         except (TypeError, ValueError, ArithmeticError) as exc:
             return _rejected_trade(opportunity, f"capital_objective: {exc}")
 
