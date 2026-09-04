@@ -80,7 +80,9 @@ def market_event_to_wire(event: MarketEvent) -> dict[str, Any]:
 
 def market_event_from_wire(payload: dict[str, Any]) -> MarketEvent:
     event_time = _datetime_from_wire(payload.get("event_time", payload["source_ts"]))
-    ingest_time = _datetime_from_wire(payload.get("ingest_time", payload["received_ts"]))
+    ingest_time = _datetime_from_wire(
+        payload.get("ingest_time", payload["received_ts"])
+    )
     return MarketEvent(
         event_type=MarketEventType(payload["event_type"]),
         exchange=str(payload["exchange"]),
@@ -94,7 +96,9 @@ def market_event_from_wire(payload: dict[str, Any]) -> MarketEvent:
         source=MarketSource(payload["source"]),
         ingest_time=ingest_time,
         event_id=str(payload["event_id"]),
-        sequence=int(payload["sequence"]) if payload.get("sequence") is not None else None,
+        sequence=(
+            int(payload["sequence"]) if payload.get("sequence") is not None else None
+        ),
         correlation_id=payload.get("correlation_id"),
         trace_id=payload.get("trace_id"),
         schema_version=int(payload.get("schema_version", 1)),
