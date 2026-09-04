@@ -231,15 +231,18 @@ class KnowledgeGraphWriter(AITOSModule):
         self._subscriptions.extend(
             [
                 await self._event_bus.subscribe(
-                    "trade.position_opened", self._on_position_opened,
+                    "trade.position_opened",
+                    self._on_position_opened,
                     group="knowledge-graph",
                 ),
                 await self._event_bus.subscribe(
-                    "trade.position_closed", self._on_position_closed,
+                    "trade.position_closed",
+                    self._on_position_closed,
                     group="knowledge-graph",
                 ),
                 await self._event_bus.subscribe(
-                    "journal.mistake_recorded", self._on_mistake_recorded,
+                    "journal.mistake_recorded",
+                    self._on_mistake_recorded,
                     group="knowledge-graph",
                 ),
             ]
@@ -247,20 +250,31 @@ class KnowledgeGraphWriter(AITOSModule):
         for topic in SEMANTIC_TOPICS:
             self._subscriptions.append(
                 await self._event_bus.subscribe(
-                    topic, self._on_semantic_event,
-                    group="knowledge-graph-semantic", live_only=True,
+                    topic,
+                    self._on_semantic_event,
+                    group="knowledge-graph-semantic",
+                    live_only=True,
                 )
             )
         self._initialized = True
-        logger.info("KnowledgeGraphWriter initialized", extra={"aitos_extra": {"semantic_topics": SEMANTIC_TOPICS}})
+        logger.info(
+            "KnowledgeGraphWriter initialized",
+            extra={"aitos_extra": {"semantic_topics": SEMANTIC_TOPICS}},
+        )
 
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
-            details={"writes_applied": self._writes_applied, "errors": self._errors, "semantic_topics": list(SEMANTIC_TOPICS)},
+            details={
+                "writes_applied": self._writes_applied,
+                "errors": self._errors,
+                "semantic_topics": list(SEMANTIC_TOPICS),
+            },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
@@ -277,18 +291,30 @@ class KnowledgeGraphWriter(AITOSModule):
     async def handle_event(self, event: Event) -> EventResponse | None:
         return None
 
-    async def update_symbol_correlation(self, symbol_a: str, symbol_b: str, coefficient: float, updated_at: str) -> None:
+    async def update_symbol_correlation(
+        self, symbol_a: str, symbol_b: str, coefficient: float, updated_at: str
+    ) -> None:
         self._require_initialized()
-        await self._run(CORRELATION_QUERY, symbol_a=symbol_a, symbol_b=symbol_b, coefficient=coefficient, updated_at=updated_at)
+        await self._run(
+            CORRELATION_QUERY,
+            symbol_a=symbol_a,
+            symbol_b=symbol_b,
+            coefficient=coefficient,
+            updated_at=updated_at,
+        )
 
     async def _on_position_opened(self, event: Event) -> EventResponse | None:
         payload = event.payload
         await self._run(
             CREATE_TRADE_QUERY,
-            symbol=payload.get("symbol", ""), strategy_id=payload.get("strategy_id", ""),
-            trade_id=payload.get("trade_id", ""), side=payload.get("side", ""),
-            entry_price=payload.get("entry_price", 0.0), regime=payload.get("regime", "unknown"),
-            state=payload.get("state", ""), entry_time=payload.get("entry_time", ""),
+            symbol=payload.get("symbol", ""),
+            strategy_id=payload.get("strategy_id", ""),
+            trade_id=payload.get("trade_id", ""),
+            side=payload.get("side", ""),
+            entry_price=payload.get("entry_price", 0.0),
+            regime=payload.get("regime", "unknown"),
+            state=payload.get("state", ""),
+            entry_time=payload.get("entry_time", ""),
         )
         self._last_event_time = event.created_at
         return None
@@ -297,9 +323,12 @@ class KnowledgeGraphWriter(AITOSModule):
         payload = event.payload
         await self._run(
             CLOSE_TRADE_QUERY,
-            trade_id=payload.get("trade_id", ""), pnl=payload.get("pnl"),
-            pnl_percent=payload.get("pnl_percent"), exit_price=payload.get("exit_price"),
-            exit_reason=payload.get("exit_reason"), exit_time=payload.get("exit_time"),
+            trade_id=payload.get("trade_id", ""),
+            pnl=payload.get("pnl"),
+            pnl_percent=payload.get("pnl_percent"),
+            exit_price=payload.get("exit_price"),
+            exit_reason=payload.get("exit_reason"),
+            exit_time=payload.get("exit_time"),
             state=payload.get("state", ""),
         )
         self._last_event_time = event.created_at
@@ -313,8 +342,10 @@ class KnowledgeGraphWriter(AITOSModule):
         for index, mistake_text in enumerate(entry["mistakes"]):
             await self._run(
                 LINK_MISTAKE_QUERY,
-                trade_id=trade_id, mistake_id=f"{event.event_id}:m:{index}",
-                mistake_text=mistake_text, created_at=entry.get("created_at", ""),
+                trade_id=trade_id,
+                mistake_id=f"{event.event_id}:m:{index}",
+                mistake_text=mistake_text,
+                created_at=entry.get("created_at", ""),
             )
         self._last_event_time = event.created_at
         return None
@@ -323,7 +354,9 @@ class KnowledgeGraphWriter(AITOSModule):
         payload = event.payload if isinstance(event.payload, dict) else {}
         await self._run(
             PROJECT_SEMANTIC_EVENT_QUERY,
-            event_id=event.event_id, topic=event.topic, event_time=event.created_at,
+            event_id=event.event_id,
+            topic=event.topic,
+            event_time=event.created_at,
             source_module=event.source_module,
             schema_version=str(payload.get("schema_version", "1")),
             payload_json=json.dumps(payload, default=str, separators=(",", ":")),
@@ -342,11 +375,15 @@ class KnowledgeGraphWriter(AITOSModule):
             execution_side=_first(payload, "side", "execution_side"),
             execution_status=_first(payload, "execution_status", "status"),
             execution_price=_number(payload, "execution_price", "fill_price", "price"),
-            execution_quantity=_number(payload, "execution_quantity", "fill_quantity", "quantity"),
+            execution_quantity=_number(
+                payload, "execution_quantity", "fill_quantity", "quantity"
+            ),
             journey_id=_first(payload, "journey_id", "trade_journey_id"),
             journey_state=_first(payload, "journey_state", "journey_status", "state"),
             forecast_id=_first(payload, "forecast_id", "prediction_id"),
-            forecast_probability=_number(payload, "probability", "forecast_probability", "confidence"),
+            forecast_probability=_number(
+                payload, "probability", "forecast_probability", "confidence"
+            ),
             forecast_target=_first(payload, "target", "forecast_target"),
             forecast_horizon=_first(payload, "horizon", "forecast_horizon"),
             outcome_id=_first(payload, "outcome_id", "result_id"),
@@ -354,7 +391,9 @@ class KnowledgeGraphWriter(AITOSModule):
             outcome_pnl=_number(payload, "pnl", "outcome_pnl"),
             run_id=_first(payload, "model_run_id", "run_id", "training_run_id"),
             dataset_id=_first(payload, "dataset_id", "dataset_version"),
-            feature_set_version=_first(payload, "feature_set_version", "feature_version"),
+            feature_set_version=_first(
+                payload, "feature_set_version", "feature_version"
+            ),
             artifact_id=_first(payload, "artifact_id", "model_artifact_id"),
             run_status=_first(payload, "run_status", "training_status", "status"),
             calibration_id=_first(payload, "calibration_id", "calibration_run_id"),
@@ -375,8 +414,13 @@ class KnowledgeGraphWriter(AITOSModule):
             self._writes_applied += 1
         except Exception as exc:  # noqa: BLE001
             self._errors += 1
-            logger.error("knowledge graph write failed", extra={"aitos_extra": {"error": str(exc)}})
+            logger.error(
+                "knowledge graph write failed",
+                extra={"aitos_extra": {"error": str(exc)}},
+            )
 
     def _require_initialized(self) -> None:
         if not self._initialized:
-            raise ModuleNotInitializedError("KnowledgeGraphWriter.initialize() must be called first")
+            raise ModuleNotInitializedError(
+                "KnowledgeGraphWriter.initialize() must be called first"
+            )
