@@ -31,15 +31,14 @@ def test_mixed_evidence_is_explicitly_reported():
     assert result.invalidations
 
 
-def test_extreme_volatility_can_force_no_trade():
+def test_extreme_volatility_is_a_risk_context_not_automatic_contradiction():
     result = ContextualDecisionEngine().build(
         direction="long",
         component_scores=BASE,
         context={"regime": "volatile", "volatility_regime": "extreme"},
     )
-    # The engine must at least surface the extreme-volatility conflict rather
-    # than silently treating it as a normal bullish setup.
-    assert any("extreme volatility" in x for x in result.contradictions)
+    assert result.market_state == "volatile:extreme"
+    assert not any("extreme volatility" in x for x in result.contradictions)
 
 
 def test_no_direction_is_safe_no_trade():
