@@ -1,6 +1,6 @@
 """Bridge the existing opportunity scanner into contextual intelligence.
 
-The scanner remains responsible for candidate discovery.  This bridge enriches
+The scanner remains responsible for candidate discovery. This bridge enriches
 candidates with the higher-order contextual layers without coupling the core
 scanner to every intelligence implementation.
 """
