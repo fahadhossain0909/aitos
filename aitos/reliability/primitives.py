@@ -38,7 +38,7 @@ class BackoffPolicy:
     jitter: float = 0.10
 
     def delay(self, retry_number: int) -> float:
-        base = min(self.max_delay, self.initial_delay * (self.multiplier ** retry_number))
+        base = min(self.max_delay, self.initial_delay * (self.multiplier**retry_number))
         # Deterministic jitter is preferable for tests; runtime callers can
         # supply their own sleep policy if non-deterministic jitter is required.
         return max(0.0, base * (1.0 + self.jitter))
@@ -80,7 +80,9 @@ class CircuitState(str, Enum):
 class CircuitBreaker:
     """Failure-count circuit breaker with cooldown and half-open probing."""
 
-    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 30.0) -> None:
+    def __init__(
+        self, failure_threshold: int = 5, recovery_timeout: float = 30.0
+    ) -> None:
         if failure_threshold < 1 or recovery_timeout <= 0:
             raise ValueError("invalid circuit-breaker configuration")
         self.failure_threshold = failure_threshold
@@ -94,7 +96,10 @@ class CircuitBreaker:
             return True
         if self.state is CircuitState.OPEN:
             current = time.monotonic() if now is None else now
-            if self._opened_at is not None and current - self._opened_at >= self.recovery_timeout:
+            if (
+                self._opened_at is not None
+                and current - self._opened_at >= self.recovery_timeout
+            ):
                 self.state = CircuitState.HALF_OPEN
                 return True
             return False
@@ -163,7 +168,9 @@ class AppendOnlyJournal:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
-    def append(self, kind: str, payload: Mapping[str, Any], created_at: str) -> JournalRecord:
+    def append(
+        self, kind: str, payload: Mapping[str, Any], created_at: str
+    ) -> JournalRecord:
         previous = self._last_hash()
         body = {
             "sequence": self._next_sequence(),
