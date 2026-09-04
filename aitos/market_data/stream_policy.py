@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+# Historical deep-book capture is intentionally fixed so historical storage
+# remains stable across live-ranking changes and replay datasets remain
+# comparable over time.
+HISTORICAL_DEEP_SYMBOLS: tuple[str, ...] = ("BTCUSDT", "LTCUSDT")
+
+
 @dataclass(frozen=True, slots=True)
 class SubscriptionPlan:
     universe: tuple[str, ...]
@@ -20,9 +26,10 @@ def build_subscription_plan(
 ) -> SubscriptionPlan:
     """Build the ranked universe and promote BTC plus the strongest two others.
 
-    Both live deep analysis and historical deep-book capture follow the same
-    deterministic promotion policy. This keeps research replay aligned with
-    the instruments that the canonical market-data plane actually promotes.
+    Live deep analysis follows the ranked promotion policy, while historical
+    deep-book capture uses the fixed symbol set defined by
+    ``HISTORICAL_DEEP_SYMBOLS`` so ranking changes do not alter the historical
+    dataset contract.
     """
     universe = tuple(dict.fromkeys(s.upper() for s in ranked_symbols if s))
     candidate25 = universe[:25]
@@ -37,5 +44,5 @@ def build_subscription_plan(
         candidate10=candidate10,
         candidate5=candidate5,
         deep=deep,
-        historical_book=deep,
+        historical_book=HISTORICAL_DEEP_SYMBOLS,
     )
