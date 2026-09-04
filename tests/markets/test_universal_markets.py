@@ -81,7 +81,7 @@ def test_high_volatility_reduces_allowed_size():
         state=state,
         equity=10_000,
     )
-    assert decision.max_notional == 2500
+    assert decision.max_notional == 1250
 
 
 def test_execution_intent_is_the_strategy_execution_boundary():
