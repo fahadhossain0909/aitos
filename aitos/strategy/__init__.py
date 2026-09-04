@@ -1,14 +1,11 @@
-"""Universal strategy layer for AITOS.
-
-Strategies emit execution intents; shared portfolio, risk and execution layers
-remain strategy-agnostic. The package is deliberately independent of any
-single venue or asset class.
-"""
+"""Universal strategy layer for AITOS."""
 
 from .allocator import CapitalAllocator
 from .builtins import (
     FundingBasisStrategy,
+    HedgeStrategy,
     MarketMakingStrategy,
+    OptionsVolatilityStrategy,
     RegimeRouterStrategy,
     StatisticalArbitrageStrategy,
 )
@@ -26,20 +23,9 @@ from .engine import StrategyCycle, StrategyEngine
 from .registry import StrategyRegistry
 
 __all__ = [
-    "CapitalAllocator",
-    "CapitalRequest",
-    "ExecutionIntent",
-    "FundingBasisStrategy",
-    "MarketMakingStrategy",
-    "MarketSnapshot",
-    "PositionEffect",
-    "RegimeRouterStrategy",
-    "StatisticalArbitrageStrategy",
-    "StrategyContext",
-    "StrategyCycle",
-    "StrategyEngine",
-    "StrategyFamily",
-    "StrategyMode",
-    "StrategyRegistry",
-    "StrategyResult",
+    "CapitalAllocator", "CapitalRequest", "ExecutionIntent", "FundingBasisStrategy",
+    "HedgeStrategy", "MarketMakingStrategy", "MarketSnapshot", "OptionsVolatilityStrategy",
+    "PositionEffect", "RegimeRouterStrategy", "StatisticalArbitrageStrategy",
+    "StrategyContext", "StrategyCycle", "StrategyEngine", "StrategyFamily",
+    "StrategyMode", "StrategyRegistry", "StrategyResult",
 ]
