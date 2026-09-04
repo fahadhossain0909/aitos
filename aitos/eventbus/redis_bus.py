@@ -59,11 +59,7 @@ def _stream_maxlen(topic: str) -> int | None:
     for prefix, default in sorted(
         STREAM_MAXLEN_DEFAULTS.items(), key=lambda item: -len(item[0])
     ):
-        if (
-            topic == prefix
-            or topic.startswith(prefix + ".")
-            or topic.startswith(prefix)
-        ):
+        if topic == prefix or topic.startswith(prefix + ".") or topic.startswith(prefix):
             env_name = "REDIS_STREAM_MAXLEN_" + prefix.replace(".", "_").upper().rstrip(
                 "_"
             )
@@ -484,11 +480,11 @@ class EventBus(AITOSModule):
         fields: dict[str, Any],
         exc: Exception,
     ) -> None:
-        """Retry by replacing the failed PEL entry instead of leaving it stuck.
+        """Retry without acknowledging the source until the replacement exists.
 
-        Redis PEL entries cannot be mutated in-place. ACKing the failed entry
-        before publishing one replacement gives the retry a clean lifecycle and
-        ensures the original entry can never remain permanently pending.
+        Redis PEL entries cannot be mutated in-place. The replacement is written
+        first and only then is the failed entry acknowledged. This preserves
+        at-least-once semantics even if Redis rejects the retry write.
         """
         attempts = int(fields.get("_delivery_attempts", 0)) + 1
         if attempts >= MAX_DELIVERY_ATTEMPTS:
@@ -510,13 +506,13 @@ class EventBus(AITOSModule):
             self._last_acked_at = datetime.now(timezone.utc).isoformat()
             return
 
-        await self._redis.xack(stream_key, group, entry_id)
         retry_fields = dict(fields)
         retry_fields["_delivery_attempts"] = attempts
         maxlen = _stream_maxlen(stream_key.removeprefix("stream:")) or 25_000
         await self._redis.xadd(
             stream_key, retry_fields, maxlen=maxlen, approximate=True
         )
+        await self._redis.xack(stream_key, group, entry_id)
         self._retry_events += 1
         self._acked_events += 1
         self._last_acked_at = datetime.now(timezone.utc).isoformat()
