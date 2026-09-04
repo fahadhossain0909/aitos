@@ -22,10 +22,21 @@ def _klines(n=80):
         high = max(open_, close) + 0.4
         low = min(open_, close) - 0.4
         out.append(
-            Kline("TESTUSDT", "15m", start + timedelta(minutes=15*i),
-                  start + timedelta(minutes=15*(i+1)), open_, high, low, close,
-                  100.0 + i, 10000.0, 100, 55.0 if delta > 0 else 45.0,
-                  5500.0 if delta > 0 else 4500.0)
+            Kline(
+                "TESTUSDT",
+                "15m",
+                start + timedelta(minutes=15 * i),
+                start + timedelta(minutes=15 * (i + 1)),
+                open_,
+                high,
+                low,
+                close,
+                100.0 + i,
+                10000.0,
+                100,
+                55.0 if delta > 0 else 45.0,
+                5500.0 if delta > 0 else 4500.0,
+            )
         )
         price = close
     return out

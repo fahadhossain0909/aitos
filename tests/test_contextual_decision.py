@@ -1,6 +1,5 @@
 from aitos.intelligence.contextual_decision import ContextualDecisionEngine
 
-
 BASE = {
     "trend_strength": 8.0,
     "liquidity_quality": 8.0,
