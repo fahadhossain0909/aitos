@@ -1,6 +1,6 @@
 """Predictive statistical intelligence for AITOS.
 
-A-Stat is deliberately market-agnostic and dependency-light.  It produces
+A-Stat is deliberately market-agnostic and dependency-light. It produces
 calibrated probabilities, regime estimates, volatility, tail risk and
 strategy-specific expectancy without owning execution decisions.
 """
@@ -14,6 +14,7 @@ from .models import (
     RegimeProbability,
     StrategyStatContext,
 )
+from .router import StatisticalStrategyRouter, StrategyScore, strategy_contexts
 
 __all__ = [
     "AStatEngine",
@@ -22,5 +23,8 @@ __all__ = [
     "BayesianEvidence",
     "DirectionProbability",
     "RegimeProbability",
+    "StatisticalStrategyRouter",
+    "StrategyScore",
     "StrategyStatContext",
+    "strategy_contexts",
 ]
