@@ -16,6 +16,7 @@ logger = get_logger("aitos.market_data.runtime")
 
 _RECONNECT_INITIAL_DELAY_SECONDS = 1.0
 _RECONNECT_MAX_DELAY_SECONDS = 30.0
+PUBLISH_RETRY_DELAY_SECONDS = 0.5
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
 
 
@@ -105,9 +106,10 @@ class CanonicalMarketDataRuntime:
             except Exception as exc:
                 self.gateway.health.record_error("publish", str(exc))
                 logger.exception(
-                    "canonical market-data publish failed",
+                    "canonical market-data publish failed; retrying without dropping event",
                     extra={"aitos_extra": {"error": str(exc)}},
                 )
+                await asyncio.sleep(PUBLISH_RETRY_DELAY_SECONDS)
 
     async def _run(
         self,
@@ -123,8 +125,7 @@ class CanonicalMarketDataRuntime:
                 while not self._stopped:
                     try:
                         event = await asyncio.wait_for(
-                            stream.__anext__(),
-                            timeout=self.stream_idle_timeout_seconds,
+                            stream.__anext__(), timeout=self.stream_idle_timeout_seconds
                         )
                     except StopAsyncIteration:
                         break
