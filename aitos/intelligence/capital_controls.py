@@ -25,7 +25,9 @@ class CapitalCircuitBreaker:
     def __init__(self, config: CapitalControlConfig | None = None) -> None:
         self.config = config or CapitalControlConfig()
 
-    def check(self, *, daily_pnl_pct: float = 0.0, consecutive_losses: int = 0) -> tuple[bool, str]:
+    def check(
+        self, *, daily_pnl_pct: float = 0.0, consecutive_losses: int = 0
+    ) -> tuple[bool, str]:
         if not isfinite(float(daily_pnl_pct)):
             return False, "invalid_daily_pnl"
         if float(daily_pnl_pct) <= -self.config.max_daily_loss_pct:
@@ -63,11 +65,21 @@ def execution_cost_bps(
     """
     cfg = config or CapitalControlConfig()
     liquidity = max(0.0, min(10.0, float(liquidity_score)))
-    liquidity_multiplier = 1.0 if liquidity >= cfg.min_liquidity_for_execution else cfg.adverse_slippage_multiplier
-    volatility = 0.0 if volatility_score is None else max(0.0, min(1.0, float(volatility_score)))
+    liquidity_multiplier = (
+        1.0
+        if liquidity >= cfg.min_liquidity_for_execution
+        else cfg.adverse_slippage_multiplier
+    )
+    volatility = (
+        0.0 if volatility_score is None else max(0.0, min(1.0, float(volatility_score)))
+    )
     volatility_multiplier = 1.0 + volatility
     fee = max(0.0, float(base_fee_bps))
-    slippage = max(0.0, float(base_slippage_bps)) * liquidity_multiplier * volatility_multiplier
+    slippage = (
+        max(0.0, float(base_slippage_bps))
+        * liquidity_multiplier
+        * volatility_multiplier
+    )
     return fee + slippage
 
 
