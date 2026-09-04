@@ -1,0 +1,50 @@
+name: Market Data Contract Audit
+
+on:
+  push:
+    branches: ["architecture/market-data-v1"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  market-data-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          pip install pytest pytest-asyncio black==25.12.0 flake8
+      - name: Compile Python sources
+        run: python -m compileall -q aitos run_live_trading.py run_paper_trading.py
+      - name: Check formatting
+        run: black --check --diff aitos tests run_live_trading.py run_paper_trading.py
+      - name: Static fatal-error lint
+        run: flake8 aitos run_live_trading.py run_paper_trading.py --count --select=E9,F63,F7,F82 --show-source --statistics
+      - name: Market-data tests
+        env:
+          PYTHONPATH: .
+          TESTING: 'true'
+        run: pytest -q tests/market_data tests/test_event_bus_live_start.py
+      - name: Full unit/integration test suite
+        env:
+          PYTHONPATH: .
+          TESTING: 'true'
+        run: pytest -q
+      - name: Validate Compose
+        run: |
+          cp .env.example .env
+          docker compose config >/dev/null
+      - name: Validate runtime audit script syntax
+        run: bash -n scripts/market_data_contract_audit.sh scripts/paper_runtime_audit.sh
