@@ -8,6 +8,14 @@ from .capital_objective import (
     CapitalObjectiveConfig,
     OpportunityEstimate,
 )
+from .capital_protection import (
+    CapitalReservation,
+    PortfolioProtection,
+    PortfolioRiskSnapshot,
+    ProtectionConfig,
+    ProtectionDecision,
+    Reservation,
+)
 from .capital_runtime import install_capital_guard
 from .deep_rl_policy import DeepValueRLScorer
 from .funding import funding_rate_score
@@ -33,6 +41,12 @@ __all__ = [
     "CapitalGatewayResult",
     "CapitalObjective",
     "CapitalObjectiveConfig",
+    "CapitalReservation",
+    "PortfolioProtection",
+    "PortfolioRiskSnapshot",
+    "ProtectionConfig",
+    "ProtectionDecision",
+    "Reservation",
     "DeepValueRLScorer",
     "NeutralRLScorer",
     "OpportunityEstimate",
