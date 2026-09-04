@@ -130,3 +130,21 @@ class FundingRate:
 
     def to_dict(self) -> dict[str, Any]:
         return {"symbol": self.symbol, "funding_rate": self.funding_rate, "funding_time": _iso(self.funding_time), "mark_price": self.mark_price}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> FundingRate:
+        return cls(symbol=data["symbol"], funding_rate=float(data["funding_rate"]), funding_time=_dt(data["funding_time"]), mark_price=float(data["mark_price"]))
+
+
+@dataclass(frozen=True)
+class OpenInterest:
+    symbol: str
+    open_interest: float
+    timestamp: datetime
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"symbol": self.symbol, "open_interest": self.open_interest, "timestamp": _iso(self.timestamp)}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OpenInterest:
+        return cls(symbol=data["symbol"], open_interest=float(data["open_interest"]), timestamp=_dt(data["timestamp"]))
