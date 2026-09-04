@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from typing import Any
 
 from aitos.market_data.binance_adapter import BinanceCanonicalMarketDataAdapter
