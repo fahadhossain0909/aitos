@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import math
 
-from aitos.statistics import ContractStatisticalStack, GARCH11, HierarchicalBayes, MarkovSwitchingModel, POTGPD
+from aitos.statistics import (
+    GARCH11,
+    POTGPD,
+    ContractStatisticalStack,
+    HierarchicalBayes,
+    MarkovSwitchingModel,
+)
 
 
 def _returns() -> list[float]:
-    return [0.002 * math.sin(i / 3.0) + (0.001 if i % 7 else -0.004) for i in range(160)]
+    return [
+        0.002 * math.sin(i / 3.0) + (0.001 if i % 7 else -0.004) for i in range(160)
+    ]
 
 
 def test_all_models_produce_finite_outputs() -> None:

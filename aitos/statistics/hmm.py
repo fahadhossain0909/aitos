@@ -1,4 +1,5 @@
 """Lightweight Gaussian HMM / Markov-switching regime estimator."""
+
 from __future__ import annotations
 
 import math
@@ -31,11 +32,16 @@ class MarkovSwitchingModel:
             return HMMState(p, 0, t, (0.0,) * self.states, (1.0,) * self.states)
         ordered = sorted(xs)
         n = len(xs)
-        means = [ordered[int((n - 1) * i / (self.states - 1))] for i in range(self.states)]
+        means = [
+            ordered[int((n - 1) * i / (self.states - 1))] for i in range(self.states)
+        ]
         centre = sum(xs) / n
         sigma = max(math.sqrt(sum((x - centre) ** 2 for x in xs) / max(1, n)), 1e-5)
         sigmas = [sigma] * self.states
-        trans = [[0.85 if i == j else 0.15 / (self.states - 1) for j in range(self.states)] for i in range(self.states)]
+        trans = [
+            [0.85 if i == j else 0.15 / (self.states - 1) for j in range(self.states)]
+            for i in range(self.states)
+        ]
         posterior = [[1.0 / self.states] * self.states for _ in xs]
         for _ in range(self.iterations):
             f = [[0.0] * self.states for _ in xs]
@@ -45,13 +51,20 @@ class MarkovSwitchingModel:
             f[0] = [v / s0 for v in f[0]]
             for t in range(1, n):
                 for j in range(self.states):
-                    f[t][j] = _normal_pdf(xs[t], means[j], sigmas[j]) * sum(f[t - 1][i] * trans[i][j] for i in range(self.states))
+                    f[t][j] = _normal_pdf(xs[t], means[j], sigmas[j]) * sum(
+                        f[t - 1][i] * trans[i][j] for i in range(self.states)
+                    )
                 s = sum(f[t]) or 1.0
                 f[t] = [v / s for v in f[t]]
             b = [[1.0] * self.states for _ in xs]
             for t in range(n - 2, -1, -1):
                 for i in range(self.states):
-                    b[t][i] = sum(trans[i][j] * _normal_pdf(xs[t + 1], means[j], sigmas[j]) * b[t + 1][j] for j in range(self.states))
+                    b[t][i] = sum(
+                        trans[i][j]
+                        * _normal_pdf(xs[t + 1], means[j], sigmas[j])
+                        * b[t + 1][j]
+                        for j in range(self.states)
+                    )
                 s = sum(b[t]) or 1.0
                 b[t] = [v / s for v in b[t]]
             for t in range(n):
@@ -61,11 +74,20 @@ class MarkovSwitchingModel:
             for j in range(self.states):
                 w = sum(posterior[t][j] for t in range(n)) or 1.0
                 means[j] = sum(posterior[t][j] * xs[t] for t in range(n)) / w
-                sigmas[j] = max(math.sqrt(sum(posterior[t][j] * (xs[t] - means[j]) ** 2 for t in range(n)) / w), 1e-5)
+                sigmas[j] = max(
+                    math.sqrt(
+                        sum(posterior[t][j] * (xs[t] - means[j]) ** 2 for t in range(n))
+                        / w
+                    ),
+                    1e-5,
+                )
             for i in range(self.states):
                 denom = sum(posterior[t][i] for t in range(n - 1)) or 1.0
                 for j in range(self.states):
-                    trans[i][j] = sum(posterior[t][i] * posterior[t + 1][j] for t in range(n - 1)) / denom
+                    trans[i][j] = (
+                        sum(posterior[t][i] * posterior[t + 1][j] for t in range(n - 1))
+                        / denom
+                    )
                 s = sum(trans[i]) or 1.0
                 trans[i] = [v / s for v in trans[i]]
         probs = posterior[-1]
@@ -74,4 +96,10 @@ class MarkovSwitchingModel:
         means = tuple(means[i] for i in order)
         sigmas = tuple(sigmas[i] for i in order)
         transition = tuple(tuple(trans[i][j] for j in order) for i in order)
-        return HMMState(probs, max(range(self.states), key=probs.__getitem__), transition, means, sigmas)
+        return HMMState(
+            probs,
+            max(range(self.states), key=probs.__getitem__),
+            transition,
+            means,
+            sigmas,
+        )

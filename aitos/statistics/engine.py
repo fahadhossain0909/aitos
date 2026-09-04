@@ -1,11 +1,18 @@
 """A-Stat orchestration and calibration layer."""
+
 from __future__ import annotations
 
 import math
 from collections import deque
 from collections.abc import Iterable
 
-from .models import AStatObservation, AStatResult, BayesianEvidence, DirectionProbability, RegimeProbability
+from .models import (
+    AStatObservation,
+    AStatResult,
+    BayesianEvidence,
+    DirectionProbability,
+    RegimeProbability,
+)
 from .stack import ContractStatisticalStack
 
 
@@ -13,15 +20,24 @@ class AStatEngine:
     """Market-neutral statistical engine with an advanced per-contract stack."""
 
     WEIGHTS = {
-        "momentum": 1.20, "return": 1.00, "orderbook_imbalance": 1.10, "cvd": 0.90,
-        "delta": 0.70, "vwap_distance": 0.60, "funding": -0.25, "open_interest": 0.35,
-        "market_breadth": 0.75, "lead_lag": 0.65,
+        "momentum": 1.20,
+        "return": 1.00,
+        "orderbook_imbalance": 1.10,
+        "cvd": 0.90,
+        "delta": 0.70,
+        "vwap_distance": 0.60,
+        "funding": -0.25,
+        "open_interest": 0.35,
+        "market_breadth": 0.75,
+        "lead_lag": 0.65,
     }
 
     def __init__(self, calibration_window: int = 256) -> None:
         self._outcomes: deque[tuple[float, bool]] = deque(maxlen=calibration_window)
         self._returns: deque[float] = deque(maxlen=calibration_window)
-        self._stack = ContractStatisticalStack(max_history=max(1024, calibration_window * 8))
+        self._stack = ContractStatisticalStack(
+            max_history=max(1024, calibration_window * 8)
+        )
 
     def update(self, realised_return: float, predicted_up: float) -> None:
         r = float(realised_return)
@@ -29,7 +45,11 @@ class AStatEngine:
         self._outcomes.append((max(0.0, min(1.0, float(predicted_up))), r > 0.0))
 
     def _score(self, features: dict[str, float]) -> float:
-        return sum(self.WEIGHTS.get(k, 0.0) * float(v) for k, v in features.items() if k != "returns")
+        return sum(
+            self.WEIGHTS.get(k, 0.0) * float(v)
+            for k, v in features.items()
+            if k != "returns"
+        )
 
     @staticmethod
     def bayesian_update(prior: float, evidence: Iterable[BayesianEvidence]) -> float:
@@ -58,7 +78,9 @@ class AStatEngine:
         brier = sum((p - float(y)) ** 2 for p, y in outcomes) / len(outcomes)
         return max(0.0, min(1.0, 1.0 - brier / 0.25))
 
-    def evaluate(self, observation: AStatObservation, evidence: Iterable[BayesianEvidence] = ()) -> AStatResult:
+    def evaluate(
+        self, observation: AStatObservation, evidence: Iterable[BayesianEvidence] = ()
+    ) -> AStatResult:
         evidence = tuple(evidence)
         score = self._score(observation.features)
         prior = self.bayesian_update(observation.prior_up, evidence)
@@ -69,27 +91,49 @@ class AStatEngine:
         scale = up + down + flat
         direction = DirectionProbability(up / scale, down / scale, flat / scale)
         returns = observation.features.get("returns", ())
-        advanced = self._stack.evaluate(observation.symbol, returns) if isinstance(returns, (tuple, list)) and returns else None
+        advanced = (
+            self._stack.evaluate(observation.symbol, returns)
+            if isinstance(returns, (tuple, list)) and returns
+            else None
+        )
         if advanced is not None:
             expected_return = advanced.expected_return
             volatility = advanced.garch.volatility
             downside = advanced.downside_probability
             tail = advanced.tail_probability
-            confidence = 0.6 * advanced.confidence + 0.4 * self._calibration(self._outcomes)
+            confidence = 0.6 * advanced.confidence + 0.4 * self._calibration(
+                self._outcomes
+            )
             regime = self._regime(score, volatility)
         else:
             volatility = abs(float(observation.features.get("volatility", 0.01)))
-            expected_return = float(observation.features.get("expected_return", (direction.up - direction.down) * volatility))
+            expected_return = float(
+                observation.features.get(
+                    "expected_return", (direction.up - direction.down) * volatility
+                )
+            )
             downside = 1.0 - direction.up
             tail = downside * 0.1
-            confidence = min(1.0, 0.5 * self._calibration(self._outcomes) + 0.5 * math.log1p(observation.sample_size) / math.log(1001.0))
+            confidence = min(
+                1.0,
+                0.5 * self._calibration(self._outcomes)
+                + 0.5 * math.log1p(observation.sample_size) / math.log(1001.0),
+            )
             regime = self._regime(score, volatility)
         expected_value = expected_return - downside * volatility
         return AStatResult(
-            symbol=observation.symbol, horizon=observation.horizon, direction=direction, regime=regime,
-            expected_return=expected_return, expected_volatility=volatility,
-            downside_probability=max(0.0, min(1.0, downside)), tail_loss_probability=max(0.0, min(1.0, tail)),
-            expected_value=expected_value, probability_confidence=max(0.0, min(1.0, confidence)),
-            calibration_quality=self._calibration(self._outcomes), sample_size=max(observation.sample_size, len(self._returns)),
-            evidence=tuple(item.name for item in evidence), advanced=advanced,
+            symbol=observation.symbol,
+            horizon=observation.horizon,
+            direction=direction,
+            regime=regime,
+            expected_return=expected_return,
+            expected_volatility=volatility,
+            downside_probability=max(0.0, min(1.0, downside)),
+            tail_loss_probability=max(0.0, min(1.0, tail)),
+            expected_value=expected_value,
+            probability_confidence=max(0.0, min(1.0, confidence)),
+            calibration_quality=self._calibration(self._outcomes),
+            sample_size=max(observation.sample_size, len(self._returns)),
+            evidence=tuple(item.name for item in evidence),
+            advanced=advanced,
         )
