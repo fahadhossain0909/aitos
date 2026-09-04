@@ -16,7 +16,7 @@ from typing import Any
 
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus, Subscription
-from aitos.models.market import Kline, OrderBookSnapshot, TradeTick
+from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot, TradeTick
 
 from .bus import MarketDataBus
 from .channels import GROUP_PERSISTENCE
@@ -55,24 +55,15 @@ class CanonicalMarketDataPersistenceSink:
             self._initialized = True
             return
         self._subscriptions = [
-            await self._bus.subscribe(
-                MarketEventType.TRADE,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.BOOK_SNAPSHOT,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.KLINE,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
+            await self._bus.subscribe(MarketEventType.TRADE, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(MarketEventType.BOOK_SNAPSHOT, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(MarketEventType.KLINE, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(MarketEventType.FUNDING, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(MarketEventType.OPEN_INTEREST, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(MarketEventType.TICKER, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(MarketEventType.LIQUIDATION, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(MarketEventType.OPTIONS, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(MarketEventType.INSTRUMENT, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
         ]
         self._workers = [
             asyncio.create_task(self._worker(i), name=f"market-data-persistence-{i}")
@@ -102,7 +93,7 @@ class CanonicalMarketDataPersistenceSink:
             pass
 
     async def _enqueue(self, event: MarketEvent) -> None:
-        """Queue history work without ever waiting on the persistence layer."""
+        """Queue persistence work without ever waiting on ClickHouse."""
         if self._repository is None:
             return
         if event.event_type is MarketEventType.BOOK_SNAPSHOT:
@@ -119,9 +110,6 @@ class CanonicalMarketDataPersistenceSink:
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
-            # Historical persistence is explicitly lossy under pressure. Never
-            # await here: a full history queue must not propagate backpressure to
-            # the live market-data consumer.
             self._rejected += 1
 
     async def _worker(self, worker_id: int) -> None:
@@ -154,6 +142,16 @@ class CanonicalMarketDataPersistenceSink:
         elif event.event_type is MarketEventType.KLINE:
             payload["symbol"] = event.symbol
             await self._repository.save_kline(Kline.from_dict(payload))
+        elif event.event_type is MarketEventType.FUNDING:
+            payload["symbol"] = event.symbol
+            payload.setdefault("funding_time", event.event_time.isoformat())
+            await self._repository.save_funding_rate(FundingRate.from_dict(payload))
+        elif event.event_type is MarketEventType.OPEN_INTEREST:
+            payload["symbol"] = event.symbol
+            payload.setdefault("timestamp", event.event_time.isoformat())
+            await self._repository.save_open_interest(OpenInterest.from_dict(payload))
+        else:
+            await self._repository.save_market_event(event)
 
     def snapshot(self) -> dict[str, object]:
         return {
