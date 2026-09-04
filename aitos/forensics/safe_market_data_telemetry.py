@@ -7,11 +7,9 @@ publish latency and lightweight counters without changing delivery semantics.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from functools import wraps
 from typing import Any
-
-from dataclasses import replace
-
 
 _MARKET_PREFIXES = (
     "market.trade",
@@ -61,9 +59,7 @@ def install(eventbus_cls: type[Any]) -> None:
             elapsed_ms = (time.perf_counter() - start) * 1000.0
             self._market_publish_count += 1
             self._market_publish_total_ms += elapsed_ms
-            self._market_publish_max_ms = max(
-                self._market_publish_max_ms, elapsed_ms
-            )
+            self._market_publish_max_ms = max(self._market_publish_max_ms, elapsed_ms)
             self._market_last_publish_ms = elapsed_ms
 
     async def health_wrapper(self: Any):
@@ -76,12 +72,8 @@ def install(eventbus_cls: type[Any]) -> None:
                 "count": count,
                 "total_ms": round(total, 3),
                 "avg_ms": round(total / count, 3) if count else 0.0,
-                "max_ms": round(
-                    getattr(self, "_market_publish_max_ms", 0.0), 3
-                ),
-                "last_ms": round(
-                    getattr(self, "_market_last_publish_ms", 0.0), 3
-                ),
+                "max_ms": round(getattr(self, "_market_publish_max_ms", 0.0), 3),
+                "last_ms": round(getattr(self, "_market_last_publish_ms", 0.0), 3),
                 "errors": getattr(self, "_market_publish_errors", 0),
             },
         }
