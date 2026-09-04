@@ -14,6 +14,26 @@ jobs:
   market-data-contracts:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_PORT: '8123'
+      CLICKHOUSE_USER: aitos_test
+      CLICKHOUSE_PASSWORD: aitos_test_password
+      CLICKHOUSE_DATABASE: aitos
+      TESTING: 'true'
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.12-alpine
+        env:
+          CLICKHOUSE_USER: aitos_test
+          CLICKHOUSE_PASSWORD: aitos_test_password
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -26,6 +46,15 @@ jobs:
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           pip install pytest pytest-asyncio black==25.12.0 flake8
+      - name: Initialize ClickHouse test database
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8123/ping >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" \
+            'http://127.0.0.1:8123/' \
+            --data-binary 'CREATE DATABASE IF NOT EXISTS aitos'
       - name: Compile Python sources
         run: python -m compileall -q aitos run_live_trading.py run_paper_trading.py
       - name: Check formatting
@@ -35,12 +64,10 @@ jobs:
       - name: Market-data tests
         env:
           PYTHONPATH: .
-          TESTING: 'true'
         run: pytest -q tests/market_data tests/test_event_bus_live_start.py
       - name: Full unit/integration test suite
         env:
           PYTHONPATH: .
-          TESTING: 'true'
         run: pytest -q
       - name: Validate Compose
         run: |
