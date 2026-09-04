@@ -32,6 +32,13 @@ from .capital_protection import (
 from .capital_runtime import install_capital_guard
 from .deep_rl_policy import DeepValueRLScorer
 from .funding import funding_rate_score
+from .historical_analogue import (
+    AnalogueOutcome,
+    HistoricalAnalogue,
+    StateTransition,
+    infer_state_transition,
+    search_historical_analogues,
+)
 from .liquidity import liquidity_quality_score
 from .open_interest import oi_trend_score
 from .rl_feedback import RLFeedbackLoop
@@ -45,6 +52,7 @@ from .scanner import (
 
 __all__ = [
     "DEFAULT_WEIGHTS",
+    "AnalogueOutcome",
     "CapitalAllocation",
     "CapitalAllocator",
     "CapitalCircuitBreaker",
@@ -60,6 +68,7 @@ __all__ = [
     "CapitalOutcome",
     "CapitalReservation",
     "DeepValueRLScorer",
+    "HistoricalAnalogue",
     "NeutralRLScorer",
     "OpportunityEstimate",
     "OpportunityScanner",
@@ -72,13 +81,16 @@ __all__ = [
     "RLPolicyScorer",
     "Reservation",
     "ScanCandidate",
+    "StateTransition",
     "TabularBanditRLScorer",
     "determine_direction",
     "execution_cost_bps",
     "funding_rate_score",
     "indicators",
+    "infer_state_transition",
     "install_capital_guard",
     "liquidity_quality_score",
     "oi_trend_score",
     "opportunity_age_seconds",
+    "search_historical_analogues",
 ]
