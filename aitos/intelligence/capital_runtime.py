@@ -78,12 +78,15 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
             if getattr(position, "symbol", "")
         }
     if "correlations" not in consensus and positions:
-        pairwise = float(getattr(portfolio, "max_pairwise_correlation", 0.0) or 0.0)
-        consensus["correlations"] = {
-            f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": pairwise
-            for position in positions
-            if getattr(position, "symbol", "")
-        }
+        pairwise = getattr(portfolio, "max_pairwise_correlation", None)
+        if pairwise is not None and float(pairwise) > 0.0:
+            consensus["correlations"] = {
+                f"{getattr(position, 'symbol', '')}:{opportunity.symbol}": float(pairwise)
+                for position in positions
+                if getattr(position, "symbol", "")
+            }
+        # When no pairwise estimate exists, omit the map so the protection
+        # layer deliberately falls back to its conservative unknown correlation.
     return consensus
 
 
@@ -134,7 +137,10 @@ def install_capital_guard() -> None:
             "risk_budget_pct": (allocation.risk_budget_usd / equity) * 100.0,
         }
         authorized = replace(protected_opportunity, agent_consensus=consensus)
-        return await original(self, authorized, portfolio, *args, **kwargs)
+        trade = await original(self, authorized, portfolio, *args, **kwargs)
+        if trade.state == TradeLifecycleState.REJECTED:
+            gateway.release(opportunity.symbol)
+        return trade
 
     TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
 
