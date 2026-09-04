@@ -24,14 +24,14 @@ Exchange
 
 ClickHouse
   -> backtest / statistics / calibration / ML-RL training
-  -> graph backfill / reconstruction (controlled research operation)
+  -> controlled graph backfill / reconstruction
 ```
 
-### Why the graph writer consumes EventBus
+### Storage boundary
 
-Strategies and intelligence modules should **not write Neo4j directly**. They emit canonical events. This keeps trading logic independent of storage and prevents a Neo4j outage from becoming a trading outage. The current writer subscribes to decision, risk, scanner, statistics, intelligence, journey and execution namespaces with `live_only=True`.
+Strategies and intelligence modules **do not write Neo4j directly**. They emit canonical events. The graph writer consumes selected semantic events from EventBus with `live_only=True`. This keeps storage concerns out of trading logic and ensures a Neo4j outage does not become a trading outage.
 
-Raw market streams (`market.trade.*`, order-book deltas, klines) are deliberately excluded from the semantic graph writer.
+Raw `market.trade.*`, order-book deltas, klines and large feature streams stay in Redis/ClickHouse. Neo4j stores compact semantic references and lineage.
 
 ## Canonical graph model
 
@@ -58,125 +58,135 @@ Core nodes:
 Core relationships:
 
 ```text
-Decision -[:ABOUT_SYMBOL]-> Symbol
-Decision -[:SUPPORTED_BY]-> Evidence
-Decision -[:GENERATED_BY]-> Model
-Decision -[:GOVERNED_BY]-> Policy
-Decision -[:IN_REGIME]-> MarketRegime
-Decision -[:RESULTED_IN]-> Trade
+KnowledgeEvent -[:ABOUT_SYMBOL]-> Symbol
+KnowledgeEvent -[:INVOLVES_STRATEGY]-> Strategy
+KnowledgeEvent -[:PRODUCED_BY_MODEL]-> Model
+KnowledgeEvent -[:GOVERNED_BY_POLICY]-> Policy
+KnowledgeEvent -[:RELATES_TO_DECISION]-> Decision
+KnowledgeEvent -[:RELATES_TO_TRADE]-> Trade
+KnowledgeEvent -[:OCCURRED_IN_REGIME]-> MarketRegime
+KnowledgeEvent -[:SUPPORTED_BY]-> Evidence
+KnowledgeEvent -[:HAS_RISK_DECISION]-> RiskDecision
+KnowledgeEvent -[:HAS_EXECUTION]-> Execution
+KnowledgeEvent -[:HAS_JOURNEY]-> TradeJourney
+KnowledgeEvent -[:REFERENCES_FORECAST]-> Forecast
+KnowledgeEvent -[:REFERENCES_OUTCOME]-> Outcome
+KnowledgeEvent -[:PART_OF_MODEL_RUN]-> ModelRun
+KnowledgeEvent -[:PART_OF_CALIBRATION]-> CalibrationRun
+
+Trade -[:ON_SYMBOL]-> Symbol
 Trade -[:USED_STRATEGY]-> Strategy
-Trade -[:HAS_JOURNEY]-> TradeJourney
-Trade -[:HAD_RISK_DECISION]-> RiskDecision
-Trade -[:HAS_EXECUTION]-> Execution
-Trade -[:RESULTED_IN]-> Outcome
 Trade -[:HAD_MISTAKE]-> Mistake
-Model -[:PRODUCES]-> Forecast
-Forecast -[:RESOLVED_AS]-> Outcome
-Model -[:EVALUATED_IN]-> CalibrationRun
 Symbol -[:CORRELATED_WITH {coefficient, updated_at}]-> Symbol
 ```
 
-`KnowledgeEvent` provides immutable-ish event lineage and connects the event to canonical entities. It is intentionally bounded to semantic events rather than market ticks.
+All first-class semantic nodes use stable IDs supplied by the event when available. Evidence without a supplied ID receives an event-scoped deterministic ID. Trade and mistake projections use `MERGE`, making repeated event delivery idempotent at the node level.
 
 ## Statistical models and probability calibration
 
-Neo4j should **not perform the heavy numerical calibration itself**. Calibration is computed by Python/statistical services from ClickHouse data. Neo4j stores the relationships needed to explain and query the result:
+Neo4j does **not** perform heavy numerical calibration. Python/statistical services compute calibration from ClickHouse data and publish the resulting semantic run.
 
 ```text
-Model/ModelVersion
+Model
   -> Forecast {probability, horizon, target}
   -> Outcome {realized_label, pnl, ...}
   -> CalibrationRun {method, sample_count, brier, log_loss, ece, ...}
 ```
 
-This supports questions such as:
+This supports graph questions such as:
 
 - Which model is calibrated best in trending regimes?
-- Does a 0.80 probability forecast actually resolve near 80% historically?
-- Which strategy/model combination is over-confident on a particular symbol?
-- Which calibration run produced the currently governed policy?
+- Does a 0.80 probability forecast resolve near 80% historically?
+- Which strategy/model combination is over-confident on a symbol?
+- Which calibration run produced the governed policy?
 
-The numerical time series and raw samples remain in ClickHouse; Neo4j stores lineage and semantic links.
+Raw samples, calibration curves and numerical time series remain in ClickHouse or model artifacts. Neo4j retains lineage and semantic relationships.
 
 ## AI / explainability
 
-AI outputs should be represented as decision lineage, not just text:
+AI outputs are represented as decision lineage:
 
 ```text
 Decision
   -> Evidence -> Feature/Signal
-  -> GeneratedBy -> Model
-  -> GovernedBy -> Policy
-  -> InRegime -> MarketRegime
-  -> About -> Symbol
+  -> Model
+  -> Policy
+  -> MarketRegime
+  -> Symbol
+  -> Trade
 ```
 
-Feature attribution (SHAP/attention/etc.) can be stored as compact evidence records for important decisions. Large explanation arrays should remain in ClickHouse/artifacts, with a graph reference or artifact ID.
+Compact SHAP/attention feature attribution may be projected as `Evidence`. Large explanation tensors/arrays remain in ClickHouse or artifacts and are referenced by ID/URI.
 
 ## Learning and deep learning
 
-Training jobs remain ClickHouse-first. A completed training run should create/update a `Model`/`ModelVersion` and `ModelRun`/`CalibrationRun` node containing:
+Training remains ClickHouse-first. A completed training event can project:
 
-- dataset/window identifier
-- feature-set version
-- architecture/version
-- hyperparameter-set ID
-- validation/holdout metrics
-- calibration metrics
-- artifact/model URI
-- parent model/champion relationship
-- promotion/governance state
+```text
+Model
+  -> ModelRun
+      -> dataset_id
+      -> feature_set_version
+      -> artifact_id
+      -> validation / holdout metrics
+      -> promotion status
+  -> CalibrationRun
+```
 
-Learning curves should normally be stored as compact checkpoints/metrics in ClickHouse or model artifacts. Neo4j links the curve/run to model lineage rather than storing every batch point as graph nodes.
+Learning curves remain numerical artifacts/ClickHouse records rather than thousands of graph nodes. Neo4j provides the lineage needed to connect a deployed model to its dataset, run, calibration, policy and downstream outcomes.
 
 ## Trade Journey integration
 
-The graph is especially valuable for Trade Journey analysis. Journey state transitions can connect:
+Journey events can attach a stable `TradeJourney` to a trade and decision lineage:
 
 ```text
-Trade -> TradeJourney -> StateTransition
+Trade -> TradeJourney
 Trade -> Decision -> Evidence/Model/Policy
 Trade -> RiskDecision
 Trade -> Execution
 Trade -> Outcome
 ```
 
-This allows future analysis of patterns such as which evidence combinations commonly lead from `PROVING` to `CONFIRMED`, or which conditions precede `DECAYING`/`EXITING`.
+This enables later retrieval of patterns such as which evidence combinations commonly precede `PROVING -> CONFIRMED`, or which model/regime combinations precede `DECAYING -> EXITING`.
 
-## Source-of-truth rules
+## Operational rules
 
-1. Redis is the live operational source, not the historical authority.
-2. ClickHouse is the durable analytical source of truth.
-3. Neo4j is the relationship/semantic source of truth for graph questions.
-4. Neo4j writes are asynchronous and must never block market-data ingestion or order execution.
-5. Strategies/intelligence do not call Neo4j directly; they emit events.
-6. High-frequency raw market data is never mirrored wholesale into Neo4j.
-7. Research/backfill from ClickHouse is controlled and idempotent.
-8. Historical deep order-book collection remains the fixed `BTCUSDT` + `LTCUSDT` research policy and is independent of the live Top-2 order-book policy.
+1. Redis/EventBus = live transport and hot state.
+2. ClickHouse = durable numerical/analytical source of truth.
+3. Neo4j = semantic relationship/lineage source of truth for graph questions.
+4. Neo4j writes are isolated from the live trading path.
+5. Strategies/intelligence never call Neo4j directly.
+6. Raw high-frequency market data is never mirrored wholesale into Neo4j.
+7. Controlled ClickHouse -> Neo4j reconstruction must be idempotent.
+8. Graph-derived information is a **context feature**, never an ungoverned direct trade instruction.
+9. Historical deep order-book collection remains fixed to `BTCUSDT` + `LTCUSDT`, independent of live Top-2 order-book ranking.
 
-## Phased implementation
+## Implementation status
 
-### V2 now
+### V2 — complete
 
 - Event-driven semantic projection for decision/risk/scanner/statistics/intelligence/journey/execution.
 - Trade, strategy, mistake and symbol-correlation graph.
-- Live-only subscriptions for semantic events.
+- Live-only semantic subscriptions.
 - No raw tick/L2 ingestion into Neo4j.
 
-### V2.1 next
+### V2.1 — implemented
 
-- First-class `Evidence`, `Forecast`, `Outcome`, `RiskDecision`, `Execution` and `TradeJourney` nodes with stable IDs.
-- Model/version and policy lineage.
-- Calibration-run nodes linked to forecasts/outcomes.
+- First-class `Evidence`, `Forecast`, `Outcome`, `RiskDecision`, `Execution` and `TradeJourney` nodes.
+- Stable model/policy and training-run lineage.
+- Calibration-run metadata and forecast/outcome references.
+- Bounded evidence projection for features/attributions.
+- Idempotent trade/mistake node projection.
+- Failure isolation and health counters retained.
 
-### V2.2 research
+### V2.2 — next research layer
 
-- Controlled ClickHouse -> Neo4j backfill/reconstruction.
-- Graph-based similarity/retrieval for regime/strategy/trade cases.
-- Graph features exposed to the AI contextual decision layer.
-- Graph-derived priors used as **features**, never as an ungoverned direct trading decision.
+- Controlled ClickHouse -> Neo4j backfill/reconstruction worker.
+- Graph similarity/retrieval for regime/strategy/trade cases.
+- Graph-derived context exposed to the AI contextual decision layer.
+- Graph priors used as model features, subject to normal risk/policy governance.
 
-### V3
+### V3 — future
 
 - Temporal/causal relationship analysis.
 - Regime-transition graph analytics.
