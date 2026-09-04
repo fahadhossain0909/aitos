@@ -75,7 +75,8 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                 MarketEvent(
                     event_type=MarketEventType.TRADE,
                     exchange=Venue.BYBIT.value,
-                    market=self.market_type,
+                    market=self.market_type.value,
+                    market_type=self.market_type,
                     symbol=symbol,
                     event_time=event_time,
                     payload={
@@ -113,7 +114,8 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                 else MarketEventType.BOOK_DELTA
             ),
             exchange=Venue.BYBIT.value,
-            market=self.market_type,
+            market=self.market_type.value,
+            market_type=self.market_type,
             symbol=symbol,
             event_time=event_time,
             payload={
