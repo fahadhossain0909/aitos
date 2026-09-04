@@ -17,7 +17,9 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
 
     def __init__(self, market_type: MarketType = MarketType.PERPETUAL) -> None:
         if market_type not in (MarketType.PERPETUAL, MarketType.USD_M_FUTURES):
-            raise ValueError("OKX adapter currently supports swap/linear derivatives only")
+            raise ValueError(
+                "OKX adapter currently supports swap/linear derivatives only"
+            )
         self._market_type = market_type
 
     @property
@@ -47,8 +49,7 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
     @staticmethod
     def _symbol(instrument: str) -> str:
         value = instrument.upper()
-        if value.endswith("-SWAP"):
-            value = value[:-5]
+        value = value.removesuffix("-SWAP")
         return value.replace("-", "")
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
@@ -56,13 +57,17 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         async for event in self._stream(symbols, message, self._parse_trade):
             yield event
 
-    async def stream_order_books(self, symbols: list[str], levels: int = 20) -> AsyncIterator[MarketEvent]:
+    async def stream_order_books(
+        self, symbols: list[str], levels: int = 20
+    ) -> AsyncIterator[MarketEvent]:
         channel = "books5" if levels <= 5 else "books"
         message = {"op": "subscribe", "args": self._args(symbols, channel)}
         async for event in self._stream(symbols, message, self._parse_book):
             yield event
 
-    def _parse_trade(self, message: dict[str, Any]) -> MarketEvent | list[MarketEvent] | None:
+    def _parse_trade(
+        self, message: dict[str, Any]
+    ) -> MarketEvent | list[MarketEvent] | None:
         if message.get("arg", {}).get("channel") != "trades":
             return None
         events: list[MarketEvent] = []
@@ -77,18 +82,27 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
             except (TypeError, ValueError):
                 sequence = None
             event_time = self._timestamp_ms(item.get("ts"))
-            events.append(MarketEvent(
-                event_type=MarketEventType.TRADE,
-                exchange=Venue.OKX.value,
-                market=self.market_type.value,
-                symbol=symbol,
-                event_time=event_time,
-                payload={"symbol": symbol, "timestamp": event_time.isoformat(), "trade_id": trade_id, "price": self._float(item["px"]), "quantity": self._float(item["sz"]), "side": item.get("side")},
-                source=MarketSource.WEBSOCKET,
-                sequence=sequence,
-                correlation_id=f"okx:{self.market_type.value}:{symbol}:{trade_id}",
-                trace_id=symbol,
-            ))
+            events.append(
+                MarketEvent(
+                    event_type=MarketEventType.TRADE,
+                    exchange=Venue.OKX.value,
+                    market=self.market_type.value,
+                    symbol=symbol,
+                    event_time=event_time,
+                    payload={
+                        "symbol": symbol,
+                        "timestamp": event_time.isoformat(),
+                        "trade_id": trade_id,
+                        "price": self._float(item["px"]),
+                        "quantity": self._float(item["sz"]),
+                        "side": item.get("side"),
+                    },
+                    source=MarketSource.WEBSOCKET,
+                    sequence=sequence,
+                    correlation_id=f"okx:{self.market_type.value}:{symbol}:{trade_id}",
+                    trace_id=symbol,
+                )
+            )
         if not events:
             return None
         return events[0] if len(events) == 1 else events
@@ -107,14 +121,24 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
             return None
         sequence = int(item.get("seqId") or item.get("checksum") or 0)
         return MarketEvent(
-            event_type=MarketEventType.BOOK_SNAPSHOT if item.get("action") in (None, "snapshot") else MarketEventType.BOOK_DELTA,
+            event_type=(
+                MarketEventType.BOOK_SNAPSHOT
+                if item.get("action") in (None, "snapshot")
+                else MarketEventType.BOOK_DELTA
+            ),
             exchange=Venue.OKX.value,
             market=self.market_type.value,
             symbol=symbol,
             event_time=self._timestamp_ms(item.get("ts")),
             payload={
-                "bids": [{"price": self._float(row[0]), "quantity": self._float(row[1])} for row in item.get("bids", [])],
-                "asks": [{"price": self._float(row[0]), "quantity": self._float(row[1])} for row in item.get("asks", [])],
+                "bids": [
+                    {"price": self._float(row[0]), "quantity": self._float(row[1])}
+                    for row in item.get("bids", [])
+                ],
+                "asks": [
+                    {"price": self._float(row[0]), "quantity": self._float(row[1])}
+                    for row in item.get("asks", [])
+                ],
                 "last_update_id": sequence,
                 "seq_id": sequence,
                 "checksum": item.get("checksum"),
