@@ -51,7 +51,9 @@ class JsonWebSocketAdapter(CanonicalMarketDataAdapter):
             await ws.send(json.dumps(subscribe_message))
             logger.info(
                 "canonical websocket subscription sent",
-                extra={"aitos_extra": {"url": self.websocket_url, "symbols": normalized}},
+                extra={
+                    "aitos_extra": {"url": self.websocket_url, "symbols": normalized}
+                },
             )
             async for raw in ws:
                 if isinstance(raw, bytes):
