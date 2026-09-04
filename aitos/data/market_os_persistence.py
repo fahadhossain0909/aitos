@@ -75,6 +75,8 @@ class MarketOSPersistence(AITOSModule):
         "intelligence.*",
         "statistics.*",
         "scanner.*",
+        "journal.*",
+        "market.opportunity_scanned",
     )
 
     def __init__(
@@ -172,7 +174,7 @@ class MarketOSPersistence(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.3.0"
+        return "1.3.1"
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
@@ -266,7 +268,7 @@ class MarketOSPersistence(AITOSModule):
     async def _handle_orderflow(self, event: Event) -> EventResponse | None:
         p = event.payload
         row = [
-            event.created_at,
+            _parse_timestamp(event.created_at),
             event.event_id,
             _symbol_from_topic(event.topic),
             int(p.get("trade_count", 0)),
@@ -287,7 +289,7 @@ class MarketOSPersistence(AITOSModule):
     async def _handle_liquidity(self, event: Event) -> EventResponse | None:
         p = event.payload
         row = [
-            event.created_at,
+            _parse_timestamp(event.created_at),
             event.event_id,
             _symbol_from_topic(event.topic),
             str(p.get("kind", "")),
@@ -303,7 +305,7 @@ class MarketOSPersistence(AITOSModule):
     async def _handle_live_state(self, event: Event) -> EventResponse | None:
         p = event.payload
         row = [
-            event.created_at,
+            _parse_timestamp(event.created_at),
             event.event_id,
             _symbol_from_topic(event.topic),
             int(p.get("trade_count", 0)),
@@ -319,7 +321,7 @@ class MarketOSPersistence(AITOSModule):
     async def _handle_orderbook(self, event: Event) -> EventResponse | None:
         p = event.payload
         row = [
-            event.created_at,
+            _parse_timestamp(event.created_at),
             event.event_id,
             _symbol_from_topic(event.topic),
             json.dumps(p.get("bids", []), sort_keys=True, default=str),
@@ -333,10 +335,10 @@ class MarketOSPersistence(AITOSModule):
         return None
 
     async def _handle_live_analytics(self, event: Event) -> EventResponse | None:
-        """Persist decision/risk/trade/intelligence telemetry without replaying stale events."""
+        """Persist live analytics without replaying stale events."""
         symbol = str(event.payload.get("symbol") or _symbol_from_topic(event.topic))
         category = _analytics_category(event.topic)
-        event_time = event.created_at
+        event_time = _parse_timestamp(event.created_at)
         row = [
             event_time,
             datetime.now(timezone.utc),
@@ -347,7 +349,7 @@ class MarketOSPersistence(AITOSModule):
             symbol,
             event.source_module or "unknown",
             event.correlation_id or event.event_id,
-            str(event.payload.get("schema_version", "1.0")),
+            str(event.payload.get("schema_version", event.schema_version or "1.0")),
             json.dumps(event.payload, sort_keys=True, default=str),
         ]
         await self._enqueue("live_analytics_events", row, event)
