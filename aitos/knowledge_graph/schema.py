@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 CONSTRAINTS = (
     ("trade_id", "Trade", "id"),
     ("decision_id", "Decision", "id"),
