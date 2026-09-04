@@ -31,9 +31,9 @@ def _finite_non_negative(value: float, name: str) -> float:
 class CapitalObjectiveConfig:
     """Policy knobs for sustainable capital compounding.
 
-    ``max_*`` fields are hard vetoes, not soft score penalties. This prevents
-    an unusually attractive return estimate from buying its way through a
-    capital-protection violation.
+    ``max_*`` fields are hard vetoes, not soft score penalties. Expected loss
+    is the adverse price move to the configured stop, so the default permits a
+    2% stop while the account-level risk budget remains independently capped.
     """
 
     growth_weight: float = 0.60
@@ -41,7 +41,7 @@ class CapitalObjectiveConfig:
     min_net_edge_pct: float = 0.05
     min_expected_return_pct: float = 0.10
     max_loss_probability: float = 0.35
-    max_expected_loss_pct: float = 1.50
+    max_expected_loss_pct: float = 2.00
     max_cost_pct: float = 0.50
     min_liquidity_score: float = 4.0
     target_net_edge_pct: float = 1.00
@@ -110,8 +110,6 @@ class OpportunityEstimate:
 
     @property
     def expected_net_edge_pct(self) -> float:
-        # Expected loss is probability-weighted. Costs are deterministic
-        # frictions and therefore are subtracted in full.
         return (
             self.expected_gross_return_pct
             - self.total_cost_pct
@@ -120,7 +118,6 @@ class OpportunityEstimate:
 
     @property
     def expected_net_return_pct(self) -> float:
-        """Expected return before the probability-weighted loss deduction."""
         return self.expected_gross_return_pct - self.total_cost_pct
 
 
@@ -162,9 +159,6 @@ class CapitalObjective:
             reasons.append("liquidity_below_minimum")
 
         growth_score = _clamp(100.0 * edge / max(cfg.target_net_edge_pct, 1e-9))
-        # Lower probability and lower loss severity are better. Liquidity and
-        # confidence are included because fragile execution can turn paper edge
-        # into realized loss.
         probability_score = 100.0 * (1.0 - estimate.loss_probability)
         loss_score = 100.0 * (
             1.0
@@ -223,12 +217,7 @@ class CapitalAllocation:
 
 
 class CapitalAllocator:
-    """Allocate a bounded risk budget across eligible opportunities.
-
-    Allocation is proportional to score and capped per trade. This is
-    intentionally deterministic; a later portfolio optimizer can replace it
-    without changing the objective contract.
-    """
+    """Allocate a bounded risk budget across eligible opportunities."""
 
     def __init__(self, objective: CapitalObjective | None = None) -> None:
         self.objective = objective or CapitalObjective()
@@ -252,20 +241,22 @@ class CapitalAllocator:
         if total_score <= 0:
             return []
         allocations: list[CapitalAllocation] = []
-        for decision in selected:
-            risk = min(
-                per_trade_cap,
-                total_risk_usd * decision.composite_score / total_score,
-            )
-            # Position notional is deliberately derived from the risk budget,
-            # not from leverage. Execution/risk adapters can apply venue limits.
+        remaining_risk = total_risk_usd
+        for index, decision in enumerate(selected):
+            proportional = total_risk_usd * decision.composite_score / total_score
+            risk = min(per_trade_cap, proportional, max(0.0, remaining_risk))
+            if index == len(selected) - 1:
+                risk = min(risk, max(0.0, remaining_risk))
+            risk = round(risk, 8)
+            risk = min(risk, round(max(0.0, remaining_risk), 8))
             capital = risk / max(cfg.max_trade_risk_pct / 100.0, 1e-9)
             allocations.append(
                 CapitalAllocation(
                     symbol=decision.symbol,
                     capital_usd=round(capital, 8),
-                    risk_budget_usd=round(risk, 8),
+                    risk_budget_usd=risk,
                     score=decision.composite_score,
                 )
             )
+            remaining_risk = max(0.0, remaining_risk - risk)
         return allocations
