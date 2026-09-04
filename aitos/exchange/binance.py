@@ -16,7 +16,6 @@ from aitos.exchange.parsing import (
     parse_depth_diff_ws,
     parse_funding_rate_rest,
     parse_kline_rest,
-    parse_kline_ws,
     parse_open_interest_rest,
     parse_order_book_rest,
     parse_trade_rest,
