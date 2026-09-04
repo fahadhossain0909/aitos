@@ -48,7 +48,12 @@ def test_bybit_orderbook_snapshot_then_delta_is_emitted_as_snapshot():
             "topic": "orderbook.50.BTCUSDT",
             "type": "delta",
             "ts": 1770000000100,
-            "data": {"s": "BTCUSDT", "u": 101, "b": [["99", "0"], ["98", "4"]], "a": []},
+            "data": {
+                "s": "BTCUSDT",
+                "u": 101,
+                "b": [["99", "0"], ["98", "4"]],
+                "a": [],
+            },
         }
     )
     assert first is not None and second is not None
@@ -69,13 +74,31 @@ def test_okx_trade_and_book_are_canonical():
     trade = adapter._parse_trade(
         {
             "arg": {"channel": "trades", "instId": "BTC-USDT-SWAP"},
-            "data": [{"instId": "BTC-USDT-SWAP", "tradeId": "123", "px": "90000", "sz": "1", "side": "buy", "ts": "1770000000000"}],
+            "data": [
+                {
+                    "instId": "BTC-USDT-SWAP",
+                    "tradeId": "123",
+                    "px": "90000",
+                    "sz": "1",
+                    "side": "buy",
+                    "ts": "1770000000000",
+                }
+            ],
         }
     )
     book = adapter._parse_book(
         {
             "arg": {"channel": "books", "instId": "BTC-USDT-SWAP"},
-            "data": [{"instId": "BTC-USDT-SWAP", "action": "snapshot", "seqId": "7", "ts": "1770000000000", "bids": [["89999", "2", "1"]], "asks": [["90001", "3", "1"]]}],
+            "data": [
+                {
+                    "instId": "BTC-USDT-SWAP",
+                    "action": "snapshot",
+                    "seqId": "7",
+                    "ts": "1770000000000",
+                    "bids": [["89999", "2", "1"]],
+                    "asks": [["90001", "3", "1"]],
+                }
+            ],
         }
     )
     assert trade is not None and book is not None
