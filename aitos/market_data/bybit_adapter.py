@@ -15,7 +15,7 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
 
     websocket_url = "wss://stream.bybit.com/v5/public/linear"
 
-    def __init__(self, market_type: MarketType = MarketType.PERPETUAL) -> None:
+    def __init__(self, market_type: MarketType = MarketType.USD_M_FUTURES) -> None:
         if market_type not in (MarketType.PERPETUAL, MarketType.USD_M_FUTURES):
             raise ValueError(
                 "Bybit public adapter currently supports linear derivatives only"
@@ -75,6 +75,8 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
             symbol=symbol,
             event_time=event_time,
             payload={
+                "symbol": symbol,
+                "timestamp": event_time.isoformat(),
                 "trade_id": trade_id,
                 "price": self._float(item["p"]),
                 "quantity": self._float(item["v"]),
