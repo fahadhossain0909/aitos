@@ -16,7 +16,13 @@ from typing import Any
 
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus, Subscription
-from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot, TradeTick
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeTick,
+)
 
 from .bus import MarketDataBus
 from .channels import GROUP_PERSISTENCE
@@ -55,15 +61,60 @@ class CanonicalMarketDataPersistenceSink:
             self._initialized = True
             return
         self._subscriptions = [
-            await self._bus.subscribe(MarketEventType.TRADE, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
-            await self._bus.subscribe(MarketEventType.BOOK_SNAPSHOT, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
-            await self._bus.subscribe(MarketEventType.KLINE, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
-            await self._bus.subscribe(MarketEventType.FUNDING, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
-            await self._bus.subscribe(MarketEventType.OPEN_INTEREST, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
-            await self._bus.subscribe(MarketEventType.TICKER, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
-            await self._bus.subscribe(MarketEventType.LIQUIDATION, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
-            await self._bus.subscribe(MarketEventType.OPTIONS, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
-            await self._bus.subscribe(MarketEventType.INSTRUMENT, self._enqueue, group=GROUP_PERSISTENCE, live_only=True),
+            await self._bus.subscribe(
+                MarketEventType.TRADE,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.BOOK_SNAPSHOT,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.KLINE,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.FUNDING,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.OPEN_INTEREST,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.TICKER,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.LIQUIDATION,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.OPTIONS,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.INSTRUMENT,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
         ]
         self._workers = [
             asyncio.create_task(self._worker(i), name=f"market-data-persistence-{i}")
