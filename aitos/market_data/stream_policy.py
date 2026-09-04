@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+HISTORICAL_DEEP_SYMBOLS = ("BTCUSDT", "LTCUSDT")
+
+
 @dataclass(frozen=True, slots=True)
 class SubscriptionPlan:
     universe: tuple[str, ...]
@@ -20,9 +23,10 @@ def build_subscription_plan(
 ) -> SubscriptionPlan:
     """Build the full ranked universe and promote BTC plus the best two others.
 
-    The universe remains the complete ranked Binance market set. The deep tier
-    is only a bounded expensive-work tier; it is derived from the ranking and
-    never hard-codes LTC or any other altcoin.
+    Live expensive analysis is dynamic: BTC is always retained as the anchor and
+    the strongest two non-BTC ranked symbols are promoted into the live deep tier.
+    Historical deep-order-book collection is intentionally independent of live
+    ranking and remains fixed to BTCUSDT/LTCUSDT for reproducible research data.
     """
     universe = tuple(dict.fromkeys(s.upper() for s in ranked_symbols if s))
     candidate25 = universe[:25]
@@ -37,5 +41,5 @@ def build_subscription_plan(
         candidate10=candidate10,
         candidate5=candidate5,
         deep=deep,
-        historical_book=deep,
+        historical_book=HISTORICAL_DEEP_SYMBOLS,
     )
