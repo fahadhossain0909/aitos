@@ -6,20 +6,25 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from .contracts import MarketEvent, MarketEventType, MarketSource
+from .endpoints import OKX_PUBLIC_WS, OKX_WS_HEARTBEAT_INTERVAL_SECONDS
 from .venues import MarketType, Venue, VenueCapabilities
 from .websocket_adapter import JsonWebSocketAdapter
 
 
 class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
-    """Normalize OKX public swap streams into venue-neutral events."""
+    """Normalize OKX public perpetual streams into venue-neutral events."""
 
-    websocket_url = "wss://ws.okx.com:8443/ws/v5/public"
+    websocket_url = OKX_PUBLIC_WS
+    heartbeat_interval_seconds = OKX_WS_HEARTBEAT_INTERVAL_SECONDS
+    # OKX documents a text "ping" heartbeat for public WebSocket connections.
+    heartbeat_message = "ping"
 
     def __init__(self, market_type: MarketType = MarketType.PERPETUAL) -> None:
         if market_type not in (MarketType.PERPETUAL, MarketType.USD_M_FUTURES):
-            raise ValueError("OKX adapter currently supports perpetual derivatives")
+            raise ValueError(
+                "OKX adapter currently supports swap/linear derivatives only"
+            )
         self._market_type = market_type
-        self._books: dict[str, tuple[dict[float, float], dict[float, float], int]] = {}
 
     @property
     def venue(self) -> Venue:
@@ -34,25 +39,21 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         return VenueCapabilities(trades=True, order_book=True, rest_recovery=True)
 
     def _args(self, symbols: list[str], channel: str) -> list[dict[str, str]]:
-        return [
-            {"channel": channel, "instId": self._instrument(s)}
-            for s in dict.fromkeys(symbols)
-        ]
+        return [{"channel": channel, "instId": self._instrument(s)} for s in symbols]
 
     @staticmethod
     def _instrument(symbol: str) -> str:
         value = symbol.upper()
-        if value.endswith("-USDT-SWAP"):
+        if "-" in value:
             return value
         if value.endswith("USDT"):
             return f"{value[:-4]}-USDT-SWAP"
         return value
 
     @staticmethod
-    def _symbol(inst_id: str) -> str:
-        value = inst_id.upper()
-        if value.endswith("-USDT-SWAP"):
-            return f"{value[:-10]}USDT"
+    def _symbol(instrument: str) -> str:
+        value = instrument.upper()
+        value = value.removesuffix("-SWAP")
         return value.replace("-", "")
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
@@ -68,43 +69,48 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         async for event in self._stream(symbols, message, self._parse_book):
             yield event
 
-    def _parse_trade(self, message: dict[str, Any]) -> MarketEvent | None:
+    def _parse_trade(
+        self, message: dict[str, Any]
+    ) -> MarketEvent | list[MarketEvent] | None:
         if message.get("arg", {}).get("channel") != "trades":
             return None
-        data = message.get("data") or []
-        if not data:
+        events: list[MarketEvent] = []
+        for item in message.get("data") or []:
+            instrument = str(item.get("instId", ""))
+            if not instrument:
+                continue
+            symbol = self._symbol(instrument)
+            trade_id = str(item.get("tradeId") or item.get("seqId") or "0")
+            try:
+                sequence = int(trade_id)
+            except (TypeError, ValueError):
+                sequence = None
+            event_time = self._timestamp_ms(item.get("ts"))
+            events.append(
+                MarketEvent(
+                    event_type=MarketEventType.TRADE,
+                    exchange=Venue.OKX.value,
+                    market=self.market_type.value,
+                    symbol=symbol,
+                    event_time=event_time,
+                    payload={
+                        "symbol": symbol,
+                        "timestamp": event_time.isoformat(),
+                        "trade_id": trade_id,
+                        "price": self._float(item["px"]),
+                        "quantity": self._float(item["sz"]),
+                        "side": item.get("side"),
+                    },
+                    source=MarketSource.WEBSOCKET,
+                    sequence=sequence,
+                    correlation_id=f"okx:{self.market_type.value}:{symbol}:{trade_id}",
+                    trace_id=symbol,
+                    instrument_id=f"okx:{self.market_type.value}:{instrument.upper()}",
+                )
+            )
+        if not events:
             return None
-        item = data[0]
-        symbol = self._symbol(str(item.get("instId", "")))
-        if not symbol:
-            return None
-        trade_id = str(item.get("tradeId") or item.get("seqId") or "0")
-        try:
-            sequence = int(item.get("tradeId")) if item.get("tradeId") else None
-        except (TypeError, ValueError):
-            sequence = None
-        event_time = self._timestamp_ms(item.get("ts"))
-        return MarketEvent(
-            event_type=MarketEventType.TRADE,
-            exchange=Venue.OKX.value,
-            market=self.market_type.value,
-            market_type=self.market_type.value,
-            symbol=symbol,
-            instrument_id=f"okx:{self.market_type.value}:{self._instrument(symbol)}",
-            event_time=event_time,
-            payload={
-                "symbol": symbol,
-                "timestamp": event_time.isoformat(),
-                "trade_id": trade_id,
-                "price": self._float(item["px"]),
-                "quantity": self._float(item["sz"]),
-                "side": item.get("side"),
-            },
-            source=MarketSource.WEBSOCKET,
-            sequence=sequence,
-            correlation_id=f"okx:{self.market_type.value}:{symbol}:{trade_id}",
-            trace_id=symbol,
-        )
+        return events[0] if len(events) == 1 else events
 
     def _parse_book(self, message: dict[str, Any]) -> MarketEvent | None:
         channel = message.get("arg", {}).get("channel")
@@ -114,60 +120,37 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
         if not data:
             return None
         item = data[0]
-        symbol = self._symbol(str(item.get("instId", "")))
+        instrument = str(item.get("instId") or message.get("arg", {}).get("instId", ""))
+        symbol = self._symbol(instrument)
         if not symbol:
             return None
-        action = item.get("action") or "snapshot"
-        sequence = int(item.get("seqId") or 0)
-        bids, asks, previous = self._books.get(symbol, ({}, {}, 0))
-        if action == "snapshot" or symbol not in self._books:
-            bids = {
-                float(row[0]): float(row[1])
-                for row in item.get("bids", [])
-                if float(row[1]) > 0
-            }
-            asks = {
-                float(row[0]): float(row[1])
-                for row in item.get("asks", [])
-                if float(row[1]) > 0
-            }
-        else:
-            if sequence and previous and sequence <= previous:
-                return None
-            for row in item.get("bids", []):
-                price, quantity = float(row[0]), float(row[1])
-                if quantity == 0:
-                    bids.pop(price, None)
-                else:
-                    bids[price] = quantity
-            for row in item.get("asks", []):
-                price, quantity = float(row[0]), float(row[1])
-                if quantity == 0:
-                    asks.pop(price, None)
-                else:
-                    asks[price] = quantity
-        self._books[symbol] = (bids, asks, sequence or previous)
-        event_time = self._timestamp_ms(item.get("ts"))
+        sequence = int(item.get("seqId") or item.get("checksum") or 0)
         return MarketEvent(
-            event_type=MarketEventType.BOOK_SNAPSHOT,
+            event_type=(
+                MarketEventType.BOOK_SNAPSHOT
+                if item.get("action") in (None, "snapshot")
+                else MarketEventType.BOOK_DELTA
+            ),
             exchange=Venue.OKX.value,
             market=self.market_type.value,
-            market_type=self.market_type.value,
             symbol=symbol,
-            instrument_id=f"okx:{self.market_type.value}:{self._instrument(symbol)}",
-            event_time=event_time,
+            event_time=self._timestamp_ms(item.get("ts")),
             payload={
-                "symbol": symbol,
-                "timestamp": event_time.isoformat(),
                 "bids": [
-                    {"price": p, "quantity": q}
-                    for p, q in sorted(bids.items(), reverse=True)
+                    {"price": self._float(row[0]), "quantity": self._float(row[1])}
+                    for row in item.get("bids", [])
                 ],
-                "asks": [{"price": p, "quantity": q} for p, q in sorted(asks.items())],
-                "last_update_id": sequence or previous,
+                "asks": [
+                    {"price": self._float(row[0]), "quantity": self._float(row[1])}
+                    for row in item.get("asks", [])
+                ],
+                "last_update_id": sequence,
+                "seq_id": sequence,
+                "checksum": item.get("checksum"),
             },
             source=MarketSource.WEBSOCKET,
-            sequence=sequence or previous,
-            correlation_id=f"okx:{self.market_type.value}:{symbol}:book:{sequence or previous}",
+            sequence=sequence,
+            correlation_id=f"okx:{self.market_type.value}:{symbol}:book:{sequence}",
             trace_id=symbol,
+            instrument_id=f"okx:{self.market_type.value}:{instrument.upper()}",
         )

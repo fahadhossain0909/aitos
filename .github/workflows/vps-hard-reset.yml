@@ -1,0 +1,126 @@
+name: HARD RESET VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type HARD_RESET_VPS to wipe AITOS Docker/deployment/data state'
+        required: true
+        type: string
+      reboot:
+        description: 'Reboot the VPS after cleanup'
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  AITOS_DATA_ROOT: /mnt/aitos-data
+  DEPLOY_PATH: /home/n41/aitos
+
+concurrency:
+  group: aitos-vps-hard-reset
+  cancel-in-progress: false
+
+jobs:
+  hard-reset:
+    runs-on: ubuntu-latest
+    environment: papertrade
+    timeout-minutes: 30
+    steps:
+      - name: Verify destructive confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          [ "$CONFIRMATION" = HARD_RESET_VPS ] || { echo '::error::Confirmation mismatch; nothing changed.'; exit 1; }
+      - name: Validate SSH access
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY AITOS_DATA_DISK_UUID; do test -n "${!name:-}" || { echo "::error::Missing secret: $name"; exit 1; }; done
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_vps_reset_key
+          chmod 600 /tmp/aitos_vps_reset_key
+      - name: HARD RESET AITOS state
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          REBOOT: ${{ inputs.reboot }}
+          AITOS_DATA_ROOT: ${{ env.AITOS_DATA_ROOT }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_vps_reset_key
+          command_timeout: 20m
+          envs: CONFIRMATION,REBOOT,AITOS_DATA_ROOT,DEPLOY_PATH,AITOS_DATA_DISK_UUID
+          script: |
+            set -Eeuo pipefail
+            [ "$CONFIRMATION" = HARD_RESET_VPS ]
+            [ "$(id -u)" -eq 0 ] || { echo '::error::Deployment user must be root-capable for hard reset'; exit 1; }
+            [ "$AITOS_DATA_ROOT" = /mnt/aitos-data ] || exit 1
+            [ "$DEPLOY_PATH" = /home/n41/aitos ] || exit 1
+            exec 9>/var/lock/aitos-vps-hard-reset.lock
+            flock -n 9 || { echo '::error::Another reset is running'; exit 1; }
+
+            echo '=== PRE-RESET ==='
+            hostname; date -u; df -h
+            findmnt --target "$AITOS_DATA_ROOT" || true
+            docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}' || true
+
+            echo '=== DATA DISK SAFETY GATE ==='
+            test -d "$AITOS_DATA_ROOT"
+            mountpoint -q "$AITOS_DATA_ROOT" || { echo '::error::Data root is not mounted; refusing deletion.'; exit 1; }
+            UUID_SOURCE="/dev/disk/by-uuid/$AITOS_DATA_DISK_UUID"
+            test -e "$UUID_SOURCE" || { echo '::error::Configured disk UUID not found'; exit 1; }
+            EXPECTED_DEVICE="$(readlink -f "$UUID_SOURCE")"
+            MOUNT_SOURCE="$(findmnt -rn -o SOURCE --target "$AITOS_DATA_ROOT" | head -n1)"
+            MOUNT_DEVICE="$(readlink -f "$MOUNT_SOURCE")"
+            [ "$MOUNT_DEVICE" = "$EXPECTED_DEVICE" ] || { echo "::error::Mounted device $MOUNT_DEVICE does not match configured UUID device $EXPECTED_DEVICE"; exit 1; }
+            echo "Verified dedicated data disk: $EXPECTED_DEVICE"
+
+            echo '=== STOP AITOS ==='
+            cd /
+            if [ -d "$DEPLOY_PATH" ] && docker compose -f "$DEPLOY_PATH/docker-compose.yml" config >/dev/null 2>&1; then
+              docker compose -f "$DEPLOY_PATH/docker-compose.yml" --project-directory "$DEPLOY_PATH" down --remove-orphans --volumes --timeout 30 || true
+            fi
+            docker ps -aq --filter 'name=aitos-' | xargs -r docker rm -f || true
+
+            echo '=== REMOVE AITOS DOCKER RESOURCES ==='
+            docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | awk '$1 ~ /^(aitos|ghcr\.io\/fahadhossain0909\/aitos)([:/]|$)/ {print $2}' | sort -u | xargs -r docker rmi -f || true
+            docker volume ls -q | grep -E '(^|_)aitos([_-]|$)' | xargs -r docker volume rm -f || true
+            docker network ls --format '{{.Name}}' | grep -E '(^|_)aitos([_-]|$)' | xargs -r docker network rm || true
+
+            echo '=== REMOVE DEPLOYMENT CHECKOUT ==='
+            rm -rf -- "$DEPLOY_PATH"
+
+            echo '=== WIPE AITOS DATA DISK CONTENTS ==='
+            # The mount and filesystem remain intact. Only contents of the
+            # verified dedicated AITOS data filesystem are removed.
+            find "$AITOS_DATA_ROOT" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+
+            echo '=== POST-RESET GATE ==='
+            test -d "$AITOS_DATA_ROOT"
+            mountpoint -q "$AITOS_DATA_ROOT"
+            POST_SOURCE="$(readlink -f "$(findmnt -rn -o SOURCE --target "$AITOS_DATA_ROOT" | head -n1)")"
+            [ "$POST_SOURCE" = "$EXPECTED_DEVICE" ]
+            test -z "$(find "$AITOS_DATA_ROOT" -mindepth 1 -print -quit 2>/dev/null)"
+            test -z "$(docker ps -aq --filter 'name=aitos-')"
+            echo 'AITOS hard reset completed. OS, SSH, filesystem, mount and unrelated Docker resources were preserved.'
+            df -h "$AITOS_DATA_ROOT"
+            docker system df || true
+
+            if [ "$REBOOT" = true ]; then
+              nohup sh -c 'sleep 2; systemctl reboot' >/dev/null 2>&1 &
+            fi
+      - name: Remove SSH key
+        if: always()
+        run: rm -f /tmp/aitos_vps_reset_key

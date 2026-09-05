@@ -1,8 +1,5 @@
 """Domain models for market data, mirroring the ClickHouse schema in the
 AITOS spec plus funding rate / open interest.
-
-Models are immutable and serializable to/from plain dicts so they can travel
-safely through the Event Bus and be reused by live and historical pipelines.
 """
 
 from __future__ import annotations
@@ -26,6 +23,10 @@ def _dt(value: str | datetime) -> datetime:
     if isinstance(value, datetime):
         return value
     return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -122,13 +123,21 @@ class OrderBookSnapshot:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OrderBookSnapshot:
+        def level_value(item: dict[str, Any]) -> float:
+            value = item.get("qty", item.get("quantity"))
+            if value is None:
+                raise KeyError("qty")
+            return float(value)
+
         bids = tuple(
-            (float(x["price"]), float(x["qty"]))
+            (float(x["price"]), level_value(x))
             for x in data.get("bid_levels", data.get("bids", []))
+            if level_value(x) > 0
         )
         asks = tuple(
-            (float(x["price"]), float(x["qty"]))
+            (float(x["price"]), level_value(x))
             for x in data.get("ask_levels", data.get("asks", []))
+            if level_value(x) > 0
         )
         return cls(
             symbol=data["symbol"],
@@ -145,9 +154,13 @@ class TradeTick:
     trade_id: int
     price: float
     quantity: float
-    side: TradeSide
-    is_buyer_maker: bool
-    timestamp: datetime
+    side: TradeSide = TradeSide.BUY
+    is_buyer_maker: bool = False
+    timestamp: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.timestamp is None:
+            object.__setattr__(self, "timestamp", _now())
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -162,14 +175,25 @@ class TradeTick:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TradeTick:
+        raw_side = data.get("side")
+        if isinstance(raw_side, TradeSide):
+            side = raw_side
+        elif raw_side is not None:
+            side = TradeSide(str(raw_side).lower())
+        elif "is_buyer_maker" in data:
+            side = TradeSide.SELL if bool(data["is_buyer_maker"]) else TradeSide.BUY
+        else:
+            side = TradeSide.BUY
         return cls(
             symbol=data["symbol"],
             trade_id=int(data["trade_id"]),
             price=float(data["price"]),
             quantity=float(data["quantity"]),
-            side=TradeSide(data["side"]),
-            is_buyer_maker=bool(data["is_buyer_maker"]),
-            timestamp=_dt(data["timestamp"]),
+            side=side,
+            is_buyer_maker=bool(data.get("is_buyer_maker", side is TradeSide.SELL)),
+            timestamp=(
+                _dt(data["timestamp"]) if data.get("timestamp") is not None else _now()
+            ),
         )
 
 
@@ -207,7 +231,7 @@ class OpenInterest:
     def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
-            "open_interest": float(self.open_interest),
+            "open_interest": self.open_interest,
             "timestamp": _iso(self.timestamp),
         }
 

@@ -19,84 +19,35 @@ env:
   AITOS_DATA_ROOT: /mnt/aitos-data
   BOOT_FREE_RESERVE_BYTES: 8053063680
   DATA_DISK_MIN_FREE_GB: 20
-  ALLOW_DISPOSABLE_DOCKER_RESET: true
 
 jobs:
   publish-image:
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request'
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v7.0.1
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4.6.0
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/login-action@v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Lowercase repository name
-        id: repo
+      - id: repo
         run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6.2.0
-        with:
-          images: ${{ env.REGISTRY }}/${{ steps.repo.outputs.repo }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=tag
-            type=sha,prefix=sha-,format=long
-            type=raw,value=latest,enable={{is_default_branch}}
-      - name: Build Docker image
-        uses: docker/build-push-action@v7.3.0
+      - uses: docker/build-push-action@v7.3.0
         with:
           context: .
-          load: true
-          push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.repo }}:sha-${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.repo }}:latest
           provenance: false
           sbom: false
-      - name: Push Docker image to GHCR with retry
-        env:
-          IMAGE_TAGS: ${{ steps.meta.outputs.tags }}
-        run: |
-          set -euo pipefail
-          max_attempts=5
-          attempt=1
-          while [ "$attempt" -le "$max_attempts" ]; do
-            echo "=== GHCR push attempt $attempt/$max_attempts ==="
-            failed=0
-            while IFS= read -r tag; do
-              [ -n "$tag" ] || continue
-              echo "Pushing $tag"
-              if ! docker push "$tag"; then
-                failed=1
-                echo "::warning::GHCR push failed for $tag (attempt $attempt/$max_attempts)."
-                break
-              fi
-            done <<< "$IMAGE_TAGS"
-            if [ "$failed" -eq 0 ]; then
-              echo "All Docker image tags pushed successfully."
-              exit 0
-            fi
-            if [ "$attempt" -eq "$max_attempts" ]; then
-              echo "::error::GHCR push failed after $max_attempts attempts."
-              exit 1
-            fi
-            sleep_seconds=$((attempt * 15))
-            echo "Waiting ${sleep_seconds}s before retrying GHCR push."
-            sleep "$sleep_seconds"
-            attempt=$((attempt + 1))
-          done
 
   deploy:
     runs-on: ubuntu-latest
     needs: publish-image
     environment: papertrade
     steps:
-      - name: Check required deployment secrets
-        id: check-secrets
+      - name: Validate deployment secrets
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -107,161 +58,124 @@ jobs:
           AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
         run: |
           set -euo pipefail
-          missing=0
           for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY REDIS_PASSWORD CLICKHOUSE_PASSWORD NEO4J_PASSWORD AITOS_DATA_DISK_UUID; do
-            if [ -z "${!name}" ]; then
-              echo "::error::Missing required GitHub Actions secret: $name"
-              missing=1
-            fi
+            test -n "${!name:-}" || { echo "::error::Missing secret: $name"; exit 1; }
           done
-          if [ "$missing" -ne 0 ]; then exit 1; fi
-          echo "has_secrets=true" >> "$GITHUB_OUTPUT"
-
-      - name: Write SSH key with proper formatting
-        if: steps.check-secrets.outputs.has_secrets == 'true'
+      - name: Prepare SSH key
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
+          umask 077
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
-
-      - name: Check runner resources
-        if: steps.check-secrets.outputs.has_secrets == 'true'
-        run: |
-          free -h
-          df -h /
-
-      - name: Deploy to remote host over SSH
-        if: steps.check-secrets.outputs.has_secrets == 'true'
+      - name: Deploy canonical AITOS stack
         uses: appleboy/ssh-action@v1.2.5
         env:
+          AITOS_DATA_ROOT: ${{ env.AITOS_DATA_ROOT }}
           BOOT_FREE_RESERVE_BYTES: ${{ env.BOOT_FREE_RESERVE_BYTES }}
           DATA_DISK_MIN_FREE_GB: ${{ env.DATA_DISK_MIN_FREE_GB }}
-          ALLOW_DISPOSABLE_DOCKER_RESET: ${{ env.ALLOW_DISPOSABLE_DOCKER_RESET }}
           AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          CLICKHOUSE_USER: ${{ secrets.CLICKHOUSE_USER || 'default' }}
+          CLICKHOUSE_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
+          NEO4J_USER: ${{ secrets.NEO4J_USER || 'neo4j' }}
+          NEO4J_PASSWORD: ${{ secrets.NEO4J_PASSWORD }}
+          BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+          BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+          BINANCE_TESTNET: ${{ secrets.BINANCE_TESTNET || 'true' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 15m
-          envs: BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,ALLOW_DISPOSABLE_DOCKER_RESET,AITOS_DATA_DISK_UUID
+          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_USER,CLICKHOUSE_PASSWORD,NEO4J_USER,NEO4J_PASSWORD,BINANCE_API_KEY,BINANCE_API_SECRET,BINANCE_TESTNET,DATABASE_URL,SENTRY_DSN,SLACK_WEBHOOK_URL
           script: |
-            set -euo pipefail
+            set -Eeuo pipefail
+            : "${AITOS_DATA_ROOT:=/mnt/aitos-data}"
             : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
             : "${DATA_DISK_MIN_FREE_GB:=20}"
-            : "${ALLOW_DISPOSABLE_DOCKER_RESET:=false}"
-            : "${AITOS_DATA_DISK_UUID:?AITOS_DATA_DISK_UUID must be configured in the papertrade environment}"
+            : "${AITOS_DATA_DISK_UUID:?missing data disk UUID}"
             APP_DIR="$HOME/aitos"
-            DATA_ROOT="${{ env.AITOS_DATA_ROOT }}"
             REPO="${{ github.repository }}"
             COMMIT="${{ github.sha }}"
             mkdir -p "$APP_DIR"
-            cd "$APP_DIR"
-
             exec 9>"$HOME/.aitos-deploy.lock"
-            echo "=== Acquiring host deployment lock ==="
             flock 9
-            echo "Host deployment lock acquired."
 
-            # Automatic low-space recovery runs before the hard reserve check.
-            # The reserve is a post-cleanup invariant, not an immediate failure trigger.
-            echo "=== Boot-disk automatic recovery ==="
-            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-            echo "Boot free space before recovery: $boot_free_bytes bytes"
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "Boot disk is below 7.5 GiB; starting safe automatic cleanup."
-              echo "Persistent data protection: $DATA_ROOT is excluded from cleanup."
-              if docker info >/dev/null 2>&1; then
-                docker image prune -af --filter 'until=0s' || true
-                docker container prune -f || true
-                docker network prune -f || true
-                docker builder prune -af || true
-              else
-                echo "::warning::Docker daemon is unavailable during boot-disk recovery."
-              fi
-              sudo journalctl --vacuum-time=7d || true
-              sudo apt-get clean || true
-              sudo rm -rf /tmp/* /var/tmp/* || true
-              sudo rm -rf /var/lib/apt/lists/* || true
-              sync
-              boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-              echo "Boot free space after recovery: $boot_free_bytes bytes"
-            fi
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "::error::Boot disk remains below the required 7.5 GiB free reserve after automatic cleanup."
-              df -h .
-              echo "=== Largest boot-disk directories ==="
-              sudo du -xhd1 / 2>/dev/null | sort -h | tail -20 || true
+            echo '=== BOOT DISK PREFLIGHT ==='
+            boot_free=$(df -B1 --output=avail "$HOME" | tail -1 | tr -d ' ')
+            [ "$boot_free" -ge "$BOOT_FREE_RESERVE_BYTES" ] || {
+              echo '::error::Boot disk below reserve; refusing destructive cleanup during deployment.'
+              echo 'Run the explicit HARD RESET workflow or clean unrelated host state manually.'
               exit 1
-            fi
-            echo "Boot-disk reserve satisfied."
-            df -h .
+            }
 
-            echo "=== Storage policy ==="
-            echo "Boot disk: keep at least 7.5 GiB free."
-            echo "Persistent AITOS database data: $DATA_ROOT/{clickhouse,neo4j,redis}."
-
-            echo "=== Downloading source snapshot ==="
+            echo '=== SOURCE DEPLOYMENT ==='
             tmp_dir=$(mktemp -d)
             trap 'rm -rf "$tmp_dir"' EXIT
             curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
             mkdir -p "$tmp_dir/source"
             tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir/source"
-            find "$APP_DIR" -mindepth 1 -maxdepth 1 ! -name .storage -exec rm -rf -- {} +
+            find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
             cp -a "$tmp_dir/source/." "$APP_DIR/"
-            mkdir -p ./.storage/others/backtest ./.storage/others/backups ./.storage/others/snapshots
+            cd "$APP_DIR"
 
-            echo "=== Automated persistent-storage bootstrap ==="
-            export AITOS_DATA_ROOT="$DATA_ROOT"
-            export AITOS_DATA_DISK_UUID
-            export AITOS_HOST_UID="$(id -u)"
-            export AITOS_HOST_GID="$(id -g)"
+            echo '=== CANONICAL STORAGE BOOTSTRAP ==='
+            export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID
+            export AITOS_HOST_UID="$(id -u)" AITOS_HOST_GID="$(id -g)"
             chmod +x scripts/bootstrap_storage.sh
             ./scripts/bootstrap_storage.sh
-            if ! mountpoint -q "$DATA_ROOT"; then
-              echo "::error::$DATA_ROOT is not a mounted data disk after bootstrap; refusing to deploy."
-              exit 1
-            fi
-            echo "Persistent storage bootstrap completed successfully."
+            mountpoint -q "$AITOS_DATA_ROOT"
 
+            echo '=== CANONICAL PRODUCTION ENV ==='
             umask 077
-            cat > .env << 'ENVEOF'
+            cat > .env << ENVEOF
             ENVIRONMENT=production
             LOG_LEVEL=INFO
             REQUIRE_HUMAN_APPROVAL_FOR_PROD=true
             DEBUG=false
             TESTING=false
-            AITOS_DATA_ROOT=${{ env.AITOS_DATA_ROOT }}
-            AITOS_DATA_DISK_UUID=${{ secrets.AITOS_DATA_DISK_UUID }}
+            AITOS_DATA_ROOT=$AITOS_DATA_ROOT
+            AITOS_DATA_DISK_UUID=$AITOS_DATA_DISK_UUID
             REDIS_HOST=redis
             REDIS_PORT=6379
             REDIS_DB=0
-            REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
-            REDIS_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/redis
+            REDIS_PASSWORD=$REDIS_PASSWORD
+            REDIS_DATA_DIR=$AITOS_DATA_ROOT/eventbus/redis
             CLICKHOUSE_HOST=clickhouse
             CLICKHOUSE_PORT=8123
-            CLICKHOUSE_USER=${{ secrets.CLICKHOUSE_USER || 'default' }}
-            CLICKHOUSE_PASSWORD=${{ secrets.CLICKHOUSE_PASSWORD }}
+            CLICKHOUSE_USER=$CLICKHOUSE_USER
+            CLICKHOUSE_PASSWORD=$CLICKHOUSE_PASSWORD
             CLICKHOUSE_DATABASE=aitos
             CLICKHOUSE_DB=aitos
-            CLICKHOUSE_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/clickhouse
+            CLICKHOUSE_DATA_DIR=$AITOS_DATA_ROOT/databases/clickhouse
             NEO4J_URI=bolt://neo4j:7687
-            NEO4J_USER=${{ secrets.NEO4J_USER || 'neo4j' }}
-            NEO4J_PASSWORD=${{ secrets.NEO4J_PASSWORD }}
-            NEO4J_DATA_DIR=${{ env.AITOS_DATA_ROOT }}/neo4j
-            NEO4J_LOG_DIR=./.storage/others/neo4j-logs
+            NEO4J_USER=$NEO4J_USER
+            NEO4J_PASSWORD=$NEO4J_PASSWORD
+            NEO4J_DATA_DIR=$AITOS_DATA_ROOT/databases/neo4j
+            NEO4J_LOG_DIR=$AITOS_DATA_ROOT/runtime/logs/neo4j
             LEARNING_POLL_SECONDS=60
             LEARNING_LOOKBACK_HOURS=168
-            LEARNING_MODEL_PATH=/models/online_rl/deep_value.pkl
-            LEARNING_STATE_PATH=/models/online_rl/worker_state.json
-            BACKTEST_DATA_DIR=./.storage/others/backtest
-            OTHERS_DATA_DIR=./.storage/others
-            BACKUP_DIR=./.storage/others/backups
-            SNAPSHOT_DIR=./.storage/others/snapshots
-            BINANCE_API_KEY=${{ secrets.BINANCE_API_KEY }}
-            BINANCE_API_SECRET=${{ secrets.BINANCE_API_SECRET }}
-            BINANCE_TESTNET=${{ secrets.BINANCE_TESTNET || 'true' }}
+            LEARNING_MODEL_PATH=$AITOS_DATA_ROOT/runtime/models/online_rl/deep_value.pkl
+            LEARNING_STATE_PATH=$AITOS_DATA_ROOT/runtime/models/online_rl/worker_state.json
+            BACKTEST_DATA_DIR=$AITOS_DATA_ROOT/research/backtest
+            REPLAY_DATA_DIR=$AITOS_DATA_ROOT/research/replay
+            BACKUP_DIR=$AITOS_DATA_ROOT/artifacts/backups
+            SNAPSHOT_DIR=$AITOS_DATA_ROOT/artifacts/snapshots
+            MODEL_DATA_DIR=$AITOS_DATA_ROOT/runtime/models
+            RUNTIME_TMP_DIR=$AITOS_DATA_ROOT/runtime/tmp
+            ARTIFACTS_DATA_DIR=$AITOS_DATA_ROOT/artifacts
+            AITOS_BOOT_RUNTIME_DIR=/var/lib/aitos
+            BOOT_FREE_BUFFER_GB=7.5
+            DATA_DISK_MIN_FREE_GB=$DATA_DISK_MIN_FREE_GB
+            DATA_DISK_TARGET_FREE_GB=25
+            BINANCE_API_KEY=$BINANCE_API_KEY
+            BINANCE_API_SECRET=$BINANCE_API_SECRET
+            BINANCE_TESTNET=$BINANCE_TESTNET
             BINANCE_RECV_WINDOW_MS=5000
             BINANCE_HEDGE_MODE=false
             DEPLOY_HOST=${{ secrets.DEPLOY_HOST }}
@@ -272,166 +186,56 @@ jobs:
             COMPOSE_PROJECT_NAME=aitos
             AITOS_IMAGE=ghcr.io/fahadhossain0909/aitos
             AITOS_IMAGE_TAG=sha-${{ github.sha }}
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
-            SENTRY_DSN=${{ secrets.SENTRY_DSN }}
-            SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}
+            DATABASE_URL=$DATABASE_URL
+            SENTRY_DSN=$SENTRY_DSN
+            SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_URL
             ENVEOF
             chmod 600 .env
 
-            echo "=== Post-source boot-disk reserve check ==="
-            boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "Boot disk crossed the reserve during source installation; cleaning again."
-              rm -rf "$tmp_dir"
-              if docker info >/dev/null 2>&1; then
-                docker image prune -af --filter 'until=0s' || true
-                docker builder prune -af || true
-              fi
-              sudo journalctl --vacuum-time=7d || true
-              sudo apt-get clean || true
-              sudo rm -rf /tmp/* /var/tmp/* /var/lib/apt/lists/* || true
-              sync
-              boot_free_bytes=$(df -B1 --output=avail . | tail -1 | tr -d ' ')
-            fi
-            if [ "$boot_free_bytes" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              echo "::error::Boot disk remains below 7.5 GiB after post-source cleanup."
-              df -h .
-              exit 1
-            fi
+            echo '=== CANONICAL PATH ASSERTIONS ==='
+            grep -q '^REDIS_DATA_DIR=/mnt/aitos-data/eventbus/redis$' .env
+            grep -q '^CLICKHOUSE_DATA_DIR=/mnt/aitos-data/databases/clickhouse$' .env
+            grep -q '^NEO4J_DATA_DIR=/mnt/aitos-data/databases/neo4j$' .env
+            grep -q '^NEO4J_LOG_DIR=/mnt/aitos-data/runtime/logs/neo4j$' .env
+            grep -q '^BACKTEST_DATA_DIR=/mnt/aitos-data/research/backtest$' .env
+            ! grep -q 'OTHERS_DATA_DIR\|\.storage/others' .env
 
-            echo "=== Docker/containerd storage preflight ==="
-            docker_storage_healthy=false
-            if docker info >/dev/null 2>&1 && docker ps -a >/dev/null 2>&1 && docker system df >/dev/null 2>&1; then
-              docker_storage_healthy=true
-              echo "Docker/containerd storage is healthy."
-            else
-              echo "::warning::Docker/containerd storage health check failed."
-              docker info 2>&1 || true
-              docker ps -a 2>&1 || true
-              docker system df 2>&1 || true
-              echo "Attempting one non-destructive Docker daemon restart."
-              sudo systemctl restart docker || true
-              sleep 10
-              if docker info >/dev/null 2>&1 && docker ps -a >/dev/null 2>&1 && docker system df >/dev/null 2>&1; then
-                docker_storage_healthy=true
-                echo "Docker/containerd storage recovered after daemon restart."
-              fi
-            fi
-
-            if [ "$docker_storage_healthy" != "true" ]; then
-              if [ "$ALLOW_DISPOSABLE_DOCKER_RESET" != "true" ]; then
-                echo "::error::Docker/containerd storage is unhealthy and disposable reset is disabled. Persistent data has not been touched."
-                exit 1
-              fi
-              echo "=== DISPOSABLE DOCKER RUNTIME RESET ==="
-              echo "Persistent $DATA_ROOT will NOT be removed."
-              sudo systemctl stop docker || true
-              sudo systemctl stop containerd || true
-              sleep 3
-              if mountpoint -q /var/lib/docker; then
-                echo "::error::/var/lib/docker is a separate mount; refusing automatic deletion."
-                exit 1
-              fi
-              if mountpoint -q /var/lib/containerd; then
-                echo "::error::/var/lib/containerd is a separate mount; refusing automatic deletion."
-                exit 1
-              fi
-              sudo rm -rf /var/lib/docker /var/lib/containerd
-              sudo mkdir -p /var/lib/docker /var/lib/containerd
-              sudo chmod 711 /var/lib/docker
-              sudo chmod 700 /var/lib/containerd
-              sudo systemctl start containerd
-              sudo systemctl start docker
-              sleep 10
-              if ! docker info >/dev/null 2>&1 || ! docker ps -a >/dev/null 2>&1 || ! docker system df >/dev/null 2>&1; then
-                echo "::error::Docker/containerd remains unhealthy after disposable runtime reset."
-                sudo systemctl status containerd --no-pager || true
-                sudo systemctl status docker --no-pager || true
-                sudo journalctl -u containerd -n 100 --no-pager || true
-                sudo journalctl -u docker -n 100 --no-pager || true
-                exit 1
-              fi
-            fi
-
-            echo "=== Docker storage configuration ==="
-            docker info --format 'Server={{.ServerVersion}} StorageDriver={{.Driver}} OSType={{.OSType}}'
-            docker system df
-            echo "=== Registry login and image pull ==="
-            echo '${{ secrets.GITHUB_TOKEN }}' | docker login ${{ env.REGISTRY }} -u '${{ github.actor }}' --password-stdin
-            docker compose config > /dev/null
+            echo '=== DOCKER VALIDATION ==='
+            docker compose config >/dev/null
             docker compose pull
-            echo "=== Persistent storage verification ==="
-            df -h "$DATA_ROOT"
-            test -d "$DATA_ROOT/clickhouse"
-            test -d "$DATA_ROOT/neo4j"
-            test -d "$DATA_ROOT/redis/live"
-            test -d "$DATA_ROOT/redis/archive"
-
-            echo "=== Container lifecycle ==="
             docker compose down --remove-orphans --timeout 30 || true
-            FIXED_NAMES="aitos-redis aitos-clickhouse aitos-neo4j aitos-paper aitos-learning aitos-storage-maintenance aitos-live aitos-clickhouse-init-1"
-            for attempt in 1 2 3; do
-              for c in $FIXED_NAMES; do
-                if docker inspect "$c" >/dev/null 2>&1; then
-                  echo "Force-removing leftover AITOS container: $c (attempt $attempt)"
-                  docker rm -f "$c" 2>/dev/null || true
-                fi
-              done
-              docker ps -aq --filter "name=aitos-clickhouse-init" | xargs -r docker rm -f 2>/dev/null || true
-              leftover=""
-              for c in $FIXED_NAMES; do
-                if docker inspect "$c" >/dev/null 2>&1; then
-                  leftover="$leftover $c"
-                fi
-              done
-              if [ -z "$leftover" ]; then
-                echo "All fixed AITOS container names are free."
-                break
-              fi
-              echo "::warning::AITOS containers still present after attempt $attempt:$leftover"
-              sleep 3
-            done
-            for c in $FIXED_NAMES; do
-              if docker inspect "$c" >/dev/null 2>&1; then
-                echo "::error::Could not free fixed AITOS container name: $c"
-                docker ps -a --filter "name=$c" || true
-                docker inspect "$c" || true
-                exit 1
-              fi
-            done
             docker compose up -d --remove-orphans --force-recreate
 
-            echo "=== Waiting for AITOS services ==="
+            echo '=== HEALTH GATE ==='
             deadline=$((SECONDS + 300))
             while [ "$SECONDS" -lt "$deadline" ]; do
-              docker compose ps --all || true
-              unhealthy=$(docker compose ps --all --format '{{.Name}} {{.State}}' | grep -E 'unhealthy|Restarting|Exited' || true)
               redis_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-redis 2>/dev/null || true)
               clickhouse_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-clickhouse 2>/dev/null || true)
               neo4j_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-neo4j 2>/dev/null || true)
-              if [ -z "$unhealthy" ] && echo "$redis_state" | grep -q healthy && echo "$clickhouse_state" | grep -q healthy && echo "$neo4j_state" | grep -q healthy; then
-                echo "Core AITOS services are healthy."
-                break
-              fi
+              if [ "$redis_state" = healthy ] && [ "$clickhouse_state" = healthy ] && [ "$neo4j_state" = healthy ]; then break; fi
               sleep 10
             done
-            docker compose ps --all
-            if docker compose ps --all --format '{{.Name}} {{.State}}' | grep -E 'unhealthy|Restarting|Exited'; then
-              echo "::error::One or more AITOS services are unhealthy/restarting/exited."
-              docker compose logs --tail=150
-              exit 1
-            fi
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-redis)" = healthy ]
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-clickhouse)" = healthy ]
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-neo4j)" = healthy ]
+            ! docker compose ps --all --format '{{.Name}} {{.State}}' | grep -E 'unhealthy|Restarting|Exited'
 
-            echo "=== Safe post-deploy Docker cleanup ==="
-            docker ps --format 'table {{.Names}}\t{{.Image}}\t{{.Status}}'
-            docker system df
-            docker image prune -af --filter 'until=0s'
-            docker container prune -f
-            docker network prune -f
-            docker builder prune -af
-            docker system df
+            echo '=== STORAGE GATE ==='
+            df -h "$AITOS_DATA_ROOT"
+            test -d "$AITOS_DATA_ROOT/databases/clickhouse"
+            test -d "$AITOS_DATA_ROOT/databases/neo4j"
+            test -d "$AITOS_DATA_ROOT/eventbus/redis/live"
+            test -d "$AITOS_DATA_ROOT/eventbus/redis/archive"
+            test -d "$AITOS_DATA_ROOT/research/backtest"
+            test -d "$AITOS_DATA_ROOT/research/replay"
+            test -d "$AITOS_DATA_ROOT/artifacts/backups"
+            test -d "$AITOS_DATA_ROOT/artifacts/snapshots"
+            test -d "$AITOS_DATA_ROOT/runtime/models"
+            test -d "$AITOS_DATA_ROOT/runtime/logs/neo4j"
+            test -d "$AITOS_DATA_ROOT/runtime/tmp"
 
-            echo "=== Final storage state ==="
-            df -h .
-            df -h "$DATA_ROOT"
-            echo "=== Deployment completed successfully: $COMMIT ==="
+            echo "=== DEPLOYMENT SUCCESS: $COMMIT ==="
+            docker system df
+      - name: Remove SSH key
+        if: always()
+        run: rm -f /tmp/deploy_key

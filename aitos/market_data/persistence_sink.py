@@ -1,4 +1,12 @@
-"""Durable ClickHouse sink for canonical market-data events."""
+"""Best-effort ClickHouse sink for canonical market-data events.
+
+Historical persistence is deliberately isolated from the live trading path.
+The Redis handler never waits for ClickHouse I/O: events are copied into a
+small bounded in-process queue and acknowledged immediately. If the queue is
+full, the historical event is dropped. Live consumers therefore cannot become
+backlogged because ClickHouse is slow, unavailable, or catching up after a
+restart.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +16,13 @@ from typing import Any
 
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus, Subscription
-from aitos.models.market import Kline, OrderBookSnapshot, TradeTick
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeTick,
+)
 
 from .bus import MarketDataBus
 from .channels import GROUP_PERSISTENCE
@@ -16,12 +30,7 @@ from .contracts import MarketEvent, MarketEventType
 
 
 class CanonicalMarketDataPersistenceSink:
-    """Bounded asynchronous ClickHouse writer for canonical events.
-
-    The Redis handler awaits a worker future. Therefore an event is acknowledged
-    only after ClickHouse accepts it; a full queue or persistence error naturally
-    leaves the Redis consumer pending instead of silently losing market history.
-    """
+    """Bounded, best-effort ClickHouse writer that never blocks live ingestion."""
 
     def __init__(
         self,
@@ -37,9 +46,7 @@ class CanonicalMarketDataPersistenceSink:
         self._repository = repository
         self._historical_books = {s.upper() for s in historical_book_symbols}
         self._book_interval = max(0.1, book_interval_seconds)
-        self._queue: asyncio.Queue[tuple[MarketEvent, asyncio.Future[None]]] = (
-            asyncio.Queue(maxsize=queue_capacity)
-        )
+        self._queue: asyncio.Queue[MarketEvent] = asyncio.Queue(maxsize=queue_capacity)
         self._workers_count = max(1, workers)
         self._subscriptions: list[Subscription] = []
         self._workers: list[asyncio.Task] = []
@@ -68,6 +75,42 @@ class CanonicalMarketDataPersistenceSink:
             ),
             await self._bus.subscribe(
                 MarketEventType.KLINE,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.FUNDING,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.OPEN_INTEREST,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.TICKER,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.LIQUIDATION,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.OPTIONS,
+                self._enqueue,
+                group=GROUP_PERSISTENCE,
+                live_only=True,
+            ),
+            await self._bus.subscribe(
+                MarketEventType.INSTRUMENT,
                 self._enqueue,
                 group=GROUP_PERSISTENCE,
                 live_only=True,
@@ -101,6 +144,7 @@ class CanonicalMarketDataPersistenceSink:
             pass
 
     async def _enqueue(self, event: MarketEvent) -> None:
+        """Queue persistence work without ever waiting on ClickHouse."""
         if self._repository is None:
             return
         if event.event_type is MarketEventType.BOOK_SNAPSHOT:
@@ -114,32 +158,23 @@ class CanonicalMarketDataPersistenceSink:
             ):
                 return
             self._last_book_persist[event.symbol] = now
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future[None] = loop.create_future()
         try:
-            self._queue.put_nowait((event, future))
+            self._queue.put_nowait(event)
         except asyncio.QueueFull:
             self._rejected += 1
-            future.cancel()
-            raise RuntimeError("canonical persistence queue is full")
-        await future
 
     async def _worker(self, worker_id: int) -> None:
         while True:
-            event, future = await self._queue.get()
+            event = await self._queue.get()
             try:
-                await self._persist(event)
-                self._processed += 1
-                if not future.done():
-                    future.set_result(None)
-            except asyncio.CancelledError:
-                if not future.done():
-                    future.cancel()
-                raise
-            except Exception as exc:
-                self._errors += 1
-                if not future.done():
-                    future.set_exception(exc)
+                try:
+                    await self._persist(event)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    self._errors += 1
+                else:
+                    self._processed += 1
             finally:
                 self._queue.task_done()
 
@@ -158,6 +193,16 @@ class CanonicalMarketDataPersistenceSink:
         elif event.event_type is MarketEventType.KLINE:
             payload["symbol"] = event.symbol
             await self._repository.save_kline(Kline.from_dict(payload))
+        elif event.event_type is MarketEventType.FUNDING:
+            payload["symbol"] = event.symbol
+            payload.setdefault("funding_time", event.event_time.isoformat())
+            await self._repository.save_funding_rate(FundingRate.from_dict(payload))
+        elif event.event_type is MarketEventType.OPEN_INTEREST:
+            payload["symbol"] = event.symbol
+            payload.setdefault("timestamp", event.event_time.isoformat())
+            await self._repository.save_open_interest(OpenInterest.from_dict(payload))
+        else:
+            await self._repository.save_market_event(event)
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -169,4 +214,5 @@ class CanonicalMarketDataPersistenceSink:
             "rejected": self._rejected,
             "workers": len(self._workers),
             "historical_book_symbols": sorted(self._historical_books),
+            "backpressure_policy": "drop_history_never_block_live",
         }

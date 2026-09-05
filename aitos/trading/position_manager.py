@@ -1,4 +1,4 @@
-"""Position Manager — Market State, Path, Exit, Hedge orchestration."""
+"""Position Manager — Market State, Path, Journey, Exit, Hedge orchestration."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from aitos.intelligence.market_state import MarketState, MarketStateEngine
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
 from aitos.intelligence.path_planner import MarketPathPlanner, PathPlan
 from aitos.intelligence.structural_risk import StructuralRiskEngine, StructuralStop
+from aitos.intelligence.trade_journey import TradeJourneyEngine, TradeJourneySnapshot
 from aitos.intelligence.trade_thesis import TradeThesis, TradeThesisEngine
 from aitos.intelligence.trade_thesis.models import ThesisEvaluation
 from aitos.logging_setup import get_logger
@@ -33,6 +34,7 @@ class PositionAction:
     reason: str
     reduce_fraction: float = 0.0
     new_stop_price: float | None = None
+    spike_tp_price: float | None = None
     exit_decision: ExitDecision | None = None
     hedge_decision: HedgeDecision | None = None
     path_plan: PathPlan | None = None
@@ -40,6 +42,7 @@ class PositionAction:
     market_state: MarketState | None = None
     thesis: TradeThesis | None = None
     thesis_eval: ThesisEvaluation | None = None
+    journey: TradeJourneySnapshot | None = None
     notes: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -48,6 +51,7 @@ class PositionAction:
             "reason": self.reason,
             "reduce_fraction": self.reduce_fraction,
             "new_stop_price": self.new_stop_price,
+            "spike_tp_price": self.spike_tp_price,
             "exit_decision": (
                 self.exit_decision.to_dict() if self.exit_decision else None
             ),
@@ -57,6 +61,7 @@ class PositionAction:
             "thesis_health": (
                 self.thesis_eval.health.value if self.thesis_eval else None
             ),
+            "journey": self.journey.to_dict() if self.journey else None,
             "notes": list(self.notes),
         }
 
@@ -70,6 +75,7 @@ class PositionManager:
         exit_intelligence_engine: ExitIntelligenceEngine | None = None,
         thesis_engine: TradeThesisEngine | None = None,
         hedge_intelligence_engine: HedgeIntelligenceEngine | None = None,
+        trade_journey_engine: TradeJourneyEngine | None = None,
         config: Mapping[str, Any] | None = None,
     ) -> None:
         self._mse = market_state_engine or MarketStateEngine()
@@ -79,6 +85,17 @@ class PositionManager:
         self._thesis_engine = thesis_engine or TradeThesisEngine()
         cfg = dict(config or {})
         self._cfg = cfg
+        self._journey_engine = trade_journey_engine or TradeJourneyEngine(
+            proving_max_r=float(cfg.get("journey_proving_max_r", 0.50)),
+            healthy_threshold=float(cfg.get("journey_healthy_threshold", 0.70)),
+            uncertain_threshold=float(cfg.get("journey_uncertain_threshold", 0.48)),
+            decay_threshold=float(cfg.get("journey_decay_threshold", 0.34)),
+            stale_after_seconds=float(cfg.get("journey_stale_after_seconds", 900.0)),
+            reduce_health_threshold=float(
+                cfg.get("journey_reduce_health_threshold", 0.42)
+            ),
+            max_reduce_fraction=float(cfg.get("journey_max_reduce_fraction", 0.50)),
+        )
         self._hedge_engine = hedge_intelligence_engine or HedgeIntelligenceEngine(
             open_threshold=float(cfg.get("hedge_open_threshold", 0.68)),
             close_threshold=float(cfg.get("hedge_close_threshold", 0.56)),
@@ -91,16 +108,57 @@ class PositionManager:
         )
         self._hedge_enabled = bool(cfg.get("hedge_enabled", True))
         self._theses: dict[str, TradeThesis] = {}
-        self._allow_stop_tighten = bool(self._cfg.get("allow_stop_tighten", True))
+        self._journeys: dict[str, TradeJourneySnapshot] = {}
+        self._allow_stop_tighten = bool(cfg.get("allow_stop_tighten", True))
+        self._spike_tp_atr_multiple = max(
+            0.0, float(cfg.get("spike_tp_atr_multiple", 10.0))
+        )
 
     def register_thesis(self, thesis: TradeThesis) -> None:
         self._theses[thesis.trade_id] = thesis
 
     def clear_trade(self, trade_id: str, symbol: str | None = None) -> None:
         self._theses.pop(trade_id, None)
+        self._journeys.pop(trade_id, None)
         self._hedge_engine.reset(trade_id)
         if symbol:
             self._eie.reset_symbol(symbol)
+
+    def _spike_tp(
+        self, *, side: str, current_price: float, atr: float | None
+    ) -> float | None:
+        if (
+            atr is None
+            or atr <= 0
+            or current_price <= 0
+            or self._spike_tp_atr_multiple <= 0
+        ):
+            return None
+        distance = atr * self._spike_tp_atr_multiple
+        return current_price + distance if side == "LONG" else current_price - distance
+
+    @staticmethod
+    def _journey_score_inputs(market_state: MarketState) -> tuple[float, float, float]:
+        momentum = {
+            "STRONG": 1.0,
+            "MODERATING": 0.68,
+            "WEAK": 0.38,
+            "EXHAUSTED": 0.15,
+        }.get(market_state.momentum.value, 0.5)
+        liquidity = {
+            "UPSIDE_LIQUIDITY_HIGH": 0.85,
+            "DOWNSIDE_LIQUIDITY_HIGH": 0.85,
+            "BALANCED": 0.65,
+            "THIN": 0.25,
+            "UNKNOWN": 0.50,
+        }.get(market_state.liquidity_bias.value, 0.5)
+        structure = {
+            "BULLISH": 0.90,
+            "BEARISH": 0.90,
+            "RANGE": 0.60,
+            "BROKEN": 0.10,
+        }.get(market_state.structure.value, 0.5)
+        return momentum, liquidity, structure
 
     def evaluate(
         self,
@@ -122,7 +180,7 @@ class PositionManager:
     ) -> PositionAction:
         ts = timestamp or datetime.now(timezone.utc)
         side = trade.side.value
-
+        trade.record_excursion(current_price)
         market_state = self._mse.compute(
             symbol=trade.symbol,
             mid_price=current_price,
@@ -138,7 +196,6 @@ class PositionManager:
             timestamp=ts,
             extra_features=extra_features,
         )
-
         path_plan = self._mpp.plan(
             market_state=market_state,
             volume_profile=volume_profile,
@@ -148,7 +205,6 @@ class PositionManager:
             swing_highs=swing_highs,
             swing_lows=swing_lows,
         )
-
         structural_stop = self._sre.compute(
             symbol=trade.symbol,
             side=side,
@@ -162,12 +218,14 @@ class PositionManager:
             atr=atr,
             timestamp=ts,
         )
-
         thesis = self._theses.get(trade.trade_id)
         if thesis is None:
-            upside = tuple(d.price for d in path_plan.upside[:3])
-            downside = tuple(d.price for d in path_plan.downside[:3])
-            expected = upside if side == "LONG" else downside
+            expected = tuple(
+                d.price
+                for d in (path_plan.upside if side == "LONG" else path_plan.downside)[
+                    :3
+                ]
+            )
             thesis = self._thesis_engine.build_from_entry(
                 trade_id=trade.trade_id,
                 symbol=trade.symbol,
@@ -181,11 +239,39 @@ class PositionManager:
                 timestamp=ts,
             )
             self._theses[trade.trade_id] = thesis
-
         thesis_eval = self._thesis_engine.evaluate(
             thesis, market_state, current_price=current_price
         )
-
+        expected_path = tuple(
+            d.price
+            for d in (path_plan.upside if side == "LONG" else path_plan.downside)[:5]
+        )
+        age_seconds = 0.0
+        try:
+            entry_dt = datetime.fromisoformat(trade.entry_time.replace("Z", "+00:00"))
+            age_seconds = max(0.0, (ts - entry_dt).total_seconds())
+        except (TypeError, ValueError):
+            pass
+        thesis_health_map = {"INTACT": 1.0, "DEGRADED": 0.55, "INVALIDATED": 0.10}
+        thesis_health = thesis_health_map.get(
+            getattr(thesis_eval.health, "value", str(thesis_eval.health)), 0.50
+        )
+        momentum_score, liquidity_score, structure_score = self._journey_score_inputs(
+            market_state
+        )
+        journey = self._journey_engine.evaluate(
+            side=side,
+            entry_price=trade.entry_price,
+            current_price=current_price,
+            unrealized_r=trade.unrealized_r_multiple(current_price),
+            age_seconds=age_seconds,
+            thesis_health=thesis_health,
+            momentum=momentum_score,
+            liquidity=liquidity_score,
+            structure=structure_score,
+            expected_path_prices=expected_path,
+        )
+        self._journeys[trade.trade_id] = journey
         exit_decision = self._eie.evaluate(
             symbol=trade.symbol,
             side=side,
@@ -198,7 +284,6 @@ class PositionManager:
             thesis_eval=thesis_eval,
             timestamp=ts,
         )
-
         hedge_decision = (
             self._hedge_engine.evaluate(
                 trade=trade,
@@ -210,35 +295,49 @@ class PositionManager:
             if self._hedge_enabled and exit_decision.action != ExitAction.EXIT
             else None
         )
-
-        new_stop: float | None = None
+        effective_action = exit_decision.action
+        reduce_fraction = exit_decision.suggested_reduce_fraction
+        if effective_action != ExitAction.EXIT:
+            if journey.action.value == "EXIT":
+                effective_action = ExitAction.EXIT
+            elif journey.action.value == "REDUCE":
+                effective_action = ExitAction.MANAGE
+                reduce_fraction = max(
+                    reduce_fraction, min(0.50, self._journey_engine.max_reduce_fraction)
+                )
+            elif journey.action.value in {"PROTECT", "TRAIL"}:
+                effective_action = ExitAction.MANAGE
+        new_stop = None
         if (
             self._allow_stop_tighten
-            and exit_decision.action == ExitAction.MANAGE
+            and effective_action == ExitAction.MANAGE
             and structural_stop is not None
         ):
-            if trade.side == TradeSide.LONG:
-                if structural_stop.stop_price > trade.sl_price:
-                    new_stop = structural_stop.stop_price
-            else:
-                if structural_stop.stop_price < trade.sl_price:
-                    new_stop = structural_stop.stop_price
-
+            if (
+                trade.side == TradeSide.LONG
+                and structural_stop.stop_price > trade.sl_price
+            ) or (
+                trade.side == TradeSide.SHORT
+                and structural_stop.stop_price < trade.sl_price
+            ):
+                new_stop = structural_stop.stop_price
+        spike_tp_price = self._spike_tp(side=side, current_price=current_price, atr=atr)
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
-        hedge_text = f" hedge={hedge_decision.action}" if hedge_decision else ""
         reason = (
-            f"EIE:{exit_decision.action.value}"
-            f" score={exit_decision.exit_score:.2f}"
-            f" ere={exit_decision.expected_remaining_edge:.4f}"
-            f" thesis={thesis_eval.health.value}{hedge_text}"
-            f" [{', '.join(reason_codes)}]"
+            f"EIE:{exit_decision.action.value} score={exit_decision.exit_score:.2f}"
+            f" ere={exit_decision.expected_remaining_edge:.4f} thesis={thesis_eval.health.value}"
+            f" journey={journey.state.value}/{journey.action.value} health={journey.health_score:.1f}"
+            f" path={journey.path_adherence:.1f}"
+            f" hedge={hedge_decision.action if hedge_decision else 'none'}"
+            f" [{', '.join(reason_codes + list(journey.reasons))}]"
         )
-
+        notes = tuple(dict.fromkeys((*exit_decision.notes, *journey.reasons)))
         return PositionAction(
-            action=exit_decision.action,
+            action=effective_action,
             reason=reason,
-            reduce_fraction=exit_decision.suggested_reduce_fraction,
+            reduce_fraction=reduce_fraction,
             new_stop_price=new_stop,
+            spike_tp_price=spike_tp_price,
             exit_decision=exit_decision,
             hedge_decision=hedge_decision,
             path_plan=path_plan,
@@ -246,5 +345,6 @@ class PositionManager:
             market_state=market_state,
             thesis=thesis,
             thesis_eval=thesis_eval,
-            notes=exit_decision.notes,
+            journey=journey,
+            notes=notes,
         )

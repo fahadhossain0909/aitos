@@ -1,0 +1,131 @@
+name: Market Data Contract Audit
+
+on:
+  push:
+    branches: ["architecture/market-data-v1"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  market-data-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_PORT: '8123'
+      CLICKHOUSE_USER: aitos_test
+      CLICKHOUSE_PASSWORD: aitos_test_password
+      CLICKHOUSE_DATABASE: aitos
+      REDIS_HOST: localhost
+      REDIS_PORT: '6379'
+      REDIS_PASSWORD: aitos_test_password
+      INTEGRATION_REDIS_URL: redis://:aitos_test_password@127.0.0.1:6379/0
+      NEO4J_URI: bolt://localhost:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: aitos_test_password
+      INTEGRATION_NEO4J_URI: bolt://127.0.0.1:7687
+      INTEGRATION_NEO4J_USER: neo4j
+      INTEGRATION_NEO4J_PASSWORD: aitos_test_password
+      TESTING: 'true'
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.12-alpine
+        env:
+          CLICKHOUSE_USER: aitos_test
+          CLICKHOUSE_PASSWORD: aitos_test_password
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        command: redis-server --requirepass aitos_test_password --appendonly no
+        options: >-
+          --health-cmd "redis-cli --no-auth-warning -a aitos_test_password ping | grep -q PONG"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      neo4j:
+        image: neo4j:5.19-community
+        env:
+          NEO4J_AUTH: neo4j/aitos_test_password
+          NEO4J_dbms_memory_heap_initial__size: 256m
+          NEO4J_dbms_memory_heap_max__size: 512m
+        ports:
+          - 7474:7474
+          - 7687:7687
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:7474 || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 30
+          --health-start-period 30s
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          pip install pytest pytest-asyncio black==25.12.0 flake8
+      - name: Initialize ClickHouse test database
+        run: |
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8123/ping >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" \
+            'http://127.0.0.1:8123/' \
+            --data-binary 'CREATE DATABASE IF NOT EXISTS aitos'
+      - name: Verify integration services
+        run: |
+          python - <<'PY'
+          import os
+          import redis
+
+          client = redis.Redis(
+              host=os.environ["REDIS_HOST"],
+              port=int(os.environ["REDIS_PORT"]),
+              password=os.environ["REDIS_PASSWORD"],
+              decode_responses=True,
+          )
+          if client.ping() is not True:
+              raise SystemExit("Redis health check failed")
+          print("Redis: PONG")
+          PY
+          curl -fsS http://127.0.0.1:7474 >/dev/null
+          curl -fsS http://127.0.0.1:8123/ping >/dev/null
+          echo "Neo4j HTTP and ClickHouse health checks passed"
+      - name: Compile Python sources
+        run: python -m compileall -q aitos run_live_trading.py run_paper_trading.py
+      - name: Check formatting
+        run: black --check --diff aitos tests run_live_trading.py run_paper_trading.py
+      - name: Static fatal-error lint
+        run: flake8 aitos run_live_trading.py run_paper_trading.py --count --select=E9,F63,F7,F82 --show-source --statistics
+      - name: Market-data tests
+        env:
+          PYTHONPATH: .
+        run: pytest -q tests/market_data tests/test_event_bus_live_start.py
+      - name: Full unit/integration test suite
+        env:
+          PYTHONPATH: .
+        run: pytest -q
+      - name: Validate Compose
+        run: |
+          cp .env.example .env
+          docker compose config >/dev/null
+      - name: Validate runtime audit script syntax
+        run: bash -n scripts/market_data_contract_audit.sh scripts/paper_runtime_audit.sh

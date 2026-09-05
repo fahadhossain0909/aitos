@@ -1,0 +1,129 @@
+name: MARKET DATA SMOKE
+
+# Manual production gate: run only after the deployment workflow has completed.
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: "Seconds to observe Binance trade + depth streams"
+        required: true
+        default: "30"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    environment: papertrade
+    timeout-minutes: 10
+    steps:
+      - name: Validate deployment secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            test -n "${!name:-}" || { echo "::error::Missing secret: $name"; exit 1; }
+          done
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_smoke_key
+          chmod 600 /tmp/aitos_smoke_key
+
+      - name: Verify live market-data path on VPS
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          DURATION_SECONDS: ${{ inputs.duration_seconds }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_smoke_key
+          command_timeout: 8m
+          envs: DURATION_SECONDS
+          script: |
+            set -Eeuo pipefail
+            case "$DURATION_SECONDS" in
+              ''|*[!0-9]*) echo '::error::duration_seconds must be an integer'; exit 1 ;;
+            esac
+            [ "$DURATION_SECONDS" -ge 10 ] && [ "$DURATION_SECONDS" -le 120 ]
+            cd "$HOME/aitos"
+            test -f .env
+            test -f docker-compose.yml
+            docker inspect aitos-paper >/dev/null
+            test "$(docker inspect --format '{{.State.Running}}' aitos-paper)" = true
+            test "$(docker inspect --format '{{.State.Health.Status}}' aitos-paper)" = healthy
+
+            echo '=== DIRECT BINANCE WEBSOCKET ==='
+            docker exec -e DURATION_SECONDS="$DURATION_SECONDS" aitos-paper python3 - <<'PY'
+            import asyncio
+            import json
+            import os
+            import time
+            import websockets
+
+            duration = int(os.environ["DURATION_SECONDS"])
+            url = (
+                "wss://fstream.binance.com/stream?streams="
+                "btcusdt@aggTrade/btcusdt@depth@100ms"
+            )
+
+            async def main():
+                trades = 0
+                books = 0
+                deadline = time.monotonic() + duration
+                async with websockets.connect(
+                    url, ping_interval=15, ping_timeout=10, open_timeout=10
+                ) as ws:
+                    while time.monotonic() < deadline:
+                        remaining = max(0.1, deadline - time.monotonic())
+                        raw = await asyncio.wait_for(ws.recv(), timeout=remaining)
+                        msg = json.loads(raw)
+                        stream = msg.get("stream", "")
+                        if stream.endswith("@aggTrade"):
+                            trades += 1
+                        elif stream.endswith("@depth@100ms"):
+                            books += 1
+                print(f"trade_messages={trades}")
+                print(f"book_messages={books}")
+                if trades == 0 or books == 0:
+                    raise SystemExit("FAIL: Binance websocket did not deliver both streams")
+
+            asyncio.run(main())
+            PY
+
+            echo '=== AITOS CONTAINER STATE ==='
+            docker inspect --format 'paper restart={{.RestartCount}} oom={{.State.OOMKilled}} health={{.State.Health.Status}}' aitos-paper
+            docker inspect --format 'redis restart={{.RestartCount}} oom={{.State.OOMKilled}} health={{.State.Health.Status}}' aitos-redis
+            docker inspect --format 'clickhouse restart={{.RestartCount}} oom={{.State.OOMKilled}} health={{.State.Health.Status}}' aitos-clickhouse
+            docker inspect --format 'neo4j restart={{.RestartCount}} oom={{.State.OOMKilled}} health={{.State.Health.Status}}' aitos-neo4j
+
+            echo '=== CANONICAL REDIS STREAMS ==='
+            REDIS_PASSWORD="$(grep '^REDIS_PASSWORD=' .env | cut -d= -f2-)"
+            test -n "$REDIS_PASSWORD"
+            docker exec -e REDIS_PASSWORD="$REDIS_PASSWORD" aitos-redis sh -c '
+              redis-cli --no-auth-warning -a "$REDIS_PASSWORD" XLEN stream:market.trade;
+              redis-cli --no-auth-warning -a "$REDIS_PASSWORD" XLEN stream:market.book.snapshot;
+              redis-cli --no-auth-warning -a "$REDIS_PASSWORD" XLEN stream:market.book.delta;
+            '
+
+            echo '=== PAPER HEALTH ==='
+            curl -fsS http://127.0.0.1:8090/health >/tmp/aitos-paper-health.json
+            python3 - <<'PY'
+            import json
+            from pathlib import Path
+            payload = json.loads(Path('/tmp/aitos-paper-health.json').read_text())
+            text = json.dumps(payload)
+            required = ('canonical_market_data', 'deep_market_data')
+            missing = [key for key in required if key not in text]
+            if missing:
+                raise SystemExit(f"FAIL: missing canonical health telemetry: {missing}")
+            print('canonical_health_telemetry=present')
+            PY
+
+            echo '=== SMOKE PASS ==='
+      - name: Remove SSH key
+        if: always()
+        run: rm -f /tmp/aitos_smoke_key

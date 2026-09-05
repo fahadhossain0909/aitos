@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import os
+from datetime import datetime, timezone
 from typing import Any
 
 from aitos.logging_setup import get_logger
@@ -39,9 +40,66 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
     processed concurrently. Independent streams may process concurrently up to
     ``REDIS_CONSUMER_CONCURRENCY``. This avoids allowing a slow BTC handler to
     serialize ETH/SOL/BNB while preserving state-update ordering per symbol.
+
+    Older EventBus revisions exposed ``_process_message`` from the base
+    consumer implementation. During the concurrency migration that method was
+    removed while the installer still depended on it. Keep the processing
+    primitive installed here as well so the monkey-patched consumer loop is
+    self-contained and cannot crash at first delivery.
     """
     if getattr(event_bus_cls, "_ordered_concurrency_installed", False):
         return
+
+    if not hasattr(event_bus_cls, "_process_message"):
+
+        async def _process_message(
+            self: Any,
+            stream_key: str,
+            entry_id: Any,
+            fields: dict[str, Any],
+            group: str,
+            handler: Any,
+        ) -> None:
+            self._consumed_events += 1
+            self._last_consumed_at = datetime.now(timezone.utc).isoformat()
+            try:
+                event = self._event_from_wire(fields)
+            except AttributeError:
+                # Event is imported lazily here to avoid changing the module's
+                # import graph while retaining compatibility with EventBus.
+                from aitos.core.contracts import Event
+
+                event = Event.from_wire(fields)
+
+            try:
+                response = await handler(event)
+                await self._redis.xack(stream_key, group, entry_id)
+                self._acked_events += 1
+                self._last_acked_at = datetime.now(timezone.utc).isoformat()
+                if response is not None and hasattr(self, "_maybe_publish_response"):
+                    await self._maybe_publish_response(event, response)
+            except Exception as exc:
+                self._handler_failures += 1
+                self._last_error = str(exc)[:500]
+                logger.exception(
+                    "event handler failed",
+                    extra={
+                        "aitos_extra": {
+                            "stream": stream_key,
+                            "group": group,
+                            "entry_id": entry_id,
+                            "error": str(exc),
+                        }
+                    },
+                )
+                if hasattr(self, "_handle_failed_event"):
+                    await self._handle_failed_event(
+                        stream_key, group, entry_id, fields, exc
+                    )
+                else:
+                    raise
+
+        event_bus_cls._process_message = _process_message
 
     async def _consume_loop(
         self: Any,

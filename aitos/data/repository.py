@@ -59,6 +59,28 @@ CREATE TABLE IF NOT EXISTS open_interest (
     time DateTime64(3, 'UTC'), symbol String, open_interest Float64
 ) ENGINE = MergeTree() PARTITION BY toYYYYMM(time) ORDER BY (symbol, time)
 """
+CREATE_MARKET_EVENTS = """
+CREATE TABLE IF NOT EXISTS market_events (
+    event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
+    event_id String, exchange LowCardinality(String), market LowCardinality(String),
+    symbol LowCardinality(String), event_type LowCardinality(String),
+    source LowCardinality(String), sequence Nullable(UInt64), schema_version UInt16,
+    correlation_id String, trace_id String, payload_json String
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (symbol, event_type, event_time, event_id)
+"""
+CREATE_LIVE_ANALYTICS_EVENTS = """
+CREATE TABLE IF NOT EXISTS live_analytics_events (
+    event_time DateTime64(3, 'UTC'), ingest_time DateTime64(3, 'UTC'),
+    event_id String, category LowCardinality(String), exchange LowCardinality(String),
+    market LowCardinality(String), symbol LowCardinality(String),
+    source_module LowCardinality(String), correlation_id String,
+    schema_version String, payload_json String
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (category, symbol, event_time, event_id)
+"""
 CREATE_LEARNING_EXPERIENCES = """
 CREATE TABLE IF NOT EXISTS learning_experiences (
     experience_id UUID, timestamp DateTime64(3, 'UTC'), source LowCardinality(String),
@@ -69,30 +91,17 @@ CREATE TABLE IF NOT EXISTS learning_experiences (
 ) ENGINE = MergeTree() PARTITION BY toYYYYMM(timestamp)
 ORDER BY (symbol, timestamp, experience_id)
 """
-
-# Durable paper/live trading state is part of the ClickHouse schema contract,
-# not an optional runtime side effect.  Keeping these DDL statements in the
-# repository initializer guarantees the tables exist before reset/verification,
-# paper startup, or recovery code can access them.
 CREATE_TRADE_RUNTIME_STATE = """
 CREATE TABLE IF NOT EXISTS trade_runtime_state (
-    trade_id String,
-    symbol LowCardinality(String),
-    state LowCardinality(String),
-    payload_json String,
-    updated_at DateTime64(3, 'UTC')
-) ENGINE = ReplacingMergeTree(updated_at)
-ORDER BY trade_id
+    trade_id String, symbol LowCardinality(String), state LowCardinality(String),
+    payload_json String, updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at) ORDER BY trade_id
 """
 CREATE_PORTFOLIO_DRAWDOWN_STATE = """
 CREATE TABLE IF NOT EXISTS portfolio_drawdown_state (
-    asset LowCardinality(String),
-    time DateTime64(3, 'UTC'),
-    equity_usd Float64,
-    peak_equity_usd Float64,
-    drawdown_pct Float64
-) ENGINE = ReplacingMergeTree(time)
-ORDER BY asset
+    asset LowCardinality(String), time DateTime64(3, 'UTC'), equity_usd Float64,
+    peak_equity_usd Float64, drawdown_pct Float64
+) ENGINE = ReplacingMergeTree(time) ORDER BY asset
 """
 
 ALL_DDL = [
@@ -101,6 +110,8 @@ ALL_DDL = [
     CREATE_TRADE_TICKS,
     CREATE_FUNDING_RATES,
     CREATE_OPEN_INTEREST,
+    CREATE_MARKET_EVENTS,
+    CREATE_LIVE_ANALYTICS_EVENTS,
     CREATE_LEARNING_EXPERIENCES,
     CREATE_TRADE_RUNTIME_STATE,
     CREATE_PORTFOLIO_DRAWDOWN_STATE,
@@ -135,7 +146,7 @@ class MarketDataRepository(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.1.0"
+        return "1.2.0"
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
@@ -145,7 +156,7 @@ class MarketDataRepository(AITOSModule):
             await self._client.command(ddl)
         self._initialized = True
         logger.info(
-            "MarketDataRepository initialized (market + learning + durable state tables ensured)"
+            "MarketDataRepository initialized with live market/analytics and durable trading tables"
         )
 
     async def health_check(self) -> HealthStatus:
@@ -178,6 +189,97 @@ class MarketDataRepository(AITOSModule):
     async def ensure_learning_experience_schema(self) -> None:
         self._require_initialized()
         await self._client.command(CREATE_LEARNING_EXPERIENCES)
+
+    async def save_market_event(self, event: Any) -> None:
+        """Persist the canonical market envelope for every live market event."""
+        self._require_initialized()
+        await self._client.insert(
+            "market_events",
+            [
+                [
+                    event.event_time,
+                    event.ingest_time,
+                    event.event_id,
+                    event.exchange,
+                    event.market,
+                    event.symbol,
+                    event.event_type.value,
+                    event.source.value,
+                    event.sequence,
+                    event.schema_version,
+                    event.correlation_id or event.event_id,
+                    event.trace_id or event.event_id,
+                    json.dumps(event.payload, sort_keys=True, default=str),
+                ]
+            ],
+            column_names=[
+                "event_time",
+                "ingest_time",
+                "event_id",
+                "exchange",
+                "market",
+                "symbol",
+                "event_type",
+                "source",
+                "sequence",
+                "schema_version",
+                "correlation_id",
+                "trace_id",
+                "payload_json",
+            ],
+        )
+        self._last_event_time = event.event_time.isoformat()
+
+    async def save_live_analytics_event(
+        self,
+        *,
+        category: str,
+        symbol: str,
+        payload: dict[str, Any],
+        event_time: Any,
+        ingest_time: Any | None = None,
+        event_id: str | None = None,
+        exchange: str = "unknown",
+        market: str = "unknown",
+        source_module: str = "unknown",
+        correlation_id: str | None = None,
+        schema_version: str = "1.0",
+    ) -> None:
+        """Persist derived live features, decisions, risk and execution records."""
+        self._require_initialized()
+        ingest_time = ingest_time or event_time
+        event_id = event_id or f"{category}:{symbol}:{event_time.isoformat()}"
+        await self._client.insert(
+            "live_analytics_events",
+            [
+                [
+                    event_time,
+                    ingest_time,
+                    event_id,
+                    category,
+                    exchange,
+                    market,
+                    symbol,
+                    source_module,
+                    correlation_id or event_id,
+                    schema_version,
+                    json.dumps(payload, sort_keys=True, default=str),
+                ]
+            ],
+            column_names=[
+                "event_time",
+                "ingest_time",
+                "event_id",
+                "category",
+                "exchange",
+                "market",
+                "symbol",
+                "source_module",
+                "correlation_id",
+                "schema_version",
+                "payload_json",
+            ],
+        )
 
     async def save_kline(self, kline: Kline) -> None:
         self._require_initialized()
@@ -242,7 +344,6 @@ class MarketDataRepository(AITOSModule):
         )
 
     async def save_orderbook_snapshot(self, book: OrderBookSnapshot) -> None:
-        """Compatibility alias for the ingestion service's historical API."""
         await self.save_order_book_snapshot(book)
 
     async def save_trade_tick(self, trade: TradeTick) -> None:
