@@ -6,7 +6,9 @@ from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSour
 from aitos.market_data.gateway import GatewayConfig, GatewayState, MarketDataGateway
 
 
-def _event(source: MarketSource, age_seconds: float = 0, sequence: int = 0) -> MarketEvent:
+def _event(
+    source: MarketSource, age_seconds: float = 0, sequence: int = 0
+) -> MarketEvent:
     return MarketEvent(
         event_type=MarketEventType.TRADE,
         exchange="binance",
