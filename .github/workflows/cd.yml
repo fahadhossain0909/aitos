@@ -108,18 +108,11 @@ jobs:
 
             echo '=== BOOT DISK PREFLIGHT ==='
             boot_free=$(df -B1 --output=avail "$HOME" | tail -1 | tr -d ' ')
-            if [ "$boot_free" -lt "$BOOT_FREE_RESERVE_BYTES" ]; then
-              docker image prune -af || true
-              docker container prune -f || true
-              docker network prune -f || true
-              docker builder prune -af || true
-              sudo journalctl --vacuum-time=7d || true
-              sudo apt-get clean || true
-              sudo rm -rf /tmp/* /var/tmp/* /var/lib/apt/lists/* || true
-              sync
-              boot_free=$(df -B1 --output=avail "$HOME" | tail -1 | tr -d ' ')
-            fi
-            [ "$boot_free" -ge "$BOOT_FREE_RESERVE_BYTES" ] || { echo '::error::Boot disk below reserve'; exit 1; }
+            [ "$boot_free" -ge "$BOOT_FREE_RESERVE_BYTES" ] || {
+              echo '::error::Boot disk below reserve; refusing destructive cleanup during deployment.'
+              echo 'Run the explicit HARD RESET workflow or clean unrelated host state manually.'
+              exit 1
+            }
 
             echo '=== SOURCE DEPLOYMENT ==='
             tmp_dir=$(mktemp -d)
@@ -241,13 +234,8 @@ jobs:
             test -d "$AITOS_DATA_ROOT/runtime/logs/neo4j"
             test -d "$AITOS_DATA_ROOT/runtime/tmp"
 
-            echo '=== SAFE DOCKER CLEANUP ==='
-            docker image prune -af
-            docker container prune -f
-            docker network prune -f
-            docker builder prune -af
-            docker system df
             echo "=== DEPLOYMENT SUCCESS: $COMMIT ==="
+            docker system df
       - name: Remove SSH key
         if: always()
         run: rm -f /tmp/deploy_key
