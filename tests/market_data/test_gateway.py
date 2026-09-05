@@ -6,15 +6,16 @@ from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSour
 from aitos.market_data.gateway import GatewayConfig, GatewayState, MarketDataGateway
 
 
-def _event(source: MarketSource, age_seconds: float = 0) -> MarketEvent:
+def _event(source: MarketSource, age_seconds: float = 0, sequence: int = 0) -> MarketEvent:
     return MarketEvent(
         event_type=MarketEventType.TRADE,
         exchange="binance",
         market="usd_m_futures",
         symbol="BTCUSDT",
         event_time=datetime.now(timezone.utc) - timedelta(seconds=age_seconds),
-        payload={"price": 100},
+        payload={"price": 100, "sequence": sequence},
         source=source,
+        sequence=sequence,
     )
 
 
@@ -65,3 +66,24 @@ async def test_gateway_publishes_and_exposes_queue_depth() -> None:
     assert gateway.state is GatewayState.CONNECTED
     assert len(published) == 1
     assert gateway.snapshot()["queue"]["depth"] == 0
+
+
+@pytest.mark.asyncio
+async def test_gateway_preserves_fifo_order_with_single_drain() -> None:
+    published = []
+
+    async def publish(event):
+        published.append(event.sequence)
+
+    gateway = MarketDataGateway(
+        "binance", "usd_m_futures", publish, GatewayConfig(queue_capacity=8)
+    )
+    gateway.begin_connect()
+    gateway.mark_connected()
+
+    for sequence in range(5):
+        assert gateway.accept(_event(MarketSource.WEBSOCKET, sequence=sequence))
+    for _ in range(5):
+        await gateway.drain_once()
+
+    assert published == [0, 1, 2, 3, 4]
