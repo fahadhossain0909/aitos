@@ -1,0 +1,330 @@
+name: Staging CD + Runtime Audit
+
+on:
+  push:
+    branches:
+      - 'architecture/**'
+      - 'feature/**'
+      - 'bugfix/**'
+      - 'hotfix/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: aitos-staging
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  AITOS_DATA_ROOT: /mnt/aitos-staging-data
+  BOOT_FREE_RESERVE_BYTES: 8053063680
+  DATA_DISK_MIN_FREE_GB: 20
+
+jobs:
+  publish-image:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch under test
+        uses: actions/checkout@v7.0.1
+
+      - name: Login to GHCR
+        uses: docker/login-action@v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: repo
+        run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build immutable staging image
+        uses: docker/build-push-action@v7.3.0
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.repo.outputs.repo }}:staging-sha-${{ github.sha }}
+          provenance: false
+          sbom: false
+
+  deploy-and-audit:
+    runs-on: ubuntu-latest
+    needs: publish-image
+    timeout-minutes: 30
+    environment: staging
+    steps:
+      - name: Validate staging deployment secrets
+        shell: bash
+        env:
+          STAGING_DEPLOY_HOST: ${{ secrets.STAGING_DEPLOY_HOST }}
+          STAGING_DEPLOY_USER: ${{ secrets.STAGING_DEPLOY_USER }}
+          STAGING_DEPLOY_SSH_KEY: ${{ secrets.STAGING_DEPLOY_SSH_KEY }}
+          STAGING_DATA_DISK_UUID: ${{ secrets.STAGING_DATA_DISK_UUID }}
+          STAGING_REDIS_PASSWORD: ${{ secrets.STAGING_REDIS_PASSWORD }}
+          STAGING_CLICKHOUSE_PASSWORD: ${{ secrets.STAGING_CLICKHOUSE_PASSWORD }}
+          STAGING_NEO4J_PASSWORD: ${{ secrets.STAGING_NEO4J_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in STAGING_DEPLOY_HOST STAGING_DEPLOY_USER STAGING_DEPLOY_SSH_KEY STAGING_DATA_DISK_UUID STAGING_REDIS_PASSWORD STAGING_CLICKHOUSE_PASSWORD STAGING_NEO4J_PASSWORD; do
+            test -n "${!name:-}" || { echo "::error::Missing staging secret: $name"; exit 1; }
+          done
+
+      - name: Prepare staging SSH key
+        shell: bash
+        env:
+          STAGING_DEPLOY_SSH_KEY: ${{ secrets.STAGING_DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$STAGING_DEPLOY_SSH_KEY" > /tmp/aitos_staging_key
+          chmod 600 /tmp/aitos_staging_key
+
+      - name: Deploy immutable branch image to staging
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          AITOS_DATA_ROOT: ${{ env.AITOS_DATA_ROOT }}
+          BOOT_FREE_RESERVE_BYTES: ${{ env.BOOT_FREE_RESERVE_BYTES }}
+          DATA_DISK_MIN_FREE_GB: ${{ env.DATA_DISK_MIN_FREE_GB }}
+          STAGING_DATA_DISK_UUID: ${{ secrets.STAGING_DATA_DISK_UUID }}
+          STAGING_REDIS_PASSWORD: ${{ secrets.STAGING_REDIS_PASSWORD }}
+          STAGING_CLICKHOUSE_PASSWORD: ${{ secrets.STAGING_CLICKHOUSE_PASSWORD }}
+          STAGING_NEO4J_PASSWORD: ${{ secrets.STAGING_NEO4J_PASSWORD }}
+          STAGING_BINANCE_API_KEY: ${{ secrets.STAGING_BINANCE_API_KEY }}
+          STAGING_BINANCE_API_SECRET: ${{ secrets.STAGING_BINANCE_API_SECRET }}
+          STAGING_BINANCE_TESTNET: ${{ secrets.STAGING_BINANCE_TESTNET || 'true' }}
+          STAGING_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          STAGING_SENTRY_DSN: ${{ secrets.STAGING_SENTRY_DSN }}
+        with:
+          host: ${{ secrets.STAGING_DEPLOY_HOST }}
+          username: ${{ secrets.STAGING_DEPLOY_USER }}
+          key_path: /tmp/aitos_staging_key
+          command_timeout: 20m
+          envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,STAGING_DATA_DISK_UUID,STAGING_REDIS_PASSWORD,STAGING_CLICKHOUSE_PASSWORD,STAGING_NEO4J_PASSWORD,STAGING_BINANCE_API_KEY,STAGING_BINANCE_API_SECRET,STAGING_BINANCE_TESTNET,STAGING_DATABASE_URL,STAGING_SENTRY_DSN
+          script: |
+            set -Eeuo pipefail
+            : "${AITOS_DATA_ROOT:=/mnt/aitos-staging-data}"
+            : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
+            : "${DATA_DISK_MIN_FREE_GB:=20}"
+            : "${STAGING_DATA_DISK_UUID:?missing staging data disk UUID}"
+            APP_DIR="$HOME/aitos-staging"
+            REPO="${{ github.repository }}"
+            COMMIT="${{ github.sha }}"
+            IMAGE="ghcr.io/${REPO,,}:staging-sha-${COMMIT}"
+
+            mkdir -p "$APP_DIR"
+            exec 9>"$HOME/.aitos-staging-deploy.lock"
+            flock 9
+
+            echo '=== STAGING BOOT DISK PREFLIGHT ==='
+            boot_free=$(df -B1 --output=avail "$HOME" | tail -1 | tr -d ' ')
+            [ "$boot_free" -ge "$BOOT_FREE_RESERVE_BYTES" ] || {
+              echo '::error::Staging boot disk below reserve; refusing destructive cleanup.'
+              exit 1
+            }
+
+            echo '=== STAGING SOURCE DEPLOYMENT ==='
+            tmp_dir=$(mktemp -d)
+            trap 'rm -rf "$tmp_dir"' EXIT
+            curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
+            mkdir -p "$tmp_dir/source"
+            tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir/source"
+            find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+            cp -a "$tmp_dir/source/." "$APP_DIR/"
+            cd "$APP_DIR"
+
+            echo '=== STAGING STORAGE BOOTSTRAP ==='
+            export AITOS_DATA_ROOT
+            export AITOS_DATA_DISK_UUID="$STAGING_DATA_DISK_UUID"
+            export AITOS_HOST_UID="$(id -u)" AITOS_HOST_GID="$(id -g)"
+            chmod +x scripts/bootstrap_storage.sh
+            ./scripts/bootstrap_storage.sh
+            mountpoint -q "$AITOS_DATA_ROOT"
+
+            echo '=== STAGING ENVIRONMENT ==='
+            umask 077
+            cat > .env << ENVEOF
+            ENVIRONMENT=staging
+            LOG_LEVEL=INFO
+            REQUIRE_HUMAN_APPROVAL_FOR_PROD=true
+            DEBUG=false
+            TESTING=false
+            AITOS_DATA_ROOT=$AITOS_DATA_ROOT
+            AITOS_DATA_DISK_UUID=$STAGING_DATA_DISK_UUID
+            REDIS_HOST=redis
+            REDIS_PORT=6379
+            REDIS_DB=0
+            REDIS_PASSWORD=$STAGING_REDIS_PASSWORD
+            REDIS_DATA_DIR=$AITOS_DATA_ROOT/eventbus/redis
+            CLICKHOUSE_HOST=clickhouse
+            CLICKHOUSE_PORT=8123
+            CLICKHOUSE_USER=default
+            CLICKHOUSE_PASSWORD=$STAGING_CLICKHOUSE_PASSWORD
+            CLICKHOUSE_DATABASE=aitos
+            CLICKHOUSE_DB=aitos
+            CLICKHOUSE_DATA_DIR=$AITOS_DATA_ROOT/databases/clickhouse
+            NEO4J_URI=bolt://neo4j:7687
+            NEO4J_USER=neo4j
+            NEO4J_PASSWORD=$STAGING_NEO4J_PASSWORD
+            NEO4J_DATA_DIR=$AITOS_DATA_ROOT/databases/neo4j
+            NEO4J_LOG_DIR=$AITOS_DATA_ROOT/runtime/logs/neo4j
+            LEARNING_POLL_SECONDS=60
+            LEARNING_LOOKBACK_HOURS=168
+            LEARNING_MODEL_PATH=$AITOS_DATA_ROOT/runtime/models/online_rl/deep_value.pkl
+            LEARNING_STATE_PATH=$AITOS_DATA_ROOT/runtime/models/online_rl/worker_state.json
+            BACKTEST_DATA_DIR=$AITOS_DATA_ROOT/research/backtest
+            REPLAY_DATA_DIR=$AITOS_DATA_ROOT/research/replay
+            BACKUP_DIR=$AITOS_DATA_ROOT/artifacts/backups
+            SNAPSHOT_DIR=$AITOS_DATA_ROOT/artifacts/snapshots
+            MODEL_DATA_DIR=$AITOS_DATA_ROOT/runtime/models
+            RUNTIME_TMP_DIR=$AITOS_DATA_ROOT/runtime/tmp
+            ARTIFACTS_DATA_DIR=$AITOS_DATA_ROOT/artifacts
+            AITOS_BOOT_RUNTIME_DIR=/var/lib/aitos
+            BOOT_FREE_BUFFER_GB=7.5
+            DATA_DISK_MIN_FREE_GB=$DATA_DISK_MIN_FREE_GB
+            DATA_DISK_TARGET_FREE_GB=25
+            BINANCE_API_KEY=$STAGING_BINANCE_API_KEY
+            BINANCE_API_SECRET=$STAGING_BINANCE_API_SECRET
+            BINANCE_TESTNET=$STAGING_BINANCE_TESTNET
+            BINANCE_RECV_WINDOW_MS=5000
+            BINANCE_HEDGE_MODE=false
+            APP_PORT=8001
+            APP_HOST=0.0.0.0
+            COMPOSE_PROJECT_NAME=aitos-staging
+            AITOS_IMAGE=$IMAGE
+            AITOS_IMAGE_TAG=staging-sha-${COMMIT}
+            DATABASE_URL=$STAGING_DATABASE_URL
+            SENTRY_DSN=$STAGING_SENTRY_DSN
+            ENVEOF
+            chmod 600 .env
+
+            echo '=== STAGING PATH ASSERTIONS ==='
+            grep -q '^REDIS_DATA_DIR=/mnt/aitos-staging-data/eventbus/redis$' .env
+            grep -q '^CLICKHOUSE_DATA_DIR=/mnt/aitos-staging-data/databases/clickhouse$' .env
+            grep -q '^NEO4J_DATA_DIR=/mnt/aitos-staging-data/databases/neo4j$' .env
+            ! grep -q '^AITOS_DATA_ROOT=/mnt/aitos-data$' .env
+            ! grep -q 'COMPOSE_PROJECT_NAME=aitos$' .env
+
+            echo '=== STAGING DOCKER DEPLOYMENT ==='
+            docker compose config >/dev/null
+            docker compose pull
+            docker compose down --remove-orphans --timeout 30 || true
+            docker compose up -d --remove-orphans --force-recreate
+
+            echo '=== STAGING HEALTH GATE ==='
+            deadline=$((SECONDS + 300))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              redis_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-staging-redis 2>/dev/null || true)
+              clickhouse_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-staging-clickhouse 2>/dev/null || true)
+              neo4j_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-staging-neo4j 2>/dev/null || true)
+              if [ "$redis_state" = healthy ] && [ "$clickhouse_state" = healthy ] && [ "$neo4j_state" = healthy ]; then break; fi
+              sleep 10
+            done
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-staging-redis)" = healthy ]
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-staging-clickhouse)" = healthy ]
+            [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-staging-neo4j)" = healthy ]
+            ! docker compose ps --all --format '{{.Name}} {{.State}}' | grep -E 'unhealthy|Restarting|Exited'
+
+            echo '=== STAGING STORAGE GATE ==='
+            mountpoint -q "$AITOS_DATA_ROOT"
+            df -h "$AITOS_DATA_ROOT"
+            for path in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
+              test -d "$AITOS_DATA_ROOT/$path"
+            done
+
+            echo "=== STAGING DEPLOYMENT SUCCESS: $COMMIT ==="
+
+      - name: Run read-only staging runtime audit
+        id: staging_audit
+        continue-on-error: true
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.STAGING_DEPLOY_HOST }}
+          username: ${{ secrets.STAGING_DEPLOY_USER }}
+          key_path: /tmp/aitos_staging_key
+          command_timeout: 10m
+          script: |
+            set -u
+            cd "$HOME/aitos-staging"
+            test -f scripts/paper_runtime_audit.sh
+            mkdir -p "$HOME/aitos-staging-audit"
+            REPORT="$HOME/aitos-staging-audit/report.txt"
+            EXIT_CODE="$HOME/aitos-staging-audit/exit_code"
+            set +e
+            bash scripts/paper_runtime_audit.sh >"$REPORT" 2>&1
+            status=$?
+            set -e
+            {
+              echo
+              echo '--- STAGING RUNTIME METADATA ---'
+              echo "tested_commit=${{ github.sha }}"
+              echo "tested_ref=${{ github.ref_name }}"
+              echo "tested_at_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo
+              echo '--- Live scanner freshness diagnostics (last 30m) ---'
+              docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep 'live scanner freshness' | tail -n 200 || true
+              echo
+              echo '--- Paper signal diagnostics (last 30m) ---'
+              docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep 'paper signal diagnostics' | tail -n 200 || true
+              echo
+              echo '--- Scanner score-breakdown diagnostics (last 30m) ---'
+              docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep 'scanner score breakdown' | tail -n 200 || true
+              echo
+              echo '--- Scanner ranking / trade decision diagnostics (last 30m) ---'
+              docker logs --since 30m --timestamps aitos-staging-paper 2>&1 | grep -E 'scanner ranking decision|trade candidate rejected by kernel|trade candidate skipped|trade candidate submitted' | tail -n 200 || true
+              echo
+              echo '--- Container status ---'
+              docker compose ps --all
+            } >> "$REPORT"
+            printf '%s\n' "$status" > "$EXIT_CODE"
+            test -s "$REPORT"
+            exit "$status"
+
+      - name: Retrieve staging audit report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p aitos-staging-audit
+          scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$STAGING_DEPLOY_USER@$STAGING_DEPLOY_HOST:aitos-staging-audit/report.txt" aitos-staging-audit/report.txt
+          scp -i /tmp/aitos_staging_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "$STAGING_DEPLOY_USER@$STAGING_DEPLOY_HOST:aitos-staging-audit/exit_code" aitos-staging-audit/exit_code
+          test -s aitos-staging-audit/report.txt
+          test -s aitos-staging-audit/exit_code
+        env:
+          STAGING_DEPLOY_HOST: ${{ secrets.STAGING_DEPLOY_HOST }}
+          STAGING_DEPLOY_USER: ${{ secrets.STAGING_DEPLOY_USER }}
+
+      - name: Print staging audit report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat aitos-staging-audit/report.txt
+
+      - name: Upload staging audit artifact
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: aitos-staging-audit-${{ github.sha }}
+          path: aitos-staging-audit/
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Enforce staging audit gate
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(tr -d '[:space:]' < aitos-staging-audit/exit_code)"
+          case "$status" in
+            0) echo 'Staging runtime audit PASSED.' ;;
+            ''|*[!0-9]*) echo "Invalid staging audit exit code: $status"; exit 1 ;;
+            *) echo "Staging runtime audit FAILED: exit code $status"; exit "$status" ;;
+          esac
+
+      - name: Cleanup SSH key
+        if: always()
+        shell: bash
+        run: rm -f /tmp/aitos_staging_key
