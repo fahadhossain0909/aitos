@@ -17,7 +17,11 @@ _RECONNECT_INITIAL_DELAY_SECONDS = 1.0
 _RECONNECT_MAX_DELAY_SECONDS = 30.0
 PUBLISH_RETRY_DELAY_SECONDS = 0.5
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
-GATEWAY_DRAIN_WORKERS = 4
+# A single ordered drain worker is intentional: Redis Streams preserve append
+# order, and concurrent gateway publishers could reorder trade/order-book events
+# before they reach the canonical bus. Throughput improvements should use
+# ordered batching/pipelining rather than concurrent per-event publishers.
+GATEWAY_DRAIN_WORKERS = 1
 
 
 class CanonicalMarketDataRuntime:
