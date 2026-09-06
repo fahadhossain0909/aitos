@@ -3,9 +3,18 @@ from __future__ import annotations
 import pytest
 
 from aitos.capital.compliance import PropComplianceEngine
-from aitos.capital.models import AccountMode, AccountSnapshot, PropFirmProfile, PropRuleSet
+from aitos.capital.models import (
+    AccountMode,
+    AccountSnapshot,
+    PropFirmProfile,
+    PropRuleSet,
+)
 from aitos.capital.router import CapitalRouter
-from aitos.execution.order_executor import OrderRequest, OrderResult, SimulatedOrderExecutor
+from aitos.execution.order_executor import (
+    OrderRequest,
+    OrderResult,
+    SimulatedOrderExecutor,
+)
 from aitos.models.trade import TradeSide
 
 
@@ -67,7 +76,9 @@ def test_drawdown_is_enforced(request):
 def test_api_and_automation_policy_is_enforced(request):
     engine = PropComplianceEngine()
     assert not engine.evaluate(profile(api_allowed=False), account(), request).allowed
-    assert not engine.evaluate(profile(automation_allowed=False), account(), request).allowed
+    assert not engine.evaluate(
+        profile(automation_allowed=False), account(), request
+    ).allowed
 
 
 @pytest.mark.asyncio
