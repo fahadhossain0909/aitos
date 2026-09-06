@@ -18,7 +18,9 @@ try:
     from ctrader_open_api import Client, EndPoints, Protobuf, TcpProtocol
     from ctrader_open_api.messages.OpenApiMessages_pb2 import (
         ProtoOAAccountAuthReq,
+        ProtoOAAccountAuthRes,
         ProtoOAApplicationAuthReq,
+        ProtoOAApplicationAuthRes,
         ProtoOAExecutionEvent,
         ProtoOANewOrderReq,
     )
@@ -29,7 +31,8 @@ try:
     from twisted.internet import reactor
 except ImportError:  # pragma: no cover - optional integration dependency
     Client = EndPoints = Protobuf = TcpProtocol = None  # type: ignore[assignment]
-    ProtoOAAccountAuthReq = ProtoOAApplicationAuthReq = None  # type: ignore[assignment]
+    ProtoOAAccountAuthReq = ProtoOAAccountAuthRes = None  # type: ignore[assignment]
+    ProtoOAApplicationAuthReq = ProtoOAApplicationAuthRes = None  # type: ignore[assignment]
     ProtoOAExecutionEvent = ProtoOANewOrderReq = None  # type: ignore[assignment]
     ProtoOAOrderType = ProtoOATradeSide = None  # type: ignore[assignment]
     reactor = None
@@ -45,6 +48,10 @@ class CTraderOrderExecutor(OrderExecutor):
     cTrader protocol volume is expressed in 0.01 units, so AITOS quantity is
     multiplied by 100. ``symbol_ids`` maps AITOS symbols to broker-specific
     numeric cTrader symbol IDs.
+
+    The adapter is intentionally created from an already-running asyncio
+    context. The SDK's Twisted reactor is isolated in its own daemon thread;
+    AITOS never starts/stops the global reactor from individual orders.
     """
 
     def __init__(
@@ -74,12 +81,10 @@ class CTraderOrderExecutor(OrderExecutor):
         self._client = Client(self._endpoint, EndPoints.PROTOBUF_PORT, TcpProtocol)
         self._connected = threading.Event()
         self._authenticated = threading.Event()
-        self._loop: asyncio.AbstractEventLoop | None = None
         self._reactor_started = False
         self._start_runtime()
 
     def _start_runtime(self) -> None:
-        self._loop = asyncio.get_running_loop()
         self._client.setConnectedCallback(self._on_connected)
         self._client.setDisconnectedCallback(self._on_disconnected)
         self._client.setMessageReceivedCallback(self._on_message)
@@ -105,27 +110,35 @@ class CTraderOrderExecutor(OrderExecutor):
         self._authenticated.clear()
 
     def _on_message(self, client: Any, message: Any) -> None:
-        if message.payloadType == ProtoOAApplicationAuthReq().payloadType + 1:
+        if message.payloadType == ProtoOAApplicationAuthRes().payloadType:
             request = ProtoOAAccountAuthReq()
             request.ctidTraderAccountId = self._account_id
             request.accessToken = self._access_token
             client.send(request)
-        elif message.payloadType == ProtoOAAccountAuthReq().payloadType + 1:
+        elif message.payloadType == ProtoOAAccountAuthRes().payloadType:
             self._authenticated.set()
 
     async def _send(self, request: Any) -> Any:
-        """Run a Twisted Deferred-returning SDK call from asyncio."""
+        """Bridge a Twisted Deferred-returning SDK call into asyncio."""
         loop = asyncio.get_running_loop()
         future: asyncio.Future[Any] = loop.create_future()
 
         def on_success(message: Any) -> Any:
-            loop.call_soon_threadsafe(future.set_result, message)
+            loop.call_soon_threadsafe(_set_result, message)
             return message
 
         def on_error(failure: Any) -> Any:
             error = RuntimeError(str(getattr(failure, "value", failure)))
-            loop.call_soon_threadsafe(future.set_exception, error)
+            loop.call_soon_threadsafe(_set_error, error)
             return failure
+
+        def _set_result(message: Any) -> None:
+            if not future.done():
+                future.set_result(message)
+
+        def _set_error(error: Exception) -> None:
+            if not future.done():
+                future.set_exception(error)
 
         def dispatch() -> None:
             deferred = self._client.send(request)
@@ -180,4 +193,7 @@ class CTraderOrderExecutor(OrderExecutor):
 
     @property
     def supports_exchange_side_stops(self) -> bool:
-        return True
+        # The generic AITOS stop API is not yet mapped to cTrader's dedicated
+        # protection/modify messages. Keep this false rather than claiming a
+        # capability that the routed executor cannot safely guarantee.
+        return False
