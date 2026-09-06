@@ -8,14 +8,21 @@ def test_storage_bootstrap_is_fail_closed() -> None:
     assert "AITOS_DATA_DISK_UUID is required" in SCRIPT
     assert 'mountpoint -q "$DATA_ROOT"' in SCRIPT
     assert "Mounted source verification failed" in SCRIPT
-    assert "never" not in SCRIPT.lower() or "never falls back" in SCRIPT.lower()
+    assert "never falls back" in SCRIPT.lower()
 
 
 def test_storage_bootstrap_creates_current_layout() -> None:
-    assert '"$DATA_ROOT/clickhouse"' in SCRIPT
-    assert '"$DATA_ROOT/neo4j"' in SCRIPT
-    assert '"$DATA_ROOT/redis/live"' in SCRIPT
-    assert '"$DATA_ROOT/redis/archive"' in SCRIPT
+    for path in (
+        '"$DATA_ROOT/databases/clickhouse"',
+        '"$DATA_ROOT/databases/neo4j"',
+        '"$DATA_ROOT/eventbus/redis/live"',
+        '"$DATA_ROOT/eventbus/redis/archive"',
+        '"$DATA_ROOT/research/backtest"',
+        '"$DATA_ROOT/research/replay"',
+        '"$DATA_ROOT/artifacts/backups"',
+        '"$DATA_ROOT/runtime/models"',
+    ):
+        assert path in SCRIPT
 
 
 def test_storage_environment_contract_exists() -> None:

@@ -23,6 +23,7 @@ from aitos.core.exceptions import (
     ModuleNotInitializedError,
 )
 from aitos.eventbus.redis_bus import EventBus
+from aitos.intelligence.contextual_decision import ContextualDecisionEngine
 from aitos.journal.policy_registry import PolicyRegistry
 from aitos.kernel.decision_fusion import DEFAULT_EVIDENCE_WEIGHTS, DecisionFusionEngine
 from aitos.logging_setup import get_logger
@@ -95,10 +96,12 @@ class AIKernel(AITOSModule):
         require_human_approval_for_prod: bool = True,
         fusion_engine: DecisionFusionEngine | None = None,
         policy_registry: PolicyRegistry | None = None,
+        contextual_engine: ContextualDecisionEngine | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._require_human_approval_for_prod = require_human_approval_for_prod
         self._fusion_engine = fusion_engine or DecisionFusionEngine()
+        self._contextual_engine = contextual_engine or ContextualDecisionEngine()
         self._policy_registry = policy_registry or PolicyRegistry(
             os.getenv("AITOS_ACTIVE_POLICY_PATH", "runtime/active_policy.json"),
             DEFAULT_EVIDENCE_WEIGHTS,
@@ -115,7 +118,7 @@ class AIKernel(AITOSModule):
 
     @property
     def version(self) -> str:
-        return "1.4.0"
+        return "1.5.0"
 
     @property
     def fusion_min_confidence(self) -> float:
@@ -128,6 +131,10 @@ class AIKernel(AITOSModule):
     @property
     def fusion_weights(self) -> dict[str, float]:
         return self._fusion_engine.weights
+
+    @property
+    def contextual_engine(self) -> ContextualDecisionEngine:
+        return self._contextual_engine
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
@@ -180,6 +187,7 @@ class AIKernel(AITOSModule):
                 "registered_agents": list(self._agents.keys()),
                 "fusion_min_confidence": self.fusion_min_confidence,
                 "policy_version": self._policy_version,
+                "contextual_engine": True,
             },
         )
 
@@ -216,13 +224,50 @@ class AIKernel(AITOSModule):
         self._require_initialized()
         return self._world_state
 
+    def _contextual_evidence(
+        self, context: DecisionContext
+    ) -> tuple[dict[str, Any], list[str]]:
+        payload = context.context
+        direction = payload.get("direction")
+        scores = payload.get("component_scores")
+        if not isinstance(direction, str) or not isinstance(scores, dict):
+            return {}, []
+        try:
+            advanced = payload.get("advanced_context")
+            # Advanced context is accepted as an optional precomputed object.
+            result = self._contextual_engine.build(
+                direction=direction,
+                component_scores=scores,
+                component_availability=payload.get("component_availability"),
+                context=payload,
+                advanced=advanced if hasattr(advanced, "features") else None,
+            )
+            return {
+                "source": "contextual_decision",
+                "action": result.action,
+                "confidence": result.confidence,
+                "market_state": result.market_state,
+                "scenarios": [x.to_dict() for x in result.scenarios],
+                "evidence": [x.to_dict() for x in result.evidence],
+                "target_zones": list(result.target_zones),
+            }, list(result.contradictions)
+        except Exception as exc:
+            logger.warning(
+                "contextual decision enrichment failed",
+                extra={"aitos_extra": {"symbol": context.symbol, "error": str(exc)}},
+            )
+            return {}, []
+
     async def request_decision(self, context: DecisionContext) -> FusedDecision:
         self._require_initialized()
         evidence = self._fusion_engine.fuse_context(context.context)
+        contextual, contextual_conflicts = self._contextual_evidence(context)
         if evidence is not None:
             contributions = [
                 contribution.to_dict() for contribution in evidence.contributions
             ]
+            if contextual:
+                contributions.append(contextual)
             if evidence.missing_components:
                 contributions.append(
                     {
@@ -230,16 +275,22 @@ class AIKernel(AITOSModule):
                         "components": list(evidence.missing_components),
                     }
                 )
+            conflicts = list(contextual_conflicts)
+            if evidence.direction == "neutral" and evidence.missing_components:
+                conflicts.append(
+                    f"insufficient evidence: {', '.join(evidence.missing_components)}"
+                )
+            if (
+                contextual.get("action") == "no_trade"
+                and evidence.direction != "neutral"
+            ):
+                conflicts.append("contextual layer recommends no_trade")
             return FusedDecision(
                 symbol=context.symbol,
                 direction=evidence.direction,
                 confidence=evidence.confidence,
                 contributions=contributions,
-                conflicting_evidence=(
-                    [f"insufficient evidence: {', '.join(evidence.missing_components)}"]
-                    if evidence.direction == "neutral" and evidence.missing_components
-                    else []
-                ),
+                conflicting_evidence=conflicts,
             )
 
         if not self._agents:
@@ -284,11 +335,15 @@ class AIKernel(AITOSModule):
             for decision in decisions
             if decision.direction != fused_direction
         ]
+        conflicting.extend(contextual_conflicts)
+        if contextual.get("action") == "no_trade":
+            conflicting.append("contextual layer recommends no_trade")
         return FusedDecision(
             symbol=context.symbol,
             direction=fused_direction,
             confidence=round(min(fused_confidence, 1.0), 4),
-            contributions=[decision.to_dict() for decision in decisions],
+            contributions=[decision.to_dict() for decision in decisions]
+            + ([contextual] if contextual else []),
             conflicting_evidence=conflicting,
         )
 

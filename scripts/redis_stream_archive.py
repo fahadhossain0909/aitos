@@ -14,14 +14,13 @@ from redis.exceptions import TimeoutError as RedisTimeoutError
 
 HOST = os.getenv("REDIS_HOST", "redis")
 PORT = int(os.getenv("REDIS_PORT", "6379"))
+PASSWORD = os.getenv("REDIS_PASSWORD")
 ROOT = Path(os.getenv("REDIS_ARCHIVE_DIR", "/archive"))
 CURSOR_FILE = ROOT / ".cursors.json"
 POLL = max(0.1, float(os.getenv("REDIS_ARCHIVE_POLL_SECONDS", "1")))
 RETRY = max(0.5, float(os.getenv("REDIS_ARCHIVE_RETRY_SECONDS", "2")))
 BATCH = max(1, int(os.getenv("REDIS_ARCHIVE_BATCH_SIZE", "1000")))
 DEFAULT_MAXLEN = max(1, int(os.getenv("REDIS_STREAM_MAXLEN_DEFAULT", "5000")))
-# Keep archive limits aligned with the production hot-working-set limits.
-# Prefixes are checked longest/most-specific first where necessary.
 STREAM_MAXLEN = {
     "stream:market.trade.": 10000,
     "stream:market.orderbook.": 10000,
@@ -194,13 +193,6 @@ async def archive_stream(
         return True
     if state.get("legacy"):
         return False
-
-    # An empty XREAD means the durable archive cursor has caught up to the
-    # current stream tail. At that point it is safe to enforce the hot-set
-    # limit directly. The previous implementation performed XREVRANGE
-    # COUNT (maxlen + 1) here on every polling cycle. On 20k-100k entry
-    # streams that became a sustained O(N) Redis CPU workload and was the
-    # source of the production XREVRANGE slowlog entries.
     maxlen = maxlen_for(key)
     trimmed = await r.xtrim(key, maxlen=maxlen, approximate=True)
     return bool(trimmed)
@@ -220,8 +212,6 @@ async def archive_forever(
                         break
             await asyncio.sleep(POLL)
         except (RedisConnectionError, RedisTimeoutError) as exc:
-            # Redis is allowed to restart independently. Keep the archive worker
-            # alive and retry without losing the durable file cursor.
             print(
                 f"Redis unavailable; retrying archive connection: {exc!r}", flush=True
             )
@@ -232,7 +222,7 @@ async def main() -> None:
     writer = ArchiveWriter()
     cursors = writer.recover(writer.load())
     while True:
-        r = redis.Redis(host=HOST, port=PORT, decode_responses=False)
+        r = redis.Redis(host=HOST, port=PORT, password=PASSWORD, decode_responses=False)
         try:
             await r.ping()
             print("Redis archive connection established", flush=True)

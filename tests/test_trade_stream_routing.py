@@ -76,7 +76,7 @@ def test_trade_streams_use_market_namespace_and_direct_fallback():
     assert (
         BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
     )
-    assert WS_MARKET_RAW_BASE_URL.endswith("/market/ws")
+    assert WS_MARKET_RAW_BASE_URL.endswith("/ws")
 
 
 def test_orderbook_streams_stay_on_public_namespace():

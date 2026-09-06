@@ -1,4 +1,4 @@
-"""Bounded storage maintenance for boot and data disks."""
+"""Bounded storage maintenance for boot and persistent data disks."""
 
 from __future__ import annotations
 
@@ -20,23 +20,12 @@ DEFAULT_BOOT_BUFFER_GB = 7.5
 DEFAULT_DATA_DISK_MIN_FREE_GB = 2.5
 DEFAULT_DATA_DISK_TARGET_FREE_GB = 25.0
 DEFAULT_AUTO_DELETE_PERCENT = 2.5
-
-BOOT_DISPOSABLE_DIRS = (
-    "cache",
-    "caches",
-    "logs",
-    "backtest",
-    "snapshots",
-    "tmp",
-    "backups",
-)
-
+BOOT_DISPOSABLE_DIRS = ("cache", "caches", "logs", "tmp", "backtest")
 EVICTABLE_TABLES = {
     "order_book_snapshots": "time",
     "order_book_updates": "time",
     "market_ohlcv": "time",
 }
-
 PROTECTED_TABLE_TOKENS = (
     "trade",
     "order",
@@ -98,8 +87,7 @@ def _gb(value: float) -> float:
 
 
 def _protected(table: str) -> bool:
-    name = table.lower()
-    return any(token in name for token in PROTECTED_TABLE_TOKENS)
+    return any(token in table.lower() for token in PROTECTED_TABLE_TOKENS)
 
 
 def choose_retention_days(
@@ -115,13 +103,7 @@ def choose_retention_days(
 
 def _table_inventory(client, database: str):
     rows = client.query(
-        """
-        SELECT table, sum(bytes_on_disk) AS bytes,
-               min(min_time) AS min_time, max(max_time) AS max_time
-        FROM system.parts
-        WHERE database = {db:String} AND active
-        GROUP BY table ORDER BY bytes DESC
-        """,
+        """SELECT table, sum(bytes_on_disk) AS bytes, min(min_time) AS min_time, max(max_time) AS max_time FROM system.parts WHERE database = {db:String} AND active GROUP BY table ORDER BY bytes DESC""",
         parameters={"db": database},
     ).result_rows
     return [(str(row[0]), int(row[1] or 0), row[2], row[3]) for row in rows]
@@ -142,7 +124,6 @@ def enforce_clickhouse(
     ]
     evictable_bytes = sum(row[1] for row in evictable)
     protected_bytes = max(0, total_bytes - evictable_bytes)
-
     if not evictable:
         return {
             "total_gb": _gb(total_bytes),
@@ -152,13 +133,12 @@ def enforce_clickhouse(
             "evicted": [],
             "reason": "no configured evictable tables",
         }
-
     daily_bytes = 0.0
     for _table, size, min_time, max_time in evictable:
         if min_time and max_time:
-            span_days = max(1.0, (max_time - min_time).total_seconds() / 86400.0)
-            daily_bytes += size / span_days
-
+            daily_bytes += size / max(
+                1.0, (max_time - min_time).total_seconds() / 86400.0
+            )
     target_bytes = config.clickhouse_target_gb * (1024**3)
     available_evictable_bytes = max(0.0, target_bytes - protected_bytes)
     retention = choose_retention_days(
@@ -166,20 +146,15 @@ def enforce_clickhouse(
     )
     if force_emergency:
         retention = RETENTION_LADDER[-1]
-
     evicted: list[str] = []
     if force_emergency or _gb(total_bytes) > config.clickhouse_target_gb:
         cutoff = datetime.now(timezone.utc) - timedelta(days=retention)
         for table, _size, _min_time, _max_time in evictable:
             time_column = EVICTABLE_TABLES[table]
-            sql = (
-                f"ALTER TABLE `{database}`.`{table}` DELETE WHERE "
-                f"{time_column} < {{cutoff:DateTime64(3)}}"
-            )
+            sql = f"ALTER TABLE `{database}`.`{table}` DELETE WHERE {time_column} < {{cutoff:DateTime64(3)}}"
             if not config.dry_run:
                 client.command(sql, parameters={"cutoff": cutoff})
             evicted.append(f"{table}<{cutoff.isoformat()}")
-
     return {
         "total_gb": _gb(total_bytes),
         "protected_gb": _gb(protected_bytes),
@@ -210,8 +185,7 @@ def _boot_free_bytes(root: Path) -> int:
 def _disposable_files(root: Path) -> list[tuple[int, int, Path]]:
     candidates: list[tuple[int, int, Path]] = []
     for priority, dirname in enumerate(BOOT_DISPOSABLE_DIRS):
-        directory = root / dirname
-        for path in _files(directory):
+        for path in _files(root / dirname):
             try:
                 candidates.append((priority, path.stat().st_mtime_ns, path))
             except FileNotFoundError:
@@ -239,17 +213,14 @@ def prune_for_boot_buffer(
             "cleanup_needed": False,
             "reserve_met": True,
         }
-
     required = target - free_before
     disposable = _disposable_files(root)
     total_disposable = sum(
         path.stat().st_size for _, _, path in disposable if path.exists()
     )
-    batch = max(1, int(total_disposable * delete_percent / 100.0))
-    delete_bytes = max(required, batch)
+    delete_bytes = max(required, max(1, int(total_disposable * delete_percent / 100.0)))
     freed = 0
     deleted: list[str] = []
-
     for _priority, _mtime, path in sorted(
         disposable, key=lambda item: (item[0], item[1], str(item[2]))
     ):
@@ -263,7 +234,6 @@ def prune_for_boot_buffer(
             path.unlink()
         deleted.append(str(path))
         freed += size
-
     free_after = _boot_free_bytes(root) if not dry_run else free_before + freed
     return {
         "free_before_gb": _gb(free_before),
@@ -277,24 +247,25 @@ def prune_for_boot_buffer(
     }
 
 
-def inspect_boot_storage(others_root: Path, config: StorageConfig) -> dict:
-    free_bytes = _boot_free_bytes(others_root)
+def inspect_boot_storage(boot_root: Path, config: StorageConfig) -> dict:
+    free_bytes = _boot_free_bytes(boot_root)
     free_gb = _gb(free_bytes)
     result = {
         "boot_free_gb": free_gb,
         "boot_buffer_gb": config.boot_buffer_gb,
         "reserve_met": free_gb >= config.boot_buffer_gb,
     }
-    if not result["reserve_met"]:
-        result["prune"] = prune_for_boot_buffer(
-            others_root,
+    result["prune"] = (
+        None
+        if result["reserve_met"]
+        else prune_for_boot_buffer(
+            boot_root,
             config.boot_buffer_gb,
             config.auto_delete_percent,
             config.dry_run,
             known_free_bytes=free_bytes,
         )
-    else:
-        result["prune"] = None
+    )
     return result
 
 
@@ -313,8 +284,9 @@ def inspect_data_disk(root: Path, config: StorageConfig) -> dict:
 
 
 def run_once(config: StorageConfig, boot_only: bool = False) -> dict:
-    others_root = Path(os.getenv("OTHERS_DATA_DIR", "/others"))
-    boot_result = inspect_boot_storage(others_root, config)
+    boot_root = Path(os.getenv("AITOS_BOOT_RUNTIME_DIR", "/var/lib/aitos"))
+    boot_root.mkdir(parents=True, exist_ok=True)
+    boot_result = inspect_boot_storage(boot_root, config)
     if boot_only:
         return {"boot_storage": boot_result}
     data_disk_root = Path(os.getenv("DATA_DISK_DIR", "/data-disk"))

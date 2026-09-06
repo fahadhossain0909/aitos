@@ -1,4 +1,9 @@
-"""EventBus market-data telemetry that uses only public EventBus methods."""
+"""Public-API-only market-data telemetry for production diagnostics.
+
+This module deliberately avoids private EventBus delivery internals. It observes
+publish/handler latency and lightweight counters without changing delivery
+semantics.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +16,11 @@ from typing import Any
 
 MARKET_PREFIXES = (
     "market.trade.",
+    "market.trade",
+    "market.book.",
+    "market.book",
     "market.orderbook.",
+    "market.orderbook",
     "market.orderflow.",
     "market.liquidity.",
     "market.live_state.",
@@ -19,7 +28,7 @@ MARKET_PREFIXES = (
 )
 
 
-def _market(topic: str) -> bool:
+def _is_market_topic(topic: str) -> bool:
     return topic.startswith(MARKET_PREFIXES)
 
 
@@ -43,10 +52,11 @@ def _format(stats: dict[str, dict[str, float]]) -> dict[str, dict[str, float | i
 
 
 def install(eventbus_cls: type[Any]) -> None:
-    """Add non-invasive telemetry without depending on private EventBus methods."""
+    """Install safe telemetry using only public EventBus methods."""
     if getattr(eventbus_cls, "_safe_market_data_telemetry_installed", False):
         return
     eventbus_cls._safe_market_data_telemetry_installed = True
+
     original_init = eventbus_cls.__init__
     original_publish = eventbus_cls.publish
     original_subscribe = eventbus_cls.subscribe
@@ -54,8 +64,13 @@ def install(eventbus_cls: type[Any]) -> None:
     original_shutdown = eventbus_cls.shutdown
 
     @wraps(original_init)
-    def init(self: Any, *args: Any, **kwargs: Any) -> None:
+    def init_wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
+        self._market_publish_count = 0
+        self._market_publish_errors = 0
+        self._market_publish_total_ms = 0.0
+        self._market_publish_max_ms = 0.0
+        self._market_last_publish_ms = 0.0
         self._safe_market_publish_stats: dict[str, dict[str, float]] = {}
         self._safe_market_handler_stats: dict[str, dict[str, float]] = {}
         self._safe_market_recent: deque[dict[str, Any]] = deque(maxlen=100)
@@ -68,79 +83,99 @@ def install(eventbus_cls: type[Any]) -> None:
             self._safe_market_watchdog = None
 
     @wraps(original_publish)
-    async def publish(self: Any, event: Any, *args: Any, **kwargs: Any) -> None:
+    async def publish_wrapper(self: Any, event: Any, *args: Any, **kwargs: Any) -> Any:
         topic = getattr(event, "topic", "")
-        if not _market(topic):
-            await original_publish(self, event, *args, **kwargs)
-            return
-        started = time.perf_counter()
+        if not _is_market_topic(topic):
+            return await original_publish(self, event, *args, **kwargs)
+        start = time.perf_counter()
         try:
-            await original_publish(self, event, *args, **kwargs)
+            return await original_publish(self, event, *args, **kwargs)
+        except Exception:
+            self._market_publish_errors += 1
+            raise
         finally:
-            elapsed = (time.perf_counter() - started) * 1000.0
-            _stats_add(self._safe_market_publish_stats, topic, elapsed)
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            self._market_publish_count += 1
+            self._market_publish_total_ms += elapsed_ms
+            self._market_publish_max_ms = max(self._market_publish_max_ms, elapsed_ms)
+            self._market_last_publish_ms = elapsed_ms
+            _stats_add(self._safe_market_publish_stats, topic, elapsed_ms)
 
     @wraps(original_subscribe)
-    async def subscribe(
-        self: Any,
-        topic: str,
-        handler: Any,
-        group: str = "default",
-        start_id: str = "0",
-    ) -> Any:
+    async def subscribe_wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+        handler = kwargs.get("handler")
+        if handler is None and len(args) >= 2:
+            handler = args[1]
+        if handler is None:
+            return await original_subscribe(self, *args, **kwargs)
+
         @wraps(handler)
         async def observed(event: Any) -> Any:
-            event_topic = getattr(event, "topic", "")
-            if not _market(event_topic):
+            topic = getattr(event, "topic", "")
+            if not _is_market_topic(topic):
                 return await handler(event)
             started = time.perf_counter()
             try:
                 return await handler(event)
             finally:
-                elapsed = (time.perf_counter() - started) * 1000.0
-                _stats_add(self._safe_market_handler_stats, event_topic, elapsed)
+                elapsed_ms = (time.perf_counter() - started) * 1000.0
+                _stats_add(self._safe_market_handler_stats, topic, elapsed_ms)
                 self._safe_market_recent.append(
                     {
-                        "topic": event_topic,
+                        "topic": topic,
                         "stage": "handler",
-                        "latency_ms": round(elapsed, 3),
+                        "latency_ms": round(elapsed_ms, 3),
                         "ts": time.time(),
                     }
                 )
 
-        return await original_subscribe(
-            self, topic, observed, group=group, start_id=start_id
-        )
+        if "handler" in kwargs:
+            kwargs = {**kwargs, "handler": observed}
+        else:
+            args = (*args[:1], observed, *args[2:])
+        return await original_subscribe(self, *args, **kwargs)
 
     @wraps(original_health)
-    async def health(self: Any):
+    async def health_wrapper(self: Any):
         status = await original_health(self)
-        details = dict(status.details)
-        details["market_data_e2e"] = {
-            "publish_latency": _format(self._safe_market_publish_stats),
-            "handler_latency": _format(self._safe_market_handler_stats),
-            "event_loop": {
-                "samples": self._safe_market_loop_samples,
-                "last_lag_ms": round(self._safe_market_loop_lag_ms, 3),
-                "max_lag_ms": round(self._safe_market_loop_lag_max_ms, 3),
+        count = getattr(self, "_market_publish_count", 0)
+        total = getattr(self, "_market_publish_total_ms", 0.0)
+        details = {
+            **status.details,
+            "market_publish_latency": {
+                "count": count,
+                "total_ms": round(total, 3),
+                "avg_ms": round(total / count, 3) if count else 0.0,
+                "max_ms": round(getattr(self, "_market_publish_max_ms", 0.0), 3),
+                "last_ms": round(getattr(self, "_market_last_publish_ms", 0.0), 3),
+                "errors": getattr(self, "_market_publish_errors", 0),
             },
-            "recent_traces": list(self._safe_market_recent),
+            "market_data_e2e": {
+                "publish_latency": _format(self._safe_market_publish_stats),
+                "handler_latency": _format(self._safe_market_handler_stats),
+                "event_loop": {
+                    "samples": self._safe_market_loop_samples,
+                    "last_lag_ms": round(self._safe_market_loop_lag_ms, 3),
+                    "max_lag_ms": round(self._safe_market_loop_lag_max_ms, 3),
+                },
+                "recent_traces": list(self._safe_market_recent),
+            },
         }
         return replace(status, details=details)
 
     @wraps(original_shutdown)
-    async def shutdown(self: Any, *args: Any, **kwargs: Any) -> None:
+    async def shutdown_wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
         task = getattr(self, "_safe_market_watchdog", None)
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         await original_shutdown(self, *args, **kwargs)
 
-    eventbus_cls.__init__ = init
-    eventbus_cls.publish = publish
-    eventbus_cls.subscribe = subscribe
-    eventbus_cls.health_check = health
-    eventbus_cls.shutdown = shutdown
+    eventbus_cls.__init__ = init_wrapper
+    eventbus_cls.publish = publish_wrapper
+    eventbus_cls.subscribe = subscribe_wrapper
+    eventbus_cls.health_check = health_wrapper
+    eventbus_cls.shutdown = shutdown_wrapper
 
 
 async def _watchdog(eventbus: Any) -> None:

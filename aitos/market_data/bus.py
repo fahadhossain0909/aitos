@@ -15,7 +15,6 @@ from .channels import (
     CHANNEL_BOOK_SNAPSHOT,
     CHANNEL_FUNDING,
     CHANNEL_INSTRUMENT,
-    CHANNEL_KLINE,
     CHANNEL_LIQUIDATION,
     CHANNEL_OPEN_INTEREST,
     CHANNEL_OPTIONS,
@@ -30,7 +29,7 @@ _CHANNEL_BY_TYPE = {
     MarketEventType.BOOK_DELTA: CHANNEL_BOOK_DELTA,
     MarketEventType.BOOK_SNAPSHOT: CHANNEL_BOOK_SNAPSHOT,
     MarketEventType.TICKER: CHANNEL_TICKER,
-    MarketEventType.KLINE: CHANNEL_KLINE,
+    MarketEventType.KLINE: "market.kline",
     MarketEventType.FUNDING: CHANNEL_FUNDING,
     MarketEventType.OPEN_INTEREST: CHANNEL_OPEN_INTEREST,
     MarketEventType.LIQUIDATION: CHANNEL_LIQUIDATION,
@@ -38,6 +37,9 @@ _CHANNEL_BY_TYPE = {
     MarketEventType.INSTRUMENT: CHANNEL_INSTRUMENT,
 }
 
+# The legacy EventBus is intentionally retained as the transport primitive during
+# migration. Register v1 semantic channels with its bounded-retention policy so
+# a canonical stream can never grow without limit.
 for _channel in set(_CHANNEL_BY_TYPE.values()):
     redis_bus_module.STREAM_MAXLEN_DEFAULTS.setdefault(_channel, maxlen_for(_channel))
 
@@ -109,7 +111,7 @@ MarketEventHandler = Callable[[MarketEvent], Awaitable[Any]]
 
 
 class MarketDataBus:
-    """Semantic market-data API backed by bounded Redis Streams."""
+    """Semantic market-data API backed by Redis Streams."""
 
     def __init__(self, event_bus: EventBus) -> None:
         self._event_bus = event_bus

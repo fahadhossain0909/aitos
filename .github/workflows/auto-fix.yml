@@ -9,8 +9,9 @@ on:
 permissions:
   contents: write
 
-# Serialize auto-fix runs per source branch. Do not cancel an active fixer;
-# queue the next run so concurrent commits are rebased in order.
+# Serialize auto-fix runs per source branch. Architecture V1 is intentionally
+# excluded: its commits are validated by the dedicated contract workflow and
+# must not be rewritten underneath implementation commits.
 concurrency:
   group: auto-fix-${{ github.repository }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
   cancel-in-progress: false
@@ -19,7 +20,11 @@ jobs:
   python-autofix:
     name: Safe Python Auto-Fix
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    if: >-
+      (github.event_name == 'push' && github.ref_name != 'architecture/market-data-v1') ||
+      (github.event_name == 'pull_request_target' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref != 'architecture/market-data-v1')
     steps:
       - name: Check out source branch
         uses: actions/checkout@v7.0.1
@@ -47,7 +52,6 @@ jobs:
             echo "mode=all" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
           if [[ "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
             git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
             base="${{ github.event.pull_request.base.sha }}"
@@ -59,7 +63,6 @@ jobs:
               base="$(git rev-list --max-count=1 HEAD^)"
             fi
           fi
-
           files="$(git diff --name-only "$base" "$head" -- '*.py' | tr '\n' ' ' | xargs || true)"
           echo "mode=changed" >> "$GITHUB_OUTPUT"
           echo "files=$files" >> "$GITHUB_OUTPUT"
@@ -67,23 +70,18 @@ jobs:
       - name: Run Black (full repository)
         if: steps.scope.outputs.mode == 'all'
         run: black .
-
       - name: Run isort (full repository)
         if: steps.scope.outputs.mode == 'all'
         run: isort .
-
       - name: Run Ruff safe fixes (full repository)
         if: steps.scope.outputs.mode == 'all'
         run: ruff check --fix --exit-zero .
-
       - name: Run Black (changed Python files)
         if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
         run: black ${{ steps.scope.outputs.files }}
-
       - name: Run isort (changed Python files)
         if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
         run: isort ${{ steps.scope.outputs.files }}
-
       - name: Run Ruff safe fixes (changed Python files)
         if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
         run: ruff check --fix --exit-zero ${{ steps.scope.outputs.files }}
@@ -98,12 +96,10 @@ jobs:
             echo "No automatic fixes were needed."
             exit 0
           fi
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -- '*.py'
           git commit -m "ci: apply automatic formatting and safe lint fixes"
-
           for attempt in 1 2 3 4 5; do
             git fetch origin "$SOURCE_BRANCH"
             if git rebase "origin/$SOURCE_BRANCH"; then
@@ -117,8 +113,5 @@ jobs:
             echo "Push attempt $attempt raced with another update; retrying."
             sleep $((attempt * 2))
           done
-
           echo "Unable to push automatic fixes after multiple concurrent-update retries." >&2
           exit 1
-
-# Force a full-repository formatting pass after a formatter-check failure.
