@@ -15,16 +15,17 @@ from aitos.execution.order_executor import OrderRequest, OrderResult
 
 
 class AlfaxOrderExecutor(BinanceFuturesOrderExecutor):
-    """Alfax adapter using its Binance Futures-compatible API.
+    """Alfax adapter using its documented Binance Futures-compatible API."""
 
-    Alfax documents Binance-compatible paths, HMAC authentication and
-    WebSocket formats. Reusing the hardened Binance executor keeps signing,
-    idempotency, precision and reduce-only behavior in one implementation.
-    """
-
-    def __init__(self, api_key: str, api_secret: str, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        base_url: str = "https://api.alfax.trade",
+        **kwargs: Any,
+    ) -> None:
         super().__init__(api_key, api_secret, **kwargs)
-        self._base_url = kwargs.pop("base_url", "https://api.alfax.trade")
+        self._base_url = base_url.rstrip("/")
 
 
 class TradeLockerOrderExecutor:
@@ -90,9 +91,7 @@ class TradeLockerOrderExecutor:
         if request.client_order_id:
             payload["customTag"] = request.client_order_id
         response = await self._request(
-            "POST",
-            f"/trade/accounts/{self._account_id}/orders",
-            json=payload,
+            "POST", f"/trade/accounts/{self._account_id}/orders", json=payload
         )
         order_id = str(response.get("orderId", response.get("id", "")))
         return OrderResult(
