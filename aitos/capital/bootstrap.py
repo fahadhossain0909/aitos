@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from aitos.capital.router import CapitalRouter
 from aitos.capital.routed_executor import RoutedOrderExecutor
+from aitos.capital.router import CapitalRouter
 from aitos.execution.order_executor import OrderExecutor
 
 
