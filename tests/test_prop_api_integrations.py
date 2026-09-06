@@ -14,9 +14,16 @@ from aitos.models.trade import TradeSide
 def test_ctrader_authorization_url_uses_official_endpoint():
     client = CTraderOAuthClient("id", "secret", "https://localhost/callback")
     url = client.authorization_url()
-    assert url.startswith("https://openapi.ctrader.com/apps/auth?")
+    assert url.startswith("https://id.ctrader.com/my/settings/openapi/grantingaccess/?")
     assert "client_id=id" in url
     assert "scope=trading" in url
+    assert "product=web" in url
+
+
+def test_ctrader_rejects_unknown_scope():
+    client = CTraderOAuthClient("id", "secret", "https://localhost/callback")
+    with pytest.raises(ValueError):
+        client.authorization_url(scope="admin")
 
 
 def test_prop_account_snapshot_tracks_loss_and_drawdown():
@@ -62,12 +69,8 @@ async def test_mt5_gateway_posts_provider_neutral_order():
     session.__aexit__ = AsyncMock(return_value=None)
     factory = MagicMock(return_value=session)
 
-    executor = MT5GatewayOrderExecutor(
-        "http://gateway", "secret", session_factory=factory
-    )
-    result = await executor.submit_order(
-        OrderRequest("EURUSD", TradeSide.LONG, 0.1, 1.25)
-    )
+    executor = MT5GatewayOrderExecutor("http://gateway", "secret", session_factory=factory)
+    result = await executor.submit_order(OrderRequest("EURUSD", TradeSide.LONG, 0.1, 1.25))
     assert result.order_id == "123"
     assert result.filled_quantity == 0.1
     session.post.assert_called_once()
