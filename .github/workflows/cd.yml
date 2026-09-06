@@ -247,17 +247,24 @@ jobs:
 
             echo '=== STORAGE GATE ==='
             df -h "$AITOS_DATA_ROOT"
-            test -d "$AITOS_DATA_ROOT/databases/clickhouse"
-            test -d "$AITOS_DATA_ROOT/databases/neo4j"
-            test -d "$AITOS_DATA_ROOT/eventbus/redis/live"
-            test -d "$AITOS_DATA_ROOT/eventbus/redis/archive"
-            test -d "$AITOS_DATA_ROOT/research/backtest"
-            test -d "$AITOS_DATA_ROOT/research/replay"
-            test -d "$AITOS_DATA_ROOT/artifacts/backups"
-            test -d "$AITOS_DATA_ROOT/artifacts/snapshots"
-            test -d "$AITOS_DATA_ROOT/runtime/models"
-            test -d "$AITOS_DATA_ROOT/runtime/logs/neo4j"
-            test -d "$AITOS_DATA_ROOT/runtime/tmp"
+            for required in \
+              databases/clickhouse \
+              databases/neo4j \
+              eventbus/redis/live \
+              eventbus/redis/archive \
+              research/backtest \
+              research/replay \
+              artifacts/backups \
+              artifacts/snapshots \
+              runtime/models \
+              runtime/logs/neo4j \
+              runtime/tmp; do
+              sudo test -d "$AITOS_DATA_ROOT/$required" || {
+                echo "::error::Missing required directory: $AITOS_DATA_ROOT/$required"
+                sudo ls -ld "$AITOS_DATA_ROOT" "$AITOS_DATA_ROOT/$(dirname "$required")" "$AITOS_DATA_ROOT/$required" 2>&1 || true
+                exit 1
+              }
+            done
 
             echo "=== DEPLOYMENT SUCCESS: $COMMIT ==="
             docker system df
