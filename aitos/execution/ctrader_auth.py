@@ -44,7 +44,9 @@ class CTraderOAuthClient:
         )
 
     async def _token_request(self, payload: dict[str, str]) -> CTraderToken:
-        payload.update({"client_id": self.client_id, "client_secret": self.client_secret})
+        payload.update(
+            {"client_id": self.client_id, "client_secret": self.client_secret}
+        )
         async with aiohttp.ClientSession() as session:
             async with session.get(self.TOKEN_URL, params=payload) as response:
                 body = await response.json(content_type=None)

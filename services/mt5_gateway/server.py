@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import os
 import secrets
+
 from aiohttp import web
 
 try:
     import MetaTrader5 as mt5
 except ImportError as exc:  # pragma: no cover - only Windows gateway runtime
-    raise RuntimeError("install MetaTrader5 in the Windows gateway environment") from exc
+    raise RuntimeError(
+        "install MetaTrader5 in the Windows gateway environment"
+    ) from exc
 
 TOKEN = os.environ.get("AITOS_MT5_GATEWAY_TOKEN")
 if not TOKEN:
@@ -28,7 +31,9 @@ def authorized(request: web.Request) -> bool:
 
 def ensure_mt5() -> None:
     if not mt5.initialize():
-        raise web.HTTPServiceUnavailable(text=f"MT5 initialize failed: {mt5.last_error()}")
+        raise web.HTTPServiceUnavailable(
+            text=f"MT5 initialize failed: {mt5.last_error()}"
+        )
 
 
 def health(_: web.Request) -> web.Response:
@@ -44,14 +49,16 @@ def account(request: web.Request) -> web.Response:
     info = mt5.account_info()
     if info is None:
         raise web.HTTPServiceUnavailable(text=str(mt5.last_error()))
-    return web.json_response({
-        "login": info.login,
-        "balance": info.balance,
-        "equity": info.equity,
-        "currency": info.currency,
-        "margin": info.margin,
-        "margin_free": info.margin_free,
-    })
+    return web.json_response(
+        {
+            "login": info.login,
+            "balance": info.balance,
+            "equity": info.equity,
+            "currency": info.currency,
+            "margin": info.margin,
+            "margin_free": info.margin_free,
+        }
+    )
 
 
 def positions(request: web.Request) -> web.Response:
@@ -59,18 +66,20 @@ def positions(request: web.Request) -> web.Response:
         raise web.HTTPUnauthorized()
     ensure_mt5()
     rows = mt5.positions_get() or ()
-    return web.json_response([
-        {
-            "ticket": p.ticket,
-            "symbol": p.symbol,
-            "type": p.type,
-            "volume": p.volume,
-            "price_open": p.price_open,
-            "price_current": p.price_current,
-            "profit": p.profit,
-        }
-        for p in rows
-    ])
+    return web.json_response(
+        [
+            {
+                "ticket": p.ticket,
+                "symbol": p.symbol,
+                "type": p.type,
+                "volume": p.volume,
+                "price_open": p.price_open,
+                "price_current": p.price_current,
+                "profit": p.profit,
+            }
+            for p in rows
+        ]
+    )
 
 
 async def order(request: web.Request) -> web.Response:
@@ -114,13 +123,17 @@ async def order(request: web.Request) -> web.Response:
     if result is None:
         raise web.HTTPServiceUnavailable(text=str(mt5.last_error()))
     if result.retcode != mt5.TRADE_RETCODE_DONE:
-        raise web.HTTPBadRequest(text=f"MT5 order rejected: {result.retcode} {result.comment}")
-    return web.json_response({
-        "order_id": str(result.order),
-        "filled_quantity": float(result.volume),
-        "fill_price": float(result.price),
-        "success": True,
-    })
+        raise web.HTTPBadRequest(
+            text=f"MT5 order rejected: {result.retcode} {result.comment}"
+        )
+    return web.json_response(
+        {
+            "order_id": str(result.order),
+            "filled_quantity": float(result.volume),
+            "fill_price": float(result.price),
+            "success": True,
+        }
+    )
 
 
 app = web.Application()
@@ -130,4 +143,8 @@ app.router.add_get("/v1/positions", positions)
 app.router.add_post("/v1/orders", order)
 
 if __name__ == "__main__":
-    web.run_app(app, host=os.environ.get("AITOS_MT5_GATEWAY_HOST", "0.0.0.0"), port=int(os.environ.get("AITOS_MT5_GATEWAY_PORT", "8787")))
+    web.run_app(
+        app,
+        host=os.environ.get("AITOS_MT5_GATEWAY_HOST", "0.0.0.0"),
+        port=int(os.environ.get("AITOS_MT5_GATEWAY_PORT", "8787")),
+    )

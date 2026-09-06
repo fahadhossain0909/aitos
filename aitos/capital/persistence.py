@@ -131,7 +131,13 @@ class PropCapitalRepository:
         password: str = "",
         database: str = "aitos",
     ) -> None:
-        self._params = dict(host=host, port=port, username=username, password=password, database=database)
+        self._params = dict(
+            host=host,
+            port=port,
+            username=username,
+            password=password,
+            database=database,
+        )
         self._client = None
 
     async def initialize(self) -> None:
@@ -146,48 +152,135 @@ class PropCapitalRepository:
         ):
             await self._client.command(ddl)
 
-    async def save_account(self, *, account_id: str, provider: str, platform: str, account_mode: str,
-                           initial_balance: float, currency: str, api_enabled: bool,
-                           automation_enabled: bool, metadata: dict[str, Any] | None = None) -> None:
+    async def save_account(
+        self,
+        *,
+        account_id: str,
+        provider: str,
+        platform: str,
+        account_mode: str,
+        initial_balance: float,
+        currency: str,
+        api_enabled: bool,
+        automation_enabled: bool,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
         self._require()
-        await self._client.insert("prop_accounts", [[
-            datetime.now(timezone.utc), account_id, provider, platform, account_mode,
-            initial_balance, currency, int(api_enabled), int(automation_enabled),
-            json.dumps(metadata or {}, sort_keys=True),
-        ]], column_names=[
-            "recorded_at", "account_id", "provider", "platform", "account_mode",
-            "initial_balance", "currency", "api_enabled", "automation_enabled", "metadata_json",
-        ])
+        await self._client.insert(
+            "prop_accounts",
+            [
+                [
+                    datetime.now(timezone.utc),
+                    account_id,
+                    provider,
+                    platform,
+                    account_mode,
+                    initial_balance,
+                    currency,
+                    int(api_enabled),
+                    int(automation_enabled),
+                    json.dumps(metadata or {}, sort_keys=True),
+                ]
+            ],
+            column_names=[
+                "recorded_at",
+                "account_id",
+                "provider",
+                "platform",
+                "account_mode",
+                "initial_balance",
+                "currency",
+                "api_enabled",
+                "automation_enabled",
+                "metadata_json",
+            ],
+        )
 
     async def save_equity(self, snapshot: Any) -> None:
         self._require()
-        await self._client.insert("prop_equity_snapshots", [[
-            datetime.now(timezone.utc), snapshot.provider, snapshot.account_id,
-            snapshot.balance, snapshot.equity, snapshot.day_start_equity,
-            snapshot.high_water_mark, snapshot.daily_loss, snapshot.drawdown,
-            snapshot.realized_pnl_today, snapshot.unrealized_pnl,
-        ]], column_names=[
-            "recorded_at", "provider", "account_id", "balance", "equity",
-            "day_start_equity", "high_water_mark", "daily_loss", "drawdown",
-            "realized_pnl_today", "unrealized_pnl",
-        ])
+        await self._client.insert(
+            "prop_equity_snapshots",
+            [
+                [
+                    datetime.now(timezone.utc),
+                    snapshot.provider,
+                    snapshot.account_id,
+                    snapshot.balance,
+                    snapshot.equity,
+                    snapshot.day_start_equity,
+                    snapshot.high_water_mark,
+                    snapshot.daily_loss,
+                    snapshot.drawdown,
+                    snapshot.realized_pnl_today,
+                    snapshot.unrealized_pnl,
+                ]
+            ],
+            column_names=[
+                "recorded_at",
+                "provider",
+                "account_id",
+                "balance",
+                "equity",
+                "day_start_equity",
+                "high_water_mark",
+                "daily_loss",
+                "drawdown",
+                "realized_pnl_today",
+                "unrealized_pnl",
+            ],
+        )
 
-    async def save_compliance(self, *, provider: str, account_id: str, venue: str,
-                              decision: Any, request: Any, projected_loss: float,
-                              correlation_id: str) -> None:
+    async def save_compliance(
+        self,
+        *,
+        provider: str,
+        account_id: str,
+        venue: str,
+        decision: Any,
+        request: Any,
+        projected_loss: float,
+        correlation_id: str,
+    ) -> None:
         self._require()
-        await self._client.insert("prop_compliance_events", [[
-            datetime.now(timezone.utc), provider, account_id, venue,
-            int(decision.allowed), decision.reason, request.symbol, request.side.value,
-            request.quantity, request.reference_price, projected_loss, correlation_id,
-        ]], column_names=[
-            "recorded_at", "provider", "account_id", "venue", "allowed", "reason",
-            "symbol", "side", "quantity", "reference_price", "projected_loss", "correlation_id",
-        ])
+        await self._client.insert(
+            "prop_compliance_events",
+            [
+                [
+                    datetime.now(timezone.utc),
+                    provider,
+                    account_id,
+                    venue,
+                    int(decision.allowed),
+                    decision.reason,
+                    request.symbol,
+                    request.side.value,
+                    request.quantity,
+                    request.reference_price,
+                    projected_loss,
+                    correlation_id,
+                ]
+            ],
+            column_names=[
+                "recorded_at",
+                "provider",
+                "account_id",
+                "venue",
+                "allowed",
+                "reason",
+                "symbol",
+                "side",
+                "quantity",
+                "reference_price",
+                "projected_loss",
+                "correlation_id",
+            ],
+        )
 
     def _require(self) -> None:
         if self._client is None:
-            raise RuntimeError("PropCapitalRepository.initialize() must be called first")
+            raise RuntimeError(
+                "PropCapitalRepository.initialize() must be called first"
+            )
 
     async def close(self) -> None:
         if self._client is not None:
