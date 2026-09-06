@@ -114,13 +114,24 @@ jobs:
               exit 1
             }
 
+            echo '=== STOPPING PREVIOUS AITOS STACK ==='
+            if [ -f "$APP_DIR/docker-compose.yml" ]; then
+              cd "$APP_DIR"
+              docker compose down --remove-orphans --timeout 30 || true
+            fi
+
             echo '=== SOURCE DEPLOYMENT ==='
             tmp_dir=$(mktemp -d)
             trap 'rm -rf "$tmp_dir"' EXIT
             curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
             mkdir -p "$tmp_dir/source"
             tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir/source"
-            find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+            case "$APP_DIR" in
+              "$HOME/aitos") ;;
+              *) echo "::error::Unexpected APP_DIR: $APP_DIR"; exit 1 ;;
+            esac
+            sudo find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+            mkdir -p "$APP_DIR"
             cp -a "$tmp_dir/source/." "$APP_DIR/"
             cd "$APP_DIR"
 
