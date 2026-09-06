@@ -75,9 +75,9 @@ migrate_directory "Neo4j" \
 
 # Redis has a layout migration rather than a simple directory rename: the
 # canonical bind mount is eventbus/redis/live and the archive directory is
-# separate. Move only the known persistent Redis payloads into live, then
-# remove the legacy root when it is empty. Refuse unknown payloads so nothing
-# is silently discarded.
+# separate. Support both the old flat Redis layout and an intermediate
+# legacy live/archive layout. Refuse unknown payloads so nothing is silently
+# discarded.
 LEGACY_REDIS="$DATA_ROOT/redis"
 REDIS_ROOT="$DATA_ROOT/eventbus/redis"
 REDIS_LIVE="$REDIS_ROOT/live"
@@ -87,8 +87,44 @@ if [[ -e "$LEGACY_REDIS" ]]; then
   [[ -d "$LEGACY_REDIS" && ! -L "$LEGACY_REDIS" ]] || die "Legacy Redis path is not a real directory: $LEGACY_REDIS"
   if [[ -n "$(find "$LEGACY_REDIS" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
     log "Legacy Redis migration"
-    "${SUDO[@]}" mkdir -p "$REDIS_LIVE" "$REDIS_ARCHIVE"
+    "${SUDO[@]}" mkdir -p "$REDIS_ROOT"
 
+    # Migrate an intermediate legacy live directory as a whole. This preserves
+    # Redis's append-only directory structure and all file metadata.
+    LEGACY_REDIS_LIVE="$LEGACY_REDIS/live"
+    if [[ -e "$LEGACY_REDIS_LIVE" ]]; then
+      [[ -d "$LEGACY_REDIS_LIVE" && ! -L "$LEGACY_REDIS_LIVE" ]] || die "Legacy Redis live path is not a real directory: $LEGACY_REDIS_LIVE"
+      [[ -n "$(find "$LEGACY_REDIS_LIVE" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Legacy Redis live directory is empty; refusing to remove it implicitly: $LEGACY_REDIS_LIVE"
+      if [[ -e "$REDIS_LIVE" || -L "$REDIS_LIVE" ]]; then
+        [[ ! -L "$REDIS_LIVE" ]] || die "Canonical Redis live path is a symlink; refusing migration: $REDIS_LIVE"
+        [[ -d "$REDIS_LIVE" ]] || die "Canonical Redis live path exists but is not a directory: $REDIS_LIVE"
+        [[ -z "$(find "$REDIS_LIVE" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical Redis live path already contains data; refusing to overwrite: $REDIS_LIVE"
+        "${SUDO[@]}" rmdir "$REDIS_LIVE"
+      fi
+      "${SUDO[@]}" mv -- "$LEGACY_REDIS_LIVE" "$REDIS_LIVE"
+    fi
+
+    # Migrate a legacy archive directory as a whole when present.
+    LEGACY_REDIS_ARCHIVE="$LEGACY_REDIS/archive"
+    if [[ -e "$LEGACY_REDIS_ARCHIVE" ]]; then
+      [[ -d "$LEGACY_REDIS_ARCHIVE" && ! -L "$LEGACY_REDIS_ARCHIVE" ]] || die "Legacy Redis archive path is not a real directory: $LEGACY_REDIS_ARCHIVE"
+      if [[ -z "$(find "$LEGACY_REDIS_ARCHIVE" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+        "${SUDO[@]}" rmdir "$LEGACY_REDIS_ARCHIVE"
+      else
+        if [[ -e "$REDIS_ARCHIVE" || -L "$REDIS_ARCHIVE" ]]; then
+          [[ ! -L "$REDIS_ARCHIVE" ]] || die "Canonical Redis archive path is a symlink; refusing migration: $REDIS_ARCHIVE"
+          [[ -d "$REDIS_ARCHIVE" ]] || die "Canonical Redis archive path exists but is not a directory: $REDIS_ARCHIVE"
+          [[ -z "$(find "$REDIS_ARCHIVE" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical Redis archive path already contains data; refusing to overwrite: $REDIS_ARCHIVE"
+          "${SUDO[@]}" rmdir "$REDIS_ARCHIVE"
+        fi
+        "${SUDO[@]}" mkdir -p "$(dirname "$REDIS_ARCHIVE")"
+        "${SUDO[@]}" mv -- "$LEGACY_REDIS_ARCHIVE" "$REDIS_ARCHIVE"
+      fi
+    fi
+
+    # Migrate known flat Redis persistence payloads into the canonical live
+    # directory. Unknown files remain fatal rather than being deleted.
+    "${SUDO[@]}" mkdir -p "$REDIS_LIVE"
     for item in dump.rdb appendonly.aof appendonlydir; do
       source="$LEGACY_REDIS/$item"
       target="$REDIS_LIVE/$item"
@@ -98,12 +134,14 @@ if [[ -e "$LEGACY_REDIS" ]]; then
     done
 
     if [[ -n "$(find "$LEGACY_REDIS" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+      echo "Remaining legacy Redis paths:" >&2
+      find "$LEGACY_REDIS" -mindepth 1 -maxdepth 2 -print >&2
       die "Legacy Redis path contains unknown data after migration; refusing to remove: $LEGACY_REDIS"
     fi
     "${SUDO[@]}" rmdir "$LEGACY_REDIS"
     "${SUDO[@]}" sync
     echo "Legacy Redis data migrated successfully:"
-    echo "  $LEGACY_REDIS -> $REDIS_LIVE"
+    echo "  $LEGACY_REDIS -> $REDIS_ROOT"
   else
     "${SUDO[@]}" rmdir "$LEGACY_REDIS"
     echo "Removed empty legacy Redis directory: $LEGACY_REDIS"
