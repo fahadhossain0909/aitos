@@ -121,7 +121,9 @@ class CTraderOrderExecutor(OrderExecutor):
             result = OrderResult(
                 order_id=order_id,
                 symbol="",
-                side=__import__("aitos.models.trade", fromlist=["TradeSide"]).TradeSide.LONG,
+                side=__import__(
+                    "aitos.models.trade", fromlist=["TradeSide"]
+                ).TradeSide.LONG,
                 filled_quantity=filled,
                 fill_price=price,
                 success=True,
