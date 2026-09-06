@@ -103,7 +103,7 @@ services:
       - "${NEO4J_LOG_DIR:-/mnt/aitos-data/runtime/logs/neo4j}:/logs"
     cpus: "${NEO4J_CPUS:-0.25}"
     mem_limit: "${NEO4J_MEM_LIMIT:-2.5g}"
-    healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 10, start_period: 60s}
+    healthcheck: {test: ["CMD-SHELL", "wget --spider -q http://localhost:7474 || exit 1"], interval: 10s, timeout: 5s, retries: 30, start_period: 180s}
     restart: unless-stopped
 
   aitos-paper:
