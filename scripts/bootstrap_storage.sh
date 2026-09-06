@@ -62,9 +62,6 @@ has_entries() {
   [[ -n "$("${SUDO[@]}" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
 }
 
-# Fail closed if obsolete root-level paths contain real data. Use privileged
-# inspection because database containers may own legacy files with UIDs that
-# the deployment user cannot traverse.
 for legacy in clickhouse neo4j redis; do
   legacy_path="$DATA_ROOT/$legacy"
   if [[ -d "$legacy_path" && ! -L "$legacy_path" ]]; then
@@ -83,11 +80,6 @@ for legacy in others; do
   elif [[ -L "$path" ]]; then ${SUDO[@]} rm -f -- "$path"; fi
 done
 
-# Create the canonical tree only AFTER obsolete-path cleanup. This ordering is
-# deliberate: no legacy cleanup operation is allowed to run after canonical
-# Redis directories have been created. Recreate every parent explicitly and
-# verify the Redis live/archive paths immediately so a topology race or stale
-# mount cannot silently reach the Docker stage.
 log "Creating canonical AITOS data layout"
 ${SUDO[@]} mkdir -p \
   "$DATA_ROOT/databases/clickhouse" "$DATA_ROOT/databases/neo4j" \
@@ -97,8 +89,11 @@ ${SUDO[@]} mkdir -p \
   "$DATA_ROOT/artifacts/backups" "$DATA_ROOT/artifacts/snapshots" \
   "$DATA_ROOT/runtime/models" "$DATA_ROOT/runtime/logs/neo4j" "$DATA_ROOT/runtime/tmp"
 
+# Database/Redis directories are owned by their container UIDs and may be
+# intentionally inaccessible to the deployment user. Therefore all structural
+# verification before ownership normalization must be privileged.
 for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
-  [[ -d "$DATA_ROOT/$required" ]] || {
+  ${SUDO[@]} test -d "$DATA_ROOT/$required" || {
     echo "=== CANONICAL LAYOUT DIAGNOSTICS ===" >&2
     ${SUDO[@]} ls -ld "$DATA_ROOT" "$DATA_ROOT/eventbus" "$DATA_ROOT/eventbus/redis" "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive" 2>&1 || true
     ${SUDO[@]} find "$DATA_ROOT/eventbus" -maxdepth 3 -print 2>&1 || true
@@ -115,6 +110,6 @@ ${SUDO[@]} chmod 0755 "$DATA_ROOT" "$DATA_ROOT/databases" "$DATA_ROOT/eventbus" 
 ${SUDO[@]} chmod 0750 "$DATA_ROOT/eventbus/redis" "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive"
 log "Storage verification"
 df -h "$DATA_ROOT"; findmnt --target "$DATA_ROOT"
-for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do [[ -d "$DATA_ROOT/$required" ]] || die "Missing required directory: $DATA_ROOT/$required"; done
+for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do ${SUDO[@]} test -d "$DATA_ROOT/$required" || die "Missing required directory: $DATA_ROOT/$required"; done
 TMP_FILE="$DATA_ROOT/.aitos-storage-write-test"; ${SUDO[@]} touch "$TMP_FILE"; ${SUDO[@]} rm -f "$TMP_FILE"
 echo "AITOS canonical storage bootstrap completed successfully."
