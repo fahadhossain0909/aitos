@@ -20,6 +20,9 @@ for command_name in find mountpoint readlink; do
   command -v "$command_name" >/dev/null 2>&1 || die "$command_name is required."
 done
 
+SUDO=(sudo)
+[[ "$(id -u)" -eq 0 ]] && SUDO=()
+
 mountpoint -q "$DATA_ROOT" || die "Data root is not mounted: $DATA_ROOT"
 [[ -d "$DATA_ROOT" && ! -L "$DATA_ROOT" ]] || die "Invalid data root: $DATA_ROOT"
 
@@ -30,13 +33,13 @@ fi
 [[ -d "$LEGACY" && ! -L "$LEGACY" ]] || die "Legacy ClickHouse path is not a real directory: $LEGACY"
 
 if [[ -z "$(find "$LEGACY" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-  rmdir "$LEGACY"
+  "${SUDO[@]}" rmdir "$LEGACY"
   echo "Removed empty legacy ClickHouse directory: $LEGACY"
   exit 0
 fi
 
 log "Legacy ClickHouse migration"
-mkdir -p "$DATA_ROOT/databases"
+"${SUDO[@]}" mkdir -p "$DATA_ROOT/databases"
 
 if [[ -e "$CANONICAL" || -L "$CANONICAL" ]]; then
   if [[ -L "$CANONICAL" ]]; then
@@ -46,18 +49,18 @@ if [[ -e "$CANONICAL" || -L "$CANONICAL" ]]; then
   if [[ -n "$(find "$CANONICAL" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
     die "Canonical ClickHouse path already contains data; refusing to overwrite: $CANONICAL"
   fi
-  rmdir "$CANONICAL"
+  "${SUDO[@]}" rmdir "$CANONICAL"
 fi
 
 # Both paths are on the mounted AITOS data filesystem, so rename preserves the
 # files, ownership, permissions, timestamps, and hard links without copying
 # terabytes of ClickHouse data through the network.
-mv -- "$LEGACY" "$CANONICAL"
-sync
+"${SUDO[@]}" mv -- "$LEGACY" "$CANONICAL"
+"${SUDO[@]}" sync
 
 [[ ! -e "$LEGACY" ]] || die "Legacy ClickHouse path still exists after migration: $LEGACY"
 [[ -d "$CANONICAL" ]] || die "Canonical ClickHouse path missing after migration: $CANONICAL"
-[[ -z "$(find "$CANONICAL" -mindepth 1 -print -quit 2>/dev/null)" ]] && die "Canonical ClickHouse path is unexpectedly empty after migration."
+[[ -n "$(find "$CANONICAL" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical ClickHouse path is unexpectedly empty after migration."
 
 echo "Legacy ClickHouse data migrated successfully:"
 echo "  $LEGACY -> $CANONICAL"
