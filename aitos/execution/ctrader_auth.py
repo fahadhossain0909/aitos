@@ -1,8 +1,4 @@
-"""OAuth helpers for cTrader Open API.
-
-The cTrader Open API uses OAuth 2.0 for account authorization. Tokens should
-be kept outside source control and injected from the AITOS secret manager.
-"""
+"""OAuth helpers for cTrader Open API."""
 
 from __future__ import annotations
 
@@ -21,7 +17,9 @@ class CTraderToken:
 
 
 class CTraderOAuthClient:
-    AUTH_URL = "https://id.ctrader.com/my/settings/openapi-granting-access/"
+    """OAuth 2.0 helper matching Spotware's official OpenApiPy endpoints."""
+
+    AUTH_URL = "https://openapi.ctrader.com/apps/auth"
     TOKEN_URL = "https://openapi.ctrader.com/apps/token"
 
     def __init__(self, client_id: str, client_secret: str, redirect_uri: str) -> None:
@@ -31,21 +29,13 @@ class CTraderOAuthClient:
 
     def authorization_url(self, *, scope: str = "trading") -> str:
         query = urlencode(
-            {
-                "client_id": self.client_id,
-                "redirect_uri": self.redirect_uri,
-                "scope": scope,
-            }
+            {"client_id": self.client_id, "redirect_uri": self.redirect_uri, "scope": scope}
         )
         return f"{self.AUTH_URL}?{query}"
 
     async def exchange_code(self, code: str) -> CTraderToken:
         return await self._token_request(
-            {
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": self.redirect_uri,
-            }
+            {"grant_type": "authorization_code", "code": code, "redirect_uri": self.redirect_uri}
         )
 
     async def refresh(self, refresh_token: str) -> CTraderToken:
