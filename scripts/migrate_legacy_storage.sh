@@ -3,18 +3,17 @@ set -Eeuo pipefail
 
 # One-time migration of known pre-canonical AITOS storage paths.
 # This script is intentionally fail-closed: it never overwrites an existing
-# canonical data directory and never deletes legacy data until the rename has
-# completed and the source path is verified absent.
+# canonical data directory and never deletes legacy data until the migration
+# has completed and the source path is verified absent.
 
 DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
-LEGACY="$DATA_ROOT/clickhouse"
-CANONICAL="$DATA_ROOT/databases/clickhouse"
+ALLOW="${AITOS_ALLOW_LEGACY_STORAGE_MIGRATION:-false}"
 
 log() { printf '\n=== %s ===\n' "$*"; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 [[ "$DATA_ROOT" = /* ]] || die "AITOS_DATA_ROOT must be absolute."
-[[ "${AITOS_ALLOW_LEGACY_STORAGE_MIGRATION:-false}" = true ]] || die "Legacy storage migration is disabled; set AITOS_ALLOW_LEGACY_STORAGE_MIGRATION=true only for the deployment migration step."
+[[ "$ALLOW" = true ]] || die "Legacy storage migration is disabled; set AITOS_ALLOW_LEGACY_STORAGE_MIGRATION=true only for the deployment migration step."
 
 for command_name in find mountpoint readlink; do
   command -v "$command_name" >/dev/null 2>&1 || die "$command_name is required."
@@ -26,41 +25,89 @@ SUDO=(sudo)
 mountpoint -q "$DATA_ROOT" || die "Data root is not mounted: $DATA_ROOT"
 [[ -d "$DATA_ROOT" && ! -L "$DATA_ROOT" ]] || die "Invalid data root: $DATA_ROOT"
 
-if [[ ! -e "$LEGACY" ]]; then
-  echo "No legacy ClickHouse path found; nothing to migrate."
-  exit 0
-fi
-[[ -d "$LEGACY" && ! -L "$LEGACY" ]] || die "Legacy ClickHouse path is not a real directory: $LEGACY"
+migrate_directory() {
+  local label="$1" legacy="$2" canonical="$3"
 
-if [[ -z "$(find "$LEGACY" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-  "${SUDO[@]}" rmdir "$LEGACY"
-  echo "Removed empty legacy ClickHouse directory: $LEGACY"
-  exit 0
-fi
-
-log "Legacy ClickHouse migration"
-"${SUDO[@]}" mkdir -p "$DATA_ROOT/databases"
-
-if [[ -e "$CANONICAL" || -L "$CANONICAL" ]]; then
-  if [[ -L "$CANONICAL" ]]; then
-    die "Canonical ClickHouse path is a symlink; refusing migration: $CANONICAL"
+  if [[ ! -e "$legacy" ]]; then
+    echo "No legacy $label path found; nothing to migrate."
+    return 0
   fi
-  [[ -d "$CANONICAL" ]] || die "Canonical ClickHouse path exists but is not a directory: $CANONICAL"
-  if [[ -n "$(find "$CANONICAL" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-    die "Canonical ClickHouse path already contains data; refusing to overwrite: $CANONICAL"
+  [[ -d "$legacy" && ! -L "$legacy" ]] || die "Legacy $label path is not a real directory: $legacy"
+
+  if [[ -z "$(find "$legacy" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    "${SUDO[@]}" rmdir "$legacy"
+    echo "Removed empty legacy $label directory: $legacy"
+    return 0
   fi
-  "${SUDO[@]}" rmdir "$CANONICAL"
+
+  log "Legacy $label migration"
+  "${SUDO[@]}" mkdir -p "$(dirname "$canonical")"
+
+  if [[ -e "$canonical" || -L "$canonical" ]]; then
+    [[ ! -L "$canonical" ]] || die "Canonical $label path is a symlink; refusing migration: $canonical"
+    [[ -d "$canonical" ]] || die "Canonical $label path exists but is not a directory: $canonical"
+    if [[ -n "$(find "$canonical" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+      die "Canonical $label path already contains data; refusing to overwrite: $canonical"
+    fi
+    "${SUDO[@]}" rmdir "$canonical"
+  fi
+
+  "${SUDO[@]}" mv -- "$legacy" "$canonical"
+  "${SUDO[@]}" sync
+
+  [[ ! -e "$legacy" ]] || die "Legacy $label path still exists after migration: $legacy"
+  [[ -d "$canonical" ]] || die "Canonical $label path missing after migration: $canonical"
+  [[ -n "$(find "$canonical" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical $label path is unexpectedly empty after migration."
+
+  echo "Legacy $label data migrated successfully:"
+  echo "  $legacy -> $canonical"
+}
+
+# ClickHouse and Neo4j use a direct directory rename because their canonical
+# paths preserve the complete database directory layout.
+migrate_directory "ClickHouse" \
+  "$DATA_ROOT/clickhouse" \
+  "$DATA_ROOT/databases/clickhouse"
+
+migrate_directory "Neo4j" \
+  "$DATA_ROOT/neo4j" \
+  "$DATA_ROOT/databases/neo4j"
+
+# Redis has a layout migration rather than a simple directory rename: the
+# canonical bind mount is eventbus/redis/live and the archive directory is
+# separate. Move only the known persistent Redis payloads into live, then
+# remove the legacy root when it is empty. Refuse unknown payloads so nothing
+# is silently discarded.
+LEGACY_REDIS="$DATA_ROOT/redis"
+REDIS_ROOT="$DATA_ROOT/eventbus/redis"
+REDIS_LIVE="$REDIS_ROOT/live"
+REDIS_ARCHIVE="$REDIS_ROOT/archive"
+
+if [[ -e "$LEGACY_REDIS" ]]; then
+  [[ -d "$LEGACY_REDIS" && ! -L "$LEGACY_REDIS" ]] || die "Legacy Redis path is not a real directory: $LEGACY_REDIS"
+  if [[ -n "$(find "$LEGACY_REDIS" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    log "Legacy Redis migration"
+    "${SUDO[@]}" mkdir -p "$REDIS_LIVE" "$REDIS_ARCHIVE"
+
+    for item in dump.rdb appendonly.aof appendonlydir; do
+      source="$LEGACY_REDIS/$item"
+      target="$REDIS_LIVE/$item"
+      [[ -e "$source" ]] || continue
+      [[ ! -e "$target" ]] || die "Refusing to overwrite existing Redis live payload: $target"
+      "${SUDO[@]}" mv -- "$source" "$target"
+    done
+
+    if [[ -n "$(find "$LEGACY_REDIS" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+      die "Legacy Redis path contains unknown data after migration; refusing to remove: $LEGACY_REDIS"
+    fi
+    "${SUDO[@]}" rmdir "$LEGACY_REDIS"
+    "${SUDO[@]}" sync
+    echo "Legacy Redis data migrated successfully:"
+    echo "  $LEGACY_REDIS -> $REDIS_LIVE"
+  else
+    "${SUDO[@]}" rmdir "$LEGACY_REDIS"
+    echo "Removed empty legacy Redis directory: $LEGACY_REDIS"
+  fi
 fi
 
-# Both paths are on the mounted AITOS data filesystem, so rename preserves the
-# files, ownership, permissions, timestamps, and hard links without copying
-# terabytes of ClickHouse data through the network.
-"${SUDO[@]}" mv -- "$LEGACY" "$CANONICAL"
-"${SUDO[@]}" sync
-
-[[ ! -e "$LEGACY" ]] || die "Legacy ClickHouse path still exists after migration: $LEGACY"
-[[ -d "$CANONICAL" ]] || die "Canonical ClickHouse path missing after migration: $CANONICAL"
-[[ -n "$(find "$CANONICAL" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical ClickHouse path is unexpectedly empty after migration."
-
-echo "Legacy ClickHouse data migrated successfully:"
-echo "  $LEGACY -> $CANONICAL"
+echo "Legacy storage migration completed successfully."
