@@ -1,0 +1,2 @@
+aiohttp>=3.10,<4
+MetaTrader5>=5.0.0

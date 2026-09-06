@@ -19,7 +19,7 @@ from aitos.models.trade import TradeSide
 
 
 @pytest.fixture
-def request() -> OrderRequest:
+def order_request() -> OrderRequest:
     return OrderRequest(
         symbol="BTCUSDT",
         side=TradeSide.LONG,
@@ -49,52 +49,56 @@ def account(**kwargs) -> AccountSnapshot:
     )
 
 
-def test_daily_loss_is_fail_closed(request):
+def test_daily_loss_is_fail_closed(order_request):
     engine = PropComplianceEngine()
     decision = engine.evaluate(
         profile(daily_loss_limit=5_000),
         account(equity=95_001),
-        request,
+        order_request,
         projected_loss=1.0,
     )
     assert not decision.allowed
     assert "daily loss" in decision.reason
 
 
-def test_drawdown_is_enforced(request):
+def test_drawdown_is_enforced(order_request):
     engine = PropComplianceEngine()
     decision = engine.evaluate(
         profile(max_drawdown=10_000),
         account(equity=90_001),
-        request,
+        order_request,
         projected_loss=1.0,
     )
     assert not decision.allowed
     assert "drawdown" in decision.reason
 
 
-def test_api_and_automation_policy_is_enforced(request):
+def test_api_and_automation_policy_is_enforced(order_request):
     engine = PropComplianceEngine()
-    assert not engine.evaluate(profile(api_allowed=False), account(), request).allowed
     assert not engine.evaluate(
-        profile(automation_allowed=False), account(), request
+        profile(api_allowed=False), account(), order_request
+    ).allowed
+    assert not engine.evaluate(
+        profile(automation_allowed=False), account(), order_request
     ).allowed
 
 
 @pytest.mark.asyncio
-async def test_router_selects_compliant_venue(request):
+async def test_router_selects_compliant_venue(order_request):
     router = CapitalRouter()
     safe = profile(daily_loss_limit=5_000)
     unsafe = profile(daily_loss_limit=1)
     router.register("unsafe", SimulatedOrderExecutor(), unsafe, account(equity=99_999))
     router.register("safe", SimulatedOrderExecutor(), safe, account())
 
-    venue, result = await router.submit_best(request)
+    venue, result = await router.submit_best(order_request)
     assert venue == "safe"
     assert result.success
 
 
-def test_simulated_executor_remains_compatible(request):
-    result = __import__("asyncio").run(SimulatedOrderExecutor().submit_order(request))
+def test_simulated_executor_remains_compatible(order_request):
+    result = __import__("asyncio").run(
+        SimulatedOrderExecutor().submit_order(order_request)
+    )
     assert isinstance(result, OrderResult)
     assert result.success

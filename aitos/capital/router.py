@@ -19,13 +19,17 @@ class VenueQuote:
 
 
 class CapitalRouter:
-    """Selects a compliant capital venue without coupling strategy to vendors."""
+    """Select a compliant capital venue without coupling strategy to vendors."""
 
     def __init__(self, compliance: PropComplianceEngine | None = None) -> None:
         self.compliance = compliance or PropComplianceEngine()
         self._venues: dict[
             str, tuple[OrderExecutor, PropFirmProfile, AccountSnapshot]
         ] = {}
+
+    @property
+    def has_venues(self) -> bool:
+        return bool(self._venues)
 
     def register(
         self,
@@ -34,7 +38,19 @@ class CapitalRouter:
         profile: PropFirmProfile,
         account: AccountSnapshot,
     ) -> None:
+        if not venue.strip():
+            raise ValueError("venue name must not be empty")
+        if account.provider != profile.provider:
+            raise ValueError("profile and account providers must match")
         self._venues[venue] = (executor, profile, account)
+
+    @property
+    def supports_exchange_side_stops(self) -> bool:
+        # A routed executor cannot safely promise stop capability merely
+        # because one venue supports it: the selected venue is determined per
+        # order. Keep the capability conservative until protection routing is
+        # implemented explicitly.
+        return False
 
     def candidates(
         self, request: OrderRequest, projected_loss: float = 0.0
@@ -51,19 +67,27 @@ class CapitalRouter:
                     else max(0.0, profile.rules.daily_loss_limit - account.daily_loss)
                 )
                 result.append(VenueQuote(venue, account.account_id, remaining_daily))
-        return sorted(result, key=lambda q: (-q.available_risk, q.expected_cost_bps))
+        return sorted(
+            result, key=lambda q: (-q.available_risk, q.expected_cost_bps, q.venue)
+        )
 
     async def submit_best(
-        self,
-        request: OrderRequest,
-        projected_loss: float = 0.0,
+        self, request: OrderRequest, projected_loss: float = 0.0
     ) -> tuple[str, OrderResult]:
         candidates = self.candidates(request, projected_loss)
         if not candidates:
             raise RuntimeError("no compliant capital venue is available")
-        venue = candidates[0].venue
-        executor, profile, account = self._venues[venue]
-        decision = self.compliance.evaluate(profile, account, request, projected_loss)
-        if not decision.allowed:
-            raise RuntimeError(decision.reason)
-        return venue, await executor.submit_order(request)
+        for candidate in candidates:
+            executor, profile, account = self._venues[candidate.venue]
+            decision = self.compliance.evaluate(
+                profile, account, request, projected_loss
+            )
+            if not decision.allowed:
+                continue
+            try:
+                return candidate.venue, await executor.submit_order(request)
+            except Exception:
+                # Try the next compliant capital venue. This makes routing
+                # resilient to a single venue outage without bypassing rules.
+                continue
+        raise RuntimeError("all compliant capital venues failed execution")
