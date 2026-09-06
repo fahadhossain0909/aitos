@@ -64,16 +64,22 @@ ${SUDO[@]} mkdir -p \
   "$DATA_ROOT/research/backtest" "$DATA_ROOT/research/replay" \
   "$DATA_ROOT/artifacts/backups" "$DATA_ROOT/artifacts/snapshots" \
   "$DATA_ROOT/runtime/models" "$DATA_ROOT/runtime/logs/neo4j" "$DATA_ROOT/runtime/tmp"
+
+has_entries() {
+  [[ -n "$("${SUDO[@]}" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
+}
+
 # Fail closed if obsolete root-level paths contain real data. Empty legacy
 # directories are removed; no symlinks are recreated because all env paths are
-# now canonical.
+# now canonical. Protected container-owned paths are inspected with sudo so
+# permissions cannot hide payloads from the deployment user.
 for legacy in clickhouse neo4j redis; do
   legacy_path="$DATA_ROOT/$legacy"
   if [[ -d "$legacy_path" && ! -L "$legacy_path" ]]; then
-    if [[ -n "$(find "$legacy_path" -mindepth 1 -print -quit 2>/dev/null)" ]]; then die "Legacy path contains data: $legacy_path; migrate explicitly before deployment."; fi
-    ${SUDO[@]} rmdir "$legacy_path"
+    if has_entries "$legacy_path"; then die "Legacy path contains data: $legacy_path; migrate explicitly before deployment."; fi
+    ${SUDO[@]} rmdir -- "$legacy_path" || die "Legacy path changed during inspection; refusing to remove: $legacy_path"
   elif [[ -L "$legacy_path" ]]; then
-    ${SUDO[@]} rm -f "$legacy_path"
+    ${SUDO[@]} rm -f -- "$legacy_path"
   fi
 done
 STORAGE_DIR="$REPO_ROOT/.storage"
@@ -82,9 +88,9 @@ STORAGE_DIR="$REPO_ROOT/.storage"
 for legacy in others; do
   path="$STORAGE_DIR/$legacy"
   if [[ -d "$path" && ! -L "$path" ]]; then
-    if [[ -n "$(find "$path" -mindepth 1 -print -quit 2>/dev/null)" ]]; then die "Legacy checkout storage contains data: $path; migrate explicitly."; fi
-    ${SUDO[@]} rmdir "$path"
-  elif [[ -L "$path" ]]; then ${SUDO[@]} rm -f "$path"; fi
+    if has_entries "$path"; then die "Legacy checkout storage contains data: $path; migrate explicitly."; fi
+    ${SUDO[@]} rmdir -- "$path" || die "Legacy checkout storage changed during inspection; refusing to remove: $path"
+  elif [[ -L "$path" ]]; then ${SUDO[@]} rm -f -- "$path"; fi
 done
 ${SUDO[@]} chown "$HOST_UID:$HOST_GID" "$DATA_ROOT"
 ${SUDO[@]} chown -R "$CLICKHOUSE_UID:$CLICKHOUSE_GID" "$DATA_ROOT/databases/clickhouse"
