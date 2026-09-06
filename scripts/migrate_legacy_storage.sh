@@ -9,8 +9,8 @@ set -Eeuo pipefail
 # The script is also idempotent. If canonical Redis storage is already
 # populated from a previous successful deployment, it is treated as the
 # authoritative live store. Any remaining legacy Redis data is quarantined
-# under the canonical archive so bootstrap can safely remove the obsolete
-# root-level path without deleting data.
+# under a separate legacy area on the same data disk so bootstrap can safely
+# remove the obsolete root-level path without deleting active Redis data.
 
 DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 ALLOW="${AITOS_ALLOW_LEGACY_STORAGE_MIGRATION:-false}"
@@ -92,8 +92,9 @@ REDIS_ARCHIVE="$REDIS_ROOT/archive"
 # A previous deployment may already have initialized canonical Redis storage.
 # In that state canonical/live is authoritative. Never overwrite it. If the
 # old root still has data, move that complete legacy tree into a unique
-# archive quarantine on the same data disk. This preserves data while also
-# allowing bootstrap_storage.sh to enforce that /redis no longer exists.
+# quarantine OUTSIDE the canonical Redis tree. Keeping the quarantine outside
+# REDIS_ROOT avoids any possibility that moving the legacy root can alter the
+# active live/archive directory topology.
 canonical_redis_payload=false
 if [[ -d "$REDIS_LIVE" && ! -L "$REDIS_LIVE" ]]; then
   for item in dump.rdb appendonly.aof appendonlydir; do
@@ -110,14 +111,15 @@ if [[ "$canonical_redis_payload" = true ]]; then
     [[ -d "$LEGACY_REDIS" && ! -L "$LEGACY_REDIS" ]] || die "Legacy Redis path is not a real directory: $LEGACY_REDIS"
     if has_entries "$LEGACY_REDIS"; then
       log "Quarantining legacy Redis data"
-      "${SUDO[@]}" mkdir -p "$REDIS_ARCHIVE"
+      LEGACY_QUARANTINE_ROOT="$DATA_ROOT/.aitos-legacy/redis"
+      "${SUDO[@]}" mkdir -p "$LEGACY_QUARANTINE_ROOT"
 
       archive_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
-      quarantine="$REDIS_ARCHIVE/legacy-root-$archive_stamp"
+      quarantine="$LEGACY_QUARANTINE_ROOT/root-$archive_stamp"
       suffix=0
       while [[ -e "$quarantine" || -L "$quarantine" ]]; do
         suffix=$((suffix + 1))
-        quarantine="$REDIS_ARCHIVE/legacy-root-$archive_stamp-$suffix"
+        quarantine="$LEGACY_QUARANTINE_ROOT/root-$archive_stamp-$suffix"
       done
 
       "${SUDO[@]}" mv -- "$LEGACY_REDIS" "$quarantine"
@@ -131,6 +133,17 @@ if [[ "$canonical_redis_payload" = true ]]; then
       echo "Removed empty legacy Redis directory: $LEGACY_REDIS"
     fi
   fi
+
+  # Reassert the canonical live invariant after legacy quarantine. This is
+  # deliberately explicit because bootstrap_storage.sh requires this path to
+  # exist even when Redis itself has not yet recreated any files.
+  "${SUDO[@]}" mkdir -p "$REDIS_LIVE" "$REDIS_ARCHIVE"
+  for item in dump.rdb appendonly.aof appendonlydir; do
+    [[ -e "$REDIS_LIVE/$item" ]] || continue
+    canonical_redis_payload=true
+    break
+  done
+  [[ "$canonical_redis_payload" = true ]] || die "Canonical Redis live payload disappeared during legacy quarantine: $REDIS_LIVE"
 else
   if [[ -e "$LEGACY_REDIS" ]]; then
     [[ -d "$LEGACY_REDIS" && ! -L "$LEGACY_REDIS" ]] || die "Legacy Redis path is not a real directory: $LEGACY_REDIS"
