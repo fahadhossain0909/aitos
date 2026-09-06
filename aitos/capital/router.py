@@ -23,54 +23,53 @@ class CapitalRouter:
 
     def __init__(self, compliance: PropComplianceEngine | None = None) -> None:
         self.compliance = compliance or PropComplianceEngine()
-        self._venues: dict[
-            str, tuple[OrderExecutor, PropFirmProfile, AccountSnapshot]
-        ] = {}
+        self._venues: dict[str, tuple[OrderExecutor, PropFirmProfile, AccountSnapshot]] = {}
 
-    def register(
-        self,
-        venue: str,
-        executor: OrderExecutor,
-        profile: PropFirmProfile,
-        account: AccountSnapshot,
-    ) -> None:
+    @property
+    def has_venues(self) -> bool:
+        return bool(self._venues)
+
+    def register(self, venue: str, executor: OrderExecutor, profile: PropFirmProfile,
+                 account: AccountSnapshot) -> None:
+        if not venue.strip():
+            raise ValueError("venue name must not be empty")
+        if account.account_id != profile.account_id:
+            raise ValueError("profile and account IDs must match")
         self._venues[venue] = (executor, profile, account)
 
     @property
     def supports_exchange_side_stops(self) -> bool:
-        return any(
-            executor.supports_exchange_side_stops
-            for executor, _, _ in self._venues.values()
-        )
+        # A routed executor cannot safely promise stop capability merely
+        # because one venue supports it: the selected venue is determined per
+        # order. Keep the capability conservative until protection routing is
+        # implemented explicitly.
+        return False
 
-    def candidates(
-        self, request: OrderRequest, projected_loss: float = 0.0
-    ) -> list[VenueQuote]:
+    def candidates(self, request: OrderRequest, projected_loss: float = 0.0) -> list[VenueQuote]:
         result: list[VenueQuote] = []
         for venue, (_, profile, account) in self._venues.items():
-            decision = self.compliance.evaluate(
-                profile, account, request, projected_loss
-            )
+            decision = self.compliance.evaluate(profile, account, request, projected_loss)
             if decision.allowed:
                 remaining_daily = (
-                    float("inf")
-                    if profile.rules.daily_loss_limit is None
+                    float("inf") if profile.rules.daily_loss_limit is None
                     else max(0.0, profile.rules.daily_loss_limit - account.daily_loss)
                 )
                 result.append(VenueQuote(venue, account.account_id, remaining_daily))
-        return sorted(result, key=lambda q: (-q.available_risk, q.expected_cost_bps))
+        return sorted(result, key=lambda q: (-q.available_risk, q.expected_cost_bps, q.venue))
 
-    async def submit_best(
-        self,
-        request: OrderRequest,
-        projected_loss: float = 0.0,
-    ) -> tuple[str, OrderResult]:
+    async def submit_best(self, request: OrderRequest, projected_loss: float = 0.0) -> tuple[str, OrderResult]:
         candidates = self.candidates(request, projected_loss)
         if not candidates:
             raise RuntimeError("no compliant capital venue is available")
-        venue = candidates[0].venue
-        executor, profile, account = self._venues[venue]
-        decision = self.compliance.evaluate(profile, account, request, projected_loss)
-        if not decision.allowed:
-            raise RuntimeError(decision.reason)
-        return venue, await executor.submit_order(request)
+        for candidate in candidates:
+            executor, profile, account = self._venues[candidate.venue]
+            decision = self.compliance.evaluate(profile, account, request, projected_loss)
+            if not decision.allowed:
+                continue
+            try:
+                return candidate.venue, await executor.submit_order(request)
+            except Exception:
+                # Try the next compliant capital venue. This makes routing
+                # resilient to a single venue outage without bypassing rules.
+                continue
+        raise RuntimeError("all compliant capital venues failed execution")
