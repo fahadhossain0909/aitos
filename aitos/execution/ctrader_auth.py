@@ -17,9 +17,11 @@ class CTraderToken:
 
 
 class CTraderOAuthClient:
-    """OAuth 2.0 helper matching Spotware's official OpenApiPy endpoints."""
+    """OAuth 2.0 helper matching Spotware's official Open API flow."""
 
-    AUTH_URL = "https://openapi.ctrader.com/apps/auth"
+    # Spotware's current authorization page is hosted on id.ctrader.com;
+    # token exchange is served by openapi.ctrader.com.
+    AUTH_URL = "https://id.ctrader.com/my/settings/openapi/grantingaccess/"
     TOKEN_URL = "https://openapi.ctrader.com/apps/token"
 
     def __init__(self, client_id: str, client_secret: str, redirect_uri: str) -> None:
@@ -28,11 +30,14 @@ class CTraderOAuthClient:
         self.redirect_uri = redirect_uri
 
     def authorization_url(self, *, scope: str = "trading") -> str:
+        if scope not in {"accounts", "trading"}:
+            raise ValueError("cTrader scope must be 'accounts' or 'trading'")
         query = urlencode(
             {
                 "client_id": self.client_id,
                 "redirect_uri": self.redirect_uri,
                 "scope": scope,
+                "product": "web",
             }
         )
         return f"{self.AUTH_URL}?{query}"
