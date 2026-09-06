@@ -62,7 +62,9 @@ async def test_mt5_gateway_posts_provider_neutral_order():
     session.__aexit__ = AsyncMock(return_value=None)
     factory = MagicMock(return_value=session)
 
-    executor = MT5GatewayOrderExecutor("http://gateway", "secret", session_factory=factory)
+    executor = MT5GatewayOrderExecutor(
+        "http://gateway", "secret", session_factory=factory
+    )
     result = await executor.submit_order(
         OrderRequest("EURUSD", TradeSide.LONG, 0.1, 1.25)
     )
