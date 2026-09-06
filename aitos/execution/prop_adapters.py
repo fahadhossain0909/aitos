@@ -65,7 +65,11 @@ class TradeLockerOrderExecutor:
         response = await self._request(
             "POST",
             "/auth/jwt/token",
-            json={"email": self._email, "password": self._password, "server": self._server},
+            json={
+                "email": self._email,
+                "password": self._password,
+                "server": self._server,
+            },
             auth=False,
         )
         self._access_token = response["accessToken"]
@@ -76,9 +80,13 @@ class TradeLockerOrderExecutor:
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
         if self._access_token is None:
-            raise RuntimeError("TradeLockerOrderExecutor.connect() must be called first")
+            raise RuntimeError(
+                "TradeLockerOrderExecutor.connect() must be called first"
+            )
         side = 0 if request.side.value == "LONG" else 1
-        order_type = "market" if request.order_type == "MARKET" else request.order_type.lower()
+        order_type = (
+            "market" if request.order_type == "MARKET" else request.order_type.lower()
+        )
         payload = {
             "qty": request.quantity,
             "routeId": self._route_id,
@@ -104,7 +112,12 @@ class TradeLockerOrderExecutor:
         )
 
     async def _request(
-        self, method: str, path: str, *, json: dict[str, Any] | None = None, auth: bool = True
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        auth: bool = True,
     ) -> dict[str, Any]:
         if self._session is None:
             raise RuntimeError("connect() must be called first")
