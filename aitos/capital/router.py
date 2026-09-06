@@ -19,13 +19,11 @@ class VenueQuote:
 
 
 class CapitalRouter:
-    """Selects a compliant capital venue without coupling strategy to vendors."""
+    """Select a compliant capital venue without coupling strategy to vendors."""
 
     def __init__(self, compliance: PropComplianceEngine | None = None) -> None:
         self.compliance = compliance or PropComplianceEngine()
-        self._venues: dict[
-            str, tuple[OrderExecutor, PropFirmProfile, AccountSnapshot]
-        ] = {}
+        self._venues: dict[str, tuple[OrderExecutor, PropFirmProfile, AccountSnapshot]] = {}
 
     def register(
         self,
@@ -36,14 +34,14 @@ class CapitalRouter:
     ) -> None:
         self._venues[venue] = (executor, profile, account)
 
-    def candidates(
-        self, request: OrderRequest, projected_loss: float = 0.0
-    ) -> list[VenueQuote]:
+    @property
+    def supports_exchange_side_stops(self) -> bool:
+        return any(executor.supports_exchange_side_stops for executor, _, _ in self._venues.values())
+
+    def candidates(self, request: OrderRequest, projected_loss: float = 0.0) -> list[VenueQuote]:
         result: list[VenueQuote] = []
         for venue, (_, profile, account) in self._venues.items():
-            decision = self.compliance.evaluate(
-                profile, account, request, projected_loss
-            )
+            decision = self.compliance.evaluate(profile, account, request, projected_loss)
             if decision.allowed:
                 remaining_daily = (
                     float("inf")
