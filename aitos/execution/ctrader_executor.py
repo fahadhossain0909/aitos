@@ -1,23 +1,21 @@
 """cTrader Open API execution adapter.
 
-The adapter bridges cTrader's official Twisted SDK into AITOS' asyncio
-OrderExecutor contract. It uses the official OpenApiPy package rather than
-browser/UI automation. OAuth access tokens are supplied by the caller; token
-refresh is handled by the separate auth helper in ``aitos/execution/ctrader_auth.py``.
+Bridges Spotware's official Twisted OpenApiPy SDK into AITOS' asyncio
+OrderExecutor contract. No UI/browser automation is used.
 """
 
 from __future__ import annotations
 
 import asyncio
 import threading
-import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
+from aitos.models.trade import TradeSide
 
 try:
     from ctrader_open_api import Client, EndPoints, Protobuf, TcpProtocol
-    from ctrader_open_api.messages.OpenApiCommonMessages_pb2 import ProtoHeartbeatEvent
     from ctrader_open_api.messages.OpenApiMessages_pb2 import (
         ProtoOAAccountAuthReq,
         ProtoOAApplicationAuthReq,
@@ -29,25 +27,24 @@ try:
         ProtoOATradeSide,
     )
     from twisted.internet import reactor
-except ImportError:  # pragma: no cover - exercised only without optional dependency
+except ImportError:  # pragma: no cover - optional integration dependency
     Client = EndPoints = Protobuf = TcpProtocol = None  # type: ignore[assignment]
-    ProtoHeartbeatEvent = ProtoOAAccountAuthReq = ProtoOAApplicationAuthReq = None  # type: ignore[assignment]
+    ProtoOAAccountAuthReq = ProtoOAApplicationAuthReq = None  # type: ignore[assignment]
     ProtoOAExecutionEvent = ProtoOANewOrderReq = None  # type: ignore[assignment]
     ProtoOAOrderType = ProtoOATradeSide = None  # type: ignore[assignment]
     reactor = None
 
 
 class CTraderConfigurationError(RuntimeError):
-    pass
+    """Raised when cTrader integration is not installed/configured."""
 
 
 class CTraderOrderExecutor(OrderExecutor):
-    """Execute AITOS orders through cTrader Open API.
+    """Execute market/limit/stop orders through cTrader Open API.
 
-    ``symbol_id`` must be the broker's cTrader numeric symbol id. Volume is
-    converted to cTrader's protocol units (0.01 of a unit) as required by
-    ProtoOANewOrderReq. The adapter waits for the execution event instead of
-    treating request acceptance as a fill.
+    cTrader protocol volume is expressed in 0.01 units, so AITOS quantity is
+    multiplied by 100. ``symbol_ids`` maps AITOS symbols to broker-specific
+    numeric cTrader symbol IDs.
     """
 
     def __init__(
@@ -63,24 +60,22 @@ class CTraderOrderExecutor(OrderExecutor):
     ) -> None:
         if Client is None or reactor is None:
             raise CTraderConfigurationError(
-                "cTrader support requires the optional 'ctrader-open-api' package"
+                "install 'ctrader-open-api' to enable cTrader execution"
             )
         self._client_id = client_id
         self._client_secret = client_secret
         self._access_token = access_token
         self._account_id = int(account_id)
         self._symbol_ids = {k.upper(): int(v) for k, v in symbol_ids.items()}
-        self._request_timeout = request_timeout
+        self._timeout = request_timeout
         self._endpoint = (
             EndPoints.PROTOBUF_LIVE_HOST if live else EndPoints.PROTOBUF_DEMO_HOST
         )
         self._client = Client(self._endpoint, EndPoints.PROTOBUF_PORT, TcpProtocol)
         self._connected = threading.Event()
         self._authenticated = threading.Event()
-        self._reactor_thread: threading.Thread | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._pending: dict[str, asyncio.Future[OrderResult]] = {}
-        self._lock = threading.Lock()
+        self._reactor_started = False
         self._start_runtime()
 
     def _start_runtime(self) -> None:
@@ -88,10 +83,14 @@ class CTraderOrderExecutor(OrderExecutor):
         self._client.setConnectedCallback(self._on_connected)
         self._client.setDisconnectedCallback(self._on_disconnected)
         self._client.setMessageReceivedCallback(self._on_message)
-        self._reactor_thread = threading.Thread(
-            target=reactor.run, kwargs={"installSignalHandlers": False}, daemon=True
-        )
-        self._reactor_thread.start()
+        if not self._reactor_started:
+            self._reactor_started = True
+            threading.Thread(
+                target=reactor.run,
+                kwargs={"installSignalHandlers": False},
+                daemon=True,
+                name="aitos-ctrader-reactor",
+            ).start()
         reactor.callFromThread(self._client.connect)
 
     def _on_connected(self, client: Any) -> None:
@@ -106,44 +105,53 @@ class CTraderOrderExecutor(OrderExecutor):
         self._authenticated.clear()
 
     def _on_message(self, client: Any, message: Any) -> None:
-        if message.payloadType == ProtoOAExecutionEvent().payloadType:
-            event = Protobuf.extract(message)
-            order = getattr(event, "order", None)
-            if order is None:
-                return
-            order_id = str(getattr(order, "orderId", ""))
-            with self._lock:
-                future = self._pending.get(order_id)
-            if future is None or self._loop is None or future.done():
-                return
-            filled = float(getattr(order, "executedVolume", 0)) / 100.0
-            price = float(getattr(order, "executionPrice", 0.0))
-            result = OrderResult(
-                order_id=order_id,
-                symbol="",
-                side=__import__(
-                    "aitos.models.trade", fromlist=["TradeSide"]
-                ).TradeSide.LONG,
-                filled_quantity=filled,
-                fill_price=price,
-                success=True,
-            )
-            self._loop.call_soon_threadsafe(future.set_result, result)
+        if message.payloadType == ProtoOAApplicationAuthReq().payloadType + 1:
+            request = ProtoOAAccountAuthReq()
+            request.ctidTraderAccountId = self._account_id
+            request.accessToken = self._access_token
+            client.send(request)
+        elif message.payloadType == ProtoOAAccountAuthReq().payloadType + 1:
+            self._authenticated.set()
+
+    async def _send(self, request: Any) -> Any:
+        """Run a Twisted Deferred-returning SDK call from asyncio."""
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[Any] = loop.create_future()
+
+        def on_success(message: Any) -> Any:
+            loop.call_soon_threadsafe(future.set_result, message)
+            return message
+
+        def on_error(failure: Any) -> Any:
+            error = RuntimeError(str(getattr(failure, "value", failure)))
+            loop.call_soon_threadsafe(future.set_exception, error)
+            return failure
+
+        def dispatch() -> None:
+            deferred = self._client.send(request)
+            deferred.addCallback(on_success)
+            deferred.addErrback(on_error)
+
+        reactor.callFromThread(dispatch)
+        return await asyncio.wait_for(future, timeout=self._timeout)
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
         if request.order_type not in {"MARKET", "LIMIT", "STOP"}:
             raise ValueError(f"unsupported cTrader order type: {request.order_type}")
-        if request.symbol.upper() not in self._symbol_ids:
+        symbol_id = self._symbol_ids.get(request.symbol.upper())
+        if symbol_id is None:
             raise ValueError(f"missing cTrader symbol id for {request.symbol}")
-        if not self._connected.wait(self._request_timeout):
+        if not self._connected.wait(self._timeout):
             raise RuntimeError("cTrader connection timeout")
-        symbol_id = self._symbol_ids[request.symbol.upper()]
+        if not self._authenticated.wait(self._timeout):
+            raise RuntimeError("cTrader account authentication timeout")
+
         order = ProtoOANewOrderReq()
         order.ctidTraderAccountId = self._account_id
         order.symbolId = symbol_id
         order.orderType = ProtoOAOrderType.Value(request.order_type)
         order.tradeSide = ProtoOATradeSide.Value(
-            "BUY" if request.side.value == "LONG" else "SELL"
+            "BUY" if request.side is TradeSide.LONG else "SELL"
         )
         order.volume = max(1, round(request.quantity * 100))
         if request.order_type == "LIMIT":
@@ -151,26 +159,23 @@ class CTraderOrderExecutor(OrderExecutor):
         elif request.order_type == "STOP":
             order.stopPrice = request.reference_price
 
-        # cTrader returns the definitive execution event asynchronously. The
-        # SDK's request Deferred is deliberately not interpreted as a fill.
-        future: asyncio.Future[OrderResult] = asyncio.get_running_loop().create_future()
-        client_msg_id = request.client_order_id or uuid.uuid4().hex
-        reactor.callFromThread(self._client.send, order, clientMsgId=client_msg_id)
-        try:
-            result = await asyncio.wait_for(future, timeout=self._request_timeout)
-        finally:
-            # Pending events are keyed by server order id; request id is not
-            # guaranteed to equal the order id, so timeout cleanup is best-effort.
-            pass
+        message = await self._send(order)
+        if message.payloadType != ProtoOAExecutionEvent().payloadType:
+            raise RuntimeError("cTrader returned a non-execution response to new order")
+        event = Protobuf.extract(message)
+        order_result = getattr(event, "order", None)
+        if order_result is None:
+            raise RuntimeError("cTrader execution response did not contain an order")
+        execution_price = float(getattr(order_result, "executionPrice", 0.0))
+        executed_volume = float(getattr(order_result, "executedVolume", 0)) / 100.0
         return OrderResult(
-            order_id=result.order_id,
+            order_id=str(getattr(order_result, "orderId", "")),
             symbol=request.symbol,
             side=request.side,
-            filled_quantity=result.filled_quantity,
-            fill_price=result.fill_price,
-            filled_at=result.filled_at,
-            success=result.success,
-            error=result.error,
+            filled_quantity=executed_volume,
+            fill_price=execution_price,
+            filled_at=datetime.now(timezone.utc).isoformat(),
+            success=True,
         )
 
     @property
