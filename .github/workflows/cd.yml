@@ -135,6 +135,12 @@ jobs:
             cp -a "$tmp_dir/source/." "$APP_DIR/"
             cd "$APP_DIR"
 
+            echo '=== LEGACY STORAGE MIGRATION ==='
+            export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID
+            export AITOS_ALLOW_LEGACY_STORAGE_MIGRATION=true
+            chmod +x scripts/migrate_legacy_storage.sh
+            ./scripts/migrate_legacy_storage.sh
+
             echo '=== CANONICAL STORAGE BOOTSTRAP ==='
             export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID
             export AITOS_HOST_UID="$(id -u)" AITOS_HOST_GID="$(id -g)"
