@@ -21,7 +21,4 @@ class RoutedOrderExecutor(OrderExecutor):
 
     @property
     def supports_exchange_side_stops(self) -> bool:
-        return any(
-            executor.supports_exchange_side_stops
-            for executor, _, _ in self._router._venues.values()
-        )
+        return self._router.supports_exchange_side_stops
