@@ -29,13 +29,21 @@ class CTraderOAuthClient:
 
     def authorization_url(self, *, scope: str = "trading") -> str:
         query = urlencode(
-            {"client_id": self.client_id, "redirect_uri": self.redirect_uri, "scope": scope}
+            {
+                "client_id": self.client_id,
+                "redirect_uri": self.redirect_uri,
+                "scope": scope,
+            }
         )
         return f"{self.AUTH_URL}?{query}"
 
     async def exchange_code(self, code: str) -> CTraderToken:
         return await self._token_request(
-            {"grant_type": "authorization_code", "code": code, "redirect_uri": self.redirect_uri}
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "redirect_uri": self.redirect_uri,
+            }
         )
 
     async def refresh(self, refresh_token: str) -> CTraderToken:
