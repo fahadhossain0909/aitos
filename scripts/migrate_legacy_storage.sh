@@ -94,14 +94,19 @@ if [[ -e "$LEGACY_REDIS" ]]; then
     LEGACY_REDIS_LIVE="$LEGACY_REDIS/live"
     if [[ -e "$LEGACY_REDIS_LIVE" ]]; then
       [[ -d "$LEGACY_REDIS_LIVE" && ! -L "$LEGACY_REDIS_LIVE" ]] || die "Legacy Redis live path is not a real directory: $LEGACY_REDIS_LIVE"
-      [[ -n "$(find "$LEGACY_REDIS_LIVE" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Legacy Redis live directory is empty; refusing to remove it implicitly: $LEGACY_REDIS_LIVE"
-      if [[ -e "$REDIS_LIVE" || -L "$REDIS_LIVE" ]]; then
-        [[ ! -L "$REDIS_LIVE" ]] || die "Canonical Redis live path is a symlink; refusing migration: $REDIS_LIVE"
-        [[ -d "$REDIS_LIVE" ]] || die "Canonical Redis live path exists but is not a directory: $REDIS_LIVE"
-        [[ -z "$(find "$REDIS_LIVE" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical Redis live path already contains data; refusing to overwrite: $REDIS_LIVE"
-        "${SUDO[@]}" rmdir "$REDIS_LIVE"
+
+      if [[ -z "$(find "$LEGACY_REDIS_LIVE" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+        "${SUDO[@]}" rmdir "$LEGACY_REDIS_LIVE"
+        echo "Removed empty legacy Redis live directory: $LEGACY_REDIS_LIVE"
+      else
+        if [[ -e "$REDIS_LIVE" || -L "$REDIS_LIVE" ]]; then
+          [[ ! -L "$REDIS_LIVE" ]] || die "Canonical Redis live path is a symlink; refusing migration: $REDIS_LIVE"
+          [[ -d "$REDIS_LIVE" ]] || die "Canonical Redis live path exists but is not a directory: $REDIS_LIVE"
+          [[ -z "$(find "$REDIS_LIVE" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical Redis live path already contains data; refusing to overwrite: $REDIS_LIVE"
+          "${SUDO[@]}" rmdir "$REDIS_LIVE"
+        fi
+        "${SUDO[@]}" mv -- "$LEGACY_REDIS_LIVE" "$REDIS_LIVE"
       fi
-      "${SUDO[@]}" mv -- "$LEGACY_REDIS_LIVE" "$REDIS_LIVE"
     fi
 
     # Migrate a legacy archive directory as a whole when present.
