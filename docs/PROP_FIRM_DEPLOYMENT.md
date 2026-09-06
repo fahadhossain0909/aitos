@@ -4,7 +4,7 @@
 
 ### Alfax
 
-Alfax exposes a Binance Futures-compatible API. AITOS can reuse its Binance execution semantics by changing the API base URL. The official documentation currently provides a first-party Python SDK and states that REST paths, HMAC authentication and WebSocket formats are byte-compatible with Binance Futures USDT-M. citeturn0search2turn0search15
+Alfax exposes a Binance Futures-compatible API. AITOS can reuse its Binance execution semantics by changing the API base URL. See the official documentation at https://alfax.trade/docs.
 
 Required secret material:
 
@@ -17,24 +17,24 @@ Do not commit either value. Register the account in `CapitalRouter` with an `Acc
 
 ## 2. cTrader prop accounts
 
-cTrader Open API supports real-time market data, trading operations, and current/pending order and position retrieval. It supports official Python SDKs and both demo and live accounts. Non-historical traffic is limited to 50 requests/second/connection and historical requests to 5 requests/second/connection. citeturn0search0turn0search1
+cTrader Open API supports real-time market data, trading operations, and current/pending order and position retrieval. See https://help.ctrader.com/open-api/.
 
-Register an application in the cTrader Open API portal, configure its redirect URI, and use OAuth 2.0 to obtain/refresh the account token. citeturn0search4turn0search7
+Register an application in the cTrader Open API portal, configure its redirect URI, and use OAuth 2.0 to obtain/refresh the account token.
 
 AITOS now provides:
 
 - `aitos.execution.ctrader_auth.CTraderOAuthClient`
 - `aitos.execution.ctrader_executor.CTraderOrderExecutor`
 
-Install the official SDK from PyPI with `pip install ctrader-open-api`. citeturn0search1
+Install the official SDK from PyPI with `pip install ctrader-open-api`.
 
-The executor uses numeric broker-specific `symbolId` values and converts AITOS quantities to cTrader protocol volume units (0.01 of a unit). The official protocol defines `ProtoOANewOrderReq` as the trading request and requires the account ID, symbol ID, order type, trade side and volume. citeturn1search3
+The executor uses numeric broker-specific `symbolId` values and converts AITOS quantities to cTrader protocol volume units (0.01 of a unit). The official protocol defines `ProtoOANewOrderReq` as the trading request and requires the account ID, symbol ID, order type, trade side and volume.
 
 ## 3. TradeLocker
 
-TradeLocker exposes REST endpoints for orders, positions and account information. Trading requests require `accNum` and an instrument-specific `TRADE` route ID; market orders use IOC validity and price 0. citeturn0search11turn0search8
+TradeLocker exposes REST endpoints for orders, positions and account information. Trading requests require `accNum` and an instrument-specific `TRADE` route ID; market orders use IOC validity and price 0. See https://public-api.tradelocker.com/docs/getting-started.
 
-AITOS provides `TradeLockerOrderExecutor`. Before production use, fetch the account's current instrument/route metadata from TradeLocker's `/trade/accounts/{accountId}/instruments` endpoint instead of hard-coding it from a symbol name. Rate limits should be read from `/trade/config` at startup. citeturn0search11
+AITOS provides `TradeLockerOrderExecutor`. Before production use, fetch the account's current instrument/route metadata from TradeLocker's `/trade/accounts/{accountId}/instruments` endpoint instead of hard-coding it from a symbol name. Rate limits should be read from `/trade/config` at startup.
 
 ## 4. MT5
 
