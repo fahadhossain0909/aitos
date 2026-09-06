@@ -8,8 +8,9 @@ set -Eeuo pipefail
 #
 # The script is also idempotent. If canonical Redis storage is already
 # populated from a previous successful deployment, it is treated as the
-# authoritative live store and deployment continues without touching legacy
-# data. Any remaining legacy data is preserved for explicit later cleanup.
+# authoritative live store. Any remaining legacy Redis data is quarantined
+# under the canonical archive so bootstrap can safely remove the obsolete
+# root-level path without deleting data.
 
 DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 ALLOW="${AITOS_ALLOW_LEGACY_STORAGE_MIGRATION:-false}"
@@ -20,7 +21,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [[ "$DATA_ROOT" = /* ]] || die "AITOS_DATA_ROOT must be absolute."
 [[ "$ALLOW" = true ]] || die "Legacy storage migration is disabled; set AITOS_ALLOW_LEGACY_STORAGE_MIGRATION=true only for the deployment migration step."
 
-for command_name in find mountpoint readlink; do
+for command_name in find mountpoint readlink date; do
   command -v "$command_name" >/dev/null 2>&1 || die "$command_name is required."
 done
 
@@ -89,9 +90,10 @@ REDIS_LIVE="$REDIS_ROOT/live"
 REDIS_ARCHIVE="$REDIS_ROOT/archive"
 
 # A previous deployment may already have initialized canonical Redis storage.
-# In that state canonical/live is authoritative. Do not overwrite it and do
-# not delete any legacy data; simply let the deployment proceed. This makes
-# repeated CD runs safe while preserving any legacy data for explicit cleanup.
+# In that state canonical/live is authoritative. Never overwrite it. If the
+# old root still has data, move that complete legacy tree into a unique
+# archive quarantine on the same data disk. This preserves data while also
+# allowing bootstrap_storage.sh to enforce that /redis no longer exists.
 canonical_redis_payload=false
 if [[ -d "$REDIS_LIVE" && ! -L "$REDIS_LIVE" ]]; then
   for item in dump.rdb appendonly.aof appendonlydir; do
@@ -105,7 +107,29 @@ fi
 if [[ "$canonical_redis_payload" = true ]]; then
   echo "Canonical Redis live storage is already populated; treating Redis migration as complete."
   if [[ -e "$LEGACY_REDIS" ]]; then
-    echo "WARNING: legacy Redis data remains at $LEGACY_REDIS; preserving it and continuing deployment."
+    [[ -d "$LEGACY_REDIS" && ! -L "$LEGACY_REDIS" ]] || die "Legacy Redis path is not a real directory: $LEGACY_REDIS"
+    if has_entries "$LEGACY_REDIS"; then
+      log "Quarantining legacy Redis data"
+      "${SUDO[@]}" mkdir -p "$REDIS_ARCHIVE"
+
+      archive_stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+      quarantine="$REDIS_ARCHIVE/legacy-root-$archive_stamp"
+      suffix=0
+      while [[ -e "$quarantine" || -L "$quarantine" ]]; do
+        suffix=$((suffix + 1))
+        quarantine="$REDIS_ARCHIVE/legacy-root-$archive_stamp-$suffix"
+      done
+
+      "${SUDO[@]}" mv -- "$LEGACY_REDIS" "$quarantine"
+      "${SUDO[@]}" sync
+      [[ ! -e "$LEGACY_REDIS" ]] || die "Legacy Redis path still exists after quarantine: $LEGACY_REDIS"
+      [[ -d "$quarantine" ]] || die "Redis quarantine missing after migration: $quarantine"
+      echo "Legacy Redis data quarantined without overwrite:"
+      echo "  $LEGACY_REDIS -> $quarantine"
+    else
+      "${SUDO[@]}" rmdir -- "$LEGACY_REDIS" || die "Legacy Redis path changed during inspection; refusing to remove: $LEGACY_REDIS"
+      echo "Removed empty legacy Redis directory: $LEGACY_REDIS"
+    fi
   fi
 else
   if [[ -e "$LEGACY_REDIS" ]]; then
