@@ -25,6 +25,13 @@ SUDO=(sudo)
 mountpoint -q "$DATA_ROOT" || die "Data root is not mounted: $DATA_ROOT"
 [[ -d "$DATA_ROOT" && ! -L "$DATA_ROOT" ]] || die "Invalid data root: $DATA_ROOT"
 
+has_entries() {
+  # Legacy/database data may be owned by a container UID and therefore not be
+  # visible to the deploy user. Always inspect protected paths as root so a
+  # permission-hidden payload can never be mistaken for an empty directory.
+  [[ -n "$("${SUDO[@]}" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
+}
+
 migrate_directory() {
   local label="$1" legacy="$2" canonical="$3"
 
@@ -34,8 +41,8 @@ migrate_directory() {
   fi
   [[ -d "$legacy" && ! -L "$legacy" ]] || die "Legacy $label path is not a real directory: $legacy"
 
-  if [[ -z "$(find "$legacy" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-    "${SUDO[@]}" rmdir "$legacy"
+  if ! has_entries "$legacy"; then
+    "${SUDO[@]}" rmdir -- "$legacy" || die "Legacy $label path changed during inspection; refusing to continue: $legacy"
     echo "Removed empty legacy $label directory: $legacy"
     return 0
   fi
@@ -46,10 +53,10 @@ migrate_directory() {
   if [[ -e "$canonical" || -L "$canonical" ]]; then
     [[ ! -L "$canonical" ]] || die "Canonical $label path is a symlink; refusing migration: $canonical"
     [[ -d "$canonical" ]] || die "Canonical $label path exists but is not a directory: $canonical"
-    if [[ -n "$(find "$canonical" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    if has_entries "$canonical"; then
       die "Canonical $label path already contains data; refusing to overwrite: $canonical"
     fi
-    "${SUDO[@]}" rmdir "$canonical"
+    "${SUDO[@]}" rmdir -- "$canonical" || die "Canonical $label path changed during inspection; refusing migration: $canonical"
   fi
 
   "${SUDO[@]}" mv -- "$legacy" "$canonical"
@@ -57,7 +64,7 @@ migrate_directory() {
 
   [[ ! -e "$legacy" ]] || die "Legacy $label path still exists after migration: $legacy"
   [[ -d "$canonical" ]] || die "Canonical $label path missing after migration: $canonical"
-  [[ -n "$(find "$canonical" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical $label path is unexpectedly empty after migration."
+  has_entries "$canonical" || die "Canonical $label path is unexpectedly empty after migration: $canonical"
 
   echo "Legacy $label data migrated successfully:"
   echo "  $legacy -> $canonical"
@@ -85,7 +92,7 @@ REDIS_ARCHIVE="$REDIS_ROOT/archive"
 
 if [[ -e "$LEGACY_REDIS" ]]; then
   [[ -d "$LEGACY_REDIS" && ! -L "$LEGACY_REDIS" ]] || die "Legacy Redis path is not a real directory: $LEGACY_REDIS"
-  if [[ -n "$(find "$LEGACY_REDIS" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+  if has_entries "$LEGACY_REDIS"; then
     log "Legacy Redis migration"
     "${SUDO[@]}" mkdir -p "$REDIS_ROOT"
 
@@ -95,15 +102,17 @@ if [[ -e "$LEGACY_REDIS" ]]; then
     if [[ -e "$LEGACY_REDIS_LIVE" ]]; then
       [[ -d "$LEGACY_REDIS_LIVE" && ! -L "$LEGACY_REDIS_LIVE" ]] || die "Legacy Redis live path is not a real directory: $LEGACY_REDIS_LIVE"
 
-      if [[ -z "$(find "$LEGACY_REDIS_LIVE" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-        "${SUDO[@]}" rmdir "$LEGACY_REDIS_LIVE"
+      if ! has_entries "$LEGACY_REDIS_LIVE"; then
+        "${SUDO[@]}" rmdir -- "$LEGACY_REDIS_LIVE" || die "Legacy Redis live path changed during inspection; refusing to continue: $LEGACY_REDIS_LIVE"
         echo "Removed empty legacy Redis live directory: $LEGACY_REDIS_LIVE"
       else
         if [[ -e "$REDIS_LIVE" || -L "$REDIS_LIVE" ]]; then
           [[ ! -L "$REDIS_LIVE" ]] || die "Canonical Redis live path is a symlink; refusing migration: $REDIS_LIVE"
           [[ -d "$REDIS_LIVE" ]] || die "Canonical Redis live path exists but is not a directory: $REDIS_LIVE"
-          [[ -z "$(find "$REDIS_LIVE" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical Redis live path already contains data; refusing to overwrite: $REDIS_LIVE"
-          "${SUDO[@]}" rmdir "$REDIS_LIVE"
+          if has_entries "$REDIS_LIVE"; then
+            die "Canonical Redis live path already contains data; refusing to overwrite: $REDIS_LIVE"
+          fi
+          "${SUDO[@]}" rmdir -- "$REDIS_LIVE" || die "Canonical Redis live path changed during inspection; refusing migration: $REDIS_LIVE"
         fi
         "${SUDO[@]}" mv -- "$LEGACY_REDIS_LIVE" "$REDIS_LIVE"
       fi
@@ -113,14 +122,16 @@ if [[ -e "$LEGACY_REDIS" ]]; then
     LEGACY_REDIS_ARCHIVE="$LEGACY_REDIS/archive"
     if [[ -e "$LEGACY_REDIS_ARCHIVE" ]]; then
       [[ -d "$LEGACY_REDIS_ARCHIVE" && ! -L "$LEGACY_REDIS_ARCHIVE" ]] || die "Legacy Redis archive path is not a real directory: $LEGACY_REDIS_ARCHIVE"
-      if [[ -z "$(find "$LEGACY_REDIS_ARCHIVE" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
-        "${SUDO[@]}" rmdir "$LEGACY_REDIS_ARCHIVE"
+      if ! has_entries "$LEGACY_REDIS_ARCHIVE"; then
+        "${SUDO[@]}" rmdir -- "$LEGACY_REDIS_ARCHIVE" || die "Legacy Redis archive path changed during inspection; refusing to continue: $LEGACY_REDIS_ARCHIVE"
       else
         if [[ -e "$REDIS_ARCHIVE" || -L "$REDIS_ARCHIVE" ]]; then
           [[ ! -L "$REDIS_ARCHIVE" ]] || die "Canonical Redis archive path is a symlink; refusing migration: $REDIS_ARCHIVE"
           [[ -d "$REDIS_ARCHIVE" ]] || die "Canonical Redis archive path exists but is not a directory: $REDIS_ARCHIVE"
-          [[ -z "$(find "$REDIS_ARCHIVE" -mindepth 1 -print -quit 2>/dev/null)" ]] || die "Canonical Redis archive path already contains data; refusing to overwrite: $REDIS_ARCHIVE"
-          "${SUDO[@]}" rmdir "$REDIS_ARCHIVE"
+          if has_entries "$REDIS_ARCHIVE"; then
+            die "Canonical Redis archive path already contains data; refusing to overwrite: $REDIS_ARCHIVE"
+          fi
+          "${SUDO[@]}" rmdir -- "$REDIS_ARCHIVE" || die "Canonical Redis archive path changed during inspection; refusing migration: $REDIS_ARCHIVE"
         fi
         "${SUDO[@]}" mkdir -p "$(dirname "$REDIS_ARCHIVE")"
         "${SUDO[@]}" mv -- "$LEGACY_REDIS_ARCHIVE" "$REDIS_ARCHIVE"
@@ -138,17 +149,17 @@ if [[ -e "$LEGACY_REDIS" ]]; then
       "${SUDO[@]}" mv -- "$source" "$target"
     done
 
-    if [[ -n "$(find "$LEGACY_REDIS" -mindepth 1 -print -quit 2>/dev/null)" ]]; then
+    if has_entries "$LEGACY_REDIS"; then
       echo "Remaining legacy Redis paths:" >&2
-      find "$LEGACY_REDIS" -mindepth 1 -maxdepth 2 -print >&2
+      "${SUDO[@]}" find "$LEGACY_REDIS" -mindepth 1 -maxdepth 2 -print >&2
       die "Legacy Redis path contains unknown data after migration; refusing to remove: $LEGACY_REDIS"
     fi
-    "${SUDO[@]}" rmdir "$LEGACY_REDIS"
+    "${SUDO[@]}" rmdir -- "$LEGACY_REDIS" || die "Legacy Redis root changed during migration; refusing to remove: $LEGACY_REDIS"
     "${SUDO[@]}" sync
     echo "Legacy Redis data migrated successfully:"
     echo "  $LEGACY_REDIS -> $REDIS_ROOT"
   else
-    "${SUDO[@]}" rmdir "$LEGACY_REDIS"
+    "${SUDO[@]}" rmdir -- "$LEGACY_REDIS" || die "Legacy Redis path changed during inspection; refusing to remove: $LEGACY_REDIS"
     echo "Removed empty legacy Redis directory: $LEGACY_REDIS"
   fi
 fi
