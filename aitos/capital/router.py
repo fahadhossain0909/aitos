@@ -40,8 +40,8 @@ class CapitalRouter:
     ) -> None:
         if not venue.strip():
             raise ValueError("venue name must not be empty")
-        if account.account_id != profile.account_id:
-            raise ValueError("profile and account IDs must match")
+        if account.provider != profile.provider:
+            raise ValueError("profile and account providers must match")
         self._venues[venue] = (executor, profile, account)
 
     @property
