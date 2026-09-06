@@ -57,13 +57,6 @@ MOUNT_DEVICE="$(readlink -f "$MOUNT_SOURCE" 2>/dev/null || true)"
 log "Persisting mount in /etc/fstab"
 FSTAB_LINE="UUID=$DISK_UUID $DATA_ROOT $FSTYPE defaults,nofail,x-systemd.device-timeout=30s 0 2"
 if ! ${SUDO[@]} grep -Eq "^[[:space:]]*UUID=${DISK_UUID}[[:space:]]+" /etc/fstab; then printf '%s\n' "$FSTAB_LINE" | ${SUDO[@]} tee -a /etc/fstab >/dev/null; fi
-log "Creating canonical AITOS data layout"
-${SUDO[@]} mkdir -p \
-  "$DATA_ROOT/databases/clickhouse" "$DATA_ROOT/databases/neo4j" \
-  "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive" \
-  "$DATA_ROOT/research/backtest" "$DATA_ROOT/research/replay" \
-  "$DATA_ROOT/artifacts/backups" "$DATA_ROOT/artifacts/snapshots" \
-  "$DATA_ROOT/runtime/models" "$DATA_ROOT/runtime/logs/neo4j" "$DATA_ROOT/runtime/tmp"
 
 has_entries() {
   [[ -n "$("${SUDO[@]}" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
@@ -89,6 +82,30 @@ for legacy in others; do
     ${SUDO[@]} rmdir -- "$path" || die "Legacy checkout storage changed during inspection; refusing to remove: $path"
   elif [[ -L "$path" ]]; then ${SUDO[@]} rm -f -- "$path"; fi
 done
+
+# Create the canonical tree only AFTER obsolete-path cleanup. This ordering is
+# deliberate: no legacy cleanup operation is allowed to run after canonical
+# Redis directories have been created. Recreate every parent explicitly and
+# verify the Redis live/archive paths immediately so a topology race or stale
+# mount cannot silently reach the Docker stage.
+log "Creating canonical AITOS data layout"
+${SUDO[@]} mkdir -p \
+  "$DATA_ROOT/databases/clickhouse" "$DATA_ROOT/databases/neo4j" \
+  "$DATA_ROOT/eventbus" "$DATA_ROOT/eventbus/redis" \
+  "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive" \
+  "$DATA_ROOT/research/backtest" "$DATA_ROOT/research/replay" \
+  "$DATA_ROOT/artifacts/backups" "$DATA_ROOT/artifacts/snapshots" \
+  "$DATA_ROOT/runtime/models" "$DATA_ROOT/runtime/logs/neo4j" "$DATA_ROOT/runtime/tmp"
+
+for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
+  [[ -d "$DATA_ROOT/$required" ]] || {
+    echo "=== CANONICAL LAYOUT DIAGNOSTICS ===" >&2
+    ${SUDO[@]} ls -ld "$DATA_ROOT" "$DATA_ROOT/eventbus" "$DATA_ROOT/eventbus/redis" "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive" 2>&1 || true
+    ${SUDO[@]} find "$DATA_ROOT/eventbus" -maxdepth 3 -print 2>&1 || true
+    die "Canonical directory creation failed: $DATA_ROOT/$required"
+  }
+done
+
 ${SUDO[@]} chown "$HOST_UID:$HOST_GID" "$DATA_ROOT"
 ${SUDO[@]} chown -R "$CLICKHOUSE_UID:$CLICKHOUSE_GID" "$DATA_ROOT/databases/clickhouse"
 ${SUDO[@]} chown -R "$NEO4J_UID:$NEO4J_GID" "$DATA_ROOT/databases/neo4j"
