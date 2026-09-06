@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable
 
 from aitos.capital.compliance import PropComplianceEngine
 from aitos.capital.models import AccountSnapshot, PropFirmProfile
@@ -24,7 +23,9 @@ class CapitalRouter:
 
     def __init__(self, compliance: PropComplianceEngine | None = None) -> None:
         self.compliance = compliance or PropComplianceEngine()
-        self._venues: dict[str, tuple[OrderExecutor, PropFirmProfile, AccountSnapshot]] = {}
+        self._venues: dict[
+            str, tuple[OrderExecutor, PropFirmProfile, AccountSnapshot]
+        ] = {}
 
     def register(
         self,
@@ -35,10 +36,14 @@ class CapitalRouter:
     ) -> None:
         self._venues[venue] = (executor, profile, account)
 
-    def candidates(self, request: OrderRequest, projected_loss: float = 0.0) -> list[VenueQuote]:
+    def candidates(
+        self, request: OrderRequest, projected_loss: float = 0.0
+    ) -> list[VenueQuote]:
         result: list[VenueQuote] = []
         for venue, (_, profile, account) in self._venues.items():
-            decision = self.compliance.evaluate(profile, account, request, projected_loss)
+            decision = self.compliance.evaluate(
+                profile, account, request, projected_loss
+            )
             if decision.allowed:
                 remaining_daily = (
                     float("inf")
