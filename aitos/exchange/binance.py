@@ -27,7 +27,9 @@ from aitos.logging_setup import get_logger
 from aitos.market_data.endpoints import (
     BINANCE_USDM_WS_COMBINED,
     BINANCE_USDM_WS_MAX_LIFETIME_SECONDS,
+    BINANCE_USDM_WS_PUBLIC_COMBINED,
     BINANCE_USDM_WS_RAW,
+    BINANCE_USDM_WS_PUBLIC_RAW,
 )
 from aitos.models.market import (
     FundingRate,
@@ -41,7 +43,8 @@ logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
 WS_MARKET_BASE_URL = BINANCE_USDM_WS_COMBINED
 WS_MARKET_RAW_BASE_URL = BINANCE_USDM_WS_RAW
-WS_PUBLIC_BASE_URL = WS_MARKET_BASE_URL
+WS_PUBLIC_BASE_URL = BINANCE_USDM_WS_PUBLIC_COMBINED
+WS_PUBLIC_RAW_BASE_URL = BINANCE_USDM_WS_PUBLIC_RAW
 DEFAULT_RATE_LIMIT_CAPACITY = 2000
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2000 / 60
 MAX_BACKOFF_SECONDS = 60.0
@@ -148,13 +151,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield parse_kline_ws(data)
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
-        """Yield aggregate trades from bounded combined-stream shards.
-
-        The old implementation started a direct WebSocket for every symbol after
-        five seconds of primary-stream silence. For an 800+ symbol universe that
-        meant hundreds of simultaneous connections from one IP. That is not a
-        safe fallback and can amplify an upstream connectivity problem.
-        """
+        """Yield aggregate trades from bounded combined-stream shards."""
         normalized = list(dict.fromkeys(s.upper() for s in symbols))
         if not normalized:
             return
@@ -255,6 +252,13 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             for i in range(0, len(unique), max_per_connection)
         ]
 
+    @staticmethod
+    def _get_ws_base_url(streams: list[str]) -> tuple[str, str]:
+        """Select Binance's market vs public routing by stream family."""
+        if any("@depth" in stream or "@bookTicker" in stream for stream in streams):
+            return WS_PUBLIC_BASE_URL, WS_PUBLIC_RAW_BASE_URL
+        return WS_MARKET_BASE_URL, WS_MARKET_RAW_BASE_URL
+
     async def _get(self, path: str, params: dict[str, Any], weight: int) -> Any:
         await self._rate_limiter.acquire(weight)
         await self.connect()
@@ -267,7 +271,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     @staticmethod
     def _ws_base_url(streams: list[str]) -> str:
-        return WS_PUBLIC_BASE_URL
+        return BinanceFuturesAdapter._get_ws_base_url(streams)[0]
 
     async def _raw_stream(
         self, streams: list[str], emit_reconnect: bool = False
@@ -276,20 +280,23 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             return
         shards = self._partition_streams(streams)
         if len(shards) == 1:
-            url = f"{self._ws_base_url(shards[0])}?streams={'/'.join(shards[0])}"
+            base_url, _ = self._get_ws_base_url(shards[0])
+            url = f"{base_url}?streams={'/'.join(shards[0])}"
             async for item in self._connect_raw(url, None, emit_reconnect, shards[0]):
                 yield item
             return
 
-        iterators = [
-            self._connect_raw(
-                f"{self._ws_base_url(shard)}?streams={'/'.join(shard)}",
-                None,
-                emit_reconnect,
-                shard,
-            ).__aiter__()
-            for shard in shards
-        ]
+        iterators = []
+        for shard in shards:
+            base_url, _ = self._get_ws_base_url(shard)
+            iterators.append(
+                self._connect_raw(
+                    f"{base_url}?streams={'/'.join(shard)}",
+                    None,
+                    emit_reconnect,
+                    shard,
+                ).__aiter__()
+            )
         tasks: dict[asyncio.Task, int] = {
             asyncio.create_task(iterator.__anext__()): index
             for index, iterator in enumerate(iterators)
