@@ -182,7 +182,9 @@ class CanonicalMarketDataRuntime:
 
     async def _restart_orderbook_task(self) -> None:
         orderbook_tasks = [
-            task for task in self._tasks if task.get_name() == "market-data-orderbook"
+            task
+            for task in self._tasks
+            if task.get_name() == "market-data-orderbook"
         ]
         for task in orderbook_tasks:
             task.cancel()
@@ -207,8 +209,8 @@ class CanonicalMarketDataRuntime:
     async def _drain_loop(self, worker_id: int) -> None:
         while not self._stopped:
             try:
-                await self.gateway.drain_once()
-                if not self._first_canonical_publish_seen:
+                published = await self.gateway.drain_once()
+                if published and not self._first_canonical_publish_seen:
                     self._first_canonical_publish_seen = True
                     logger.info(
                         "canonical market-data first publish completed",
