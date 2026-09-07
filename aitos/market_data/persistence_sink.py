@@ -38,6 +38,7 @@ class CanonicalMarketDataPersistenceSink:
         repository: MarketDataRepository | None,
         *,
         historical_book_symbols: tuple[str, ...] = ("BTCUSDT", "LTCUSDT"),
+        historical_trade_symbols: tuple[str, ...] = ("BTCUSDT", "LTCUSDT"),
         book_interval_seconds: float = 1.0,
         queue_capacity: int = 10_000,
         workers: int = 4,
@@ -45,6 +46,7 @@ class CanonicalMarketDataPersistenceSink:
         self._bus = MarketDataBus(event_bus)
         self._repository = repository
         self._historical_books = {s.upper() for s in historical_book_symbols}
+        self._historical_trades = {s.upper() for s in historical_trade_symbols}
         self._book_interval = max(0.1, book_interval_seconds)
         self._queue: asyncio.Queue[MarketEvent] = asyncio.Queue(maxsize=queue_capacity)
         self._workers_count = max(1, workers)
@@ -54,6 +56,7 @@ class CanonicalMarketDataPersistenceSink:
         self._processed = 0
         self._errors = 0
         self._rejected = 0
+        self._filtered = 0
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -144,11 +147,16 @@ class CanonicalMarketDataPersistenceSink:
             pass
 
     async def _enqueue(self, event: MarketEvent) -> None:
-        """Queue persistence work without ever waiting on ClickHouse."""
+        """Queue historical work without ever waiting on ClickHouse."""
         if self._repository is None:
             return
-        if event.event_type is MarketEventType.BOOK_SNAPSHOT:
+        if event.event_type is MarketEventType.TRADE:
+            if event.symbol.upper() not in self._historical_trades:
+                self._filtered += 1
+                return
+        elif event.event_type is MarketEventType.BOOK_SNAPSHOT:
             if event.symbol.upper() not in self._historical_books:
+                self._filtered += 1
                 return
             now = datetime.now(timezone.utc)
             previous = self._last_book_persist.get(event.symbol)
@@ -156,6 +164,7 @@ class CanonicalMarketDataPersistenceSink:
                 previous is not None
                 and (now - previous).total_seconds() < self._book_interval
             ):
+                self._filtered += 1
                 return
             self._last_book_persist[event.symbol] = now
         try:
@@ -212,7 +221,9 @@ class CanonicalMarketDataPersistenceSink:
             "processed": self._processed,
             "errors": self._errors,
             "rejected": self._rejected,
+            "filtered": self._filtered,
             "workers": len(self._workers),
             "historical_book_symbols": sorted(self._historical_books),
+            "historical_trade_symbols": sorted(self._historical_trades),
             "backpressure_policy": "drop_history_never_block_live",
         }
