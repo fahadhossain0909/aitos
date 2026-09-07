@@ -329,7 +329,9 @@ class DataIngestionService(_LegacyDataIngestionService):
             status.details["live_deep_orderbook_symbols"] = list(
                 self._canonical_runtime.orderbook_symbols
             )
-            status.details["live_orderbook_levels"] = self._canonical_runtime.orderbook_levels
+            status.details["live_orderbook_levels"] = (
+                self._canonical_runtime.orderbook_levels
+            )
             status.details["live_orderbook_fallback_levels"] = (
                 self._canonical_runtime.orderbook_fallback_levels
             )
