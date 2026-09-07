@@ -165,16 +165,22 @@ jobs:
             cat "$REPORT"
             exit "$status"
 
-      - name: Download audit report
+      - name: Pull audit report from VPS
         if: always()
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.DEPLOY_HOST }}
-          username: ${{ secrets.DEPLOY_USER }}
-          key_path: /tmp/aitos_audit_key
-          source: aitos-strategy-funnel-audit/report.txt
-          target: /tmp/aitos-funnel-report
-          strip_components: 1
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/aitos-funnel-report
+          mkdir -p /tmp/aitos-funnel-report
+          remote_home="$(ssh -i /tmp/aitos_audit_key -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=30 "${DEPLOY_USER}@${DEPLOY_HOST}" 'printf "%s" "$HOME"')"
+          remote_report="${remote_home}/aitos-strategy-funnel-audit/report.txt"
+          echo "Pulling audit report from ${DEPLOY_USER}@${DEPLOY_HOST}:${remote_report}"
+          scp -q -i /tmp/aitos_audit_key -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=30 "${DEPLOY_USER}@${DEPLOY_HOST}:${remote_report}" /tmp/aitos-funnel-report/report.txt
+          test -f /tmp/aitos-funnel-report/report.txt
+          echo "Audit report downloaded: $(wc -c < /tmp/aitos-funnel-report/report.txt) bytes"
 
       - name: Upload report artifact
         if: always()
@@ -182,4 +188,4 @@ jobs:
         with:
           name: aitos-strategy-funnel-position-intelligence-audit
           path: /tmp/aitos-funnel-report/report.txt
-          if-no-files-found: warn
+          if-no-files-found: error
