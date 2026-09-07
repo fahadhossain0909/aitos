@@ -100,7 +100,10 @@ async def install_staged_scan(
             reverse=True,
         )
         top50 = [s for s, score in cheap_ranked[:TOP_50] if score >= 0]
-        if scanner._reference_symbol in symbols and scanner._reference_symbol not in top50:
+        if (
+            scanner._reference_symbol in symbols
+            and scanner._reference_symbol not in top50
+        ):
             top50 = [scanner._reference_symbol, *top50[: TOP_50 - 1]]
         await on_subscription_change(top50, "TOP_50")
 
@@ -111,7 +114,10 @@ async def install_staged_scan(
             key=lambda s: _cheap_score(cheap_map.get(s, [])),
             reverse=True,
         )[:TOP_25]
-        if scanner._reference_symbol in top50 and scanner._reference_symbol not in top25:
+        if (
+            scanner._reference_symbol in top50
+            and scanner._reference_symbol not in top25
+        ):
             top25 = [scanner._reference_symbol, *top25[: TOP_25 - 1]]
         await on_subscription_change(top25, "TOP_25")
 
@@ -123,7 +129,11 @@ async def install_staged_scan(
                 if candidate is not None:
                     expensive.append(candidate)
             except Exception as exc:
-                scanner._logger.error("staged scan failed for %s: %s", symbol, exc) if hasattr(scanner, "_logger") else None
+                (
+                    scanner._logger.error("staged scan failed for %s: %s", symbol, exc)
+                    if hasattr(scanner, "_logger")
+                    else None
+                )
 
         expensive.sort(key=lambda c: c.composite_score, reverse=True)
         top10 = expensive[:TOP_10]
@@ -133,24 +143,30 @@ async def install_staged_scan(
         top2 = top5[:TOP_2]
         await on_subscription_change([c.symbol for c in top2], "TOP_2")
 
-        scanner._last_scan_at = scanner._utc_now_iso() if hasattr(scanner, "_utc_now_iso") else None
+        scanner._last_scan_at = (
+            scanner._utc_now_iso() if hasattr(scanner, "_utc_now_iso") else None
+        )
         scanner._last_candidate_count = len(top2)
-        await scanner._event_bus.publish(
-            scanner._make_scan_complete_event(
-                symbols_scanned=len(symbols),
-                candidates_found=len(top2),
-                stage_counts={
-                    "ALL": len(symbols),
-                    "TOP_50": len(top50),
-                    "TOP_25": len(top25),
-                    "TOP_10": len(top10),
-                    "TOP_5": len(top5),
-                    "TOP_2": len(top2),
-                },
+        (
+            await scanner._event_bus.publish(
+                scanner._make_scan_complete_event(
+                    symbols_scanned=len(symbols),
+                    candidates_found=len(top2),
+                    stage_counts={
+                        "ALL": len(symbols),
+                        "TOP_50": len(top50),
+                        "TOP_25": len(top25),
+                        "TOP_10": len(top10),
+                        "TOP_5": len(top5),
+                        "TOP_2": len(top2),
+                    },
+                )
+                if hasattr(scanner, "_make_scan_complete_event")
+                else None
             )
-            if hasattr(scanner, "_make_scan_complete_event")
+            if False
             else None
-        ) if False else None
+        )
         return top2
 
     scanner.scan_all = _staged_scan_all
