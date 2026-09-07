@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
 
 from .backpressure import BoundedMarketQueue
 from .contracts import MarketEvent, MarketSource
@@ -37,12 +38,14 @@ class MarketDataGateway:
         market_type: str,
         publisher: Callable[[MarketEvent], Awaitable[None]],
         config: GatewayConfig | None = None,
+        transport_snapshot_provider: Callable[[], dict[str, Any]] | None = None,
     ) -> None:
         self.config = config or GatewayConfig()
         self.queue = BoundedMarketQueue[MarketEvent](self.config.queue_capacity)
         self.health = GatewayHealth(venue, market_type)
         self.state = GatewayState.STOPPED
         self._publisher = publisher
+        self._transport_snapshot_provider = transport_snapshot_provider
 
     def begin_connect(self) -> None:
         self.state = GatewayState.CONNECTING
@@ -131,8 +134,18 @@ class MarketDataGateway:
             self.queue.task_done()
 
     def snapshot(self) -> dict[str, object]:
-        return {
+        snapshot: dict[str, object] = {
             "state": self.state.value,
             "queue": self.queue.snapshot(),
             "health": self.health.snapshot(),
         }
+        if self._transport_snapshot_provider is not None:
+            try:
+                snapshot["transport"] = self._transport_snapshot_provider()
+            except Exception as exc:
+                snapshot["transport"] = {
+                    "state": "telemetry_error",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:500],
+                }
+        return snapshot
