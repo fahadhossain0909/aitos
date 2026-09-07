@@ -2,7 +2,6 @@
 import asyncio
 import json
 import os
-import ssl
 import time
 from urllib.parse import quote
 
@@ -18,6 +17,7 @@ CANDIDATES = [
     ("market_combined", f"{BASE}/market/stream?streams={quote(STREAM, safe='@')}"),
     ("market_raw", f"{BASE}/market/ws/{STREAM}"),
 ]
+
 
 async def probe(name, url):
     started = time.monotonic()
@@ -48,7 +48,9 @@ async def probe(name, url):
                 if isinstance(payload, dict):
                     data = payload.get("data", payload)
                     if isinstance(data, dict) and data.get("e") == "aggTrade":
-                        out["first_message_ms"] = round((time.monotonic() - started) * 1000, 1)
+                        out["first_message_ms"] = round(
+                            (time.monotonic() - started) * 1000, 1
+                        )
                         out["event"] = data.get("e")
                         out["symbol"] = data.get("s")
                         out["trade_id"] = data.get("a")
@@ -64,8 +66,14 @@ async def probe(name, url):
         out["error"] = str(exc)
     return out
 
+
 async def main():
-    print(json.dumps({"endpoint_probe": [await probe(n, u) for n, u in CANDIDATES]}, indent=2))
+    print(
+        json.dumps(
+            {"endpoint_probe": [await probe(n, u) for n, u in CANDIDATES]}, indent=2
+        )
+    )
+
 
 if __name__ == "__main__":
     asyncio.run(main())
