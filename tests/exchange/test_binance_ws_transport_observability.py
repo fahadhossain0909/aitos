@@ -56,6 +56,8 @@ async def test_binance_websocket_transport_records_connection_to_event():
     assert telemetry["last_handshake_at"]
     assert telemetry["last_first_frame_at"]
     assert telemetry["last_market_event_at"]
-    assert telemetry["current_url"].startswith("wss://fstream.binance.com/market/stream")
+    assert telemetry["current_url"].startswith(
+        "wss://fstream.binance.com/market/stream"
+    )
 
     await stream.aclose()
