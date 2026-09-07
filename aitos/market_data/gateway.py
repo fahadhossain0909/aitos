@@ -112,7 +112,8 @@ class MarketDataGateway:
     def _queue_age_seconds(event: MarketEvent) -> float:
         return max(0.0, (datetime.now(timezone.utc) - event.ingest_time).total_seconds())
 
-    async def drain_once(self) -> None:
+    async def drain_once(self) -> bool:
+        """Publish one event, or drop it if doing so would violate freshness."""
         event = await self.queue.get()
         try:
             queue_age = self._queue_age_seconds(event)
@@ -121,7 +122,7 @@ class MarketDataGateway:
                     f"queued market event age {queue_age:.3f}s exceeded "
                     f"{self.config.max_queue_age_seconds:.3f}s"
                 )
-                return
+                return False
             try:
                 await asyncio.wait_for(
                     self._publisher(event), timeout=self.config.publish_timeout_seconds
@@ -138,6 +139,7 @@ class MarketDataGateway:
                 raise
             else:
                 self.health.record_publish()
+                return True
         finally:
             self.queue.task_done()
 
