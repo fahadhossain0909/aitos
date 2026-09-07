@@ -10,12 +10,12 @@ from __future__ import annotations
 import os
 
 BINANCE_USDM_WS_BASE = "wss://fstream.binance.com"
-# Binance's current USDⓈ-M WebSocket Streams SDK connects to the market
-# routing path and then sends SUBSCRIBE requests over that connection.
+# Binance USDⓈ-M regular market streams: aggTrade, kline, markPrice, ticker, etc.
 BINANCE_USDM_WS_COMBINED = f"{BINANCE_USDM_WS_BASE}/market/stream"
-# Kept for compatibility with callers/tests that use the raw-stream constant.
-# The adapter's production fan-out uses the market/stream subscription path.
 BINANCE_USDM_WS_RAW = f"{BINANCE_USDM_WS_BASE}/market/ws"
+# Binance USDⓈ-M high-frequency public streams: depth and bookTicker.
+BINANCE_USDM_WS_PUBLIC_COMBINED = f"{BINANCE_USDM_WS_BASE}/public/stream"
+BINANCE_USDM_WS_PUBLIC_RAW = f"{BINANCE_USDM_WS_BASE}/public/ws"
 
 BYBIT_LINEAR_WS = os.getenv(
     "BYBIT_LINEAR_WS_URL", "wss://stream.bybit.com/v5/public/linear"
