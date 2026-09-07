@@ -31,7 +31,7 @@ LIVE_DEEP_NON_BTC = 2
 
 
 class DataIngestionService(_LegacyDataIngestionService):
-    """Legacy-compatible facade backed by canonical market-data runtimes."""
+    """Legacy-compatible facade backed by bounded canonical market-data runtimes."""
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         live_trade_handler = kwargs.get("live_trade_handler")
@@ -65,26 +65,35 @@ class DataIngestionService(_LegacyDataIngestionService):
         self._canonical_persistence: CanonicalMarketDataPersistenceSink | None = None
         self._deep_collector: DeepOrderBookCollector | None = None
         self._ranking_hook_installed = False
+        self._staged_scanner_installed = False
+        self._live_trade_symbols: list[str] = []
         if self._canonical_mode:
             market_type = str(getattr(self._exchange, "market_type", "usd_m_futures"))
             market_bus = MarketDataBus(self._event_bus)
             gateway = MarketDataGateway(
                 venue="binance", market_type=market_type, publisher=market_bus.publish
             )
-            initial_orderbooks = [
-                (
-                    LIVE_DEEP_ANCHOR
-                    if LIVE_DEEP_ANCHOR in {s.upper() for s in self._symbols}
-                    else self._symbols[0]
-                )
-            ]
+            normalized_symbols = {s.upper() for s in self._symbols}
+            initial_orderbooks = (
+                [LIVE_DEEP_ANCHOR]
+                if LIVE_DEEP_ANCHOR in normalized_symbols
+                else self._symbols[:1]
+            )
+            # Boot with the anchor only. The scanner promotes the live trade
+            # subscription to Top-50 after the first cheap universe pass.
+            initial_trades = (
+                [LIVE_DEEP_ANCHOR]
+                if LIVE_DEEP_ANCHOR in normalized_symbols
+                else self._symbols[:1]
+            )
+            self._live_trade_symbols = list(initial_trades)
             self._canonical_runtime = CanonicalMarketDataRuntime(
                 adapter=BinanceCanonicalMarketDataAdapter(
                     self._exchange, market_type=market_type
                 ),
                 market_bus=market_bus,
                 gateway=gateway,
-                symbols=self._symbols,
+                symbols=initial_trades,
                 orderbook_symbols=initial_orderbooks,
                 orderbook_levels=STANDARD_ORDERBOOK_LEVELS,
             )
@@ -120,26 +129,93 @@ class DataIngestionService(_LegacyDataIngestionService):
             self._install_ranking_hook(scanner)
 
     def _install_ranking_hook(self, scanner: Any) -> None:
-        """Bridge scanner ranking to the canonical runtime without coupling modules."""
+        """Install staged scanner orchestration and wire its transport gates."""
         if scanner is None or self._ranking_hook_installed:
             return
-        original_rank = scanner.rank
+        from aitos.intelligence.staged_scanner import install_staged_scan
+
         ingestion = self
 
-        async def rank_with_market_promotion(*args: Any, **kwargs: Any):
-            ranked = await original_rank(*args, **kwargs)
-            await ingestion.update_live_deep_orderbooks(
-                [c.symbol for c in ranked[:LIVE_DEEP_NON_BTC]]
+        async def on_stage(symbols: list[str], stage: str) -> None:
+            if stage == "TOP_50":
+                await ingestion.update_live_trade_symbols(symbols)
+            elif stage == "TOP_2":
+                await ingestion.update_live_deep_orderbooks(symbols)
+            logger.info(
+                "scanner market-data stage reached",
+                extra={
+                    "aitos_extra": {
+                        "stage": stage,
+                        "symbol_count": len(symbols),
+                        "symbols": list(symbols),
+                    }
+                },
             )
-            return ranked
 
-        scanner.rank = rank_with_market_promotion
+        asyncio.create_task(
+            install_staged_scan(scanner, on_stage),
+            name="aitos-install-staged-scanner",
+        )
         self._ranking_hook_installed = True
+
+    async def update_live_trade_symbols(
+        self, symbols: list[str] | tuple[str, ...]
+    ) -> bool:
+        """Hot-switch the canonical trade feed to the scanner's Top-50 cohort."""
+        candidates = [s.upper() for s in symbols if s]
+        if LIVE_DEEP_ANCHOR in {s.upper() for s in self._symbols}:
+            candidates = [LIVE_DEEP_ANCHOR, *candidates]
+        normalized = list(dict.fromkeys(candidates))
+        if self._canonical_runtime is None:
+            return False
+        if normalized == self._live_trade_symbols:
+            return False
+        async with self._canonical_runtime._reconfigure_lock:
+            previous = list(self._live_trade_symbols)
+            self._live_trade_symbols = normalized
+            self._canonical_runtime.symbols = normalized
+            if self._canonical_runtime._stopped:
+                return True
+            trade_tasks = [
+                task
+                for task in self._canonical_runtime._tasks
+                if task.get_name() == "market-data-trades"
+            ]
+            for task in trade_tasks:
+                task.cancel()
+            if trade_tasks:
+                await asyncio.gather(*trade_tasks, return_exceptions=True)
+            self._canonical_runtime._tasks = [
+                task
+                for task in self._canonical_runtime._tasks
+                if task not in trade_tasks
+            ]
+            if self._canonical_runtime.enable_trades and normalized:
+                self._canonical_runtime._tasks.append(
+                    asyncio.create_task(
+                        self._canonical_runtime._run(
+                            "trades",
+                            lambda: self._canonical_runtime.adapter.stream_trades(normalized),
+                        ),
+                        name="market-data-trades",
+                    )
+                )
+            logger.info(
+                "live trade subscription reconfigured",
+                extra={
+                    "aitos_extra": {
+                        "stage": "trade_subscription_reconfigured",
+                        "previous_symbols": previous,
+                        "trade_symbols": normalized,
+                    }
+                },
+            )
+            return True
 
     async def update_live_deep_orderbooks(
         self, ranked_non_btc_symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        """Keep BTC plus the two highest-ranked non-BTC symbols on the WS book feed."""
+        """Keep BTC plus the two highest-ranked non-BTC symbols on live book feed."""
         candidates = [
             s.upper()
             for s in ranked_non_btc_symbols
@@ -179,10 +255,6 @@ class DataIngestionService(_LegacyDataIngestionService):
             canonical = self._canonical_runtime.gateway.snapshot()
             canonical_health = canonical["health"]
             status.details["canonical_market_data"] = canonical
-            # Keep the historical health keys populated from the canonical
-            # runtime. In canonical mode the legacy _run_trade_stream is
-            # intentionally disabled, so its counters otherwise remain zero
-            # even while live Binance trades are flowing normally.
             status.details["trade_stream_messages_received"] = canonical_health[
                 "received_events"
             ]
@@ -207,6 +279,7 @@ class DataIngestionService(_LegacyDataIngestionService):
             status.details["canonical_trade_health_source"] = (
                 "market_data.gateway.health"
             )
+            status.details["live_trade_symbols"] = list(self._live_trade_symbols)
             status.details["live_deep_orderbook_symbols"] = list(
                 self._canonical_runtime.orderbook_symbols
             )
@@ -232,10 +305,6 @@ class DataIngestionService(_LegacyDataIngestionService):
         await super().shutdown(grace_period_seconds)
 
 
-# Apply the cross-cutting instrumentation after the concrete facade exists.
-# Keeping this here preserves the historical runtime behavior while allowing
-# aitos.data.__init__ to avoid eagerly importing this module (which would
-# reintroduce the persistence_sink <-> aitos.data.repository cycle).
 from .trade_recovery_guard import install_trade_recovery_guard
 from .transport_telemetry import install_transport_telemetry
 
