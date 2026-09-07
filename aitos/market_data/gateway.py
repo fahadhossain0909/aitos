@@ -74,9 +74,7 @@ class MarketDataGateway:
         whether the market event is currently too old, so it must be measured
         against the current UTC clock rather than the ingest timestamp.
         """
-        return max(
-            0.0, (datetime.now(timezone.utc) - event.event_time).total_seconds()
-        )
+        return max(0.0, (datetime.now(timezone.utc) - event.event_time).total_seconds())
 
     def _validate_event(self, event: MarketEvent) -> bool:
         self.health.record_event()
