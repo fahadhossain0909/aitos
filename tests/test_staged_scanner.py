@@ -8,7 +8,9 @@ from aitos.intelligence import staged_scanner
 class FakeExchange:
     async def fetch_klines(self, symbol, timeframe, limit=100):
         rank = int(symbol.removeprefix("S"))
-        return [SimpleNamespace(volume=float(rank), close=100.0 + rank) for _ in range(40)]
+        return [
+            SimpleNamespace(volume=float(rank), close=100.0 + rank) for _ in range(40)
+        ]
 
 
 class FakeCandidate:
@@ -38,7 +40,9 @@ async def test_staged_scan_calls_expensive_path_only_for_top_ten(monkeypatch):
     monkeypatch.setattr(staged_scanner.indicators, "momentum_score", lambda _: 10.0)
     monkeypatch.setattr(staged_scanner.indicators, "atr_percentile", lambda _: 60.0)
     monkeypatch.setattr(staged_scanner.indicators, "adx", lambda _: 100.0)
-    monkeypatch.setattr(staged_scanner.indicators, "classify_regime", lambda _: "trending")
+    monkeypatch.setattr(
+        staged_scanner.indicators, "classify_regime", lambda _: "trending"
+    )
 
     scanner = FakeScanner()
     stages = []
@@ -49,7 +53,13 @@ async def test_staged_scan_calls_expensive_path_only_for_top_ten(monkeypatch):
     await staged_scanner.install_staged_scan(scanner, callback)
     result = await scanner.scan_all()
 
-    assert [stage for stage, _ in stages] == ["TOP_50", "TOP_25", "TOP_10", "TOP_5", "TOP_2"]
+    assert [stage for stage, _ in stages] == [
+        "TOP_50",
+        "TOP_25",
+        "TOP_10",
+        "TOP_5",
+        "TOP_2",
+    ]
     assert len(stages[0][1]) == 50
     assert len(stages[1][1]) == 25
     assert len(stages[2][1]) == 10
