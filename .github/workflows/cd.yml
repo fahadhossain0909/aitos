@@ -110,10 +110,18 @@ jobs:
             exec 9>"$HOME/.aitos-deploy.lock"
             flock 9
 
+            echo '=== DOCKER STORAGE PRE-CLEANUP ==='
+            echo 'Pruning unused Docker images before the boot-disk safety gate...'
+            docker image prune -af || true
+            echo 'Docker image storage after prune:'
+            docker system df || true
+
             echo '=== BOOT DISK PREFLIGHT ==='
             boot_free=$(df -B1 --output=avail "$HOME" | tail -1 | tr -d ' ')
+            echo "Boot disk free bytes: $boot_free"
+            echo "Required reserve bytes: $BOOT_FREE_RESERVE_BYTES"
             [ "$boot_free" -ge "$BOOT_FREE_RESERVE_BYTES" ] || {
-              echo '::error::Boot disk below reserve; refusing destructive cleanup during deployment.'
+              echo '::error::Boot disk below reserve even after unused Docker image prune; refusing destructive cleanup during deployment.'
               echo 'Run the explicit HARD RESET workflow or clean unrelated host state manually.'
               exit 1
             }
