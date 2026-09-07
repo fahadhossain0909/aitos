@@ -47,6 +47,19 @@ def _configured_positive_int(name: str, default: int) -> int:
     return value if value > 0 else default
 
 
+def _configured_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    logger.warning("Invalid %s=%r; using default %s", name, raw, default)
+    return default
+
+
 class DataIngestionService(_LegacyDataIngestionService):
     """Legacy-compatible facade backed by bounded canonical market-data runtimes."""
 
@@ -81,6 +94,9 @@ class DataIngestionService(_LegacyDataIngestionService):
         self._deep_runtime: CanonicalMarketDataRuntime | None = None
         self._canonical_persistence: CanonicalMarketDataPersistenceSink | None = None
         self._deep_collector: DeepOrderBookCollector | None = None
+        self._deep_history_enabled = _configured_bool(
+            "AITOS_ENABLE_DEEP_HISTORY", False
+        )
         self._ranking_hook_installed = False
         self._staged_scanner_installed = False
         self._staged_scanner_install_task: asyncio.Task | None = None
@@ -120,23 +136,6 @@ class DataIngestionService(_LegacyDataIngestionService):
                 orderbook_levels=live_orderbook_levels,
                 orderbook_fallback_levels=live_orderbook_fallback,
             )
-            deep_adapter = BinanceCanonicalMarketDataAdapter(
-                self._exchange, market_type=market_type
-            )
-            deep_bus = MarketDataBus(self._event_bus)
-            deep_gateway = MarketDataGateway(
-                venue="binance", market_type=market_type, publisher=deep_bus.publish
-            )
-            self._deep_runtime = CanonicalMarketDataRuntime(
-                adapter=deep_adapter,
-                market_bus=deep_bus,
-                gateway=deep_gateway,
-                symbols=[],
-                orderbook_symbols=list(DEEP_HISTORICAL_SYMBOLS),
-                orderbook_levels=DEEP_ORDERBOOK_LEVELS,
-                enable_trades=False,
-                enable_orderbooks=True,
-            )
             self._canonical_persistence = CanonicalMarketDataPersistenceSink(
                 self._event_bus,
                 self._repository,
@@ -144,12 +143,30 @@ class DataIngestionService(_LegacyDataIngestionService):
                 book_interval_seconds=1.0,
                 historical_trade_symbols=DEEP_HISTORICAL_SYMBOLS,
             )
-            if self._repository is not None:
-                self._deep_collector = DeepOrderBookCollector(
-                    deep_adapter,
-                    DeepOrderBookStore(self._repository),
-                    symbols=DEEP_HISTORICAL_SYMBOLS,
+            if self._deep_history_enabled:
+                deep_adapter = BinanceCanonicalMarketDataAdapter(
+                    self._exchange, market_type=market_type
                 )
+                deep_bus = MarketDataBus(self._event_bus)
+                deep_gateway = MarketDataGateway(
+                    venue="binance", market_type=market_type, publisher=deep_bus.publish
+                )
+                self._deep_runtime = CanonicalMarketDataRuntime(
+                    adapter=deep_adapter,
+                    market_bus=deep_bus,
+                    gateway=deep_gateway,
+                    symbols=[],
+                    orderbook_symbols=list(DEEP_HISTORICAL_SYMBOLS),
+                    orderbook_levels=DEEP_ORDERBOOK_LEVELS,
+                    enable_trades=False,
+                    enable_orderbooks=True,
+                )
+                if self._repository is not None:
+                    self._deep_collector = DeepOrderBookCollector(
+                        deep_adapter,
+                        DeepOrderBookStore(self._repository),
+                        symbols=DEEP_HISTORICAL_SYMBOLS,
+                    )
             self._install_ranking_hook(scanner)
 
     def _install_ranking_hook(self, scanner: Any) -> None:
@@ -299,6 +316,9 @@ class DataIngestionService(_LegacyDataIngestionService):
                 "publish_errors"
             ]
             status.details["trade_stream_dropped"] = canonical_health["dropped_events"]
+            status.details["trade_freshness_drops"] = canonical_health[
+                "freshness_drops"
+            ]
             status.details["last_trade_event_time"] = canonical_health.get(
                 "last_event_at"
             )
@@ -309,6 +329,11 @@ class DataIngestionService(_LegacyDataIngestionService):
             status.details["live_deep_orderbook_symbols"] = list(
                 self._canonical_runtime.orderbook_symbols
             )
+            status.details["live_orderbook_levels"] = self._canonical_runtime.orderbook_levels
+            status.details["live_orderbook_fallback_levels"] = (
+                self._canonical_runtime.orderbook_fallback_levels
+            )
+        status.details["deep_history_enabled"] = self._deep_history_enabled
         if self._deep_runtime is not None:
             status.details["deep_market_data"] = self._deep_runtime.gateway.snapshot()
         if self._deep_collector is not None:
