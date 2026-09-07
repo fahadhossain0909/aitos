@@ -27,8 +27,6 @@ from aitos.logging_setup import get_logger
 from aitos.market_data.endpoints import (
     BINANCE_USDM_WS_COMBINED,
     BINANCE_USDM_WS_MAX_LIFETIME_SECONDS,
-    BINANCE_USDM_WS_PUBLIC_COMBINED,
-    BINANCE_USDM_WS_PUBLIC_RAW,
     BINANCE_USDM_WS_RAW,
 )
 from aitos.models.market import (
@@ -43,8 +41,8 @@ logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
 WS_MARKET_BASE_URL = BINANCE_USDM_WS_COMBINED
 WS_MARKET_RAW_BASE_URL = BINANCE_USDM_WS_RAW
-WS_PUBLIC_BASE_URL = BINANCE_USDM_WS_PUBLIC_COMBINED
-WS_PUBLIC_RAW_BASE_URL = BINANCE_USDM_WS_PUBLIC_RAW
+WS_PUBLIC_BASE_URL = WS_MARKET_BASE_URL
+WS_PUBLIC_RAW_BASE_URL = WS_MARKET_RAW_BASE_URL
 DEFAULT_RATE_LIMIT_CAPACITY = 2000
 DEFAULT_RATE_LIMIT_REFILL_PER_SECOND = 2000 / 60
 MAX_BACKOFF_SECONDS = 60.0
@@ -54,10 +52,6 @@ ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS = 10.0
 WS_PING_INTERVAL_SECONDS = 15.0
 WS_PING_TIMEOUT_SECONDS = 10.0
 WS_OPEN_TIMEOUT_SECONDS = 10.0
-# Keep connections well below Binance's documented per-connection stream ceiling.
-# More importantly, never create one WebSocket connection per symbol as a
-# "fallback": with hundreds of symbols that can exhaust the venue/IP connection
-# budget and make a genuine network problem look like total market-data failure.
 BINANCE_MAX_STREAMS_PER_CONNECTION = 200
 
 
@@ -151,7 +145,6 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             yield parse_kline_ws(data)
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[TradeTick]:
-        """Yield aggregate trades from bounded combined-stream shards."""
         normalized = list(dict.fromkeys(s.upper() for s in symbols))
         if not normalized:
             return
@@ -254,9 +247,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     @staticmethod
     def _get_ws_base_url(streams: list[str]) -> tuple[str, str]:
-        """Select Binance's market vs public routing by stream family."""
-        if any("@depth" in stream or "@bookTicker" in stream for stream in streams):
-            return WS_PUBLIC_BASE_URL, WS_PUBLIC_RAW_BASE_URL
+        """Route all Binance USDⓈ-M public streams through the market path."""
         return WS_MARKET_BASE_URL, WS_MARKET_RAW_BASE_URL
 
     async def _get(self, path: str, params: dict[str, Any], weight: int) -> Any:
