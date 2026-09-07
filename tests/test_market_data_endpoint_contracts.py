@@ -1,5 +1,7 @@
 """Pin venue WebSocket endpoints and transport contracts to current APIs."""
 
+import math
+
 from aitos.exchange.binance import (
     BINANCE_MAX_STREAMS_PER_CONNECTION,
     WS_MARKET_BASE_URL,
@@ -30,11 +32,10 @@ def test_binance_usdm_uses_current_market_stream_paths():
 def test_binance_all_market_streams_are_partitioned_below_venue_limit():
     streams = [f"symbol{i}@aggTrade" for i in range(901)]
     shards = BinanceFuturesAdapter._partition_streams(streams)
-    assert len(shards) == 2
-    assert len(shards[0]) == BINANCE_MAX_STREAMS_PER_CONNECTION
-    assert len(shards[1]) == 1
-    assert len({stream for shard in shards for stream in shard}) == 901
-    assert all(len(shard) <= 1024 for shard in shards)
+    assert len(shards) == math.ceil(901 / BINANCE_MAX_STREAMS_PER_CONNECTION)
+    assert [len(s) for s in shards] == [200, 200, 200, 200, 101]
+    assert len({st for sh in shards for st in sh}) == 901
+    assert all(len(sh) <= BINANCE_MAX_STREAMS_PER_CONNECTION for sh in shards)
 
 
 def test_binance_stream_partition_deduplicates_without_reordering():
@@ -67,7 +68,6 @@ def test_current_subscription_topics_are_documented_shapes():
     book_message = {"op": "subscribe", "args": ["orderbook.50.BTCUSDT"]}
     assert trade_message["args"] == ["publicTrade.BTCUSDT"]
     assert book_message["args"] == ["orderbook.50.BTCUSDT"]
-
     okx = OKXCanonicalMarketDataAdapter()
     assert okx._args(["BTCUSDT"], "trades") == [
         {"channel": "trades", "instId": "BTC-USDT-SWAP"}
