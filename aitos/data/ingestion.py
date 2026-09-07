@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
 
 from aitos.logging_setup import get_logger
@@ -28,9 +29,22 @@ logger = get_logger("aitos.data.ingestion")
 
 DEEP_HISTORICAL_SYMBOLS = ("BTCUSDT", "LTCUSDT")
 DEEP_ORDERBOOK_LEVELS = 1000
-STANDARD_ORDERBOOK_LEVELS = 100
+LIVE_ORDERBOOK_LEVELS = 1000
+LIVE_ORDERBOOK_FALLBACK_LEVELS = 100
 LIVE_DEEP_ANCHOR = "BTCUSDT"
 LIVE_DEEP_NON_BTC = 2
+
+
+def _configured_positive_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using default %d", name, raw, default)
+        return default
+    return value if value > 0 else default
 
 
 class DataIngestionService(_LegacyDataIngestionService):
@@ -89,6 +103,12 @@ class DataIngestionService(_LegacyDataIngestionService):
                 else self._symbols[:1]
             )
             self._live_trade_symbols = list(initial_trades)
+            live_orderbook_levels = _configured_positive_int(
+                "AITOS_LIVE_ORDERBOOK_LEVELS", LIVE_ORDERBOOK_LEVELS
+            )
+            live_orderbook_fallback = _configured_positive_int(
+                "AITOS_LIVE_ORDERBOOK_FALLBACK_LEVELS", LIVE_ORDERBOOK_FALLBACK_LEVELS
+            )
             self._canonical_runtime = CanonicalMarketDataRuntime(
                 adapter=BinanceCanonicalMarketDataAdapter(
                     self._exchange, market_type=market_type
@@ -97,7 +117,8 @@ class DataIngestionService(_LegacyDataIngestionService):
                 gateway=gateway,
                 symbols=initial_trades,
                 orderbook_symbols=initial_orderbooks,
-                orderbook_levels=STANDARD_ORDERBOOK_LEVELS,
+                orderbook_levels=live_orderbook_levels,
+                orderbook_fallback_levels=live_orderbook_fallback,
             )
             deep_adapter = BinanceCanonicalMarketDataAdapter(
                 self._exchange, market_type=market_type
@@ -121,6 +142,7 @@ class DataIngestionService(_LegacyDataIngestionService):
                 self._repository,
                 historical_book_symbols=DEEP_HISTORICAL_SYMBOLS,
                 book_interval_seconds=1.0,
+                historical_trade_symbols=DEEP_HISTORICAL_SYMBOLS,
             )
             if self._repository is not None:
                 self._deep_collector = DeepOrderBookCollector(
