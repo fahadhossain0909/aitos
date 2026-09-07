@@ -1,14 +1,19 @@
 from aitos.exchange.binance import (
     WS_MARKET_BASE_URL,
     WS_MARKET_RAW_BASE_URL,
+    WS_PUBLIC_BASE_URL,
+    WS_PUBLIC_RAW_BASE_URL,
     BinanceFuturesAdapter,
 )
 
 
-def test_binance_futures_uses_current_combined_stream_path():
+def test_binance_futures_uses_current_stream_paths():
     assert WS_MARKET_BASE_URL == "wss://fstream.binance.com/market/stream"
     assert WS_MARKET_RAW_BASE_URL == "wss://fstream.binance.com/market/ws"
+    assert WS_PUBLIC_BASE_URL == "wss://fstream.binance.com/public/stream"
+    assert WS_PUBLIC_RAW_BASE_URL == "wss://fstream.binance.com/public/ws"
 
     adapter = BinanceFuturesAdapter()
     assert adapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
-    assert adapter._ws_base_url(["btcusdt@depth@100ms"]) == WS_MARKET_BASE_URL
+    assert adapter._ws_base_url(["btcusdt@depth@100ms"]) == WS_PUBLIC_BASE_URL
+    assert adapter._ws_base_url(["btcusdt@bookTicker"]) == WS_PUBLIC_BASE_URL
