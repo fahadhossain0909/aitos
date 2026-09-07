@@ -18,6 +18,9 @@ class _FakeWebSocket:
         self._sent = True
         return '{"stream":"btcusdt@aggTrade","data":{"e":"aggTrade","s":"BTCUSDT"}}'
 
+    async def recv(self):
+        return await self.__anext__()
+
 
 class _FakeWebSocketContext:
     def __init__(self, ws: _FakeWebSocket):
