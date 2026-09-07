@@ -14,8 +14,11 @@ BINANCE_USDM_WS_BASE = "wss://fstream.binance.com"
 # routing path and then sends SUBSCRIBE requests over that connection.
 BINANCE_USDM_WS_COMBINED = f"{BINANCE_USDM_WS_BASE}/market/stream"
 # Kept for compatibility with callers/tests that use the raw-stream constant.
-# The adapter's production fan-out uses the market/stream subscription path.
 BINANCE_USDM_WS_RAW = f"{BINANCE_USDM_WS_BASE}/market/ws"
+# Legacy public-route names are retained as aliases. All USDⓈ-M public market
+# streams are intentionally routed through the validated market path.
+BINANCE_USDM_WS_PUBLIC_COMBINED = BINANCE_USDM_WS_COMBINED
+BINANCE_USDM_WS_PUBLIC_RAW = BINANCE_USDM_WS_RAW
 
 BYBIT_LINEAR_WS = os.getenv(
     "BYBIT_LINEAR_WS_URL", "wss://stream.bybit.com/v5/public/linear"
@@ -25,8 +28,6 @@ OKX_PUBLIC_WS = os.getenv("OKX_WS_PUBLIC_URL", "wss://ws.okx.com:8443/ws/v5/publ
 
 # Exchange lifecycle/heartbeat contracts documented by the venues.
 BINANCE_WS_MAX_LIFETIME_SECONDS = 23 * 60 * 60 + 50 * 60
-# Backward-compatible name used by older Binance adapter/test code. Keep the
-# canonical constant above so new code has one source of truth.
 BINANCE_USDM_WS_MAX_LIFETIME_SECONDS = BINANCE_WS_MAX_LIFETIME_SECONDS
 BYBIT_WS_HEARTBEAT_INTERVAL_SECONDS = 20.0
 OKX_WS_HEARTBEAT_INTERVAL_SECONDS = 20.0
