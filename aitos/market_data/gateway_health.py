@@ -24,6 +24,7 @@ class GatewayHealth:
     published_events: int = 0
     publish_errors: int = 0
     dropped_events: int = 0
+    freshness_drops: int = 0
     backpressure_events: int = 0
     stale_events: int = 0
     last_event_at: datetime | None = None
@@ -51,6 +52,13 @@ class GatewayHealth:
         if stage == "stale_websocket":
             self.stale_events += 1
         self.record_error(stage, message)
+
+    def record_freshness_drop(self, message: str) -> None:
+        """Record an intentional freshness-first drop without degrading health."""
+        self.freshness_drops += 1
+        self.dropped_events += 1
+        self.last_error = message[:500]
+        self._updated_at = datetime.now(timezone.utc)
 
     def record_publish(self) -> None:
         self.published_events += 1
@@ -106,6 +114,7 @@ class GatewayHealth:
             "published_events": self.published_events,
             "publish_errors": self.publish_errors,
             "dropped_events": self.dropped_events,
+            "freshness_drops": self.freshness_drops,
             "backpressure_events": self.backpressure_events,
             "stale_events": self.stale_events,
             "source_age_ms": self._age_ms(
