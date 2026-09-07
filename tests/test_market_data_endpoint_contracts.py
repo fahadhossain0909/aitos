@@ -32,8 +32,8 @@ def test_binance_usdm_uses_current_market_stream_paths():
     assert WS_PUBLIC_RAW_BASE_URL == WS_MARKET_RAW_BASE_URL
     assert BINANCE_USDM_WS_COMBINED == WS_MARKET_BASE_URL
     assert BINANCE_USDM_WS_RAW == WS_MARKET_RAW_BASE_URL
-    assert BINANCE_USDM_WS_PUBLIC_COMBINED not in ("wss://fstream.binance.com/public/stream",)
-    assert BINANCE_USDM_WS_PUBLIC_RAW not in ("wss://fstream.binance.com/public/ws",)
+    assert BINANCE_USDM_WS_PUBLIC_COMBINED == WS_MARKET_BASE_URL
+    assert BINANCE_USDM_WS_PUBLIC_RAW == WS_MARKET_RAW_BASE_URL
     assert BINANCE_WS_MAX_LIFETIME_SECONDS < 24 * 60 * 60
 
 
