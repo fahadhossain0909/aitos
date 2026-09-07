@@ -105,9 +105,7 @@ async def install_staged_scan(
 
         fetched = await asyncio.gather(*(fetch_limited(s) for s in symbols))
         kline_map = dict(fetched)
-        cheap_scores = {
-            symbol: _cheap_score(klines) for symbol, klines in fetched
-        }
+        cheap_scores = {symbol: _cheap_score(klines) for symbol, klines in fetched}
 
         top50 = [
             symbol
@@ -116,12 +114,17 @@ async def install_staged_scan(
             )
             if score >= 0
         ][:TOP_50]
-        if scanner._reference_symbol in symbols and scanner._reference_symbol not in top50:
+        if (
+            scanner._reference_symbol in symbols
+            and scanner._reference_symbol not in top50
+        ):
             top50 = [scanner._reference_symbol, *top50[: TOP_50 - 1]]
         await on_subscription_change(top50, "TOP_50")
 
         medium_scores = {
-            symbol: _medium_score(kline_map.get(symbol, []), cheap_scores.get(symbol, -1.0))
+            symbol: _medium_score(
+                kline_map.get(symbol, []), cheap_scores.get(symbol, -1.0)
+            )
             for symbol in top50
         }
         top25 = [
@@ -131,7 +134,10 @@ async def install_staged_scan(
             )
             if score >= 0
         ][:TOP_25]
-        if scanner._reference_symbol in top50 and scanner._reference_symbol not in top25:
+        if (
+            scanner._reference_symbol in top50
+            and scanner._reference_symbol not in top25
+        ):
             top25 = [scanner._reference_symbol, *top25[: TOP_25 - 1]]
         await on_subscription_change(top25, "TOP_25")
 
@@ -156,9 +162,11 @@ async def install_staged_scan(
         top2 = top5[:TOP_2]
         await on_subscription_change([c.symbol for c in top2], "TOP_2")
 
-        scanner._last_scan_at = __import__("datetime").datetime.now(
-            __import__("datetime").timezone.utc
-        ).isoformat()
+        scanner._last_scan_at = (
+            __import__("datetime")
+            .datetime.now(__import__("datetime").timezone.utc)
+            .isoformat()
+        )
         scanner._last_candidate_count = len(top2)
         logger.info(
             "staged scan complete",
