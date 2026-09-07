@@ -61,7 +61,9 @@ class CanonicalMarketDataRuntime:
         self._reconfigure_lock = asyncio.Lock()
         self._first_canonical_event_seen = False
         self._first_canonical_publish_seen = False
-        transport_snapshot = getattr(self.adapter.exchange, "websocket_transport_snapshot", None)
+        transport_snapshot = getattr(
+            self.adapter.exchange, "websocket_transport_snapshot", None
+        )
         if transport_snapshot is not None:
             self.gateway._transport_snapshot_provider = transport_snapshot
 
@@ -210,7 +212,9 @@ class CanonicalMarketDataRuntime:
             try:
                 logger.info(
                     "canonical stream starting",
-                    extra={"aitos_extra": {"stage": "stream_start", "stream": stream_name}},
+                    extra={
+                        "aitos_extra": {"stage": "stream_start", "stream": stream_name}
+                    },
                 )
                 stream = stream_factory().__aiter__()
                 while not self._stopped:
