@@ -17,10 +17,6 @@ _RECONNECT_INITIAL_DELAY_SECONDS = 1.0
 _RECONNECT_MAX_DELAY_SECONDS = 30.0
 PUBLISH_RETRY_DELAY_SECONDS = 0.5
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
-# A single ordered drain worker is intentional: Redis Streams preserve append
-# order, and concurrent gateway publishers could reorder trade/order-book events
-# before they reach the canonical bus. Throughput improvements should use
-# ordered batching/pipelining rather than concurrent per-event publishers.
 GATEWAY_DRAIN_WORKERS = 1
 
 
@@ -63,11 +59,18 @@ class CanonicalMarketDataRuntime:
         self._drain_tasks: list[asyncio.Task] = []
         self._stopped = True
         self._reconfigure_lock = asyncio.Lock()
+        self._first_canonical_event_seen = False
+        self._first_canonical_publish_seen = False
+        transport_snapshot = getattr(self.adapter.exchange, "websocket_transport_snapshot", None)
+        if transport_snapshot is not None:
+            self.gateway._transport_snapshot_provider = transport_snapshot
 
     async def start(self) -> None:
         if not self._stopped:
             return
         self._stopped = False
+        self._first_canonical_event_seen = False
+        self._first_canonical_publish_seen = False
         self.gateway.begin_connect()
         self._drain_tasks = [
             asyncio.create_task(
@@ -121,16 +124,12 @@ class CanonicalMarketDataRuntime:
     async def update_orderbook_symbols(
         self, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        """Hot-switch the live order-book socket to a new symbol set.
-
-        Trade ingestion remains untouched. The current socket is cancelled and
-        closed before the replacement starts, so the gateway never has two live
-        order-book subscriptions competing for the same stream.
-        """
+        """Hot-switch the live order-book socket to a new symbol set."""
         normalized = list(dict.fromkeys(s.upper() for s in symbols if s))
         async with self._reconfigure_lock:
             if normalized == self.orderbook_symbols:
                 return False
+            previous = self.orderbook_symbols
             self.orderbook_symbols = normalized
             if self._stopped:
                 return True
@@ -147,7 +146,13 @@ class CanonicalMarketDataRuntime:
             self._start_orderbook_task()
             logger.info(
                 "live orderbook subscription reconfigured",
-                extra={"aitos_extra": {"orderbook_symbols": normalized}},
+                extra={
+                    "aitos_extra": {
+                        "stage": "subscription_reconfigured",
+                        "previous_symbols": previous,
+                        "orderbook_symbols": normalized,
+                    }
+                },
             )
             return True
 
@@ -168,6 +173,17 @@ class CanonicalMarketDataRuntime:
         while not self._stopped:
             try:
                 await self.gateway.drain_once()
+                if not self._first_canonical_publish_seen:
+                    self._first_canonical_publish_seen = True
+                    logger.info(
+                        "canonical market-data first publish completed",
+                        extra={
+                            "aitos_extra": {
+                                "stage": "first_canonical_publish",
+                                "worker_id": worker_id,
+                            }
+                        },
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -176,6 +192,7 @@ class CanonicalMarketDataRuntime:
                     "canonical market-data publish failed; retrying without dropping event",
                     extra={
                         "aitos_extra": {
+                            "stage": "canonical_publish_error",
                             "error": str(exc),
                             "worker_id": worker_id,
                         }
@@ -191,6 +208,10 @@ class CanonicalMarketDataRuntime:
             saw_event = False
             stream = None
             try:
+                logger.info(
+                    "canonical stream starting",
+                    extra={"aitos_extra": {"stage": "stream_start", "stream": stream_name}},
+                )
                 stream = stream_factory().__aiter__()
                 while not self._stopped:
                     try:
@@ -208,6 +229,7 @@ class CanonicalMarketDataRuntime:
                             "canonical market-data stream watchdog timeout; reconnecting",
                             extra={
                                 "aitos_extra": {
+                                    "stage": "canonical_idle_timeout",
                                     "stream": stream_name,
                                     "timeout_seconds": self.stream_idle_timeout_seconds,
                                 }
@@ -217,12 +239,45 @@ class CanonicalMarketDataRuntime:
                     saw_event = True
                     accepted = await self.gateway.accept_async(event)
                     if accepted and event.source == MarketSource.WEBSOCKET:
+                        if not self._first_canonical_event_seen:
+                            self._first_canonical_event_seen = True
+                            logger.info(
+                                "canonical market-data first event accepted",
+                                extra={
+                                    "aitos_extra": {
+                                        "stage": "first_canonical_event",
+                                        "stream": stream_name,
+                                        "event_type": type(event).__name__,
+                                        "source": event.source.value,
+                                    }
+                                },
+                            )
                         self.gateway.mark_connected()
+                    elif not accepted:
+                        logger.warning(
+                            "canonical market-data event rejected",
+                            extra={
+                                "aitos_extra": {
+                                    "stage": "canonical_accept_rejected",
+                                    "stream": stream_name,
+                                    "source": event.source.value,
+                                }
+                            },
+                        )
                 if self._stopped:
                     return
                 self.gateway.mark_reconnecting()
                 self.gateway.health.record_error(
                     stream_name, "stream ended unexpectedly"
+                )
+                logger.warning(
+                    "canonical stream ended unexpectedly",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "canonical_stream_end",
+                            "stream": stream_name,
+                        }
+                    },
                 )
             except asyncio.CancelledError:
                 raise
@@ -235,7 +290,9 @@ class CanonicalMarketDataRuntime:
                     "canonical market-data stream failed; reconnecting",
                     extra={
                         "aitos_extra": {
+                            "stage": "canonical_stream_error",
                             "stream": stream_name,
+                            "error_type": type(exc).__name__,
                             "error": str(exc),
                             "delay": delay,
                         }
