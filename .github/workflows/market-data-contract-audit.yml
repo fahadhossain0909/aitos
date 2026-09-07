@@ -124,7 +124,7 @@ jobs:
           PYTHONPATH: .
         run: |
           set -o pipefail
-          pytest -vv -o faulthandler_timeout=60 --durations=25 2>&1 | tee pytest-full-suite.log
+          pytest -vv -o faulthandler_timeout=60 --durations=25 --maxfail=5 2>&1 | tee pytest-full-suite.log
       - name: Upload full-suite diagnostics
         if: always()
         uses: actions/upload-artifact@v4
