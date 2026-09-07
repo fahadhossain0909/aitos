@@ -21,10 +21,7 @@ class FakeWS:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
+    async def recv(self):
         if not self.messages:
             raise StopAsyncIteration
         return self.messages.pop(0)
