@@ -110,7 +110,9 @@ class MarketDataGateway:
 
     @staticmethod
     def _queue_age_seconds(event: MarketEvent) -> float:
-        return max(0.0, (datetime.now(timezone.utc) - event.ingest_time).total_seconds())
+        return max(
+            0.0, (datetime.now(timezone.utc) - event.ingest_time).total_seconds()
+        )
 
     async def drain_once(self) -> bool:
         """Publish one event, or drop it if doing so would violate freshness."""
