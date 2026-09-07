@@ -143,7 +143,9 @@ async def install_staged_scan(
         # Expensive multi-source analysis is capped at nine ranked non-BTC
         # symbols plus the permanent BTC anchor.
         non_anchor = [symbol for symbol in top25 if symbol != anchor]
-        expensive_symbols = ([anchor] if anchor in top25 else []) + non_anchor[: TOP_10 - 1]
+        expensive_symbols = ([anchor] if anchor in top25 else []) + non_anchor[
+            : TOP_10 - 1
+        ]
         expensive: list[Any] = []
         for symbol in expensive_symbols:
             try:
@@ -159,7 +161,9 @@ async def install_staged_scan(
         expensive.sort(key=lambda candidate: candidate.composite_score, reverse=True)
         anchor_candidates = [c for c in expensive if c.symbol == anchor]
         non_anchor_candidates = [c for c in expensive if c.symbol != anchor]
-        top10 = anchor_candidates + non_anchor_candidates[: TOP_10 - len(anchor_candidates)]
+        top10 = (
+            anchor_candidates + non_anchor_candidates[: TOP_10 - len(anchor_candidates)]
+        )
         await on_subscription_change([c.symbol for c in top10], "TOP_10")
 
         top5 = non_anchor_candidates[:TOP_5]
