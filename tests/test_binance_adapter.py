@@ -161,7 +161,7 @@ async def test_fetch_before_connect_auto_connects():
 
 
 class FakeWebSocket:
-    """Minimal async-iterator fake matching the websockets receive contract."""
+    """Minimal fake matching the websockets receive contract."""
 
     def __init__(self, messages: list[dict]):
         self._messages = iter(messages)
@@ -177,10 +177,7 @@ class FakeWebSocket:
     async def __aexit__(self, *exc):
         return None
 
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
+    async def recv(self):
         try:
             return json.dumps(next(self._messages))
         except StopIteration as exc:
