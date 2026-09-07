@@ -38,14 +38,25 @@ def test_binance_usdm_uses_current_market_and_public_stream_paths():
 
 
 def test_binance_routes_regular_market_streams_to_market_path():
-    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
-    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@kline_1m"]) == WS_MARKET_BASE_URL
-    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@markPrice"]) == WS_MARKET_BASE_URL
+    assert (
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
+    )
+    assert (
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@kline_1m"]) == WS_MARKET_BASE_URL
+    )
+    assert (
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@markPrice"]) == WS_MARKET_BASE_URL
+    )
 
 
 def test_binance_routes_order_book_streams_to_public_path():
-    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@depth@100ms"]) == WS_PUBLIC_BASE_URL
-    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@bookTicker"]) == WS_PUBLIC_BASE_URL
+    assert (
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@depth@100ms"])
+        == WS_PUBLIC_BASE_URL
+    )
+    assert (
+        BinanceFuturesAdapter._ws_base_url(["btcusdt@bookTicker"]) == WS_PUBLIC_BASE_URL
+    )
 
 
 def test_binance_all_market_streams_are_partitioned_below_venue_limit():

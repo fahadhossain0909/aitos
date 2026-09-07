@@ -28,8 +28,8 @@ from aitos.market_data.endpoints import (
     BINANCE_USDM_WS_COMBINED,
     BINANCE_USDM_WS_MAX_LIFETIME_SECONDS,
     BINANCE_USDM_WS_PUBLIC_COMBINED,
-    BINANCE_USDM_WS_RAW,
     BINANCE_USDM_WS_PUBLIC_RAW,
+    BINANCE_USDM_WS_RAW,
 )
 from aitos.models.market import (
     FundingRate,
