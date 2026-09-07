@@ -70,7 +70,9 @@ async def install_staged_scan(
 
     BTC is always retained as the deep anchor and is analyzed with the
     expensive scanner even when it would not rank inside the non-BTC cohort.
-    Returned trading candidates are the final Top-2 non-BTC symbols.
+    Returned trading candidates are the final Top-2 scored candidates; BTC's
+    anchor status controls transport retention, not whether it may be a
+    legitimate trading candidate.
     """
     if getattr(scanner, "_staged_scan_installed", False):
         return
@@ -166,7 +168,9 @@ async def install_staged_scan(
         )
         await on_subscription_change([c.symbol for c in top10], "TOP_10")
 
-        top5 = non_anchor_candidates[:TOP_5]
+        # Top-5/Top-2 are trading-candidate tiers. BTC remains a transport
+        # anchor independently through update_live_deep_orderbooks().
+        top5 = expensive[:TOP_5]
         await on_subscription_change([c.symbol for c in top5], "TOP_5")
         top2 = top5[:TOP_2]
         await on_subscription_change([c.symbol for c in top2], "TOP_2")
