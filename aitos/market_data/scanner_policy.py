@@ -1,8 +1,7 @@
 """Adaptive market-universe policy.
 
-This module contains policy only; it does not fetch data or perform expensive
-calculations. Keeping ranking separate from transport prevents scanner load
-from feeding back into the market-data gateway.
+Policy is intentionally data-source agnostic. Transport code can consume the
+resulting tiers without coupling ranking calculations to WebSocket fan-out.
 """
 
 from __future__ import annotations
@@ -13,24 +12,28 @@ from enum import IntEnum
 
 class ScanTier(IntEnum):
     UNIVERSE = 0
-    TOP_25 = 1
-    TOP_10 = 2
-    TOP_5 = 3
-    TOP_2 = 4
-    ANCHOR = 5
+    TOP_50 = 1
+    TOP_25 = 2
+    TOP_10 = 3
+    TOP_5 = 4
+    TOP_2 = 5
+    ANCHOR = 6
 
 
 @dataclass(frozen=True, slots=True)
 class ScanLimits:
+    top_50: int = 50
     top_25: int = 25
     top_10: int = 10
     top_5: int = 5
     top_2: int = 2
 
     def __post_init__(self) -> None:
-        if not (0 < self.top_2 <= self.top_5 <= self.top_10 <= self.top_25):
+        if not (
+            0 < self.top_2 <= self.top_5 <= self.top_10 <= self.top_25 <= self.top_50
+        ):
             raise ValueError(
-                "scan limits must satisfy 0 < top_2 <= top_5 <= top_10 <= top_25"
+                "scan limits must satisfy 0 < top_2 <= top_5 <= top_10 <= top_25 <= top_50"
             )
 
 
@@ -44,11 +47,12 @@ class InstrumentScore:
 def promote(
     ranked: list[InstrumentScore], limits: ScanLimits | None = None
 ) -> dict[ScanTier, list[str]]:
-    """Return deterministic candidate tiers from an already-ranked universe."""
+    """Return deterministic ALL→50→25→10→5→2 candidate tiers."""
     limits = limits or ScanLimits()
     ordered = sorted(ranked, key=lambda item: (-item.score, item.symbol))
     return {
         ScanTier.UNIVERSE: [item.symbol for item in ordered],
+        ScanTier.TOP_50: [item.symbol for item in ordered[: limits.top_50]],
         ScanTier.TOP_25: [item.symbol for item in ordered[: limits.top_25]],
         ScanTier.TOP_10: [item.symbol for item in ordered[: limits.top_10]],
         ScanTier.TOP_5: [item.symbol for item in ordered[: limits.top_5]],
