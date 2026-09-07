@@ -182,9 +182,7 @@ class CanonicalMarketDataRuntime:
 
     async def _restart_orderbook_task(self) -> None:
         orderbook_tasks = [
-            task
-            for task in self._tasks
-            if task.get_name() == "market-data-orderbook"
+            task for task in self._tasks if task.get_name() == "market-data-orderbook"
         ]
         for task in orderbook_tasks:
             task.cancel()
