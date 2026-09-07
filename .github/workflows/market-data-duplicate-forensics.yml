@@ -1,0 +1,76 @@
+name: Market Data Duplicate Forensics
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  duplicate-forensics:
+    name: VPS market-data duplicate audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            test -n "${!name:-}" || { echo "Missing required secret: $name"; exit 1; }
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_e2e_key
+          chmod 600 /tmp/aitos_e2e_key
+
+      - name: Run duplicate audit on VPS
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_e2e_key
+          command_timeout: 8m
+          script: |
+            set -euo pipefail
+            cd "$HOME/aitos"
+            test -f scripts/market_data_duplicate_forensics.sh
+            export AITOS_FORENSIC_REPORT_DIR="$HOME/aitos-market-data-e2e-forensics"
+            bash scripts/market_data_duplicate_forensics.sh
+
+      - name: Retrieve duplicate report
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p market-data-duplicate-forensics
+          scp -i /tmp/aitos_e2e_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-market-data-e2e-forensics/duplicates.json" \
+            market-data-duplicate-forensics/duplicates.json
+          cat market-data-duplicate-forensics/duplicates.json
+
+      - name: Upload duplicate report
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: aitos-market-data-duplicate-forensics
+          path: market-data-duplicate-forensics/duplicates.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/aitos_e2e_key
