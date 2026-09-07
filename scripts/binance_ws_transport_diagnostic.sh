@@ -28,12 +28,15 @@ section "Host TLS"
 run "TLS handshake" "openssl s_client -connect ${HOST}:${PORT} -servername ${HOST} -brief </dev/null"
 
 section "Host HTTP/1.1 upgrade reachability"
-run "HTTP upgrade" "curl --http1.1 -sS -i --max-time 10 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: SGVsbG9BdG9zV1M=' 'https://${HOST}/market/stream?streams=btcusdt@aggTrade'"
+# A successful WebSocket upgrade switches the connection to binary WebSocket
+# frames. Never stream that body into report.md: control/frame bytes can make
+# the report invalid UTF-8 and break the verdict parser.
+run "HTTP upgrade" "curl --http1.1 -sS -D - -o /dev/null --max-time 10 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: SGVsbG9BdG9zV1M=' 'https://${HOST}/market/stream?streams=btcusdt@aggTrade'"
 
 section "Container identity/network"
 run "container" "docker inspect -f '{{.Config.Image}} {{.State.Status}}' '$CONTAINER'"
 run "container DNS" "docker exec '$CONTAINER' getent ahosts '$HOST'"
-run "container TCP" "docker exec '$CONTAINER' sh -lc 'if command -v nc >/dev/null; then nc -vz -w 5 '$HOST' '$PORT'; else wget -q --spider --timeout=5 https://'$HOST'/ || true; fi'"
+run "container TCP" "docker exec '$CONTAINER' python3 -c 'import socket; s=socket.create_connection((\"$HOST\", $PORT), 5); s.close(); print(\"TCP_OK\")' || echo TCP_FAIL"
 run "container TLS" "docker exec '$CONTAINER' sh -lc 'command -v openssl >/dev/null && openssl s_client -connect '$HOST':'$PORT' -servername '$HOST' -brief </dev/null || true'"
 
 section "Container WebSocket first-message probe"
@@ -74,10 +77,15 @@ python3 - "$OUT/report.md" <<'PY'
 import re,sys
 s=open(sys.argv[1],encoding='utf-8').read()
 ws='"stage":"first_message","ok":true' in s or '"stage": "first_message", "ok": true' in s
-print('Host DNS:', 'PASS' if re.search(r'getent.*?\n.*?fstream',s,re.S) else 'UNKNOWN')
+print('Host DNS:', 'PASS' if 'fstream.binance.com' in s else 'UNKNOWN')
 print('Host TCP/TLS:', 'FAIL' if 'TCP_FAIL' in s else 'PASS/REVIEW')
+print('Host HTTP upgrade:', 'PASS' if '101 Switching Protocols' in s else 'FAIL/REVIEW')
+print('Container TCP:', 'PASS' if 'TCP_OK' in s else 'FAIL/REVIEW')
 print('WebSocket first message:', 'PASS' if ws else 'FAIL/NO-DATA')
 print('\nInterpretation:')
-print('Transport reachable; investigate AITOS runtime/subscription/consumer path.' if ws else 'No first aggTrade message from container; use DNS/TCP/TLS/HTTP stages to locate the boundary.')
+if ws:
+    print('Transport reachable; investigate AITOS runtime/subscription/consumer path.')
+else:
+    print('No first aggTrade message from container; use DNS/TCP/TLS/HTTP stages to locate the boundary.')
 PY
 printf '\nReport: %s\n' "$OUT/report.md"
