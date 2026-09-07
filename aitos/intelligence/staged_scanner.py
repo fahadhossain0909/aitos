@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from aitos.intelligence import indicators
@@ -65,7 +66,12 @@ async def install_staged_scan(
     scanner: Any,
     on_subscription_change: SubscriptionCallback,
 ) -> None:
-    """Install the ALL→50→25→10→5→2 scanner pipeline."""
+    """Install the ALL→50→25→10→5→2 scanner pipeline.
+
+    BTC is always retained as the deep anchor and is analyzed with the
+    expensive scanner even when it would not rank inside the non-BTC cohort.
+    Returned trading candidates are the final Top-2 non-BTC symbols.
+    """
     if getattr(scanner, "_staged_scan_installed", False):
         return
 
@@ -83,13 +89,12 @@ async def install_staged_scan(
 
     async def _staged_scan_all() -> list[Any]:
         symbols = list(dict.fromkeys(scanner._symbols))
+        anchor = scanner._reference_symbol or "BTCUSDT"
         reference_klines = None
-        if scanner._reference_symbol:
+        if anchor:
             try:
                 reference_klines = await scanner._exchange.fetch_klines(
-                    scanner._reference_symbol,
-                    scanner._timeframe,
-                    limit=scanner._kline_lookback,
+                    anchor, scanner._timeframe, limit=scanner._kline_lookback
                 )
             except Exception as exc:
                 logger.warning(
@@ -114,11 +119,8 @@ async def install_staged_scan(
             )
             if score >= 0
         ][:TOP_50]
-        if (
-            scanner._reference_symbol in symbols
-            and scanner._reference_symbol not in top50
-        ):
-            top50 = [scanner._reference_symbol, *top50[: TOP_50 - 1]]
+        if anchor in symbols and anchor not in top50:
+            top50 = [anchor, *top50[: TOP_50 - 1]]
         await on_subscription_change(top50, "TOP_50")
 
         medium_scores = {
@@ -134,16 +136,16 @@ async def install_staged_scan(
             )
             if score >= 0
         ][:TOP_25]
-        if (
-            scanner._reference_symbol in top50
-            and scanner._reference_symbol not in top25
-        ):
-            top25 = [scanner._reference_symbol, *top25[: TOP_25 - 1]]
+        if anchor in top50 and anchor not in top25:
+            top25 = [anchor, *top25[: TOP_25 - 1]]
         await on_subscription_change(top25, "TOP_25")
 
-        # The expensive multi-source scanner is capped at ten symbols.
+        # Expensive multi-source analysis is capped at nine ranked non-BTC
+        # symbols plus the permanent BTC anchor.
+        non_anchor = [symbol for symbol in top25 if symbol != anchor]
+        expensive_symbols = ([anchor] if anchor in top25 else []) + non_anchor[: TOP_10 - 1]
         expensive: list[Any] = []
-        for symbol in top25[:TOP_10]:
+        for symbol in expensive_symbols:
             try:
                 candidate = await scanner.scan_symbol(symbol, reference_klines)
                 if candidate is not None:
@@ -155,18 +157,17 @@ async def install_staged_scan(
                 )
 
         expensive.sort(key=lambda candidate: candidate.composite_score, reverse=True)
-        top10 = expensive[:TOP_10]
+        anchor_candidates = [c for c in expensive if c.symbol == anchor]
+        non_anchor_candidates = [c for c in expensive if c.symbol != anchor]
+        top10 = anchor_candidates + non_anchor_candidates[: TOP_10 - len(anchor_candidates)]
         await on_subscription_change([c.symbol for c in top10], "TOP_10")
-        top5 = top10[:TOP_5]
+
+        top5 = non_anchor_candidates[:TOP_5]
         await on_subscription_change([c.symbol for c in top5], "TOP_5")
         top2 = top5[:TOP_2]
         await on_subscription_change([c.symbol for c in top2], "TOP_2")
 
-        scanner._last_scan_at = (
-            __import__("datetime")
-            .datetime.now(__import__("datetime").timezone.utc)
-            .isoformat()
-        )
+        scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
         scanner._last_candidate_count = len(top2)
         logger.info(
             "staged scan complete",
@@ -180,6 +181,7 @@ async def install_staged_scan(
                         "TOP_5": len(top5),
                         "TOP_2": len(top2),
                     },
+                    "anchor": anchor,
                     "top2": [c.symbol for c in top2],
                 }
             },
