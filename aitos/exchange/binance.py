@@ -422,7 +422,8 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     backoff = INITIAL_BACKOFF_SECONDS
                     first_message = True
                     async with asyncio.timeout(BINANCE_USDM_WS_MAX_LIFETIME_SECONDS):
-                        async for raw_message in ws:
+                        while True:
+                            raw_message = await ws.recv()
                             self._ws_transport["frames_received"] += 1
                             if first_message:
                                 first_at = _now_iso()
