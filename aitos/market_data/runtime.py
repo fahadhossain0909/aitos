@@ -61,9 +61,8 @@ class CanonicalMarketDataRuntime:
         self._reconfigure_lock = asyncio.Lock()
         self._first_canonical_event_seen = False
         self._first_canonical_publish_seen = False
-        transport_snapshot = getattr(
-            self.adapter.exchange, "websocket_transport_snapshot", None
-        )
+        exchange = getattr(self.adapter, "exchange", None)
+        transport_snapshot = getattr(exchange, "websocket_transport_snapshot", None)
         if transport_snapshot is not None:
             self.gateway._transport_snapshot_provider = transport_snapshot
 
