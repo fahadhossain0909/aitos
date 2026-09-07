@@ -9,12 +9,14 @@ from aitos.market_data.gateway import GatewayConfig, GatewayState, MarketDataGat
 def _event(
     source: MarketSource, age_seconds: float = 0, sequence: int = 0
 ) -> MarketEvent:
+    now = datetime.now(timezone.utc)
     return MarketEvent(
         event_type=MarketEventType.TRADE,
         exchange="binance",
         market="usd_m_futures",
         symbol="BTCUSDT",
-        event_time=datetime.now(timezone.utc) - timedelta(seconds=age_seconds),
+        event_time=now - timedelta(seconds=age_seconds),
+        ingest_time=now - timedelta(seconds=age_seconds),
         payload={"price": 100, "sequence": sequence},
         source=source,
         sequence=sequence,
