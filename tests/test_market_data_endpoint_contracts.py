@@ -6,11 +6,15 @@ from aitos.exchange.binance import (
     BINANCE_MAX_STREAMS_PER_CONNECTION,
     WS_MARKET_BASE_URL,
     WS_MARKET_RAW_BASE_URL,
+    WS_PUBLIC_BASE_URL,
+    WS_PUBLIC_RAW_BASE_URL,
     BinanceFuturesAdapter,
 )
 from aitos.market_data.bybit_adapter import BybitCanonicalMarketDataAdapter
 from aitos.market_data.endpoints import (
     BINANCE_USDM_WS_COMBINED,
+    BINANCE_USDM_WS_PUBLIC_COMBINED,
+    BINANCE_USDM_WS_PUBLIC_RAW,
     BINANCE_USDM_WS_RAW,
     BINANCE_WS_MAX_LIFETIME_SECONDS,
     BYBIT_LINEAR_WS,
@@ -21,12 +25,27 @@ from aitos.market_data.endpoints import (
 from aitos.market_data.okx_adapter import OKXCanonicalMarketDataAdapter
 
 
-def test_binance_usdm_uses_current_market_stream_paths():
+def test_binance_usdm_uses_current_market_and_public_stream_paths():
     assert WS_MARKET_BASE_URL == "wss://fstream.binance.com/market/stream"
     assert WS_MARKET_RAW_BASE_URL == "wss://fstream.binance.com/market/ws"
+    assert WS_PUBLIC_BASE_URL == "wss://fstream.binance.com/public/stream"
+    assert WS_PUBLIC_RAW_BASE_URL == "wss://fstream.binance.com/public/ws"
     assert BINANCE_USDM_WS_COMBINED == WS_MARKET_BASE_URL
     assert BINANCE_USDM_WS_RAW == WS_MARKET_RAW_BASE_URL
+    assert BINANCE_USDM_WS_PUBLIC_COMBINED == WS_PUBLIC_BASE_URL
+    assert BINANCE_USDM_WS_PUBLIC_RAW == WS_PUBLIC_RAW_BASE_URL
     assert BINANCE_WS_MAX_LIFETIME_SECONDS < 24 * 60 * 60
+
+
+def test_binance_routes_regular_market_streams_to_market_path():
+    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@aggTrade"]) == WS_MARKET_BASE_URL
+    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@kline_1m"]) == WS_MARKET_BASE_URL
+    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@markPrice"]) == WS_MARKET_BASE_URL
+
+
+def test_binance_routes_order_book_streams_to_public_path():
+    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@depth@100ms"]) == WS_PUBLIC_BASE_URL
+    assert BinanceFuturesAdapter._ws_base_url(["btcusdt@bookTicker"]) == WS_PUBLIC_BASE_URL
 
 
 def test_binance_all_market_streams_are_partitioned_below_venue_limit():
