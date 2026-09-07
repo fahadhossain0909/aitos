@@ -1,0 +1,185 @@
+name: Strategy Funnel & Position Intelligence Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 * * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            [ -n "${!name:-}" ] || { echo "Missing required secret: $name"; exit 1; }
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_audit_key
+          chmod 600 /tmp/aitos_audit_key
+
+      - name: Run funnel and position intelligence audit on VPS
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_audit_key
+          command_timeout: 10m
+          script: |
+            set -u
+            cd "$HOME/aitos"
+            mkdir -p "$HOME/aitos-strategy-funnel-audit"
+            REPORT="$HOME/aitos-strategy-funnel-audit/report.txt"
+            : > "$REPORT"
+            status=0
+
+            {
+              echo '=== AITOS STRATEGY FUNNEL + OPEN POSITION INTELLIGENCE AUDIT ==='
+              echo "UTC: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo 'Purpose: verify broad-market scanner coverage, candidate funnel, and the live state/reason for every currently open position.'
+              echo 'Observation window: last 24h for scanner/decision/exit-intelligence logs.'
+              echo
+
+              echo '--- 1. BROAD-MARKET SCANNER FUNNEL ---'
+              logs="$(docker logs --since 24h --timestamps aitos-paper 2>&1 || true)"
+              score_logs="$(printf '%s\n' "$logs" | grep -E 'paper signal diagnostics|scanner score breakdown|scanner ranking decision' || true)"
+              candidate_logs="$(printf '%s\n' "$logs" | grep -E 'trade candidate|candidate.*(accepted|rejected|skipped)|kernel.*(accepted|rejected)|trade.*submitted' || true)"
+              echo 'Raw scanner/decision events (last 300):'
+              printf '%s\n' "$score_logs" | tail -n 300
+              echo
+              echo 'Funnel event counts:'
+              printf '%s\n' "$score_logs" | grep -c 'paper signal diagnostics' | xargs printf '  symbols scanned/logged: %s\n' || true
+              printf '%s\n' "$score_logs" | grep -c 'scanner score breakdown' | xargs printf '  score breakdowns: %s\n' || true
+              printf '%s\n' "$score_logs" | grep -c 'scanner ranking decision' | xargs printf '  ranking decisions: %s\n' || true
+              printf '%s\n' "$candidate_logs" | grep -c -E 'candidate.*rejected|kernel.*rejected' | xargs printf '  candidate/kernel rejections: %s\n' || true
+              printf '%s\n' "$candidate_logs" | grep -c -E 'candidate.*accepted|candidate.*submitted|trade.*submitted' | xargs printf '  accepted/submitted events: %s\n' || true
+              echo
+              echo 'Symbols observed in scanner diagnostics:'
+              printf '%s\n' "$score_logs" | grep -oE '"symbol"[[:space:]]*:[[:space:]]*"[A-Z0-9]+USDT"|symbol=[A-Z0-9]+USDT' | sed -E 's/.*[":=]//; s/[" ]//g' | sort -u | tr '\n' ' ' || true
+              echo
+              echo
+
+              echo '--- 2. CURRENT POSITION INVENTORY ---'
+              if docker inspect aitos-clickhouse >/dev/null 2>&1; then
+                docker exec aitos-clickhouse clickhouse-client --query "SELECT trade_id, symbol, side, strategy_id, state, entry_price, sl_price, tp_price, entry_time, recorded_at FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) WHERE state IN ('position_opened','exit_triggered') ORDER BY parseDateTimeBestEffortOrNull(entry_time) ASC FORMAT TSVWithNames" > /tmp/open_positions.tsv 2>/tmp/open_positions.err || status=1
+                cat /tmp/open_positions.err || true
+                if [ -s /tmp/open_positions.tsv ]; then
+                  cat /tmp/open_positions.tsv
+                else
+                  echo 'No currently open positions found.'
+                fi
+              else
+                echo 'ClickHouse container unavailable.'
+                status=1
+              fi
+              echo
+
+              echo '--- 3. OPEN POSITION DISTANCE / AGE / MARKET STATUS ---'
+              if [ -s /tmp/open_positions.tsv ]; then
+                tail -n +2 /tmp/open_positions.tsv | while IFS=$'\t' read -r trade_id symbol side strategy state entry_price sl_price tp_price entry_time recorded_at; do
+                  [ -n "$symbol" ] || continue
+                  ticker="$(curl -fsS --max-time 5 "https://fapi.binance.com/fapi/v1/ticker/price?symbol=$symbol" 2>/dev/null || true)"
+                  current_price="$(printf '%s' "$ticker" | sed -n 's/.*"price":"\([0-9.eE+-]*\)".*/\1/p')"
+                  if [ -z "$current_price" ]; then
+                    echo "trade_id=$trade_id symbol=$symbol side=$side price=UNAVAILABLE market_status=UNKNOWN"
+                    continue
+                  fi
+                  python3 - "$trade_id" "$symbol" "$side" "$entry_price" "$sl_price" "$tp_price" "$entry_time" "$current_price" <<'PY'
+            import sys
+            from datetime import datetime, timezone
+            tid, symbol, side, entry, sl, tp, entry_time, current = sys.argv[1:]
+            try:
+                entry=float(entry); sl=float(sl); tp=float(tp); current=float(current)
+                favorable = ((current-entry)/entry*100) if side == 'LONG' else ((entry-current)/entry*100)
+                to_sl = ((current-sl)/current*100) if side == 'LONG' else ((sl-current)/current*100)
+                to_tp = ((tp-current)/current*100) if side == 'LONG' else ((current-tp)/current*100)
+                e = datetime.fromisoformat(entry_time.replace('Z','+00:00'))
+                age=(datetime.now(timezone.utc)-e).total_seconds()/3600
+                print(f"trade_id={tid} symbol={symbol} side={side} entry={entry:.8g} current={current:.8g} move_pct={favorable:.4f} distance_to_sl_pct={to_sl:.4f} distance_to_tp_pct={to_tp:.4f} age_hours={age:.2f} state=OPEN")
+            except Exception as exc:
+                print(f"trade_id={tid} symbol={symbol} state=OPEN calculation_error={exc}")
+            PY
+                done
+              else
+                echo 'No open positions to evaluate.'
+              fi
+              echo
+
+              echo '--- 4. WHY ARE OPEN POSITIONS STILL OPEN? ---'
+              echo 'Recent Exit Intelligence / PositionManager / market-context / hold-or-exit events:'
+              eie_logs="$(printf '%s\n' "$logs" | grep -Ei 'exit intelligence|positionmanager|position manager|market.?context|hold|thesis|invalidation|exit decision|exit score|trailing|stop.?loss|take.?profit' || true)"
+              if [ -n "$eie_logs" ]; then
+                printf '%s\n' "$eie_logs" | tail -n 800
+              else
+                echo 'No matching exit-intelligence/market-context events found in the last 24h.'
+              fi
+              echo
+
+              echo '--- 5. PER-OPEN-POSITION CONTEXT ---'
+              if [ -s /tmp/open_positions.tsv ]; then
+                tail -n +2 /tmp/open_positions.tsv | while IFS=$'\t' read -r trade_id symbol side strategy state entry_price sl_price tp_price entry_time recorded_at; do
+                  [ -n "$symbol" ] || continue
+                  echo "### trade_id=$trade_id symbol=$symbol side=$side"
+                  printf '%s\n' "$eie_logs" | grep -F "$symbol" | tail -n 80 || echo 'No symbol-specific exit-intelligence context found.'
+                done
+              fi
+              echo
+
+              echo '--- 6. POSITION STATE SUMMARY ---'
+              if docker inspect aitos-clickhouse >/dev/null 2>&1; then
+                docker exec aitos-clickhouse clickhouse-client --query "SELECT state, countDistinct(trade_id) AS trades FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) GROUP BY state ORDER BY state FORMAT PrettyCompactMonoBlock" 2>&1 || status=1
+                echo
+                echo 'Open positions by symbol:'
+                docker exec aitos-clickhouse clickhouse-client --query "SELECT symbol, side, countDistinct(trade_id) AS open_trades FROM (SELECT * FROM aitos.trades ORDER BY trade_id, recorded_at DESC, parseDateTimeBestEffortOrNull(exit_time) DESC, parseDateTimeBestEffortOrNull(entry_time) DESC LIMIT 1 BY trade_id) WHERE state IN ('position_opened','exit_triggered') GROUP BY symbol, side ORDER BY open_trades DESC, symbol FORMAT PrettyCompactMonoBlock" 2>&1 || status=1
+              fi
+              echo
+
+              echo '--- 7. INFRASTRUCTURE CAVEAT ---'
+              too_many="$(printf '%s\n' "$logs" | grep -c 'Too many connections' || true)"
+              echo "Redis Too many connections events in aitos-paper logs: $too_many"
+              if [ "$too_many" -gt 0 ]; then
+                echo 'WARNING: downstream event consumers may be missing lifecycle/feedback events even when the scanner itself is active.'
+              fi
+              echo
+              echo 'Interpretation rule: scanner PASS is not equivalent to trade entry; open-position status must be read from the latest lifecycle snapshot plus current market price and the latest EIE/market-context telemetry.'
+            } > "$REPORT" 2>&1 || status=1
+
+            printf '%s\n' "$status" > "$HOME/aitos-strategy-funnel-audit/exit_code"
+            cat "$REPORT"
+            exit "$status"
+
+      - name: Download audit report
+        if: always()
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_audit_key
+          source: aitos-strategy-funnel-audit/report.txt
+          target: /tmp/aitos-funnel-report
+          strip_components: 1
+
+      - name: Upload report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aitos-strategy-funnel-position-intelligence-audit
+          path: /tmp/aitos-funnel-report/report.txt
+          if-no-files-found: warn
