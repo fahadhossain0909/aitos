@@ -200,13 +200,13 @@ class DataIngestionService(_LegacyDataIngestionService):
             status.details["trade_downstream_errors"] = canonical_health[
                 "publish_errors"
             ]
-            status.details["trade_stream_dropped"] = canonical_health[
-                "dropped_events"
-            ]
+            status.details["trade_stream_dropped"] = canonical_health["dropped_events"]
             status.details["last_trade_event_time"] = canonical_health.get(
                 "last_event_at"
             )
-            status.details["canonical_trade_health_source"] = "market_data.gateway.health"
+            status.details["canonical_trade_health_source"] = (
+                "market_data.gateway.health"
+            )
             status.details["live_deep_orderbook_symbols"] = list(
                 self._canonical_runtime.orderbook_symbols
             )
