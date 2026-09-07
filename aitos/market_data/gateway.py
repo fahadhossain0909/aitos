@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
@@ -83,9 +84,10 @@ class MarketDataGateway:
         return True
 
     def _accept_latest(self, event: MarketEvent) -> bool:
+        replaced_before = self.queue.stats.replaced_oldest
         if self.queue.put_latest_nowait(event):
             self.health.record_accept()
-            if self.queue.stats.replaced_oldest:
+            if self.queue.stats.replaced_oldest > replaced_before:
                 self.health.backpressure_events += 1
             return True
         self.health.record_freshness_drop("unable to enqueue newest market event")
@@ -108,11 +110,7 @@ class MarketDataGateway:
 
     @staticmethod
     def _queue_age_seconds(event: MarketEvent) -> float:
-        from datetime import datetime, timezone
-
-        return max(
-            0.0, (datetime.now(timezone.utc) - event.ingest_time).total_seconds()
-        )
+        return max(0.0, (datetime.now(timezone.utc) - event.ingest_time).total_seconds())
 
     async def drain_once(self) -> None:
         event = await self.queue.get()
