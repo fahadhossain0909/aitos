@@ -65,9 +65,22 @@ class MarketDataGateway:
         self.state = GatewayState.STOPPED
         self.health.connected = False
 
+    @staticmethod
+    def _source_freshness_age_seconds(event: MarketEvent) -> float:
+        """Return the wall-clock age of the exchange event itself.
+
+        ``MarketEvent.source_age_seconds`` measures transport latency
+        (ingest_time - event_time).  The gateway freshness policy instead asks
+        whether the market event is currently too old, so it must be measured
+        against the current UTC clock rather than the ingest timestamp.
+        """
+        return max(
+            0.0, (datetime.now(timezone.utc) - event.event_time).total_seconds()
+        )
+
     def _validate_event(self, event: MarketEvent) -> bool:
         self.health.record_event()
-        age = event.source_age_seconds
+        age = self._source_freshness_age_seconds(event)
         if (
             event.source == MarketSource.WEBSOCKET
             and age > self.config.max_source_age_seconds
@@ -89,6 +102,7 @@ class MarketDataGateway:
             self.health.record_accept()
             if self.queue.stats.replaced_oldest > replaced_before:
                 self.health.backpressure_events += 1
+                self.health.dropped_events += 1
             return True
         self.health.record_freshness_drop("unable to enqueue newest market event")
         return False
