@@ -195,7 +195,9 @@ class DataIngestionService(_LegacyDataIngestionService):
                     asyncio.create_task(
                         self._canonical_runtime._run(
                             "trades",
-                            lambda: self._canonical_runtime.adapter.stream_trades(normalized),
+                            lambda: self._canonical_runtime.adapter.stream_trades(
+                                normalized
+                            ),
                         ),
                         name="market-data-trades",
                     )
