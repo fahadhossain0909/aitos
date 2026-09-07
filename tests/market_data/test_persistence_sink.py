@@ -117,6 +117,30 @@ async def test_history_enqueue_never_waits_for_clickhouse():
 
 
 @pytest.mark.asyncio
+async def test_non_anchor_trade_is_filtered_from_history_queue():
+    repo = FakeRepository()
+    sink = make_sink(repo, queue_capacity=2)
+
+    await sink._enqueue(
+        event(
+            MarketEventType.TRADE,
+            {
+                "symbol": "ETHUSDT",
+                "trade_id": 99,
+                "price": 4000.0,
+                "quantity": 1.0,
+                "side": "BUY",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
+            symbol="ETHUSDT",
+        )
+    )
+
+    assert sink.snapshot()["queue_depth"] == 0
+    assert sink.snapshot()["filtered"] == 1
+
+
+@pytest.mark.asyncio
 async def test_history_queue_overflow_drops_history_instead_of_backpressuring():
     repo = FakeRepository()
     sink = make_sink(repo, queue_capacity=1)
