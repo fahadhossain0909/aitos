@@ -1,0 +1,85 @@
+name: Binance WebSocket Transport Diagnostic
+
+on:
+  push:
+    branches:
+      - diagnostic/binance-ws-transport
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transport-diagnostic:
+    name: VPS Binance WebSocket transport probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout diagnostic probe
+        uses: actions/checkout@v4
+
+      - name: Check deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            test -n "${!name:-}" || { echo "Missing required secret: $name"; exit 1; }
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_diag_key
+          chmod 600 /tmp/aitos_diag_key
+
+      - name: Run host and container transport probe
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          scp -i /tmp/aitos_diag_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            scripts/binance_ws_transport_diagnostic.sh \
+            "$DEPLOY_USER@$DEPLOY_HOST:/tmp/binance_ws_transport_diagnostic.sh"
+          ssh -i /tmp/aitos_diag_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            'chmod +x /tmp/binance_ws_transport_diagnostic.sh && AITOS_WS_DIAG_OUTPUT="$HOME/binance-ws-transport-diagnostic" bash /tmp/binance_ws_transport_diagnostic.sh'
+
+      - name: Retrieve diagnostic report
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p binance-ws-transport-diagnostic
+          scp -i /tmp/aitos_diag_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:binance-ws-transport-diagnostic/report.md" \
+            binance-ws-transport-diagnostic/report.md
+          cat binance-ws-transport-diagnostic/report.md
+
+      - name: Upload diagnostic report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: binance-ws-transport-diagnostic
+          path: binance-ws-transport-diagnostic/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/aitos_diag_key
