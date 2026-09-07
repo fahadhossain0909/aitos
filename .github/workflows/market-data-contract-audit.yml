@@ -122,7 +122,7 @@ jobs:
       - name: Full unit/integration test suite
         env:
           PYTHONPATH: .
-        run: pytest -q
+        run: pytest -q -o faulthandler_timeout=60 --durations=25
       - name: Validate Compose
         run: |
           cp .env.example .env
