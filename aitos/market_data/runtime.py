@@ -56,7 +56,9 @@ class CanonicalMarketDataRuntime:
             )
         )
         self.orderbook_levels = max(20, orderbook_levels)
-        self.orderbook_fallback_levels = max(20, min(orderbook_fallback_levels, self.orderbook_levels))
+        self.orderbook_fallback_levels = max(
+            20, min(orderbook_fallback_levels, self.orderbook_levels)
+        )
         self.stream_idle_timeout_seconds = stream_idle_timeout_seconds
         self.enable_trades = enable_trades
         self.enable_orderbooks = enable_orderbooks
@@ -180,9 +182,7 @@ class CanonicalMarketDataRuntime:
 
     async def _restart_orderbook_task(self) -> None:
         orderbook_tasks = [
-            task
-            for task in self._tasks
-            if task.get_name() == "market-data-orderbook"
+            task for task in self._tasks if task.get_name() == "market-data-orderbook"
         ]
         for task in orderbook_tasks:
             task.cancel()
