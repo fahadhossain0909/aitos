@@ -1,15 +1,15 @@
 name: Temporary Binance recv fix v2
 on:
-  workflow_dispatch:
+  push:
+    branches: [fix/binance-explicit-recv-v2]
 permissions:
   contents: write
 jobs:
   fix:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
-        with:
-          ref: fix/binance-explicit-recv-v2
       - name: Apply explicit recv loop
         run: |
           python - <<'PY'
