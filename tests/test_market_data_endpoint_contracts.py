@@ -22,8 +22,8 @@ from aitos.market_data.okx_adapter import OKXCanonicalMarketDataAdapter
 
 
 def test_binance_usdm_uses_current_market_stream_paths():
-    assert WS_MARKET_BASE_URL == "wss://fstream.binance.com/stream"
-    assert WS_MARKET_RAW_BASE_URL == "wss://fstream.binance.com/ws"
+    assert WS_MARKET_BASE_URL == "wss://fstream.binance.com/market/stream"
+    assert WS_MARKET_RAW_BASE_URL == "wss://fstream.binance.com/market/ws"
     assert BINANCE_USDM_WS_COMBINED == WS_MARKET_BASE_URL
     assert BINANCE_USDM_WS_RAW == WS_MARKET_RAW_BASE_URL
     assert BINANCE_WS_MAX_LIFETIME_SECONDS < 24 * 60 * 60
