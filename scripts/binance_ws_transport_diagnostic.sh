@@ -3,7 +3,7 @@ set -u
 
 # Transport-only probe. It deliberately does not modify AITOS state.
 # Run from the VPS host; it also probes from inside aitos-paper.
-ENDPOINT="${AITOS_BINANCE_WS_DIAG_ENDPOINT:-wss://fstream.binance.com/stream?streams=btcusdt@aggTrade}"
+ENDPOINT="${AITOS_BINANCE_WS_DIAG_ENDPOINT:-wss://fstream.binance.com/market/stream?streams=btcusdt@aggTrade}"
 HOST="fstream.binance.com"
 PORT="443"
 CONTAINER="${AITOS_PAPER_CONTAINER:-aitos-paper}"
@@ -28,7 +28,7 @@ section "Host TLS"
 run "TLS handshake" "openssl s_client -connect ${HOST}:${PORT} -servername ${HOST} -brief </dev/null"
 
 section "Host HTTP/1.1 upgrade reachability"
-run "HTTP upgrade" "curl --http1.1 -sS -i --max-time 10 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: SGVsbG9BdG9zV1M=' 'https://${HOST}/stream?streams=btcusdt@aggTrade'"
+run "HTTP upgrade" "curl --http1.1 -sS -i --max-time 10 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: SGVsbG9BdG9zV1M=' 'https://${HOST}/market/stream?streams=btcusdt@aggTrade'"
 
 section "Container identity/network"
 run "container" "docker inspect -f '{{.Config.Image}} {{.State.Status}}' '$CONTAINER'"
