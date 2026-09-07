@@ -69,6 +69,7 @@ class DataIngestionService(_LegacyDataIngestionService):
         self._deep_collector: DeepOrderBookCollector | None = None
         self._ranking_hook_installed = False
         self._staged_scanner_installed = False
+        self._staged_scanner_install_task: asyncio.Task | None = None
         self._live_trade_symbols: list[str] = []
         if self._canonical_mode:
             market_type = str(getattr(self._exchange, "market_type", "usd_m_futures"))
@@ -82,8 +83,6 @@ class DataIngestionService(_LegacyDataIngestionService):
                 if LIVE_DEEP_ANCHOR in normalized_symbols
                 else self._symbols[:1]
             )
-            # Boot with the anchor only. The scanner promotes the live trade
-            # subscription to Top-50 after the first cheap universe pass.
             initial_trades = (
                 [LIVE_DEEP_ANCHOR]
                 if LIVE_DEEP_ANCHOR in normalized_symbols
@@ -155,7 +154,7 @@ class DataIngestionService(_LegacyDataIngestionService):
                 },
             )
 
-        asyncio.create_task(
+        self._staged_scanner_install_task = asyncio.create_task(
             install_staged_scan(scanner, on_stage),
             name="aitos-install-staged-scanner",
         )
@@ -299,6 +298,12 @@ class DataIngestionService(_LegacyDataIngestionService):
         return status
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        if self._staged_scanner_install_task is not None:
+            self._staged_scanner_install_task.cancel()
+            await asyncio.gather(
+                self._staged_scanner_install_task, return_exceptions=True
+            )
+            self._staged_scanner_install_task = None
         if self._deep_collector is not None:
             await self._deep_collector.stop()
         if self._canonical_persistence is not None:
