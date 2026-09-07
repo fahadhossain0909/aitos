@@ -176,9 +176,37 @@ class DataIngestionService(_LegacyDataIngestionService):
     async def health_check(self):
         status = await super().health_check()
         if self._canonical_runtime is not None:
-            status.details["canonical_market_data"] = (
-                self._canonical_runtime.gateway.snapshot()
+            canonical = self._canonical_runtime.gateway.snapshot()
+            canonical_health = canonical["health"]
+            status.details["canonical_market_data"] = canonical
+            # Keep the historical health keys populated from the canonical
+            # runtime. In canonical mode the legacy _run_trade_stream is
+            # intentionally disabled, so its counters otherwise remain zero
+            # even while live Binance trades are flowing normally.
+            status.details["trade_stream_messages_received"] = canonical_health[
+                "received_events"
+            ]
+            status.details["trade_events_received"] = canonical_health[
+                "accepted_events"
+            ]
+            status.details["trade_stream_restarts"] = canonical_health[
+                "reconnect_count"
+            ]
+            status.details["trade_stream_idle_timeouts"] = canonical_health[
+                "stream_idle_timeouts"
+            ]
+            status.details["trade_parse_errors"] = canonical_health["decode_errors"]
+            status.details["trade_stream_errors"] = canonical_health["reconnect_count"]
+            status.details["trade_downstream_errors"] = canonical_health[
+                "publish_errors"
+            ]
+            status.details["trade_stream_dropped"] = canonical_health[
+                "dropped_events"
+            ]
+            status.details["last_trade_event_time"] = canonical_health.get(
+                "last_event_at"
             )
+            status.details["canonical_trade_health_source"] = "market_data.gateway.health"
             status.details["live_deep_orderbook_symbols"] = list(
                 self._canonical_runtime.orderbook_symbols
             )
