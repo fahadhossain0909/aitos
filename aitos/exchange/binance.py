@@ -368,7 +368,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     {
                         "state": "connecting",
                         "current_url": url,
-                        "streams": list(streams or ([direct_stream] if direct_stream else [])),
+                        "streams": list(
+                            streams or ([direct_stream] if direct_stream else [])
+                        ),
                         "connect_attempts": self._ws_transport["connect_attempts"] + 1,
                         "last_connect_started_at": started_at,
                         "last_error_type": None,
@@ -390,7 +392,10 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     self._ws_transport.update(
                         {
                             "state": "connected",
-                            "successful_handshakes": self._ws_transport["successful_handshakes"] + 1,
+                            "successful_handshakes": self._ws_transport[
+                                "successful_handshakes"
+                            ]
+                            + 1,
                             "last_handshake_at": handshake_at,
                         }
                     )
@@ -436,9 +441,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                             if direct_stream is not None:
                                 payload, stream_name = envelope, direct_stream
                             else:
-                                payload, stream_name = envelope.get("data", envelope), envelope.get(
-                                    "stream", ""
-                                )
+                                payload, stream_name = envelope.get(
+                                    "data", envelope
+                                ), envelope.get("stream", "")
                             self._ws_transport["market_events_received"] += 1
                             self._ws_transport["last_market_event_at"] = _now_iso()
                             yield payload, stream_name
