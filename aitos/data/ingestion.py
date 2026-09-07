@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
+from aitos.logging_setup import get_logger
 from aitos.market_data.binance_adapter import BinanceCanonicalMarketDataAdapter
 from aitos.market_data.bus import MarketDataBus
 from aitos.market_data.deep_orderbook import DeepOrderBookStore
@@ -22,6 +23,8 @@ from .ingestion_legacy import (
     orderflow_topic,
     trade_topic,
 )
+
+logger = get_logger("aitos.data.ingestion")
 
 DEEP_HISTORICAL_SYMBOLS = ("BTCUSDT", "LTCUSDT")
 DEEP_ORDERBOOK_LEVELS = 1000
