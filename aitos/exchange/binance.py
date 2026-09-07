@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
+from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
@@ -55,6 +56,10 @@ WS_OPEN_TIMEOUT_SECONDS = 10.0
 BINANCE_MAX_STREAMS_PER_CONNECTION = 200
 
 
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 class BinanceFuturesAdapter(ExchangeAdapter):
     def __init__(
         self,
@@ -64,6 +69,26 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     ) -> None:
         self._session_factory = session_factory
         self._session: aiohttp.ClientSession | None = None
+        self._ws_transport: dict[str, Any] = {
+            "state": "idle",
+            "current_url": None,
+            "streams": [],
+            "connect_attempts": 0,
+            "successful_handshakes": 0,
+            "frames_received": 0,
+            "market_events_received": 0,
+            "close_count": 0,
+            "subscription_mode": "combined_url",
+            "last_connect_started_at": None,
+            "last_handshake_at": None,
+            "last_first_frame_at": None,
+            "last_market_event_at": None,
+            "last_close_at": None,
+            "last_close_code": None,
+            "last_close_reason": None,
+            "last_error_type": None,
+            "last_error": None,
+        }
         if ws_connector is None:
             import websockets
 
@@ -78,6 +103,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             capacity=DEFAULT_RATE_LIMIT_CAPACITY,
             refill_per_second=DEFAULT_RATE_LIMIT_REFILL_PER_SECOND,
         )
+
+    def websocket_transport_snapshot(self) -> dict[str, Any]:
+        """Return a copy of transport-stage telemetry safe for health reports."""
+        snapshot = dict(self._ws_transport)
+        snapshot["streams"] = list(self._ws_transport.get("streams", []))
+        return snapshot
 
     async def connect(self) -> None:
         if self._session is None or self._session.closed:
@@ -330,54 +361,162 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     ) -> AsyncIterator[tuple[Any, str]]:
         backoff = INITIAL_BACKOFF_SECONDS
         while True:
+            ws = None
             try:
+                started_at = _now_iso()
+                self._ws_transport.update(
+                    {
+                        "state": "connecting",
+                        "current_url": url,
+                        "streams": list(
+                            streams or ([direct_stream] if direct_stream else [])
+                        ),
+                        "connect_attempts": self._ws_transport["connect_attempts"] + 1,
+                        "last_connect_started_at": started_at,
+                        "last_error_type": None,
+                        "last_error": None,
+                    }
+                )
                 logger.info(
                     "Binance websocket connecting",
                     extra={
                         "aitos_extra": {
+                            "stage": "connect_started",
                             "url": url,
                             "streams": streams or [direct_stream],
                         }
                     },
                 )
                 async with self._ws_connector(url) as ws:
+                    handshake_at = _now_iso()
+                    self._ws_transport.update(
+                        {
+                            "state": "connected",
+                            "successful_handshakes": self._ws_transport[
+                                "successful_handshakes"
+                            ]
+                            + 1,
+                            "last_handshake_at": handshake_at,
+                        }
+                    )
                     logger.info(
                         "Binance websocket connected",
-                        extra={"aitos_extra": {"url": url}},
+                        extra={
+                            "aitos_extra": {
+                                "stage": "handshake_complete",
+                                "url": url,
+                                "subscription_mode": "combined_url",
+                            }
+                        },
+                    )
+                    logger.info(
+                        "Binance websocket subscription active",
+                        extra={
+                            "aitos_extra": {
+                                "stage": "subscription_active",
+                                "mode": "combined_url",
+                                "streams": streams or [direct_stream],
+                            }
+                        },
                     )
                     backoff = INITIAL_BACKOFF_SECONDS
                     first_message = True
                     async with asyncio.timeout(BINANCE_USDM_WS_MAX_LIFETIME_SECONDS):
                         async for raw_message in ws:
+                            self._ws_transport["frames_received"] += 1
                             if first_message:
+                                first_at = _now_iso()
+                                self._ws_transport["last_first_frame_at"] = first_at
                                 logger.info(
-                                    "Binance websocket first message received",
-                                    extra={"aitos_extra": {"url": url}},
+                                    "Binance websocket first frame received",
+                                    extra={
+                                        "aitos_extra": {
+                                            "stage": "first_frame",
+                                            "url": url,
+                                        }
+                                    },
                                 )
                                 first_message = False
                             envelope = json.loads(raw_message)
                             if direct_stream is not None:
-                                yield envelope, direct_stream
+                                payload, stream_name = envelope, direct_stream
                             else:
-                                yield envelope.get("data", envelope), envelope.get(
-                                    "stream", ""
-                                )
+                                payload, stream_name = envelope.get(
+                                    "data", envelope
+                                ), envelope.get("stream", "")
+                            self._ws_transport["market_events_received"] += 1
+                            self._ws_transport["last_market_event_at"] = _now_iso()
+                            yield payload, stream_name
             except asyncio.CancelledError:
                 raise
             except TimeoutError:
+                self._ws_transport.update(
+                    {
+                        "state": "lifecycle_rotation",
+                        "last_close_at": _now_iso(),
+                        "last_close_code": getattr(ws, "close_code", None),
+                        "last_close_reason": getattr(ws, "close_reason", None),
+                    }
+                )
                 logger.info(
                     "Binance websocket reached proactive lifecycle rotation",
-                    extra={"aitos_extra": {"url": url}},
+                    extra={
+                        "aitos_extra": {
+                            "stage": "lifecycle_rotation",
+                            "url": url,
+                            "close_code": getattr(ws, "close_code", None),
+                            "close_reason": getattr(ws, "close_reason", None),
+                        }
+                    },
                 )
             except Exception as exc:
+                close_code = getattr(ws, "close_code", None)
+                close_reason = getattr(ws, "close_reason", None)
+                self._ws_transport.update(
+                    {
+                        "state": "reconnecting",
+                        "close_count": self._ws_transport["close_count"] + 1,
+                        "last_close_at": _now_iso(),
+                        "last_close_code": close_code,
+                        "last_close_reason": close_reason,
+                        "last_error_type": type(exc).__name__,
+                        "last_error": str(exc)[:500],
+                    }
+                )
                 logger.error(
                     "Binance websocket disconnected; reconnecting",
                     extra={
                         "aitos_extra": {
+                            "stage": "disconnect",
                             "url": url,
                             "error_type": type(exc).__name__,
                             "error": str(exc),
+                            "close_code": close_code,
+                            "close_reason": close_reason,
                             "backoff_seconds": backoff,
+                        }
+                    },
+                )
+            else:
+                close_code = getattr(ws, "close_code", None)
+                close_reason = getattr(ws, "close_reason", None)
+                self._ws_transport.update(
+                    {
+                        "state": "reconnecting",
+                        "close_count": self._ws_transport["close_count"] + 1,
+                        "last_close_at": _now_iso(),
+                        "last_close_code": close_code,
+                        "last_close_reason": close_reason,
+                    }
+                )
+                logger.warning(
+                    "Binance websocket stream ended; reconnecting",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "stream_end",
+                            "url": url,
+                            "close_code": close_code,
+                            "close_reason": close_reason,
                         }
                     },
                 )
@@ -386,6 +525,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     "Binance market stream reconnecting",
                     extra={
                         "aitos_extra": {
+                            "stage": "reconnect_wait",
                             "streams": streams or [direct_stream],
                             "backoff_seconds": backoff,
                         }
