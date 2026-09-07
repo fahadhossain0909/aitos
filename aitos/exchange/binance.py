@@ -30,7 +30,13 @@ from aitos.market_data.endpoints import (
     BINANCE_USDM_WS_MAX_LIFETIME_SECONDS,
     BINANCE_USDM_WS_RAW,
 )
-from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot, TradeTick
+from aitos.models.market import (
+    FundingRate,
+    Kline,
+    OpenInterest,
+    OrderBookSnapshot,
+    TradeTick,
+)
 
 logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
@@ -55,15 +61,48 @@ def _now_iso() -> str:
 
 
 class BinanceFuturesAdapter(ExchangeAdapter):
-    def __init__(self, session_factory: Callable[[], aiohttp.ClientSession] = aiohttp.ClientSession, ws_connector: Callable[..., Any] | None = None, rate_limiter: TokenBucketRateLimiter | None = None) -> None:
+    def __init__(
+        self,
+        session_factory: Callable[[], aiohttp.ClientSession] = aiohttp.ClientSession,
+        ws_connector: Callable[..., Any] | None = None,
+        rate_limiter: TokenBucketRateLimiter | None = None,
+    ) -> None:
         self._session_factory = session_factory
         self._session: aiohttp.ClientSession | None = None
-        self._ws_transport: dict[str, Any] = {"state": "idle", "current_url": None, "streams": [], "connect_attempts": 0, "successful_handshakes": 0, "frames_received": 0, "market_events_received": 0, "close_count": 0, "subscription_mode": "combined_url", "last_connect_started_at": None, "last_handshake_at": None, "last_first_frame_at": None, "last_market_event_at": None, "last_close_at": None, "last_close_code": None, "last_close_reason": None, "last_error_type": None, "last_error": None}
+        self._ws_transport: dict[str, Any] = {
+            "state": "idle",
+            "current_url": None,
+            "streams": [],
+            "connect_attempts": 0,
+            "successful_handshakes": 0,
+            "frames_received": 0,
+            "market_events_received": 0,
+            "close_count": 0,
+            "subscription_mode": "combined_url",
+            "last_connect_started_at": None,
+            "last_handshake_at": None,
+            "last_first_frame_at": None,
+            "last_market_event_at": None,
+            "last_close_at": None,
+            "last_close_code": None,
+            "last_close_reason": None,
+            "last_error_type": None,
+            "last_error": None,
+        }
         if ws_connector is None:
             import websockets
-            ws_connector = lambda url: websockets.connect(url, ping_interval=WS_PING_INTERVAL_SECONDS, ping_timeout=WS_PING_TIMEOUT_SECONDS, open_timeout=WS_OPEN_TIMEOUT_SECONDS)
+
+            ws_connector = lambda url: websockets.connect(
+                url,
+                ping_interval=WS_PING_INTERVAL_SECONDS,
+                ping_timeout=WS_PING_TIMEOUT_SECONDS,
+                open_timeout=WS_OPEN_TIMEOUT_SECONDS,
+            )
         self._ws_connector = ws_connector
-        self._rate_limiter = rate_limiter or TokenBucketRateLimiter(capacity=DEFAULT_RATE_LIMIT_CAPACITY, refill_per_second=DEFAULT_RATE_LIMIT_REFILL_PER_SECOND)
+        self._rate_limiter = rate_limiter or TokenBucketRateLimiter(
+            capacity=DEFAULT_RATE_LIMIT_CAPACITY,
+            refill_per_second=DEFAULT_RATE_LIMIT_REFILL_PER_SECOND,
+        )
 
     def websocket_transport_snapshot(self) -> dict[str, Any]:
         snapshot = dict(self._ws_transport)
@@ -78,30 +117,59 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         if self._session is not None and not self._session.closed:
             await self._session.close()
 
-    async def fetch_klines(self, symbol: str, timeframe: str, limit: int = 500) -> list[Kline]:
+    async def fetch_klines(
+        self, symbol: str, timeframe: str, limit: int = 500
+    ) -> list[Kline]:
         weight = 5 if limit <= 100 else (10 if limit <= 500 else 25)
-        raw = await self._get("/fapi/v1/klines", {"symbol": symbol, "interval": timeframe, "limit": limit}, weight)
-        return [parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw]
+        raw = await self._get(
+            "/fapi/v1/klines",
+            {"symbol": symbol, "interval": timeframe, "limit": limit},
+            weight,
+        )
+        return [
+            parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw
+        ]
 
     async def fetch_order_book(self, symbol: str, limit: int = 50) -> OrderBookSnapshot:
         weight = 2 if limit <= 50 else (5 if limit <= 100 else 10)
-        return parse_order_book_rest(await self._get("/fapi/v1/depth", {"symbol": symbol, "limit": limit}, weight), symbol=symbol)
+        return parse_order_book_rest(
+            await self._get(
+                "/fapi/v1/depth", {"symbol": symbol, "limit": limit}, weight
+            ),
+            symbol=symbol,
+        )
 
-    async def fetch_recent_trades(self, symbol: str, limit: int = 500) -> list[TradeTick]:
+    async def fetch_recent_trades(
+        self, symbol: str, limit: int = 500
+    ) -> list[TradeTick]:
         raw = await self._get("/fapi/v1/trades", {"symbol": symbol, "limit": limit}, 5)
         return [parse_trade_rest(row, symbol=symbol) for row in raw]
 
     async def fetch_funding_rate(self, symbol: str) -> FundingRate:
-        return parse_funding_rate_rest(await self._get("/fapi/v1/premiumIndex", {"symbol": symbol}, 1))
+        return parse_funding_rate_rest(
+            await self._get("/fapi/v1/premiumIndex", {"symbol": symbol}, 1)
+        )
 
     async def fetch_open_interest(self, symbol: str) -> OpenInterest:
-        return parse_open_interest_rest(await self._get("/fapi/v1/openInterest", {"symbol": symbol}, 1))
+        return parse_open_interest_rest(
+            await self._get("/fapi/v1/openInterest", {"symbol": symbol}, 1)
+        )
 
-    async def fetch_exchange_info(self, symbols: list[str] | None = None) -> dict[str, SymbolFilters]:
-        all_filters = parse_exchange_info(await self._get("/fapi/v1/exchangeInfo", {}, 1))
-        return all_filters if symbols is None else {s: all_filters[s] for s in symbols if s in all_filters}
+    async def fetch_exchange_info(
+        self, symbols: list[str] | None = None
+    ) -> dict[str, SymbolFilters]:
+        all_filters = parse_exchange_info(
+            await self._get("/fapi/v1/exchangeInfo", {}, 1)
+        )
+        return (
+            all_filters
+            if symbols is None
+            else {s: all_filters[s] for s in symbols if s in all_filters}
+        )
 
-    async def stream_klines(self, symbols: list[str], timeframe: str) -> AsyncIterator[Kline]:
+    async def stream_klines(
+        self, symbols: list[str], timeframe: str
+    ) -> AsyncIterator[Kline]:
         streams = [f"{s.lower()}@kline_{timeframe}" for s in dict.fromkeys(symbols)]
         async for data, _ in self._raw_stream(streams, emit_reconnect=True):
             yield parse_kline_ws(data)
@@ -114,17 +182,23 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         async for data, _ in self._raw_stream(streams, emit_reconnect=True):
             yield parse_agg_trade_ws(data)
 
-    async def stream_order_book(self, symbols: list[str], levels: int = 20) -> AsyncIterator[OrderBookSnapshot]:
+    async def stream_order_book(
+        self, symbols: list[str], levels: int = 20
+    ) -> AsyncIterator[OrderBookSnapshot]:
         if not symbols:
             return
         streams = [f"{s.lower()}@depth@100ms" for s in dict.fromkeys(symbols)]
         symbol_by_stream = {f"{s.lower()}@depth@100ms": s for s in symbols}
-        queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE)
+        queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(
+            maxsize=ORDERBOOK_BOOTSTRAP_QUEUE_SIZE
+        )
         ready = asyncio.Event()
 
         async def producer() -> None:
             try:
-                async for data, stream_name in self._raw_stream(streams, emit_reconnect=True):
+                async for data, stream_name in self._raw_stream(
+                    streams, emit_reconnect=True
+                ):
                     ready.set()
                     try:
                         queue.put_nowait((data, stream_name))
@@ -146,7 +220,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         producer_task = asyncio.create_task(producer())
         books: dict[str, LocalOrderBook] = {}
         try:
-            await asyncio.wait_for(ready.wait(), timeout=ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS)
+            await asyncio.wait_for(
+                ready.wait(), timeout=ORDERBOOK_BOOTSTRAP_READY_TIMEOUT_SECONDS
+            )
             for symbol in symbols:
                 books[symbol] = await bootstrap(symbol)
             while True:
@@ -165,11 +241,15 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             producer_task.cancel()
             await asyncio.gather(producer_task, return_exceptions=True)
 
-    async def stream_order_books(self, symbols: list[str], levels: int = 20) -> AsyncIterator[OrderBookSnapshot]:
+    async def stream_order_books(
+        self, symbols: list[str], levels: int = 20
+    ) -> AsyncIterator[OrderBookSnapshot]:
         async for snapshot in self.stream_order_book(symbols, levels):
             yield snapshot
 
-    async def stream_order_book_deltas(self, symbols: list[str]) -> AsyncIterator[tuple[str, Any]]:
+    async def stream_order_book_deltas(
+        self, symbols: list[str]
+    ) -> AsyncIterator[tuple[str, Any]]:
         if not symbols:
             return
         streams = [f"{s.lower()}@depth@100ms" for s in dict.fromkeys(symbols)]
@@ -178,14 +258,22 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             try:
                 yield symbol, parse_depth_diff_ws(data)
             except Exception as exc:
-                logger.error("Binance depth delta invalid", extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}})
+                logger.error(
+                    "Binance depth delta invalid",
+                    extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                )
 
     @staticmethod
-    def _partition_streams(streams: list[str], max_per_connection: int = BINANCE_MAX_STREAMS_PER_CONNECTION) -> list[list[str]]:
+    def _partition_streams(
+        streams: list[str], max_per_connection: int = BINANCE_MAX_STREAMS_PER_CONNECTION
+    ) -> list[list[str]]:
         if max_per_connection <= 0:
             raise ValueError("max_per_connection must be positive")
         unique = list(dict.fromkeys(streams))
-        return [unique[i:i + max_per_connection] for i in range(0, len(unique), max_per_connection)]
+        return [
+            unique[i : i + max_per_connection]
+            for i in range(0, len(unique), max_per_connection)
+        ]
 
     @staticmethod
     def _get_ws_base_url(streams: list[str]) -> tuple[str, str]:
@@ -195,7 +283,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
-        async with self._session.get(f"{REST_BASE_URL}{path}", params=params) as response:
+        async with self._session.get(
+            f"{REST_BASE_URL}{path}", params=params
+        ) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -203,7 +293,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     def _ws_base_url(streams: list[str]) -> str:
         return BinanceFuturesAdapter._get_ws_base_url(streams)[0]
 
-    async def _raw_stream(self, streams: list[str], emit_reconnect: bool = False) -> AsyncIterator[tuple[Any, str]]:
+    async def _raw_stream(
+        self, streams: list[str], emit_reconnect: bool = False
+    ) -> AsyncIterator[tuple[Any, str]]:
         if not streams:
             return
         shards = self._partition_streams(streams)
@@ -216,8 +308,15 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         iterators = []
         for shard in shards:
             base_url, _ = self._get_ws_base_url(shard)
-            iterators.append(self._connect_raw(f"{base_url}?streams={'/'.join(shard)}", None, emit_reconnect, shard).__aiter__())
-        tasks: dict[asyncio.Task, int] = {asyncio.create_task(iterator.__anext__()): index for index, iterator in enumerate(iterators)}
+            iterators.append(
+                self._connect_raw(
+                    f"{base_url}?streams={'/'.join(shard)}", None, emit_reconnect, shard
+                ).__aiter__()
+            )
+        tasks: dict[asyncio.Task, int] = {
+            asyncio.create_task(iterator.__anext__()): index
+            for index, iterator in enumerate(iterators)
+        }
         try:
             while tasks:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
@@ -230,7 +329,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
-                        logger.error("Binance sharded websocket iterator failed", extra={"aitos_extra": {"shard_index": index, "error": str(exc)}})
+                        logger.error(
+                            "Binance sharded websocket iterator failed",
+                            extra={
+                                "aitos_extra": {"shard_index": index, "error": str(exc)}
+                            },
+                        )
                     else:
                         tasks[asyncio.create_task(iterators[index].__anext__())] = index
         finally:
@@ -238,20 +342,76 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 if not task.done():
                     task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            await asyncio.gather(*(iterator.aclose() for iterator in iterators), return_exceptions=True)
+            await asyncio.gather(
+                *(iterator.aclose() for iterator in iterators), return_exceptions=True
+            )
 
-    async def _connect_raw(self, url: str, direct_stream: str | None, emit_reconnect: bool, streams: list[str] | None = None) -> AsyncIterator[tuple[Any, str]]:
+    async def _connect_raw(
+        self,
+        url: str,
+        direct_stream: str | None,
+        emit_reconnect: bool,
+        streams: list[str] | None = None,
+    ) -> AsyncIterator[tuple[Any, str]]:
         backoff = INITIAL_BACKOFF_SECONDS
         while True:
             ws = None
             try:
                 started_at = _now_iso()
-                self._ws_transport.update({"state": "connecting", "current_url": url, "streams": list(streams or ([direct_stream] if direct_stream else [])), "connect_attempts": self._ws_transport["connect_attempts"] + 1, "last_connect_started_at": started_at, "last_error_type": None, "last_error": None})
-                logger.info("Binance websocket connecting", extra={"aitos_extra": {"stage": "connect_started", "url": url, "streams": streams or [direct_stream]}})
+                self._ws_transport.update(
+                    {
+                        "state": "connecting",
+                        "current_url": url,
+                        "streams": list(
+                            streams or ([direct_stream] if direct_stream else [])
+                        ),
+                        "connect_attempts": self._ws_transport["connect_attempts"] + 1,
+                        "last_connect_started_at": started_at,
+                        "last_error_type": None,
+                        "last_error": None,
+                    }
+                )
+                logger.info(
+                    "Binance websocket connecting",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "connect_started",
+                            "url": url,
+                            "streams": streams or [direct_stream],
+                        }
+                    },
+                )
                 async with self._ws_connector(url) as ws:
-                    self._ws_transport.update({"state": "connected", "successful_handshakes": self._ws_transport["successful_handshakes"] + 1, "last_handshake_at": _now_iso()})
-                    logger.info("Binance websocket connected", extra={"aitos_extra": {"stage": "handshake_complete", "url": url, "subscription_mode": "combined_url"}})
-                    logger.info("Binance websocket subscription active", extra={"aitos_extra": {"stage": "subscription_active", "mode": "combined_url", "streams": streams or [direct_stream]}})
+                    self._ws_transport.update(
+                        {
+                            "state": "connected",
+                            "successful_handshakes": self._ws_transport[
+                                "successful_handshakes"
+                            ]
+                            + 1,
+                            "last_handshake_at": _now_iso(),
+                        }
+                    )
+                    logger.info(
+                        "Binance websocket connected",
+                        extra={
+                            "aitos_extra": {
+                                "stage": "handshake_complete",
+                                "url": url,
+                                "subscription_mode": "combined_url",
+                            }
+                        },
+                    )
+                    logger.info(
+                        "Binance websocket subscription active",
+                        extra={
+                            "aitos_extra": {
+                                "stage": "subscription_active",
+                                "mode": "combined_url",
+                                "streams": streams or [direct_stream],
+                            }
+                        },
+                    )
                     backoff = INITIAL_BACKOFF_SECONDS
                     first_message = True
                     async with asyncio.timeout(BINANCE_USDM_WS_MAX_LIFETIME_SECONDS):
@@ -260,29 +420,85 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                             self._ws_transport["frames_received"] += 1
                             if first_message:
                                 self._ws_transport["last_first_frame_at"] = _now_iso()
-                                logger.info("Binance websocket first frame received", extra={"aitos_extra": {"stage": "first_frame", "url": url}})
+                                logger.info(
+                                    "Binance websocket first frame received",
+                                    extra={
+                                        "aitos_extra": {
+                                            "stage": "first_frame",
+                                            "url": url,
+                                        }
+                                    },
+                                )
                                 first_message = False
                             envelope = json.loads(raw_message)
                             if direct_stream is not None:
                                 payload, stream_name = envelope, direct_stream
                             else:
-                                payload, stream_name = envelope.get("data", envelope), envelope.get("stream", "")
+                                payload, stream_name = envelope.get(
+                                    "data", envelope
+                                ), envelope.get("stream", "")
                             self._ws_transport["market_events_received"] += 1
                             self._ws_transport["last_market_event_at"] = _now_iso()
                             yield payload, stream_name
             except asyncio.CancelledError:
                 raise
             except TimeoutError:
-                self._ws_transport.update({"state": "lifecycle_rotation", "last_close_at": _now_iso(), "last_close_code": getattr(ws, "close_code", None), "last_close_reason": getattr(ws, "close_reason", None)})
-                logger.info("Binance websocket reached proactive lifecycle rotation", extra={"aitos_extra": {"stage": "lifecycle_rotation", "url": url, "close_code": getattr(ws, "close_code", None), "close_reason": getattr(ws, "close_reason", None)}})
+                self._ws_transport.update(
+                    {
+                        "state": "lifecycle_rotation",
+                        "last_close_at": _now_iso(),
+                        "last_close_code": getattr(ws, "close_code", None),
+                        "last_close_reason": getattr(ws, "close_reason", None),
+                    }
+                )
+                logger.info(
+                    "Binance websocket reached proactive lifecycle rotation",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "lifecycle_rotation",
+                            "url": url,
+                            "close_code": getattr(ws, "close_code", None),
+                            "close_reason": getattr(ws, "close_reason", None),
+                        }
+                    },
+                )
             except Exception as exc:
-                self._ws_transport.update({"state": "error", "last_close_at": _now_iso(), "last_close_code": getattr(ws, "close_code", None), "last_close_reason": getattr(ws, "close_reason", None), "last_error_type": type(exc).__name__, "last_error": str(exc)})
-                logger.warning("Binance websocket disconnected; reconnecting", extra={"aitos_extra": {"stage": "receive_error", "url": url, "error_type": type(exc).__name__, "error": str(exc), "backoff_seconds": backoff}})
+                self._ws_transport.update(
+                    {
+                        "state": "error",
+                        "last_close_at": _now_iso(),
+                        "last_close_code": getattr(ws, "close_code", None),
+                        "last_close_reason": getattr(ws, "close_reason", None),
+                        "last_error_type": type(exc).__name__,
+                        "last_error": str(exc),
+                    }
+                )
+                logger.warning(
+                    "Binance websocket disconnected; reconnecting",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "receive_error",
+                            "url": url,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                            "backoff_seconds": backoff,
+                        }
+                    },
+                )
             finally:
                 self._ws_transport["close_count"] += 1
                 self._ws_transport["state"] = "reconnecting"
             if emit_reconnect:
-                logger.info("Binance websocket reconnecting", extra={"aitos_extra": {"stage": "reconnect", "url": url, "backoff_seconds": backoff}})
+                logger.info(
+                    "Binance websocket reconnecting",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "reconnect",
+                            "url": url,
+                            "backoff_seconds": backoff,
+                        }
+                    },
+                )
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2.0, MAX_BACKOFF_SECONDS)
 
