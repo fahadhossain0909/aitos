@@ -30,11 +30,7 @@ class ScanLimits:
 
     def __post_init__(self) -> None:
         if not (
-            0 < self.top_2
-            <= self.top_5
-            <= self.top_10
-            <= self.top_25
-            <= self.top_50
+            0 < self.top_2 <= self.top_5 <= self.top_10 <= self.top_25 <= self.top_50
         ):
             raise ValueError(
                 "scan limits must satisfy 0 < top_2 <= top_5 <= top_10 <= top_25 <= top_50"
