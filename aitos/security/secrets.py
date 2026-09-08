@@ -12,6 +12,7 @@ import json
 import os
 from dataclasses import dataclass
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 
@@ -41,12 +42,19 @@ class VaultSecretProvider(SecretProvider):
 
     def get(self, name: str, *, required: bool = True) -> str | None:
         url = f"{self.address.rstrip('/')}/v1/{self.mount}/data/{self.path}"
+        scheme = urlparse(url).scheme.lower()
+        if scheme not in {"http", "https"}:
+            raise RuntimeError(
+                f"unsupported Vault URL scheme {scheme!r}; expected http or https"
+            )
         request = Request(
             url,
             headers={"X-Vault-Token": self.token, "Accept": "application/json"},
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            # URL scheme is explicitly allowlisted above; B310 is suppressed
+            # only for this constrained Vault HTTP(S) request.
+            with urlopen(request, timeout=self.timeout_seconds) as response:  # nosec B310
                 document = json.loads(response.read().decode("utf-8"))
             value = document.get("data", {}).get("data", {}).get(name)
         except (
