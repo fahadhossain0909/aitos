@@ -9,7 +9,6 @@ permissions:
 
 jobs:
   patch:
-    if: github.sha == '1edd45c7945106cda77627a10a294addabcd5863'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
