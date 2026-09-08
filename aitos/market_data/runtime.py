@@ -36,10 +36,12 @@ class CanonicalMarketDataRuntime:
         enable_orderbooks: bool = True,
         orderbook_symbols: list[str] | None = None,
         orderbook_fallback_levels: int = 100,
+        kline_symbols: list[str] | None = None,
+        enable_klines: bool = False,
     ) -> None:
         if stream_idle_timeout_seconds <= 0:
             raise ValueError("stream_idle_timeout_seconds must be positive")
-        if not enable_trades and not enable_orderbooks:
+        if not enable_trades and not enable_orderbooks and not enable_klines:
             raise ValueError("at least one market-data stream must be enabled")
         if orderbook_fallback_levels <= 0:
             raise ValueError("orderbook_fallback_levels must be positive")
@@ -55,6 +57,7 @@ class CanonicalMarketDataRuntime:
                 )
             )
         )
+        self.kline_symbols = list(dict.fromkeys(s.upper() for s in (kline_symbols or [])))[:5]
         self.orderbook_levels = max(20, orderbook_levels)
         self.orderbook_fallback_levels = max(
             20, min(orderbook_fallback_levels, self.orderbook_levels)
@@ -62,6 +65,7 @@ class CanonicalMarketDataRuntime:
         self.stream_idle_timeout_seconds = stream_idle_timeout_seconds
         self.enable_trades = enable_trades
         self.enable_orderbooks = enable_orderbooks
+        self.enable_klines = enable_klines
         self._tasks: list[asyncio.Task] = []
         self._drain_tasks: list[asyncio.Task] = []
         self._stopped = True
@@ -98,6 +102,7 @@ class CanonicalMarketDataRuntime:
                 )
             )
         self._start_orderbook_task()
+        self._start_kline_task()
         logger.info(
             "canonical market-data runtime started",
             extra={
@@ -106,10 +111,13 @@ class CanonicalMarketDataRuntime:
                     "market_type": self.adapter.market_type.value,
                     "trade_symbols": self.symbols,
                     "orderbook_symbols": self.orderbook_symbols,
+                    "kline_symbols": self.kline_symbols,
+                    "kline_timeframe": "5m",
                     "orderbook_levels": self.orderbook_levels,
                     "orderbook_fallback_levels": self.orderbook_fallback_levels,
                     "enable_trades": self.enable_trades,
                     "enable_orderbooks": self.enable_orderbooks,
+                    "enable_klines": self.enable_klines,
                     "stream_idle_timeout_seconds": self.stream_idle_timeout_seconds,
                     "gateway_drain_workers": GATEWAY_DRAIN_WORKERS,
                 }
@@ -130,6 +138,51 @@ class CanonicalMarketDataRuntime:
                 name="market-data-orderbook",
             )
         )
+
+    def _start_kline_task(self) -> None:
+        if not self.enable_klines or not self.kline_symbols:
+            return
+        self._tasks.append(
+            asyncio.create_task(
+                self._run(
+                    "klines",
+                    lambda: self.adapter.stream_klines(self.kline_symbols, "5m"),
+                ),
+                name="market-data-klines",
+            )
+        )
+
+    async def update_kline_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
+        """Hot-switch the bounded 5m kline socket to the exact staged Top-5."""
+        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[:5]
+        async with self._reconfigure_lock:
+            if normalized == self.kline_symbols:
+                return False
+            previous = self.kline_symbols
+            self.kline_symbols = normalized
+            if self._stopped:
+                return True
+            kline_tasks = [
+                task for task in self._tasks if task.get_name() == "market-data-klines"
+            ]
+            for task in kline_tasks:
+                task.cancel()
+            if kline_tasks:
+                await asyncio.gather(*kline_tasks, return_exceptions=True)
+            self._tasks = [task for task in self._tasks if task not in kline_tasks]
+            self._start_kline_task()
+            logger.info(
+                "live kline subscription reconfigured",
+                extra={
+                    "aitos_extra": {
+                        "stage": "kline_subscription_reconfigured",
+                        "previous_symbols": previous,
+                        "kline_symbols": normalized,
+                        "kline_timeframe": "5m",
+                    }
+                },
+            )
+            return True
 
     async def update_orderbook_symbols(
         self, symbols: list[str] | tuple[str, ...]
