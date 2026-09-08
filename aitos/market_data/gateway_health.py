@@ -32,6 +32,7 @@ class GatewayHealth:
     last_accepted_at: datetime | None = None
     last_published_at: datetime | None = None
     last_error: str | None = None
+    _idle_timeout_reconnect_pending: bool = field(default=False, repr=False)
     _updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def record_event(self, source_at: datetime | None = None) -> None:
@@ -71,6 +72,7 @@ class GatewayHealth:
 
     def record_idle_timeout(self, stream: str, timeout_seconds: float) -> None:
         self.stream_idle_timeouts += 1
+        self._idle_timeout_reconnect_pending = True
         self.record_error(
             "stream_idle",
             f"{stream} produced no canonical event for {timeout_seconds:.1f}s",
@@ -86,7 +88,17 @@ class GatewayHealth:
         self._updated_at = datetime.now(timezone.utc)
 
     def reconnect(self) -> None:
-        self.reconnect_count += 1
+        """Record one reconnect attempt.
+
+        The runtime's idle-timeout path marks the gateway reconnecting before
+        raising the timeout; its outer exception handler then marks it again.
+        Consume that timeout handoff here so one physical reconnect is counted
+        exactly once instead of twice.
+        """
+        if self._idle_timeout_reconnect_pending:
+            self._idle_timeout_reconnect_pending = False
+        else:
+            self.reconnect_count += 1
         self.connected = False
         self.degraded = True
         self._updated_at = datetime.now(timezone.utc)
