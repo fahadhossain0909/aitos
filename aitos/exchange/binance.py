@@ -450,6 +450,16 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                             yield payload, stream_name
             except asyncio.CancelledError:
                 raise
+            except StopAsyncIteration:
+                self._ws_transport.update(
+                    {
+                        "state": "closed",
+                        "last_close_at": _now_iso(),
+                        "last_close_code": getattr(ws, "close_code", None),
+                        "last_close_reason": getattr(ws, "close_reason", None),
+                    }
+                )
+                return
             except TimeoutError:
                 self._ws_transport.update(
                     {
