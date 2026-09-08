@@ -272,30 +272,18 @@ class DataIngestionService(_LegacyDataIngestionService):
         return await self._canonical_runtime.update_orderbook_symbols(symbols)
 
     async def initialize(self, config: dict[str, Any]) -> None:
-        # The legacy base class always starts a kline websocket for the full
-        # configured universe. Canonical mode deliberately does NOT use that
-        # feed: staged scanning obtains cheap klines via REST and canonical
-        # live sockets are reserved for the bounded trade/order-book cohorts.
-        # Suppress the legacy kline task before calling the base initializer so
-        # the broad websocket is never opened in canonical mode.
-        legacy_symbols = self._symbols
+        if self._initialized:
+            return
         if self._canonical_mode:
-            self._symbols = []
-        try:
+            # Do not invoke the legacy initializer: it unconditionally starts
+            # a full-universe kline websocket plus legacy persistence workers.
+            # Cheap scanner klines use bounded REST calls, while canonical live
+            # sockets are deliberately limited to the staged trade/book cohorts.
+            await self._exchange.connect()
+            self._initialized = True
+        else:
             await super().initialize(config)
-        finally:
-            self._symbols = legacy_symbols
         if self._canonical_runtime is not None:
-            legacy_workers = [
-                task
-                for task in self._tasks
-                if task.get_name().startswith("aitos-trade-persistence-")
-            ]
-            for task in legacy_workers:
-                task.cancel()
-            if legacy_workers:
-                await asyncio.gather(*legacy_workers, return_exceptions=True)
-            self._tasks = [task for task in self._tasks if task not in legacy_workers]
             if self._canonical_persistence is not None:
                 await self._canonical_persistence.initialize()
             await self._canonical_runtime.start()
