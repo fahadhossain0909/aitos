@@ -56,9 +56,15 @@ async def test_trade_stream_is_canonical():
 @pytest.mark.asyncio
 async def test_book_stream_is_canonical():
     adapter = BinanceCanonicalMarketDataAdapter(FakeExchange())
-    event = await anext(adapter.stream_order_books(["BTCUSDT"]))
-    assert event.event_type is MarketEventType.BOOK_SNAPSHOT
-    assert event.source is MarketSource.WEBSOCKET
+    stream = adapter.stream_order_books(["BTCUSDT"])
+
+    seed_event = await anext(stream)
+    assert seed_event.event_type is MarketEventType.BOOK_SNAPSHOT
+    assert seed_event.source is MarketSource.REST
+
+    live_event = await anext(stream)
+    assert live_event.event_type is MarketEventType.BOOK_SNAPSHOT
+    assert live_event.source is MarketSource.WEBSOCKET
 
 
 @pytest.mark.asyncio
