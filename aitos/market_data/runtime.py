@@ -57,7 +57,9 @@ class CanonicalMarketDataRuntime:
                 )
             )
         )
-        self.kline_symbols = list(dict.fromkeys(s.upper() for s in (kline_symbols or [])))[:5]
+        self.kline_symbols = list(
+            dict.fromkeys(s.upper() for s in (kline_symbols or []))
+        )[:5]
         self.orderbook_levels = max(20, orderbook_levels)
         self.orderbook_fallback_levels = max(
             20, min(orderbook_fallback_levels, self.orderbook_levels)
