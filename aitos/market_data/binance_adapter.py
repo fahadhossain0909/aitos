@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
@@ -50,71 +49,25 @@ class BinanceCanonicalMarketDataAdapter:
         )
 
     async def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
-        """Stream trades plus a bounded 5-minute kline cohort.
+        """Stream only the requested trade cohort.
 
-        The caller supplies the scanner's live trade cohort (Top-50 after
-        staging). The first five symbols are therefore the ranked Top-5 cohort
-        and are the only symbols subscribed to the live kline feed. This keeps
-        kline websocket pressure bounded while preserving live trade coverage.
+        K-lines are deliberately a separate bounded stream so the staged
+        scanner can hot-switch the exact Top-5 without restarting the Top-50
+        trade feed or coupling the two socket workloads.
         """
-        trade_stream = self.exchange.stream_trades(symbols).__aiter__()
-        kline_symbols = list(dict.fromkeys(s.upper() for s in symbols))[
-            :KLINE_SYMBOL_LIMIT
-        ]
-        kline_stream = (
-            self.exchange.stream_klines(kline_symbols, KLINE_TIMEFRAME).__aiter__()
-            if kline_symbols
-            else None
-        )
-        tasks: dict[asyncio.Task, str] = {
-            asyncio.create_task(trade_stream.__anext__()): "trade"
-        }
-        if kline_stream is not None:
-            tasks[asyncio.create_task(kline_stream.__anext__())] = "kline"
-
-        try:
-            while tasks:
-                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-                for task in done:
-                    stream_kind = tasks.pop(task)
-                    try:
-                        item = task.result()
-                    except StopAsyncIteration:
-                        continue
-                    if stream_kind == "trade":
-                        tasks[asyncio.create_task(trade_stream.__anext__())] = "trade"
-                        yield trade_event(
-                            item,
-                            market_type=self.market_type,
-                            source=MarketSource.WEBSOCKET,
-                        )
-                    else:
-                        tasks[asyncio.create_task(kline_stream.__anext__())] = "kline"  # type: ignore[union-attr]
-                        yield kline_event(
-                            item,
-                            market_type=self.market_type,
-                            source=MarketSource.WEBSOCKET,
-                        )
-        finally:
-            for task in tasks:
-                task.cancel()
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-            for stream in (trade_stream, kline_stream):
-                if stream is not None and hasattr(stream, "aclose"):
-                    try:
-                        await stream.aclose()
-                    except Exception:
-                        pass
+        async for trade in self.exchange.stream_trades(symbols):
+            yield trade_event(
+                trade,
+                market_type=self.market_type,
+                source=MarketSource.WEBSOCKET,
+            )
 
     async def stream_klines(
         self, symbols: list[str], timeframe: str = KLINE_TIMEFRAME
     ) -> AsyncIterator[MarketEvent]:
-        """Stream normalized Binance klines for a bounded symbol set."""
-        async for kline in self.exchange.stream_klines(
-            list(dict.fromkeys(s.upper() for s in symbols))[:KLINE_SYMBOL_LIMIT],
-            timeframe,
-        ):
+        """Stream normalized 5-minute Binance klines for at most five symbols."""
+        bounded = list(dict.fromkeys(s.upper() for s in symbols))[:KLINE_SYMBOL_LIMIT]
+        async for kline in self.exchange.stream_klines(bounded, timeframe):
             yield kline_event(
                 kline,
                 market_type=self.market_type,
