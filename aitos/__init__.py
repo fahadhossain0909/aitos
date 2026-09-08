@@ -23,7 +23,7 @@ if not hasattr(asyncio, "timeout"):
             self._handle: asyncio.TimerHandle | None = None
             self._expired = False
 
-        async def __aenter__(self) -> "_CompatTimeout":
+        async def __aenter__(self) -> _CompatTimeout:
             loop = asyncio.get_running_loop()
             self._task = asyncio.current_task()
             self._handle = loop.call_later(self._delay, self._cancel_task)
