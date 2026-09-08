@@ -160,9 +160,9 @@ class CanonicalMarketDataRuntime:
 
     async def update_kline_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
         """Hot-switch the bounded 1m kline socket to the exact staged Top-5."""
-        normalized = list(
-            dict.fromkeys(s.upper() for s in symbols if s)
-        )[:KLINE_SYMBOL_LIMIT]
+        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[
+            :KLINE_SYMBOL_LIMIT
+        ]
         async with self._reconfigure_lock:
             if normalized == self.kline_symbols:
                 return False
