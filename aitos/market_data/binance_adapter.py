@@ -54,7 +54,11 @@ class BinanceCanonicalMarketDataAdapter:
         requested = list(dict.fromkeys(s.upper() for s in symbols if s))
         if not requested:
             return []
-        missing = [s for s in requested if self._valid_symbol_cache is None or s not in self._valid_symbol_cache]
+        missing = [
+            s
+            for s in requested
+            if self._valid_symbol_cache is None or s not in self._valid_symbol_cache
+        ]
         if self._valid_symbol_cache is None or missing:
             try:
                 filters = await self.exchange.fetch_exchange_info(None)
@@ -62,7 +66,9 @@ class BinanceCanonicalMarketDataAdapter:
                 return []
             self._valid_symbol_cache = set(filters)
         valid = [s for s in requested if s in (self._valid_symbol_cache or set())]
-        rejected = [s for s in requested if s not in (self._valid_symbol_cache or set())]
+        rejected = [
+            s for s in requested if s not in (self._valid_symbol_cache or set())
+        ]
         if rejected:
             from aitos.logging_setup import get_logger
 
