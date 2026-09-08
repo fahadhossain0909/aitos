@@ -33,6 +33,8 @@ LIVE_ORDERBOOK_LEVELS = 1000
 LIVE_ORDERBOOK_FALLBACK_LEVELS = 100
 LIVE_DEEP_ANCHOR = "BTCUSDT"
 LIVE_DEEP_NON_BTC = 2
+LIVE_KLINE_SYMBOLS = 5
+LIVE_KLINE_TIMEFRAME = "5m"
 
 
 def _configured_positive_int(name: str, default: int) -> int:
@@ -101,6 +103,7 @@ class DataIngestionService(_LegacyDataIngestionService):
         self._staged_scanner_installed = False
         self._staged_scanner_install_task: asyncio.Task | None = None
         self._live_trade_symbols: list[str] = []
+        self._live_kline_symbols: list[str] = []
         if self._canonical_mode:
             market_type = str(getattr(self._exchange, "market_type", "usd_m_futures"))
             market_bus = MarketDataBus(self._event_bus)
@@ -135,6 +138,8 @@ class DataIngestionService(_LegacyDataIngestionService):
                 orderbook_symbols=initial_orderbooks,
                 orderbook_levels=live_orderbook_levels,
                 orderbook_fallback_levels=live_orderbook_fallback,
+                kline_symbols=[],
+                enable_klines=True,
             )
             self._canonical_persistence = CanonicalMarketDataPersistenceSink(
                 self._event_bus,
@@ -180,6 +185,8 @@ class DataIngestionService(_LegacyDataIngestionService):
         async def on_stage(symbols: list[str], stage: str) -> None:
             if stage == "TOP_50":
                 await ingestion.update_live_trade_symbols(symbols)
+            elif stage == "TOP_5":
+                await ingestion.update_live_kline_symbols(symbols)
             elif stage == "TOP_2":
                 await ingestion.update_live_deep_orderbooks(symbols)
             logger.info(
@@ -255,6 +262,18 @@ class DataIngestionService(_LegacyDataIngestionService):
             )
             return True
 
+    async def update_live_kline_symbols(
+        self, symbols: list[str] | tuple[str, ...]
+    ) -> bool:
+        """Hot-switch the exact staged Top-5 onto the 5-minute K-line socket."""
+        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[:LIVE_KLINE_SYMBOLS]
+        if self._canonical_runtime is None:
+            return False
+        changed = await self._canonical_runtime.update_kline_symbols(normalized)
+        if changed:
+            self._live_kline_symbols = normalized
+        return changed
+
     async def update_live_deep_orderbooks(
         self, ranked_non_btc_symbols: list[str] | tuple[str, ...]
     ) -> bool:
@@ -278,7 +297,8 @@ class DataIngestionService(_LegacyDataIngestionService):
             # Do not invoke the legacy initializer: it unconditionally starts
             # a full-universe kline websocket plus legacy persistence workers.
             # Cheap scanner klines use bounded REST calls, while canonical live
-            # sockets are deliberately limited to the staged trade/book cohorts.
+            # sockets are deliberately limited to the staged trade/book cohorts
+            # and the exact Top-5 5-minute kline cohort.
             await self._exchange.connect()
             self._initialized = True
         else:
@@ -326,6 +346,8 @@ class DataIngestionService(_LegacyDataIngestionService):
                 "market_data.gateway.health"
             )
             status.details["live_trade_symbols"] = list(self._live_trade_symbols)
+            status.details["live_kline_symbols"] = list(self._live_kline_symbols)
+            status.details["live_kline_timeframe"] = LIVE_KLINE_TIMEFRAME
             status.details["live_deep_orderbook_symbols"] = list(
                 self._canonical_runtime.orderbook_symbols
             )
