@@ -58,7 +58,9 @@ class BinanceCanonicalMarketDataAdapter:
         kline websocket pressure bounded while preserving live trade coverage.
         """
         trade_stream = self.exchange.stream_trades(symbols).__aiter__()
-        kline_symbols = list(dict.fromkeys(s.upper() for s in symbols))[:KLINE_SYMBOL_LIMIT]
+        kline_symbols = list(dict.fromkeys(s.upper() for s in symbols))[
+            :KLINE_SYMBOL_LIMIT
+        ]
         kline_stream = (
             self.exchange.stream_klines(kline_symbols, KLINE_TIMEFRAME).__aiter__()
             if kline_symbols
@@ -72,9 +74,7 @@ class BinanceCanonicalMarketDataAdapter:
 
         try:
             while tasks:
-                done, _ = await asyncio.wait(
-                    tasks, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
                     stream_kind = tasks.pop(task)
                     try:
