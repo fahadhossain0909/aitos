@@ -171,7 +171,9 @@ async def main() -> None:
     await experience_recorder.initialize({})
     health_server = HealthServer(
         components.all_modules() + [experience_recorder, market_os_persistence],
-        host="0.0.0.0",
+        # The health endpoint is intentionally container/network reachable.
+        # nosec B104 - binding all interfaces is required for the Docker health check.
+        host="0.0.0.0",  # nosec B104
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
