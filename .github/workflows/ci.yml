@@ -56,7 +56,7 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.10', '3.11', '3.12']
-    timeout-minutes: 45
+    timeout-minutes: 15
     env:
       CLICKHOUSE_HOST: localhost
       CLICKHOUSE_PORT: '8123'
@@ -130,7 +130,7 @@ jobs:
       - name: Run unit and integration tests with coverage
         env:
           PYTHONPATH: .
-        run: pytest --cov=. --cov-report=xml --cov-report=html --junitxml=junit/test-results-${{ matrix.python-version }}.xml -v
+        run: pytest --timeout=120 --cov=. --cov-report=xml --cov-report=html --junitxml=junit/test-results-${{ matrix.python-version }}.xml -v
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7.0.0
         with:
