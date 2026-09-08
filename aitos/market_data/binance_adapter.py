@@ -16,7 +16,7 @@ from .legacy_bridge import (
 )
 from .venues import MarketType, Venue, VenueCapabilities
 
-KLINE_TIMEFRAME = "5m"
+KLINE_TIMEFRAME = "1m"
 KLINE_SYMBOL_LIMIT = 5
 
 
@@ -65,7 +65,7 @@ class BinanceCanonicalMarketDataAdapter:
     async def stream_klines(
         self, symbols: list[str], timeframe: str = KLINE_TIMEFRAME
     ) -> AsyncIterator[MarketEvent]:
-        """Stream normalized 5-minute Binance klines for at most five symbols."""
+        """Stream normalized 1-minute Binance klines for at most five symbols."""
         bounded = list(dict.fromkeys(s.upper() for s in symbols))[:KLINE_SYMBOL_LIMIT]
         async for kline in self.exchange.stream_klines(bounded, timeframe):
             yield kline_event(
