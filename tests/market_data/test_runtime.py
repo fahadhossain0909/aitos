@@ -99,3 +99,28 @@ async def test_runtime_restarts_streams_after_unexpected_end():
 
 @pytest.mark.asyncio
 async def test_runtime_hot_switches_orderbook_symbols():
+    adapter = FakeAdapter()
+    gateway = MarketDataGateway(
+        venue="binance",
+        market_type="usd_m_futures",
+        publisher=NoopBus().publish,
+    )
+    runtime = CanonicalMarketDataRuntime(
+        adapter=adapter,
+        market_bus=NoopBus(),
+        gateway=gateway,
+        symbols=["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+        orderbook_symbols=["BTCUSDT"],
+    )
+
+    await runtime.start()
+    await asyncio.sleep(0.05)
+    changed = await runtime.update_orderbook_symbols(["BTCUSDT", "ETHUSDT", "SOLUSDT"])
+    await asyncio.sleep(0.05)
+    await runtime.stop()
+
+    assert changed is True
+    assert runtime.orderbook_symbols == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+    assert adapter.book_starts >= 2
+    assert adapter.book_symbols[0] == ["BTCUSDT"]
+    assert adapter.book_symbols[-1] == ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
