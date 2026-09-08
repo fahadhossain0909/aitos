@@ -19,6 +19,8 @@ PUBLISH_RETRY_DELAY_SECONDS = 0.05
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
 GATEWAY_DRAIN_WORKERS = 1
 DEPTH_PRESSURE_THRESHOLD = 100
+KLINE_TIMEFRAME = "1m"
+KLINE_SYMBOL_LIMIT = 5
 
 
 class CanonicalMarketDataRuntime:
@@ -59,7 +61,7 @@ class CanonicalMarketDataRuntime:
         )
         self.kline_symbols = list(
             dict.fromkeys(s.upper() for s in (kline_symbols or []))
-        )[:5]
+        )[:KLINE_SYMBOL_LIMIT]
         self.orderbook_levels = max(20, orderbook_levels)
         self.orderbook_fallback_levels = max(
             20, min(orderbook_fallback_levels, self.orderbook_levels)
@@ -114,7 +116,7 @@ class CanonicalMarketDataRuntime:
                     "trade_symbols": self.symbols,
                     "orderbook_symbols": self.orderbook_symbols,
                     "kline_symbols": self.kline_symbols,
-                    "kline_timeframe": "5m",
+                    "kline_timeframe": KLINE_TIMEFRAME,
                     "orderbook_levels": self.orderbook_levels,
                     "orderbook_fallback_levels": self.orderbook_fallback_levels,
                     "enable_trades": self.enable_trades,
@@ -148,15 +150,19 @@ class CanonicalMarketDataRuntime:
             asyncio.create_task(
                 self._run(
                     "klines",
-                    lambda: self.adapter.stream_klines(self.kline_symbols, "5m"),
+                    lambda: self.adapter.stream_klines(
+                        self.kline_symbols, KLINE_TIMEFRAME
+                    ),
                 ),
                 name="market-data-klines",
             )
         )
 
     async def update_kline_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
-        """Hot-switch the bounded 5m kline socket to the exact staged Top-5."""
-        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[:5]
+        """Hot-switch the bounded 1m kline socket to the exact staged Top-5."""
+        normalized = list(
+            dict.fromkeys(s.upper() for s in symbols if s)
+        )[:KLINE_SYMBOL_LIMIT]
         async with self._reconfigure_lock:
             if normalized == self.kline_symbols:
                 return False
@@ -180,7 +186,7 @@ class CanonicalMarketDataRuntime:
                         "stage": "kline_subscription_reconfigured",
                         "previous_symbols": previous,
                         "kline_symbols": normalized,
-                        "kline_timeframe": "5m",
+                        "kline_timeframe": KLINE_TIMEFRAME,
                     }
                 },
             )
