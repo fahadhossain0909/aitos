@@ -266,7 +266,9 @@ class DataIngestionService(_LegacyDataIngestionService):
         self, symbols: list[str] | tuple[str, ...]
     ) -> bool:
         """Hot-switch the exact staged Top-5 onto the 5-minute K-line socket."""
-        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[:LIVE_KLINE_SYMBOLS]
+        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[
+            :LIVE_KLINE_SYMBOLS
+        ]
         if self._canonical_runtime is None:
             return False
         changed = await self._canonical_runtime.update_kline_symbols(normalized)
