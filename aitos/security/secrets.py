@@ -54,7 +54,9 @@ class VaultSecretProvider(SecretProvider):
         try:
             # URL scheme is explicitly allowlisted above; B310 is suppressed
             # only for this constrained Vault HTTP(S) request.
-            with urlopen(request, timeout=self.timeout_seconds) as response:  # nosec B310
+            with urlopen(
+                request, timeout=self.timeout_seconds
+            ) as response:  # nosec B310
                 document = json.loads(response.read().decode("utf-8"))
             value = document.get("data", {}).get("data", {}).get(name)
         except (
