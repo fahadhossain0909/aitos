@@ -73,11 +73,7 @@ jobs:
         image: redis:7.2-alpine
         ports:
           - 6379:6379
-        options: >-
-          --health-cmd "redis-cli --no-auth-warning -a ci-only-not-used ping | grep -q PONG"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
+        options: '--health-cmd "redis-cli --no-auth-warning -a ci-only-not-used ping | grep -q PONG" --health-interval 5s --health-timeout 3s --health-retries 20'
         command: ["redis-server", "--requirepass", "ci-only-not-used"]
       clickhouse:
         image: clickhouse/clickhouse-server:24.12-alpine
@@ -86,11 +82,7 @@ jobs:
           CLICKHOUSE_PASSWORD: aitos_test_password
         ports:
           - 8123:8123
-        options: >-
-          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 20
+        options: '--health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1" --health-interval 5s --health-timeout 3s --health-retries 20'
       neo4j:
         image: neo4j:5.19-community
         env:
@@ -98,11 +90,7 @@ jobs:
         ports:
           - 7687:7687
           - 7474:7474
-        options: >-
-          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:7474 || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 30
+        options: '--health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:7474 || exit 1" --health-interval 10s --health-timeout 5s --health-retries 30'
     steps:
       - name: Check out repository
         uses: actions/checkout@v7.0.1
