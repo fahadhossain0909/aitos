@@ -22,7 +22,7 @@ jobs:
         uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
       - name: Install formatting tools
         run: python -m pip install --upgrade pip black==25.12.0
       - name: Check Black formatting
@@ -39,8 +39,8 @@ jobs:
         uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.11'
-          cache: 'pip'
-      - name: Install dependencies
+          cache: pip
+      - name: Install lint tools
         run: |
           python -m pip install --upgrade pip
           pip install flake8 black==25.12.0 pylint
@@ -74,7 +74,7 @@ jobs:
         ports:
           - 6379:6379
         options: '--health-cmd "redis-cli --no-auth-warning -a ci-only-not-used ping | grep -q PONG" --health-interval 5s --health-timeout 3s --health-retries 20'
-        command: ["redis-server", "--requirepass", "ci-only-not-used"]
+        command: redis-server --requirepass ci-only-not-used
       clickhouse:
         image: clickhouse/clickhouse-server:24.12-alpine
         env:
@@ -98,7 +98,7 @@ jobs:
         uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'pip'
+          cache: pip
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -112,7 +112,7 @@ jobs:
             sleep 1
           done
           curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" 'http://127.0.0.1:8123/' --data-binary 'CREATE DATABASE IF NOT EXISTS aitos'
-      - name: Create .env file from secrets for tests
+      - name: Create .env file for tests
         run: |
           cat > .env << EOF
           DATABASE_URL=${{ secrets.DATABASE_URL }}
@@ -156,7 +156,7 @@ jobs:
         uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.11'
-          cache: 'pip'
+          cache: pip
       - name: Install security tools
         run: |
           python -m pip install --upgrade pip
@@ -188,7 +188,7 @@ jobs:
         run: docker compose config >/dev/null
       - name: Lowercase repository name
         id: repo
-        run: echo "repo=${GITHUB_REPOSITORY,,}" >> $GITHUB_OUTPUT
+        run: echo "repo=${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4.2.0
       - name: Build Docker image
@@ -218,10 +218,10 @@ jobs:
              [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.security.result }}" != "success" ] || \
              [ "${{ needs.docker-validate.result }}" != "success" ]; then
-            echo "❌ CI failed"
+            echo "CI failed"
             exit 1
           fi
-          echo "✅ CI passed"
+          echo "CI passed"
       - name: Comment on PR
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v9.0.0
@@ -231,5 +231,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `✅ **CI Pipeline passed**\n\n| Step | Status |\n|------|--------|\n| Formatting | ${{ needs.format.result }} |\n| Linting | ${{ needs.lint.result }} |\n| Tests | ${{ needs.test.result }} |\n| Security | ${{ needs.security.result }} |\n| Docker | ${{ needs.docker-validate.result }} |`
+              body: `CI Pipeline passed\n\n| Step | Status |\n|------|--------|\n| Formatting | ${{ needs.format.result }} |\n| Linting | ${{ needs.lint.result }} |\n| Tests | ${{ needs.test.result }} |\n| Security | ${{ needs.security.result }} |\n| Docker | ${{ needs.docker-validate.result }} |`
             })
