@@ -28,6 +28,10 @@ class CanonicalMarketDataAdapter(Protocol):
 
     def stream_trades(self, symbols: list[str]) -> AsyncIterator[MarketEvent]: ...
 
+    def stream_klines(
+        self, symbols: list[str], timeframe: str
+    ) -> AsyncIterator[MarketEvent]: ...
+
     def stream_order_books(
         self, symbols: list[str], levels: int
     ) -> AsyncIterator[MarketEvent]: ...
