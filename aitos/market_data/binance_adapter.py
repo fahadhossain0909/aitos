@@ -28,6 +28,7 @@ class BinanceCanonicalMarketDataAdapter:
     ) -> None:
         self.exchange = exchange
         self._market_type = MarketType(market_type)
+        self._valid_symbol_cache: set[str] | None = None
 
     @property
     def venue(self) -> Venue:
@@ -53,12 +54,15 @@ class BinanceCanonicalMarketDataAdapter:
         requested = list(dict.fromkeys(s.upper() for s in symbols if s))
         if not requested:
             return []
-        try:
-            filters = await self.exchange.fetch_exchange_info(requested)
-        except Exception:
-            return []
-        valid = [s for s in requested if s in filters]
-        rejected = [s for s in requested if s not in filters]
+        missing = [s for s in requested if self._valid_symbol_cache is None or s not in self._valid_symbol_cache]
+        if self._valid_symbol_cache is None or missing:
+            try:
+                filters = await self.exchange.fetch_exchange_info(None)
+            except Exception:
+                return []
+            self._valid_symbol_cache = set(filters)
+        valid = [s for s in requested if s in (self._valid_symbol_cache or set())]
+        rejected = [s for s in requested if s not in (self._valid_symbol_cache or set())]
         if rejected:
             from aitos.logging_setup import get_logger
 
