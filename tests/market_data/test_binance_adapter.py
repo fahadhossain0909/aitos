@@ -8,6 +8,9 @@ from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
 class FakeExchange:
+    async def fetch_exchange_info(self, symbols=None):
+        return ["BTCUSDT"]
+
     async def stream_trades(self, symbols):
         yield TradeTick(
             symbol=symbols[0],
