@@ -50,9 +50,9 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
     """Real producers for ticker/funding/liquidation and REST-polled OI/instruments."""
 
     async def stream_tickers(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
-        bounded = list(dict.fromkeys(s.upper() for s in symbols if s))[
-            :TOP_SYMBOL_LIMIT
-        ]
+        bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
+        if not bounded:
+            return
         streams = [f"{s.lower()}@ticker" for s in bounded]
         async for data, stream_name in self.exchange._raw_stream(
             streams, emit_reconnect=True
@@ -61,9 +61,9 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
             yield _event(MarketEventType.TICKER, symbol, dict(data), _dt(data.get("E")))
 
     async def stream_funding(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
-        bounded = list(dict.fromkeys(s.upper() for s in symbols if s))[
-            :TOP_SYMBOL_LIMIT
-        ]
+        bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
+        if not bounded:
+            return
         streams = [f"{s.lower()}@markPrice@1s" for s in bounded]
         async for data, stream_name in self.exchange._raw_stream(
             streams, emit_reconnect=True
@@ -109,9 +109,7 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
     async def stream_open_interest(
         self, symbols: list[str]
     ) -> AsyncIterator[MarketEvent]:
-        bounded = list(dict.fromkeys(s.upper() for s in symbols if s))[
-            :TOP_SYMBOL_LIMIT
-        ]
+        bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
         while True:
             for symbol in bounded:
                 try:
@@ -135,7 +133,7 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
     async def stream_instruments(
         self, symbols: list[str]
     ) -> AsyncIterator[MarketEvent]:
-        requested = list(dict.fromkeys(s.upper() for s in symbols if s))
+        requested = await self._valid_symbols(symbols)
         while True:
             try:
                 filters = await self.exchange.fetch_exchange_info(requested or None)
