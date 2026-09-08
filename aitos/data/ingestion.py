@@ -34,7 +34,7 @@ LIVE_ORDERBOOK_FALLBACK_LEVELS = 100
 LIVE_DEEP_ANCHOR = "BTCUSDT"
 LIVE_DEEP_NON_BTC = 2
 LIVE_KLINE_SYMBOLS = 5
-LIVE_KLINE_TIMEFRAME = "5m"
+LIVE_KLINE_TIMEFRAME = "1m"
 
 
 def _configured_positive_int(name: str, default: int) -> int:
@@ -265,7 +265,7 @@ class DataIngestionService(_LegacyDataIngestionService):
     async def update_live_kline_symbols(
         self, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        """Hot-switch the exact staged Top-5 onto the 5-minute K-line socket."""
+        """Hot-switch the exact staged Top-5 onto the 1-minute K-line socket."""
         normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[
             :LIVE_KLINE_SYMBOLS
         ]
@@ -300,7 +300,7 @@ class DataIngestionService(_LegacyDataIngestionService):
             # a full-universe kline websocket plus legacy persistence workers.
             # Cheap scanner klines use bounded REST calls, while canonical live
             # sockets are deliberately limited to the staged trade/book cohorts
-            # and the exact Top-5 5-minute kline cohort.
+            # and the exact Top-5 1-minute kline cohort.
             await self._exchange.connect()
             self._initialized = True
         else:
