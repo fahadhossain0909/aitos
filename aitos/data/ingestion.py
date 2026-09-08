@@ -272,7 +272,19 @@ class DataIngestionService(_LegacyDataIngestionService):
         return await self._canonical_runtime.update_orderbook_symbols(symbols)
 
     async def initialize(self, config: dict[str, Any]) -> None:
-        await super().initialize(config)
+        # The legacy base class always starts a kline websocket for the full
+        # configured universe. Canonical mode deliberately does NOT use that
+        # feed: staged scanning obtains cheap klines via REST and canonical
+        # live sockets are reserved for the bounded trade/order-book cohorts.
+        # Suppress the legacy kline task before calling the base initializer so
+        # the broad websocket is never opened in canonical mode.
+        legacy_symbols = self._symbols
+        if self._canonical_mode:
+            self._symbols = []
+        try:
+            await super().initialize(config)
+        finally:
+            self._symbols = legacy_symbols
         if self._canonical_runtime is not None:
             legacy_workers = [
                 task
