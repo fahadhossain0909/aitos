@@ -30,9 +30,6 @@ for c in "$REDIS_CONTAINER" "$PAPER_CONTAINER"; do
   docker inspect "$c" >/dev/null 2>&1 || { echo "BLOCKER: missing container: $c" >> "$REPORT"; exit 1; }
 done
 
-# Capture health through a file/stdin pipeline. Never place the complete JSON
-# response in an environment variable: large /health payloads can exceed
-# execve() ARG_MAX and cause "Argument list too long".
 end=$(( $(date +%s) + WINDOW_SECONDS ))
 while [ "$(date +%s)" -lt "$end" ]; do
   ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -58,25 +55,18 @@ except Exception as exc:
   sleep "$INTERVAL_SECONDS"
 done
 
-# Capture stream metadata and consumer groups after the observation window.
 for key in stream:market.trade stream:market.book.snapshot stream:market.book.delta stream:market.ticker stream:market.kline stream:market.funding stream:market.open_interest stream:market.liquidation stream:market.instrument; do
   if [ "$(redis EXISTS "$key" 2>/dev/null || echo 0)" = 1 ]; then
-    {
-      echo "### $key"
-      redis XINFO STREAM "$key" || true
-    } >> "$STREAM_INFO"
+    { echo "### $key"; redis XINFO STREAM "$key" || true; } >> "$STREAM_INFO"
   fi
 done
 for key in stream:market.trade stream:market.book.snapshot stream:market.book.delta stream:market.ticker stream:market.kline stream:market.funding stream:market.open_interest stream:market.liquidation stream:market.instrument; do
   if [ "$(redis EXISTS "$key" 2>/dev/null || echo 0)" = 1 ]; then
-    {
-      echo "### $key"
-      redis XINFO GROUPS "$key" || true
-    } >> "$GROUP_INFO"
+    { echo "### $key"; redis XINFO GROUPS "$key" || true; } >> "$GROUP_INFO"
   fi
 done
 
-SAMPLES="$SAMPLES" STREAM_LENGTHS="$STREAM_LENGTHS" REDIS_CONTAINER="$REDIS_CONTAINER" REPORT="$REPORT" JSON="$JSON" STREAM_INFO="$STREAM_INFO" GROUP_INFO="$GROUP_INFO" python3 <<'PY'
+SAMPLES="$SAMPLES" STREAM_LENGTHS="$STREAM_LENGTHS" REDIS_CONTAINER="$REDIS_CONTAINER" REPORT="$REPORT" JSON="$JSON" python3 <<'PY'
 import json
 import os
 import subprocess
@@ -130,8 +120,6 @@ checks = []
 def add(name, status, evidence):
     checks.append({"name": name, "status": status, "evidence": evidence})
 
-# Observability checks are separate from data-path checks. Missing telemetry is
-# a real finding, but it must not hide the Redis evidence collected below.
 if ingestion:
     add("data-ingestion health exposed", "PASS", "data-ingestion-service module found")
 else:
@@ -158,9 +146,10 @@ if canonical:
 else:
     add("canonical websocket telemetry exposed", "FAIL", "canonical_market_data missing from /health")
 
-# Redis stream growth is evidence, not a simplistic PASS/FAIL based only on
-# XLEN increasing. A shrinking stream is explicitly marked suspicious because
-# valid MAXLEN trimming can also reduce XLEN.
+# A bounded Redis stream can remain at the same XLEN while new entries are
+# continuously appended and old entries are trimmed. Therefore delta == 0 is
+# inconclusive, not a dead-stream failure. Consumer-group lag/PENDING and the
+# transport/publish counters are the actual liveness evidence.
 summary = {}
 for key, vals in streams.items():
     first = vals[0][1]
@@ -171,12 +160,11 @@ for key, vals in streams.items():
     elif delta < 0:
         status = "WARN"
     else:
-        status = "FAIL"
+        status = "WARN"
     summary[key] = {"first_xlen": first, "last_xlen": last_value, "delta": delta, "samples": len(vals)}
     add(f"{key} growth", status, summary[key])
 
-# Read consumer groups as structured data directly from redis-cli so the
-# report records lag/pending even when stream length did not grow.
+
 def rc(*args):
     try:
         return subprocess.check_output(
@@ -239,9 +227,6 @@ with open(os.environ["REPORT"], "a", encoding="utf-8") as fh:
     fh.write("\n```\n")
     fh.write("\n## Evidence files\n\n- `health_raw.jsonl` — raw /health payloads\n- `stream_info.txt` — Redis XINFO STREAM metadata\n- `consumer_groups.txt` — Redis XINFO GROUPS metadata\n")
 
-# Only hard-fail when the collector itself could not collect samples. Data-path
-# findings remain in the report so a forensic run does not destroy evidence by
-# failing early on a schema/telemetry mismatch.
 if not samples:
     raise SystemExit("FAIL: no health samples collected")
 PY
