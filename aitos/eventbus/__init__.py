@@ -4,9 +4,7 @@ from aitos.forensics.market_data_attribution import install_eventbus_attribution
 from aitos.forensics.pipeline_stage_telemetry import (
     install as install_pipeline_stage_telemetry,
 )
-from aitos.forensics.root_cause_telemetry import (
-    install as install_root_cause_telemetry,
-)
+from aitos.forensics.root_cause_telemetry import install as install_root_cause_telemetry
 from aitos.forensics.safe_market_data_telemetry import (
     install as install_safe_market_data_telemetry,
 )
