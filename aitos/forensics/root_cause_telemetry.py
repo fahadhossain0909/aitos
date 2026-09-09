@@ -1,0 +1,304 @@
+"""Root-cause telemetry for the canonical market-data pipeline.
+
+Observational only: this module does not change queueing, retry, ordering, or
+freshness policy. It measures the boundaries needed to distinguish Redis
+latency, ClickHouse latency, persistence backlog, event-loop starvation, and
+WebSocket watchdog reconnects.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from collections import defaultdict, deque
+from functools import wraps
+from typing import Any
+
+_INSTALLED = False
+_LOGGER_NAME = "aitos.forensics.root_cause"
+
+
+def _logger():
+    from aitos.logging_setup import get_logger
+
+    return get_logger(_LOGGER_NAME)
+
+
+def _bucket() -> dict[str, Any]:
+    return {
+        "count": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0,
+        "min_ms": None,
+        "slow_over_100ms": 0,
+        "slow_over_1000ms": 0,
+    }
+
+
+def _record(stats: dict[str, Any], elapsed_ms: float) -> None:
+    stats["count"] += 1
+    stats["total_ms"] += elapsed_ms
+    stats["max_ms"] = max(stats["max_ms"], elapsed_ms)
+    stats["min_ms"] = elapsed_ms if stats["min_ms"] is None else min(stats["min_ms"], elapsed_ms)
+    if elapsed_ms >= 100:
+        stats["slow_over_100ms"] += 1
+    if elapsed_ms >= 1000:
+        stats["slow_over_1000ms"] += 1
+
+
+def _format(stats: dict[str, Any]) -> dict[str, Any]:
+    out = dict(stats)
+    count = int(out.get("count", 0))
+    out["avg_ms"] = round(float(out.get("total_ms", 0.0)) / count, 3) if count else 0.0
+    out["total_ms"] = round(float(out.get("total_ms", 0.0)), 3)
+    out["max_ms"] = round(float(out.get("max_ms", 0.0)), 3)
+    if out.get("min_ms") is not None:
+        out["min_ms"] = round(float(out["min_ms"]), 3)
+    return out
+
+
+def install() -> None:
+    """Install once at import time; failures are isolated from application startup."""
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+    _install_gateway()
+    _install_repository()
+    _install_persistence_sink()
+
+
+def _install_gateway() -> None:
+    try:
+        from aitos.market_data.gateway import MarketDataGateway
+    except Exception:
+        return
+    cls = MarketDataGateway
+    if getattr(cls, "_root_cause_telemetry_installed", False):
+        return
+    cls._root_cause_telemetry_installed = True
+    original_init = cls.__init__
+    original_accept = cls.accept_async
+    original_drain = cls.drain_once
+    original_snapshot = cls.snapshot
+
+    @wraps(original_init)
+    def init(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        self._root_cause_publish_stats = defaultdict(_bucket)
+        self._root_cause_drain_stats = _bucket()
+        self._root_cause_recent = deque(maxlen=100)
+        self._root_cause_last_accept_monotonic = None
+        self._root_cause_idle_timeout_samples = 0
+
+    async def accept_async(self: Any, event: Any) -> bool:
+        accepted = await original_accept(self, event)
+        now = time.monotonic()
+        previous = getattr(self, "_root_cause_last_accept_monotonic", None)
+        if previous is not None:
+            gap_ms = max(0.0, (now - previous) * 1000)
+            if gap_ms >= 1000:
+                self._root_cause_recent.append(
+                    {
+                        "stage": "gateway_receive_gap",
+                        "gap_ms": round(gap_ms, 3),
+                        "event_type": getattr(getattr(event, "event_type", None), "value", None),
+                        "symbol": getattr(event, "symbol", None),
+                        "at_ms": round(time.time() * 1000, 3),
+                    }
+                )
+        if accepted:
+            self._root_cause_last_accept_monotonic = now
+        return accepted
+
+    async def drain_once(self: Any) -> bool:
+        started = time.perf_counter()
+        queue_before = self.queue.qsize()
+        try:
+            return await original_drain(self)
+        finally:
+            elapsed = (time.perf_counter() - started) * 1000
+            _record(self._root_cause_drain_stats, elapsed)
+            self._root_cause_recent.append(
+                {
+                    "stage": "gateway_drain",
+                    "duration_ms": round(elapsed, 3),
+                    "queue_before": queue_before,
+                    "queue_after": self.queue.qsize(),
+                    "at_ms": round(time.time() * 1000, 3),
+                }
+            )
+
+    def snapshot(self: Any) -> dict[str, object]:
+        result = original_snapshot(self)
+        result["root_cause_telemetry"] = {
+            "gateway_drain": _format(self._root_cause_drain_stats),
+            "recent": list(self._root_cause_recent),
+            "last_accept_monotonic": self._root_cause_last_accept_monotonic,
+        }
+        return result
+
+    cls.__init__ = init
+    cls.accept_async = accept_async
+    cls.drain_once = drain_once
+    cls.snapshot = snapshot
+
+
+def _install_repository() -> None:
+    try:
+        from aitos.data.repository import MarketDataRepository
+    except Exception:
+        return
+    cls = MarketDataRepository
+    if getattr(cls, "_root_cause_telemetry_installed", False):
+        return
+    cls._root_cause_telemetry_installed = True
+    original_init = cls.__init__
+    original_health = cls.health_check
+
+    methods = (
+        "save_trade_tick",
+        "save_order_book_snapshot",
+        "save_kline",
+        "save_funding_rate",
+        "save_open_interest",
+        "save_market_event",
+    )
+
+    @wraps(original_init)
+    def init(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        self._root_cause_ch_stats = defaultdict(_bucket)
+        self._root_cause_ch_recent = deque(maxlen=100)
+
+    def wrap_method(name: str, original: Any):
+        @wraps(original)
+        async def wrapped(self: Any, *args: Any, **kwargs: Any):
+            started = time.perf_counter()
+            event = args[0] if args else None
+            symbol = getattr(event, "symbol", None)
+            try:
+                return await original(self, *args, **kwargs)
+            finally:
+                elapsed = (time.perf_counter() - started) * 1000
+                key = f"{name}:{str(symbol or 'unknown').upper()}"
+                _record(self._root_cause_ch_stats[key], elapsed)
+                self._root_cause_ch_recent.append(
+                    {
+                        "stage": "clickhouse_write",
+                        "operation": name,
+                        "symbol": symbol,
+                        "latency_ms": round(elapsed, 3),
+                        "at_ms": round(time.time() * 1000, 3),
+                    }
+                )
+                if elapsed >= 100:
+                    _logger().warning(
+                        "clickhouse write latency",
+                        extra={"aitos_extra": self._root_cause_ch_recent[-1]},
+                    )
+
+        return wrapped
+
+    @wraps(original_health)
+    async def health(self: Any, *args: Any, **kwargs: Any):
+        from dataclasses import replace
+
+        status = await original_health(self, *args, **kwargs)
+        details = dict(status.details)
+        details["root_cause_telemetry"] = {
+            "clickhouse_writes": {
+                key: _format(value) for key, value in sorted(self._root_cause_ch_stats.items())
+            },
+            "recent": list(self._root_cause_ch_recent),
+        }
+        return replace(status, details=details)
+
+    cls.__init__ = init
+    cls.health_check = health
+    for name in methods:
+        original = getattr(cls, name, None)
+        if original is not None:
+            setattr(cls, name, wrap_method(name, original))
+
+
+def _install_persistence_sink() -> None:
+    try:
+        from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSink
+    except Exception:
+        return
+    cls = CanonicalMarketDataPersistenceSink
+    if getattr(cls, "_root_cause_telemetry_installed", False):
+        return
+    cls._root_cause_telemetry_installed = True
+    original_init = cls.__init__
+    original_enqueue = cls._enqueue
+    original_persist = cls._persist
+    original_snapshot = cls.snapshot
+
+    @wraps(original_init)
+    def init(self: Any, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        self._root_cause_enqueued_at: dict[str, float] = {}
+        self._root_cause_persist_wait = defaultdict(_bucket)
+        self._root_cause_persist_recent = deque(maxlen=100)
+
+    async def enqueue(self: Any, event: Any) -> None:
+        before = self._queue.qsize()
+        await original_enqueue(self, event)
+        if self._queue.qsize() > before:
+            event_id = str(getattr(event, "event_id", id(event)))
+            self._root_cause_enqueued_at[event_id] = time.monotonic()
+            self._root_cause_persist_recent.append(
+                {
+                    "stage": "persistence_enqueue",
+                    "event_type": getattr(getattr(event, "event_type", None), "value", None),
+                    "symbol": getattr(event, "symbol", None),
+                    "queue_depth": self._queue.qsize(),
+                    "at_ms": round(time.time() * 1000, 3),
+                }
+            )
+
+    async def persist(self: Any, event: Any) -> None:
+        event_id = str(getattr(event, "event_id", id(event)))
+        enqueued = self._root_cause_enqueued_at.pop(event_id, None)
+        if enqueued is not None:
+            wait_ms = max(0.0, (time.monotonic() - enqueued) * 1000)
+            event_type = getattr(getattr(event, "event_type", None), "value", "unknown")
+            _record(self._root_cause_persist_wait[str(event_type)], wait_ms)
+        started = time.perf_counter()
+        try:
+            return await original_persist(self, event)
+        finally:
+            elapsed = (time.perf_counter() - started) * 1000
+            event_type = getattr(getattr(event, "event_type", None), "value", "unknown")
+            sample = {
+                "stage": "persistence_write",
+                "event_type": event_type,
+                "symbol": getattr(event, "symbol", None),
+                "write_latency_ms": round(elapsed, 3),
+                "queue_depth": self._queue.qsize(),
+                "at_ms": round(time.time() * 1000, 3),
+            }
+            self._root_cause_persist_recent.append(sample)
+            if elapsed >= 100:
+                _logger().warning("persistence write latency", extra={"aitos_extra": sample})
+
+    def snapshot(self: Any) -> dict[str, object]:
+        result = original_snapshot(self)
+        result["root_cause_telemetry"] = {
+            "queue_wait": {
+                key: _format(value) for key, value in sorted(self._root_cause_persist_wait.items())
+            },
+            "recent": list(self._root_cause_persist_recent),
+            "tracked_enqueued_events": len(self._root_cause_enqueued_at),
+        }
+        return result
+
+    cls.__init__ = init
+    cls._enqueue = enqueue
+    cls._persist = persist
+    cls.snapshot = snapshot
+
+
+install()
