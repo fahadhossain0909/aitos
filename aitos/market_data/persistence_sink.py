@@ -1,28 +1,15 @@
-"""Best-effort ClickHouse sink for canonical market-data events.
-
-Historical persistence is deliberately isolated from the live trading path.
-The Redis handler never waits for ClickHouse I/O: events are copied into a
-small bounded in-process queue and acknowledged immediately. If the queue is
-full, the historical event is dropped. Live consumers therefore cannot become
-backlogged because ClickHouse is slow, unavailable, or catching up after a
-restart.
-"""
+"""Best-effort historical market-data persistence isolated from live ingestion."""
 
 from __future__ import annotations
 
 import asyncio
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
 from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus, Subscription
-from aitos.models.market import (
-    FundingRate,
-    Kline,
-    OpenInterest,
-    OrderBookSnapshot,
-    TradeTick,
-)
+from aitos.models.market import OrderBookSnapshot, TradeTick
 
 from .bus import MarketDataBus
 from .channels import GROUP_PERSISTENCE
@@ -30,7 +17,13 @@ from .contracts import MarketEvent, MarketEventType
 
 
 class CanonicalMarketDataPersistenceSink:
-    """Bounded, best-effort ClickHouse writer that never blocks live ingestion."""
+    """Bounded historical writer; never makes live ingestion wait for ClickHouse.
+
+    The canonical Redis bus carries the full live universe. This sink is a
+    deliberately narrow historical boundary: only configured event types and
+    configured historical symbols are admitted. Low-value live event classes
+    must not silently consume the historical persistence queue.
+    """
 
     def __init__(
         self,
@@ -42,6 +35,12 @@ class CanonicalMarketDataPersistenceSink:
         book_interval_seconds: float = 1.0,
         queue_capacity: int = 10_000,
         workers: int = 4,
+        batch_size: int = 100,
+        batch_wait_seconds: float = 0.05,
+        persist_event_types: tuple[MarketEventType, ...] = (
+            MarketEventType.TRADE,
+            MarketEventType.BOOK_SNAPSHOT,
+        ),
     ) -> None:
         self._bus = MarketDataBus(event_bus)
         self._repository = repository
@@ -50,6 +49,9 @@ class CanonicalMarketDataPersistenceSink:
         self._book_interval = max(0.1, book_interval_seconds)
         self._queue: asyncio.Queue[MarketEvent] = asyncio.Queue(maxsize=queue_capacity)
         self._workers_count = max(1, workers)
+        self._batch_size = max(1, batch_size)
+        self._batch_wait = max(0.0, batch_wait_seconds)
+        self._persist_event_types = set(persist_event_types)
         self._subscriptions: list[Subscription] = []
         self._workers: list[asyncio.Task] = []
         self._last_book_persist: dict[str, datetime] = {}
@@ -57,68 +59,23 @@ class CanonicalMarketDataPersistenceSink:
         self._errors = 0
         self._rejected = 0
         self._filtered = 0
+        self._batches = 0
         self._initialized = False
 
     async def initialize(self) -> None:
         if self._initialized or self._repository is None:
             self._initialized = True
             return
-        self._subscriptions = [
-            await self._bus.subscribe(
-                MarketEventType.TRADE,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.BOOK_SNAPSHOT,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.KLINE,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.FUNDING,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.OPEN_INTEREST,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.TICKER,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.LIQUIDATION,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.OPTIONS,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-            await self._bus.subscribe(
-                MarketEventType.INSTRUMENT,
-                self._enqueue,
-                group=GROUP_PERSISTENCE,
-                live_only=True,
-            ),
-        ]
+        self._subscriptions = []
+        for event_type in sorted(self._persist_event_types, key=lambda item: item.value):
+            self._subscriptions.append(
+                await self._bus.subscribe(
+                    event_type,
+                    self._enqueue,
+                    group=GROUP_PERSISTENCE,
+                    live_only=True,
+                )
+            )
         self._workers = [
             asyncio.create_task(self._worker(i), name=f"market-data-persistence-{i}")
             for i in range(self._workers_count)
@@ -147,8 +104,11 @@ class CanonicalMarketDataPersistenceSink:
             pass
 
     async def _enqueue(self, event: MarketEvent) -> None:
-        """Queue historical work without ever waiting on ClickHouse."""
+        """Apply the historical boundary before consuming queue capacity."""
         if self._repository is None:
+            return
+        if event.event_type not in self._persist_event_types:
+            self._filtered += 1
             return
         if event.event_type is MarketEventType.TRADE:
             if event.symbol.upper() not in self._historical_trades:
@@ -160,58 +120,68 @@ class CanonicalMarketDataPersistenceSink:
                 return
             now = datetime.now(timezone.utc)
             previous = self._last_book_persist.get(event.symbol)
-            if (
-                previous is not None
-                and (now - previous).total_seconds() < self._book_interval
-            ):
+            if previous is not None and (now - previous).total_seconds() < self._book_interval:
                 self._filtered += 1
                 return
             self._last_book_persist[event.symbol] = now
+        else:
+            self._filtered += 1
+            return
         try:
             self._queue.put_nowait(event)
         except asyncio.QueueFull:
+            # Historical persistence is best-effort and must never block live ingestion.
             self._rejected += 1
 
     async def _worker(self, worker_id: int) -> None:
         while True:
             event = await self._queue.get()
+            batch = [event]
             try:
+                deadline = asyncio.get_running_loop().time() + self._batch_wait
+                while len(batch) < self._batch_size:
+                    timeout = max(0.0, deadline - asyncio.get_running_loop().time())
+                    if timeout == 0:
+                        break
+                    try:
+                        batch.append(await asyncio.wait_for(self._queue.get(), timeout))
+                    except asyncio.TimeoutError:
+                        break
                 try:
-                    await self._persist(event)
+                    await self._persist_batch(batch)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    self._errors += 1
+                    self._errors += len(batch)
                 else:
-                    self._processed += 1
+                    self._processed += len(batch)
+                    self._batches += 1
             finally:
-                self._queue.task_done()
+                for _ in batch:
+                    self._queue.task_done()
 
-    async def _persist(self, event: MarketEvent) -> None:
-        if self._repository is None:
+    async def _persist_batch(self, events: list[MarketEvent]) -> None:
+        if self._repository is None or not events:
             return
-        payload: dict[str, Any] = dict(event.payload)
-        if event.event_type is MarketEventType.TRADE:
-            await self._repository.save_trade_tick(TradeTick.from_dict(payload))
-        elif event.event_type is MarketEventType.BOOK_SNAPSHOT:
-            payload["symbol"] = event.symbol
-            payload["timestamp"] = event.event_time.isoformat()
-            await self._repository.save_order_book_snapshot(
-                OrderBookSnapshot.from_dict(payload)
+        grouped: dict[MarketEventType, list[MarketEvent]] = defaultdict(list)
+        for event in events:
+            grouped[event.event_type].append(event)
+
+        trades = grouped.get(MarketEventType.TRADE, [])
+        if trades:
+            await self._repository.save_trade_ticks(
+                [TradeTick.from_dict(dict(event.payload)) for event in trades]
             )
-        elif event.event_type is MarketEventType.KLINE:
-            payload["symbol"] = event.symbol
-            await self._repository.save_kline(Kline.from_dict(payload))
-        elif event.event_type is MarketEventType.FUNDING:
-            payload["symbol"] = event.symbol
-            payload.setdefault("funding_time", event.event_time.isoformat())
-            await self._repository.save_funding_rate(FundingRate.from_dict(payload))
-        elif event.event_type is MarketEventType.OPEN_INTEREST:
-            payload["symbol"] = event.symbol
-            payload.setdefault("timestamp", event.event_time.isoformat())
-            await self._repository.save_open_interest(OpenInterest.from_dict(payload))
-        else:
-            await self._repository.save_market_event(event)
+
+        books = grouped.get(MarketEventType.BOOK_SNAPSHOT, [])
+        if books:
+            snapshots: list[OrderBookSnapshot] = []
+            for event in books:
+                payload: dict[str, Any] = dict(event.payload)
+                payload["symbol"] = event.symbol
+                payload["timestamp"] = event.event_time.isoformat()
+                snapshots.append(OrderBookSnapshot.from_dict(payload))
+            await self._repository.save_order_book_snapshots(snapshots)
 
     def snapshot(self) -> dict[str, object]:
         return {
@@ -223,6 +193,10 @@ class CanonicalMarketDataPersistenceSink:
             "rejected": self._rejected,
             "filtered": self._filtered,
             "workers": len(self._workers),
+            "batch_size": self._batch_size,
+            "batch_wait_seconds": self._batch_wait,
+            "batches": self._batches,
+            "persist_event_types": sorted(item.value for item in self._persist_event_types),
             "historical_book_symbols": sorted(self._historical_books),
             "historical_trade_symbols": sorted(self._historical_trades),
             "backpressure_policy": "drop_history_never_block_live",
