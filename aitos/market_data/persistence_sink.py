@@ -67,7 +67,9 @@ class CanonicalMarketDataPersistenceSink:
             self._initialized = True
             return
         self._subscriptions = []
-        for event_type in sorted(self._persist_event_types, key=lambda item: item.value):
+        for event_type in sorted(
+            self._persist_event_types, key=lambda item: item.value
+        ):
             self._subscriptions.append(
                 await self._bus.subscribe(
                     event_type,
@@ -120,7 +122,10 @@ class CanonicalMarketDataPersistenceSink:
                 return
             now = datetime.now(timezone.utc)
             previous = self._last_book_persist.get(event.symbol)
-            if previous is not None and (now - previous).total_seconds() < self._book_interval:
+            if (
+                previous is not None
+                and (now - previous).total_seconds() < self._book_interval
+            ):
                 self._filtered += 1
                 return
             self._last_book_persist[event.symbol] = now
@@ -196,7 +201,9 @@ class CanonicalMarketDataPersistenceSink:
             "batch_size": self._batch_size,
             "batch_wait_seconds": self._batch_wait,
             "batches": self._batches,
-            "persist_event_types": sorted(item.value for item in self._persist_event_types),
+            "persist_event_types": sorted(
+                item.value for item in self._persist_event_types
+            ),
             "historical_book_symbols": sorted(self._historical_books),
             "historical_trade_symbols": sorted(self._historical_trades),
             "backpressure_policy": "drop_history_never_block_live",
