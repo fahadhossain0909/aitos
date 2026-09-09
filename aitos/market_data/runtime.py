@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Callable
 
 from aitos.logging_setup import get_logger
@@ -15,6 +16,7 @@ from .gateway import MarketDataGateway
 logger = get_logger("aitos.market_data.runtime")
 _RECONNECT_INITIAL_DELAY_SECONDS = 1.0
 _RECONNECT_MAX_DELAY_SECONDS = 30.0
+RECONNECT_STABLE_SECONDS = 10.0
 PUBLISH_RETRY_DELAY_SECONDS = 0.05
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
 GATEWAY_DRAIN_WORKERS = 1
@@ -77,10 +79,24 @@ class CanonicalMarketDataRuntime:
         self._depth_fallback_applied = False
         self._first_canonical_event_seen = False
         self._first_canonical_publish_seen = False
+        self._stream_telemetry: dict[str, dict[str, object]] = {}
         exchange = getattr(self.adapter, "exchange", None)
         transport_snapshot = getattr(exchange, "websocket_transport_snapshot", None)
         if transport_snapshot is not None:
-            self.gateway._transport_snapshot_provider = transport_snapshot
+            self.gateway._transport_snapshot_provider = self._transport_snapshot
+
+    def _transport_snapshot(self) -> dict[str, object]:
+        exchange = getattr(self.adapter, "exchange", None)
+        snapshot = (
+            dict(exchange.websocket_transport_snapshot())
+            if exchange is not None
+            and hasattr(exchange, "websocket_transport_snapshot")
+            else {}
+        )
+        snapshot["runtime_streams"] = {
+            name: dict(value) for name, value in self._stream_telemetry.items()
+        }
+        return snapshot
 
     async def start(self) -> None:
         if not self._stopped:
@@ -159,7 +175,6 @@ class CanonicalMarketDataRuntime:
         )
 
     async def update_kline_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
-        """Hot-switch the bounded 1m kline socket to the exact staged Top-5."""
         normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[
             :KLINE_SYMBOL_LIMIT
         ]
@@ -195,7 +210,6 @@ class CanonicalMarketDataRuntime:
     async def update_orderbook_symbols(
         self, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        """Hot-switch the live order-book socket to a new symbol set."""
         normalized = list(dict.fromkeys(s.upper() for s in symbols if s))
         async with self._reconfigure_lock:
             if normalized == self.orderbook_symbols:
@@ -219,7 +233,6 @@ class CanonicalMarketDataRuntime:
             return True
 
     async def update_orderbook_levels(self, levels: int, reason: str) -> bool:
-        """Hot-switch depth without changing the live symbol cohort."""
         levels = max(20, int(levels))
         async with self._reconfigure_lock:
             if levels == self.orderbook_levels:
@@ -309,24 +322,46 @@ class CanonicalMarketDataRuntime:
             self._depth_fallback_applied = True
             await self.update_orderbook_levels(
                 self.orderbook_fallback_levels,
-                reason=(
-                    f"live-path pressure detected: replaced_oldest={replaced}, "
-                    f"freshness_drops={freshness_drops}"
-                ),
+                reason=f"live-path pressure detected: replaced_oldest={replaced}, freshness_drops={freshness_drops}",
             )
+
+    def _stream_state(self, stream_name: str) -> dict[str, object]:
+        return self._stream_telemetry.setdefault(
+            stream_name,
+            {
+                "restarts": 0,
+                "idle_timeouts": 0,
+                "errors": 0,
+                "events": 0,
+                "accepted": 0,
+                "last_start_at": None,
+                "last_event_at": None,
+                "last_failure_at": None,
+                "consecutive_failures": 0,
+            },
+        )
 
     async def _run(
         self, stream_name: str, stream_factory: Callable[[], AsyncIterator]
     ) -> None:
         delay = _RECONNECT_INITIAL_DELAY_SECONDS
+        state = self._stream_state(stream_name)
         while not self._stopped:
             saw_event = False
             stream = None
+            started_monotonic = time.monotonic()
+            failure_kind: str | None = None
             try:
+                state["last_start_at"] = time.time()
                 logger.info(
                     "canonical stream starting",
                     extra={
-                        "aitos_extra": {"stage": "stream_start", "stream": stream_name}
+                        "aitos_extra": {
+                            "stage": "stream_start",
+                            "stream": stream_name,
+                            "reconnect_delay": delay,
+                            "consecutive_failures": state["consecutive_failures"],
+                        }
                     },
                 )
                 stream = stream_factory().__aiter__()
@@ -336,12 +371,11 @@ class CanonicalMarketDataRuntime:
                             stream.__anext__(), timeout=self.stream_idle_timeout_seconds
                         )
                     except StopAsyncIteration:
+                        failure_kind = "stream_end"
                         break
                     except asyncio.TimeoutError as exc:
-                        self.gateway.health.record_idle_timeout(
-                            stream_name, self.stream_idle_timeout_seconds
-                        )
-                        self.gateway.mark_reconnecting()
+                        failure_kind = "idle_timeout"
+                        state["idle_timeouts"] = int(state["idle_timeouts"]) + 1
                         logger.error(
                             "canonical market-data stream watchdog timeout; reconnecting",
                             extra={
@@ -349,12 +383,19 @@ class CanonicalMarketDataRuntime:
                                     "stage": "canonical_idle_timeout",
                                     "stream": stream_name,
                                     "timeout_seconds": self.stream_idle_timeout_seconds,
+                                    "consecutive_failures": state[
+                                        "consecutive_failures"
+                                    ],
                                 }
                             },
                         )
                         raise exc
                     saw_event = True
+                    state["events"] = int(state["events"]) + 1
                     accepted = await self.gateway.accept_async(event)
+                    if accepted:
+                        state["accepted"] = int(state["accepted"]) + 1
+                    state["last_event_at"] = time.time()
                     if accepted and event.source == MarketSource.WEBSOCKET:
                         if not self._first_canonical_event_seen:
                             self._first_canonical_event_seen = True
@@ -370,23 +411,15 @@ class CanonicalMarketDataRuntime:
                                 },
                             )
                         self.gateway.mark_connected()
-                    elif not accepted:
-                        logger.warning(
-                            "canonical market-data event rejected",
-                            extra={
-                                "aitos_extra": {
-                                    "stage": "canonical_accept_rejected",
-                                    "stream": stream_name,
-                                    "source": event.source.value,
-                                }
-                            },
-                        )
                 if self._stopped:
                     return
+                if failure_kind is None:
+                    failure_kind = "stream_end"
                 self.gateway.mark_reconnecting()
                 self.gateway.health.record_error(
                     stream_name, "stream ended unexpectedly"
                 )
+                state["errors"] = int(state["errors"]) + 1
                 logger.warning(
                     "canonical stream ended unexpectedly",
                     extra={
@@ -401,8 +434,12 @@ class CanonicalMarketDataRuntime:
             except Exception as exc:
                 if self._stopped:
                     return
+                if failure_kind is None:
+                    failure_kind = type(exc).__name__
                 self.gateway.mark_reconnecting()
                 self.gateway.health.record_error(stream_name, str(exc))
+                state["errors"] = int(state["errors"]) + 1
+                state["last_failure_at"] = time.time()
                 logger.exception(
                     "canonical market-data stream failed; reconnecting",
                     extra={
@@ -412,6 +449,7 @@ class CanonicalMarketDataRuntime:
                             "error_type": type(exc).__name__,
                             "error": str(exc),
                             "delay": delay,
+                            "failure_kind": failure_kind,
                         }
                     },
                 )
@@ -421,9 +459,42 @@ class CanonicalMarketDataRuntime:
                         await stream.aclose()
                     except Exception:
                         logger.debug("canonical stream close failed", exc_info=True)
-            delay = (
-                _RECONNECT_INITIAL_DELAY_SECONDS
-                if saw_event
-                else min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+            elapsed = time.monotonic() - started_monotonic
+            if self._stopped:
+                return
+            if failure_kind in {"idle_timeout", "stream_end"} or not saw_event:
+                state["consecutive_failures"] = int(state["consecutive_failures"]) + 1
+                delay = min(
+                    max(
+                        delay * 2 if int(state["consecutive_failures"]) > 1 else delay,
+                        _RECONNECT_INITIAL_DELAY_SECONDS,
+                    ),
+                    _RECONNECT_MAX_DELAY_SECONDS,
+                )
+            else:
+                if elapsed >= RECONNECT_STABLE_SECONDS:
+                    state["consecutive_failures"] = 0
+                    delay = _RECONNECT_INITIAL_DELAY_SECONDS
+                else:
+                    state["consecutive_failures"] = (
+                        int(state["consecutive_failures"]) + 1
+                    )
+                    delay = min(
+                        max(delay * 2, _RECONNECT_INITIAL_DELAY_SECONDS),
+                        _RECONNECT_MAX_DELAY_SECONDS,
+                    )
+            state["restarts"] = int(state["restarts"]) + 1
+            logger.warning(
+                "canonical stream reconnect scheduled",
+                extra={
+                    "aitos_extra": {
+                        "stage": "canonical_reconnect_scheduled",
+                        "stream": stream_name,
+                        "failure_kind": failure_kind,
+                        "delay": delay,
+                        "consecutive_failures": state["consecutive_failures"],
+                        "stream_uptime_seconds": round(elapsed, 3),
+                    }
+                },
             )
             await asyncio.sleep(delay)
