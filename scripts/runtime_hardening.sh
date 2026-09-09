@@ -36,7 +36,7 @@ redis_policy="$(docker exec aitos-redis redis-cli CONFIG GET maxmemory-policy 2>
 if [ "$redis_maxmemory" != "$REDIS_MAXMEMORY_BYTES" ] || [ "$redis_policy" != "noeviction" ]; then
   echo "Reconciling Redis runtime policy: maxmemory=$REDIS_MAXMEMORY_BYTES policy=noeviction"
   docker exec aitos-redis redis-cli CONFIG SET maxmemory "$REDIS_MAXMEMORY_BYTES"
-  docker exec aitos-redis redis-cli redis-cli CONFIG SET maxmemory-policy noeviction 2>/dev/null || docker exec aitos-redis redis-cli CONFIG SET maxmemory-policy noeviction
+  docker exec aitos-redis redis-cli CONFIG SET maxmemory-policy noeviction
 fi
 
 redis_maxmemory="$(docker exec aitos-redis redis-cli CONFIG GET maxmemory 2>/dev/null | tail -n 1 | tr -d '\r')"
