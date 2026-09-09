@@ -19,9 +19,6 @@ from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
-from aitos.execution.order_executor import (
-    IdempotentOrderExecutor,
-)
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.journal.repository import JournalRepository
@@ -33,6 +30,7 @@ from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
+    IdempotentOrderExecutor,
     PersistentLivePortfolioTracker,
     TradeStatePersistence,
 )
