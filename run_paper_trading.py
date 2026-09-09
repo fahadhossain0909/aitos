@@ -41,7 +41,10 @@ PAPER_MIN_SCORE_THRESHOLD = 50.0
 
 async def connect_redis_with_retry(settings) -> Redis:
     async def _attempt() -> Redis:
-        client = Redis.from_url(settings.redis.url)
+        client = Redis.from_url(
+            settings.redis.url,
+            max_connections=settings.redis.max_connections,
+        )
         await client.ping()
         return client
 
@@ -222,7 +225,9 @@ async def main() -> None:
         await shutdown_all(components)
         await market_repo.shutdown()
         await journal_repo.shutdown()
-        await redis_client.aclose()
+        if graph_driver is not None:
+            await graph_driver.close()
+        await redis_client.close()
 
 
 if __name__ == "__main__":
