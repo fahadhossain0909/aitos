@@ -58,6 +58,23 @@ def _format(stats: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _queue_depth(self: Any) -> int:
+    """Read queue depth without assuming normal __init__ lifecycle.
+
+    Some tests and deserialization paths intentionally construct instances via
+    __new__. Telemetry must remain observational in those cases and must not
+    create or mutate application queue state merely to report a metric.
+    """
+    queue = getattr(self, "_queue", None)
+    qsize = getattr(queue, "qsize", None)
+    if qsize is None:
+        return 0
+    try:
+        return int(qsize())
+    except Exception:
+        return 0
+
+
 def _ensure_gateway_state(self: Any) -> None:
     """Make telemetry safe for partially constructed/test-created instances."""
     if not hasattr(self, "_root_cause_drain_stats"):
@@ -284,9 +301,10 @@ def _install_persistence_sink() -> None:
 
     async def enqueue(self: Any, event: Any) -> None:
         _ensure_persistence_state(self)
-        before = self._queue.qsize()
+        before = _queue_depth(self)
         await original_enqueue(self, event)
-        if self._queue.qsize() > before:
+        after = _queue_depth(self)
+        if after > before:
             event_id = str(getattr(event, "event_id", id(event)))
             self._root_cause_enqueued_at[event_id] = time.monotonic()
             self._root_cause_persist_recent.append(
@@ -296,7 +314,7 @@ def _install_persistence_sink() -> None:
                         getattr(event, "event_type", None), "value", None
                     ),
                     "symbol": getattr(event, "symbol", None),
-                    "queue_depth": self._queue.qsize(),
+                    "queue_depth": after,
                     "at_ms": round(time.time() * 1000, 3),
                 }
             )
@@ -320,7 +338,7 @@ def _install_persistence_sink() -> None:
                 "event_type": event_type,
                 "symbol": getattr(event, "symbol", None),
                 "write_latency_ms": round(elapsed, 3),
-                "queue_depth": self._queue.qsize(),
+                "queue_depth": _queue_depth(self),
                 "at_ms": round(time.time() * 1000, 3),
             }
             self._root_cause_persist_recent.append(sample)
