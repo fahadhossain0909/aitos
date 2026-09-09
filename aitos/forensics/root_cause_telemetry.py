@@ -58,6 +58,34 @@ def _format(stats: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _ensure_gateway_state(self: Any) -> None:
+    """Make telemetry safe for partially constructed/test-created instances."""
+    if not hasattr(self, "_root_cause_drain_stats"):
+        self._root_cause_drain_stats = _bucket()
+    if not hasattr(self, "_root_cause_recent"):
+        self._root_cause_recent = deque(maxlen=100)
+    if not hasattr(self, "_root_cause_last_accept_monotonic"):
+        self._root_cause_last_accept_monotonic = None
+
+
+def _ensure_repository_state(self: Any) -> None:
+    """Make telemetry safe when __init__ was bypassed by tests/deserialization."""
+    if not hasattr(self, "_root_cause_ch_stats"):
+        self._root_cause_ch_stats = defaultdict(_bucket)
+    if not hasattr(self, "_root_cause_ch_recent"):
+        self._root_cause_ch_recent = deque(maxlen=100)
+
+
+def _ensure_persistence_state(self: Any) -> None:
+    """Make telemetry safe when __init__ was bypassed by tests/deserialization."""
+    if not hasattr(self, "_root_cause_enqueued_at"):
+        self._root_cause_enqueued_at = {}
+    if not hasattr(self, "_root_cause_persist_wait"):
+        self._root_cause_persist_wait = defaultdict(_bucket)
+    if not hasattr(self, "_root_cause_persist_recent"):
+        self._root_cause_persist_recent = deque(maxlen=100)
+
+
 def install() -> None:
     """Install once at import time; failures are isolated from application startup."""
     global _INSTALLED
@@ -93,9 +121,10 @@ def _install_gateway() -> None:
         self._root_cause_idle_timeout_samples = 0
 
     async def accept_async(self: Any, event: Any) -> bool:
+        _ensure_gateway_state(self)
         accepted = await original_accept(self, event)
         now = time.monotonic()
-        previous = getattr(self, "_root_cause_last_accept_monotonic", None)
+        previous = self._root_cause_last_accept_monotonic
         if previous is not None:
             gap_ms = max(0.0, (now - previous) * 1000)
             if gap_ms >= 1000:
@@ -115,6 +144,7 @@ def _install_gateway() -> None:
         return accepted
 
     async def drain_once(self: Any) -> bool:
+        _ensure_gateway_state(self)
         started = time.perf_counter()
         queue_before = self.queue.qsize()
         try:
@@ -133,6 +163,7 @@ def _install_gateway() -> None:
             )
 
     def snapshot(self: Any) -> dict[str, object]:
+        _ensure_gateway_state(self)
         result = original_snapshot(self)
         result["root_cause_telemetry"] = {
             "gateway_drain": _format(self._root_cause_drain_stats),
@@ -177,6 +208,7 @@ def _install_repository() -> None:
     def wrap_method(name: str, original: Any):
         @wraps(original)
         async def wrapped(self: Any, *args: Any, **kwargs: Any):
+            _ensure_repository_state(self)
             started = time.perf_counter()
             event = args[0] if args else None
             symbol = getattr(event, "symbol", None)
@@ -205,6 +237,7 @@ def _install_repository() -> None:
 
     @wraps(original_health)
     async def health(self: Any, *args: Any, **kwargs: Any):
+        _ensure_repository_state(self)
         from dataclasses import replace
 
         status = await original_health(self, *args, **kwargs)
@@ -250,6 +283,7 @@ def _install_persistence_sink() -> None:
         self._root_cause_persist_recent = deque(maxlen=100)
 
     async def enqueue(self: Any, event: Any) -> None:
+        _ensure_persistence_state(self)
         before = self._queue.qsize()
         await original_enqueue(self, event)
         if self._queue.qsize() > before:
@@ -268,6 +302,7 @@ def _install_persistence_sink() -> None:
             )
 
     async def persist(self: Any, event: Any) -> None:
+        _ensure_persistence_state(self)
         event_id = str(getattr(event, "event_id", id(event)))
         enqueued = self._root_cause_enqueued_at.pop(event_id, None)
         if enqueued is not None:
@@ -295,6 +330,7 @@ def _install_persistence_sink() -> None:
                 )
 
     def snapshot(self: Any) -> dict[str, object]:
+        _ensure_persistence_state(self)
         result = original_snapshot(self)
         result["root_cause_telemetry"] = {
             "queue_wait": {
