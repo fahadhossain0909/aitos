@@ -58,13 +58,22 @@ def _record(bucket: dict[str, Any], elapsed_ms: float) -> None:
     bucket["count"] += 1
     bucket["total_ms"] += elapsed_ms
     bucket["max_ms"] = max(bucket["max_ms"], elapsed_ms)
-    bucket["min_ms"] = elapsed_ms if bucket["min_ms"] is None else min(bucket["min_ms"], elapsed_ms)
+    bucket["min_ms"] = (
+        elapsed_ms if bucket["min_ms"] is None else min(bucket["min_ms"], elapsed_ms)
+    )
     bucket["over_100ms"] += elapsed_ms >= 100
     bucket["over_1000ms"] += elapsed_ms >= 1000
 
 
 def _bucket() -> dict[str, Any]:
-    return {"count": 0, "total_ms": 0.0, "max_ms": 0.0, "min_ms": None, "over_100ms": 0, "over_1000ms": 0}
+    return {
+        "count": 0,
+        "total_ms": 0.0,
+        "max_ms": 0.0,
+        "min_ms": None,
+        "over_100ms": 0,
+        "over_1000ms": 0,
+    }
 
 
 def _format(bucket: dict[str, Any]) -> dict[str, Any]:
@@ -104,7 +113,10 @@ async def _watchdog(event_bus: Any) -> None:
             "cgroup_cpu": _cgroup_cpu(),
         }
         if lag_ms >= 100:
-            _logger().warning("event-loop scheduling lag", extra={"aitos_extra": event_bus._contention_last})
+            _logger().warning(
+                "event-loop scheduling lag",
+                extra={"aitos_extra": event_bus._contention_last},
+            )
 
 
 def install() -> None:
@@ -152,12 +164,24 @@ def _install_eventbus(cls: type[Any]) -> None:
         if redis is not None:
             try:
                 info = await redis.info(section="server")
-                server.update({k: info.get(k) for k in ("redis_version", "hz", "uptime_in_seconds") if k in info})
+                server.update(
+                    {
+                        k: info.get(k)
+                        for k in ("redis_version", "hz", "uptime_in_seconds")
+                        if k in info
+                    }
+                )
             except Exception as exc:
                 server["error"] = f"{type(exc).__name__}: {exc}"
             try:
                 stats = await redis.info(section="stats")
-                for key in ("instantaneous_ops_per_sec", "instantaneous_input_kbps", "instantaneous_output_kbps", "rejected_connections", "blocked_clients"):
+                for key in (
+                    "instantaneous_ops_per_sec",
+                    "instantaneous_input_kbps",
+                    "instantaneous_output_kbps",
+                    "rejected_connections",
+                    "blocked_clients",
+                ):
                     if key in stats:
                         server[key] = stats[key]
             except Exception as exc:
@@ -170,7 +194,9 @@ def _install_eventbus(cls: type[Any]) -> None:
             except Exception:
                 pass
         self._contention_server = server
-        self._contention_server_recent.append({"at_ms": round(time.time() * 1000, 3), **server})
+        self._contention_server_recent.append(
+            {"at_ms": round(time.time() * 1000, 3), **server}
+        )
         details["runtime_contention"] = {
             "event_loop": _format(self._contention_loop),
             "event_loop_last": self._contention_last,
@@ -207,7 +233,9 @@ def _install_repository() -> None:
         @wraps(original)
         async def wrapped(self: Any, *args: Any, **kwargs: Any):
             started = time.perf_counter()
-            count = len(args[0]) if args and isinstance(args[0], (list, tuple)) else None
+            count = (
+                len(args[0]) if args and isinstance(args[0], (list, tuple)) else None
+            )
             try:
                 return await original(self, *args, **kwargs)
             finally:
@@ -217,7 +245,17 @@ def _install_repository() -> None:
                 if count is not None:
                     bucket["rows"] = bucket.get("rows", 0) + count
                 if elapsed >= 100:
-                    _logger().warning("clickhouse batch write latency", extra={"aitos_extra": {"operation": name, "latency_ms": round(elapsed, 3), "rows": count, "cgroup_cpu": _cgroup_cpu()}})
+                    _logger().warning(
+                        "clickhouse batch write latency",
+                        extra={
+                            "aitos_extra": {
+                                "operation": name,
+                                "latency_ms": round(elapsed, 3),
+                                "rows": count,
+                                "cgroup_cpu": _cgroup_cpu(),
+                            }
+                        },
+                    )
 
         return wrapped
 
@@ -226,7 +264,8 @@ def _install_repository() -> None:
         status = await original_health(self, *args, **kwargs)
         details = dict(status.details)
         details.setdefault("runtime_contention", {})["clickhouse_batches"] = {
-            name: _format(stats) for name, stats in getattr(self, "_contention_batch_stats", {}).items()
+            name: _format(stats)
+            for name, stats in getattr(self, "_contention_batch_stats", {}).items()
         }
         return replace(status, details=details)
 
