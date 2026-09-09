@@ -8,7 +8,6 @@ WebSocket watchdog reconnects.
 
 from __future__ import annotations
 
-import asyncio
 import time
 from collections import defaultdict, deque
 from functools import wraps
@@ -39,7 +38,9 @@ def _record(stats: dict[str, Any], elapsed_ms: float) -> None:
     stats["count"] += 1
     stats["total_ms"] += elapsed_ms
     stats["max_ms"] = max(stats["max_ms"], elapsed_ms)
-    stats["min_ms"] = elapsed_ms if stats["min_ms"] is None else min(stats["min_ms"], elapsed_ms)
+    stats["min_ms"] = (
+        elapsed_ms if stats["min_ms"] is None else min(stats["min_ms"], elapsed_ms)
+    )
     if elapsed_ms >= 100:
         stats["slow_over_100ms"] += 1
     if elapsed_ms >= 1000:
@@ -102,7 +103,9 @@ def _install_gateway() -> None:
                     {
                         "stage": "gateway_receive_gap",
                         "gap_ms": round(gap_ms, 3),
-                        "event_type": getattr(getattr(event, "event_type", None), "value", None),
+                        "event_type": getattr(
+                            getattr(event, "event_type", None), "value", None
+                        ),
                         "symbol": getattr(event, "symbol", None),
                         "at_ms": round(time.time() * 1000, 3),
                     }
@@ -208,7 +211,8 @@ def _install_repository() -> None:
         details = dict(status.details)
         details["root_cause_telemetry"] = {
             "clickhouse_writes": {
-                key: _format(value) for key, value in sorted(self._root_cause_ch_stats.items())
+                key: _format(value)
+                for key, value in sorted(self._root_cause_ch_stats.items())
             },
             "recent": list(self._root_cause_ch_recent),
         }
@@ -224,7 +228,9 @@ def _install_repository() -> None:
 
 def _install_persistence_sink() -> None:
     try:
-        from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSink
+        from aitos.market_data.persistence_sink import (
+            CanonicalMarketDataPersistenceSink,
+        )
     except Exception:
         return
     cls = CanonicalMarketDataPersistenceSink
@@ -252,7 +258,9 @@ def _install_persistence_sink() -> None:
             self._root_cause_persist_recent.append(
                 {
                     "stage": "persistence_enqueue",
-                    "event_type": getattr(getattr(event, "event_type", None), "value", None),
+                    "event_type": getattr(
+                        getattr(event, "event_type", None), "value", None
+                    ),
                     "symbol": getattr(event, "symbol", None),
                     "queue_depth": self._queue.qsize(),
                     "at_ms": round(time.time() * 1000, 3),
@@ -282,13 +290,16 @@ def _install_persistence_sink() -> None:
             }
             self._root_cause_persist_recent.append(sample)
             if elapsed >= 100:
-                _logger().warning("persistence write latency", extra={"aitos_extra": sample})
+                _logger().warning(
+                    "persistence write latency", extra={"aitos_extra": sample}
+                )
 
     def snapshot(self: Any) -> dict[str, object]:
         result = original_snapshot(self)
         result["root_cause_telemetry"] = {
             "queue_wait": {
-                key: _format(value) for key, value in sorted(self._root_cause_persist_wait.items())
+                key: _format(value)
+                for key, value in sorted(self._root_cause_persist_wait.items())
             },
             "recent": list(self._root_cause_persist_recent),
             "tracked_enqueued_events": len(self._root_cause_enqueued_at),
