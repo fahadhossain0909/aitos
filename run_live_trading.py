@@ -18,22 +18,14 @@ from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
-from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.journal.repository import JournalRepository
-from aitos.kernel.ai_kernel import AIKernel
 from aitos.learning.recorder import LearningExperienceRecorder
-from aitos.live_trading import confirm_live_trading, prepare_live_executor
+from aitos.live_trading import prepare_live_executor
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
-from aitos.trading.persistent_state import (
-    DurableTradingStateStore,
-    IdempotentOrderExecutor,
-    PersistentLivePortfolioTracker,
-    TradeStatePersistence,
-)
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
