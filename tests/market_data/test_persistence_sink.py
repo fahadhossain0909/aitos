@@ -10,16 +10,12 @@ class FakeRepository:
     def __init__(self):
         self.trades = []
         self.books = []
-        self.klines = []
 
-    async def save_trade_tick(self, trade):
-        self.trades.append(trade)
+    async def save_trade_ticks(self, trades):
+        self.trades.extend(trades)
 
-    async def save_order_book_snapshot(self, book):
-        self.books.append(book)
-
-    async def save_kline(self, kline):
-        self.klines.append(kline)
+    async def save_order_book_snapshots(self, books):
+        self.books.extend(books)
 
 
 def event(event_type, payload, symbol="BTCUSDT"):
@@ -47,38 +43,34 @@ def make_sink(repo, queue_capacity=10_000):
 
 
 @pytest.mark.asyncio
-async def test_persistence_sink_persists_trade():
+async def test_persistence_sink_batches_trade():
     repo = FakeRepository()
-    sink = CanonicalMarketDataPersistenceSink.__new__(
-        CanonicalMarketDataPersistenceSink
-    )
-    sink._repository = repo
-    await sink._persist(
-        event(
-            MarketEventType.TRADE,
-            {
-                "symbol": "BTCUSDT",
-                "trade_id": 7,
-                "price": 90000.0,
-                "quantity": 1.0,
-                "side": "BUY",
-                "is_buyer_maker": False,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            },
-        )
+    sink = make_sink(repo)
+    await sink._persist_batch(
+        [
+            event(
+                MarketEventType.TRADE,
+                {
+                    "symbol": "BTCUSDT",
+                    "trade_id": 7,
+                    "price": 90000.0,
+                    "quantity": 1.0,
+                    "side": "BUY",
+                    "is_buyer_maker": False,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        ]
     )
     assert len(repo.trades) == 1
     assert repo.trades[0].trade_id == 7
 
 
 @pytest.mark.asyncio
-async def test_persistence_sink_does_not_persist_non_anchor_books():
+async def test_non_anchor_book_is_filtered_before_persistence():
     repo = FakeRepository()
-    sink = CanonicalMarketDataPersistenceSink.__new__(
-        CanonicalMarketDataPersistenceSink
-    )
-    sink._repository = repo
-    await sink._persist(
+    sink = make_sink(repo)
+    await sink._enqueue(
         event(
             MarketEventType.BOOK_SNAPSHOT,
             {
@@ -89,7 +81,9 @@ async def test_persistence_sink_does_not_persist_non_anchor_books():
             symbol="ETHUSDT",
         )
     )
-    assert len(repo.books) == 1
+    assert sink.snapshot()["queue_depth"] == 0
+    assert sink.snapshot()["filtered"] == 1
+    assert repo.books == []
 
 
 @pytest.mark.asyncio
