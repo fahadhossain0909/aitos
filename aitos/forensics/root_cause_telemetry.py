@@ -38,7 +38,9 @@ def _record(stats: dict[str, Any], elapsed_ms: float) -> None:
     stats["count"] += 1
     stats["total_ms"] += elapsed_ms
     stats["max_ms"] = max(stats["max_ms"], elapsed_ms)
-    stats["min_ms"] = elapsed_ms if stats["min_ms"] is None else min(stats["min_ms"], elapsed_ms)
+    stats["min_ms"] = (
+        elapsed_ms if stats["min_ms"] is None else min(stats["min_ms"], elapsed_ms)
+    )
     if elapsed_ms >= 100:
         stats["slow_over_100ms"] += 1
     if elapsed_ms >= 1000:
@@ -132,13 +134,17 @@ def _install_gateway() -> None:
         if previous is not None:
             gap_ms = max(0.0, (now - previous) * 1000)
             if gap_ms >= 1000:
-                self._root_cause_recent.append({
-                    "stage": "gateway_receive_gap",
-                    "gap_ms": round(gap_ms, 3),
-                    "event_type": getattr(getattr(event, "event_type", None), "value", None),
-                    "symbol": getattr(event, "symbol", None),
-                    "at_ms": round(time.time() * 1000, 3),
-                })
+                self._root_cause_recent.append(
+                    {
+                        "stage": "gateway_receive_gap",
+                        "gap_ms": round(gap_ms, 3),
+                        "event_type": getattr(
+                            getattr(event, "event_type", None), "value", None
+                        ),
+                        "symbol": getattr(event, "symbol", None),
+                        "at_ms": round(time.time() * 1000, 3),
+                    }
+                )
         if accepted:
             self._root_cause_last_accept_monotonic = now
         return accepted
@@ -152,13 +158,15 @@ def _install_gateway() -> None:
         finally:
             elapsed = (time.perf_counter() - started) * 1000
             _record(self._root_cause_drain_stats, elapsed)
-            self._root_cause_recent.append({
-                "stage": "gateway_drain",
-                "duration_ms": round(elapsed, 3),
-                "queue_before": queue_before,
-                "queue_after": self.queue.qsize(),
-                "at_ms": round(time.time() * 1000, 3),
-            })
+            self._root_cause_recent.append(
+                {
+                    "stage": "gateway_drain",
+                    "duration_ms": round(elapsed, 3),
+                    "queue_before": queue_before,
+                    "queue_after": self.queue.qsize(),
+                    "at_ms": round(time.time() * 1000, 3),
+                }
+            )
 
     def snapshot(self: Any) -> dict[str, object]:
         _ensure_gateway_state(self)
@@ -216,29 +224,34 @@ def _install_repository() -> None:
                 elapsed = (time.perf_counter() - started) * 1000
                 key = f"{name}:{str(symbol or 'unknown').upper()}"
                 _record(self._root_cause_ch_stats[key], elapsed)
-                self._root_cause_ch_recent.append({
-                    "stage": "clickhouse_write",
-                    "operation": name,
-                    "symbol": symbol,
-                    "latency_ms": round(elapsed, 3),
-                    "at_ms": round(time.time() * 1000, 3),
-                })
+                self._root_cause_ch_recent.append(
+                    {
+                        "stage": "clickhouse_write",
+                        "operation": name,
+                        "symbol": symbol,
+                        "latency_ms": round(elapsed, 3),
+                        "at_ms": round(time.time() * 1000, 3),
+                    }
+                )
                 if elapsed >= 100:
                     _logger().warning(
                         "clickhouse write latency",
                         extra={"aitos_extra": self._root_cause_ch_recent[-1]},
                     )
+
         return wrapped
 
     @wraps(original_health)
     async def health(self: Any, *args: Any, **kwargs: Any):
         _ensure_repository_state(self)
         from dataclasses import replace
+
         status = await original_health(self, *args, **kwargs)
         details = dict(status.details)
         details["root_cause_telemetry"] = {
             "clickhouse_writes": {
-                key: _format(value) for key, value in sorted(self._root_cause_ch_stats.items())
+                key: _format(value)
+                for key, value in sorted(self._root_cause_ch_stats.items())
             },
             "recent": list(self._root_cause_ch_recent),
         }
@@ -254,7 +267,9 @@ def _install_repository() -> None:
 
 def _install_persistence_sink() -> None:
     try:
-        from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSink
+        from aitos.market_data.persistence_sink import (
+            CanonicalMarketDataPersistenceSink,
+        )
     except Exception:
         return
     cls = CanonicalMarketDataPersistenceSink
@@ -288,13 +303,17 @@ def _install_persistence_sink() -> None:
         if after > before:
             event_id = str(getattr(event, "event_id", id(event)))
             self._root_cause_enqueued_at[event_id] = time.monotonic()
-            self._root_cause_persist_recent.append({
-                "stage": "persistence_enqueue",
-                "event_type": getattr(getattr(event, "event_type", None), "value", None),
-                "symbol": getattr(event, "symbol", None),
-                "queue_depth": after,
-                "at_ms": round(time.time() * 1000, 3),
-            })
+            self._root_cause_persist_recent.append(
+                {
+                    "stage": "persistence_enqueue",
+                    "event_type": getattr(
+                        getattr(event, "event_type", None), "value", None
+                    ),
+                    "symbol": getattr(event, "symbol", None),
+                    "queue_depth": after,
+                    "at_ms": round(time.time() * 1000, 3),
+                }
+            )
 
     async def persist_batch(self: Any, events: list[Any]) -> Any:
         _ensure_persistence_state(self)
@@ -307,9 +326,16 @@ def _install_persistence_sink() -> None:
             event_id = str(getattr(event, "event_id", id(event)))
             enqueued = self._root_cause_enqueued_at.pop(event_id, None)
             if enqueued is not None:
-                event_type = str(getattr(getattr(event, "event_type", None), "value", "unknown"))
-                _record(self._root_cause_persist_wait[event_type], max(0.0, (now - enqueued) * 1000))
-            event_type = str(getattr(getattr(event, "event_type", None), "value", "unknown"))
+                event_type = str(
+                    getattr(getattr(event, "event_type", None), "value", "unknown")
+                )
+                _record(
+                    self._root_cause_persist_wait[event_type],
+                    max(0.0, (now - enqueued) * 1000),
+                )
+            event_type = str(
+                getattr(getattr(event, "event_type", None), "value", "unknown")
+            )
             event_types[event_type] += 1
             symbol = getattr(event, "symbol", None)
             if symbol:
@@ -339,7 +365,8 @@ def _install_persistence_sink() -> None:
         result = original_snapshot(self)
         result["root_cause_telemetry"] = {
             "queue_wait": {
-                key: _format(value) for key, value in sorted(self._root_cause_persist_wait.items())
+                key: _format(value)
+                for key, value in sorted(self._root_cause_persist_wait.items())
             },
             "recent": list(self._root_cause_persist_recent),
             "tracked_enqueued_events": len(self._root_cause_enqueued_at),
