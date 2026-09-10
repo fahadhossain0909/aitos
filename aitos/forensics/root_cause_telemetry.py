@@ -307,30 +307,67 @@ def _install_persistence_sink() -> None:
     async def enqueue(self: Any, event: Any) -> None:
         _ensure_persistence_state(self)
         before = _queue_depth(self)
-        started = time.perf_counter()
-        try:
-            return await original_enqueue(event)
-        finally:
-            elapsed = (time.perf_counter() - started) * 1000
-            _record(self._root_cause_persist_wait["enqueue"], elapsed)
+        await original_enqueue(self, event)
+        after = _queue_depth(self)
+        if after > before:
+            event_id = str(getattr(event, "event_id", id(event)))
+            self._root_cause_enqueued_at[event_id] = time.monotonic()
             self._root_cause_persist_recent.append(
                 {
                     "stage": "persistence_enqueue",
-                    "latency_ms": round(elapsed, 3),
-                    "queue_before": before,
-                    "queue_after": _queue_depth(self),
+                    "event_type": getattr(
+                        getattr(event, "event_type", None), "value", None
+                    ),
+                    "symbol": getattr(event, "symbol", None),
+                    "queue_depth": after,
                     "at_ms": round(time.time() * 1000, 3),
                 }
             )
 
-    async def persist_batch(self: Any, *args: Any, **kwargs: Any):
+    async def persist_batch(self: Any, events: list[Any]) -> Any:
         _ensure_persistence_state(self)
         started = time.perf_counter()
+        now = time.monotonic()
+        batch = list(events)
+        event_types = defaultdict(int)
+        symbols: list[str] = []
+        for event in batch:
+            event_id = str(getattr(event, "event_id", id(event)))
+            enqueued = self._root_cause_enqueued_at.pop(event_id, None)
+            if enqueued is not None:
+                event_type = str(
+                    getattr(getattr(event, "event_type", None), "value", "unknown")
+                )
+                _record(
+                    self._root_cause_persist_wait[event_type],
+                    max(0.0, (now - enqueued) * 1000),
+                )
+            event_type = str(
+                getattr(getattr(event, "event_type", None), "value", "unknown")
+            )
+            event_types[event_type] += 1
+            symbol = getattr(event, "symbol", None)
+            if symbol:
+                symbols.append(str(symbol))
         try:
-            return await original_persist_batch(*args, **kwargs)
+            return await original_persist_batch(self, batch)
         finally:
             elapsed = (time.perf_counter() - started) * 1000
-            _record(self._root_cause_persist_wait["persist_batch"], elapsed)
+            sample = {
+                "stage": "persistence_batch_write",
+                "batch_size": len(batch),
+                "event_types": dict(event_types),
+                "symbols": sorted(set(symbols)),
+                "write_latency_ms": round(elapsed, 3),
+                "queue_depth": _queue_depth(self),
+                "at_ms": round(time.time() * 1000, 3),
+            }
+            self._root_cause_persist_recent.append(sample)
+            if elapsed >= 100:
+                _logger().warning(
+                    "persistence batch write latency",
+                    extra={"aitos_extra": sample},
+                )
 
     def snapshot(self: Any) -> dict[str, object]:
         _ensure_persistence_state(self)
@@ -341,6 +378,7 @@ def _install_persistence_sink() -> None:
                 for key, value in sorted(self._root_cause_persist_wait.items())
             },
             "recent": list(self._root_cause_persist_recent),
+            "tracked_enqueued_events": len(self._root_cause_enqueued_at),
         }
         return result
 
@@ -348,3 +386,6 @@ def _install_persistence_sink() -> None:
     cls._enqueue = enqueue
     cls._persist_batch = persist_batch
     cls.snapshot = snapshot
+
+
+install()
