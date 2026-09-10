@@ -38,8 +38,8 @@ class RiskLimits(BaseModel):
     max_correlated_exposure_hard_cap_pct: float = Field(default=25.0, gt=0)
     max_sector_exposure_pct: float = Field(default=20.0, gt=0)
     max_sector_exposure_hard_cap_pct: float = Field(default=40.0, gt=0)
-    max_open_positions: int = Field(default=10, ge=1)
-    max_open_positions_hard_cap: int = Field(default=20, ge=1)
+    max_open_positions: int = Field(default=5, ge=1)
+    max_open_positions_hard_cap: int = Field(default=5, ge=1)
     min_data_freshness_seconds: float = Field(default=5.0, gt=0)
     min_data_freshness_hard_cap_seconds: float = Field(default=30.0, gt=0)
 
