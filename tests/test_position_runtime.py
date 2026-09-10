@@ -59,9 +59,7 @@ def test_position_monitor_stays_normal_for_healthy_position():
 
 def test_position_monitor_warning_uses_hysteresis_before_returning_to_normal():
     controller = PositionMonitorController(hysteresis_updates=3)
-    warning = controller.evaluate(
-        trade=_trade(), current_price=95.5, extra_features={}
-    )
+    warning = controller.evaluate(trade=_trade(), current_price=95.5, extra_features={})
     assert warning.tier == PositionMonitorTier.WARNING
     first_clear = controller.evaluate(
         trade=_trade(), current_price=102.0, extra_features={}
