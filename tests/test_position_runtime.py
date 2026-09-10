@@ -6,19 +6,22 @@ from aitos.intelligence.position_monitor import (
 )
 from aitos.intelligence.position_runtime import (
     MAX_DEEP_SYMBOLS,
-    MAX_OPEN_POSITIONS,
-    POSITION_CAPITAL_POOL_PCT,
-    POSITION_DATA_RESERVE_PCT,
     _capital_policy_consensus,
     _merge_symbols,
 )
 
 
-def test_position_policy_is_configurable_and_keeps_reserve_buffer():
-    assert MAX_OPEN_POSITIONS == 10
-    assert POSITION_DATA_RESERVE_PCT == 20.0
-    assert POSITION_CAPITAL_POOL_PCT == 80.0
+def test_position_policy_keeps_monitoring_metadata_without_fixed_position_size():
     assert MAX_DEEP_SYMBOLS == 6
+    portfolio = SimpleNamespace(
+        equity_usd=10_000.0,
+        positions=(SimpleNamespace(notional_usd=1_000.0, symbol="BTCUSDT"),),
+    )
+    policy = _capital_policy_consensus(portfolio)
+    assert policy["monitoring_model"] == "normal_warning_exit_candidate"
+    assert policy["position_sizing_authority"] == "existing_position_manager_and_risk_engine"
+    assert policy["fixed_per_position_capital_pct"] is None
+    assert policy["fixed_per_position_capital_usd"] is None
 
 
 def test_merge_symbols_preserves_requested_order_and_adds_open_positions():
@@ -27,21 +30,6 @@ def test_merge_symbols_preserves_requested_order_and_adds_open_positions():
         ["SOLUSDT", "ETHUSDT", "XRPUSDT"],
     )
     assert merged == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
-
-
-def test_capital_policy_reports_reserve_and_remaining_capacity():
-    portfolio = SimpleNamespace(
-        equity_usd=10_000.0,
-        positions=(
-            SimpleNamespace(notional_usd=1_000.0, symbol="BTCUSDT"),
-            SimpleNamespace(notional_usd=500.0, symbol="ETHUSDT"),
-        ),
-    )
-    policy = _capital_policy_consensus(portfolio)
-    assert policy["capital_pool_usd"] == 8_000.0
-    assert policy["deployed_notional_usd"] == 1_500.0
-    assert policy["remaining_policy_capacity_usd"] == 6_500.0
-    assert policy["monitoring_model"] == "normal_warning_exit_candidate"
 
 
 def _trade(sl: float = 95.0):
