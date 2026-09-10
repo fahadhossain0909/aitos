@@ -10,7 +10,10 @@ from typing import Any
 
 from aitos.data.ingestion import DataIngestionService
 from aitos.intelligence.exit_intelligence import ExitAction
-from aitos.intelligence.position_monitor import PositionMonitorController, PositionMonitorTier
+from aitos.intelligence.position_monitor import (
+    PositionMonitorController,
+    PositionMonitorTier,
+)
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionAction, PositionManager
 
@@ -28,7 +31,9 @@ def _resource_budget(name: str, default: int) -> int:
 MAX_DEEP_SYMBOLS = _resource_budget("AITOS_MAX_DEEP_SYMBOLS", 6)
 _LIFECYCLES: weakref.WeakSet[TradeLifecycle] = weakref.WeakSet()
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
-_MONITORS: weakref.WeakKeyDictionary[PositionManager, PositionMonitorController] = weakref.WeakKeyDictionary()
+_MONITORS: weakref.WeakKeyDictionary[PositionManager, PositionMonitorController] = (
+    weakref.WeakKeyDictionary()
+)
 _DEEP_PRIORITY_SYMBOLS: dict[str, tuple[PositionMonitorTier, float]] = {}
 
 
@@ -59,12 +64,18 @@ def _merge_symbols(requested: list[str], protected: list[str]) -> list[str]:
     return result
 
 
-def _deep_priority_order(priorities: dict[str, tuple[PositionMonitorTier, float]] | None = None) -> list[str]:
+def _deep_priority_order(
+    priorities: dict[str, tuple[PositionMonitorTier, float]] | None = None,
+) -> list[str]:
     source = priorities if priorities is not None else _DEEP_PRIORITY_SYMBOLS
     return [
         symbol
         for symbol, (tier, priority) in sorted(
-            source.items(), key=lambda item: (-item[1][1], -int(item[1][0] == PositionMonitorTier.EXIT_CANDIDATE))
+            source.items(),
+            key=lambda item: (
+                -item[1][1],
+                -int(item[1][0] == PositionMonitorTier.EXIT_CANDIDATE),
+            ),
         )
         if tier in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE}
     ]
@@ -97,15 +108,31 @@ def _install_ingestion_guards() -> None:
         _INGESTIONS.add(self)
         self._aitos_position_universe_enabled = True
 
-    async def guarded_trade(self: DataIngestionService, symbols: list[str] | tuple[str, ...]) -> bool:
-        return await original_trade(self, _merge_symbols(_open_symbols(), list(symbols)))
+    async def guarded_trade(
+        self: DataIngestionService, symbols: list[str] | tuple[str, ...]
+    ) -> bool:
+        return await original_trade(
+            self, _merge_symbols(_open_symbols(), list(symbols))
+        )
 
-    async def guarded_kline(self: DataIngestionService, symbols: list[str] | tuple[str, ...]) -> bool:
-        return await original_kline(self, _merge_symbols(_open_symbols(), list(symbols)))
+    async def guarded_kline(
+        self: DataIngestionService, symbols: list[str] | tuple[str, ...]
+    ) -> bool:
+        return await original_kline(
+            self, _merge_symbols(_open_symbols(), list(symbols))
+        )
 
-    async def guarded_book(self: DataIngestionService, ranked_non_btc_symbols: list[str] | tuple[str, ...]) -> bool:
-        requested = [str(s).upper() for s in ranked_non_btc_symbols if s and str(s).upper() != REFERENCE_SYMBOL]
-        escalated = [symbol for symbol in _deep_priority_order() if symbol != REFERENCE_SYMBOL]
+    async def guarded_book(
+        self: DataIngestionService, ranked_non_btc_symbols: list[str] | tuple[str, ...]
+    ) -> bool:
+        requested = [
+            str(s).upper()
+            for s in ranked_non_btc_symbols
+            if s and str(s).upper() != REFERENCE_SYMBOL
+        ]
+        escalated = [
+            symbol for symbol in _deep_priority_order() if symbol != REFERENCE_SYMBOL
+        ]
         non_btc = _merge_symbols(escalated, requested)
         symbols = [REFERENCE_SYMBOL, *non_btc[: max(0, MAX_DEEP_SYMBOLS - 1)]]
         runtime = getattr(self, "_canonical_runtime", None)
@@ -120,7 +147,12 @@ def _install_ingestion_guards() -> None:
     DataIngestionService._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
 
 
-def _cheap_position_action(tier: PositionMonitorTier, score: float, reasons: tuple[str, ...], market_state: Any = None) -> PositionAction:
+def _cheap_position_action(
+    tier: PositionMonitorTier,
+    score: float,
+    reasons: tuple[str, ...],
+    market_state: Any = None,
+) -> PositionAction:
     return PositionAction(
         action=ExitAction.MANAGE,
         reason=f"POSITION_MONITOR:{tier.value} score={score:.2f} [{', '.join(reasons)}]",
@@ -129,7 +161,9 @@ def _cheap_position_action(tier: PositionMonitorTier, score: float, reasons: tup
     )
 
 
-def _warning_market_state(self: PositionManager, *, trade: Any, current_price: float, kwargs: dict[str, Any]) -> Any:
+def _warning_market_state(
+    self: PositionManager, *, trade: Any, current_price: float, kwargs: dict[str, Any]
+) -> Any:
     try:
         atr = kwargs.get("atr")
         volume_profile = kwargs.get("volume_profile")
@@ -138,7 +172,9 @@ def _warning_market_state(self: PositionManager, *, trade: Any, current_price: f
             mid_price=current_price,
             order_flow=kwargs.get("order_flow"),
             trend_strength=kwargs.get("trend_strength"),
-            atr_pct=(atr / current_price * 100.0) if atr and current_price > 0 else None,
+            atr_pct=(
+                (atr / current_price * 100.0) if atr and current_price > 0 else None
+            ),
             volume_profile_poc=volume_profile.poc if volume_profile else None,
             value_area_high=volume_profile.vah if volume_profile else None,
             value_area_low=volume_profile.val if volume_profile else None,
@@ -164,12 +200,27 @@ def _install_position_monitor() -> None:
         return controller
 
     @wraps(original_evaluate)
-    def guarded_evaluate(self: PositionManager, *, trade: Any, current_price: float, extra_features: Any = None, **kwargs: Any) -> PositionAction:
+    def guarded_evaluate(
+        self: PositionManager,
+        *,
+        trade: Any,
+        current_price: float,
+        extra_features: Any = None,
+        **kwargs: Any,
+    ) -> PositionAction:
         # Direct PositionManager consumers keep the canonical full-intelligence
         # contract. Only the live TradeLifecycle opts into tiered monitoring.
         if not getattr(self, "_aitos_tiered_monitoring_enabled", False):
-            return original_evaluate(self, trade=trade, current_price=current_price, extra_features=extra_features, **kwargs)
-        decision = monitor_for(self).evaluate(trade=trade, current_price=current_price, extra_features=extra_features)
+            return original_evaluate(
+                self,
+                trade=trade,
+                current_price=current_price,
+                extra_features=extra_features,
+                **kwargs,
+            )
+        decision = monitor_for(self).evaluate(
+            trade=trade, current_price=current_price, extra_features=extra_features
+        )
         symbol = str(getattr(trade, "symbol", "")).upper()
         if decision.tier == PositionMonitorTier.NORMAL:
             _DEEP_PRIORITY_SYMBOLS.pop(symbol, None)
@@ -177,11 +228,29 @@ def _install_position_monitor() -> None:
                 trade.record_excursion(current_price)
             except Exception:
                 pass
-            return _cheap_position_action(decision.tier, decision.score, decision.reasons)
+            return _cheap_position_action(
+                decision.tier, decision.score, decision.reasons
+            )
         _DEEP_PRIORITY_SYMBOLS[symbol] = (decision.tier, decision.priority_score)
         if decision.tier == PositionMonitorTier.WARNING:
-            return _cheap_position_action(decision.tier, decision.score, decision.reasons, market_state=_warning_market_state(self, trade=trade, current_price=current_price, kwargs={**kwargs, "extra_features": extra_features}))
-        action = original_evaluate(self, trade=trade, current_price=current_price, extra_features=extra_features, **kwargs)
+            return _cheap_position_action(
+                decision.tier,
+                decision.score,
+                decision.reasons,
+                market_state=_warning_market_state(
+                    self,
+                    trade=trade,
+                    current_price=current_price,
+                    kwargs={**kwargs, "extra_features": extra_features},
+                ),
+            )
+        action = original_evaluate(
+            self,
+            trade=trade,
+            current_price=current_price,
+            extra_features=extra_features,
+            **kwargs,
+        )
         return PositionAction(
             action=action.action,
             reason=f"POSITION_MONITOR:{decision.tier.value} priority={decision.priority_score:.2f} score={decision.score:.2f}; {action.reason}",
@@ -196,10 +265,17 @@ def _install_position_monitor() -> None:
             thesis=action.thesis,
             thesis_eval=action.thesis_eval,
             journey=action.journey,
-            notes=(f"monitor_tier={decision.tier.value}", f"priority_score={decision.priority_score:.2f}", *decision.reasons, *action.notes),
+            notes=(
+                f"monitor_tier={decision.tier.value}",
+                f"priority_score={decision.priority_score:.2f}",
+                *decision.reasons,
+                *action.notes,
+            ),
         )
 
-    def guarded_clear(self: PositionManager, trade_id: str, symbol: str | None = None) -> None:
+    def guarded_clear(
+        self: PositionManager, trade_id: str, symbol: str | None = None
+    ) -> None:
         original_clear(self, trade_id, symbol=symbol)
         monitor_for(self).clear(trade_id)
         if symbol:
@@ -225,13 +301,16 @@ def _install_lifecycle_wiring() -> None:
             # The live application passes its PositionManager into TradeLifecycle.
             # Opt that instance into the tiered gate without changing the public
             # PositionManager.evaluate() contract for direct consumers.
-            setattr(position_manager, "_aitos_tiered_monitoring_enabled", True)
+            position_manager._aitos_tiered_monitoring_enabled = True
 
     TradeLifecycle.__init__ = guarded_init  # type: ignore[method-assign]
 
     if original_submit is not None:
+
         @wraps(original_submit)
-        async def guarded_submit(self: TradeLifecycle, *args: Any, **kwargs: Any) -> Any:
+        async def guarded_submit(
+            self: TradeLifecycle, *args: Any, **kwargs: Any
+        ) -> Any:
             trade = await original_submit(self, *args, **kwargs)
             state = getattr(getattr(trade, "state", None), "value", "")
             symbol = str(getattr(trade, "symbol", "") or "").upper()
@@ -243,6 +322,7 @@ def _install_lifecycle_wiring() -> None:
                     except Exception:
                         continue
             return trade
+
         TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
 
     TradeLifecycle._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
