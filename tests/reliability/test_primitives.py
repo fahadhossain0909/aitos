@@ -60,7 +60,13 @@ async def test_circuit_breaker_opens_and_recovers() -> None:
         with pytest.raises(RuntimeError):
             await breaker.call(_fail)
     assert breaker.allow(now=time.monotonic()) is False
-    assert breaker.allow(now=(breaker._opened_at or time.monotonic()) + 5) is True
+
+    opened_at = breaker._opened_at
+    assert opened_at is not None
+    # Use a value just beyond the timeout boundary so this test is independent
+    # of floating-point representation/clock-resolution differences in CI.
+    recovery_now = opened_at + breaker.recovery_timeout + 1e-9
+    assert breaker.allow(now=recovery_now) is True
     await breaker.call(_ok)
     assert breaker.state.value == "closed"
 

@@ -64,9 +64,12 @@ jobs:
           scp -i /tmp/aitos_orderbook_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             scripts/orderbook_targeted_forensics.sh \
             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/orderbook_targeted_forensics.sh"
+          # Use the forensic script's existing $HOME default. Passing a literal
+          # '$HOME' here previously wrote the bundle somewhere else, so SCP could
+          # not retrieve the raw evidence.
           ssh -i /tmp/aitos_orderbook_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd /home/n41/aitos && chmod +x /tmp/orderbook_targeted_forensics.sh && AITOS_ORDERBOOK_FORENSICS_WINDOW_SECONDS='$WINDOW_SECONDS' AITOS_ORDERBOOK_FORENSICS_SAMPLE_SECONDS='$SAMPLE_SECONDS' AITOS_ORDERBOOK_FORENSICS_OUTPUT='\$HOME/aitos-orderbook-targeted-forensics' bash /tmp/orderbook_targeted_forensics.sh"
+            "cd /home/n41/aitos && chmod +x /tmp/orderbook_targeted_forensics.sh && AITOS_ORDERBOOK_FORENSICS_WINDOW_SECONDS='$WINDOW_SECONDS' AITOS_ORDERBOOK_FORENSICS_SAMPLE_SECONDS='$SAMPLE_SECONDS' bash /tmp/orderbook_targeted_forensics.sh"
 
       - name: Retrieve forensic report
         if: always()
@@ -80,9 +83,8 @@ jobs:
           scp -i /tmp/aitos_orderbook_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r \
             "$DEPLOY_USER@$DEPLOY_HOST:aitos-orderbook-targeted-forensics/." \
             orderbook-targeted-forensics/
-          if [[ -f orderbook-targeted-forensics/report.md ]]; then
-            cat orderbook-targeted-forensics/report.md
-          fi
+          test -s orderbook-targeted-forensics/report.md
+          cat orderbook-targeted-forensics/report.md
 
       - name: Upload forensic artifact
         if: always()
@@ -90,7 +92,7 @@ jobs:
         with:
           name: orderbook-targeted-forensics
           path: orderbook-targeted-forensics/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
       - name: Cleanup
