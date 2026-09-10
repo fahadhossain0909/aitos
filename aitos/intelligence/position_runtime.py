@@ -116,15 +116,20 @@ def _install_ingestion_guards() -> None:
     async def guarded_trade(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
+        # Open positions are protected before scanner symbols. This matters even
+        # when a downstream runtime later applies a finite trade-symbol budget.
         return await original_trade(
-            self, _merge_symbols(list(symbols), _open_symbols())
+            self, _merge_symbols(_open_symbols(), list(symbols))
         )
 
     async def guarded_kline(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
+        # DataIngestionService caps live klines at LIVE_KLINE_SYMBOLS. Put the
+        # protected Position Universe first so scanner ranking cannot evict an
+        # open position from its minimum market-data coverage.
         return await original_kline(
-            self, _merge_symbols(list(symbols), _open_symbols())
+            self, _merge_symbols(_open_symbols(), list(symbols))
         )
 
     async def guarded_book(
