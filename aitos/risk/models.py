@@ -95,27 +95,74 @@ class PortfolioState:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
 
+    @property
+    def current_drawdown_pct(self) -> float:
+        if self.peak_equity_usd <= 0:
+            return 0.0
+        return max(
+            0.0, (self.peak_equity_usd - self.equity_usd) / self.peak_equity_usd * 100
+        )
+
+    @property
+    def gross_exposure_usd(self) -> float:
+        return sum(p.notional_usd for p in self.positions)
+
+    @property
+    def max_position_leverage(self) -> float:
+        return max((p.leverage for p in self.positions), default=0.0)
+
+    @property
+    def sector_exposure_pct(self) -> dict[str, float]:
+        if self.equity_usd <= 0:
+            return {}
+        totals: dict[str, float] = {}
+        for p in self.positions:
+            sector = p.sector or "other"
+            totals[sector] = totals.get(sector, 0.0) + p.notional_usd
+        return {
+            sector: notional / self.equity_usd * 100
+            for sector, notional in totals.items()
+        }
+
+
+@dataclass(frozen=True)
+class RiskScoreBreakdown:
+    position_risk: float
+    market_risk: float
+    system_risk: float
+    portfolio_risk: float
+    total: float
+    action: RiskAction
+    explanation: list[str] = field(default_factory=list)
+    computed_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
     def to_dict(self) -> dict[str, Any]:
         return {
-            "equity_usd": self.equity_usd,
-            "peak_equity_usd": self.peak_equity_usd,
-            "positions": [
-                {
-                    "symbol": position.symbol,
-                    "notional_usd": position.notional_usd,
-                    "leverage": position.leverage,
-                    "sector": position.sector,
-                }
-                for position in self.positions
-            ],
-            "daily_pnl_pct": self.daily_pnl_pct,
-            "weekly_pnl_pct": self.weekly_pnl_pct,
-            "volatility_percentile": self.volatility_percentile,
-            "regime": self.regime,
-            "max_pairwise_correlation": self.max_pairwise_correlation,
-            "api_error_rate_pct": self.api_error_rate_pct,
-            "api_latency_ms": self.api_latency_ms,
-            "data_freshness_seconds": self.data_freshness_seconds,
-            "model_accuracy": self.model_accuracy,
-            "timestamp": self.timestamp,
+            "position_risk": self.position_risk,
+            "market_risk": self.market_risk,
+            "system_risk": self.system_risk,
+            "portfolio_risk": self.portfolio_risk,
+            "total": self.total,
+            "action": self.action.value,
+            "explanation": self.explanation,
+            "computed_at": self.computed_at,
         }
+
+
+@dataclass(frozen=True)
+class LimitBreach:
+    limit_name: str
+    limit_value: float
+    observed_value: float
+    is_hard_cap: bool
+    message: str
+
+
+@dataclass(frozen=True)
+class PositionSizeResult:
+    position_size_usd: float
+    leverage: float
+    risk_amount_usd: float
+    rationale: str
