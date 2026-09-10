@@ -62,21 +62,8 @@ from .scanner import (
 # Activate only after scanner import completes, avoiding a circular import.
 install_contextual_scanner_bridge(OpportunityScanner)
 
-# Activate the bounded position/data universe after the core trading classes
-# have been imported. Open positions remain in the market-data universe even
-# when the scanner ranks them out, while the lifecycle boundary enforces the
-# five-position hard ceiling.
-from .position_runtime import (
-    MAX_OPEN_POSITIONS,
-    POSITION_CAPITAL_POOL_PCT,
-    POSITION_DATA_RESERVE_PCT,
-)
-
 __all__ = [
     "DEFAULT_WEIGHTS",
-    "MAX_OPEN_POSITIONS",
-    "POSITION_CAPITAL_POOL_PCT",
-    "POSITION_DATA_RESERVE_PCT",
     "AnalogueOutcome",
     "CapitalAllocation",
     "CapitalAllocator",
