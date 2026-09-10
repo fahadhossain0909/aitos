@@ -23,6 +23,13 @@ class CanonicalMarketDataPersistenceSink:
     deliberately narrow historical boundary: only configured event types and
     configured historical symbols are admitted. Low-value live event classes
     must not silently consume the historical persistence queue.
+
+    Historical persistence intentionally uses a single worker by default.
+    ClickHouse inserts are relatively slow on the constrained paper-trading VM;
+    several concurrent workers turn a small historical stream into many tiny,
+    overlapping inserts and increase storage/Redis/event-loop contention. The
+    queue remains bounded and best-effort, so this does not backpressure live
+    market-data ingestion.
     """
 
     def __init__(
@@ -34,7 +41,7 @@ class CanonicalMarketDataPersistenceSink:
         historical_trade_symbols: tuple[str, ...] = ("BTCUSDT", "LTCUSDT"),
         book_interval_seconds: float = 1.0,
         queue_capacity: int = 10_000,
-        workers: int = 4,
+        workers: int = 1,
         batch_size: int = 100,
         batch_wait_seconds: float = 0.05,
         persist_event_types: tuple[MarketEventType, ...] = (
