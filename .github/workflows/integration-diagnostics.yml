@@ -1,0 +1,129 @@
+name: Integration Diagnostics
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+
+permissions:
+  contents: read
+
+jobs:
+  integration-diagnostics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLICKHOUSE_HOST: 127.0.0.1
+      CLICKHOUSE_PORT: '8123'
+      CLICKHOUSE_USER: aitos_test
+      CLICKHOUSE_PASSWORD: aitos_test_password
+      CLICKHOUSE_DATABASE: aitos
+      TESTING: 'true'
+      INTEGRATION_REDIS_URL: redis://:ci-only-not-used@127.0.0.1:6379/0
+      INTEGRATION_NEO4J_URI: bolt://127.0.0.1:7687
+      INTEGRATION_NEO4J_USER: neo4j
+      INTEGRATION_NEO4J_PASSWORD: ci-neo4j-password
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli --no-auth-warning -a ci-only-not-used ping | grep -q PONG"
+          --health-interval 3s --health-timeout 3s --health-retries 30
+        command: redis-server --requirepass ci-only-not-used
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.12-alpine
+        env:
+          CLICKHOUSE_USER: aitos_test
+          CLICKHOUSE_PASSWORD: aitos_test_password
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"
+          --health-interval 3s --health-timeout 3s --health-retries 40
+      neo4j:
+        image: neo4j:5.19-community
+        env:
+          NEO4J_AUTH: neo4j/ci-neo4j-password
+        ports:
+          - 7687:7687
+          - 7474:7474
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:7474 || exit 1"
+          --health-interval 5s --health-timeout 5s --health-retries 40
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
+          pip install pytest pytest-timeout
+      - name: Wait for dependencies and capture readiness
+        shell: bash
+        run: |
+          set -u
+          mkdir -p integration-diagnostics
+          wait_for() {
+            local name="$1"; local url="$2"; local attempts="$3"
+            for i in $(seq 1 "$attempts"); do
+              if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
+                echo "$name=ready attempt=$i" | tee -a integration-diagnostics/readiness.txt
+                return 0
+              fi
+              sleep 1
+            done
+            echo "$name=NOT_READY" | tee -a integration-diagnostics/readiness.txt
+            return 1
+          }
+          wait_for redis "http://127.0.0.1:6379" 30 || true
+          for i in $(seq 1 30); do
+            if redis-cli -h 127.0.0.1 -p 6379 -a ci-only-not-used --no-auth-warning ping 2>/dev/null | grep -q PONG; then
+              echo "redis_ping=PONG attempt=$i" | tee -a integration-diagnostics/readiness.txt
+              break
+            fi
+            sleep 1
+          done
+          for i in $(seq 1 60); do
+            if curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" http://127.0.0.1:8123/ping >/dev/null 2>&1; then
+              echo "clickhouse=ready attempt=$i" | tee -a integration-diagnostics/readiness.txt
+              break
+            fi
+            sleep 1
+          done
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:7474 >/dev/null 2>&1; then
+              echo "neo4j_http=ready attempt=$i" | tee -a integration-diagnostics/readiness.txt
+              break
+            fi
+            sleep 1
+          done
+          redis-cli -h 127.0.0.1 -p 6379 -a ci-only-not-used --no-auth-warning INFO server > integration-diagnostics/redis-info.txt 2>&1 || true
+          curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" http://127.0.0.1:8123/ping > integration-diagnostics/clickhouse-ping.txt 2>&1 || true
+      - name: Initialize ClickHouse
+        run: |
+          curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" 'http://127.0.0.1:8123/' --data-binary 'CREATE DATABASE IF NOT EXISTS aitos'
+      - name: Run integration tests
+        env:
+          PYTHONPATH: .
+        run: pytest -m integration --timeout=120 -vv
+      - name: Capture dependency diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          set +e
+          docker ps -a > integration-diagnostics/docker-ps.txt
+          docker stats --no-stream > integration-diagnostics/docker-stats.txt
+          docker logs $(docker ps -q --filter ancestor=redis:7.2-alpine | head -1) > integration-diagnostics/redis-container.log 2>&1
+          docker logs $(docker ps -q --filter ancestor=clickhouse/clickhouse-server:24.12-alpine | head -1) > integration-diagnostics/clickhouse-container.log 2>&1
+          docker logs $(docker ps -q --filter ancestor=neo4j:5.19-community | head -1) > integration-diagnostics/neo4j-container.log 2>&1
+      - name: Upload integration diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: integration-diagnostics
+          path: integration-diagnostics/
