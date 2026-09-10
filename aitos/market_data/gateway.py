@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -67,13 +68,7 @@ class MarketDataGateway:
 
     @staticmethod
     def _source_freshness_age_seconds(event: MarketEvent) -> float:
-        """Return the wall-clock age of the exchange event itself.
-
-        ``MarketEvent.source_age_seconds`` measures transport latency
-        (ingest_time - event_time).  The gateway freshness policy instead asks
-        whether the market event is currently too old, so it must be measured
-        against the current UTC clock rather than the ingest timestamp.
-        """
+        """Return the wall-clock age of the exchange event itself."""
         return max(0.0, (datetime.now(timezone.utc) - event.event_time).total_seconds())
 
     def _validate_event(self, event: MarketEvent) -> bool:
@@ -126,11 +121,23 @@ class MarketDataGateway:
             0.0, (datetime.now(timezone.utc) - event.ingest_time).total_seconds()
         )
 
+    def _record_drain_stage(self, stage: str, started: float) -> None:
+        recorder = getattr(self, "record_drain_stage", None)
+        if recorder is not None:
+            try:
+                recorder(stage, (time.perf_counter() - started) * 1000)
+            except Exception:
+                pass
+
     async def drain_once(self) -> bool:
         """Publish one event, or drop it if doing so would violate freshness."""
+        queue_started = time.perf_counter()
         event = await self.queue.get()
+        self._record_drain_stage("queue_get", queue_started)
         try:
+            age_started = time.perf_counter()
             queue_age = self._queue_age_seconds(event)
+            self._record_drain_stage("queue_age_check", age_started)
             if queue_age > self.config.max_queue_age_seconds:
                 self.health.record_freshness_drop(
                     f"queued market event age {queue_age:.3f}s exceeded "
@@ -138,15 +145,17 @@ class MarketDataGateway:
                 )
                 return False
             try:
-                await asyncio.wait_for(
-                    self._publisher(event), timeout=self.config.publish_timeout_seconds
-                )
+                publish_started = time.perf_counter()
+                try:
+                    await asyncio.wait_for(
+                        self._publisher(event),
+                        timeout=self.config.publish_timeout_seconds,
+                    )
+                finally:
+                    self._record_drain_stage("publisher", publish_started)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                # Never requeue an old failed event: doing so can create a stale
-                # backlog and starve newer market data. The next fresh event is
-                # allowed to proceed immediately.
                 self.health.record_publish_error(str(exc))
                 self.health.dropped_events += 1
                 self.state = GatewayState.DEGRADED
@@ -155,7 +164,9 @@ class MarketDataGateway:
                 self.health.record_publish()
                 return True
         finally:
+            task_started = time.perf_counter()
             self.queue.task_done()
+            self._record_drain_stage("queue_task_done", task_started)
 
     def snapshot(self) -> dict[str, object]:
         snapshot: dict[str, object] = {

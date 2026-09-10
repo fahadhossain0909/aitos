@@ -72,6 +72,8 @@ def _queue_depth(self: Any) -> int:
 def _ensure_gateway_state(self: Any) -> None:
     if not hasattr(self, "_root_cause_drain_stats"):
         self._root_cause_drain_stats = _bucket()
+    if not hasattr(self, "_root_cause_drain_stages"):
+        self._root_cause_drain_stages = defaultdict(_bucket)
     if not hasattr(self, "_root_cause_recent"):
         self._root_cause_recent = deque(maxlen=100)
     if not hasattr(self, "_root_cause_last_accept_monotonic"):
@@ -123,6 +125,7 @@ def _install_gateway() -> None:
     def init(self: Any, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
         self._root_cause_drain_stats = _bucket()
+        self._root_cause_drain_stages = defaultdict(_bucket)
         self._root_cause_recent = deque(maxlen=100)
         self._root_cause_last_accept_monotonic = None
 
@@ -168,11 +171,19 @@ def _install_gateway() -> None:
                 }
             )
 
+    def record_drain_stage(self: Any, stage: str, elapsed_ms: float) -> None:
+        _ensure_gateway_state(self)
+        _record(self._root_cause_drain_stages[str(stage)], max(0.0, float(elapsed_ms)))
+
     def snapshot(self: Any) -> dict[str, object]:
         _ensure_gateway_state(self)
         result = original_snapshot(self)
         result["root_cause_telemetry"] = {
             "gateway_drain": _format(self._root_cause_drain_stats),
+            "gateway_drain_stages": {
+                key: _format(value)
+                for key, value in sorted(self._root_cause_drain_stages.items())
+            },
             "recent": list(self._root_cause_recent),
             "last_accept_monotonic": self._root_cause_last_accept_monotonic,
         }
@@ -181,6 +192,7 @@ def _install_gateway() -> None:
     cls.__init__ = init
     cls.accept_async = accept_async
     cls.drain_once = drain_once
+    cls.record_drain_stage = record_drain_stage
     cls.snapshot = snapshot
 
 
@@ -281,9 +293,6 @@ def _install_persistence_sink() -> None:
     original_persist_batch = getattr(cls, "_persist_batch", None)
     original_snapshot = cls.snapshot
 
-    # The canonical persistence sink is batch-oriented. Never assume the old
-    # per-event _persist() contract: doing so makes telemetry itself crash at
-    # import time when the sink evolves to batched writes.
     if original_enqueue is None or original_persist_batch is None:
         cls._root_cause_telemetry_installed = False
         return

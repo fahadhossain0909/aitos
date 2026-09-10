@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -91,3 +92,27 @@ async def test_gateway_preserves_fifo_order_with_single_drain() -> None:
         await gateway.drain_once()
 
     assert published == [0, 1, 2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_gateway_drain_stage_telemetry_breaks_out_publisher() -> None:
+    async def publish(event):
+        await asyncio.sleep(0)
+
+    gateway = MarketDataGateway("binance", "usd_m_futures", publish)
+    gateway.begin_connect()
+    gateway.mark_connected()
+    assert gateway.accept(_event(MarketSource.WEBSOCKET))
+
+    import aitos.forensics.root_cause_telemetry as telemetry
+
+    telemetry.install()
+    await gateway.drain_once()
+    stages = gateway.snapshot()["root_cause_telemetry"]["gateway_drain_stages"]
+    assert set(stages) >= {
+        "queue_get",
+        "queue_age_check",
+        "publisher",
+        "queue_task_done",
+    }
+    assert stages["publisher"]["count"] == 1
