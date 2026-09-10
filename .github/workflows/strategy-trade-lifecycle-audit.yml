@@ -54,12 +54,11 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           WINDOW_HOURS: ${{ inputs.window_hours || '24' }}
         run: |
-          set -uo pipefail
-          REMOTE_DIR='$HOME/aitos-strategy-trade-lifecycle-audit'
+          set -u
           ssh -i /tmp/aitos_strategy_lifecycle_key \
             -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             -o ConnectTimeout=30 "$DEPLOY_USER@$DEPLOY_HOST" \
-            "cd \"$HOME/aitos\" && chmod +x scripts/strategy_trade_lifecycle_audit.sh && AITOS_STRATEGY_AUDIT_WINDOW_HOURS='$WINDOW_HOURS' AITOS_STRATEGY_AUDIT_DIR='$REMOTE_DIR' bash scripts/strategy_trade_lifecycle_audit.sh"
+            "cd \"\$HOME/aitos\" && chmod +x scripts/strategy_trade_lifecycle_audit.sh && AITOS_STRATEGY_AUDIT_WINDOW_HOURS='$WINDOW_HOURS' AITOS_STRATEGY_AUDIT_DIR='\$HOME/aitos-strategy-trade-lifecycle-audit' bash scripts/strategy_trade_lifecycle_audit.sh"
           rc=$?
           echo "remote_exit_code=$rc" | tee audit_remote_status.txt
           exit "$rc"
