@@ -31,7 +31,9 @@ async def test_acquire_beyond_capacity_waits_for_refill():
 
 @pytest.mark.asyncio
 async def test_weight_exceeding_capacity_raises():
-    limiter = TokenBucketRateLimiter(capacity=5, refill_per_second=1, reserved_capacity=0)
+    limiter = TokenBucketRateLimiter(
+        capacity=5, refill_per_second=1, reserved_capacity=0
+    )
     with pytest.raises(ValueError):
         await limiter.acquire(weight=10)
 
