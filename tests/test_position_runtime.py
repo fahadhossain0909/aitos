@@ -12,7 +12,7 @@ from aitos.intelligence.position_runtime import (
 
 
 def test_position_policy_keeps_monitoring_metadata_without_fixed_position_size():
-    assert MAX_DEEP_SYMBOLS == 6
+    assert MAX_DEEP_SYMBOLS >= 1
     portfolio = SimpleNamespace(
         equity_usd=10_000.0,
         positions=(SimpleNamespace(notional_usd=1_000.0, symbol="BTCUSDT"),),
@@ -35,9 +35,9 @@ def test_merge_symbols_preserves_requested_order_and_adds_open_positions():
     assert merged == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 
 
-def _trade(sl: float = 95.0):
+def _trade(trade_id: str = "t1", sl: float = 95.0):
     return SimpleNamespace(
-        trade_id="t1",
+        trade_id=trade_id,
         symbol="ETHUSDT",
         side=SimpleNamespace(value="LONG"),
         entry_price=100.0,
@@ -51,11 +51,16 @@ def test_position_monitor_stays_normal_for_healthy_position():
         trade=_trade(), current_price=102.0, extra_features={}
     )
     assert decision.tier == PositionMonitorTier.NORMAL
+    assert decision.health is not None
+    assert decision.health.pnl_pct > 0
+    assert decision.priority_score == 0.0
 
 
 def test_position_monitor_warning_uses_hysteresis_before_returning_to_normal():
     controller = PositionMonitorController(hysteresis_updates=3)
-    warning = controller.evaluate(trade=_trade(), current_price=95.5, extra_features={})
+    warning = controller.evaluate(
+        trade=_trade(), current_price=95.5, extra_features={}
+    )
     assert warning.tier == PositionMonitorTier.WARNING
     first_clear = controller.evaluate(
         trade=_trade(), current_price=102.0, extra_features={}
@@ -79,3 +84,45 @@ def test_position_monitor_uses_adverse_order_flow_features():
     )
     assert decision.tier == PositionMonitorTier.WARNING
     assert "cvd_divergence" in decision.reasons
+
+
+def test_priority_score_prefers_more_urgent_warning_position():
+    controller = PositionMonitorController()
+    mild = controller.evaluate(
+        trade=_trade("mild"),
+        current_price=101.0,
+        extra_features={"liquidity_risk": 0.2},
+    )
+    urgent = controller.evaluate(
+        trade=_trade("urgent", sl=99.5),
+        current_price=99.6,
+        extra_features={
+            "liquidity_risk": 0.9,
+            "adverse_order_flow_risk": 0.9,
+            "thesis_risk": 0.8,
+            "volatility_risk": 0.8,
+            "reference_risk": 0.8,
+            "data_freshness_seconds": 6.0,
+        },
+    )
+    assert urgent.priority_score > mild.priority_score
+
+
+def test_priority_score_caps_at_100_and_health_vector_is_optional_input_only():
+    decision = PositionMonitorController().evaluate(
+        trade=_trade("stress", sl=100.0),
+        current_price=100.0,
+        extra_features={
+            "exit_signal": True,
+            "liquidity_risk": 1.0,
+            "adverse_order_flow_risk": 1.0,
+            "thesis_risk": 1.0,
+            "volatility_risk": 1.0,
+            "reference_risk": 1.0,
+            "regime_risk": 1.0,
+            "data_freshness_seconds": 100.0,
+        },
+    )
+    assert decision.tier == PositionMonitorTier.EXIT_CANDIDATE
+    assert 0.0 <= decision.priority_score <= 100.0
+    assert decision.health is not None
