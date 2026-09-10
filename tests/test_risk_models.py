@@ -12,8 +12,8 @@ def test_risk_limits_defaults_match_spec_table():
     assert limits.max_drawdown_hard_cap_pct == 20.0
     assert limits.max_leverage == 10.0
     assert limits.max_leverage_hard_cap == 125.0
-    assert limits.max_open_positions == 5
-    assert limits.max_open_positions_hard_cap == 5
+    assert limits.max_open_positions == 10
+    assert limits.max_open_positions_hard_cap == 20
 
 
 def test_risk_limits_default_exceeding_hard_cap_raises():
