@@ -1,6 +1,6 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
-import asyncio
 import pytest
 
 from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
@@ -109,5 +109,10 @@ async def test_gateway_drain_stage_telemetry_breaks_out_publisher() -> None:
     telemetry.install()
     await gateway.drain_once()
     stages = gateway.snapshot()["root_cause_telemetry"]["gateway_drain_stages"]
-    assert set(stages) >= {"queue_get", "queue_age_check", "publisher", "queue_task_done"}
+    assert set(stages) >= {
+        "queue_get",
+        "queue_age_check",
+        "publisher",
+        "queue_task_done",
+    }
     assert stages["publisher"]["count"] == 1
