@@ -148,7 +148,8 @@ class MarketDataGateway:
                 publish_started = time.perf_counter()
                 try:
                     await asyncio.wait_for(
-                        self._publisher(event), timeout=self.config.publish_timeout_seconds
+                        self._publisher(event),
+                        timeout=self.config.publish_timeout_seconds,
                     )
                 finally:
                     self._record_drain_stage("publisher", publish_started)
