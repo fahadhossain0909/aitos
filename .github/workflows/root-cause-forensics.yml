@@ -1,0 +1,112 @@
+name: Unified Root Cause Forensics
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: Observation duration in seconds
+        required: false
+        default: '180'
+      interval_seconds:
+        description: Diagnostic sampling interval in seconds
+        required: false
+        default: '10'
+
+permissions:
+  contents: read
+
+jobs:
+  root-cause-forensics:
+    name: VPS unified root-cause evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            test -n "${!name:-}" || { echo "Missing required secret: $name"; exit 1; }
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_root_cause_key
+          chmod 600 /tmp/aitos_root_cause_key
+
+      - name: Run unified forensic collector
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          FORENSIC_DURATION: ${{ inputs.duration_seconds || '180' }}
+          FORENSIC_INTERVAL: ${{ inputs.interval_seconds || '10' }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_root_cause_key
+          command_timeout: 15m
+          envs: FORENSIC_DURATION,FORENSIC_INTERVAL
+          script: |
+            set -euo pipefail
+            cd "$HOME/aitos"
+            test -f scripts/root_cause_forensics.sh
+            export AITOS_ROOT_CAUSE_REPORT_DIR="$HOME/aitos-root-cause-forensics"
+            rm -rf "$AITOS_ROOT_CAUSE_REPORT_DIR"
+            bash scripts/root_cause_forensics.sh
+
+            # Keep the same observation window semantics as the E2E audit.
+            # The collector is snapshot-based; duration/interval are recorded for traceability.
+            printf 'duration_seconds=%s\ninterval_seconds=%s\n' "$FORENSIC_DURATION" "$FORENSIC_INTERVAL" > "$AITOS_ROOT_CAUSE_REPORT_DIR/run_parameters.txt"
+
+      - name: Retrieve forensic bundle
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p aitos-root-cause-forensics
+          scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/root_cause_report.md" \
+            aitos-root-cause-forensics/root_cause_report.md
+          scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/health.json" \
+            aitos-root-cause-forensics/health.json || true
+          scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/redis_consumers.txt" \
+            aitos-root-cause-forensics/redis_consumers.txt || true
+          scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/docker_stats.jsonl" \
+            aitos-root-cause-forensics/docker_stats.jsonl || true
+          scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/cgroup_cpu.stat" \
+            aitos-root-cause-forensics/cgroup_cpu.stat || true
+
+      - name: Publish report
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s aitos-root-cause-forensics/root_cause_report.md
+          cat aitos-root-cause-forensics/root_cause_report.md
+
+      - name: Upload forensic artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: aitos-root-cause-forensics
+          path: aitos-root-cause-forensics/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/aitos_root_cause_key
