@@ -1,0 +1,99 @@
+name: Strategy & Trade Lifecycle Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      window_hours:
+        description: Log and recent-performance observation window in hours
+        required: false
+        default: '24'
+  schedule:
+    - cron: '45 * * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Canonical strategy and trade lifecycle audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout audit collector
+        uses: actions/checkout@v4
+
+      - name: Check deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            test -n "${!name:-}" || { echo "Missing required secret: $name"; exit 1; }
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_strategy_lifecycle_key
+          chmod 600 /tmp/aitos_strategy_lifecycle_key
+
+      - name: Run canonical audit on paper-trading VPS
+        id: audit
+        continue-on-error: true
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          WINDOW_HOURS: ${{ inputs.window_hours || '24' }}
+        run: |
+          set -uo pipefail
+          REMOTE_DIR='$HOME/aitos-strategy-trade-lifecycle-audit'
+          ssh -i /tmp/aitos_strategy_lifecycle_key \
+            -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            -o ConnectTimeout=30 "$DEPLOY_USER@$DEPLOY_HOST" \
+            "cd \"$HOME/aitos\" && chmod +x scripts/strategy_trade_lifecycle_audit.sh && AITOS_STRATEGY_AUDIT_WINDOW_HOURS='$WINDOW_HOURS' AITOS_STRATEGY_AUDIT_DIR='$REMOTE_DIR' bash scripts/strategy_trade_lifecycle_audit.sh"
+          rc=$?
+          echo "remote_exit_code=$rc" | tee audit_remote_status.txt
+          exit "$rc"
+
+      - name: Retrieve canonical audit bundle
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -u
+          rm -rf strategy-trade-lifecycle-audit
+          mkdir -p strategy-trade-lifecycle-audit
+          remote_home="$(ssh -i /tmp/aitos_strategy_lifecycle_key -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 "$DEPLOY_USER@$DEPLOY_HOST" 'printf "%s" "$HOME"' 2>/dev/null || true)"
+          if [ -n "$remote_home" ]; then
+            remote_dir="${remote_home}/aitos-strategy-trade-lifecycle-audit"
+            scp -q -i /tmp/aitos_strategy_lifecycle_key -o BatchMode=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=30 -r \
+              "$DEPLOY_USER@$DEPLOY_HOST:${remote_dir}/." strategy-trade-lifecycle-audit/ || true
+          fi
+          if [ ! -s strategy-trade-lifecycle-audit/report.md ]; then
+            printf '%s\n' '# Canonical Strategy & Trade Lifecycle Audit' 'No report was retrieved from the VPS.' '' 'Check the remote audit step and deployment connectivity.' > strategy-trade-lifecycle-audit/report.md
+          fi
+          cat strategy-trade-lifecycle-audit/report.md
+
+      - name: Upload canonical audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aitos-strategy-trade-lifecycle-audit
+          path: strategy-trade-lifecycle-audit/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f /tmp/aitos_strategy_lifecycle_key
