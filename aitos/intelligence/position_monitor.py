@@ -7,9 +7,10 @@ are escalated into progressively more expensive analysis.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Mapping
+from typing import Any
 
 
 class PositionMonitorTier(str, Enum):
@@ -75,18 +76,28 @@ class PositionMonitorController:
 
         entry = float(getattr(trade, "entry_price", 0.0) or 0.0)
         sl = float(getattr(trade, "sl_price", 0.0) or 0.0)
-        side = str(getattr(getattr(trade, "side", None), "value", getattr(trade, "side", ""))).upper()
+        side = str(
+            getattr(getattr(trade, "side", None), "value", getattr(trade, "side", ""))
+        ).upper()
         if current_price <= 0 or entry <= 0:
-            return PositionMonitorDecision(PositionMonitorTier.WARNING, 1.0, ("invalid_price_context",))
+            return PositionMonitorDecision(
+                PositionMonitorTier.WARNING, 1.0, ("invalid_price_context",)
+            )
 
-        pnl_pct = ((current_price - entry) / entry * 100.0) if side == "LONG" else ((entry - current_price) / entry * 100.0)
+        pnl_pct = (
+            ((current_price - entry) / entry * 100.0)
+            if side == "LONG"
+            else ((entry - current_price) / entry * 100.0)
+        )
         if pnl_pct < 0:
             score += 1.0
             reasons.append("negative_pnl")
 
         if sl > 0:
             sl_distance_pct = abs(current_price - sl) / current_price * 100.0
-            if (side == "LONG" and current_price <= sl) or (side == "SHORT" and current_price >= sl):
+            if (side == "LONG" and current_price <= sl) or (
+                side == "SHORT" and current_price >= sl
+            ):
                 score += 5.0
                 reasons.append("stop_breached")
             elif sl_distance_pct <= self.exit_sl_distance_pct:
@@ -112,12 +123,16 @@ class PositionMonitorController:
             score += 1.0
             reasons.append("volatility_expansion")
 
-        freshness = self._feature(features, "data_freshness_seconds", "freshness_seconds")
+        freshness = self._feature(
+            features, "data_freshness_seconds", "freshness_seconds"
+        )
         if freshness is not None and freshness > 5.0:
             score += 2.0
             reasons.append("stale_market_data")
 
-        explicit_exit = bool(features.get("exit_candidate") or features.get("exit_signal"))
+        explicit_exit = bool(
+            features.get("exit_candidate") or features.get("exit_signal")
+        )
         if explicit_exit:
             score += 4.0
             reasons.append("explicit_exit_signal")
@@ -133,7 +148,11 @@ class PositionMonitorController:
 
         trade_id = str(getattr(trade, "trade_id", ""))
         previous = self._last_tier.get(trade_id)
-        if previous in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE} and tier == PositionMonitorTier.NORMAL:
+        if (
+            previous
+            in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE}
+            and tier == PositionMonitorTier.NORMAL
+        ):
             count = self._clear_count.get(trade_id, 0) + 1
             if count < self.hysteresis_updates:
                 tier = previous
