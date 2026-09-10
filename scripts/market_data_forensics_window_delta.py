@@ -141,15 +141,34 @@ def capacity_delta(start: dict[str, Any], end: dict[str, Any]) -> dict[str, Any]
         if isinstance(batches, (int, float)) and batches > 0
         else 0.0
     )
-    delta["window_queue_depth_start"] = start.get("queue_depth")
-    delta["window_queue_depth_end"] = end.get("queue_depth")
-    delta["window_max_queue_depth"] = end.get("max_queue_depth", 0)
-    if isinstance(start.get("max_queue_depth"), (int, float)) and isinstance(
-        end.get("max_queue_depth"), (int, float)
+    start_depth = start.get("queue_depth")
+    end_depth = end.get("queue_depth")
+    delta["window_queue_depth_start"] = start_depth
+    delta["window_queue_depth_end"] = end_depth
+    if isinstance(start_depth, (int, float)) and isinstance(end_depth, (int, float)):
+        delta["window_queue_depth_delta"] = end_depth - start_depth
+    # max_queue_depth is process-lifetime cumulative state. It is intentionally
+    # reported at the endpoints rather than falsely presented as a window max.
+    delta["cumulative_max_queue_depth_start"] = start.get("max_queue_depth")
+    delta["cumulative_max_queue_depth_end"] = end.get("max_queue_depth")
+    return delta
+
+
+def add_window_rates(delta: dict[str, Any], seconds: float) -> dict[str, Any]:
+    if seconds <= 0:
+        return delta
+    capacity = delta.get("persistence_capacity")
+    if not isinstance(capacity, dict):
+        return delta
+    for counter, name in (
+        ("enqueued", "enqueue_rate_per_sec"),
+        ("rejected", "rejection_rate_per_sec"),
+        ("batch_events", "processed_batch_event_rate_per_sec"),
+        ("batches", "batch_rate_per_sec"),
     ):
-        delta["window_max_queue_depth"] = max(
-            0, end["max_queue_depth"] - start["max_queue_depth"]
-        )
+        value = capacity.get(counter)
+        if isinstance(value, (int, float)):
+            capacity[name] = round(value / seconds, 3)
     return delta
 
 
@@ -203,11 +222,28 @@ def main() -> int:
         interval["window_start"] = previous.get("ts")
         interval["window_end"] = current.get("ts")
         intervals.append(interval)
+
+    def window_seconds(start: Any, end: Any) -> float:
+        from datetime import datetime
+
+        try:
+            a = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+            b = datetime.fromisoformat(str(end).replace("Z", "+00:00"))
+            return max(0.0, (b - a).total_seconds())
+        except (TypeError, ValueError):
+            return 0.0
+
+    total_seconds = window_seconds(samples[0].get("ts"), samples[-1].get("ts"))
+    add_window_rates(total_delta, total_seconds)
+    for interval in intervals:
+        seconds = window_seconds(interval.get("window_start"), interval.get("window_end"))
+        add_window_rates(interval, seconds)
+
     output = {
         "sample_count": len(samples),
         "window_start": samples[0].get("ts"),
         "window_end": samples[-1].get("ts"),
-        "counter_semantics": "end_minus_start for process-lifetime cumulative counters; latency count/total_ms are differenced to derive window averages; intervals are adjacent health-sample deltas",
+        "counter_semantics": "end_minus_start for process-lifetime cumulative counters; latency count/total_ms are differenced to derive window averages; queue depth is reported at both endpoints and max_queue_depth remains cumulative; intervals are adjacent health-sample deltas",
         "total_delta": total_delta,
         "intervals": intervals,
     }
@@ -219,9 +255,9 @@ def main() -> int:
     )
     report_md = directory / "report.md"
     with report_md.open("a", encoding="utf-8") as handle:
-        handle.write("\n## Windowed counter attribution v4\n\n")
+        handle.write("\n## Windowed counter attribution v5\n\n")
         handle.write(
-            "Persistence telemetry includes queue admission/rejection, queue depth, batch throughput/size, and batch write latency. All cumulative counters are attributed by end-minus-start deltas.\n\n"
+            "Persistence telemetry includes queue admission/rejection, queue depth growth, batch throughput/size, batch write latency, and configured/running workers. Queue-depth maximum remains explicitly process-lifetime state.\n\n"
         )
         handle.write("```json\n")
         handle.write(json.dumps(output, indent=2, sort_keys=True))
