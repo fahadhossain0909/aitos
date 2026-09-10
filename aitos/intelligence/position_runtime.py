@@ -98,12 +98,16 @@ def _install_ingestion_guards() -> None:
     async def guarded_trade(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_trade(self, _merge_symbols(list(symbols), _open_symbols()))
+        return await original_trade(
+            self, _merge_symbols(list(symbols), _open_symbols())
+        )
 
     async def guarded_kline(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_kline(self, _merge_symbols(list(symbols), _open_symbols()))
+        return await original_kline(
+            self, _merge_symbols(list(symbols), _open_symbols())
+        )
 
     async def guarded_book(
         self: DataIngestionService,
@@ -166,7 +170,9 @@ def _warning_market_state(
             mid_price=current_price,
             order_flow=kwargs.get("order_flow"),
             trend_strength=kwargs.get("trend_strength"),
-            atr_pct=(atr / current_price * 100.0) if atr and current_price > 0 else None,
+            atr_pct=(
+                (atr / current_price * 100.0) if atr and current_price > 0 else None
+            ),
             volume_profile_poc=volume_profile.poc if volume_profile else None,
             value_area_high=volume_profile.vah if volume_profile else None,
             value_area_low=volume_profile.val if volume_profile else None,
@@ -210,7 +216,9 @@ def _install_position_monitor() -> None:
                 trade.record_excursion(current_price)
             except Exception:
                 pass
-            return _cheap_position_action(decision.tier, decision.score, decision.reasons)
+            return _cheap_position_action(
+                decision.tier, decision.score, decision.reasons
+            )
 
         _DEEP_PRIORITY_SYMBOLS[symbol] = (decision.tier, decision.priority_score)
         if decision.tier == PositionMonitorTier.WARNING:
