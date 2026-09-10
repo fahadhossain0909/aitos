@@ -98,7 +98,9 @@ def main() -> int:
             unique.update(load_consumers(snap / f"{stream}.json"))
         aggregate[stream] = {
             "unique_consumers_seen": len(unique),
-            "final_consumer_count": stream_rows[-1]["consumer_count"] if stream_rows else 0,
+            "final_consumer_count": (
+                stream_rows[-1]["consumer_count"] if stream_rows else 0
+            ),
             "timeline": stream_rows,
         }
 
@@ -106,8 +108,14 @@ def main() -> int:
     previous_restart: int | None = None
     for snap in snapshots:
         restarts, _ = runtime(snap / "redis_runtime.txt")
-        if restarts is not None and previous_restart is not None and restarts != previous_restart:
-            restart_changes.append({"snapshot": snap.name, "from": previous_restart, "to": restarts})
+        if (
+            restarts is not None
+            and previous_restart is not None
+            and restarts != previous_restart
+        ):
+            restart_changes.append(
+                {"snapshot": snap.name, "from": previous_restart, "to": restarts}
+            )
         if restarts is not None:
             previous_restart = restarts
 
@@ -120,14 +128,26 @@ def main() -> int:
     report.append("## Interpretation")
     report.append("")
     if not churn_events:
-        report.append("- No consumer-name churn was observed during this window; a stable-identity code change is not justified by this run alone.")
+        report.append(
+            "- No consumer-name churn was observed during this window; a stable-identity code change is not justified by this run alone."
+        )
     else:
-        report.append("- Consumer-name churn was observed. Compare each churn event with the Redis restart count before changing identity semantics.")
-        restart_at_churn = [e for e in churn_events if e.get("redis_restart_count") in {x["to"] for x in restart_changes}]
+        report.append(
+            "- Consumer-name churn was observed. Compare each churn event with the Redis restart count before changing identity semantics."
+        )
+        restart_at_churn = [
+            e
+            for e in churn_events
+            if e.get("redis_restart_count") in {x["to"] for x in restart_changes}
+        ]
         if restart_changes and restart_at_churn:
-            report.append("- At least some churn coincides with Redis restart-count changes; restart-generated stale consumers remain plausible.")
+            report.append(
+                "- At least some churn coincides with Redis restart-count changes; restart-generated stale consumers remain plausible."
+            )
         else:
-            report.append("- Churn occurred without a matching Redis restart-count change in the same snapshot; investigate subscription recreation inside the application before changing consumer identity.")
+            report.append(
+                "- Churn occurred without a matching Redis restart-count change in the same snapshot; investigate subscription recreation inside the application before changing consumer identity."
+            )
     report.append("")
     report.append("## Per-stream summary")
     report.append("")
@@ -140,7 +160,11 @@ def main() -> int:
     (root / "consumer_identity_report.md").write_text("\n".join(report) + "\n")
     (root / "consumer_identity_events.json").write_text(
         json.dumps(
-            {"churn_events": churn_events, "restart_changes": restart_changes, "streams": aggregate},
+            {
+                "churn_events": churn_events,
+                "restart_changes": restart_changes,
+                "streams": aggregate,
+            },
             indent=2,
             sort_keys=True,
         )
