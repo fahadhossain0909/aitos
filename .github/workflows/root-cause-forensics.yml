@@ -58,13 +58,11 @@ jobs:
             set -euo pipefail
             cd "$HOME/aitos"
             test -f scripts/root_cause_forensics.sh
+            test -f scripts/root_cause_forensics_loop.sh
             export AITOS_ROOT_CAUSE_REPORT_DIR="$HOME/aitos-root-cause-forensics"
-            rm -rf "$AITOS_ROOT_CAUSE_REPORT_DIR"
-            bash scripts/root_cause_forensics.sh
-
-            # Keep the same observation window semantics as the E2E audit.
-            # The collector is snapshot-based; duration/interval are recorded for traceability.
-            printf 'duration_seconds=%s\ninterval_seconds=%s\n' "$FORENSIC_DURATION" "$FORENSIC_INTERVAL" > "$AITOS_ROOT_CAUSE_REPORT_DIR/run_parameters.txt"
+            export AITOS_ROOT_CAUSE_DURATION_SECONDS="$FORENSIC_DURATION"
+            export AITOS_ROOT_CAUSE_INTERVAL_SECONDS="$FORENSIC_INTERVAL"
+            bash scripts/root_cause_forensics_loop.sh
 
       - name: Retrieve forensic bundle
         if: always()
@@ -77,26 +75,33 @@ jobs:
           mkdir -p aitos-root-cause-forensics
           scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/root_cause_report.md" \
-            aitos-root-cause-forensics/root_cause_report.md
+            aitos-root-cause-forensics/root_cause_report.md || true
           scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/health.json" \
-            aitos-root-cause-forensics/health.json || true
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/timeline_summary.md" \
+            aitos-root-cause-forensics/timeline_summary.md || true
           scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/redis_consumers.txt" \
-            aitos-root-cause-forensics/redis_consumers.txt || true
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/timeline.json" \
+            aitos-root-cause-forensics/timeline.json || true
           scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/docker_stats.jsonl" \
-            aitos-root-cause-forensics/docker_stats.jsonl || true
-          scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/cgroup_cpu.stat" \
-            aitos-root-cause-forensics/cgroup_cpu.stat || true
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/timeline.tsv" \
+            aitos-root-cause-forensics/timeline.tsv || true
+          scp -i /tmp/aitos_root_cause_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-root-cause-forensics/snapshots" \
+            aitos-root-cause-forensics/ || true
 
       - name: Publish report
         if: always()
+        shell: bash
         run: |
           set -euo pipefail
-          test -s aitos-root-cause-forensics/root_cause_report.md
-          cat aitos-root-cause-forensics/root_cause_report.md
+          if [[ -s aitos-root-cause-forensics/timeline_summary.md ]]; then
+            cat aitos-root-cause-forensics/timeline_summary.md
+          elif [[ -s aitos-root-cause-forensics/root_cause_report.md ]]; then
+            cat aitos-root-cause-forensics/root_cause_report.md
+          else
+            echo 'No forensic report retrieved'
+            exit 1
+          fi
 
       - name: Upload forensic artifacts
         if: always()
