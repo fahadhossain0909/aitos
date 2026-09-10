@@ -19,7 +19,10 @@ def test_position_policy_keeps_monitoring_metadata_without_fixed_position_size()
     )
     policy = _capital_policy_consensus(portfolio)
     assert policy["monitoring_model"] == "normal_warning_exit_candidate"
-    assert policy["position_sizing_authority"] == "existing_position_manager_and_risk_engine"
+    assert (
+        policy["position_sizing_authority"]
+        == "existing_position_manager_and_risk_engine"
+    )
     assert policy["fixed_per_position_capital_pct"] is None
     assert policy["fixed_per_position_capital_usd"] is None
 
