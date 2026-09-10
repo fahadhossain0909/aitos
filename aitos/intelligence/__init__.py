@@ -62,6 +62,12 @@ from .scanner import (
 # Activate only after scanner import completes, avoiding a circular import.
 install_contextual_scanner_bridge(OpportunityScanner)
 
+# Position runtime must be activated while the intelligence package is being
+# initialized: aitos.app constructs TradeLifecycle after importing intelligence.
+# This guarantees the lifecycle-registration hook is installed before any
+# TradeLifecycle instance can be created.
+from . import position_runtime as _position_runtime  # noqa: F401,E402
+
 __all__ = [
     "DEFAULT_WEIGHTS",
     "AnalogueOutcome",
