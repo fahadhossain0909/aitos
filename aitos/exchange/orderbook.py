@@ -99,6 +99,19 @@ class LocalOrderBook:
             raise OrderBookSequenceError(
                 "order book must be seeded from REST snapshot first"
             )
+
+        # During REST bootstrap/re-bootstrap, the raw websocket producer may have
+        # buffered updates that were emitted before the REST snapshot was taken.
+        # Those updates are valid market data, but they are too old to bridge the
+        # snapshot cursor.  They must be discarded until an update satisfies the
+        # Binance bootstrap condition U <= lastUpdateId + 1 <= u.  Previously the
+        # stale-update branch ran first and emitted a synthetic snapshot for every
+        # buffered update, preventing the bridge state from being reached reliably.
+        if self._awaiting_first_update and update.final_update_id <= self.last_update_id:
+            self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
+            self._record_apply_duration(started, update)
+            return self.snapshot(self.last_update_id and update.event_time_ms or 0)
+
         if update.final_update_id <= self.last_update_id:
             self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
             result = self.snapshot(update.event_time_ms)
