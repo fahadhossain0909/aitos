@@ -19,6 +19,7 @@ from aitos.trading.position_manager import PositionAction, PositionManager
 
 REFERENCE_SYMBOL = "BTCUSDT"
 
+
 def _resource_budget(name: str, default: int) -> int:
     try:
         value = int(os.getenv(name, str(default)))
@@ -87,7 +88,6 @@ def _install_ingestion_guards() -> None:
     original_init = DataIngestionService.__init__
     original_trade = DataIngestionService.update_live_trade_symbols
     original_kline = DataIngestionService.update_live_kline_symbols
-    original_book = DataIngestionService.update_live_deep_orderbooks
 
     @wraps(original_init)
     def guarded_init(self: DataIngestionService, *args: Any, **kwargs: Any) -> None:
@@ -106,7 +106,8 @@ def _install_ingestion_guards() -> None:
         return await original_kline(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_book(
-        self: DataIngestionService, ranked_non_btc_symbols: list[str] | tuple[str, ...]
+        self: DataIngestionService,
+        ranked_non_btc_symbols: list[str] | tuple[str, ...],
     ) -> bool:
         requested = [
             str(s).upper()
@@ -117,7 +118,10 @@ def _install_ingestion_guards() -> None:
             symbol
             for symbol, (tier, priority) in sorted(
                 _DEEP_PRIORITY_SYMBOLS.items(),
-                key=lambda item: (-item[1][1], -int(item[1][0] == PositionMonitorTier.EXIT_CANDIDATE)),
+                key=lambda item: (
+                    -item[1][1],
+                    -int(item[1][0] == PositionMonitorTier.EXIT_CANDIDATE),
+                ),
             )
             if tier in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE}
             and symbol != REFERENCE_SYMBOL
@@ -233,7 +237,11 @@ def _install_position_monitor() -> None:
         )
         return PositionAction(
             action=action.action,
-            reason=f"POSITION_MONITOR:{decision.tier.value} priority={decision.priority_score:.2f} score={decision.score:.2f}; {action.reason}",
+            reason=(
+                f"POSITION_MONITOR:{decision.tier.value} "
+                f"priority={decision.priority_score:.2f} "
+                f"score={decision.score:.2f}; {action.reason}"
+            ),
             reduce_fraction=action.reduce_fraction,
             new_stop_price=action.new_stop_price,
             spike_tp_price=action.spike_tp_price,
