@@ -7,6 +7,7 @@ from aitos.intelligence.position_monitor import (
 from aitos.intelligence.position_runtime import (
     MAX_DEEP_SYMBOLS,
     _capital_policy_consensus,
+    _deep_priority_order,
     _merge_symbols,
 )
 
@@ -58,7 +59,9 @@ def test_position_monitor_stays_normal_for_healthy_position():
 
 def test_position_monitor_warning_uses_hysteresis_before_returning_to_normal():
     controller = PositionMonitorController(hysteresis_updates=3)
-    warning = controller.evaluate(trade=_trade(), current_price=95.5, extra_features={})
+    warning = controller.evaluate(
+        trade=_trade(), current_price=95.5, extra_features={}
+    )
     assert warning.tier == PositionMonitorTier.WARNING
     first_clear = controller.evaluate(
         trade=_trade(), current_price=102.0, extra_features={}
@@ -104,6 +107,16 @@ def test_priority_score_prefers_more_urgent_warning_position():
         },
     )
     assert urgent.priority_score > mild.priority_score
+
+
+def test_deep_priority_order_uses_health_urgency_before_symbol_order():
+    priorities = {
+        "ETHUSDT": (PositionMonitorTier.WARNING, 52.0),
+        "SOLUSDT": (PositionMonitorTier.EXIT_CANDIDATE, 71.0),
+        "XRPUSDT": (PositionMonitorTier.WARNING, 91.0),
+        "DOGEUSDT": (PositionMonitorTier.NORMAL, 100.0),
+    }
+    assert _deep_priority_order(priorities) == ["XRPUSDT", "SOLUSDT", "ETHUSDT"]
 
 
 def test_priority_score_caps_at_100_and_health_vector_is_optional_input_only():
