@@ -55,14 +55,20 @@ def install(event_bus_cls: type[Any]) -> None:
                     consumer_rows = []
                     now_ms = int(time.time() * 1000)
                     for raw_consumer in consumers[:_MAX_CONSUMERS_PER_GROUP]:
-                        consumer = {_decode(k): _decode(v) for k, v in raw_consumer.items()}
+                        consumer = {
+                            _decode(k): _decode(v) for k, v in raw_consumer.items()
+                        }
                         idle_ms = consumer.get("idle")
                         consumer_rows.append(
                             {
                                 "name": consumer.get("name"),
                                 "pending": consumer.get("pending", 0),
                                 "idle_ms": idle_ms,
-                                "idle_at_ms": now_ms - int(idle_ms) if isinstance(idle_ms, (int, float)) else None,
+                                "idle_at_ms": (
+                                    now_ms - int(idle_ms)
+                                    if isinstance(idle_ms, (int, float))
+                                    else None
+                                ),
                             }
                         )
                     inventory.append(
@@ -72,7 +78,9 @@ def install(event_bus_cls: type[Any]) -> None:
                             "pending": group.get("pending", 0),
                             "lag": group.get("lag"),
                             "entries_read": group.get("entries-read"),
-                            "last_delivered_id": _decode(group.get("last-delivered-id")),
+                            "last_delivered_id": _decode(
+                                group.get("last-delivered-id")
+                            ),
                             "consumers": consumer_rows,
                         }
                     )
