@@ -164,9 +164,11 @@ def _cheap_position_action(
     reasons: tuple[str, ...],
     market_state: Any = None,
 ) -> PositionAction:
-    action = ExitAction.EXIT if "stop_breached" in reasons else ExitAction.MANAGE
+    # The monitor is a risk-state gate only. Even a stop breach is represented
+    # as state here; the existing PositionManager/execution protection remains
+    # responsible for the actual exit decision.
     return PositionAction(
-        action=action,
+        action=ExitAction.MANAGE,
         reason=f"POSITION_MONITOR:{tier.value} score={score:.2f} [{', '.join(reasons)}]",
         market_state=market_state,
         notes=(f"monitor_tier={tier.value}", *reasons),
