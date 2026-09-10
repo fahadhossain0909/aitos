@@ -1,0 +1,91 @@
+name: Consumer Identity Forensics
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: Observation duration in seconds
+        required: false
+        default: '180'
+      interval_seconds:
+        description: Sampling interval in seconds
+        required: false
+        default: '10'
+
+permissions:
+  contents: read
+
+jobs:
+  consumer-identity-forensics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$DEPLOY_SSH_KEY"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_consumer_forensics_key
+          chmod 600 /tmp/aitos_consumer_forensics_key
+
+      - name: Run consumer identity observation window
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          FORENSIC_DURATION: ${{ inputs.duration_seconds || '180' }}
+          FORENSIC_INTERVAL: ${{ inputs.interval_seconds || '10' }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_consumer_forensics_key
+          command_timeout: 10m
+          envs: FORENSIC_DURATION,FORENSIC_INTERVAL
+          script: |
+            set -euo pipefail
+            cd "$HOME/aitos"
+            test -x scripts/consumer_identity_forensics.sh || chmod +x scripts/consumer_identity_forensics.sh
+            export AITOS_CONSUMER_FORENSICS_DIR="$HOME/aitos-consumer-identity-forensics"
+            export AITOS_CONSUMER_FORENSICS_DURATION_SECONDS="$FORENSIC_DURATION"
+            export AITOS_CONSUMER_FORENSICS_INTERVAL_SECONDS="$FORENSIC_INTERVAL"
+            bash scripts/consumer_identity_forensics.sh
+
+      - name: Retrieve consumer identity report
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p consumer-identity-forensics
+          scp -i /tmp/aitos_consumer_forensics_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-consumer-identity-forensics/consumer_identity_report.md" \
+            consumer-identity-forensics/consumer_identity_report.md
+          scp -i /tmp/aitos_consumer_forensics_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-consumer-identity-forensics/consumer_identity_events.json" \
+            consumer-identity-forensics/consumer_identity_events.json
+          scp -i /tmp/aitos_consumer_forensics_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-consumer-identity-forensics/snapshots" \
+            consumer-identity-forensics/
+
+      - name: Publish report
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s consumer-identity-forensics/consumer_identity_report.md
+          cat consumer-identity-forensics/consumer_identity_report.md
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aitos-consumer-identity-forensics
+          path: consumer-identity-forensics/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/aitos_consumer_forensics_key
