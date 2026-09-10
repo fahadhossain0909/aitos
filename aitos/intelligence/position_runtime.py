@@ -1,9 +1,9 @@
 """Runtime wiring for position-aware market-data coverage and tiered monitoring.
 
 Scanner ranking is never allowed to remove an open position from live market
-data. Expensive analysis is now demand-driven: every open position receives
-cheap monitoring, warnings escalate to deeper checks, and exit candidates get
-full PositionManager analysis.
+data. Expensive analysis is demand-driven: every open position receives cheap
+monitoring, warnings escalate to deeper checks, and exit candidates get full
+PositionManager analysis.
 """
 
 from __future__ import annotations
@@ -21,16 +21,20 @@ from aitos.intelligence.position_monitor import (
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionAction, PositionManager
 
+# Compatibility/export values from the previous implementation. This is now a
+# configurable risk default, not a runtime hard cap.
+MAX_OPEN_POSITIONS = 10
 POSITION_DATA_RESERVE_PCT = 20.0
 POSITION_CAPITAL_POOL_PCT = 80.0
 REFERENCE_SYMBOL = "BTCUSDT"
-MAX_POSITION_DEEP_SYMBOLS = 6
+MAX_DEEP_SYMBOLS = 6  # BTC reference + bounded escalated/scanner symbols
 
 _LIFECYCLES: weakref.WeakSet[TradeLifecycle] = weakref.WeakSet()
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
 _MONITORS: weakref.WeakKeyDictionary[PositionManager, PositionMonitorController] = (
     weakref.WeakKeyDictionary()
 )
+_DEEP_PRIORITY_SYMBOLS: dict[str, PositionMonitorTier] = {}
 
 
 def _open_symbols() -> list[str]:
@@ -96,31 +100,35 @@ def _install_ingestion_guards() -> None:
     async def guarded_trade(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_trade(
-            self, _merge_symbols(list(symbols), _open_symbols())
-        )
+        return await original_trade(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_kline(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_kline(
-            self, _merge_symbols(list(symbols), _open_symbols())
-        )
+        return await original_kline(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_book(
         self: DataIngestionService,
         ranked_non_btc_symbols: list[str] | tuple[str, ...],
     ) -> bool:
-        open_symbols = [s for s in _open_symbols() if s != REFERENCE_SYMBOL]
         requested = [
             str(s).upper()
             for s in ranked_non_btc_symbols
             if s and str(s).upper() != REFERENCE_SYMBOL
         ]
-        # Deep order-book capacity is demand-driven. Open positions are always
-        # first; remaining slots are available to scanner candidates.
-        non_btc = _merge_symbols(open_symbols, requested)
-        symbols = [REFERENCE_SYMBOL, *non_btc[: MAX_POSITION_DEEP_SYMBOLS - 1]]
+        escalated = [
+            symbol
+            for symbol, tier in sorted(
+                _DEEP_PRIORITY_SYMBOLS.items(),
+                key=lambda item: 0 if item[1] == PositionMonitorTier.EXIT_CANDIDATE else 1,
+            )
+            if tier in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE}
+            and symbol != REFERENCE_SYMBOL
+        ]
+        # Only escalated positions consume expensive order-book capacity.
+        # Normal positions remain protected by cheap trade/kline monitoring.
+        non_btc = _merge_symbols(escalated, requested)
+        symbols = [REFERENCE_SYMBOL, *non_btc[: MAX_DEEP_SYMBOLS - 1]]
         runtime = getattr(self, "_canonical_runtime", None)
         if runtime is None:
             return False
@@ -134,16 +142,9 @@ def _install_ingestion_guards() -> None:
 
 
 def _cheap_position_action(
-    trade: Any,
-    current_price: float,
-    tier: PositionMonitorTier,
-    score: float,
-    reasons: tuple[str, ...],
+    tier: PositionMonitorTier, score: float, reasons: tuple[str, ...]
 ) -> PositionAction:
-    if tier == PositionMonitorTier.EXIT_CANDIDATE:
-        action = ExitAction.EXIT if "stop_breached" in reasons else ExitAction.MANAGE
-    else:
-        action = ExitAction.MANAGE
+    action = ExitAction.EXIT if "stop_breached" in reasons else ExitAction.MANAGE
     return PositionAction(
         action=action,
         reason=f"POSITION_MONITOR:{tier.value} score={score:.2f} [{', '.join(reasons)}]",
@@ -174,24 +175,25 @@ def _install_position_monitor() -> None:
         extra_features: Any = None,
         **kwargs: Any,
     ) -> PositionAction:
-        controller = monitor_for(self)
-        decision = controller.evaluate(
+        decision = monitor_for(self).evaluate(
             trade=trade,
             current_price=current_price,
             extra_features=extra_features,
         )
-        # NORMAL is intentionally cheap: no path planning, thesis evaluation,
-        # hedge calculation, or full Exit Intelligence. WARNING performs the
-        # existing PositionManager analysis for confirmation. EXIT_CANDIDATE
-        # always receives the complete analysis immediately.
+        symbol = str(getattr(trade, "symbol", "")).upper()
         if decision.tier == PositionMonitorTier.NORMAL:
+            _DEEP_PRIORITY_SYMBOLS.pop(symbol, None)
             try:
                 trade.record_excursion(current_price)
             except Exception:
                 pass
             return _cheap_position_action(
-                trade, current_price, decision.tier, decision.score, decision.reasons
+                decision.tier, decision.score, decision.reasons
             )
+
+        _DEEP_PRIORITY_SYMBOLS[symbol] = decision.tier
+        # WARNING and EXIT_CANDIDATE invoke the existing rich PositionManager
+        # pipeline. The latter is the highest-priority full-analysis path.
         action = original_evaluate(
             self,
             trade=trade,
@@ -213,11 +215,7 @@ def _install_position_monitor() -> None:
             thesis=action.thesis,
             thesis_eval=action.thesis_eval,
             journey=action.journey,
-            notes=(
-                f"monitor_tier={decision.tier.value}",
-                *decision.reasons,
-                *action.notes,
-            ),
+            notes=(f"monitor_tier={decision.tier.value}", *decision.reasons, *action.notes),
         )
 
     def guarded_clear(
@@ -227,6 +225,8 @@ def _install_position_monitor() -> None:
         controller = _MONITORS.get(self)
         if controller is not None:
             controller.clear(trade_id)
+        if symbol:
+            _DEEP_PRIORITY_SYMBOLS.pop(str(symbol).upper(), None)
 
     PositionManager.evaluate = guarded_evaluate  # type: ignore[method-assign]
     PositionManager.clear_trade = guarded_clear  # type: ignore[method-assign]
