@@ -1,8 +1,8 @@
 """Tiered monitoring for open positions.
 
-Every open position remains continuously monitored with cheap signals. Only
-positions showing deterioration, risk proximity, or an explicit exit trigger
-are escalated into progressively more expensive analysis.
+Monitoring is a risk-state gate only. It never performs sophisticated exit
+reasoning; EXIT_CANDIDATE simply authorizes the existing PositionManager to
+run its full intelligence pipeline.
 """
 
 from __future__ import annotations
@@ -20,20 +20,32 @@ class PositionMonitorTier(str, Enum):
 
 
 @dataclass(frozen=True)
+class PositionHealthVector:
+    """Cheap/optional health dimensions supplied by the existing data path."""
+
+    pnl_pct: float
+    stop_distance_pct: float | None
+    cvd: float | None
+    delta: float | None
+    liquidity_risk: float | None
+    volatility_risk: float | None
+    regime_risk: float | None
+    reference_risk: float | None
+    thesis_risk: float | None
+    data_freshness_seconds: float | None
+
+
+@dataclass(frozen=True)
 class PositionMonitorDecision:
     tier: PositionMonitorTier
     score: float
     reasons: tuple[str, ...] = ()
+    priority_score: float = 0.0
+    health: PositionHealthVector | None = None
 
 
 class PositionMonitorController:
-    """Cheap, deterministic escalation gate used before expensive analysis.
-
-    The controller deliberately has no exchange or database dependencies. It
-    can therefore run for every open position on every live price update.
-    Feature names are intentionally tolerant because different data providers
-    expose CVD/delta/volatility/freshness under slightly different names.
-    """
+    """Cheap deterministic escalation gate; no sophisticated exit decisions."""
 
     def __init__(
         self,
@@ -63,6 +75,53 @@ class PositionMonitorController:
                 continue
         return None
 
+    @staticmethod
+    def _risk_feature(features: Mapping[str, Any], *names: str) -> float | None:
+        value = PositionMonitorController._feature(features, *names)
+        if value is None:
+            return None
+        return max(0.0, min(1.0, abs(value)))
+
+    @staticmethod
+    def _priority(
+        *,
+        tier: PositionMonitorTier,
+        stop_distance_pct: float | None,
+        reasons: list[str],
+        features: Mapping[str, Any],
+        freshness: float | None,
+    ) -> float:
+        """Return a resource-priority score, not a trading decision."""
+        score = {
+            PositionMonitorTier.NORMAL: 0.0,
+            PositionMonitorTier.WARNING: 30.0,
+            PositionMonitorTier.EXIT_CANDIDATE: 60.0,
+        }[tier]
+        if "stop_breached" in reasons:
+            score += 40.0
+        elif stop_distance_pct is not None and stop_distance_pct > 0:
+            score += max(0.0, 20.0 * (1.0 - min(stop_distance_pct / 2.0, 1.0)))
+        score += 15.0 * PositionMonitorController._risk_feature(
+            features, "thesis_risk", "thesis_deterioration", "thesis_invalidity"
+        ) or 0.0
+        score += 15.0 * PositionMonitorController._risk_feature(
+            features, "adverse_order_flow_risk", "order_flow_risk"
+        ) or 0.0
+        score += 12.0 * PositionMonitorController._risk_feature(
+            features, "liquidity_risk", "liquidity_stress"
+        ) or 0.0
+        score += 10.0 * PositionMonitorController._risk_feature(
+            features, "volatility_risk", "volatility_stress"
+        ) or 0.0
+        score += 8.0 * PositionMonitorController._risk_feature(
+            features, "reference_risk", "btc_relationship_risk", "lead_lag_risk"
+        ) or 0.0
+        if freshness is not None:
+            score += min(max(freshness, 0.0) / 5.0, 1.0) * 10.0
+        if "explicit_exit_signal" in reasons:
+            score += 20.0
+        return min(score, 100.0)
+
     def evaluate(
         self,
         *,
@@ -73,7 +132,6 @@ class PositionMonitorController:
         features = extra_features or {}
         reasons: list[str] = []
         score = 0.0
-
         entry = float(getattr(trade, "entry_price", 0.0) or 0.0)
         sl = float(getattr(trade, "sl_price", 0.0) or 0.0)
         side = str(
@@ -81,7 +139,7 @@ class PositionMonitorController:
         ).upper()
         if current_price <= 0 or entry <= 0:
             return PositionMonitorDecision(
-                PositionMonitorTier.WARNING, 1.0, ("invalid_price_context",)
+                PositionMonitorTier.WARNING, 1.0, ("invalid_price_context",), 100.0
             )
 
         pnl_pct = (
@@ -93,30 +151,34 @@ class PositionMonitorController:
             score += 1.0
             reasons.append("negative_pnl")
 
+        stop_distance_pct: float | None = None
         if sl > 0:
-            sl_distance_pct = abs(current_price - sl) / current_price * 100.0
-            if (side == "LONG" and current_price <= sl) or (
+            stop_distance_pct = abs(current_price - sl) / current_price * 100.0
+            breached = (side == "LONG" and current_price <= sl) or (
                 side == "SHORT" and current_price >= sl
-            ):
+            )
+            if breached:
                 score += 5.0
                 reasons.append("stop_breached")
-            elif sl_distance_pct <= self.exit_sl_distance_pct:
+            elif stop_distance_pct <= self.exit_sl_distance_pct:
                 score += 3.0
                 reasons.append("near_stop_critical")
-            elif sl_distance_pct <= self.warning_sl_distance_pct:
+            elif stop_distance_pct <= self.warning_sl_distance_pct:
                 score += 2.0
                 reasons.append("near_stop")
 
         cvd = self._feature(features, "cvd", "cvd_value", "cumulative_delta")
         delta = self._feature(features, "delta", "trade_delta", "order_flow_delta")
-        if cvd is not None and pnl_pct > 0:
-            if (side == "LONG" and cvd < 0) or (side == "SHORT" and cvd > 0):
-                score += 1.5
-                reasons.append("cvd_divergence")
-        if delta is not None:
-            if (side == "LONG" and delta < 0) or (side == "SHORT" and delta > 0):
-                score += 1.0
-                reasons.append("adverse_delta")
+        if cvd is not None and pnl_pct > 0 and (
+            (side == "LONG" and cvd < 0) or (side == "SHORT" and cvd > 0)
+        ):
+            score += 1.5
+            reasons.append("cvd_divergence")
+        if delta is not None and (
+            (side == "LONG" and delta < 0) or (side == "SHORT" and delta > 0)
+        ):
+            score += 1.0
+            reasons.append("adverse_delta")
 
         volatility = self._feature(features, "volatility_pct", "atr_pct", "volatility")
         if volatility is not None and volatility > 3.0:
@@ -139,10 +201,8 @@ class PositionMonitorController:
 
         if score >= self.exit_score:
             tier = PositionMonitorTier.EXIT_CANDIDATE
-            self._clear_count.pop(str(getattr(trade, "trade_id", "")), None)
         elif score >= self.warning_score:
             tier = PositionMonitorTier.WARNING
-            self._clear_count.pop(str(getattr(trade, "trade_id", "")), None)
         else:
             tier = PositionMonitorTier.NORMAL
 
@@ -161,7 +221,33 @@ class PositionMonitorController:
         else:
             self._clear_count.pop(trade_id, None)
         self._last_tier[trade_id] = tier
-        return PositionMonitorDecision(tier=tier, score=score, reasons=tuple(reasons))
+
+        health = PositionHealthVector(
+            pnl_pct=pnl_pct,
+            stop_distance_pct=stop_distance_pct,
+            cvd=cvd,
+            delta=delta,
+            liquidity_risk=self._risk_feature(features, "liquidity_risk", "liquidity_stress"),
+            volatility_risk=self._risk_feature(features, "volatility_risk", "volatility_stress"),
+            regime_risk=self._risk_feature(features, "regime_risk", "market_regime_risk"),
+            reference_risk=self._risk_feature(features, "reference_risk", "btc_relationship_risk", "lead_lag_risk"),
+            thesis_risk=self._risk_feature(features, "thesis_risk", "thesis_deterioration", "thesis_invalidity"),
+            data_freshness_seconds=freshness,
+        )
+        priority = self._priority(
+            tier=tier,
+            stop_distance_pct=stop_distance_pct,
+            reasons=reasons,
+            features=features,
+            freshness=freshness,
+        )
+        return PositionMonitorDecision(
+            tier=tier,
+            score=score,
+            reasons=tuple(reasons),
+            priority_score=priority,
+            health=health,
+        )
 
     def clear(self, trade_id: str) -> None:
         self._last_tier.pop(trade_id, None)
