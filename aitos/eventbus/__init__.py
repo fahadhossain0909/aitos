@@ -4,7 +4,9 @@ from aitos.forensics.market_data_attribution import install_eventbus_attribution
 from aitos.forensics.pipeline_stage_telemetry import (
     install as install_pipeline_stage_telemetry,
 )
-from aitos.forensics.redis_consumer_telemetry import install as install_redis_consumer_telemetry
+from aitos.forensics.redis_consumer_telemetry import (
+    install as install_redis_consumer_telemetry,
+)
 from aitos.forensics.root_cause_telemetry import install as install_root_cause_telemetry
 from aitos.forensics.runtime_contention_telemetry import (
     install as install_runtime_contention_telemetry,
