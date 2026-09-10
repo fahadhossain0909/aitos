@@ -106,7 +106,10 @@ class LocalOrderBook:
         # updates without emitting a synthetic snapshot. Emitting them leaves
         # the book in bootstrap state and can cause repeated bridge mismatches
         # and watchdog timeouts.
-        if self._awaiting_first_update and update.final_update_id <= self.last_update_id:
+        if (
+            self._awaiting_first_update
+            and update.final_update_id <= self.last_update_id
+        ):
             self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
             self._record_apply_duration(started, update)
             return None
