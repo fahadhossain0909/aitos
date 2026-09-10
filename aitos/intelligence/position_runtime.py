@@ -13,14 +13,13 @@ from functools import wraps
 from typing import Any
 
 from aitos.data.ingestion import DataIngestionService
-from aitos.models.trade import TradeLifecycleState
-from aitos.trading.lifecycle import TradeLifecycle
-from aitos.trading.position_manager import PositionAction, PositionManager
 from aitos.intelligence.exit_intelligence import ExitAction
 from aitos.intelligence.position_monitor import (
     PositionMonitorController,
     PositionMonitorTier,
 )
+from aitos.trading.lifecycle import TradeLifecycle
+from aitos.trading.position_manager import PositionAction, PositionManager
 
 POSITION_DATA_RESERVE_PCT = 20.0
 POSITION_CAPITAL_POOL_PCT = 80.0
@@ -65,8 +64,7 @@ def _capital_policy(portfolio: Any) -> dict[str, Any]:
     equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
     positions = tuple(getattr(portfolio, "positions", ()) or ())
     deployed_notional = sum(
-        float(getattr(position, "notional_usd", 0.0) or 0.0)
-        for position in positions
+        float(getattr(position, "notional_usd", 0.0) or 0.0) for position in positions
     )
     pool = max(0.0, equity * POSITION_CAPITAL_POOL_PCT / 100.0)
     return {
@@ -98,12 +96,16 @@ def _install_ingestion_guards() -> None:
     async def guarded_trade(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_trade(self, _merge_symbols(list(symbols), _open_symbols()))
+        return await original_trade(
+            self, _merge_symbols(list(symbols), _open_symbols())
+        )
 
     async def guarded_kline(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_kline(self, _merge_symbols(list(symbols), _open_symbols()))
+        return await original_kline(
+            self, _merge_symbols(list(symbols), _open_symbols())
+        )
 
     async def guarded_book(
         self: DataIngestionService,
@@ -132,7 +134,11 @@ def _install_ingestion_guards() -> None:
 
 
 def _cheap_position_action(
-    trade: Any, current_price: float, tier: PositionMonitorTier, score: float, reasons: tuple[str, ...]
+    trade: Any,
+    current_price: float,
+    tier: PositionMonitorTier,
+    score: float,
+    reasons: tuple[str, ...],
 ) -> PositionAction:
     if tier == PositionMonitorTier.EXIT_CANDIDATE:
         action = ExitAction.EXIT if "stop_breached" in reasons else ExitAction.MANAGE
@@ -207,10 +213,16 @@ def _install_position_monitor() -> None:
             thesis=action.thesis,
             thesis_eval=action.thesis_eval,
             journey=action.journey,
-            notes=(f"monitor_tier={decision.tier.value}", *decision.reasons, *action.notes),
+            notes=(
+                f"monitor_tier={decision.tier.value}",
+                *decision.reasons,
+                *action.notes,
+            ),
         )
 
-    def guarded_clear(self: PositionManager, trade_id: str, symbol: str | None = None) -> None:
+    def guarded_clear(
+        self: PositionManager, trade_id: str, symbol: str | None = None
+    ) -> None:
         original_clear(self, trade_id, symbol=symbol)
         controller = _MONITORS.get(self)
         if controller is not None:
