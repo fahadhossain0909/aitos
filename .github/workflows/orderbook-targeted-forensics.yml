@@ -66,7 +66,7 @@ jobs:
             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/orderbook_targeted_forensics.sh"
           ssh -i /tmp/aitos_orderbook_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "$DEPLOY_USER@$DEPLOY_HOST" \
-            "chmod +x /tmp/orderbook_targeted_forensics.sh && AITOS_ORDERBOOK_FORENSICS_WINDOW_SECONDS='$WINDOW_SECONDS' AITOS_ORDERBOOK_FORENSICS_SAMPLE_SECONDS='$SAMPLE_SECONDS' AITOS_ORDERBOOK_FORENSICS_OUTPUT='\$HOME/aitos-orderbook-targeted-forensics' bash /tmp/orderbook_targeted_forensics.sh"
+            "cd /home/n41/aitos && chmod +x /tmp/orderbook_targeted_forensics.sh && AITOS_ORDERBOOK_FORENSICS_WINDOW_SECONDS='$WINDOW_SECONDS' AITOS_ORDERBOOK_FORENSICS_SAMPLE_SECONDS='$SAMPLE_SECONDS' AITOS_ORDERBOOK_FORENSICS_OUTPUT='\$HOME/aitos-orderbook-targeted-forensics' bash /tmp/orderbook_targeted_forensics.sh"
 
       - name: Retrieve forensic report
         if: always()
