@@ -106,7 +106,9 @@ def module_sources(health: dict[str, Any]) -> dict[str, Any]:
         "canonical_market_data": canonical,
         "canonical_health": canonical.get("health") or {},
         "canonical_transport": canonical.get("transport") or {},
-        "gateway_drain": nested_get(canonical, ("root_cause_telemetry", "gateway_drain"))
+        "gateway_drain": nested_get(
+            canonical, ("root_cause_telemetry", "gateway_drain")
+        )
         or {},
         "canonical_persistence": persistence,
         "persistence_queue_wait": nested_get(
@@ -114,17 +116,9 @@ def module_sources(health: dict[str, Any]) -> dict[str, Any]:
         )
         or {},
         "event_bus": event_bus,
-        "redis_xadd": nested_get(
-            event_bus, ("market_data_e2e", "redis_xadd")
-        )
-        or {},
-        "event_loop": nested_get(
-            event_bus, ("runtime_contention", "event_loop")
-        )
-        or {},
-        "runtime_streams": nested_get(
-            canonical, ("transport", "runtime_streams")
-        )
+        "redis_xadd": nested_get(event_bus, ("market_data_e2e", "redis_xadd")) or {},
+        "event_loop": nested_get(event_bus, ("runtime_contention", "event_loop")) or {},
+        "runtime_streams": nested_get(canonical, ("transport", "runtime_streams"))
         or {},
     }
 
@@ -140,7 +134,9 @@ def latency_delta(start: dict[str, Any], end: dict[str, Any]) -> dict[str, Any]:
     return delta
 
 
-def derive_window(start_health: dict[str, Any], end_health: dict[str, Any]) -> dict[str, Any]:
+def derive_window(
+    start_health: dict[str, Any], end_health: dict[str, Any]
+) -> dict[str, Any]:
     start = module_sources(start_health)
     end = module_sources(end_health)
     return {
@@ -151,9 +147,7 @@ def derive_window(start_health: dict[str, Any], end_health: dict[str, Any]) -> d
         "persistence_queue_wait": delta_tree(
             start["persistence_queue_wait"], end["persistence_queue_wait"]
         ),
-        "runtime_streams": delta_tree(
-            start["runtime_streams"], end["runtime_streams"]
-        ),
+        "runtime_streams": delta_tree(start["runtime_streams"], end["runtime_streams"]),
     }
 
 
