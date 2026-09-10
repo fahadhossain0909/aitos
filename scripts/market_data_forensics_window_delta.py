@@ -236,7 +236,9 @@ def main() -> int:
     total_seconds = window_seconds(samples[0].get("ts"), samples[-1].get("ts"))
     add_window_rates(total_delta, total_seconds)
     for interval in intervals:
-        seconds = window_seconds(interval.get("window_start"), interval.get("window_end"))
+        seconds = window_seconds(
+            interval.get("window_start"), interval.get("window_end")
+        )
         add_window_rates(interval, seconds)
 
     output = {
