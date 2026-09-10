@@ -11,7 +11,6 @@ import os
 from pathlib import Path
 from typing import Any
 
-
 COUNTER_KEYS = {
     "received_events",
     "accepted_events",
@@ -134,12 +133,13 @@ def main() -> int:
     # Runtime stream telemetry is cumulative too; explicitly expose the exact
     # per-stream window deltas so an audit cannot mistake lifetime counts for
     # failures occurring during its observation period.
-    runtime_start = nested_get(
-        start_sources["transport_telemetry"] or {}, ("runtime_streams",)
-    ) or {}
-    runtime_end = nested_get(
-        end_sources["transport_telemetry"] or {}, ("runtime_streams",)
-    ) or {}
+    runtime_start = (
+        nested_get(start_sources["transport_telemetry"] or {}, ("runtime_streams",))
+        or {}
+    )
+    runtime_end = (
+        nested_get(end_sources["transport_telemetry"] or {}, ("runtime_streams",)) or {}
+    )
     runtime_deltas = delta_tree(runtime_start, runtime_end)
     deltas["runtime_streams"] = runtime_deltas or {}
 
@@ -154,7 +154,9 @@ def main() -> int:
     report_json = directory / "report.json"
     report = json.loads(report_json.read_text(encoding="utf-8"))
     report["window_deltas"] = output
-    report_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    report_json.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     report_md = directory / "report.md"
     with report_md.open("a", encoding="utf-8") as fh:
