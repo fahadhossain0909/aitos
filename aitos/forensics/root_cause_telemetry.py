@@ -92,8 +92,24 @@ def _ensure_persistence_state(self: Any) -> None:
         self._root_cause_enqueued_at = {}
     if not hasattr(self, "_root_cause_persist_wait"):
         self._root_cause_persist_wait = defaultdict(_bucket)
+    if not hasattr(self, "_root_cause_persist_batch_write"):
+        self._root_cause_persist_batch_write = _bucket()
     if not hasattr(self, "_root_cause_persist_recent"):
         self._root_cause_persist_recent = deque(maxlen=100)
+    if not hasattr(self, "_root_cause_persist_enqueued"):
+        self._root_cause_persist_enqueued = 0
+    if not hasattr(self, "_root_cause_persist_rejected"):
+        self._root_cause_persist_rejected = 0
+    if not hasattr(self, "_root_cause_persist_max_queue_depth"):
+        self._root_cause_persist_max_queue_depth = 0
+    if not hasattr(self, "_root_cause_persist_batches"):
+        self._root_cause_persist_batches = 0
+    if not hasattr(self, "_root_cause_persist_batch_events"):
+        self._root_cause_persist_batch_events = 0
+    if not hasattr(self, "_root_cause_persist_batch_min"):
+        self._root_cause_persist_batch_min = None
+    if not hasattr(self, "_root_cause_persist_batch_max"):
+        self._root_cause_persist_batch_max = 0
 
 
 def install() -> None:
@@ -302,15 +318,34 @@ def _install_persistence_sink() -> None:
         original_init(self, *args, **kwargs)
         self._root_cause_enqueued_at = {}
         self._root_cause_persist_wait = defaultdict(_bucket)
+        self._root_cause_persist_batch_write = _bucket()
         self._root_cause_persist_recent = deque(maxlen=100)
+        self._root_cause_persist_enqueued = 0
+        self._root_cause_persist_rejected = 0
+        self._root_cause_persist_max_queue_depth = 0
+        self._root_cause_persist_batches = 0
+        self._root_cause_persist_batch_events = 0
+        self._root_cause_persist_batch_min = None
+        self._root_cause_persist_batch_max = 0
 
     async def enqueue(self: Any, event: Any) -> None:
         _ensure_persistence_state(self)
-        before = _queue_depth(self)
+        before_queue = _queue_depth(self)
+        before_rejected = int(getattr(self, "_rejected", 0))
         await original_enqueue(self, event)
         after = _queue_depth(self)
-        if after > before:
+        self._root_cause_persist_max_queue_depth = max(
+            self._root_cause_persist_max_queue_depth, after
+        )
+        after_rejected = int(getattr(self, "_rejected", 0))
+        if after_rejected > before_rejected:
+            self._root_cause_persist_rejected += after_rejected - before_rejected
+            return
+        # The queue transition identifies an admitted event without copying
+        # the sink's historical filtering rules into the forensic layer.
+        if after > before_queue:
             event_id = str(getattr(event, "event_id", id(event)))
+            self._root_cause_persist_enqueued += 1
             self._root_cause_enqueued_at[event_id] = time.monotonic()
             self._root_cause_persist_recent.append(
                 {
@@ -329,6 +364,16 @@ def _install_persistence_sink() -> None:
         started = time.perf_counter()
         now = time.monotonic()
         batch = list(events)
+        self._root_cause_persist_batches += 1
+        self._root_cause_persist_batch_events += len(batch)
+        self._root_cause_persist_batch_min = (
+            len(batch)
+            if self._root_cause_persist_batch_min is None
+            else min(self._root_cause_persist_batch_min, len(batch))
+        )
+        self._root_cause_persist_batch_max = max(
+            self._root_cause_persist_batch_max, len(batch)
+        )
         event_types = defaultdict(int)
         symbols: list[str] = []
         for event in batch:
@@ -353,6 +398,7 @@ def _install_persistence_sink() -> None:
             return await original_persist_batch(self, batch)
         finally:
             elapsed = (time.perf_counter() - started) * 1000
+            _record(self._root_cause_persist_batch_write, elapsed)
             sample = {
                 "stage": "persistence_batch_write",
                 "batch_size": len(batch),
@@ -372,10 +418,25 @@ def _install_persistence_sink() -> None:
     def snapshot(self: Any) -> dict[str, object]:
         _ensure_persistence_state(self)
         result = original_snapshot(self)
+        batches = self._root_cause_persist_batches
+        batch_events = self._root_cause_persist_batch_events
         result["root_cause_telemetry"] = {
             "queue_wait": {
                 key: _format(value)
                 for key, value in sorted(self._root_cause_persist_wait.items())
+            },
+            "batch_write": _format(self._root_cause_persist_batch_write),
+            "capacity": {
+                "enqueued": self._root_cause_persist_enqueued,
+                "rejected": self._root_cause_persist_rejected,
+                "max_queue_depth": self._root_cause_persist_max_queue_depth,
+                "batches": batches,
+                "batch_events": batch_events,
+                "avg_batch_size": round(batch_events / batches, 3) if batches else 0.0,
+                "min_batch_size": self._root_cause_persist_batch_min,
+                "max_batch_size": self._root_cause_persist_batch_max,
+                "workers_configured": int(getattr(self, "_workers_count", 0)),
+                "workers_running": len(getattr(self, "_workers", [])),
             },
             "recent": list(self._root_cause_persist_recent),
             "tracked_enqueued_events": len(self._root_cause_enqueued_at),
