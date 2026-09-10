@@ -1,5 +1,9 @@
 from types import SimpleNamespace
 
+from aitos.intelligence.position_monitor import (
+    PositionMonitorController,
+    PositionMonitorTier,
+)
 from aitos.intelligence.position_runtime import (
     MAX_DEEP_SYMBOLS,
     MAX_OPEN_POSITIONS,
@@ -10,8 +14,8 @@ from aitos.intelligence.position_runtime import (
 )
 
 
-def test_position_policy_is_five_slots_with_reserve_buffer():
-    assert MAX_OPEN_POSITIONS == 5
+def test_position_policy_is_configurable_and_keeps_reserve_buffer():
+    assert MAX_OPEN_POSITIONS == 10
     assert POSITION_DATA_RESERVE_PCT == 20.0
     assert POSITION_CAPITAL_POOL_PCT == 80.0
     assert MAX_DEEP_SYMBOLS == 6
@@ -25,7 +29,7 @@ def test_merge_symbols_preserves_requested_order_and_adds_open_positions():
     assert merged == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
 
 
-def test_capital_policy_reports_five_slot_pool_and_remaining_capacity():
+def test_capital_policy_reports_reserve_and_remaining_capacity():
     portfolio = SimpleNamespace(
         equity_usd=10_000.0,
         positions=(
@@ -37,4 +41,44 @@ def test_capital_policy_reports_five_slot_pool_and_remaining_capacity():
     assert policy["capital_pool_usd"] == 8_000.0
     assert policy["deployed_notional_usd"] == 1_500.0
     assert policy["remaining_policy_capacity_usd"] == 6_500.0
-    assert policy["per_slot_capital_usd"] == 1_600.0
+    assert policy["monitoring_model"] == "normal_warning_exit_candidate"
+
+
+def _trade(price: float = 100.0, sl: float = 95.0):
+    return SimpleNamespace(
+        trade_id="t1",
+        symbol="ETHUSDT",
+        side=SimpleNamespace(value="LONG"),
+        entry_price=100.0,
+        sl_price=sl,
+        record_excursion=lambda _price: None,
+    )
+
+
+def test_position_monitor_stays_normal_for_healthy_position():
+    decision = PositionMonitorController().evaluate(
+        trade=_trade(), current_price=102.0, extra_features={}
+    )
+    assert decision.tier == PositionMonitorTier.NORMAL
+
+
+def test_position_monitor_escalates_near_stop_and_hysteresis_prevents_flapping():
+    controller = PositionMonitorController(hysteresis_updates=3)
+    warning = controller.evaluate(trade=_trade(), current_price=95.5, extra_features={})
+    assert warning.tier == PositionMonitorTier.EXIT_CANDIDATE
+    first_clear = controller.evaluate(trade=_trade(), current_price=102.0, extra_features={})
+    assert first_clear.tier == PositionMonitorTier.EXIT_CANDIDATE
+    second_clear = controller.evaluate(trade=_trade(), current_price=102.0, extra_features={})
+    assert second_clear.tier == PositionMonitorTier.EXIT_CANDIDATE
+    final_clear = controller.evaluate(trade=_trade(), current_price=102.0, extra_features={})
+    assert final_clear.tier == PositionMonitorTier.NORMAL
+
+
+def test_position_monitor_uses_adverse_order_flow_features():
+    decision = PositionMonitorController().evaluate(
+        trade=_trade(),
+        current_price=101.0,
+        extra_features={"cvd": -10.0, "delta": -5.0},
+    )
+    assert decision.tier == PositionMonitorTier.WARNING
+    assert "cvd_divergence" in decision.reasons
