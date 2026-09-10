@@ -58,11 +58,14 @@ jobs:
             set -euo pipefail
             cd "$HOME/aitos"
             test -f scripts/market_data_e2e_forensics.sh
+            test -f scripts/market_data_forensics_window_delta.py
             export AITOS_FORENSIC_WINDOW_SECONDS="$FORENSIC_WINDOW"
             export AITOS_FORENSIC_INTERVAL_SECONDS="$FORENSIC_INTERVAL"
             export AITOS_FORENSIC_REPORT_DIR="$HOME/aitos-market-data-e2e-forensics"
             rm -rf "$AITOS_FORENSIC_REPORT_DIR"
             bash scripts/market_data_e2e_forensics.sh
+            AITOS_FORENSIC_REPORT_DIR="$AITOS_FORENSIC_REPORT_DIR" \
+              python3 scripts/market_data_forensics_window_delta.py
 
       - name: Retrieve forensic bundle
         if: always()
@@ -82,6 +85,9 @@ jobs:
           scp -i /tmp/aitos_e2e_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
             "$DEPLOY_USER@$DEPLOY_HOST:aitos-market-data-e2e-forensics/samples.jsonl" \
             aitos-market-data-e2e-forensics/samples.jsonl
+          scp -i /tmp/aitos_e2e_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-market-data-e2e-forensics/window_deltas.json" \
+            aitos-market-data-e2e-forensics/window_deltas.json
 
       - name: Publish forensic report
         if: always()
