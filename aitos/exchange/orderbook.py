@@ -77,7 +77,7 @@ class LocalOrderBook:
         self._forensics["max_bids_size"] = len(self._bids)
         self._forensics["max_asks_size"] = len(self._asks)
 
-    def apply(self, update: DepthUpdate) -> OrderBookSnapshot:
+    def apply(self, update: DepthUpdate) -> OrderBookSnapshot | None:
         started = time.perf_counter()
         self._forensics["apply_count"] = int(self._forensics["apply_count"]) + 1
         self._forensics["last_first_update_id"] = update.first_update_id
@@ -99,6 +99,21 @@ class LocalOrderBook:
             raise OrderBookSequenceError(
                 "order book must be seeded from REST snapshot first"
             )
+
+        # The websocket producer starts before the REST snapshot is fetched.
+        # Therefore the queue can contain updates that the REST snapshot already
+        # covers. While awaiting the first bridge update, discard those stale
+        # updates without emitting a synthetic snapshot. Emitting them leaves
+        # the book in bootstrap state and can cause repeated bridge mismatches
+        # and watchdog timeouts.
+        if (
+            self._awaiting_first_update
+            and update.final_update_id <= self.last_update_id
+        ):
+            self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
+            self._record_apply_duration(started, update)
+            return None
+
         if update.final_update_id <= self.last_update_id:
             self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
             result = self.snapshot(update.event_time_ms)
