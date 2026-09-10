@@ -52,20 +52,7 @@ jobs:
             echo "mode=all" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if [[ "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
-            git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
-            base="${{ github.event.pull_request.base.sha }}"
-            head="${{ github.event.pull_request.head.sha }}"
-          else
-            base="${{ github.event.before }}"
-            head="$GITHUB_SHA"
-            if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
-              base="$(git rev-list --max-count=1 HEAD^)"
-            fi
-          fi
-          files="$(git diff --name-only "$base" "$head" -- '*.py' | tr '\n' ' ' | xargs || true)"
           echo "mode=changed" >> "$GITHUB_OUTPUT"
-          echo "files=$files" >> "$GITHUB_OUTPUT"
 
       - name: Run Black (full repository)
         if: steps.scope.outputs.mode == 'all'
@@ -76,15 +63,34 @@ jobs:
       - name: Run Ruff safe fixes (full repository)
         if: steps.scope.outputs.mode == 'all'
         run: ruff check --fix --exit-zero .
-      - name: Run Black (changed Python files)
-        if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
-        run: black ${{ steps.scope.outputs.files }}
-      - name: Run isort (changed Python files)
-        if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
-        run: isort ${{ steps.scope.outputs.files }}
-      - name: Run Ruff safe fixes (changed Python files)
-        if: steps.scope.outputs.mode == 'changed' && steps.scope.outputs.files != ''
-        run: ruff check --fix --exit-zero ${{ steps.scope.outputs.files }}
+
+      - name: Run safe fixes (changed Python files)
+        if: steps.scope.outputs.mode == 'changed'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request_target" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="$GITHUB_SHA"
+            if [[ "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+              base="$(git rev-list --max-count=1 HEAD^)"
+            fi
+          fi
+
+          # Only pass files that are present in the checked-out tree.
+          # Deleted Python paths must never be handed to Black/isort/Ruff.
+          mapfile -t files < <(git diff --name-only --diff-filter=ACMR "$base" "$head" -- '*.py')
+
+          for file in "${files[@]}"; do
+            [[ -f "$file" ]] || continue
+            black "$file"
+            isort "$file"
+            ruff check --fix --exit-zero "$file"
+          done
 
       - name: Commit and push safe fixes
         shell: bash
