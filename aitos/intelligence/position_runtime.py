@@ -1,39 +1,37 @@
-"""Runtime guards for bounded open-position analysis.
+"""Runtime wiring for position-aware market-data coverage and tiered monitoring.
 
-The scanner's candidate universe is intentionally dynamic, but an open trade is
-never allowed to disappear from the market-data universe merely because it fell
-out of the scanner ranking.  This module keeps those concerns separate and
-places a hard five-position ceiling at the TradeLifecycle boundary.
-
-The expensive order-book universe is bounded to BTC plus the currently open
-positions, with remaining capacity available to scanner candidates.  Thus a
-portfolio with five positions uses at most six deep symbols (BTC reference +
-five positions), while a portfolio with fewer positions can still analyze new
-candidates.
+Scanner ranking is never allowed to remove an open position from live market
+data. Expensive analysis is now demand-driven: every open position receives
+cheap monitoring, warnings escalate to deeper checks, and exit candidates get
+full PositionManager analysis.
 """
 
 from __future__ import annotations
 
-import asyncio
 import weakref
-from dataclasses import replace
-from datetime import datetime, timezone
 from functools import wraps
 from typing import Any
 
 from aitos.data.ingestion import DataIngestionService
-from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
+from aitos.models.trade import TradeLifecycleState
 from aitos.trading.lifecycle import TradeLifecycle
+from aitos.trading.position_manager import PositionAction, PositionManager
+from aitos.intelligence.exit_intelligence import ExitAction
+from aitos.intelligence.position_monitor import (
+    PositionMonitorController,
+    PositionMonitorTier,
+)
 
-MAX_OPEN_POSITIONS = 5
 POSITION_DATA_RESERVE_PCT = 20.0
-POSITION_CAPITAL_POOL_PCT = 100.0 - POSITION_DATA_RESERVE_PCT
-MAX_DEEP_SYMBOLS = MAX_OPEN_POSITIONS + 1  # BTC reference + five positions
-MAX_SCANNER_DEEP_CANDIDATES = 2
+POSITION_CAPITAL_POOL_PCT = 80.0
 REFERENCE_SYMBOL = "BTCUSDT"
+MAX_POSITION_DEEP_SYMBOLS = 6
 
 _LIFECYCLES: weakref.WeakSet[TradeLifecycle] = weakref.WeakSet()
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
+_MONITORS: weakref.WeakKeyDictionary[PositionManager, PositionMonitorController] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 def _open_symbols() -> list[str]:
@@ -52,74 +50,34 @@ def _open_symbols() -> list[str]:
     return symbols
 
 
-def _rejected_trade(opportunity: Opportunity, reason: str) -> Trade:
-    now = datetime.now(timezone.utc).isoformat()
-    return Trade(
-        trade_id=f"position-guard-reject-{opportunity.opportunity_id}",
-        symbol=opportunity.symbol,
-        side=opportunity.side,
-        entry_price=opportunity.entry_price,
-        quantity=0.0,
-        leverage=1.0,
-        position_size_usd=0.0,
-        risk_amount_usd=0.0,
-        strategy_id=opportunity.strategy_id,
-        agent_consensus=dict(opportunity.agent_consensus),
-        explanation=opportunity.rationale,
-        sl_price=opportunity.stop_loss_price,
-        tp_price=(
-            opportunity.take_profit_levels[0]
-            if opportunity.take_profit_levels
-            else opportunity.entry_price
-        ),
-        state=TradeLifecycleState.REJECTED,
-        entry_time=now,
-        take_profit_levels=list(opportunity.take_profit_levels),
-        regime=opportunity.regime,
-        rejection_reason=reason,
-    )
-
-
-def _capital_policy_consensus(portfolio: Any) -> dict[str, Any]:
-    equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
-    deployed = sum(
-        float(getattr(position, "notional_usd", 0.0) or 0.0)
-        for position in (getattr(portfolio, "positions", ()) or ())
-    )
-    # This is a capital *policy budget*, not a replacement for stop-risk sizing.
-    # It is exposed to the downstream lifecycle so sizing/telemetry can make the
-    # five-slot + reserve decision explicit without changing account equity.
-    deploy_capital = max(0.0, equity * POSITION_CAPITAL_POOL_PCT / 100.0)
-    return {
-        "max_open_positions": MAX_OPEN_POSITIONS,
-        "open_position_count": len(getattr(portfolio, "positions", ()) or ()),
-        "capital_pool_pct": POSITION_CAPITAL_POOL_PCT,
-        "reserve_buffer_pct": POSITION_DATA_RESERVE_PCT,
-        "capital_pool_usd": round(deploy_capital, 8),
-        "deployed_notional_usd": round(deployed, 8),
-        "remaining_policy_capacity_usd": round(max(0.0, deploy_capital - deployed), 8),
-        "per_slot_capital_usd": round(deploy_capital / MAX_OPEN_POSITIONS, 8),
-    }
-
-
-def _merge_symbols(
-    requested: list[str], open_symbols: list[str], *, limit: int | None = None
-) -> list[str]:
+def _merge_symbols(requested: list[str], protected: list[str]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
-    for symbol in [*requested, *open_symbols]:
+    for symbol in [*requested, *protected]:
         normalized = str(symbol).upper()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        result.append(normalized)
-    return result if limit is None else result[:limit]
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            result.append(normalized)
+    return result
 
 
-def _reconfigure_deep_sync_marker(ingestion: DataIngestionService) -> None:
-    # No-op marker used only to keep the wrapper small and make the policy
-    # discoverable in tracebacks/telemetry.
-    ingestion._aitos_position_universe_enabled = True
+def _capital_policy(portfolio: Any) -> dict[str, Any]:
+    equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
+    positions = tuple(getattr(portfolio, "positions", ()) or ())
+    deployed_notional = sum(
+        float(getattr(position, "notional_usd", 0.0) or 0.0)
+        for position in positions
+    )
+    pool = max(0.0, equity * POSITION_CAPITAL_POOL_PCT / 100.0)
+    return {
+        "capital_pool_pct": POSITION_CAPITAL_POOL_PCT,
+        "reserve_buffer_pct": POSITION_DATA_RESERVE_PCT,
+        "capital_pool_usd": round(pool, 8),
+        "deployed_notional_usd": round(deployed_notional, 8),
+        "remaining_policy_capacity_usd": round(max(0.0, pool - deployed_notional), 8),
+        "open_position_count": len(positions),
+        "monitoring_model": "normal_warning_exit_candidate",
+    }
 
 
 def _install_ingestion_guards() -> None:
@@ -135,51 +93,36 @@ def _install_ingestion_guards() -> None:
     def guarded_init(self: DataIngestionService, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
         _INGESTIONS.add(self)
-        _reconfigure_deep_sync_marker(self)
+        self._aitos_position_universe_enabled = True
 
     async def guarded_trade(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        merged = _merge_symbols(list(symbols), _open_symbols())
-        return await original_trade(self, merged)
+        return await original_trade(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_kline(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        merged = _merge_symbols(list(symbols), _open_symbols())
-        return await original_kline(self, merged)
+        return await original_kline(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_book(
         self: DataIngestionService,
         ranked_non_btc_symbols: list[str] | tuple[str, ...],
     ) -> bool:
-        open_symbols = _open_symbols()
-        open_non_btc = [s for s in open_symbols if s != REFERENCE_SYMBOL]
+        open_symbols = [s for s in _open_symbols() if s != REFERENCE_SYMBOL]
         requested = [
             str(s).upper()
             for s in ranked_non_btc_symbols
             if s and str(s).upper() != REFERENCE_SYMBOL
         ]
-        # Open positions have priority. Remaining expensive-data capacity is
-        # offered to scanner candidates. BTC remains the shared reference.
-        non_btc: list[str] = []
-        seen: set[str] = set()
-        for symbol in [*open_non_btc, *requested]:
-            if symbol in seen:
-                continue
-            seen.add(symbol)
-            non_btc.append(symbol)
-        non_btc = non_btc[:MAX_OPEN_POSITIONS]
-        symbols = [REFERENCE_SYMBOL, *non_btc]
-        if REFERENCE_SYMBOL not in {s.upper() for s in getattr(self, "_symbols", ())}:
-            symbols = non_btc[:MAX_DEEP_SYMBOLS]
-        return (
-            await self._canonical_runtime.update_orderbook_symbols(
-                symbols[:MAX_DEEP_SYMBOLS]
-            )
-            if self._canonical_runtime is not None
-            else False
-        )
+        # Deep order-book capacity is demand-driven. Open positions are always
+        # first; remaining slots are available to scanner candidates.
+        non_btc = _merge_symbols(open_symbols, requested)
+        symbols = [REFERENCE_SYMBOL, *non_btc[: MAX_POSITION_DEEP_SYMBOLS - 1]]
+        runtime = getattr(self, "_canonical_runtime", None)
+        if runtime is None:
+            return False
+        return await runtime.update_orderbook_symbols(symbols)
 
     DataIngestionService.__init__ = guarded_init  # type: ignore[method-assign]
     DataIngestionService.update_live_trade_symbols = guarded_trade  # type: ignore[method-assign]
@@ -188,85 +131,110 @@ def _install_ingestion_guards() -> None:
     DataIngestionService._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
 
 
-def _install_lifecycle_guard() -> None:
-    if getattr(TradeLifecycle, "_aitos_position_runtime_installed", False):
+def _cheap_position_action(
+    trade: Any, current_price: float, tier: PositionMonitorTier, score: float, reasons: tuple[str, ...]
+) -> PositionAction:
+    if tier == PositionMonitorTier.EXIT_CANDIDATE:
+        action = ExitAction.EXIT if "stop_breached" in reasons else ExitAction.MANAGE
+    else:
+        action = ExitAction.MANAGE
+    return PositionAction(
+        action=action,
+        reason=f"POSITION_MONITOR:{tier.value} score={score:.2f} [{', '.join(reasons)}]",
+        notes=(f"monitor_tier={tier.value}", *reasons),
+    )
+
+
+def _install_position_monitor() -> None:
+    if getattr(PositionManager, "_aitos_tiered_monitor_installed", False):
         return
 
+    original_evaluate = PositionManager.evaluate
+    original_clear = PositionManager.clear_trade
+
+    def monitor_for(manager: PositionManager) -> PositionMonitorController:
+        controller = _MONITORS.get(manager)
+        if controller is None:
+            controller = PositionMonitorController()
+            _MONITORS[manager] = controller
+        return controller
+
+    @wraps(original_evaluate)
+    def guarded_evaluate(
+        self: PositionManager,
+        *,
+        trade: Any,
+        current_price: float,
+        extra_features: Any = None,
+        **kwargs: Any,
+    ) -> PositionAction:
+        controller = monitor_for(self)
+        decision = controller.evaluate(
+            trade=trade,
+            current_price=current_price,
+            extra_features=extra_features,
+        )
+        # NORMAL is intentionally cheap: no path planning, thesis evaluation,
+        # hedge calculation, or full Exit Intelligence. WARNING performs the
+        # existing PositionManager analysis for confirmation. EXIT_CANDIDATE
+        # always receives the complete analysis immediately.
+        if decision.tier == PositionMonitorTier.NORMAL:
+            try:
+                trade.record_excursion(current_price)
+            except Exception:
+                pass
+            return _cheap_position_action(
+                trade, current_price, decision.tier, decision.score, decision.reasons
+            )
+        action = original_evaluate(
+            self,
+            trade=trade,
+            current_price=current_price,
+            extra_features=extra_features,
+            **kwargs,
+        )
+        return PositionAction(
+            action=action.action,
+            reason=f"POSITION_MONITOR:{decision.tier.value} score={decision.score:.2f}; {action.reason}",
+            reduce_fraction=action.reduce_fraction,
+            new_stop_price=action.new_stop_price,
+            spike_tp_price=action.spike_tp_price,
+            exit_decision=action.exit_decision,
+            hedge_decision=action.hedge_decision,
+            path_plan=action.path_plan,
+            structural_stop=action.structural_stop,
+            market_state=action.market_state,
+            thesis=action.thesis,
+            thesis_eval=action.thesis_eval,
+            journey=action.journey,
+            notes=(f"monitor_tier={decision.tier.value}", *decision.reasons, *action.notes),
+        )
+
+    def guarded_clear(self: PositionManager, trade_id: str, symbol: str | None = None) -> None:
+        original_clear(self, trade_id, symbol=symbol)
+        controller = _MONITORS.get(self)
+        if controller is not None:
+            controller.clear(trade_id)
+
+    PositionManager.evaluate = guarded_evaluate  # type: ignore[method-assign]
+    PositionManager.clear_trade = guarded_clear  # type: ignore[method-assign]
+    PositionManager._aitos_tiered_monitor_installed = True  # type: ignore[attr-defined]
+
+
+def _install_lifecycle_wiring() -> None:
+    if getattr(TradeLifecycle, "_aitos_position_runtime_installed", False):
+        return
     original_init = TradeLifecycle.__init__
-    original_submit = TradeLifecycle.submit_opportunity
 
     @wraps(original_init)
     def guarded_init(self: TradeLifecycle, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
         _LIFECYCLES.add(self)
-        self._aitos_position_guard_lock = asyncio.Lock()
-
-    @wraps(original_submit)
-    async def guarded_submit(
-        self: TradeLifecycle,
-        opportunity: Opportunity,
-        portfolio: Any,
-        *args: Any,
-        **kwargs: Any,
-    ) -> Trade:
-        lock = getattr(self, "_aitos_position_guard_lock", None)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._aitos_position_guard_lock = lock
-        async with lock:
-            positions = tuple(getattr(portfolio, "positions", ()) or ())
-            open_symbols = {
-                str(getattr(position, "symbol", "")).upper()
-                for position in positions
-                if getattr(position, "symbol", "")
-            }
-            if str(opportunity.symbol).upper() in open_symbols:
-                return _rejected_trade(
-                    opportunity,
-                    "position_guard: symbol already has an open position",
-                )
-            if len(open_symbols) >= MAX_OPEN_POSITIONS:
-                return _rejected_trade(
-                    opportunity,
-                    f"position_guard: hard maximum of {MAX_OPEN_POSITIONS} open positions reached",
-                )
-            consensus = dict(opportunity.agent_consensus)
-            consensus["position_portfolio_policy"] = _capital_policy_consensus(
-                portfolio
-            )
-            protected = replace(opportunity, agent_consensus=consensus)
-            trade = await original_submit(self, protected, portfolio, *args, **kwargs)
-            if trade.state == TradeLifecycleState.POSITION_OPENED:
-                # Reconfigure every live ingestion instance immediately. This is
-                # deliberately independent of scanner rank so the new position
-                # cannot become data-blind after the next scan.
-                for ingestion in list(_INGESTIONS):
-                    try:
-                        current = list(getattr(ingestion, "_live_trade_symbols", ()))
-                        await guarded_trade(ingestion, current)
-                        current_k = list(getattr(ingestion, "_live_kline_symbols", ()))
-                        await guarded_kline(ingestion, current_k)
-                        current_b = (
-                            list(
-                                getattr(
-                                    ingestion, "_canonical_runtime", None
-                                ).orderbook_symbols
-                            )
-                            if getattr(ingestion, "_canonical_runtime", None)
-                            is not None
-                            else []
-                        )
-                        await guarded_book(ingestion, current_b)
-                    except Exception:
-                        # Market-data reconfiguration must not corrupt the trade
-                        # lifecycle; the next scanner stage will retry it.
-                        continue
-            return trade
 
     TradeLifecycle.__init__ = guarded_init  # type: ignore[method-assign]
-    TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
     TradeLifecycle._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
 
 
 _install_ingestion_guards()
-_install_lifecycle_guard()
+_install_lifecycle_wiring()
+_install_position_monitor()
