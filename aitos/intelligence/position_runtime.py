@@ -66,6 +66,24 @@ def _merge_symbols(requested: list[str], protected: list[str]) -> list[str]:
     return result
 
 
+def _deep_priority_order(
+    priorities: dict[str, tuple[PositionMonitorTier, float]] | None = None,
+) -> list[str]:
+    """Return escalated symbols in resource urgency order only."""
+    source = priorities if priorities is not None else _DEEP_PRIORITY_SYMBOLS
+    return [
+        symbol
+        for symbol, (tier, _priority) in sorted(
+            source.items(),
+            key=lambda item: (
+                -item[1][1],
+                -int(item[1][0] == PositionMonitorTier.EXIT_CANDIDATE),
+            ),
+        )
+        if tier in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE}
+    ]
+
+
 def _capital_policy(portfolio: Any) -> dict[str, Any]:
     """Expose monitoring metadata without imposing position-size allocation."""
     positions = tuple(getattr(portfolio, "positions", ()) or ())
@@ -120,15 +138,8 @@ def _install_ingestion_guards() -> None:
         ]
         escalated = [
             symbol
-            for symbol, (tier, priority) in sorted(
-                _DEEP_PRIORITY_SYMBOLS.items(),
-                key=lambda item: (
-                    -item[1][1],
-                    -int(item[1][0] == PositionMonitorTier.EXIT_CANDIDATE),
-                ),
-            )
-            if tier in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE}
-            and symbol != REFERENCE_SYMBOL
+            for symbol in _deep_priority_order()
+            if symbol != REFERENCE_SYMBOL
         ]
         non_btc = _merge_symbols(escalated, requested)
         symbols = [REFERENCE_SYMBOL, *non_btc[: max(0, MAX_DEEP_SYMBOLS - 1)]]
