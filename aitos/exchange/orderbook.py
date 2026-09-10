@@ -84,10 +84,17 @@ class LocalOrderBook:
         self._forensics["last_final_update_id"] = update.final_update_id
         self._forensics["last_previous_update_id"] = update.previous_update_id
         if not self.initialized or self.last_update_id is None:
-            self._forensics["sequence_errors"] = int(self._forensics["sequence_errors"]) + 1
+            self._forensics["sequence_errors"] = (
+                int(self._forensics["sequence_errors"]) + 1
+            )
             logger.error(
                 "order-book forensic sequence error: unseeded book",
-                extra={"aitos_extra": {"stage": "orderbook_apply_sequence_error", **self.forensics_snapshot()}},
+                extra={
+                    "aitos_extra": {
+                        "stage": "orderbook_apply_sequence_error",
+                        **self.forensics_snapshot(),
+                    }
+                },
             )
             raise OrderBookSequenceError(
                 "order book must be seeded from REST snapshot first"
@@ -103,7 +110,9 @@ class LocalOrderBook:
                 <= self.last_update_id + 1
                 <= update.final_update_id
             ):
-                self._forensics["sequence_errors"] = int(self._forensics["sequence_errors"]) + 1
+                self._forensics["sequence_errors"] = (
+                    int(self._forensics["sequence_errors"]) + 1
+                )
                 logger.error(
                     "order-book forensic sequence error: bootstrap bridge mismatch",
                     extra={
@@ -120,7 +129,9 @@ class LocalOrderBook:
             self._awaiting_first_update = False
         else:
             if update.previous_update_id != self.last_update_id:
-                self._forensics["sequence_errors"] = int(self._forensics["sequence_errors"]) + 1
+                self._forensics["sequence_errors"] = (
+                    int(self._forensics["sequence_errors"]) + 1
+                )
                 logger.error(
                     "order-book forensic sequence error: chain break",
                     extra={
@@ -152,7 +163,10 @@ class LocalOrderBook:
         self._forensics["max_asks_size"] = max(
             int(self._forensics["max_asks_size"]), len(self._asks)
         )
-        if elapsed >= SLOW_ORDERBOOK_STAGE_SECONDS or int(self._forensics["apply_count"]) % FORENSIC_SAMPLE_EVERY == 0:
+        if (
+            elapsed >= SLOW_ORDERBOOK_STAGE_SECONDS
+            or int(self._forensics["apply_count"]) % FORENSIC_SAMPLE_EVERY == 0
+        ):
             logger.info(
                 "order-book forensic apply sample",
                 extra={
