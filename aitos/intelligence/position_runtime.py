@@ -16,9 +16,6 @@ from aitos.intelligence.position_monitor import (
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionAction, PositionManager
 
-MAX_OPEN_POSITIONS = 10  # configurable risk default; not a runtime hard ceiling
-POSITION_DATA_RESERVE_PCT = 20.0
-POSITION_CAPITAL_POOL_PCT = 80.0
 REFERENCE_SYMBOL = "BTCUSDT"
 MAX_DEEP_SYMBOLS = 6
 
@@ -58,23 +55,23 @@ def _merge_symbols(requested: list[str], protected: list[str]) -> list[str]:
 
 
 def _capital_policy(portfolio: Any) -> dict[str, Any]:
-    equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
+    """Expose monitoring metadata without imposing position-size allocation.
+
+    PositionManager/its existing risk and sizing intelligence remains the sole
+    authority for how much capital/notional an individual position receives.
+    The runtime must never convert this policy into a fixed per-position budget.
+    """
     positions = tuple(getattr(portfolio, "positions", ()) or ())
-    deployed_notional = sum(
-        float(getattr(p, "notional_usd", 0.0) or 0.0) for p in positions
-    )
-    pool = max(0.0, equity * POSITION_CAPITAL_POOL_PCT / 100.0)
     return {
-        "capital_pool_pct": POSITION_CAPITAL_POOL_PCT,
-        "reserve_buffer_pct": POSITION_DATA_RESERVE_PCT,
-        "capital_pool_usd": round(pool, 8),
-        "deployed_notional_usd": round(deployed_notional, 8),
-        "remaining_policy_capacity_usd": round(max(0.0, pool - deployed_notional), 8),
         "open_position_count": len(positions),
         "monitoring_model": "normal_warning_exit_candidate",
+        "position_sizing_authority": "existing_position_manager_and_risk_engine",
+        "fixed_per_position_capital_pct": None,
+        "fixed_per_position_capital_usd": None,
     }
 
 
+# Backward-compatible test/import name. It intentionally carries metadata only.
 _capital_policy_consensus = _capital_policy
 
 
@@ -95,16 +92,12 @@ def _install_ingestion_guards() -> None:
     async def guarded_trade(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_trade(
-            self, _merge_symbols(list(symbols), _open_symbols())
-        )
+        return await original_trade(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_kline(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_kline(
-            self, _merge_symbols(list(symbols), _open_symbols())
-        )
+        return await original_kline(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_book(
         self: DataIngestionService, ranked_non_btc_symbols: list[str] | tuple[str, ...]
@@ -157,7 +150,6 @@ def _cheap_position_action(
 def _warning_market_state(
     self: PositionManager, *, trade: Any, current_price: float, kwargs: dict[str, Any]
 ) -> Any:
-    """Run only the market-state layer for WARNING positions."""
     try:
         atr = kwargs.get("atr")
         volume_profile = kwargs.get("volume_profile")
@@ -166,9 +158,7 @@ def _warning_market_state(
             mid_price=current_price,
             order_flow=kwargs.get("order_flow"),
             trend_strength=kwargs.get("trend_strength"),
-            atr_pct=(
-                (atr / current_price * 100.0) if atr and current_price > 0 else None
-            ),
+            atr_pct=(atr / current_price * 100.0) if atr and current_price > 0 else None,
             volume_profile_poc=volume_profile.poc if volume_profile else None,
             value_area_high=volume_profile.vah if volume_profile else None,
             value_area_low=volume_profile.val if volume_profile else None,
@@ -212,9 +202,7 @@ def _install_position_monitor() -> None:
                 trade.record_excursion(current_price)
             except Exception:
                 pass
-            return _cheap_position_action(
-                decision.tier, decision.score, decision.reasons
-            )
+            return _cheap_position_action(decision.tier, decision.score, decision.reasons)
 
         _DEEP_PRIORITY_SYMBOLS[symbol] = decision.tier
         if decision.tier == PositionMonitorTier.WARNING:
@@ -251,16 +239,10 @@ def _install_position_monitor() -> None:
             thesis=action.thesis,
             thesis_eval=action.thesis_eval,
             journey=action.journey,
-            notes=(
-                f"monitor_tier={decision.tier.value}",
-                *decision.reasons,
-                *action.notes,
-            ),
+            notes=(f"monitor_tier={decision.tier.value}", *decision.reasons, *action.notes),
         )
 
-    def guarded_clear(
-        self: PositionManager, trade_id: str, symbol: str | None = None
-    ) -> None:
+    def guarded_clear(self: PositionManager, trade_id: str, symbol: str | None = None) -> None:
         original_clear(self, trade_id, symbol=symbol)
         monitor_for(self).clear(trade_id)
         if symbol:
