@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
-from aitos.intelligence.position_monitor import PositionMonitorController, PositionMonitorTier
+from aitos.intelligence.position_monitor import (
+    PositionMonitorController,
+    PositionMonitorTier,
+)
 from aitos.intelligence.position_runtime import (
     MAX_DEEP_SYMBOLS,
     MAX_OPEN_POSITIONS,
@@ -53,7 +56,9 @@ def _trade(sl: float = 95.0):
 
 
 def test_position_monitor_stays_normal_for_healthy_position():
-    decision = PositionMonitorController().evaluate(trade=_trade(), current_price=102.0, extra_features={})
+    decision = PositionMonitorController().evaluate(
+        trade=_trade(), current_price=102.0, extra_features={}
+    )
     assert decision.tier == PositionMonitorTier.NORMAL
 
 
@@ -61,11 +66,17 @@ def test_position_monitor_warning_uses_hysteresis_before_returning_to_normal():
     controller = PositionMonitorController(hysteresis_updates=3)
     warning = controller.evaluate(trade=_trade(), current_price=95.5, extra_features={})
     assert warning.tier == PositionMonitorTier.WARNING
-    first_clear = controller.evaluate(trade=_trade(), current_price=102.0, extra_features={})
+    first_clear = controller.evaluate(
+        trade=_trade(), current_price=102.0, extra_features={}
+    )
     assert first_clear.tier == PositionMonitorTier.WARNING
-    second_clear = controller.evaluate(trade=_trade(), current_price=102.0, extra_features={})
+    second_clear = controller.evaluate(
+        trade=_trade(), current_price=102.0, extra_features={}
+    )
     assert second_clear.tier == PositionMonitorTier.WARNING
-    final_clear = controller.evaluate(trade=_trade(), current_price=102.0, extra_features={})
+    final_clear = controller.evaluate(
+        trade=_trade(), current_price=102.0, extra_features={}
+    )
     assert final_clear.tier == PositionMonitorTier.NORMAL
 
 
