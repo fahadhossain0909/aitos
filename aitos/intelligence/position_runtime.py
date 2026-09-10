@@ -98,13 +98,13 @@ def _capital_policy_consensus(portfolio: Any) -> dict[str, Any]:
         "capital_pool_usd": round(deploy_capital, 8),
         "deployed_notional_usd": round(deployed, 8),
         "remaining_policy_capacity_usd": round(max(0.0, deploy_capital - deployed), 8),
-        "per_slot_capital_usd": round(
-            deploy_capital / MAX_OPEN_POSITIONS, 8
-        ),
+        "per_slot_capital_usd": round(deploy_capital / MAX_OPEN_POSITIONS, 8),
     }
 
 
-def _merge_symbols(requested: list[str], open_symbols: list[str], *, limit: int | None = None) -> list[str]:
+def _merge_symbols(
+    requested: list[str], open_symbols: list[str], *, limit: int | None = None
+) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()
     for symbol in [*requested, *open_symbols]:
@@ -119,7 +119,7 @@ def _merge_symbols(requested: list[str], open_symbols: list[str], *, limit: int 
 def _reconfigure_deep_sync_marker(ingestion: DataIngestionService) -> None:
     # No-op marker used only to keep the wrapper small and make the policy
     # discoverable in tracebacks/telemetry.
-    setattr(ingestion, "_aitos_position_universe_enabled", True)
+    ingestion._aitos_position_universe_enabled = True
 
 
 def _install_ingestion_guards() -> None:
@@ -173,9 +173,13 @@ def _install_ingestion_guards() -> None:
         symbols = [REFERENCE_SYMBOL, *non_btc]
         if REFERENCE_SYMBOL not in {s.upper() for s in getattr(self, "_symbols", ())}:
             symbols = non_btc[:MAX_DEEP_SYMBOLS]
-        return await self._canonical_runtime.update_orderbook_symbols(
-            symbols[:MAX_DEEP_SYMBOLS]
-        ) if self._canonical_runtime is not None else False
+        return (
+            await self._canonical_runtime.update_orderbook_symbols(
+                symbols[:MAX_DEEP_SYMBOLS]
+            )
+            if self._canonical_runtime is not None
+            else False
+        )
 
     DataIngestionService.__init__ = guarded_init  # type: ignore[method-assign]
     DataIngestionService.update_live_trade_symbols = guarded_trade  # type: ignore[method-assign]
@@ -195,7 +199,7 @@ def _install_lifecycle_guard() -> None:
     def guarded_init(self: TradeLifecycle, *args: Any, **kwargs: Any) -> None:
         original_init(self, *args, **kwargs)
         _LIFECYCLES.add(self)
-        setattr(self, "_aitos_position_guard_lock", asyncio.Lock())
+        self._aitos_position_guard_lock = asyncio.Lock()
 
     @wraps(original_submit)
     async def guarded_submit(
@@ -208,7 +212,7 @@ def _install_lifecycle_guard() -> None:
         lock = getattr(self, "_aitos_position_guard_lock", None)
         if lock is None:
             lock = asyncio.Lock()
-            setattr(self, "_aitos_position_guard_lock", lock)
+            self._aitos_position_guard_lock = lock
         async with lock:
             positions = tuple(getattr(portfolio, "positions", ()) or ())
             open_symbols = {
@@ -227,7 +231,9 @@ def _install_lifecycle_guard() -> None:
                     f"position_guard: hard maximum of {MAX_OPEN_POSITIONS} open positions reached",
                 )
             consensus = dict(opportunity.agent_consensus)
-            consensus["position_portfolio_policy"] = _capital_policy_consensus(portfolio)
+            consensus["position_portfolio_policy"] = _capital_policy_consensus(
+                portfolio
+            )
             protected = replace(opportunity, agent_consensus=consensus)
             trade = await original_submit(self, protected, portfolio, *args, **kwargs)
             if trade.state == TradeLifecycleState.POSITION_OPENED:
@@ -240,7 +246,16 @@ def _install_lifecycle_guard() -> None:
                         await guarded_trade(ingestion, current)
                         current_k = list(getattr(ingestion, "_live_kline_symbols", ()))
                         await guarded_kline(ingestion, current_k)
-                        current_b = list(getattr(ingestion, "_canonical_runtime", None).orderbook_symbols) if getattr(ingestion, "_canonical_runtime", None) is not None else []
+                        current_b = (
+                            list(
+                                getattr(
+                                    ingestion, "_canonical_runtime", None
+                                ).orderbook_symbols
+                            )
+                            if getattr(ingestion, "_canonical_runtime", None)
+                            is not None
+                            else []
+                        )
                         await guarded_book(ingestion, current_b)
                     except Exception:
                         # Market-data reconfiguration must not corrupt the trade
