@@ -66,7 +66,7 @@ install_contextual_scanner_bridge(OpportunityScanner)
 # initialized: aitos.app constructs TradeLifecycle after importing intelligence.
 # This guarantees the lifecycle-registration hook is installed before any
 # TradeLifecycle instance can be created.
-from . import position_runtime as _position_runtime  # noqa: F401,E402
+from . import position_runtime as _position_runtime  # noqa: F401
 
 __all__ = [
     "DEFAULT_WEIGHTS",
