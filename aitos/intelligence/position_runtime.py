@@ -312,7 +312,9 @@ def _install_lifecycle_wiring() -> None:
     if original_submit is not None:
 
         @wraps(original_submit)
-        async def guarded_submit(self: TradeLifecycle, *args: Any, **kwargs: Any) -> Any:
+        async def guarded_submit(
+            self: TradeLifecycle, *args: Any, **kwargs: Any
+        ) -> Any:
             trade = await original_submit(self, *args, **kwargs)
             state = getattr(getattr(trade, "state", None), "value", "")
             symbol = str(getattr(trade, "symbol", "") or "").upper()

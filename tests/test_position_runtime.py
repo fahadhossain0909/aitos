@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from aitos.intelligence.exit_intelligence import ExitAction
 from aitos.intelligence.position_monitor import (
     PositionMonitorController,
     PositionMonitorTier,
@@ -13,7 +14,6 @@ from aitos.intelligence.position_runtime import (
 )
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionManager
-from aitos.intelligence.exit_intelligence import ExitAction
 
 
 def test_position_policy_keeps_monitoring_metadata_without_fixed_position_size():
