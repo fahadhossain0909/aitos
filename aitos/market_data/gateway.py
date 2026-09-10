@@ -68,13 +68,7 @@ class MarketDataGateway:
 
     @staticmethod
     def _source_freshness_age_seconds(event: MarketEvent) -> float:
-        """Return the wall-clock age of the exchange event itself.
-
-        ``MarketEvent.source_age_seconds`` measures transport latency
-        (ingest_time - event_time).  The gateway freshness policy instead asks
-        whether the market event is currently too old, so it must be measured
-        against the current UTC clock rather than the ingest timestamp.
-        """
+        """Return the wall-clock age of the exchange event itself."""
         return max(0.0, (datetime.now(timezone.utc) - event.event_time).total_seconds())
 
     def _validate_event(self, event: MarketEvent) -> bool:
@@ -133,7 +127,6 @@ class MarketDataGateway:
             try:
                 recorder(stage, (time.perf_counter() - started) * 1000)
             except Exception:
-                # Forensics must never affect the market-data path.
                 pass
 
     async def drain_once(self) -> bool:
@@ -173,3 +166,26 @@ class MarketDataGateway:
             task_started = time.perf_counter()
             self.queue.task_done()
             self._record_drain_stage("queue_task_done", task_started)
+
+    def snapshot(self) -> dict[str, object]:
+        snapshot: dict[str, object] = {
+            "state": self.state.value,
+            "queue": self.queue.snapshot(),
+            "health": self.health.snapshot(),
+            "freshness_policy": {
+                "max_queue_age_seconds": self.config.max_queue_age_seconds,
+                "publish_timeout_seconds": self.config.publish_timeout_seconds,
+                "overflow": "replace_oldest_with_newest",
+                "failed_publish": "drop_failed_event",
+            },
+        }
+        if self._transport_snapshot_provider is not None:
+            try:
+                snapshot["transport"] = self._transport_snapshot_provider()
+            except Exception as exc:
+                snapshot["transport"] = {
+                    "state": "telemetry_error",
+                    "error_type": type(exc).__name__,
+                    "error": str(exc)[:500],
+                }
+        return snapshot
