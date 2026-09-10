@@ -1,0 +1,59 @@
+name: Integration Flake Forensics
+
+on:
+  workflow_dispatch:
+    inputs:
+      repeats:
+        description: Number of repeated integration runs
+        required: false
+        default: '3'
+
+permissions:
+  contents: read
+
+jobs:
+  repeat-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install project and test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install pytest pytest-asyncio pytest-timeout pytest-cov
+      - name: Repeat integration suite and preserve each result
+        env:
+          REPEATS: ${{ inputs.repeats || '3' }}
+          PYTHONPATH: .
+        run: |
+          set -uo pipefail
+          mkdir -p flake-forensics
+          status=0
+          for i in $(seq 1 "$REPEATS"); do
+            echo "===== integration repeat $i/$REPEATS ====="
+            pytest -q tests/integration --timeout=120 --junitxml="flake-forensics/junit-$i.xml" -o log_cli=true 2>&1 | tee "flake-forensics/run-$i.log"
+            rc=${PIPESTATUS[0]}
+            echo "$rc" > "flake-forensics/exit-$i.txt"
+            [ "$rc" -eq 0 ] || status=1
+          done
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          rows=[]
+          for p in sorted(Path('flake-forensics').glob('exit-*.txt')):
+              rows.append({'run':p.stem.replace('exit-',''),'exit_code':int(p.read_text().strip())})
+          Path('flake-forensics/summary.json').write_text(json.dumps(rows,indent=2))
+          PY
+          exit "$status"
+      - name: Upload flake evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aitos-integration-flake-forensics
+          path: flake-forensics/
+          if-no-files-found: warn
+          retention-days: 14
