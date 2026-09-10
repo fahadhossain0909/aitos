@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import weakref
 from datetime import datetime, timezone
 from functools import wraps
@@ -17,14 +18,24 @@ from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionAction, PositionManager
 
 REFERENCE_SYMBOL = "BTCUSDT"
-MAX_DEEP_SYMBOLS = 6
+
+def _resource_budget(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+    return max(1, value)
+
+
+# Resource budget only; this is not a trading, sizing, or position-count rule.
+MAX_DEEP_SYMBOLS = _resource_budget("AITOS_MAX_DEEP_SYMBOLS", 6)
 
 _LIFECYCLES: weakref.WeakSet[TradeLifecycle] = weakref.WeakSet()
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
 _MONITORS: weakref.WeakKeyDictionary[PositionManager, PositionMonitorController] = (
     weakref.WeakKeyDictionary()
 )
-_DEEP_PRIORITY_SYMBOLS: dict[str, PositionMonitorTier] = {}
+_DEEP_PRIORITY_SYMBOLS: dict[str, tuple[PositionMonitorTier, float]] = {}
 
 
 def _open_symbols() -> list[str]:
@@ -55,12 +66,7 @@ def _merge_symbols(requested: list[str], protected: list[str]) -> list[str]:
 
 
 def _capital_policy(portfolio: Any) -> dict[str, Any]:
-    """Expose monitoring metadata without imposing position-size allocation.
-
-    PositionManager/its existing risk and sizing intelligence remains the sole
-    authority for how much capital/notional an individual position receives.
-    The runtime must never convert this policy into a fixed per-position budget.
-    """
+    """Expose monitoring metadata without imposing position-size allocation."""
     positions = tuple(getattr(portfolio, "positions", ()) or ())
     return {
         "open_position_count": len(positions),
@@ -92,16 +98,12 @@ def _install_ingestion_guards() -> None:
     async def guarded_trade(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_trade(
-            self, _merge_symbols(list(symbols), _open_symbols())
-        )
+        return await original_trade(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_kline(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        return await original_kline(
-            self, _merge_symbols(list(symbols), _open_symbols())
-        )
+        return await original_kline(self, _merge_symbols(list(symbols), _open_symbols()))
 
     async def guarded_book(
         self: DataIngestionService, ranked_non_btc_symbols: list[str] | tuple[str, ...]
@@ -113,17 +115,15 @@ def _install_ingestion_guards() -> None:
         ]
         escalated = [
             symbol
-            for symbol, tier in sorted(
+            for symbol, (tier, priority) in sorted(
                 _DEEP_PRIORITY_SYMBOLS.items(),
-                key=lambda item: (
-                    0 if item[1] == PositionMonitorTier.EXIT_CANDIDATE else 1
-                ),
+                key=lambda item: (-item[1][1], -int(item[1][0] == PositionMonitorTier.EXIT_CANDIDATE)),
             )
             if tier in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE}
             and symbol != REFERENCE_SYMBOL
         ]
         non_btc = _merge_symbols(escalated, requested)
-        symbols = [REFERENCE_SYMBOL, *non_btc[: MAX_DEEP_SYMBOLS - 1]]
+        symbols = [REFERENCE_SYMBOL, *non_btc[: max(0, MAX_DEEP_SYMBOLS - 1)]]
         runtime = getattr(self, "_canonical_runtime", None)
         if runtime is None:
             return False
@@ -162,9 +162,7 @@ def _warning_market_state(
             mid_price=current_price,
             order_flow=kwargs.get("order_flow"),
             trend_strength=kwargs.get("trend_strength"),
-            atr_pct=(
-                (atr / current_price * 100.0) if atr and current_price > 0 else None
-            ),
+            atr_pct=(atr / current_price * 100.0) if atr and current_price > 0 else None,
             volume_profile_poc=volume_profile.poc if volume_profile else None,
             value_area_high=volume_profile.vah if volume_profile else None,
             value_area_low=volume_profile.val if volume_profile else None,
@@ -208,11 +206,9 @@ def _install_position_monitor() -> None:
                 trade.record_excursion(current_price)
             except Exception:
                 pass
-            return _cheap_position_action(
-                decision.tier, decision.score, decision.reasons
-            )
+            return _cheap_position_action(decision.tier, decision.score, decision.reasons)
 
-        _DEEP_PRIORITY_SYMBOLS[symbol] = decision.tier
+        _DEEP_PRIORITY_SYMBOLS[symbol] = (decision.tier, decision.priority_score)
         if decision.tier == PositionMonitorTier.WARNING:
             return _cheap_position_action(
                 decision.tier,
@@ -226,6 +222,8 @@ def _install_position_monitor() -> None:
                 ),
             )
 
+        # EXIT_CANDIDATE is a risk-state handoff. The monitor does not decide
+        # the exit path; the existing PositionManager remains authoritative.
         action = original_evaluate(
             self,
             trade=trade,
@@ -235,7 +233,7 @@ def _install_position_monitor() -> None:
         )
         return PositionAction(
             action=action.action,
-            reason=f"POSITION_MONITOR:{decision.tier.value} score={decision.score:.2f}; {action.reason}",
+            reason=f"POSITION_MONITOR:{decision.tier.value} priority={decision.priority_score:.2f} score={decision.score:.2f}; {action.reason}",
             reduce_fraction=action.reduce_fraction,
             new_stop_price=action.new_stop_price,
             spike_tp_price=action.spike_tp_price,
@@ -249,6 +247,7 @@ def _install_position_monitor() -> None:
             journey=action.journey,
             notes=(
                 f"monitor_tier={decision.tier.value}",
+                f"priority_score={decision.priority_score:.2f}",
                 *decision.reasons,
                 *action.notes,
             ),
