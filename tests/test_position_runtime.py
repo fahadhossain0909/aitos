@@ -7,11 +7,13 @@ from aitos.intelligence.position_monitor import (
 from aitos.intelligence.position_runtime import (
     MAX_DEEP_SYMBOLS,
     _capital_policy_consensus,
+    _cheap_position_action,
     _deep_priority_order,
     _merge_symbols,
 )
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionManager
+from aitos.intelligence.exit_intelligence import ExitAction
 
 
 def test_position_policy_keeps_monitoring_metadata_without_fixed_position_size():
@@ -49,6 +51,16 @@ def test_position_symbols_can_be_placed_first_to_survive_kline_budget():
 def test_position_runtime_is_installed_before_lifecycle_and_manager_instances():
     assert getattr(TradeLifecycle, "_aitos_position_runtime_installed", False)
     assert getattr(PositionManager, "_aitos_tiered_monitor_installed", False)
+
+
+def test_monitor_does_not_make_stop_breach_an_exit_decision():
+    action = _cheap_position_action(
+        PositionMonitorTier.EXIT_CANDIDATE,
+        5.0,
+        ("stop_breached",),
+    )
+    assert action.action == ExitAction.MANAGE
+    assert "stop_breached" in action.notes
 
 
 def _trade(trade_id: str = "t1", sl: float = 95.0):
