@@ -101,21 +101,41 @@ class PositionMonitorController:
             score += 40.0
         elif stop_distance_pct is not None and stop_distance_pct > 0:
             score += max(0.0, 20.0 * (1.0 - min(stop_distance_pct / 2.0, 1.0)))
-        score += 15.0 * PositionMonitorController._risk_feature(
-            features, "thesis_risk", "thesis_deterioration", "thesis_invalidity"
-        ) or 0.0
-        score += 15.0 * PositionMonitorController._risk_feature(
-            features, "adverse_order_flow_risk", "order_flow_risk"
-        ) or 0.0
-        score += 12.0 * PositionMonitorController._risk_feature(
-            features, "liquidity_risk", "liquidity_stress"
-        ) or 0.0
-        score += 10.0 * PositionMonitorController._risk_feature(
-            features, "volatility_risk", "volatility_stress"
-        ) or 0.0
-        score += 8.0 * PositionMonitorController._risk_feature(
-            features, "reference_risk", "btc_relationship_risk", "lead_lag_risk"
-        ) or 0.0
+        score += (
+            15.0
+            * PositionMonitorController._risk_feature(
+                features, "thesis_risk", "thesis_deterioration", "thesis_invalidity"
+            )
+            or 0.0
+        )
+        score += (
+            15.0
+            * PositionMonitorController._risk_feature(
+                features, "adverse_order_flow_risk", "order_flow_risk"
+            )
+            or 0.0
+        )
+        score += (
+            12.0
+            * PositionMonitorController._risk_feature(
+                features, "liquidity_risk", "liquidity_stress"
+            )
+            or 0.0
+        )
+        score += (
+            10.0
+            * PositionMonitorController._risk_feature(
+                features, "volatility_risk", "volatility_stress"
+            )
+            or 0.0
+        )
+        score += (
+            8.0
+            * PositionMonitorController._risk_feature(
+                features, "reference_risk", "btc_relationship_risk", "lead_lag_risk"
+            )
+            or 0.0
+        )
         if freshness is not None:
             score += min(max(freshness, 0.0) / 5.0, 1.0) * 10.0
         if "explicit_exit_signal" in reasons:
@@ -169,8 +189,10 @@ class PositionMonitorController:
 
         cvd = self._feature(features, "cvd", "cvd_value", "cumulative_delta")
         delta = self._feature(features, "delta", "trade_delta", "order_flow_delta")
-        if cvd is not None and pnl_pct > 0 and (
-            (side == "LONG" and cvd < 0) or (side == "SHORT" and cvd > 0)
+        if (
+            cvd is not None
+            and pnl_pct > 0
+            and ((side == "LONG" and cvd < 0) or (side == "SHORT" and cvd > 0))
         ):
             score += 1.5
             reasons.append("cvd_divergence")
@@ -227,11 +249,21 @@ class PositionMonitorController:
             stop_distance_pct=stop_distance_pct,
             cvd=cvd,
             delta=delta,
-            liquidity_risk=self._risk_feature(features, "liquidity_risk", "liquidity_stress"),
-            volatility_risk=self._risk_feature(features, "volatility_risk", "volatility_stress"),
-            regime_risk=self._risk_feature(features, "regime_risk", "market_regime_risk"),
-            reference_risk=self._risk_feature(features, "reference_risk", "btc_relationship_risk", "lead_lag_risk"),
-            thesis_risk=self._risk_feature(features, "thesis_risk", "thesis_deterioration", "thesis_invalidity"),
+            liquidity_risk=self._risk_feature(
+                features, "liquidity_risk", "liquidity_stress"
+            ),
+            volatility_risk=self._risk_feature(
+                features, "volatility_risk", "volatility_stress"
+            ),
+            regime_risk=self._risk_feature(
+                features, "regime_risk", "market_regime_risk"
+            ),
+            reference_risk=self._risk_feature(
+                features, "reference_risk", "btc_relationship_risk", "lead_lag_risk"
+            ),
+            thesis_risk=self._risk_feature(
+                features, "thesis_risk", "thesis_deterioration", "thesis_invalidity"
+            ),
             data_freshness_seconds=freshness,
         )
         priority = self._priority(
