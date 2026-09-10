@@ -8,12 +8,32 @@ from pathlib import Path
 from typing import Any
 
 COUNTER_KEYS = {
-    "received_events", "accepted_events", "published_events", "dropped_events",
-    "freshness_drops", "publish_errors", "decode_errors", "sequence_errors",
-    "reconnect_count", "stream_idle_timeouts", "connect_attempts",
-    "successful_handshakes", "close_count", "market_events_received", "restarts",
-    "idle_timeouts", "errors", "events", "accepted", "messages", "bytes",
-    "slow_over_100ms", "slow_over_1000ms", "over_100ms", "over_1000ms", "timeouts",
+    "received_events",
+    "accepted_events",
+    "published_events",
+    "dropped_events",
+    "freshness_drops",
+    "publish_errors",
+    "decode_errors",
+    "sequence_errors",
+    "reconnect_count",
+    "stream_idle_timeouts",
+    "connect_attempts",
+    "successful_handshakes",
+    "close_count",
+    "market_events_received",
+    "restarts",
+    "idle_timeouts",
+    "errors",
+    "events",
+    "accepted",
+    "messages",
+    "bytes",
+    "slow_over_100ms",
+    "slow_over_1000ms",
+    "over_100ms",
+    "over_1000ms",
+    "timeouts",
 }
 LATENCY_TOTAL_KEYS = {"count", "total_ms"}
 
@@ -86,11 +106,13 @@ def module_sources(health: dict[str, Any]) -> dict[str, Any]:
         "canonical_persistence": persistence,
         "persistence_queue_wait": nested_get(
             persistence, ("root_cause_telemetry", "queue_wait")
-        ) or {},
+        )
+        or {},
         "event_bus": event_bus,
         "redis_xadd": nested_get(event_bus, ("market_data_e2e", "redis_xadd")) or {},
         "event_loop": nested_get(event_bus, ("runtime_contention", "event_loop")) or {},
-        "runtime_streams": nested_get(canonical, ("transport", "runtime_streams")) or {},
+        "runtime_streams": nested_get(canonical, ("transport", "runtime_streams"))
+        or {},
     }
 
 
@@ -98,11 +120,17 @@ def latency_delta(start: dict[str, Any], end: dict[str, Any]) -> dict[str, Any]:
     delta = delta_tree(start, end)
     count = delta.get("count", 0)
     total_ms = delta.get("total_ms", 0.0)
-    delta["window_avg_ms"] = round(total_ms / count, 3) if isinstance(count, (int, float)) and count > 0 else 0.0
+    delta["window_avg_ms"] = (
+        round(total_ms / count, 3)
+        if isinstance(count, (int, float)) and count > 0
+        else 0.0
+    )
     return delta
 
 
-def derive_window(start_health: dict[str, Any], end_health: dict[str, Any]) -> dict[str, Any]:
+def derive_window(
+    start_health: dict[str, Any], end_health: dict[str, Any]
+) -> dict[str, Any]:
     start = module_sources(start_health)
     end = module_sources(end_health)
     stage_start = start["gateway_drain_stages"]
@@ -111,12 +139,16 @@ def derive_window(start_health: dict[str, Any], end_health: dict[str, Any]) -> d
         "canonical": delta_tree(start["canonical_health"], end["canonical_health"]),
         "gateway_drain": latency_delta(start["gateway_drain"], end["gateway_drain"]),
         "gateway_drain_stages": {
-            stage: latency_delta(stage_start.get(stage) or {}, stage_end.get(stage) or {})
+            stage: latency_delta(
+                stage_start.get(stage) or {}, stage_end.get(stage) or {}
+            )
             for stage in sorted(set(stage_start) | set(stage_end))
         },
         "redis_xadd": latency_delta(start["redis_xadd"], end["redis_xadd"]),
         "event_loop": latency_delta(start["event_loop"], end["event_loop"]),
-        "persistence_queue_wait": delta_tree(start["persistence_queue_wait"], end["persistence_queue_wait"]),
+        "persistence_queue_wait": delta_tree(
+            start["persistence_queue_wait"], end["persistence_queue_wait"]
+        ),
         "runtime_streams": delta_tree(start["runtime_streams"], end["runtime_streams"]),
     }
 
@@ -144,15 +176,21 @@ def main() -> int:
     report_json = directory / "report.json"
     report = json.loads(report_json.read_text(encoding="utf-8"))
     report["window_deltas"] = output
-    report_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    report_json.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     report_md = directory / "report.md"
     with report_md.open("a", encoding="utf-8") as handle:
         handle.write("\n## Windowed counter attribution v3\n\n")
-        handle.write("Gateway drain is additionally broken down by queue_get, queue_age_check, publisher, and queue_task_done. All values are end-minus-start deltas.\n\n")
+        handle.write(
+            "Gateway drain is additionally broken down by queue_get, queue_age_check, publisher, and queue_task_done. All values are end-minus-start deltas.\n\n"
+        )
         handle.write("```json\n")
         handle.write(json.dumps(output, indent=2, sort_keys=True))
         handle.write("\n```\n")
-    (directory / "window_deltas.json").write_text(json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (directory / "window_deltas.json").write_text(
+        json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     return 0
 
 
