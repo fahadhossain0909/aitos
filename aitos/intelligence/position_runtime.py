@@ -1,27 +1,19 @@
-"""Runtime wiring for position-aware market-data coverage and tiered monitoring.
-
-Scanner ranking is never allowed to remove an open position from live market
-data. Expensive analysis is demand-driven: every open position receives cheap
-monitoring, warnings escalate to deeper checks, and exit candidates get full
-PositionManager analysis.
-"""
+"""Runtime wiring for position-aware market-data coverage and tiered monitoring."""
 
 from __future__ import annotations
 
 import weakref
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any
 
 from aitos.data.ingestion import DataIngestionService
 from aitos.intelligence.exit_intelligence import ExitAction
-from aitos.intelligence.position_monitor import (
-    PositionMonitorController,
-    PositionMonitorTier,
-)
+from aitos.intelligence.position_monitor import PositionMonitorController, PositionMonitorTier
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionAction, PositionManager
 
-MAX_OPEN_POSITIONS = 10  # configurable risk default; no runtime hard ceiling
+MAX_OPEN_POSITIONS = 10  # configurable risk default; not a runtime hard ceiling
 POSITION_DATA_RESERVE_PCT = 20.0
 POSITION_CAPITAL_POOL_PCT = 80.0
 REFERENCE_SYMBOL = "BTCUSDT"
@@ -76,7 +68,6 @@ def _capital_policy(portfolio: Any) -> dict[str, Any]:
     }
 
 
-# Backward-compatible helper name used by the existing focused tests.
 _capital_policy_consensus = _capital_policy
 
 
@@ -125,13 +116,36 @@ def _install_ingestion_guards() -> None:
     DataIngestionService._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
 
 
-def _cheap_position_action(tier: PositionMonitorTier, score: float, reasons: tuple[str, ...]) -> PositionAction:
+def _cheap_position_action(tier: PositionMonitorTier, score: float, reasons: tuple[str, ...], market_state: Any = None) -> PositionAction:
     action = ExitAction.EXIT if "stop_breached" in reasons else ExitAction.MANAGE
     return PositionAction(
         action=action,
         reason=f"POSITION_MONITOR:{tier.value} score={score:.2f} [{', '.join(reasons)}]",
+        market_state=market_state,
         notes=(f"monitor_tier={tier.value}", *reasons),
     )
+
+
+def _warning_market_state(self: PositionManager, *, trade: Any, current_price: float, kwargs: dict[str, Any]) -> Any:
+    """Run only the market-state layer for WARNING positions."""
+    try:
+        atr = kwargs.get("atr")
+        volume_profile = kwargs.get("volume_profile")
+        return self._mse.compute(
+            symbol=trade.symbol,
+            mid_price=current_price,
+            order_flow=kwargs.get("order_flow"),
+            trend_strength=kwargs.get("trend_strength"),
+            atr_pct=(atr / current_price * 100.0) if atr and current_price > 0 else None,
+            volume_profile_poc=volume_profile.poc if volume_profile else None,
+            value_area_high=volume_profile.vah if volume_profile else None,
+            value_area_low=volume_profile.val if volume_profile else None,
+            structure_bias_hint=None,
+            timestamp=kwargs.get("timestamp") or datetime.now(timezone.utc),
+            extra_features=kwargs.get("extra_features"),
+        )
+    except Exception:
+        return None
 
 
 def _install_position_monitor() -> None:
@@ -158,7 +172,21 @@ def _install_position_monitor() -> None:
             except Exception:
                 pass
             return _cheap_position_action(decision.tier, decision.score, decision.reasons)
+
         _DEEP_PRIORITY_SYMBOLS[symbol] = decision.tier
+        if decision.tier == PositionMonitorTier.WARNING:
+            return _cheap_position_action(
+                decision.tier,
+                decision.score,
+                decision.reasons,
+                market_state=_warning_market_state(
+                    self,
+                    trade=trade,
+                    current_price=current_price,
+                    kwargs={**kwargs, "extra_features": extra_features},
+                ),
+            )
+
         action = original_evaluate(
             self,
             trade=trade,
