@@ -330,6 +330,7 @@ def _install_persistence_sink() -> None:
 
     async def enqueue(self: Any, event: Any) -> None:
         _ensure_persistence_state(self)
+        before_queue = _queue_depth(self)
         before_rejected = int(getattr(self, "_rejected", 0))
         await original_enqueue(self, event)
         after = _queue_depth(self)
@@ -340,13 +341,9 @@ def _install_persistence_sink() -> None:
         if after_rejected > before_rejected:
             self._root_cause_persist_rejected += after_rejected - before_rejected
             return
-        # The original method only increments queue depth for events admitted
-        # after all historical filters have passed. This avoids duplicating its
-        # filtering rules in the forensic layer.
-        if after > before_rejected or after > 0:
-            # Use the queue transition when possible; if another worker changed
-            # the queue concurrently, the tracked event id is still the source
-            # of truth for queue-wait measurement.
+        # The queue transition identifies an admitted event without copying
+        # the sink's historical filtering rules into the forensic layer.
+        if after > before_queue:
             event_id = str(getattr(event, "event_id", id(event)))
             self._root_cause_persist_enqueued += 1
             self._root_cause_enqueued_at[event_id] = time.monotonic()
