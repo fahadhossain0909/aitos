@@ -116,8 +116,6 @@ def _install_ingestion_guards() -> None:
     async def guarded_trade(
         self: DataIngestionService, symbols: list[str] | tuple[str, ...]
     ) -> bool:
-        # Open positions are protected before scanner symbols. This matters even
-        # when a downstream runtime later applies a finite trade-symbol budget.
         return await original_trade(
             self, _merge_symbols(_open_symbols(), list(symbols))
         )
@@ -302,6 +300,7 @@ def _install_lifecycle_wiring() -> None:
     if getattr(TradeLifecycle, "_aitos_position_runtime_installed", False):
         return
     original_init = TradeLifecycle.__init__
+    original_submit = getattr(TradeLifecycle, "submit_opportunity", None)
 
     @wraps(original_init)
     def guarded_init(self: TradeLifecycle, *args: Any, **kwargs: Any) -> None:
@@ -309,6 +308,27 @@ def _install_lifecycle_wiring() -> None:
         _LIFECYCLES.add(self)
 
     TradeLifecycle.__init__ = guarded_init  # type: ignore[method-assign]
+
+    if original_submit is not None:
+
+        @wraps(original_submit)
+        async def guarded_submit(self: TradeLifecycle, *args: Any, **kwargs: Any) -> Any:
+            trade = await original_submit(self, *args, **kwargs)
+            state = getattr(getattr(trade, "state", None), "value", "")
+            symbol = str(getattr(trade, "symbol", "") or "").upper()
+            if state == "position_opened" and symbol:
+                # Establish the Position Universe immediately at open time,
+                # rather than waiting for the next scanner-stage callback.
+                for ingestion in list(_INGESTIONS):
+                    try:
+                        await ingestion.update_live_trade_symbols([symbol])
+                        await ingestion.update_live_kline_symbols([symbol])
+                    except Exception:
+                        continue
+            return trade
+
+        TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
+
     TradeLifecycle._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
 
 
