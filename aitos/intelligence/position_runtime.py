@@ -137,9 +137,7 @@ def _install_ingestion_guards() -> None:
             if s and str(s).upper() != REFERENCE_SYMBOL
         ]
         escalated = [
-            symbol
-            for symbol in _deep_priority_order()
-            if symbol != REFERENCE_SYMBOL
+            symbol for symbol in _deep_priority_order() if symbol != REFERENCE_SYMBOL
         ]
         non_btc = _merge_symbols(escalated, requested)
         symbols = [REFERENCE_SYMBOL, *non_btc[: max(0, MAX_DEEP_SYMBOLS - 1)]]
