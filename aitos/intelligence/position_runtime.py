@@ -21,19 +21,15 @@ from aitos.intelligence.position_monitor import (
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionAction, PositionManager
 
-# Compatibility/export values from the previous implementation. This is now a
-# configurable risk default, not a runtime hard cap.
-MAX_OPEN_POSITIONS = 10
+MAX_OPEN_POSITIONS = 10  # configurable risk default; no runtime hard ceiling
 POSITION_DATA_RESERVE_PCT = 20.0
 POSITION_CAPITAL_POOL_PCT = 80.0
 REFERENCE_SYMBOL = "BTCUSDT"
-MAX_DEEP_SYMBOLS = 6  # BTC reference + bounded escalated/scanner symbols
+MAX_DEEP_SYMBOLS = 6
 
 _LIFECYCLES: weakref.WeakSet[TradeLifecycle] = weakref.WeakSet()
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
-_MONITORS: weakref.WeakKeyDictionary[PositionManager, PositionMonitorController] = (
-    weakref.WeakKeyDictionary()
-)
+_MONITORS: weakref.WeakKeyDictionary[PositionManager, PositionMonitorController] = weakref.WeakKeyDictionary()
 _DEEP_PRIORITY_SYMBOLS: dict[str, PositionMonitorTier] = {}
 
 
@@ -67,9 +63,7 @@ def _merge_symbols(requested: list[str], protected: list[str]) -> list[str]:
 def _capital_policy(portfolio: Any) -> dict[str, Any]:
     equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
     positions = tuple(getattr(portfolio, "positions", ()) or ())
-    deployed_notional = sum(
-        float(getattr(position, "notional_usd", 0.0) or 0.0) for position in positions
-    )
+    deployed_notional = sum(float(getattr(p, "notional_usd", 0.0) or 0.0) for p in positions)
     pool = max(0.0, equity * POSITION_CAPITAL_POOL_PCT / 100.0)
     return {
         "capital_pool_pct": POSITION_CAPITAL_POOL_PCT,
@@ -82,10 +76,13 @@ def _capital_policy(portfolio: Any) -> dict[str, Any]:
     }
 
 
+# Backward-compatible helper name used by the existing focused tests.
+_capital_policy_consensus = _capital_policy
+
+
 def _install_ingestion_guards() -> None:
     if getattr(DataIngestionService, "_aitos_position_runtime_installed", False):
         return
-
     original_init = DataIngestionService.__init__
     original_trade = DataIngestionService.update_live_trade_symbols
     original_kline = DataIngestionService.update_live_kline_symbols
@@ -97,25 +94,14 @@ def _install_ingestion_guards() -> None:
         _INGESTIONS.add(self)
         self._aitos_position_universe_enabled = True
 
-    async def guarded_trade(
-        self: DataIngestionService, symbols: list[str] | tuple[str, ...]
-    ) -> bool:
+    async def guarded_trade(self: DataIngestionService, symbols: list[str] | tuple[str, ...]) -> bool:
         return await original_trade(self, _merge_symbols(list(symbols), _open_symbols()))
 
-    async def guarded_kline(
-        self: DataIngestionService, symbols: list[str] | tuple[str, ...]
-    ) -> bool:
+    async def guarded_kline(self: DataIngestionService, symbols: list[str] | tuple[str, ...]) -> bool:
         return await original_kline(self, _merge_symbols(list(symbols), _open_symbols()))
 
-    async def guarded_book(
-        self: DataIngestionService,
-        ranked_non_btc_symbols: list[str] | tuple[str, ...],
-    ) -> bool:
-        requested = [
-            str(s).upper()
-            for s in ranked_non_btc_symbols
-            if s and str(s).upper() != REFERENCE_SYMBOL
-        ]
+    async def guarded_book(self: DataIngestionService, ranked_non_btc_symbols: list[str] | tuple[str, ...]) -> bool:
+        requested = [str(s).upper() for s in ranked_non_btc_symbols if s and str(s).upper() != REFERENCE_SYMBOL]
         escalated = [
             symbol
             for symbol, tier in sorted(
@@ -125,8 +111,6 @@ def _install_ingestion_guards() -> None:
             if tier in {PositionMonitorTier.WARNING, PositionMonitorTier.EXIT_CANDIDATE}
             and symbol != REFERENCE_SYMBOL
         ]
-        # Only escalated positions consume expensive order-book capacity.
-        # Normal positions remain protected by cheap trade/kline monitoring.
         non_btc = _merge_symbols(escalated, requested)
         symbols = [REFERENCE_SYMBOL, *non_btc[: MAX_DEEP_SYMBOLS - 1]]
         runtime = getattr(self, "_canonical_runtime", None)
@@ -141,9 +125,7 @@ def _install_ingestion_guards() -> None:
     DataIngestionService._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
 
 
-def _cheap_position_action(
-    tier: PositionMonitorTier, score: float, reasons: tuple[str, ...]
-) -> PositionAction:
+def _cheap_position_action(tier: PositionMonitorTier, score: float, reasons: tuple[str, ...]) -> PositionAction:
     action = ExitAction.EXIT if "stop_breached" in reasons else ExitAction.MANAGE
     return PositionAction(
         action=action,
@@ -155,7 +137,6 @@ def _cheap_position_action(
 def _install_position_monitor() -> None:
     if getattr(PositionManager, "_aitos_tiered_monitor_installed", False):
         return
-
     original_evaluate = PositionManager.evaluate
     original_clear = PositionManager.clear_trade
 
@@ -167,19 +148,8 @@ def _install_position_monitor() -> None:
         return controller
 
     @wraps(original_evaluate)
-    def guarded_evaluate(
-        self: PositionManager,
-        *,
-        trade: Any,
-        current_price: float,
-        extra_features: Any = None,
-        **kwargs: Any,
-    ) -> PositionAction:
-        decision = monitor_for(self).evaluate(
-            trade=trade,
-            current_price=current_price,
-            extra_features=extra_features,
-        )
+    def guarded_evaluate(self: PositionManager, *, trade: Any, current_price: float, extra_features: Any = None, **kwargs: Any) -> PositionAction:
+        decision = monitor_for(self).evaluate(trade=trade, current_price=current_price, extra_features=extra_features)
         symbol = str(getattr(trade, "symbol", "")).upper()
         if decision.tier == PositionMonitorTier.NORMAL:
             _DEEP_PRIORITY_SYMBOLS.pop(symbol, None)
@@ -187,13 +157,8 @@ def _install_position_monitor() -> None:
                 trade.record_excursion(current_price)
             except Exception:
                 pass
-            return _cheap_position_action(
-                decision.tier, decision.score, decision.reasons
-            )
-
+            return _cheap_position_action(decision.tier, decision.score, decision.reasons)
         _DEEP_PRIORITY_SYMBOLS[symbol] = decision.tier
-        # WARNING and EXIT_CANDIDATE invoke the existing rich PositionManager
-        # pipeline. The latter is the highest-priority full-analysis path.
         action = original_evaluate(
             self,
             trade=trade,
@@ -218,13 +183,9 @@ def _install_position_monitor() -> None:
             notes=(f"monitor_tier={decision.tier.value}", *decision.reasons, *action.notes),
         )
 
-    def guarded_clear(
-        self: PositionManager, trade_id: str, symbol: str | None = None
-    ) -> None:
+    def guarded_clear(self: PositionManager, trade_id: str, symbol: str | None = None) -> None:
         original_clear(self, trade_id, symbol=symbol)
-        controller = _MONITORS.get(self)
-        if controller is not None:
-            controller.clear(trade_id)
+        monitor_for(self).clear(trade_id)
         if symbol:
             _DEEP_PRIORITY_SYMBOLS.pop(str(symbol).upper(), None)
 
