@@ -86,52 +86,56 @@ class PositionMonitorController:
     def _priority(
         *,
         tier: PositionMonitorTier,
+        pnl_pct: float,
         stop_distance_pct: float | None,
         reasons: list[str],
         features: Mapping[str, Any],
         freshness: float | None,
     ) -> float:
-        """Return a resource-priority score, not a trading decision."""
+        """Return resource urgency, never a trading or execution decision."""
         score = {
             PositionMonitorTier.NORMAL: 0.0,
             PositionMonitorTier.WARNING: 30.0,
             PositionMonitorTier.EXIT_CANDIDATE: 60.0,
         }[tier]
+        if pnl_pct < 0:
+            score += min(abs(pnl_pct) * 2.0, 10.0)
         if "stop_breached" in reasons:
             score += 40.0
         elif stop_distance_pct is not None and stop_distance_pct > 0:
             score += max(0.0, 20.0 * (1.0 - min(stop_distance_pct / 2.0, 1.0)))
-        score += (
-            15.0
-            * PositionMonitorController._risk_feature(
+        score += 15.0 * (
+            PositionMonitorController._risk_feature(
                 features, "thesis_risk", "thesis_deterioration", "thesis_invalidity"
             )
             or 0.0
         )
-        score += (
-            15.0
-            * PositionMonitorController._risk_feature(
+        score += 15.0 * (
+            PositionMonitorController._risk_feature(
                 features, "adverse_order_flow_risk", "order_flow_risk"
             )
             or 0.0
         )
-        score += (
-            12.0
-            * PositionMonitorController._risk_feature(
+        score += 12.0 * (
+            PositionMonitorController._risk_feature(
                 features, "liquidity_risk", "liquidity_stress"
             )
             or 0.0
         )
-        score += (
-            10.0
-            * PositionMonitorController._risk_feature(
+        score += 10.0 * (
+            PositionMonitorController._risk_feature(
                 features, "volatility_risk", "volatility_stress"
             )
             or 0.0
         )
-        score += (
-            8.0
-            * PositionMonitorController._risk_feature(
+        score += 8.0 * (
+            PositionMonitorController._risk_feature(
+                features, "regime_risk", "market_regime_risk"
+            )
+            or 0.0
+        )
+        score += 8.0 * (
+            PositionMonitorController._risk_feature(
                 features, "reference_risk", "btc_relationship_risk", "lead_lag_risk"
             )
             or 0.0
@@ -268,6 +272,7 @@ class PositionMonitorController:
         )
         priority = self._priority(
             tier=tier,
+            pnl_pct=pnl_pct,
             stop_distance_pct=stop_distance_pct,
             reasons=reasons,
             features=features,
