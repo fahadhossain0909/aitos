@@ -10,6 +10,8 @@ from aitos.intelligence.position_runtime import (
     _deep_priority_order,
     _merge_symbols,
 )
+from aitos.trading.lifecycle import TradeLifecycle
+from aitos.trading.position_manager import PositionManager
 
 
 def test_position_policy_keeps_monitoring_metadata_without_fixed_position_size():
@@ -34,6 +36,19 @@ def test_merge_symbols_preserves_requested_order_and_adds_open_positions():
         ["SOLUSDT", "ETHUSDT", "XRPUSDT"],
     )
     assert merged == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+
+
+def test_position_symbols_can_be_placed_first_to_survive_kline_budget():
+    scanner_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"]
+    protected_symbols = ["ADAUSDT", "DOTUSDT"]
+    merged = _merge_symbols(protected_symbols, scanner_symbols)
+    assert merged[:2] == protected_symbols
+    assert merged[-1] == "DOGEUSDT"
+
+
+def test_position_runtime_is_installed_before_lifecycle_and_manager_instances():
+    assert getattr(TradeLifecycle, "_aitos_position_runtime_installed", False)
+    assert getattr(PositionManager, "_aitos_tiered_monitor_installed", False)
 
 
 def _trade(trade_id: str = "t1", sl: float = 95.0):
