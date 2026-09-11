@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -45,7 +46,7 @@ class _Redis:
             self._sent = True
             stream = next(iter(streams))
             return [(stream, [("1-0", self._event.to_wire())])]
-        await __import__("asyncio").sleep(0.01)
+        await asyncio.sleep(0.01)
         return []
 
     async def xack(self, stream, group, entry_id):
@@ -139,7 +140,7 @@ async def test_eventbus_binds_canonical_position_handler():
         for _ in range(100):
             if lifecycle.updates:
                 break
-            await __import__("asyncio").sleep(0.01)
+            await asyncio.sleep(0.01)
     finally:
         subscription.cancel()
         await bus.shutdown()
