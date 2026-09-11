@@ -98,6 +98,31 @@ class CanonicalMarketDataRuntime:
         }
         return snapshot
 
+    def _classify_timeout(self, stream_name: str) -> tuple[str, dict[str, object]]:
+        """Classify a timeout without changing watchdog thresholds.
+
+        The Binance order-book adapter has an inner bootstrap-readiness timeout.
+        That timeout bubbles through ``__anext__`` as the same ``TimeoutError``
+        type used by the runtime watchdog, so blindly labelling every timeout
+        as ``canonical_idle_timeout`` hides the actual failing stage. Transport
+        timestamps let us distinguish a connection that handshook but never
+        delivered its first frame from a stream that had already produced data.
+        """
+        exchange = getattr(self.adapter, "exchange", None)
+        snapshot = (
+            dict(exchange.websocket_transport_snapshot())
+            if exchange is not None
+            and hasattr(exchange, "websocket_transport_snapshot")
+            else {}
+        )
+        if stream_name != "orderbook":
+            return "idle_timeout", snapshot
+        handshake = snapshot.get("last_handshake_at")
+        first_frame = snapshot.get("last_first_frame_at")
+        if handshake and (not first_frame or str(first_frame) < str(handshake)):
+            return "bootstrap_ready_timeout", snapshot
+        return "idle_timeout", snapshot
+
     async def start(self) -> None:
         if not self._stopped:
             return
@@ -331,6 +356,7 @@ class CanonicalMarketDataRuntime:
             {
                 "restarts": 0,
                 "idle_timeouts": 0,
+                "bootstrap_ready_timeouts": 0,
                 "errors": 0,
                 "events": 0,
                 "accepted": 0,
@@ -338,6 +364,7 @@ class CanonicalMarketDataRuntime:
                 "last_event_at": None,
                 "last_failure_at": None,
                 "consecutive_failures": 0,
+                "last_failure_kind": None,
             },
         )
 
@@ -374,18 +401,41 @@ class CanonicalMarketDataRuntime:
                         failure_kind = "stream_end"
                         break
                     except asyncio.TimeoutError as exc:
-                        failure_kind = "idle_timeout"
-                        state["idle_timeouts"] = int(state["idle_timeouts"]) + 1
+                        failure_kind, transport = self._classify_timeout(stream_name)
+                        if failure_kind == "bootstrap_ready_timeout":
+                            state["bootstrap_ready_timeouts"] = (
+                                int(state["bootstrap_ready_timeouts"]) + 1
+                            )
+                        else:
+                            state["idle_timeouts"] = int(state["idle_timeouts"]) + 1
                         logger.error(
-                            "canonical market-data stream watchdog timeout; reconnecting",
+                            "canonical market-data timeout; reconnecting",
                             extra={
                                 "aitos_extra": {
-                                    "stage": "canonical_idle_timeout",
+                                    "stage": (
+                                        "orderbook_bootstrap_ready_timeout"
+                                        if failure_kind == "bootstrap_ready_timeout"
+                                        else "canonical_idle_timeout"
+                                    ),
                                     "stream": stream_name,
                                     "timeout_seconds": self.stream_idle_timeout_seconds,
                                     "consecutive_failures": state[
                                         "consecutive_failures"
                                     ],
+                                    "failure_kind": failure_kind,
+                                    "transport": {
+                                        key: transport.get(key)
+                                        for key in (
+                                            "state",
+                                            "current_url",
+                                            "last_connect_started_at",
+                                            "last_handshake_at",
+                                            "last_first_frame_at",
+                                            "last_market_event_at",
+                                            "last_error_type",
+                                            "last_error",
+                                        )
+                                    },
                                 }
                             },
                         )
@@ -420,6 +470,7 @@ class CanonicalMarketDataRuntime:
                     stream_name, "stream ended unexpectedly"
                 )
                 state["errors"] = int(state["errors"]) + 1
+                state["last_failure_kind"] = failure_kind
                 logger.warning(
                     "canonical stream ended unexpectedly",
                     extra={
@@ -440,6 +491,7 @@ class CanonicalMarketDataRuntime:
                 self.gateway.health.record_error(stream_name, str(exc))
                 state["errors"] = int(state["errors"]) + 1
                 state["last_failure_at"] = time.time()
+                state["last_failure_kind"] = failure_kind
                 logger.exception(
                     "canonical market-data stream failed; reconnecting",
                     extra={
@@ -462,7 +514,15 @@ class CanonicalMarketDataRuntime:
             elapsed = time.monotonic() - started_monotonic
             if self._stopped:
                 return
-            if failure_kind in {"idle_timeout", "stream_end"} or not saw_event:
+            if (
+                failure_kind
+                in {
+                    "idle_timeout",
+                    "bootstrap_ready_timeout",
+                    "stream_end",
+                }
+                or not saw_event
+            ):
                 state["consecutive_failures"] = int(state["consecutive_failures"]) + 1
                 delay = min(
                     max(

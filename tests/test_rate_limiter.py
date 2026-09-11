@@ -68,3 +68,27 @@ async def test_normal_call_cannot_consume_reserved_capacity():
     await limiter.acquire(weight=1)
     elapsed = time.monotonic() - start
     assert elapsed > 0.005
+
+
+@pytest.mark.asyncio
+async def test_wait_telemetry_records_caller_weight_and_duration():
+    limiter = TokenBucketRateLimiter(
+        capacity=2,
+        refill_per_second=20,
+        reserved_capacity=0,
+    )
+    await limiter.acquire(weight=2)
+
+    task = asyncio.create_task(limiter.acquire(weight=2), name="market-data-orderbook")
+    await asyncio.wait_for(task, timeout=0.5)
+
+    snapshot = limiter.snapshot()
+    assert snapshot["acquire_count"] == 2
+    assert snapshot["wait_count"] == 1
+    assert snapshot["slow_wait_count"] == 1
+    assert snapshot["last_caller"] == "market-data-orderbook"
+    assert snapshot["last_weight"] == 2
+    assert snapshot["last_critical"] is True
+    assert snapshot["last_wait_ms"] >= 50
+    assert snapshot["total_wait_ms"] >= 50
+    assert snapshot["max_wait_ms"] >= 50
