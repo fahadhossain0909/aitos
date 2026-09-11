@@ -243,7 +243,20 @@ def install_trade_lifecycle_market_bridge() -> None:
         handler: Callable[..., Any],
         group: str = "default",
         start_id: str = "0",
+        live_only: bool | None = None,
     ):
+        """Preserve EventBus.subscribe compatibility while binding the bridge.
+
+        ``live_only=True`` is accepted for older semantic consumers and is
+        translated to the EventBus' canonical ``start_id='$'`` contract.
+        Explicit ``start_id`` remains authoritative when ``live_only`` is not
+        provided.
+        """
+        if live_only is True:
+            start_id = "$"
+        elif live_only is False and start_id == "$":
+            start_id = "0"
+
         lifecycle = getattr(handler, "__self__", None)
         is_position_lifecycle = (
             lifecycle is not None
