@@ -352,10 +352,11 @@ class CanonicalMarketDataRuntime:
             if self._stopped:
                 return
             state["restarts"] = int(state["restarts"]) + 1
+            sleep_delay = delay
             if elapsed >= RECONNECT_STABLE_SECONDS and saw_event:
                 state["consecutive_failures"] = 0
                 delay = _RECONNECT_INITIAL_DELAY_SECONDS
             else:
                 state["consecutive_failures"] = int(state["consecutive_failures"]) + 1
                 delay = min(_RECONNECT_MAX_DELAY_SECONDS, delay * 2)
-            await asyncio.sleep(delay)
+            await asyncio.sleep(sleep_delay)
