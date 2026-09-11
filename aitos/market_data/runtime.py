@@ -403,9 +403,9 @@ class CanonicalMarketDataRuntime:
                     except asyncio.TimeoutError as exc:
                         failure_kind, transport = self._classify_timeout(stream_name)
                         if failure_kind == "bootstrap_ready_timeout":
-                            state["bootstrap_ready_timeouts"] = int(
-                                state["bootstrap_ready_timeouts"]
-                            ) + 1
+                            state["bootstrap_ready_timeouts"] = (
+                                int(state["bootstrap_ready_timeouts"]) + 1
+                            )
                         else:
                             state["idle_timeouts"] = int(state["idle_timeouts"]) + 1
                         logger.error(
@@ -514,11 +514,15 @@ class CanonicalMarketDataRuntime:
             elapsed = time.monotonic() - started_monotonic
             if self._stopped:
                 return
-            if failure_kind in {
-                "idle_timeout",
-                "bootstrap_ready_timeout",
-                "stream_end",
-            } or not saw_event:
+            if (
+                failure_kind
+                in {
+                    "idle_timeout",
+                    "bootstrap_ready_timeout",
+                    "stream_end",
+                }
+                or not saw_event
+            ):
                 state["consecutive_failures"] = int(state["consecutive_failures"]) + 1
                 delay = min(
                     max(
