@@ -65,8 +65,6 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
             try:
                 event = self._event_from_wire(fields)
             except AttributeError:
-                # Event is imported lazily here to avoid changing the module's
-                # import graph while retaining compatibility with EventBus.
                 from aitos.core.contracts import Event
 
                 event = Event.from_wire(fields)
@@ -134,9 +132,9 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                 while True:
                     try:
                         resp = await self._redis.xreadgroup(
-                            groupname=group,
-                            consumername=consumer,
-                            streams={stream_key: ">"},
+                            group,
+                            consumer,
+                            {stream_key: ">"},
                             count=CONSUMER_BATCH_SIZE,
                             block=CONSUMER_BLOCK_MS,
                         )
@@ -185,7 +183,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                             f"stream:{stream_topic}",
                             group,
                             start_id=start_id,
-                            reset_existing=live_only,
+                            reset_existing=False,
                         )
                     streams_seen |= matching
                 else:
@@ -194,7 +192,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                         f"stream:{topic_pattern}",
                         group,
                         start_id=start_id,
-                        reset_existing=live_only,
+                        reset_existing=False,
                     )
 
                 for stream_topic in sorted(streams_seen):
