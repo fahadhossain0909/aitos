@@ -326,7 +326,7 @@ class EventBus(AITOSModule):
         """
         if await self._redis.xlen(stream_key) == 0:
             return
-        await self._redis.xgroup_setid(stream_key, group, id="$" )
+        await self._redis.xgroup_setid(stream_key, group, id="$")
 
     async def _ensure_group(
         self,
