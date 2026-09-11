@@ -3,16 +3,12 @@ from types import SimpleNamespace
 import pytest
 
 from aitos.core.contracts import Event
-from aitos.trading.market_context import (
-    MarketContext,
-    handle_position_market_event,
-)
+from aitos.trading.market_context import MarketContext, handle_position_market_event
 
 
 class _Provider:
     def get_context(self, symbol: str) -> MarketContext:
-        assert symbol == "BTCUSDT"
-        return MarketContext(source="test")
+        return MarketContext(source=f"test:{symbol}")
 
 
 class _Lifecycle:
@@ -30,16 +26,21 @@ class _Lifecycle:
 @pytest.mark.asyncio
 async def test_market_event_updates_matching_open_position():
     lifecycle = _Lifecycle()
+    provider = _Provider()
     event = Event(
         topic="market.trade.BTCUSDT",
         payload={"symbol": "BTCUSDT", "price": "65000.25"},
         source_module="test",
     )
 
-    consumed = await handle_position_market_event(lifecycle, _Provider(), event)
+    consumed = await handle_position_market_event(lifecycle, provider, event)
 
     assert consumed is True
-    assert lifecycle.updates == [("trade-1", 65000.25, _Provider().get_context("BTCUSDT").as_kwargs())]
+    assert len(lifecycle.updates) == 1
+    trade_id, price, kwargs = lifecycle.updates[0]
+    assert trade_id == "trade-1"
+    assert price == 65000.25
+    assert kwargs == provider.get_context("BTCUSDT").as_kwargs()
 
 
 @pytest.mark.asyncio
