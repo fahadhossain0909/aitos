@@ -7,8 +7,18 @@ REDIS_MAXMEMORY_BYTES="${REDIS_MAXMEMORY_BYTES:-2147483648}"
 LOCK_FILE="${HOME}/.aitos-deploy.lock"
 
 cd "$APP_DIR"
-exec 9>"$LOCK_FILE"
-flock 9
+
+# Workflows may already hold the shared deployment lock. Re-acquiring the
+# same lock from this child script can self-deadlock, so only acquire it when
+# this script is running standalone.
+if [ "${AITOS_DEPLOY_LOCK_HELD:-0}" != "1" ]; then
+  exec 9>"$LOCK_FILE"
+  if ! flock -w 30 9; then
+    echo "ERROR: deployment lock is busy after 30 seconds: $LOCK_FILE" >&2
+    ps -eo pid,ppid,etime,user,cmd --sort=etime | grep -E '[a]itos|[f]lock' || true
+    exit 75
+  fi
+fi
 
 # The compose file is the source of truth. Reconcile the running Redis
 # instance as well so a previously-created container cannot retain an old
