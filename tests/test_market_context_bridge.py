@@ -137,6 +137,7 @@ async def test_eventbus_binds_canonical_position_handler():
     )
     bus = EventBus(_Redis(event))
     await bus.initialize({})
+    bus._known_topics.add(event.topic)
 
     subscription = await bus.subscribe(
         "market.trade.*",
