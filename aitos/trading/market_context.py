@@ -255,6 +255,7 @@ def install_trade_lifecycle_market_bridge() -> None:
             "market.trade."
         )
         if is_position_lifecycle and is_market_topic:
+
             async def _position_market_handler(event: Event):
                 provider = getattr(lifecycle, "market_context_provider", None)
                 return await handle_position_market_event(lifecycle, provider, event)
@@ -269,7 +270,9 @@ def install_trade_lifecycle_market_bridge() -> None:
                     }
                 },
             )
-        return await original_subscribe(self, topic, handler, group=group, start_id=start_id)
+        return await original_subscribe(
+            self, topic, handler, group=group, start_id=start_id
+        )
 
     EventBus.subscribe = _canonical_subscribe  # type: ignore[method-assign]
     EventBus._aitos_canonical_position_subscription_installed = True  # type: ignore[attr-defined]
