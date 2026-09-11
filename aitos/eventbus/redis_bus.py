@@ -326,7 +326,7 @@ class EventBus(AITOSModule):
         """
         if await self._redis.xlen(stream_key) == 0:
             return
-        await self._redis.xgroup_setid(stream_key, group, id="$")
+        await self._redis.xgroup_setid(stream_key, group, id="$" )
 
     async def _ensure_group(
         self,
@@ -412,7 +412,7 @@ class EventBus(AITOSModule):
                             stream_key,
                             group,
                             start_id=start_id,
-                            reset_existing=live_only,
+                            reset_existing=False,
                         )
                         streams_seen.add(stream_key)
                 if not stream_names:
