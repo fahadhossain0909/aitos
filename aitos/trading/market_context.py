@@ -193,9 +193,7 @@ async def handle_position_market_event(
                 }
             },
         )
-        await trade_lifecycle.update_price(
-            trade.trade_id, current_price, **ctx_kwargs
-        )
+        await trade_lifecycle.update_price(trade.trade_id, current_price, **ctx_kwargs)
 
     if matched:
         logger.debug(
