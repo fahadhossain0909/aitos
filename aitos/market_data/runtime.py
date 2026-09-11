@@ -2,16 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
-import time
-from collections.abc import AsyncIterator, Callable
-
 from aitos.logging_setup import get_logger
-
-from .adapter import CanonicalMarketDataAdapter
-from .bus import MarketDataBus
-from .contracts import MarketSource
-from .gateway import MarketDataGateway
 
 logger = get_logger("aitos.market_data.runtime")
 _RECONNECT_INITIAL_DELAY_SECONDS = 1.0
