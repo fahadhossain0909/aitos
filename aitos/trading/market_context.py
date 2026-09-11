@@ -171,17 +171,21 @@ async def handle_position_market_event(
         return True
 
     current_price = float(price)
+    matching_trades = [
+        trade
+        for trade in list(trade_lifecycle.get_open_trades())
+        if trade.symbol == symbol
+    ]
+    if not matching_trades:
+        return True
+
     try:
         ctx_kwargs = provider.get_context(symbol).as_kwargs() if provider else {}
     except Exception as exc:  # noqa: BLE001
         logger.debug("position market context unavailable: %s", exc)
         ctx_kwargs = {}
 
-    matched = 0
-    for trade in list(trade_lifecycle.get_open_trades()):
-        if trade.symbol != symbol:
-            continue
-        matched += 1
+    for trade in matching_trades:
         logger.debug(
             "POSITION_MONITOR bridge dispatch",
             extra={
@@ -193,13 +197,19 @@ async def handle_position_market_event(
                 }
             },
         )
-        await trade_lifecycle.update_price(trade.trade_id, current_price, **ctx_kwargs)
-
-    if matched:
-        logger.debug(
-            "POSITION_MONITOR bridge delivered market price",
-            extra={"aitos_extra": {"symbol": symbol, "matched_positions": matched}},
+        await trade_lifecycle.update_price(
+            trade.trade_id, current_price, **ctx_kwargs
         )
+
+    logger.debug(
+        "POSITION_MONITOR bridge delivered market price",
+        extra={
+            "aitos_extra": {
+                "symbol": symbol,
+                "matched_positions": len(matching_trades),
+            }
+        },
+    )
     return True
 
 
