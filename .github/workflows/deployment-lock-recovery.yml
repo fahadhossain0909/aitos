@@ -1,0 +1,163 @@
+name: Deployment Lock Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type RECOVER to terminate stale deployment lock owners/waiters (AITOS services are preserved).'
+        required: true
+        type: string
+
+concurrency:
+  group: deployment-lock-recovery-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  LOCK_FILE: /home/.aitos-deploy.lock
+
+jobs:
+  recover:
+    if: ${{ inputs.confirm == 'RECOVER' }}
+    runs-on: ubuntu-latest
+    environment: papertrade
+    steps:
+      - name: Validate deployment secrets
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            test -n "${!name:-}" || { echo "::error::Missing secret: $name"; exit 1; }
+          done
+
+      - name: Prepare SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+
+      - name: Recover stale deployment lock
+        uses: appleboy/ssh-action@v1.2.5
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/deploy_key
+          command_timeout: 10m
+          capture_stdout: false
+          script: |
+            set -Eeuo pipefail
+            LOCK_FILE="$HOME/.aitos-deploy.lock"
+
+            echo '=== DEPLOYMENT LOCK RECOVERY: PRECHECK ==='
+            echo "host=$(hostname)"
+            echo "lock=$LOCK_FILE"
+            test -e "$LOCK_FILE" || { echo 'Lock file does not exist; nothing to recover.'; exit 0; }
+
+            echo '=== CURRENT AITOS SERVICES (PRESERVED) ==='
+            docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep -E '^aitos-' || true
+
+            echo '=== LOCK FD OWNERS ==='
+            found=0
+            for pid_dir in /proc/[0-9]*; do
+              pid="${pid_dir##*/}"
+              [ -r "$pid_dir/cmdline" ] || continue
+              for fd in "$pid_dir"/fd/*; do
+                target=$(readlink "$fd" 2>/dev/null || true)
+                case "$target" in
+                  "$LOCK_FILE"|"$LOCK_FILE"' (deleted)')
+                    found=1
+                    cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || true)
+                    echo "pid=$pid fd=${fd##*/} cmd=$cmd"
+                    ;;
+                esac
+              done
+            done
+            [ "$found" -eq 1 ] || echo 'No process currently holds an open FD to the lock file.'
+
+            echo '=== DEPLOYMENT/LOCK WAITER PROCESSES ==='
+            ps -eo pid=,ppid=,etime=,user=,args= --sort=etime | grep -E '[f]lock|[.]aitos-deploy[.]lock|[r]untime_hardening[.]sh|[l]ifecycle-runtime-reconcile|[d]ocker compose (pull|up|down)' || true
+
+            echo '=== TERMINATING ONLY DEPLOYMENT-ORCHESTRATION PROCESSES ==='
+            # Never pkill generic "aitos": trading/runtime services must survive.
+            # A process is eligible only when it is demonstrably tied to the deployment
+            # lock AND its command line is deployment orchestration rather than an AITOS service.
+            candidates=''
+            for pid_dir in /proc/[0-9]*; do
+              pid="${pid_dir##*/}"
+              [ -r "$pid_dir/cmdline" ] || continue
+              cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || true)
+              holds_lock=0
+              for fd in "$pid_dir"/fd/*; do
+                target=$(readlink "$fd" 2>/dev/null || true)
+                case "$target" in
+                  "$LOCK_FILE"|"$LOCK_FILE"' (deleted)') holds_lock=1 ;;
+                esac
+              done
+              [ "$holds_lock" -eq 1 ] || continue
+
+              case "$cmd" in
+                *runtime_hardening.sh*|*lifecycle-runtime-reconcile*|*aitos-deploy.lock*|*'flock 9'*|*'flock -w'*|*'docker compose pull'*|*'docker compose up'*|*'docker compose down'*)
+                  candidates="$candidates $pid"
+                  ;;
+                *)
+                  echo "SKIP non-orchestration lock holder pid=$pid cmd=$cmd"
+                  ;;
+              esac
+            done
+
+            if [ -n "${candidates// }" ]; then
+              echo "Candidates:$candidates"
+              for pid in $candidates; do
+                if [ -d "/proc/$pid" ]; then
+                  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+                  echo "TERM pid=$pid cmd=$cmd"
+                  kill -TERM "$pid" 2>/dev/null || true
+                fi
+              done
+              sleep 5
+              for pid in $candidates; do
+                if [ -d "/proc/$pid" ]; then
+                  cmd=$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)
+                  echo "KILL pid=$pid cmd=$cmd"
+                  kill -KILL "$pid" 2>/dev/null || true
+                fi
+              done
+            else
+              echo 'No safe deployment-orchestration lock holder found.'
+            fi
+
+            echo '=== VERIFY LOCK IS ACQUIRABLE ==='
+            exec 9>"$LOCK_FILE"
+            if ! flock -n 9; then
+              echo '::error::Lock is still held after safe recovery; refusing to delete the lock file.'
+              echo '=== REMAINING LOCK OWNERS ==='
+              for pid_dir in /proc/[0-9]*; do
+                pid="${pid_dir##*/}"
+                [ -r "$pid_dir/cmdline" ] || continue
+                for fd in "$pid_dir"/fd/*; do
+                  target=$(readlink "$fd" 2>/dev/null || true)
+                  case "$target" in
+                    "$LOCK_FILE"|"$LOCK_FILE"' (deleted)')
+                      echo "pid=$pid fd=${fd##*/} cmd=$(tr '\0' ' ' < "$pid_dir/cmdline" 2>/dev/null || true)"
+                      ;;
+                  esac
+                done
+              done
+              exit 75
+            fi
+            echo '=== LOCK RECOVERY SUCCESS: LOCK IS FREE ==='
+
+            echo '=== AITOS SERVICES AFTER RECOVERY (PRESERVED) ==='
+            docker ps --format '{{.Names}} {{.Status}}' 2>/dev/null | grep -E '^aitos-' || true
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f /tmp/deploy_key
