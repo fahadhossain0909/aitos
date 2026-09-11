@@ -93,10 +93,41 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
-          command_timeout: 15m
+          command_timeout: 30m
+          capture_stdout: true
           envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_USER,CLICKHOUSE_PASSWORD,NEO4J_USER,NEO4J_PASSWORD,BINANCE_API_KEY,BINANCE_API_SECRET,BINANCE_TESTNET,DATABASE_URL,SENTRY_DSN,SLACK_WEBHOOK_URL,GHCR_USERNAME,GHCR_TOKEN
           script: |
             set -Eeuo pipefail
+
+            PHASE="startup"
+            PHASE_STARTED_AT="$SECONDS"
+            dump_failure_state() {
+              rc=$?
+              echo "=== DEPLOYMENT FAILURE ==="
+              echo "phase=$PHASE exit_code=$rc elapsed_seconds=$((SECONDS - PHASE_STARTED_AT))"
+              echo "=== HOST DISK ==="
+              df -h "$HOME" /mnt/aitos-data 2>&1 || true
+              echo "=== DOCKER DISK ==="
+              docker system df 2>&1 || true
+              echo "=== COMPOSE STATUS ==="
+              if [ -d "$HOME/aitos" ]; then
+                cd "$HOME/aitos" 2>/dev/null || true
+                docker compose ps --all 2>&1 || true
+                echo "=== RECENT COMPOSE LOGS ==="
+                docker compose logs --tail=120 2>&1 || true
+              fi
+              exit "$rc"
+            }
+            trap dump_failure_state ERR
+            phase_start() {
+              PHASE="$1"
+              PHASE_STARTED_AT="$SECONDS"
+              echo "=== PHASE START: $PHASE ==="
+            }
+            phase_end() {
+              echo "=== PHASE END: $PHASE elapsed_seconds=$((SECONDS - PHASE_STARTED_AT)) ==="
+            }
+
             : "${AITOS_DATA_ROOT:=/mnt/aitos-data}"
             : "${BOOT_FREE_RESERVE_BYTES:=8053063680}"
             : "${DATA_DISK_MIN_FREE_GB:=20}"
@@ -110,13 +141,12 @@ jobs:
             exec 9>"$HOME/.aitos-deploy.lock"
             flock 9
 
-            echo '=== DOCKER STORAGE PRE-CLEANUP ==='
-            echo 'Pruning unused Docker images before the boot-disk safety gate...'
-            docker image prune -af || true
-            echo 'Docker image storage after prune:'
+            phase_start "docker-pre-cleanup"
+            timeout 180s docker image prune -af || echo "Docker image prune timed out/failed; continuing to preflight."
             docker system df || true
+            phase_end
 
-            echo '=== BOOT DISK PREFLIGHT ==='
+            phase_start "boot-disk-preflight"
             boot_free=$(df -B1 --output=avail "$HOME" | tail -1 | tr -d ' ')
             echo "Boot disk free bytes: $boot_free"
             echo "Required reserve bytes: $BOOT_FREE_RESERVE_BYTES"
@@ -125,17 +155,19 @@ jobs:
               echo 'Run the explicit HARD RESET workflow or clean unrelated host state manually.'
               exit 1
             }
+            phase_end
 
-            echo '=== STOPPING PREVIOUS AITOS STACK ==='
+            phase_start "stop-previous-stack"
             if [ -f "$APP_DIR/docker-compose.yml" ]; then
               cd "$APP_DIR"
-              docker compose down --remove-orphans --timeout 30 || true
+              timeout 120s docker compose down --remove-orphans --timeout 30 || true
             fi
+            phase_end
 
-            echo '=== SOURCE DEPLOYMENT ==='
+            phase_start "source-deployment"
             tmp_dir=$(mktemp -d)
             trap 'rm -rf "$tmp_dir"; docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-            curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
+            timeout 180s curl -fsSL --retry 3 --retry-delay 2 "https://github.com/$REPO/archive/$COMMIT.tar.gz" -o "$tmp_dir/source.tar.gz"
             mkdir -p "$tmp_dir/source"
             tar -xzf "$tmp_dir/source.tar.gz" --strip-components=1 -C "$tmp_dir/source"
             case "$APP_DIR" in
@@ -146,21 +178,24 @@ jobs:
             mkdir -p "$APP_DIR"
             cp -a "$tmp_dir/source/." "$APP_DIR/"
             cd "$APP_DIR"
+            phase_end
 
-            echo '=== LEGACY STORAGE MIGRATION ==='
+            phase_start "legacy-storage-migration"
             export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID
             export AITOS_ALLOW_LEGACY_STORAGE_MIGRATION=true
             chmod +x scripts/migrate_legacy_storage.sh
-            ./scripts/migrate_legacy_storage.sh
+            timeout 900s ./scripts/migrate_legacy_storage.sh
+            phase_end
 
-            echo '=== CANONICAL STORAGE BOOTSTRAP ==='
+            phase_start "canonical-storage-bootstrap"
             export AITOS_DATA_ROOT AITOS_DATA_DISK_UUID
             export AITOS_HOST_UID="$(id -u)" AITOS_HOST_GID="$(id -g)"
             chmod +x scripts/bootstrap_storage.sh
-            ./scripts/bootstrap_storage.sh
+            timeout 300s ./scripts/bootstrap_storage.sh
             mountpoint -q "$AITOS_DATA_ROOT"
+            phase_end
 
-            echo '=== CANONICAL PRODUCTION ENV ==='
+            phase_start "canonical-env"
             umask 077
             cat > .env << ENVEOF
             ENVIRONMENT=production
@@ -220,31 +255,39 @@ jobs:
             SLACK_WEBHOOK_URL=$SLACK_WEBHOOK_URL
             ENVEOF
             chmod 600 .env
+            phase_end
 
-            echo '=== CANONICAL PATH ASSERTIONS ==='
+            phase_start "canonical-path-assertions"
             grep -q '^REDIS_DATA_DIR=/mnt/aitos-data/eventbus/redis$' .env
             grep -q '^CLICKHOUSE_DATA_DIR=/mnt/aitos-data/databases/clickhouse$' .env
             grep -q '^NEO4J_DATA_DIR=/mnt/aitos-data/databases/neo4j$' .env
             grep -q '^NEO4J_LOG_DIR=/mnt/aitos-data/runtime/logs/neo4j$' .env
             grep -q '^BACKTEST_DATA_DIR=/mnt/aitos-data/research/backtest$' .env
             ! grep -q 'OTHERS_DATA_DIR\|\.storage/others' .env
+            phase_end
 
-            echo '=== GHCR AUTHENTICATION ==='
+            phase_start "ghcr-auth"
             printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+            phase_end
 
-            echo '=== DOCKER VALIDATION ==='
+            phase_start "docker-validation-and-pull"
             docker compose config >/dev/null
             docker compose pull
             docker logout ghcr.io >/dev/null 2>&1 || true
-            docker compose down --remove-orphans --timeout 30 || true
-            docker compose up -d --remove-orphans --force-recreate
+            phase_end
 
-            echo '=== HEALTH GATE ==='
+            phase_start "compose-recreate"
+            timeout 120s docker compose down --remove-orphans --timeout 30 || true
+            docker compose up -d --remove-orphans --force-recreate
+            phase_end
+
+            phase_start "health-gate"
             deadline=$((SECONDS + 300))
             while [ "$SECONDS" -lt "$deadline" ]; do
               redis_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-redis 2>/dev/null || true)
               clickhouse_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-clickhouse 2>/dev/null || true)
               neo4j_state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' aitos-neo4j 2>/dev/null || true)
+              echo "health redis=$redis_state clickhouse=$clickhouse_state neo4j=$neo4j_state elapsed=$((SECONDS - PHASE_STARTED_AT))s"
               if [ "$redis_state" = healthy ] && [ "$clickhouse_state" = healthy ] && [ "$neo4j_state" = healthy ]; then break; fi
               sleep 10
             done
@@ -252,8 +295,9 @@ jobs:
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-clickhouse)" = healthy ]
             [ "$(docker inspect --format '{{.State.Health.Status}}' aitos-neo4j)" = healthy ]
             ! docker compose ps --all --format '{{.Name}} {{.State}}' | grep -E 'unhealthy|Restarting|Exited'
+            phase_end
 
-            echo '=== STORAGE GATE ==='
+            phase_start "storage-gate"
             df -h "$AITOS_DATA_ROOT"
             for required in \
               databases/clickhouse \
@@ -273,6 +317,7 @@ jobs:
                 exit 1
               }
             done
+            phase_end
 
             echo "=== DEPLOYMENT SUCCESS: $COMMIT ==="
             docker system df
