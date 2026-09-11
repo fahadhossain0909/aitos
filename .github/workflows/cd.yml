@@ -94,7 +94,7 @@ jobs:
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/deploy_key
           command_timeout: 30m
-          capture_stdout: true
+          capture_stdout: false
           envs: AITOS_DATA_ROOT,BOOT_FREE_RESERVE_BYTES,DATA_DISK_MIN_FREE_GB,AITOS_DATA_DISK_UUID,REDIS_PASSWORD,CLICKHOUSE_USER,CLICKHOUSE_PASSWORD,NEO4J_USER,NEO4J_PASSWORD,BINANCE_API_KEY,BINANCE_API_SECRET,BINANCE_TESTNET,DATABASE_URL,SENTRY_DSN,SLACK_WEBHOOK_URL,GHCR_USERNAME,GHCR_TOKEN
           script: |
             set -Eeuo pipefail
@@ -138,8 +138,21 @@ jobs:
             REPO="${{ github.repository }}"
             COMMIT="${{ github.sha }}"
             mkdir -p "$APP_DIR"
-            exec 9>"$HOME/.aitos-deploy.lock"
-            flock 9
+
+            phase_start "deployment-lock"
+            LOCK_FILE="$HOME/.aitos-deploy.lock"
+            exec 9>"$LOCK_FILE"
+            echo "=== ACQUIRING DEPLOYMENT LOCK: $LOCK_FILE ==="
+            if ! flock -w 30 9; then
+              echo "::error::Deployment lock is busy after 30 seconds: $LOCK_FILE"
+              echo "=== POSSIBLE LOCK HOLDERS ==="
+              ps -eo pid,ppid,etime,user,cmd --sort=etime | grep -E '[a]itos|[f]lock' || true
+              echo "=== LOCK FILE ==="
+              ls -l "$LOCK_FILE" 2>&1 || true
+              exit 75
+            fi
+            echo "=== DEPLOYMENT LOCK ACQUIRED ==="
+            phase_end
 
             phase_start "docker-pre-cleanup"
             timeout 180s docker image prune -af || echo "Docker image prune timed out/failed; continuing to preflight."
