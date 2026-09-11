@@ -6,7 +6,10 @@ import pytest
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus
 from aitos.trading.lifecycle import TradeLifecycle
-from aitos.trading.market_context import MarketContext, handle_position_market_event
+from aitos.trading.market_context import (
+    MarketContext,
+    handle_position_market_event,
+)
 
 
 class _Provider:
@@ -25,6 +28,11 @@ class _Lifecycle:
 
     async def update_price(self, trade_id: str, price: float, **kwargs):
         self.updates.append((trade_id, price, kwargs))
+
+    async def handle_event(self, event: Event):
+        return await handle_position_market_event(
+            self, self.market_context_provider, event
+        )
 
 
 class _Redis:
