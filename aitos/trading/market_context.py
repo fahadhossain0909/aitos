@@ -2,6 +2,11 @@
 
 Bridges LiveMarketStateStore into the kwargs that TradeLifecycle.update_price
 / PositionManager.evaluate expect. Without a provider, EIE runs price-only.
+
+This module also owns the canonical runtime bridge from live market-price
+EventBus messages to open-position ``TradeLifecycle.update_price`` calls.
+That bridge is deliberately installed here because ``app.build_system``
+constructs TradeLifecycle before wiring the LiveStateContextProvider.
 """
 
 from __future__ import annotations
@@ -10,6 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from aitos.core.contracts import Event
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
 from aitos.logging_setup import get_logger
@@ -137,3 +143,93 @@ class CallableContextProvider:
 
     def get_context(self, symbol: str) -> MarketContext:
         return self._fn(symbol)
+
+
+async def handle_position_market_event(
+    trade_lifecycle: Any,
+    provider: MarketContextProvider | None,
+    event: Event,
+) -> bool:
+    """Deliver a live price event to every open position for that symbol.
+
+    Returns ``True`` when the event is a position-price event and has therefore
+    been consumed by this canonical bridge. Returning ``True`` even when the
+    payload is malformed prevents the legacy/native lifecycle handler from
+    creating a second, subtly different price path.
+    """
+    if not (
+        event.topic.startswith("market.kline.")
+        or event.topic.startswith("market.trade.")
+    ):
+        return False
+
+    symbol = event.payload.get("symbol")
+    price = event.payload.get("close", event.payload.get("price"))
+    from aitos.trading.lifecycle import _valid_market_price
+
+    if not symbol or not _valid_market_price(price):
+        return True
+
+    current_price = float(price)
+    try:
+        ctx_kwargs = provider.get_context(symbol).as_kwargs() if provider else {}
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("position market context unavailable: %s", exc)
+        ctx_kwargs = {}
+
+    matched = 0
+    for trade in list(trade_lifecycle.get_open_trades()):
+        if trade.symbol != symbol:
+            continue
+        matched += 1
+        logger.debug(
+            "POSITION_MONITOR bridge dispatch",
+            extra={
+                "aitos_extra": {
+                    "trade_id": trade.trade_id,
+                    "symbol": symbol,
+                    "price": current_price,
+                    "topic": event.topic,
+                }
+            },
+        )
+        await trade_lifecycle.update_price(
+            trade.trade_id, current_price, **ctx_kwargs
+        )
+
+    if matched:
+        logger.debug(
+            "POSITION_MONITOR bridge delivered market price",
+            extra={"aitos_extra": {"symbol": symbol, "matched_positions": matched}},
+        )
+    return True
+
+
+def install_trade_lifecycle_market_bridge() -> None:
+    """Install the canonical market-event bridge exactly once.
+
+    ``TradeLifecycle`` already has a native market-context implementation, but
+    production evidence showed that the native path can receive market events
+    without reaching ``update_price``. The bridge is intentionally installed at
+    the market-context boundary and therefore works with the existing native
+    provider wiring without modifying the packed lifecycle source.
+    """
+    from aitos.trading.lifecycle import TradeLifecycle
+
+    if getattr(TradeLifecycle, "_aitos_canonical_market_bridge_installed", False):
+        return
+
+    original_handle_event = TradeLifecycle.handle_event
+
+    async def _canonical_handle_event(self: Any, event: Event):
+        provider = getattr(self, "market_context_provider", None)
+        if await handle_position_market_event(self, provider, event):
+            return None
+        return await original_handle_event(self, event)
+
+    TradeLifecycle.handle_event = _canonical_handle_event
+    TradeLifecycle._aitos_canonical_market_bridge_installed = True
+    logger.info("Canonical position market-event bridge installed")
+
+
+install_trade_lifecycle_market_bridge()
