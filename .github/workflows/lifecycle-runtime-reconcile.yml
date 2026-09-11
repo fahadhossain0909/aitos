@@ -1,19 +1,24 @@
 name: Lifecycle Runtime Reconcile
 
 on:
-  push:
-    branches: [main, master]
+  workflow_run:
+    workflows: [CD]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  AITOS_DATA_ROOT: /mnt/aitos-data
+
 concurrency:
-  group: lifecycle-runtime-reconcile-${{ github.ref }}
+  group: lifecycle-runtime-reconcile-production
   cancel-in-progress: true
 
 jobs:
   reconcile:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main') }}
     runs-on: ubuntu-latest
     environment: papertrade
     timeout-minutes: 10
@@ -41,20 +46,21 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_lifecycle_key
           chmod 600 /tmp/aitos_lifecycle_key
 
-      - name: Wait for CD deployment of this exact commit
+      - name: Reconcile the exact successful CD commit
         uses: appleboy/ssh-action@v1.2.5
         env:
-          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_lifecycle_key
           command_timeout: 8m
-          envs: EXPECTED_SHA
+          envs: EXPECTED_SHA,AITOS_DATA_DISK_UUID
           script: |
             set -Eeuo pipefail
             APP_DIR="$HOME/aitos"
-            deadline=$((SECONDS + 600))
+            deadline=$((SECONDS + 180))
             while [ "$SECONDS" -lt "$deadline" ]; do
               if [ -f "$APP_DIR/.env" ] && grep -q "^AITOS_IMAGE_TAG=sha-${EXPECTED_SHA}$" "$APP_DIR/.env"; then
                 echo "CD has installed the expected image tag: sha-${EXPECTED_SHA}"
@@ -66,6 +72,7 @@ jobs:
             test -f "$APP_DIR/.env"
             grep -q "^AITOS_IMAGE_TAG=sha-${EXPECTED_SHA}$" "$APP_DIR/.env"
 
+            cd "$APP_DIR"
             exec 9>"$HOME/.aitos-deploy.lock"
             echo "=== ACQUIRING LIFECYCLE-RECONCILE LOCK ==="
             if ! flock -w 30 9; then
@@ -74,12 +81,11 @@ jobs:
               exit 75
             fi
             echo "=== LIFECYCLE-RECONCILE LOCK ACQUIRED ==="
-            cd "$APP_DIR"
 
             test -x scripts/runtime_hardening.sh || chmod +x scripts/runtime_hardening.sh
             AITOS_DEPLOY_LOCK_HELD=1 \
-              AITOS_DATA_ROOT=/mnt/aitos-data \
-              AITOS_DATA_DISK_UUID="${{ secrets.AITOS_DATA_DISK_UUID }}" \
+              AITOS_DATA_ROOT="$AITOS_DATA_ROOT" \
+              AITOS_DATA_DISK_UUID="$AITOS_DATA_DISK_UUID" \
               scripts/runtime_hardening.sh
 
             expected_image="ghcr.io/fahadhossain0909/aitos:sha-${EXPECTED_SHA}"

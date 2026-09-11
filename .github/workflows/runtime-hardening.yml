@@ -1,15 +1,13 @@
 name: Production Runtime Hardening
 
 on:
-  push:
-    branches: [main, master]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: runtime-hardening-${{ github.ref }}
+  group: runtime-hardening-manual
   cancel-in-progress: true
 
 jobs:
@@ -59,14 +57,6 @@ jobs:
             APP_DIR="$HOME/aitos"
             cd "$APP_DIR"
 
-            for attempt in $(seq 1 12); do
-              if [ -f scripts/runtime_hardening.sh ]; then
-                break
-              fi
-              echo "Waiting for CD deployment to install runtime_hardening.sh (attempt $attempt/12)..."
-              sleep 10
-            done
-
             exec 9>"$HOME/.aitos-deploy.lock"
             echo "=== ACQUIRING RUNTIME-HARDENING LOCK ==="
             if ! flock -w 30 9; then
@@ -76,11 +66,7 @@ jobs:
             fi
             echo "=== RUNTIME-HARDENING LOCK ACQUIRED ==="
 
-            if [ ! -f scripts/runtime_hardening.sh ]; then
-              echo "::error::runtime_hardening.sh is missing from deployed source after waiting for CD."
-              exit 1
-            fi
-            chmod +x scripts/runtime_hardening.sh
+            test -x scripts/runtime_hardening.sh || chmod +x scripts/runtime_hardening.sh
             AITOS_DEPLOY_LOCK_HELD=1 \
               AITOS_DATA_ROOT=/mnt/aitos-data \
               AITOS_DATA_DISK_UUID="$AITOS_DATA_DISK_UUID" \
