@@ -10,13 +10,13 @@ permissions:
 
 concurrency:
   group: lifecycle-runtime-reconcile-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   reconcile:
     runs-on: ubuntu-latest
     environment: papertrade
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Validate deployment secrets
         shell: bash
@@ -49,7 +49,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_lifecycle_key
-          command_timeout: 15m
+          command_timeout: 8m
           envs: EXPECTED_SHA
           script: |
             set -Eeuo pipefail
@@ -67,11 +67,18 @@ jobs:
             grep -q "^AITOS_IMAGE_TAG=sha-${EXPECTED_SHA}$" "$APP_DIR/.env"
 
             exec 9>"$HOME/.aitos-deploy.lock"
-            flock 9
+            echo "=== ACQUIRING LIFECYCLE-RECONCILE LOCK ==="
+            if ! flock -w 30 9; then
+              echo "::error::Lifecycle reconcile could not acquire deployment lock within 30 seconds."
+              ps -eo pid,ppid,etime,user,cmd --sort=etime | grep -E '[a]itos|[f]lock' || true
+              exit 75
+            fi
+            echo "=== LIFECYCLE-RECONCILE LOCK ACQUIRED ==="
             cd "$APP_DIR"
 
             test -x scripts/runtime_hardening.sh || chmod +x scripts/runtime_hardening.sh
-            AITOS_DATA_ROOT=/mnt/aitos-data \
+            AITOS_DEPLOY_LOCK_HELD=1 \
+              AITOS_DATA_ROOT=/mnt/aitos-data \
               AITOS_DATA_DISK_UUID="${{ secrets.AITOS_DATA_DISK_UUID }}" \
               scripts/runtime_hardening.sh
 

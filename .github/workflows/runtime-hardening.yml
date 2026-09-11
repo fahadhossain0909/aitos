@@ -10,13 +10,13 @@ permissions:
 
 concurrency:
   group: runtime-hardening-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   harden:
     runs-on: ubuntu-latest
     environment: papertrade
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - name: Check deployment secrets
         shell: bash
@@ -52,16 +52,13 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key_path: /tmp/aitos_runtime_key
-          command_timeout: 15m
+          command_timeout: 8m
           envs: AITOS_DATA_DISK_UUID
           script: |
             set -euo pipefail
             APP_DIR="$HOME/aitos"
             cd "$APP_DIR"
 
-            # CD deploys the source snapshot concurrently with this workflow.
-            # Wait briefly for the new hardening script to arrive before taking
-            # the shared deployment lock, avoiding a false race failure.
             for attempt in $(seq 1 12); do
               if [ -f scripts/runtime_hardening.sh ]; then
                 break
@@ -70,17 +67,22 @@ jobs:
               sleep 10
             done
 
-            # CD and this workflow share the same host lock. If CD is still
-            # deploying, wait for it rather than racing docker compose.
             exec 9>"$HOME/.aitos-deploy.lock"
-            flock 9
+            echo "=== ACQUIRING RUNTIME-HARDENING LOCK ==="
+            if ! flock -w 30 9; then
+              echo "::error::Runtime hardening could not acquire deployment lock within 30 seconds."
+              ps -eo pid,ppid,etime,user,cmd --sort=etime | grep -E '[a]itos|[f]lock' || true
+              exit 75
+            fi
+            echo "=== RUNTIME-HARDENING LOCK ACQUIRED ==="
 
             if [ ! -f scripts/runtime_hardening.sh ]; then
               echo "::error::runtime_hardening.sh is missing from deployed source after waiting for CD."
               exit 1
             fi
             chmod +x scripts/runtime_hardening.sh
-            AITOS_DATA_ROOT=/mnt/aitos-data \
+            AITOS_DEPLOY_LOCK_HELD=1 \
+              AITOS_DATA_ROOT=/mnt/aitos-data \
               AITOS_DATA_DISK_UUID="$AITOS_DATA_DISK_UUID" \
               scripts/runtime_hardening.sh
 
