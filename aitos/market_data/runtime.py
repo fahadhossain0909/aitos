@@ -187,7 +187,9 @@ class CanonicalMarketDataRuntime:
         )
 
     async def update_kline_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
-        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[:KLINE_SYMBOL_LIMIT]
+        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[
+            :KLINE_SYMBOL_LIMIT
+        ]
         async with self._reconfigure_lock:
             if normalized == self.kline_symbols:
                 return False
@@ -226,7 +228,13 @@ class CanonicalMarketDataRuntime:
                 await self._restart_orderbook_task()
             logger.warning(
                 "live orderbook depth changed",
-                extra={"aitos_extra": {"stage": "orderbook_depth_reconfigured", "orderbook_levels": levels, "reason": reason}},
+                extra={
+                    "aitos_extra": {
+                        "stage": "orderbook_depth_reconfigured",
+                        "orderbook_levels": levels,
+                        "reason": reason,
+                    }
+                },
             )
             return True
 
@@ -265,7 +273,13 @@ class CanonicalMarketDataRuntime:
             except Exception as exc:
                 logger.warning(
                     "canonical market-data publish failed; continuing",
-                    extra={"aitos_extra": {"stage": "canonical_publish_error", "error": str(exc), "worker_id": worker_id}},
+                    extra={
+                        "aitos_extra": {
+                            "stage": "canonical_publish_error",
+                            "error": str(exc),
+                            "worker_id": worker_id,
+                        }
+                    },
                 )
                 await asyncio.sleep(PUBLISH_RETRY_DELAY_SECONDS)
 
@@ -275,7 +289,10 @@ class CanonicalMarketDataRuntime:
         queue = self.gateway.snapshot().get("queue", {})
         replaced = int(queue.get("replaced_oldest", 0))
         freshness_drops = int(self.gateway.health.freshness_drops)
-        if self.orderbook_levels > self.orderbook_fallback_levels and max(replaced, freshness_drops) >= DEPTH_PRESSURE_THRESHOLD:
+        if (
+            self.orderbook_levels > self.orderbook_fallback_levels
+            and max(replaced, freshness_drops) >= DEPTH_PRESSURE_THRESHOLD
+        ):
             self._depth_fallback_applied = True
             await self.update_orderbook_levels(
                 self.orderbook_fallback_levels,
@@ -320,7 +337,9 @@ class CanonicalMarketDataRuntime:
                     return
                 failure_kind = failure_kind or "stream_end"
                 self.gateway.mark_reconnecting()
-                self.gateway.health.record_error(stream_name, "stream ended unexpectedly")
+                self.gateway.health.record_error(
+                    stream_name, "stream ended unexpectedly"
+                )
                 state["errors"] = int(state["errors"]) + 1
             except asyncio.CancelledError:
                 raise
