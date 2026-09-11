@@ -3,6 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from aitos.core.contracts import Event
+from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.market_context import MarketContext, handle_position_market_event
 
 
@@ -71,3 +72,20 @@ async def test_market_event_for_other_symbol_does_not_touch_position():
 
     assert consumed is True
     assert lifecycle.updates == []
+
+
+@pytest.mark.asyncio
+async def test_trade_lifecycle_handler_uses_canonical_bridge():
+    lifecycle = _Lifecycle()
+    lifecycle.market_context_provider = _Provider()
+    event = Event(
+        topic="market.trade.BTCUSDT",
+        payload={"symbol": "BTCUSDT", "price": 65000.25},
+        source_module="test",
+    )
+
+    await TradeLifecycle.handle_event(lifecycle, event)
+
+    assert lifecycle.updates
+    assert lifecycle.updates[0][0] == "trade-1"
+    assert lifecycle.updates[0][1] == 65000.25
