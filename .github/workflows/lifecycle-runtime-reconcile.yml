@@ -1,0 +1,91 @@
+name: Lifecycle Runtime Reconcile
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lifecycle-runtime-reconcile-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    environment: papertrade
+    timeout-minutes: 20
+    steps:
+      - name: Validate deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY AITOS_DATA_DISK_UUID; do
+            test -n "${!name:-}" || { echo "::error::Missing required deployment secret: $name"; exit 1; }
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_lifecycle_key
+          chmod 600 /tmp/aitos_lifecycle_key
+
+      - name: Wait for CD deployment of this exact commit
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_lifecycle_key
+          command_timeout: 15m
+          envs: EXPECTED_SHA
+          script: |
+            set -Eeuo pipefail
+            APP_DIR="$HOME/aitos"
+            deadline=$((SECONDS + 600))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              if [ -f "$APP_DIR/.env" ] && grep -q "^AITOS_IMAGE_TAG=sha-${EXPECTED_SHA}$" "$APP_DIR/.env"; then
+                echo "CD has installed the expected image tag: sha-${EXPECTED_SHA}"
+                break
+              fi
+              echo "Waiting for CD to install sha-${EXPECTED_SHA}..."
+              sleep 10
+            done
+            test -f "$APP_DIR/.env"
+            grep -q "^AITOS_IMAGE_TAG=sha-${EXPECTED_SHA}$" "$APP_DIR/.env"
+
+            exec 9>"$HOME/.aitos-deploy.lock"
+            flock 9
+            cd "$APP_DIR"
+
+            test -x scripts/runtime_hardening.sh || chmod +x scripts/runtime_hardening.sh
+            AITOS_DATA_ROOT=/mnt/aitos-data \
+              AITOS_DATA_DISK_UUID="${{ secrets.AITOS_DATA_DISK_UUID }}" \
+              scripts/runtime_hardening.sh
+
+            expected_image="ghcr.io/fahadhossain0909/aitos:sha-${EXPECTED_SHA}"
+            actual_image="$(docker inspect --format '{{.Config.Image}}' aitos-paper)"
+            echo "Expected paper image: $expected_image"
+            echo "Actual paper image:   $actual_image"
+            test "$actual_image" = "$expected_image"
+
+            echo "=== LIFECYCLE RUNTIME RECONCILE SUCCESS: ${EXPECTED_SHA} ==="
+            docker inspect --format '{{.State.Status}}' aitos-paper
+            docker inspect --format '{{.RestartCount}}' aitos-paper
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f /tmp/aitos_lifecycle_key
