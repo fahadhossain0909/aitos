@@ -288,7 +288,11 @@ class TradeStatePersistence:
         for trade in trades:
             self._lifecycle._open_trades[trade.trade_id] = trade
         if trades:
-            symbols = list(dict.fromkeys(str(trade.symbol).upper() for trade in trades if trade.symbol))
+            symbols = list(
+                dict.fromkeys(
+                    str(trade.symbol).upper() for trade in trades if trade.symbol
+                )
+            )
             resubscribed = 0
             for ingestion in list(_INGESTIONS):
                 try:
