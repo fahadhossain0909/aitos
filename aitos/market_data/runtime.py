@@ -357,15 +357,21 @@ class CanonicalMarketDataRuntime:
             state["last_failure_elapsed_seconds"] = round(elapsed, 3)
             logger.warning(
                 "canonical market-data stream restarting",
-                extra={"aitos_extra": {
-                    "stage": "canonical_stream_restart",
-                    "stream": stream_name,
-                    "failure_kind": failure_kind,
-                    "elapsed_seconds": round(elapsed, 3),
-                    "saw_event": saw_event,
-                    "idle_timeout_seconds": self.stream_idle_timeout_seconds,
-                    "orderbook_symbols": list(self.orderbook_symbols) if stream_name == "orderbook" else None,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "stage": "canonical_stream_restart",
+                        "stream": stream_name,
+                        "failure_kind": failure_kind,
+                        "elapsed_seconds": round(elapsed, 3),
+                        "saw_event": saw_event,
+                        "idle_timeout_seconds": self.stream_idle_timeout_seconds,
+                        "orderbook_symbols": (
+                            list(self.orderbook_symbols)
+                            if stream_name == "orderbook"
+                            else None
+                        ),
+                    }
+                },
             )
             state["restarts"] = int(state["restarts"]) + 1
             sleep_delay = delay
