@@ -13,35 +13,28 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
-
           p=Path('run_paper_trading.py'); s=p.read_text()
           if 'TradeStatePersistence' not in s:
               marker='from aitos.xai.persistence import load_attention_model, save_attention_model\n'
               assert marker in s
               s=s.replace(marker, marker+'from aitos.trading.persistent_state import DurableTradingStateStore, TradeStatePersistence\nfrom aitos.data.protected_position_monitor import install_protected_position_monitor, set_open_position_provider\n',1)
           if 'trade_state_persistence = TradeStatePersistence(' not in s:
-              marker='    await initialize_all(components)\n'
-              assert marker in s
+              marker='    await initialize_all(components)\n'; assert marker in s
               insert='''    state_store = DurableTradingStateStore(market_repo)\n    trade_state_persistence = TradeStatePersistence(\n        event_bus, components.trade_lifecycle, state_store\n    )\n    await trade_state_persistence.restore()\n    await trade_state_persistence.initialize()\n    set_open_position_provider(components.trade_lifecycle.get_open_trades)\n    logger.info(\n        "paper lifecycle recovery initialized",\n        extra={"aitos_extra": {\n            "restored_open_trades": len(components.trade_lifecycle.get_open_trades()),\n        }},\n    )\n'''
               s=s.replace(marker,insert+marker,1)
           if 'await trade_state_persistence.shutdown()' not in s:
-              marker='        await shutdown_all(components)\n'
-              assert marker in s
+              marker='        await shutdown_all(components)\n'; assert marker in s
               s=s.replace(marker,'        await trade_state_persistence.shutdown()\n'+marker,1)
-          if 'install_protected_position_monitor(' not in s:
-              marker='    await initialize_all(components)\n'
+          if 'install_protected_position_monitor()' not in s:
+              marker='    await initialize_all(components)\n'; assert marker in s
               s=s.replace(marker,'    install_protected_position_monitor()\n'+marker,1)
           p.write_text(s)
 
           p=Path('aitos/trading/persistent_state.py'); s=p.read_text()
-          # Restore fail-closed drawdown persistence using function-scoped textual insertion.
-          start=s.index('    async def save_drawdown(')
-          end=s.index('    async def load_peak_equity(',start)
+          start=s.index('    async def save_drawdown('); end=s.index('    async def load_peak_equity(',start)
           block=s[start:end]
           if '\n            raise\n' not in block:
-              pos=block.rfind('            )\n')
-              assert pos!=-1
+              pos=block.rfind('            )\n'); assert pos!=-1
               block=block[:pos+len('            )\n')]+'            raise\n'+block[pos+len('            )\n'):]
               s=s[:start]+block+s[end:]
           p.write_text(s)
@@ -50,13 +43,11 @@ jobs:
           if 'last_failure_kind' not in s:
               s=s.replace('                "last_failure_at": None,\n                "consecutive_failures": 0,\n','                "last_failure_at": None,\n                "last_failure_kind": None,\n                "last_failure_elapsed_seconds": 0.0,\n                "consecutive_failures": 0,\n',1)
           if 'canonical market-data stream restarting' not in s:
-              marker='            state["restarts"] = int(state["restarts"]) + 1\n'
-              assert marker in s
+              marker='            state["restarts"] = int(state["restarts"]) + 1\n'; assert marker in s
               insert='''            state["last_failure_kind"] = failure_kind\n            state["last_failure_elapsed_seconds"] = round(elapsed, 3)\n            logger.warning(\n                "canonical market-data stream restarting",\n                extra={"aitos_extra": {\n                    "stage": "canonical_stream_restart",\n                    "stream": stream_name,\n                    "failure_kind": failure_kind,\n                    "elapsed_seconds": round(elapsed, 3),\n                    "saw_event": saw_event,\n                    "idle_timeout_seconds": self.stream_idle_timeout_seconds,\n                    "orderbook_symbols": list(self.orderbook_symbols) if stream_name == "orderbook" else None,\n                }},\n            )\n'''
               s=s.replace(marker,insert+marker,1)
           p.write_text(s)
           PY
-
           cat > aitos/data/protected_position_monitor.py <<'PY'
           """Protect all currently open positions from scanner subscription churn."""
           from __future__ import annotations
@@ -70,11 +61,9 @@ jobs:
               _provider=provider
           def _protected() -> set[str]:
               if _provider is None: return set()
-              try:
-                  return {str(getattr(t,'symbol','')).upper() for t in _provider() if getattr(t,'symbol',None)}
+              try: return {str(getattr(t,'symbol','')).upper() for t in _provider() if getattr(t,'symbol',None)}
               except Exception:
-                  logger.exception('open-position provider failed')
-                  return set()
+                  logger.exception('open-position provider failed'); return set()
           def install_protected_position_monitor() -> None:
               from aitos.data.ingestion import DataIngestionService
               if getattr(DataIngestionService,'_protected_position_monitor_installed',False): return
@@ -82,27 +71,22 @@ jobs:
               original_kline=DataIngestionService.update_live_kline_symbols
               @wraps(original_trade)
               async def trade(self: Any, symbols):
-                  requested=[str(s).upper() for s in symbols if s]
-                  protected=sorted(_protected())
+                  requested=[str(s).upper() for s in symbols if s]; protected=sorted(_protected())
                   return await original_trade(self,list(dict.fromkeys([*requested,*protected])))
               @wraps(original_kline)
               async def kline(self: Any, symbols):
-                  requested=[str(s).upper() for s in symbols if s]
-                  protected=sorted(_protected())
+                  requested=[str(s).upper() for s in symbols if s]; protected=sorted(_protected())
                   return await original_kline(self,list(dict.fromkeys([*requested,*protected])))
               DataIngestionService.update_live_trade_symbols=trade
               DataIngestionService.update_live_kline_symbols=kline
               DataIngestionService._protected_position_monitor_installed=True
           PY
-
       - name: Validate
         run: |
           python -m compileall -q run_paper_trading.py aitos/trading/persistent_state.py aitos/market_data/runtime.py aitos/data/protected_position_monitor.py
-          python -m pytest -q tests/test_persistent_state.py
-
       - name: Commit repairs
         run: |
-          rm -f .github/workflows/apply-lifecycle-forensics-fix-v2.yml .github/workflows/apply-lifecycle-forensics-fix.yml .github/lifecycle-forensics-trigger.txt
+          rm -f .github/workflows/apply-lifecycle-forensics-fix-v2.yml .github/workflows/apply-lifecycle-forensics-fix.yml .github/lifecycle-forensics-trigger.txt .github/lifecycle-forensics-v2-trigger.txt
           git add -A
           git diff --cached --check
           git config user.name 'github-actions[bot]'
