@@ -1,0 +1,181 @@
+name: Apply lifecycle recovery and forensic fixes
+
+on:
+  push:
+    branches:
+      - fix/paper-lifecycle-recovery-and-forensics
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply targeted repairs
+        env:
+          PYTHONPATH: .
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # 1) Paper trading must use the same durable lifecycle recovery path as live trading.
+          p = Path('run_paper_trading.py')
+          s = p.read_text()
+          old = '''from aitos.xai.attention_explainer import AttentionExplainer\nfrom aitos.xai.ml_explainer import TradeOutcomeClassifier\nfrom aitos.xai.persistence import load_attention_model, save_attention_model\n'''
+          new = '''from aitos.xai.attention_explainer import AttentionExplainer\nfrom aitos.xai.ml_explainer import TradeOutcomeClassifier\nfrom aitos.xai.persistence import load_attention_model, save_attention_model\nfrom aitos.trading.persistent_state import DurableTradingStateStore, TradeStatePersistence\n'''
+          if old not in s:
+              raise SystemExit('run_paper_trading.py import anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''    await initialize_all(components)\n    market_os_persistence = MarketOSPersistence(event_bus, market_repo)\n'''
+          new = '''    state_store = DurableTradingStateStore(market_repo)\n    trade_state_persistence = TradeStatePersistence(\n        event_bus, components.trade_lifecycle, state_store\n    )\n    await trade_state_persistence.restore()\n    await trade_state_persistence.initialize()\n    logger.info(\n        "paper lifecycle recovery initialized",\n        extra={"aitos_extra": {\n            "restored_open_trades": len(components.trade_lifecycle.get_open_trades()),\n        }},\n    )\n    await initialize_all(components)\n    market_os_persistence = MarketOSPersistence(event_bus, market_repo)\n'''
+          if old not in s:
+              raise SystemExit('run_paper_trading.py initialize anchor not found')
+          s = s.replace(old, new, 1)
+
+          old = '''        await experience_recorder.shutdown()\n        await market_os_persistence.shutdown()\n        await shutdown_all(components)\n'''
+          new = '''        await experience_recorder.shutdown()\n        await market_os_persistence.shutdown()\n        await trade_state_persistence.shutdown()\n        await shutdown_all(components)\n'''
+          if old not in s:
+              raise SystemExit('run_paper_trading.py shutdown anchor not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+
+          # 2) Persistence failures must propagate; otherwise durable drawdown can silently diverge after restart.
+          p = Path('aitos/trading/persistent_state.py')
+          s = p.read_text()
+          anchor = '''            logger.exception(\n                "failed to save portfolio drawdown state",\n                extra={\n                    "aitos_extra": {\n                        "asset": asset,\n                        "equity": equity,\n                        "peak": peak,\n                        "drawdown_pct": drawdown,\n                    }\n                },\n            )\n'''
+          if anchor not in s:
+              raise SystemExit('persistent_state.py drawdown anchor not found')
+          replacement = anchor + '            raise\n'
+          if replacement not in s:
+              s = s.replace(anchor, replacement, 1)
+          p.write_text(s)
+
+          # 3) Install protected-position subscription semantics.
+          p = Path('aitos/data/ingestion.py')
+          s = p.read_text()
+          anchor = '''from .trade_recovery_guard import install_trade_recovery_guard\nfrom .transport_telemetry import install_transport_telemetry\n\ninstall_transport_telemetry(DataIngestionService)\ninstall_trade_recovery_guard(DataIngestionService)\n'''
+          if anchor not in s:
+              raise SystemExit('ingestion.py installation anchor not found')
+          replacement = '''from .trade_recovery_guard import install_trade_recovery_guard\nfrom .transport_telemetry import install_transport_telemetry\nfrom .protected_position_monitor import install_protected_position_monitor\n\ninstall_transport_telemetry(DataIngestionService)\ninstall_trade_recovery_guard(DataIngestionService)\ninstall_protected_position_monitor(DataIngestionService)\n'''
+          s = s.replace(anchor, replacement, 1)
+          p.write_text(s)
+
+          # 4) Persisted lifecycle restore marks positions as protected before scanner stages reconfigure subscriptions.
+          p = Path('aitos/trading/persistent_state.py')
+          s = p.read_text()
+          old = '''            for ingestion in list(_INGESTIONS):\n                try:\n                    if symbols:\n                        await ingestion.update_live_trade_symbols(symbols)\n                        await ingestion.update_live_kline_symbols(symbols)\n                        resubscribed += 1\n'''
+          new = '''            for ingestion in list(_INGESTIONS):\n                try:\n                    if symbols:\n                        protect = getattr(ingestion, "protect_position_symbols", None)\n                        if protect is not None:\n                            protect(symbols)\n                        await ingestion.update_live_trade_symbols(symbols)\n                        await ingestion.update_live_kline_symbols(symbols)\n                        resubscribed += 1\n'''
+          if old not in s:
+              raise SystemExit('persistent_state.py restore anchor not found')
+          s = s.replace(old, new, 1)
+
+          # 5) On close, remove the symbol from the protected monitoring set.
+          old = '''        try:\n            await self._store.delete_trade(str(trade_id))\n        except Exception as exc:\n'''
+          new = '''        try:\n            await self._store.delete_trade(str(trade_id))\n            symbol = str(event.payload.get("symbol") or "").upper()\n            if symbol:\n                for ingestion in list(_INGESTIONS):\n                    unprotect = getattr(ingestion, "unprotect_position_symbols", None)\n                    if unprotect is not None:\n                        unprotect([symbol])\n        except Exception as exc:\n'''
+          if old not in s:
+              raise SystemExit('persistent_state.py close anchor not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+          cat > aitos/data/protected_position_monitor.py <<'PY'
+          """Keep open-position market subscriptions independent of scanner ranking."""
+          from __future__ import annotations
+
+          from functools import wraps
+          from typing import Any
+
+          from aitos.logging_setup import get_logger
+
+          logger = get_logger("aitos.data.protected_position_monitor")
+
+          def install_protected_position_monitor(service_cls: type[Any]) -> None:
+              if getattr(service_cls, "_protected_position_monitor_installed", False):
+                  return
+
+              original_init = service_cls.__init__
+              original_trade = service_cls.update_live_trade_symbols
+              original_kline = service_cls.update_live_kline_symbols
+
+              @wraps(original_init)
+              def init_wrapper(self: Any, *args: Any, **kwargs: Any) -> None:
+                  original_init(self, *args, **kwargs)
+                  self._protected_position_symbols = set()
+
+              @wraps(original_trade)
+              async def protected_trade(self: Any, symbols: list[str] | tuple[str, ...]) -> bool:
+                  requested = {str(s).upper() for s in symbols if s}
+                  protected = set(getattr(self, "_protected_position_symbols", set()))
+                  merged = list(dict.fromkeys([*requested, *sorted(protected)]))
+                  result = await original_trade(self, merged)
+                  logger.info(
+                      "protected position trade subscription enforced",
+                      extra={"aitos_extra": {
+                          "requested_count": len(requested),
+                          "protected_count": len(protected),
+                          "effective_count": len(merged),
+                          "protected_symbols": sorted(protected),
+                      }},
+                  )
+                  return result
+
+              @wraps(original_kline)
+              async def protected_kline(self: Any, symbols: list[str] | tuple[str, ...]) -> bool:
+                  requested = [str(s).upper() for s in symbols if s]
+                  protected = sorted(getattr(self, "_protected_position_symbols", set()))
+                  merged = list(dict.fromkeys([*requested, *protected]))
+                  return await original_kline(self, merged)
+
+              def protect(self: Any, symbols: list[str] | tuple[str, ...]) -> None:
+                  current = getattr(self, "_protected_position_symbols", set())
+                  current.update(str(s).upper() for s in symbols if s)
+                  self._protected_position_symbols = current
+
+              def unprotect(self: Any, symbols: list[str] | tuple[str, ...]) -> None:
+                  current = getattr(self, "_protected_position_symbols", set())
+                  current.difference_update(str(s).upper() for s in symbols if s)
+                  self._protected_position_symbols = current
+
+              service_cls.__init__ = init_wrapper
+              service_cls.update_live_trade_symbols = protected_trade
+              service_cls.update_live_kline_symbols = protected_kline
+              service_cls.protect_position_symbols = protect
+              service_cls.unprotect_position_symbols = unprotect
+              service_cls._protected_position_monitor_installed = True
+          PY
+
+          # 6) Add forensic fields to canonical stream state so the next audit can identify the timeout cause without guessing.
+          p = Path('aitos/market_data/runtime.py')
+          s = p.read_text()
+          old = '''                "last_failure_at": None,\n                "consecutive_failures": 0,\n'''
+          new = '''                "last_failure_at": None,\n                "last_failure_kind": None,\n                "last_failure_elapsed_seconds": 0.0,\n                "consecutive_failures": 0,\n'''
+          if old not in s:
+              raise SystemExit('runtime.py stream state anchor not found')
+          s = s.replace(old, new, 1)
+          old = '''            state["restarts"] = int(state["restarts"]) + 1\n            sleep_delay = delay\n'''
+          new = '''            state["restarts"] = int(state["restarts"]) + 1\n            state["last_failure_kind"] = failure_kind\n            state["last_failure_elapsed_seconds"] = round(elapsed, 3)\n            logger.warning(\n                "canonical market-data stream restarting",\n                extra={"aitos_extra": {\n                    "stage": "canonical_stream_restart",\n                    "stream": stream_name,\n                    "failure_kind": failure_kind,\n                    "elapsed_seconds": round(elapsed, 3),\n                    "saw_event": saw_event,\n                    "idle_timeout_seconds": self.stream_idle_timeout_seconds,\n                    "orderbook_symbols": list(self.orderbook_symbols) if stream_name == "orderbook" else None,\n                }},\n            )\n            sleep_delay = delay\n'''
+          if old not in s:
+              raise SystemExit('runtime.py restart anchor not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+
+      - name: Validate targeted repairs
+        run: |
+          python -m compileall -q run_paper_trading.py aitos/trading/persistent_state.py aitos/data/ingestion.py aitos/data/protected_position_monitor.py aitos/market_data/runtime.py
+          python -m pytest -q tests/test_persistent_state.py
+
+      - name: Remove bootstrap workflow and commit repairs
+        run: |
+          rm -f .github/workflows/apply-lifecycle-forensics-fix.yml
+          git add run_paper_trading.py aitos/trading/persistent_state.py aitos/data/ingestion.py aitos/data/protected_position_monitor.py aitos/market_data/runtime.py
+          git add -u .github/workflows/apply-lifecycle-forensics-fix.yml
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "fix: recover paper positions and instrument stream failures"
+          git push
