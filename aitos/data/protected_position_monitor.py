@@ -1,8 +1,10 @@
 """Protect all currently open positions from scanner subscription churn."""
+
 from __future__ import annotations
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Any, Callable
+from typing import Any
 
 from aitos.logging_setup import get_logger
 
