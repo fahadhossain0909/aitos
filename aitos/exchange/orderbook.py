@@ -211,10 +211,14 @@ class LocalOrderBook:
         # Keep the complete book for correctness, but only select the requested
         # top-N levels. Sorting the entire dictionary on every 100ms update was
         # an avoidable O(N log N) event-loop hotspot when the book grew large.
-        bids = tuple(heapq.nlargest(self.max_levels, self._bids.items(), key=lambda x: x[0]))
+        bids = tuple(
+            heapq.nlargest(self.max_levels, self._bids.items(), key=lambda x: x[0])
+        )
         bid_sort = time.perf_counter() - sort_started
         sort_started = time.perf_counter()
-        asks = tuple(heapq.nsmallest(self.max_levels, self._asks.items(), key=lambda x: x[0]))
+        asks = tuple(
+            heapq.nsmallest(self.max_levels, self._asks.items(), key=lambda x: x[0])
+        )
         ask_sort = time.perf_counter() - sort_started
         elapsed = time.perf_counter() - started
         self._forensics["snapshot_count"] = int(self._forensics["snapshot_count"]) + 1
