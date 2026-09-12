@@ -14,9 +14,11 @@ from aitos.intelligence.position_monitor import (
     PositionMonitorController,
     PositionMonitorTier,
 )
+from aitos.logging_setup import get_logger
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionAction, PositionManager
 
+logger = get_logger("aitos.intelligence.position_runtime")
 REFERENCE_SYMBOL = "BTCUSDT"
 
 
@@ -130,9 +132,7 @@ def _install_ingestion_guards() -> None:
             for s in ranked_non_btc_symbols
             if s and str(s).upper() != REFERENCE_SYMBOL
         ]
-        escalated = [
-            symbol for symbol in _deep_priority_order() if symbol != REFERENCE_SYMBOL
-        ]
+        escalated = [s for s in _deep_priority_order() if s != REFERENCE_SYMBOL]
         non_btc = _merge_symbols(escalated, requested)
         symbols = [REFERENCE_SYMBOL, *non_btc[: max(0, MAX_DEEP_SYMBOLS - 1)]]
         runtime = getattr(self, "_canonical_runtime", None)
@@ -208,8 +208,6 @@ def _install_position_monitor() -> None:
         extra_features: Any = None,
         **kwargs: Any,
     ) -> PositionAction:
-        # Direct PositionManager consumers keep the canonical full-intelligence
-        # contract. Only the live TradeLifecycle opts into tiered monitoring.
         if not getattr(self, "_aitos_tiered_monitoring_enabled", False):
             return original_evaluate(
                 self,
@@ -237,7 +235,7 @@ def _install_position_monitor() -> None:
                 decision.tier,
                 decision.score,
                 decision.reasons,
-                market_state=_warning_market_state(
+                _warning_market_state(
                     self,
                     trade=trade,
                     current_price=current_price,
@@ -286,6 +284,88 @@ def _install_position_monitor() -> None:
     PositionManager._aitos_tiered_monitor_installed = True  # type: ignore[attr-defined]
 
 
+def _install_lifecycle_telemetry() -> None:
+    if getattr(TradeLifecycle, "_aitos_lifecycle_telemetry_installed", False):
+        return
+    original_update_price = getattr(TradeLifecycle, "update_price", None)
+    if callable(original_update_price):
+
+        @wraps(original_update_price)
+        async def traced_update_price(
+            self: TradeLifecycle, *args: Any, **kwargs: Any
+        ) -> Any:
+            before_trades = list(self.get_open_trades())
+            before_states = {
+                str(getattr(t, "trade_id", "")): str(
+                    getattr(
+                        getattr(t, "state", None), "value", getattr(t, "state", None)
+                    )
+                )
+                for t in before_trades
+            }
+            started = datetime.now(timezone.utc)
+            try:
+                result = await original_update_price(self, *args, **kwargs)
+                after_trades = list(self.get_open_trades())
+                logger.info(
+                    "lifecycle root-cause telemetry",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "lifecycle_update_price",
+                            "open_before": len(before_trades),
+                            "open_after": len(after_trades),
+                            "open_delta": len(after_trades) - len(before_trades),
+                            "state_before_counts": _state_counts(
+                                before_states.values()
+                            ),
+                            "state_after_counts": _state_counts(
+                                str(
+                                    getattr(
+                                        getattr(t, "state", None),
+                                        "value",
+                                        getattr(t, "state", None),
+                                    )
+                                )
+                                for t in after_trades
+                            ),
+                            "duration_ms": (
+                                datetime.now(timezone.utc) - started
+                            ).total_seconds()
+                            * 1000.0,
+                        }
+                    },
+                )
+                return result
+            except Exception as exc:
+                logger.error(
+                    "lifecycle update_price failed",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "lifecycle_update_price_error",
+                            "open_before": len(before_trades),
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                            "duration_ms": (
+                                datetime.now(timezone.utc) - started
+                            ).total_seconds()
+                            * 1000.0,
+                        }
+                    },
+                )
+                raise
+
+        TradeLifecycle.update_price = traced_update_price  # type: ignore[method-assign]
+    TradeLifecycle._aitos_lifecycle_telemetry_installed = True  # type: ignore[attr-defined]
+
+
+def _state_counts(states: Any) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for state in states:
+        key = str(state)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
 def _install_lifecycle_wiring() -> None:
     if getattr(TradeLifecycle, "_aitos_position_runtime_installed", False):
         return
@@ -298,9 +378,6 @@ def _install_lifecycle_wiring() -> None:
         _LIFECYCLES.add(self)
         position_manager = kwargs.get("position_manager")
         if position_manager is not None:
-            # The live application passes its PositionManager into TradeLifecycle.
-            # Opt that instance into the tiered gate without changing the public
-            # PositionManager.evaluate() contract for direct consumers.
             position_manager._aitos_tiered_monitoring_enabled = True
 
     TradeLifecycle.__init__ = guarded_init  # type: ignore[method-assign]
@@ -311,23 +388,75 @@ def _install_lifecycle_wiring() -> None:
         async def guarded_submit(
             self: TradeLifecycle, *args: Any, **kwargs: Any
         ) -> Any:
-            trade = await original_submit(self, *args, **kwargs)
+            before = len(self.get_open_trades())
+            try:
+                trade = await original_submit(self, *args, **kwargs)
+            except Exception as exc:
+                logger.error(
+                    "lifecycle submit telemetry: submit failed",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "lifecycle_submit_error",
+                            "open_before": before,
+                            "open_after": len(self.get_open_trades()),
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        }
+                    },
+                )
+                raise
             state = getattr(getattr(trade, "state", None), "value", "")
             symbol = str(getattr(trade, "symbol", "") or "").upper()
+            logger.info(
+                "lifecycle submit telemetry",
+                extra={
+                    "aitos_extra": {
+                        "stage": "lifecycle_submit",
+                        "symbol": symbol,
+                        "trade_id": getattr(trade, "trade_id", None),
+                        "result_state": state,
+                        "open_before": before,
+                        "open_after": len(self.get_open_trades()),
+                    }
+                },
+            )
             if state == "position_opened" and symbol:
                 for ingestion in list(_INGESTIONS):
                     try:
-                        await ingestion.update_live_trade_symbols([symbol])
-                        await ingestion.update_live_kline_symbols([symbol])
-                    except Exception:
-                        continue
+                        trade_ok = await ingestion.update_live_trade_symbols([symbol])
+                        kline_ok = await ingestion.update_live_kline_symbols([symbol])
+                        logger.info(
+                            "position market-data subscription telemetry",
+                            extra={
+                                "aitos_extra": {
+                                    "stage": "position_market_data_subscription",
+                                    "symbol": symbol,
+                                    "trade_id": getattr(trade, "trade_id", None),
+                                    "trade_stream_updated": bool(trade_ok),
+                                    "kline_stream_updated": bool(kline_ok),
+                                }
+                            },
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "position market-data subscription failed",
+                            extra={
+                                "aitos_extra": {
+                                    "stage": "position_market_data_subscription_error",
+                                    "symbol": symbol,
+                                    "trade_id": getattr(trade, "trade_id", None),
+                                    "error_type": type(exc).__name__,
+                                    "error": str(exc),
+                                }
+                            },
+                        )
             return trade
 
         TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
-
     TradeLifecycle._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
 
 
 _install_ingestion_guards()
 _install_lifecycle_wiring()
+_install_lifecycle_telemetry()
 _install_position_monitor()

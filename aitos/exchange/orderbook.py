@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import heapq
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -103,9 +104,7 @@ class LocalOrderBook:
         # The websocket producer starts before the REST snapshot is fetched.
         # Therefore the queue can contain updates that the REST snapshot already
         # covers. While awaiting the first bridge update, discard those stale
-        # updates without emitting a synthetic snapshot. Emitting them leaves
-        # the book in bootstrap state and can cause repeated bridge mismatches
-        # and watchdog timeouts.
+        # updates without emitting a synthetic snapshot.
         if (
             self._awaiting_first_update
             and update.final_update_id <= self.last_update_id
@@ -209,14 +208,17 @@ class LocalOrderBook:
     def snapshot(self, event_time_ms: int = 0) -> OrderBookSnapshot:
         started = time.perf_counter()
         sort_started = time.perf_counter()
+        # Keep the complete book for correctness, but only select the requested
+        # top-N levels. Sorting the entire dictionary on every 100ms update was
+        # an avoidable O(N log N) event-loop hotspot when the book grew large.
         bids = tuple(
-            sorted(self._bids.items(), key=lambda x: x[0], reverse=True)[
-                : self.max_levels
-            ]
+            heapq.nlargest(self.max_levels, self._bids.items(), key=lambda x: x[0])
         )
         bid_sort = time.perf_counter() - sort_started
         sort_started = time.perf_counter()
-        asks = tuple(sorted(self._asks.items(), key=lambda x: x[0])[: self.max_levels])
+        asks = tuple(
+            heapq.nsmallest(self.max_levels, self._asks.items(), key=lambda x: x[0])
+        )
         ask_sort = time.perf_counter() - sort_started
         elapsed = time.perf_counter() - started
         self._forensics["snapshot_count"] = int(self._forensics["snapshot_count"]) + 1
