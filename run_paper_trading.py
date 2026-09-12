@@ -30,6 +30,8 @@ from aitos.resilience import RetryExhaustedError, retry_with_backoff
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
+from aitos.trading.persistent_state import DurableTradingStateStore, TradeStatePersistence
+from aitos.data.protected_position_monitor import install_protected_position_monitor, set_open_position_provider
 
 logger = get_logger("aitos.run_paper_trading")
 SCAN_INTERVAL_SECONDS = 60.0
@@ -165,6 +167,20 @@ async def main() -> None:
             }
         },
     )
+    state_store = DurableTradingStateStore(market_repo)
+    trade_state_persistence = TradeStatePersistence(
+        event_bus, components.trade_lifecycle, state_store
+    )
+    await trade_state_persistence.restore()
+    await trade_state_persistence.initialize()
+    set_open_position_provider(components.trade_lifecycle.get_open_trades)
+    logger.info(
+        "paper lifecycle recovery initialized",
+        extra={"aitos_extra": {
+            "restored_open_trades": len(components.trade_lifecycle.get_open_trades()),
+        }},
+    )
+    install_protected_position_monitor()
     await initialize_all(components)
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     await market_os_persistence.initialize({})
@@ -222,6 +238,7 @@ async def main() -> None:
         await health_server.stop()
         await experience_recorder.shutdown()
         await market_os_persistence.shutdown()
+        await trade_state_persistence.shutdown()
         await shutdown_all(components)
         await market_repo.shutdown()
         await journal_repo.shutdown()
