@@ -308,7 +308,9 @@ def _install_lifecycle_telemetry() -> None:
             continue
 
         @wraps(original)
-        async def traced(self: TradeLifecycle, *args: Any, __name: str = name, **kwargs: Any) -> Any:
+        async def traced(
+            self: TradeLifecycle, *args: Any, __name: str = name, **kwargs: Any
+        ) -> Any:
             before = len(self.get_open_trades())
             started = datetime.now(timezone.utc)
             try:
@@ -323,7 +325,10 @@ def _install_lifecycle_telemetry() -> None:
                             "open_before": before,
                             "open_after": after,
                             "open_delta": after - before,
-                            "duration_ms": (datetime.now(timezone.utc) - started).total_seconds() * 1000.0,
+                            "duration_ms": (
+                                datetime.now(timezone.utc) - started
+                            ).total_seconds()
+                            * 1000.0,
                             "result_type": type(result).__name__,
                         }
                     },
@@ -340,7 +345,10 @@ def _install_lifecycle_telemetry() -> None:
                             "open_before": before,
                             "open_after": after,
                             "open_delta": after - before,
-                            "duration_ms": (datetime.now(timezone.utc) - started).total_seconds() * 1000.0,
+                            "duration_ms": (
+                                datetime.now(timezone.utc) - started
+                            ).total_seconds()
+                            * 1000.0,
                             "error_type": type(exc).__name__,
                             "error": str(exc),
                         }
