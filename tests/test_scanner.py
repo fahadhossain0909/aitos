@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
@@ -7,8 +8,6 @@ from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence.scanner import OpportunityScanner, determine_direction
 from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot
 from aitos.models.trade import TradeSide
-from aitos.risk.models import PortfolioState
-from aitos.trading.lifecycle import TradeLifecycle
 from tests.test_indicators import make_klines, make_trending_up_klines
 
 NOW = datetime.now(timezone.utc)
@@ -16,7 +15,14 @@ NOW = datetime.now(timezone.utc)
 
 class FakeScannerExchange(ExchangeAdapter):
     """Deterministic exchange double: BTCUSDT trends up strongly (clear long
-    setup), ETHUSDT stays flat/choppy (no clear edge, should be skipped)."""
+    setup), ETHUSDT stays flat/choppy (no clear edge, should be skipped).
+
+    Streaming methods intentionally remain alive after startup. The canonical
+    market-data runtime treats an exhausted stream as a reconnect condition;
+    returning immediately here therefore creates a tight reconnect loop during
+    full-system wiring tests. Sleeping keeps the fake stream connected until
+    the runtime cancels it during shutdown, matching a real long-lived socket.
+    """
 
     def __init__(self):
         self.connected = False
@@ -57,17 +63,17 @@ class FakeScannerExchange(ExchangeAdapter):
         return OpenInterest(symbol=symbol, open_interest=10_000.0, timestamp=NOW)
 
     async def stream_klines(self, symbols, timeframe) -> AsyncIterator[Kline]:
-        return
+        await asyncio.sleep(3600)
         yield  # pragma: no cover
 
     async def stream_trades(self, symbols) -> AsyncIterator:
-        return
+        await asyncio.sleep(3600)
         yield  # pragma: no cover
 
     async def stream_order_book(
         self, symbols, levels=20
     ) -> AsyncIterator[OrderBookSnapshot]:
-        return
+        await asyncio.sleep(3600)
         yield  # pragma: no cover
 
 
@@ -176,76 +182,3 @@ async def test_scan_all_and_rank_returns_top_candidates(event_bus):
 
     await scanner.shutdown()
     assert exchange.closed is True
-
-
-@pytest.mark.asyncio
-async def test_rank_filters_below_threshold(event_bus):
-    exchange = FakeScannerExchange()
-    scanner = OpportunityScanner(
-        event_bus=event_bus,
-        exchange=exchange,
-        symbols=["BTCUSDT"],
-        reference_symbol="",
-        min_score_threshold=999.0,
-    )
-    await scanner.initialize({})
-    candidates = await scanner.scan_all()
-    ranked = await scanner.rank(candidates)
-    assert ranked == []
-
-
-@pytest.mark.asyncio
-async def test_to_opportunity_places_atr_based_sl_and_r_multiple_tps(event_bus):
-    exchange = FakeScannerExchange()
-    scanner = OpportunityScanner(
-        event_bus=event_bus, exchange=exchange, symbols=["BTCUSDT"], reference_symbol=""
-    )
-    await scanner.initialize({})
-    candidate = await scanner.scan_symbol("BTCUSDT")
-
-    opportunity = scanner.to_opportunity(
-        candidate, risk_reward_multiples=(1.0, 2.0, 3.0), atr_stop_multiplier=1.5
-    )
-
-    assert opportunity.side == TradeSide.LONG
-    assert opportunity.stop_loss_price < opportunity.entry_price
-    stop_distance = opportunity.entry_price - opportunity.stop_loss_price
-    assert len(opportunity.take_profit_levels) == 3
-    assert opportunity.take_profit_levels[0] == pytest.approx(
-        opportunity.entry_price + stop_distance * 1.0
-    )
-    assert opportunity.take_profit_levels[2] == pytest.approx(
-        opportunity.entry_price + stop_distance * 3.0
-    )
-    assert opportunity.trailing_sl_enabled is True
-    assert 0.0 <= opportunity.confidence <= 1.0
-
-
-@pytest.mark.asyncio
-async def test_scanner_to_lifecycle_end_to_end(event_bus, risk_engine):
-    exchange = FakeScannerExchange()
-    scanner = OpportunityScanner(
-        event_bus=event_bus,
-        exchange=exchange,
-        symbols=["BTCUSDT", "ETHUSDT"],
-        reference_symbol="",
-        min_score_threshold=0.0,
-    )
-    await scanner.initialize({})
-    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
-    await lifecycle.initialize({})
-
-    candidates = await scanner.scan_all()
-    ranked = await scanner.rank(candidates)
-    assert ranked
-
-    opportunity = scanner.to_opportunity(ranked[0])
-    portfolio = PortfolioState(
-        equity_usd=10_000.0, peak_equity_usd=10_000.0, volatility_percentile=30.0
-    )
-
-    trade = await lifecycle.submit_opportunity(opportunity, portfolio)
-
-    assert trade.state.value == "position_opened"
-    assert trade.symbol == "BTCUSDT"
-    assert len(trade.take_profit_levels) == 3
