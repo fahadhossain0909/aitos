@@ -197,6 +197,7 @@ class DurableTradingStateStore:
                     }
                 },
             )
+            raise
 
     async def load_peak_equity(self, asset: str) -> float | None:
         client = self._client()

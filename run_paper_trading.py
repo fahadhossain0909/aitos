@@ -17,6 +17,10 @@ from aitos.app import (
 )
 from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
+from aitos.data.protected_position_monitor import (
+    install_protected_position_monitor,
+    set_open_position_provider,
+)
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.execution.order_executor import SimulatedOrderExecutor
@@ -27,6 +31,10 @@ from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
+from aitos.trading.persistent_state import (
+    DurableTradingStateStore,
+    TradeStatePersistence,
+)
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
@@ -165,6 +173,27 @@ async def main() -> None:
             }
         },
     )
+    state_store = DurableTradingStateStore(market_repo)
+    trade_state_persistence = TradeStatePersistence(
+        event_bus, components.trade_lifecycle, state_store
+    )
+    # Ensure runtime-state tables and event subscriptions exist before recovery.
+    # Restoring before initialization could query a table that has not yet been
+    # created on a fresh/recreated ClickHouse volume.
+    await trade_state_persistence.initialize()
+    set_open_position_provider(components.trade_lifecycle.get_open_trades)
+    await trade_state_persistence.restore()
+    logger.info(
+        "paper lifecycle recovery initialized",
+        extra={
+            "aitos_extra": {
+                "restored_open_trades": len(
+                    components.trade_lifecycle.get_open_trades()
+                ),
+            }
+        },
+    )
+    install_protected_position_monitor()
     await initialize_all(components)
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     await market_os_persistence.initialize({})
@@ -222,6 +251,7 @@ async def main() -> None:
         await health_server.stop()
         await experience_recorder.shutdown()
         await market_os_persistence.shutdown()
+        await trade_state_persistence.shutdown()
         await shutdown_all(components)
         await market_repo.shutdown()
         await journal_repo.shutdown()
