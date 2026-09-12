@@ -8,8 +8,6 @@ from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence.scanner import OpportunityScanner, determine_direction
 from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot
 from aitos.models.trade import TradeSide
-from aitos.risk.models import PortfolioState
-from aitos.trading.lifecycle import TradeLifecycle
 from tests.test_indicators import make_klines, make_trending_up_klines
 
 NOW = datetime.now(timezone.utc)
