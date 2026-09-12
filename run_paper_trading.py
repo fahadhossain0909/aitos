@@ -17,6 +17,10 @@ from aitos.app import (
 )
 from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
+from aitos.data.protected_position_monitor import (
+    install_protected_position_monitor,
+    set_open_position_provider,
+)
 from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.execution.order_executor import SimulatedOrderExecutor
@@ -27,11 +31,13 @@ from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
+from aitos.trading.persistent_state import (
+    DurableTradingStateStore,
+    TradeStatePersistence,
+)
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
-from aitos.trading.persistent_state import DurableTradingStateStore, TradeStatePersistence
-from aitos.data.protected_position_monitor import install_protected_position_monitor, set_open_position_provider
 
 logger = get_logger("aitos.run_paper_trading")
 SCAN_INTERVAL_SECONDS = 60.0
@@ -179,9 +185,13 @@ async def main() -> None:
     await trade_state_persistence.restore()
     logger.info(
         "paper lifecycle recovery initialized",
-        extra={"aitos_extra": {
-            "restored_open_trades": len(components.trade_lifecycle.get_open_trades()),
-        }},
+        extra={
+            "aitos_extra": {
+                "restored_open_trades": len(
+                    components.trade_lifecycle.get_open_trades()
+                ),
+            }
+        },
     )
     install_protected_position_monitor()
     await initialize_all(components)
