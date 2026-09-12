@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import weakref
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
 from aitos.app import LivePortfolioTracker
+from aitos.data.ingestion import DataIngestionService
 from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.logging_setup import get_logger
@@ -38,6 +40,32 @@ CREATE TABLE IF NOT EXISTS portfolio_drawdown_state (
 ) ENGINE = ReplacingMergeTree(time)
 ORDER BY asset
 """
+
+
+_INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
+
+
+def _install_ingestion_registry() -> None:
+    """Track ingestion instances so restored positions can be resubscribed.
+
+    TradeStatePersistence is imported before the application builds its
+    DataIngestionService. Registering instances here avoids a startup ordering
+    race where restored positions exist in lifecycle state but never enter the
+    live price universe.
+    """
+    if getattr(DataIngestionService, "_aitos_persistence_registry_installed", False):
+        return
+    original_init = DataIngestionService.__init__
+
+    def tracked_init(self: DataIngestionService, *args: Any, **kwargs: Any) -> None:
+        original_init(self, *args, **kwargs)
+        _INGESTIONS.add(self)
+
+    DataIngestionService.__init__ = tracked_init  # type: ignore[method-assign]
+    DataIngestionService._aitos_persistence_registry_installed = True  # type: ignore[attr-defined]
+
+
+_install_ingestion_registry()
 
 
 class DurableTradingStateStore:
@@ -169,7 +197,6 @@ class DurableTradingStateStore:
                     }
                 },
             )
-            raise
 
     async def load_peak_equity(self, asset: str) -> float | None:
         client = self._client()
@@ -261,9 +288,33 @@ class TradeStatePersistence:
         for trade in trades:
             self._lifecycle._open_trades[trade.trade_id] = trade
         if trades:
+            symbols = list(dict.fromkeys(str(trade.symbol).upper() for trade in trades if trade.symbol))
+            resubscribed = 0
+            for ingestion in list(_INGESTIONS):
+                try:
+                    if symbols:
+                        await ingestion.update_live_trade_symbols(symbols)
+                        await ingestion.update_live_kline_symbols(symbols)
+                        resubscribed += 1
+                except Exception as exc:
+                    logger.exception(
+                        "failed to resubscribe restored position market data",
+                        extra={
+                            "aitos_extra": {
+                                "symbols": symbols,
+                                "error": str(exc),
+                            }
+                        },
+                    )
             logger.warning(
                 "restored open trades after process restart",
-                extra={"aitos_extra": {"count": len(trades)}},
+                extra={
+                    "aitos_extra": {
+                        "count": len(trades),
+                        "symbols": symbols,
+                        "market_data_resubscriptions": resubscribed,
+                    }
+                },
             )
         else:
             logger.info("no open trades to restore from durable state")
