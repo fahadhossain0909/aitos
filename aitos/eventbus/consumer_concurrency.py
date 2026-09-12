@@ -12,7 +12,6 @@ from aitos.logging_setup import get_logger
 
 from .redis_bus import (
     CONSUMER_BATCH_SIZE,
-    CONSUMER_BLOCK_MS,
     POLL_INTERVAL_SECONDS,
 )
 
@@ -65,8 +64,6 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
             try:
                 event = self._event_from_wire(fields)
             except AttributeError:
-                # Event is imported lazily here to avoid changing the module's
-                # import graph while retaining compatibility with EventBus.
                 from aitos.core.contracts import Event
 
                 event = Event.from_wire(fields)
@@ -133,13 +130,21 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
 
                 while True:
                     try:
+                        # This loop intentionally uses non-blocking XREADGROUP.
+                        # Each stream has its own task, so polling preserves the
+                        # per-stream ordering/concurrency model while allowing
+                        # asyncio cancellation to interrupt immediately. Blocking
+                        # fakeredis/aioredis reads can otherwise survive task
+                        # cancellation and prevent clean application shutdown.
                         resp = await self._redis.xreadgroup(
                             groupname=group,
                             consumername=consumer,
                             streams={stream_key: ">"},
                             count=CONSUMER_BATCH_SIZE,
-                            block=CONSUMER_BLOCK_MS,
+                            block=None,
                         )
+                    except asyncio.CancelledError:
+                        raise
                     except Exception as exc:
                         logger.error(
                             "xreadgroup error",
@@ -185,7 +190,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                             f"stream:{stream_topic}",
                             group,
                             start_id=start_id,
-                            reset_existing=live_only,
+                            reset_existing=False,
                         )
                     streams_seen |= matching
                 else:
@@ -194,7 +199,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                         f"stream:{topic_pattern}",
                         group,
                         start_id=start_id,
-                        reset_existing=live_only,
+                        reset_existing=False,
                     )
 
                 for stream_topic in sorted(streams_seen):

@@ -5,8 +5,9 @@ Bridges LiveMarketStateStore into the kwargs that TradeLifecycle.update_price
 
 This module also owns the canonical runtime bridge from live market-price
 EventBus messages to open-position ``TradeLifecycle.update_price`` calls.
-That bridge is deliberately installed here because ``app.build_system``
-constructs TradeLifecycle before wiring the LiveStateContextProvider.
+The bridge is installed at the EventBus subscription boundary so the exact
+callback consumed by Redis is deterministic; this avoids relying on a class
+method monkey-patch being observed by an already-bound callback.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from aitos.intelligence.order_flow_engine import OrderFlowFeatures
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.trading.market_context")
+_BRIDGE_DELIVERIES = 0
 
 
 @dataclass(frozen=True)
@@ -152,11 +154,12 @@ async def handle_position_market_event(
 ) -> bool:
     """Deliver a live price event to every open position for that symbol.
 
-    Returns ``True`` when the event is a position-price event and has therefore
-    been consumed by this canonical bridge. Returning ``True`` even when the
-    payload is malformed prevents the legacy/native lifecycle handler from
-    creating a second, subtly different price path.
+    Returns ``True`` when a market-price event has been consumed by this
+    canonical position bridge. This prevents a second native price path from
+    racing the canonical ``update_price`` call.
     """
+    global _BRIDGE_DELIVERIES
+
     if not (
         event.topic.startswith("market.kline.")
         or event.topic.startswith("market.trade.")
@@ -170,11 +173,12 @@ async def handle_position_market_event(
     if not symbol or not _valid_market_price(price):
         return True
 
+    symbol = str(symbol).upper()
     current_price = float(price)
     matching_trades = [
         trade
         for trade in list(trade_lifecycle.get_open_trades())
-        if trade.symbol == symbol
+        if str(getattr(trade, "symbol", "")).upper() == symbol
     ]
     if not matching_trades:
         return True
@@ -186,55 +190,105 @@ async def handle_position_market_event(
         ctx_kwargs = {}
 
     for trade in matching_trades:
-        logger.debug(
-            "POSITION_MONITOR bridge dispatch",
-            extra={
-                "aitos_extra": {
-                    "trade_id": trade.trade_id,
-                    "symbol": symbol,
-                    "price": current_price,
-                    "topic": event.topic,
-                }
-            },
-        )
         await trade_lifecycle.update_price(trade.trade_id, current_price, **ctx_kwargs)
-
-    logger.debug(
-        "POSITION_MONITOR bridge delivered market price",
-        extra={
-            "aitos_extra": {
-                "symbol": symbol,
-                "matched_positions": len(matching_trades),
-            }
-        },
-    )
+        _BRIDGE_DELIVERIES += 1
+        if _BRIDGE_DELIVERIES == 1 or _BRIDGE_DELIVERIES % 100 == 0:
+            logger.info(
+                "POSITION_MONITOR market bridge delivered live price",
+                extra={
+                    "aitos_extra": {
+                        "deliveries": _BRIDGE_DELIVERIES,
+                        "trade_id": trade.trade_id,
+                        "symbol": symbol,
+                        "price": current_price,
+                        "topic": event.topic,
+                        "matched_positions": len(matching_trades),
+                    }
+                },
+            )
     return True
 
 
 def install_trade_lifecycle_market_bridge() -> None:
-    """Install the canonical market-event bridge exactly once.
+    """Install a canonical market bridge at both lifecycle and EventBus edges.
 
-    ``TradeLifecycle`` already has a native market-context implementation, but
-    production evidence showed that the native path can receive market events
-    without reaching ``update_price``. The bridge is intentionally installed at
-    the market-context boundary and therefore works with the existing native
-    provider wiring without modifying the packed lifecycle source.
+    The lifecycle wrapper preserves compatibility for direct callers. The
+    EventBus wrapper is the production-critical path: it replaces the exact
+    bound ``TradeLifecycle.handle_event`` callback supplied to
+    ``EventBus.subscribe`` before Redis consumers are created.
     """
+    from aitos.eventbus.redis_bus import EventBus
     from aitos.trading.lifecycle import TradeLifecycle
 
-    if getattr(TradeLifecycle, "_aitos_canonical_market_bridge_installed", False):
+    if not getattr(TradeLifecycle, "_aitos_canonical_market_bridge_installed", False):
+        original_handle_event = TradeLifecycle.handle_event
+
+        async def _canonical_handle_event(self: Any, event: Event):
+            provider = getattr(self, "market_context_provider", None)
+            if await handle_position_market_event(self, provider, event):
+                return None
+            return await original_handle_event(self, event)
+
+        TradeLifecycle.handle_event = _canonical_handle_event
+        TradeLifecycle._aitos_canonical_market_bridge_installed = True
+
+    if getattr(EventBus, "_aitos_canonical_position_subscription_installed", False):
         return
 
-    original_handle_event = TradeLifecycle.handle_event
+    original_subscribe = EventBus.subscribe
 
-    async def _canonical_handle_event(self: Any, event: Event):
-        provider = getattr(self, "market_context_provider", None)
-        if await handle_position_market_event(self, provider, event):
-            return None
-        return await original_handle_event(self, event)
+    async def _canonical_subscribe(
+        self: Any,
+        topic: str,
+        handler: Callable[..., Any],
+        group: str = "default",
+        start_id: str = "0",
+        live_only: bool | None = None,
+    ):
+        """Preserve EventBus.subscribe compatibility while binding the bridge.
 
-    TradeLifecycle.handle_event = _canonical_handle_event
-    TradeLifecycle._aitos_canonical_market_bridge_installed = True
+        ``live_only=True`` is accepted for older semantic consumers and is
+        translated to the EventBus' canonical ``start_id='$'`` contract.
+        Explicit ``start_id`` remains authoritative when ``live_only`` is not
+        provided.
+        """
+        if live_only is True:
+            start_id = "$"
+        elif live_only is False and start_id == "$":
+            start_id = "0"
+
+        lifecycle = getattr(handler, "__self__", None)
+        is_position_lifecycle = (
+            lifecycle is not None
+            and hasattr(lifecycle, "get_open_trades")
+            and hasattr(lifecycle, "update_price")
+            and hasattr(lifecycle, "market_context_provider")
+        )
+        is_market_topic = topic.startswith("market.kline.") or topic.startswith(
+            "market.trade."
+        )
+        if is_position_lifecycle and is_market_topic:
+
+            async def _position_market_handler(event: Event):
+                provider = getattr(lifecycle, "market_context_provider", None)
+                return await handle_position_market_event(lifecycle, provider, event)
+
+            handler = _position_market_handler
+            logger.info(
+                "Canonical position market handler bound to EventBus subscription",
+                extra={
+                    "aitos_extra": {
+                        "topic": topic,
+                        "group": group,
+                    }
+                },
+            )
+        return await original_subscribe(
+            self, topic, handler, group=group, start_id=start_id
+        )
+
+    EventBus.subscribe = _canonical_subscribe  # type: ignore[method-assign]
+    EventBus._aitos_canonical_position_subscription_installed = True  # type: ignore[attr-defined]
     logger.info("Canonical position market-event bridge installed")
 
 

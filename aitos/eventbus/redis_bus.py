@@ -412,7 +412,7 @@ class EventBus(AITOSModule):
                             stream_key,
                             group,
                             start_id=start_id,
-                            reset_existing=live_only,
+                            reset_existing=False,
                         )
                         streams_seen.add(stream_key)
                 if not stream_names:
