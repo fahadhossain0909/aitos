@@ -171,9 +171,12 @@ async def main() -> None:
     trade_state_persistence = TradeStatePersistence(
         event_bus, components.trade_lifecycle, state_store
     )
-    await trade_state_persistence.restore()
+    # Ensure runtime-state tables and event subscriptions exist before recovery.
+    # Restoring before initialization could query a table that has not yet been
+    # created on a fresh/recreated ClickHouse volume.
     await trade_state_persistence.initialize()
     set_open_position_provider(components.trade_lifecycle.get_open_trades)
+    await trade_state_persistence.restore()
     logger.info(
         "paper lifecycle recovery initialized",
         extra={"aitos_extra": {
