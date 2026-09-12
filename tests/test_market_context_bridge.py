@@ -49,7 +49,7 @@ class _Redis:
     async def xlen(self, stream):
         return 0
 
-    async def xreadgroup(self, group, consumer, streams, count=100, block=100):
+    async def xreadgroup(self, *, streams, **_kwargs):
         if not self._sent:
             self._sent = True
             stream = next(iter(streams))
