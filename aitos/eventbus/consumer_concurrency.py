@@ -132,9 +132,9 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                 while True:
                     try:
                         resp = await self._redis.xreadgroup(
-                            group,
-                            consumer,
-                            {stream_key: ">"},
+                            groupname=group,
+                            consumername=consumer,
+                            streams={stream_key: ">"},
                             count=CONSUMER_BATCH_SIZE,
                             block=CONSUMER_BLOCK_MS,
                         )
