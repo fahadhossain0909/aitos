@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
@@ -16,7 +17,14 @@ NOW = datetime.now(timezone.utc)
 
 class FakeScannerExchange(ExchangeAdapter):
     """Deterministic exchange double: BTCUSDT trends up strongly (clear long
-    setup), ETHUSDT stays flat/choppy (no clear edge, should be skipped)."""
+    setup), ETHUSDT stays flat/choppy (no clear edge, should be skipped).
+
+    Streaming methods intentionally remain alive after startup. The canonical
+    market-data runtime treats an exhausted stream as a reconnect condition;
+    returning immediately here therefore creates a tight reconnect loop during
+    full-system wiring tests. Sleeping keeps the fake stream connected until
+    the runtime cancels it during shutdown, matching a real long-lived socket.
+    """
 
     def __init__(self):
         self.connected = False
@@ -57,17 +65,17 @@ class FakeScannerExchange(ExchangeAdapter):
         return OpenInterest(symbol=symbol, open_interest=10_000.0, timestamp=NOW)
 
     async def stream_klines(self, symbols, timeframe) -> AsyncIterator[Kline]:
-        return
+        await asyncio.sleep(3600)
         yield  # pragma: no cover
 
     async def stream_trades(self, symbols) -> AsyncIterator:
-        return
+        await asyncio.sleep(3600)
         yield  # pragma: no cover
 
     async def stream_order_book(
         self, symbols, levels=20
     ) -> AsyncIterator[OrderBookSnapshot]:
-        return
+        await asyncio.sleep(3600)
         yield  # pragma: no cover
 
 
