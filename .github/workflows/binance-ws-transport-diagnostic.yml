@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   transport-diagnostic:
     name: VPS Binance WebSocket transport probe
@@ -50,15 +54,16 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           set -euo pipefail
-          scp -i /tmp/aitos_diag_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          scp -i /tmp/aitos_diag_key "${SSH_OPTS[@]}" \
             scripts/binance_ws_transport_diagnostic.sh \
             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/binance_ws_transport_diagnostic.sh"
-          ssh -i /tmp/aitos_diag_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          ssh -i /tmp/aitos_diag_key "${SSH_OPTS[@]}" \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             'chmod +x /tmp/binance_ws_transport_diagnostic.sh && AITOS_WS_DIAG_OUTPUT="$HOME/binance-ws-transport-diagnostic" bash /tmp/binance_ws_transport_diagnostic.sh'
 
       - name: Retrieve diagnostic report
-        if: always()
+        if: success()
         shell: bash
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -66,7 +71,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p binance-ws-transport-diagnostic
-          scp -i /tmp/aitos_diag_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          scp -i /tmp/aitos_diag_key "${SSH_OPTS[@]}" \
             "$DEPLOY_USER@$DEPLOY_HOST:binance-ws-transport-diagnostic/report.md" \
             binance-ws-transport-diagnostic/report.md
           cat binance-ws-transport-diagnostic/report.md
