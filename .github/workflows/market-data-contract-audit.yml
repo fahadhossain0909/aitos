@@ -10,10 +10,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   market-data-contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       CLICKHOUSE_HOST: localhost
       CLICKHOUSE_PORT: '8123'
@@ -80,7 +84,7 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          pip install pytest pytest-asyncio black==25.12.0 flake8
+          pip install pytest pytest-asyncio pytest-timeout black==25.12.0 flake8
       - name: Initialize ClickHouse test database
         run: |
           for i in {1..30}; do
@@ -124,7 +128,7 @@ jobs:
           PYTHONPATH: .
         run: |
           set -o pipefail
-          pytest -vv -o faulthandler_timeout=60 --durations=25 --maxfail=5 2>&1 | tee pytest-full-suite.log
+          pytest -vv --timeout=120 --timeout-method=thread -o faulthandler_timeout=60 --durations=25 --maxfail=5 2>&1 | tee pytest-full-suite.log
       - name: Upload full-suite diagnostics
         if: always()
         uses: actions/upload-artifact@v4
