@@ -1,0 +1,105 @@
+name: Live Freshness + Position Lifecycle Forensics
+
+on:
+  workflow_dispatch:
+    inputs:
+      window_minutes:
+        description: Runtime log observation window in minutes
+        required: false
+        default: '30'
+
+permissions:
+  contents: read
+
+jobs:
+  forensic-pass:
+    name: VPS causal-chain forensic pass
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY; do
+            test -n "${!name:-}" || { echo "Missing required secret: $name"; exit 1; }
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_forensics_key
+          chmod 600 /tmp/aitos_forensics_key
+
+      - name: Run causal-chain forensic collector
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          FORENSIC_WINDOW: ${{ inputs.window_minutes || '30' }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_forensics_key
+          command_timeout: 10m
+          envs: FORENSIC_WINDOW
+          script: |
+            set -euo pipefail
+            cd "$HOME/aitos"
+            test -f scripts/live_freshness_position_forensics.sh
+            export AITOS_FORENSIC_OUT="$HOME/aitos-live-freshness-position-forensics"
+            export AITOS_FORENSIC_WINDOW_MINUTES="$FORENSIC_WINDOW"
+            bash scripts/live_freshness_position_forensics.sh
+
+      - name: Retrieve forensic report
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p aitos-live-freshness-position-forensics
+          scp -i /tmp/aitos_forensics_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-live-freshness-position-forensics/report.md" \
+            aitos-live-freshness-position-forensics/report.md || true
+          scp -i /tmp/aitos_forensics_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-live-freshness-position-forensics/timeline.tsv" \
+            aitos-live-freshness-position-forensics/timeline.tsv || true
+          scp -i /tmp/aitos_forensics_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-live-freshness-position-forensics/health.json" \
+            aitos-live-freshness-position-forensics/health.json || true
+          scp -i /tmp/aitos_forensics_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+            "$DEPLOY_USER@$DEPLOY_HOST:aitos-live-freshness-position-forensics/paper_logs.txt" \
+            aitos-live-freshness-position-forensics/paper_logs.txt || true
+
+      - name: Publish causal-chain report
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s aitos-live-freshness-position-forensics/report.md ]]; then
+            cat aitos-live-freshness-position-forensics/report.md
+          else
+            echo 'No forensic report retrieved'
+            exit 1
+          fi
+
+      - name: Upload forensic artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: aitos-live-freshness-position-forensics
+          path: aitos-live-freshness-position-forensics/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Cleanup
+        if: always()
+        run: rm -f /tmp/aitos_forensics_key
