@@ -21,6 +21,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   orderbook-forensics:
     name: VPS order-book forensic pass
@@ -61,18 +65,16 @@ jobs:
           SAMPLE_SECONDS: ${{ github.event.inputs.sample_seconds || '5' }}
         run: |
           set -euo pipefail
-          scp -i /tmp/aitos_orderbook_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          scp -i /tmp/aitos_orderbook_key "${SSH_OPTS[@]}" \
             scripts/orderbook_targeted_forensics.sh \
             "$DEPLOY_USER@$DEPLOY_HOST:/tmp/orderbook_targeted_forensics.sh"
-          # Use the forensic script's existing $HOME default. Passing a literal
-          # '$HOME' here previously wrote the bundle somewhere else, so SCP could
-          # not retrieve the raw evidence.
-          ssh -i /tmp/aitos_orderbook_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          ssh -i /tmp/aitos_orderbook_key "${SSH_OPTS[@]}" \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "cd /home/n41/aitos && chmod +x /tmp/orderbook_targeted_forensics.sh && AITOS_ORDERBOOK_FORENSICS_WINDOW_SECONDS='$WINDOW_SECONDS' AITOS_ORDERBOOK_FORENSICS_SAMPLE_SECONDS='$SAMPLE_SECONDS' bash /tmp/orderbook_targeted_forensics.sh"
 
       - name: Retrieve forensic report
-        if: always()
+        if: success()
         shell: bash
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -80,7 +82,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p orderbook-targeted-forensics
-          scp -i /tmp/aitos_orderbook_key -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r \
+          SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15 -o ConnectionAttempts=1 -o ServerAliveInterval=5 -o ServerAliveCountMax=2)
+          scp -i /tmp/aitos_orderbook_key "${SSH_OPTS[@]}" -r \
             "$DEPLOY_USER@$DEPLOY_HOST:aitos-orderbook-targeted-forensics/." \
             orderbook-targeted-forensics/
           test -s orderbook-targeted-forensics/report.md
