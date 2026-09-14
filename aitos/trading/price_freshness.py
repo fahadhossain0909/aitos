@@ -15,14 +15,13 @@ REST price so hard-SL can still fire.
 from __future__ import annotations
 
 import time
-from typing import Dict
 
 
 class PriceFreshnessTracker:
     """In-memory last-seen timestamps for live price updates per symbol."""
 
     def __init__(self) -> None:
-        self._last_seen: Dict[str, float] = {}
+        self._last_seen: dict[str, float] = {}
 
     def note_seen(self, symbol: str, when: float | None = None) -> None:
         key = str(symbol or "").upper()
