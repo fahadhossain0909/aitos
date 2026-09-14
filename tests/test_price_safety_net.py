@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
-from typing import Any, List
+from typing import Any
 
 import pytest
 
@@ -17,14 +16,16 @@ class _Trade:
 
 
 class _FakeLifecycle:
-    def __init__(self, trades: List[_Trade]) -> None:
+    def __init__(self, trades: list[_Trade]) -> None:
         self._trades = trades
         self.updated: list[tuple[str, float]] = []
 
-    def get_open_trades(self) -> List[_Trade]:
+    def get_open_trades(self) -> list[_Trade]:
         return list(self._trades)
 
-    async def update_price(self, trade_id: str, current_price: float, **kwargs: Any) -> None:
+    async def update_price(
+        self, trade_id: str, current_price: float, **kwargs: Any
+    ) -> None:
         self.updated.append((trade_id, current_price))
 
 

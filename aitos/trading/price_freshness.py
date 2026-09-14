@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import time
-from typing import Dict
 
 
 class PriceFreshnessTracker:
     """In-memory last-seen timestamps for live market prices."""
 
     def __init__(self) -> None:
-        self._last_seen: Dict[str, float] = {}
+        self._last_seen: dict[str, float] = {}
 
     def note_seen(self, symbol: str, when: float | None = None) -> None:
-        self._last_seen[str(symbol).upper()] = float(when if when is not None else time.time())
+        self._last_seen[str(symbol).upper()] = float(
+            when if when is not None else time.time()
+        )
 
     def last_seen(self, symbol: str) -> float | None:
         return self._last_seen.get(str(symbol).upper())
@@ -24,7 +25,9 @@ class PriceFreshnessTracker:
             return None
         return float(now if now is not None else time.time()) - ts
 
-    def is_stale(self, symbol: str, stale_after_seconds: float, now: float | None = None) -> bool:
+    def is_stale(
+        self, symbol: str, stale_after_seconds: float, now: float | None = None
+    ) -> bool:
         age = self.age_seconds(symbol, now=now)
         if age is None:
             return True
