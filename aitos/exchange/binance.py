@@ -485,8 +485,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                         "last_error_type": type(exc).__name__,
                         "last_error": str(exc),
                         "last_close_at": _now_iso(),
-                        "last_close_code": getattr(ws, "close_code", None) if ws else None,
-                        "last_close_reason": getattr(ws, "close_reason", None) if ws else None,
+                        "last_close_code": (
+                            getattr(ws, "close_code", None) if ws else None
+                        ),
+                        "last_close_reason": (
+                            getattr(ws, "close_reason", None) if ws else None
+                        ),
                     }
                 )
                 logger.error(
@@ -502,13 +506,15 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 )
             finally:
                 if ws is not None:
-                    self._ws_transport["close_count"] = self._ws_transport.get("close_count", 0) + 1
+                    self._ws_transport["close_count"] = (
+                        self._ws_transport.get("close_count", 0) + 1
+                    )
             if emit_reconnect:
                 yield None, "__reconnect__"
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
 
-    async def __aenter__(self) -> "BinanceFuturesAdapter":
+    async def __aenter__(self) -> BinanceFuturesAdapter:
         await self.connect()
         return self
 
