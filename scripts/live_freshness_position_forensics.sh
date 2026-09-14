@@ -68,13 +68,12 @@ for idx, line in enumerate(lines, 1):
 with open(timeline_path, "w") as f:
     f.write("timestamp\tline\ttype\tmessage\n")
     for row in events:
-        f.write("\t".join(row).replace("\n", " ") + "\n")
+        f.write("\t".join(map(str, row)).replace("\n", " ") + "\n")
 
 counts=Counter()
 for _,_,types,_ in events:
     counts.update(types.split(","))
 
-# Identify the nearest observable chain around fallback/reconnect incidents.
 chains=[]
 for i,(ts,line_no,types,msg) in enumerate(events):
     if "rest_fallback" not in types:
@@ -87,8 +86,6 @@ for i,(ts,line_no,types,msg) in enumerate(events):
         "following": [(a,b,c) for a,b,c,_ in following],
     })
 
-# Position heartbeat gaps from explicit bridge lines. This is evidence-only; it does not
-# infer HOLD from silence. A missing heartbeat is reported as an observability gap.
 position_times=[]
 for ts, line_no, types, msg in events:
     if "position_update" in types:
@@ -99,9 +96,6 @@ for a,b in zip(position_times,position_times[1:]):
     sec=(b[0]-a[0]).total_seconds()
     if sec >= 5:
         gaps.append((sec,a[1],b[1]))
-
-# Health metrics useful for cross-checking the log evidence.
-flat=json.dumps(health).lower()
 
 def find_values(obj, wanted):
     out=[]
