@@ -174,13 +174,21 @@ async def connect_raw_dynamic(
                                 raise
                             adapter._ws_transport["frames_received"] += 1
                             if first_message:
-                                adapter._ws_transport["last_first_frame_at"] = _now_iso()
+                                adapter._ws_transport["last_first_frame_at"] = (
+                                    _now_iso()
+                                )
                                 first_message = False
                             envelope = json.loads(raw_message)
                             # Control-frame acks have no "stream" / "data"
-                            if isinstance(envelope, dict) and (
-                                "result" in envelope or envelope.get("id") is not None
-                            ) and "stream" not in envelope and "data" not in envelope:
+                            if (
+                                isinstance(envelope, dict)
+                                and (
+                                    "result" in envelope
+                                    or envelope.get("id") is not None
+                                )
+                                and "stream" not in envelope
+                                and "data" not in envelope
+                            ):
                                 continue
                             if "stream" in envelope or "data" in envelope:
                                 payload = envelope.get("data", envelope)
