@@ -82,6 +82,9 @@ class CanonicalMarketDataRuntime:
         self._first_canonical_event_seen = False
         self._first_canonical_publish_seen = False
         self._stream_telemetry: dict[str, dict[str, object]] = {}
+        self._trade_stream: object | None = None
+        self._kline_stream: object | None = None
+        self._orderbook_stream: object | None = None
         exchange = getattr(self.adapter, "exchange", None)
         if getattr(exchange, "websocket_transport_snapshot", None) is not None:
             self.gateway._transport_snapshot_provider = self._transport_snapshot
@@ -139,6 +142,9 @@ class CanonicalMarketDataRuntime:
         self._stopped = False
         self._first_canonical_event_seen = False
         self._first_canonical_publish_seen = False
+        self._trade_stream = None
+        self._kline_stream = None
+        self._orderbook_stream = None
         self.gateway.begin_connect()
         self._drain_tasks = [
             asyncio.create_task(
@@ -147,47 +153,130 @@ class CanonicalMarketDataRuntime:
             for i in range(GATEWAY_DRAIN_WORKERS)
         ]
         self._tasks = []
-        if self.enable_trades and self.symbols:
-            self._tasks.append(
-                asyncio.create_task(
-                    self._run(
-                        "trades", lambda: self.adapter.stream_trades(self.symbols)
-                    ),
-                    name="market-data-trades",
-                )
-            )
+        self._start_trades_task()
         self._start_orderbook_task()
         self._start_kline_task()
+
+    # -- trades ---------------------------------------------------------
+
+    def _start_trades_task(self) -> None:
+        if not self.enable_trades or not self.symbols:
+            return
+        self._tasks.append(
+            asyncio.create_task(
+                self._run("trades", self._trade_stream_factory),
+                name="market-data-trades",
+            )
+        )
+
+    def _trade_stream_factory(self) -> AsyncIterator:
+        if hasattr(self.adapter, "stream_trades_managed"):
+            return self._managed_trade_stream_gen()
+        self._trade_stream = None
+        return self.adapter.stream_trades(self.symbols)
+
+    async def _managed_trade_stream_gen(self) -> AsyncIterator:
+        stream = await self.adapter.stream_trades_managed(self.symbols)
+        self._trade_stream = stream
+        try:
+            async for event in stream:
+                yield event
+        finally:
+            self._trade_stream = None
+            await stream.aclose()
+
+    async def update_trade_symbols(
+        self, symbols: list[str] | tuple[str, ...]
+    ) -> bool:
+        """Reconfigure the live trade cohort.
+
+        When the adapter supports managed streams, this updates the
+        existing websocket subscription in place (SUBSCRIBE/UNSUBSCRIBE on
+        the live connection) -- it does not cancel or reconnect anything,
+        so routine churn (a position opening or closing, the scanner's
+        ranking shifting) no longer costs a reconnect, an orderbook
+        re-bootstrap, or a freshness gap.
+        """
+        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))
+        async with self._reconfigure_lock:
+            if normalized == self.symbols:
+                return False
+            self.symbols = normalized
+            if self._stopped:
+                return True
+            if self._trade_stream is not None and hasattr(
+                self._trade_stream, "update_symbols"
+            ):
+                await self._trade_stream.update_symbols(normalized)
+                return True
+            tasks = [t for t in self._tasks if t.get_name() == "market-data-trades"]
+            for task in tasks:
+                task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self._tasks = [t for t in self._tasks if t not in tasks]
+            self._start_trades_task()
+            return True
+
+    # -- orderbook --------------------------------------------------------
 
     def _start_orderbook_task(self) -> None:
         if not self.enable_orderbooks or not self.orderbook_symbols:
             return
         self._tasks.append(
             asyncio.create_task(
-                self._run(
-                    "orderbook",
-                    lambda: self.adapter.stream_order_books(
-                        self.orderbook_symbols, self.orderbook_levels
-                    ),
-                ),
+                self._run("orderbook", self._orderbook_stream_factory),
                 name="market-data-orderbook",
             )
         )
+
+    def _orderbook_stream_factory(self) -> AsyncIterator:
+        if hasattr(self.adapter, "stream_order_books_managed"):
+            return self._managed_orderbook_stream_gen()
+        self._orderbook_stream = None
+        return self.adapter.stream_order_books(
+            self.orderbook_symbols, self.orderbook_levels
+        )
+
+    async def _managed_orderbook_stream_gen(self) -> AsyncIterator:
+        stream = await self.adapter.stream_order_books_managed(
+            self.orderbook_symbols, levels=self.orderbook_levels
+        )
+        self._orderbook_stream = stream
+        try:
+            async for event in stream:
+                yield event
+        finally:
+            self._orderbook_stream = None
+            await stream.aclose()
 
     def _start_kline_task(self) -> None:
         if not self.enable_klines or not self.kline_symbols:
             return
         self._tasks.append(
             asyncio.create_task(
-                self._run(
-                    "klines",
-                    lambda: self.adapter.stream_klines(
-                        self.kline_symbols, KLINE_TIMEFRAME
-                    ),
-                ),
+                self._run("klines", self._kline_stream_factory),
                 name="market-data-klines",
             )
         )
+
+    def _kline_stream_factory(self) -> AsyncIterator:
+        if hasattr(self.adapter, "stream_klines_managed"):
+            return self._managed_kline_stream_gen()
+        self._kline_stream = None
+        return self.adapter.stream_klines(self.kline_symbols, KLINE_TIMEFRAME)
+
+    async def _managed_kline_stream_gen(self) -> AsyncIterator:
+        stream = await self.adapter.stream_klines_managed(
+            self.kline_symbols, KLINE_TIMEFRAME
+        )
+        self._kline_stream = stream
+        try:
+            async for event in stream:
+                yield event
+        finally:
+            self._kline_stream = None
+            await stream.aclose()
 
     async def update_kline_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
         normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[
@@ -198,6 +287,11 @@ class CanonicalMarketDataRuntime:
                 return False
             self.kline_symbols = normalized
             if self._stopped:
+                return True
+            if self._kline_stream is not None and hasattr(
+                self._kline_stream, "update_symbols"
+            ):
+                await self._kline_stream.update_symbols(normalized)
                 return True
             tasks = [t for t in self._tasks if t.get_name() == "market-data-klines"]
             for task in tasks:
@@ -218,6 +312,11 @@ class CanonicalMarketDataRuntime:
             self.orderbook_symbols = normalized
             if self._stopped:
                 return True
+            if self._orderbook_stream is not None and hasattr(
+                self._orderbook_stream, "update_symbols"
+            ):
+                await self._orderbook_stream.update_symbols(normalized)
+                return True
             await self._restart_orderbook_task()
             return True
 
@@ -228,7 +327,15 @@ class CanonicalMarketDataRuntime:
                 return False
             self.orderbook_levels = levels
             if not self._stopped:
-                await self._restart_orderbook_task()
+                if self._orderbook_stream is not None and hasattr(
+                    self._orderbook_stream, "update_levels"
+                ):
+                    # Depth truncation is purely local -- Binance always
+                    # sends full depth diffs regardless of `levels`, so this
+                    # never needs to touch the websocket at all.
+                    await self._orderbook_stream.update_levels(levels)
+                else:
+                    await self._restart_orderbook_task()
             return True
 
     async def _restart_orderbook_task(self) -> None:

@@ -230,36 +230,15 @@ class DataIngestionService(_LegacyDataIngestionService):
         normalized = list(dict.fromkeys(candidates))
         if self._canonical_runtime is None or normalized == self._live_trade_symbols:
             return False
-        async with self._canonical_runtime._reconfigure_lock:
-            previous = list(self._live_trade_symbols)
+        previous = list(self._live_trade_symbols)
+        # Delegate to the runtime's own trade-symbol update: when the
+        # adapter supports managed streams this reconfigures the existing
+        # websocket connection in place (no cancel, no reconnect, no
+        # orderbook re-bootstrap, no freshness gap) instead of tearing down
+        # and recreating the whole trade stream on every scan cycle.
+        changed = await self._canonical_runtime.update_trade_symbols(normalized)
+        if changed:
             self._live_trade_symbols = normalized
-            self._canonical_runtime.symbols = normalized
-            if self._canonical_runtime._stopped:
-                return True
-            tasks = [
-                t
-                for t in self._canonical_runtime._tasks
-                if t.get_name() == "market-data-trades"
-            ]
-            for task in tasks:
-                task.cancel()
-            if tasks:
-                await asyncio.gather(*tasks, return_exceptions=True)
-            self._canonical_runtime._tasks = [
-                t for t in self._canonical_runtime._tasks if t not in tasks
-            ]
-            if self._canonical_runtime.enable_trades and normalized:
-                self._canonical_runtime._tasks.append(
-                    asyncio.create_task(
-                        self._canonical_runtime._run(
-                            "trades",
-                            lambda: self._canonical_runtime.adapter.stream_trades(
-                                normalized
-                            ),
-                        ),
-                        name="market-data-trades",
-                    )
-                )
             logger.info(
                 "live trade subscription reconfigured",
                 extra={
@@ -269,7 +248,7 @@ class DataIngestionService(_LegacyDataIngestionService):
                     }
                 },
             )
-            return True
+        return changed
 
     async def update_live_kline_symbols(
         self, symbols: list[str] | tuple[str, ...]

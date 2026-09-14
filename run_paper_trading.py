@@ -209,6 +209,11 @@ async def main() -> None:
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
+    from aitos.intelligence.position_runtime import get_tracked_lifecycles
+    from aitos.trading.price_safety_net import PositionPriceSafetyNet
+
+    price_safety_net = PositionPriceSafetyNet(exchange, get_tracked_lifecycles)
+    price_safety_net.start()
     tracker = PaperPortfolioTracker(starting_equity_usd=STARTING_EQUITY_USD)
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -218,9 +223,17 @@ async def main() -> None:
         while not stop_event.is_set():
             try:
                 submitted = await run_scan_and_trade_cycle(components, tracker)
-                rl_scorer.save_state()
-                outcome_classifier.save_state()
-                save_attention_model(attention_explainer, attention_path)
+                # These do blocking pickle.dump()+file-replace I/O. Run them
+                # off the event loop -- a synchronous call here previously
+                # stalled *all* concurrent async work (websocket recv,
+                # event-bus consumption) for however long the disk write
+                # took, and a stall past WS_PING_TIMEOUT_SECONDS could drop
+                # the market-data connection entirely.
+                await asyncio.to_thread(rl_scorer.save_state)
+                await asyncio.to_thread(outcome_classifier.save_state)
+                await asyncio.to_thread(
+                    save_attention_model, attention_explainer, attention_path
+                )
                 logger.info(
                     "scan cycle complete",
                     extra={
@@ -245,9 +258,12 @@ async def main() -> None:
             except asyncio.TimeoutError:
                 pass
     finally:
-        rl_scorer.save_state()
-        outcome_classifier.save_state()
-        save_attention_model(attention_explainer, attention_path)
+        await price_safety_net.stop()
+        await asyncio.to_thread(rl_scorer.save_state)
+        await asyncio.to_thread(outcome_classifier.save_state)
+        await asyncio.to_thread(
+            save_attention_model, attention_explainer, attention_path
+        )
         await health_server.stop()
         await experience_recorder.shutdown()
         await market_os_persistence.shutdown()

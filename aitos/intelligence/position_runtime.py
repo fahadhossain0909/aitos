@@ -55,6 +55,15 @@ def _open_symbols() -> list[str]:
     return symbols
 
 
+def get_tracked_lifecycles() -> list[TradeLifecycle]:
+    """Every ``TradeLifecycle`` instance created so far (weak references).
+
+    Used by ``aitos.trading.price_safety_net`` so it doesn't need its own
+    bookkeeping of which lifecycle instances exist.
+    """
+    return list(_LIFECYCLES)
+
+
 def _merge_symbols(requested: list[str], protected: list[str]) -> list[str]:
     result: list[str] = []
     seen: set[str] = set()

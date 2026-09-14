@@ -202,6 +202,11 @@ async def main() -> None:
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
+    from aitos.intelligence.position_runtime import get_tracked_lifecycles
+    from aitos.trading.price_safety_net import PositionPriceSafetyNet
+
+    price_safety_net = PositionPriceSafetyNet(exchange, get_tracked_lifecycles)
+    price_safety_net.start()
     tracker = PersistentLivePortfolioTracker(order_executor, state_store)
     await tracker.restore()
     stop_event = asyncio.Event()
@@ -217,9 +222,17 @@ async def main() -> None:
                     is_production=True,
                     approved_by=approved_by,
                 )
-                rl_scorer.save_state()
-                outcome_classifier.save_state()
-                save_attention_model(attention_explainer, attention_path)
+                # These do blocking pickle.dump()+file-replace I/O. Run them
+                # off the event loop -- a synchronous call here previously
+                # stalled *all* concurrent async work (websocket recv,
+                # event-bus consumption) for however long the disk write
+                # took, and a stall past WS_PING_TIMEOUT_SECONDS could drop
+                # the market-data connection entirely.
+                await asyncio.to_thread(rl_scorer.save_state)
+                await asyncio.to_thread(outcome_classifier.save_state)
+                await asyncio.to_thread(
+                    save_attention_model, attention_explainer, attention_path
+                )
                 logger.info(
                     "live scan cycle complete",
                     extra={
@@ -245,9 +258,12 @@ async def main() -> None:
             except asyncio.TimeoutError:
                 pass
     finally:
-        rl_scorer.save_state()
-        outcome_classifier.save_state()
-        save_attention_model(attention_explainer, attention_path)
+        await price_safety_net.stop()
+        await asyncio.to_thread(rl_scorer.save_state)
+        await asyncio.to_thread(outcome_classifier.save_state)
+        await asyncio.to_thread(
+            save_attention_model, attention_explainer, attention_path
+        )
         await filter_refresher.stop()
         await health_server.stop()
         await experience_recorder.shutdown()

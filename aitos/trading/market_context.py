@@ -206,6 +206,11 @@ async def handle_position_market_event(
                     }
                 },
             )
+
+    from aitos.trading.price_freshness import get_global_tracker
+
+    get_global_tracker().note_seen(symbol)
+
     return True
 
 
