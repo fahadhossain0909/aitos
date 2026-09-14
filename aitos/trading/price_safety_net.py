@@ -60,9 +60,7 @@ class PositionPriceSafetyNet:
         if not self._stopped:
             return
         self._stopped = False
-        self._task = asyncio.create_task(
-            self._run(), name="position-price-safety-net"
-        )
+        self._task = asyncio.create_task(self._run(), name="position-price-safety-net")
 
     async def stop(self) -> None:
         self._stopped = True

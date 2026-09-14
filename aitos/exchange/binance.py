@@ -590,7 +590,13 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 )
                 logger.info(
                     "Binance managed websocket connecting",
-                    extra={"aitos_extra": {"stage": "connect_started", "url": url, "label": label}},
+                    extra={
+                        "aitos_extra": {
+                            "stage": "connect_started",
+                            "url": url,
+                            "label": label,
+                        }
+                    },
                 )
                 async with self._ws_connector(url) as ws:
                     handshake_at = _now_iso()
@@ -693,11 +699,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                                 if pending_task is not None and not pending_task.done():
                                     pending_task.cancel()
                             await asyncio.gather(
-                                *(
-                                    t
-                                    for t in (recv_task, change_task)
-                                    if t is not None
-                                ),
+                                *(t for t in (recv_task, change_task) if t is not None),
                                 return_exceptions=True,
                             )
             except asyncio.CancelledError:
@@ -713,7 +715,13 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 )
                 logger.info(
                     "Binance managed websocket reached proactive lifecycle rotation",
-                    extra={"aitos_extra": {"stage": "lifecycle_rotation", "url": url, "label": label}},
+                    extra={
+                        "aitos_extra": {
+                            "stage": "lifecycle_rotation",
+                            "url": url,
+                            "label": label,
+                        }
+                    },
                 )
             except Exception as exc:
                 close_code = getattr(ws, "close_code", None)
@@ -759,7 +767,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             await asyncio.sleep(backoff)
             backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
 
-    def stream_trades_managed(self, symbols: list[str]) -> "ManagedStreamSet":
+    def stream_trades_managed(self, symbols: list[str]) -> ManagedStreamSet:
         """Long-lived trade subscription; update via ``update_symbols()``.
 
         Unlike ``stream_trades``, changing the symbol set does not cancel
@@ -775,7 +783,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     def stream_klines_managed(
         self, symbols: list[str], timeframe: str
-    ) -> "ManagedStreamSet":
+    ) -> ManagedStreamSet:
         """Long-lived kline subscription; update via ``update_symbols()``."""
 
         def to_stream(symbol: str) -> str:
@@ -786,7 +794,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
     def stream_order_book_managed(
         self, symbols: list[str], levels: int = 20
-    ) -> "ManagedOrderBookStream":
+    ) -> ManagedOrderBookStream:
         """Long-lived orderbook subscription; update via ``update_symbols()``.
 
         Existing per-symbol ``LocalOrderBook`` state is preserved across
@@ -872,7 +880,7 @@ class ManagedStreamSet:
         ]
         return await self.update_streams(streams)
 
-    def __aiter__(self) -> "ManagedStreamSet":
+    def __aiter__(self) -> ManagedStreamSet:
         return self
 
     async def __anext__(self) -> tuple[Any, str]:
@@ -965,7 +973,7 @@ class ManagedOrderBookStream:
         )
         return book
 
-    def __aiter__(self) -> "ManagedOrderBookStream":
+    def __aiter__(self) -> ManagedOrderBookStream:
         return self
 
     async def __anext__(self) -> OrderBookSnapshot:

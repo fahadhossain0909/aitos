@@ -21,9 +21,7 @@ class PriceFreshnessTracker:
     def note_seen(self, symbol: str, when: float | None = None) -> None:
         self._last_seen[symbol.upper()] = when if when is not None else time.monotonic()
 
-    def seconds_since_seen(
-        self, symbol: str, now: float | None = None
-    ) -> float | None:
+    def seconds_since_seen(self, symbol: str, now: float | None = None) -> float | None:
         last = self._last_seen.get(symbol.upper())
         if last is None:
             return None

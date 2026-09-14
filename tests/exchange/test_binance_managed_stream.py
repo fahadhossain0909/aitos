@@ -156,8 +156,9 @@ async def test_orderbook_stream_preserves_book_state_across_symbol_updates():
     )
     snapshot = await book_stream.__anext__()
     assert snapshot.symbol == "ETHUSDT"
-    assert bootstraps == ["BTCUSDT", "ETHUSDT"], (
-        "BTCUSDT should not be re-bootstrapped just because ETHUSDT was added"
-    )
+    assert bootstraps == [
+        "BTCUSDT",
+        "ETHUSDT",
+    ], "BTCUSDT should not be re-bootstrapped just because ETHUSDT was added"
 
     await book_stream.aclose()

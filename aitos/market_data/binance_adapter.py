@@ -119,7 +119,7 @@ class BinanceCanonicalMarketDataAdapter:
 
     async def stream_trades_managed(
         self, symbols: list[str]
-    ) -> "_ManagedCanonicalTradeStream":
+    ) -> _ManagedCanonicalTradeStream:
         """Long-lived trade subscription; ``update_symbols`` reconfigures it
         in place via incremental SUBSCRIBE/UNSUBSCRIBE instead of a full
         websocket reconnect.
@@ -130,7 +130,7 @@ class BinanceCanonicalMarketDataAdapter:
 
     async def stream_klines_managed(
         self, symbols: list[str], timeframe: str = KLINE_TIMEFRAME
-    ) -> "_ManagedCanonicalKlineStream":
+    ) -> _ManagedCanonicalKlineStream:
         """Long-lived kline subscription; ``update_symbols`` reconfigures it
         in place instead of reconnecting.
         """
@@ -140,7 +140,7 @@ class BinanceCanonicalMarketDataAdapter:
 
     async def stream_order_books_managed(
         self, symbols: list[str], levels: int = 20
-    ) -> "_ManagedCanonicalOrderBookStream":
+    ) -> _ManagedCanonicalOrderBookStream:
         """Long-lived orderbook subscription; ``update_symbols`` adds/drops
         symbols in place, preserving already-bootstrapped local order books
         for symbols that stay subscribed instead of re-bootstrapping every
@@ -200,7 +200,7 @@ class _ManagedCanonicalTradeStream:
         self._parent = parent
         self._raw = raw
 
-    def __aiter__(self) -> "_ManagedCanonicalTradeStream":
+    def __aiter__(self) -> _ManagedCanonicalTradeStream:
         return self
 
     async def __anext__(self) -> MarketEvent:
@@ -225,7 +225,7 @@ class _ManagedCanonicalKlineStream:
         self._parent = parent
         self._raw = raw
 
-    def __aiter__(self) -> "_ManagedCanonicalKlineStream":
+    def __aiter__(self) -> _ManagedCanonicalKlineStream:
         return self
 
     async def __anext__(self) -> MarketEvent:
@@ -251,7 +251,7 @@ class _ManagedCanonicalOrderBookStream:
         self._parent = parent
         self._raw = raw
 
-    def __aiter__(self) -> "_ManagedCanonicalOrderBookStream":
+    def __aiter__(self) -> _ManagedCanonicalOrderBookStream:
         return self
 
     async def __anext__(self) -> MarketEvent:

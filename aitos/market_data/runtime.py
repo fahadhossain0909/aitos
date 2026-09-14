@@ -185,9 +185,7 @@ class CanonicalMarketDataRuntime:
             self._trade_stream = None
             await stream.aclose()
 
-    async def update_trade_symbols(
-        self, symbols: list[str] | tuple[str, ...]
-    ) -> bool:
+    async def update_trade_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
         """Reconfigure the live trade cohort.
 
         When the adapter supports managed streams, this updates the
