@@ -7,8 +7,7 @@ stay open and only the delta is sent as control frames over the same websocket.
 from __future__ import annotations
 
 import asyncio
-import json
-from collections.abc import AsyncIterator, Callable
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from aitos.exchange.orderbook import LocalOrderBook, OrderBookSequenceError
@@ -96,7 +95,7 @@ class ManagedStreamSet:
                 extra={"aitos_extra": {"kind": self._kind}},
             )
 
-    def __aiter__(self) -> "ManagedStreamSet":
+    def __aiter__(self) -> ManagedStreamSet:
         return self
 
     async def __anext__(self) -> tuple[Any, str]:
@@ -130,9 +129,7 @@ class ManagedOrderBookStream:
         self._books: dict[str, LocalOrderBook] = {}
         self._lock = asyncio.Lock()
         streams = [f"{s.lower()}@depth@100ms" for s in self._symbols]
-        self._stream_set = ManagedStreamSet(
-            adapter, "orderbook", streams
-        )
+        self._stream_set = ManagedStreamSet(adapter, "orderbook", streams)
 
     def update(self, symbols: list[str]) -> None:
         normalized = list(dict.fromkeys(s.upper() for s in symbols))
@@ -142,7 +139,7 @@ class ManagedOrderBookStream:
         streams = [f"{s.lower()}@depth@100ms" for s in normalized]
         self._stream_set.update(streams)
 
-    async def __aiter__(self) -> "ManagedOrderBookStream":
+    async def __aiter__(self) -> ManagedOrderBookStream:
         return self
 
     async def __anext__(self) -> OrderBookSnapshot:
