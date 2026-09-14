@@ -1,0 +1,1673 @@
+diff --git a/aitos/data/ingestion.py b/aitos/data/ingestion.py
+index 90b62cb..e5971d0 100644
+--- a/aitos/data/ingestion.py
++++ b/aitos/data/ingestion.py
+@@ -230,36 +230,15 @@ class DataIngestionService(_LegacyDataIngestionService):
+         normalized = list(dict.fromkeys(candidates))
+         if self._canonical_runtime is None or normalized == self._live_trade_symbols:
+             return False
+-        async with self._canonical_runtime._reconfigure_lock:
+-            previous = list(self._live_trade_symbols)
++        previous = list(self._live_trade_symbols)
++        # Delegate to the runtime's own trade-symbol update: when the
++        # adapter supports managed streams this reconfigures the existing
++        # websocket connection in place (no cancel, no reconnect, no
++        # orderbook re-bootstrap, no freshness gap) instead of tearing down
++        # and recreating the whole trade stream on every scan cycle.
++        changed = await self._canonical_runtime.update_trade_symbols(normalized)
++        if changed:
+             self._live_trade_symbols = normalized
+-            self._canonical_runtime.symbols = normalized
+-            if self._canonical_runtime._stopped:
+-                return True
+-            tasks = [
+-                t
+-                for t in self._canonical_runtime._tasks
+-                if t.get_name() == "market-data-trades"
+-            ]
+-            for task in tasks:
+-                task.cancel()
+-            if tasks:
+-                await asyncio.gather(*tasks, return_exceptions=True)
+-            self._canonical_runtime._tasks = [
+-                t for t in self._canonical_runtime._tasks if t not in tasks
+-            ]
+-            if self._canonical_runtime.enable_trades and normalized:
+-                self._canonical_runtime._tasks.append(
+-                    asyncio.create_task(
+-                        self._canonical_runtime._run(
+-                            "trades",
+-                            lambda: self._canonical_runtime.adapter.stream_trades(
+-                                normalized
+-                            ),
+-                        ),
+-                        name="market-data-trades",
+-                    )
+-                )
+             logger.info(
+                 "live trade subscription reconfigured",
+                 extra={
+@@ -269,7 +248,7 @@ class DataIngestionService(_LegacyDataIngestionService):
+                     }
+                 },
+             )
+-            return True
++        return changed
+ 
+     async def update_live_kline_symbols(
+         self, symbols: list[str] | tuple[str, ...]
+diff --git a/aitos/exchange/binance.py b/aitos/exchange/binance.py
+index b2d8862..210db6a 100644
+--- a/aitos/exchange/binance.py
++++ b/aitos/exchange/binance.py
+@@ -545,9 +545,474 @@ class BinanceFuturesAdapter(ExchangeAdapter):
+             await asyncio.sleep(backoff)
+             backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
+ 
++    async def _connect_raw_dynamic(
++        self,
++        get_streams: Callable[[], list[str]],
++        changed: asyncio.Event,
++        emit_reconnect: bool,
++        label: str,
++    ) -> AsyncIterator[tuple[Any, str]]:
++        """Like ``_connect_raw``, but the subscribed stream set can change
++        while the connection stays open.
++
++        On every (re)connect, subscribes to whatever ``get_streams()``
++        currently returns. While connected, whenever ``changed`` is set, the
++        delta versus what is currently subscribed is sent as Binance
++        SUBSCRIBE/UNSUBSCRIBE control frames over the *same* websocket — no
++        reconnect, no orderbook re-bootstrap, no freshness gap. A reconnect
++        only happens on genuine connection loss or the Binance-enforced
++        lifecycle rotation, exactly as in ``_connect_raw``.
++        """
++        backoff = INITIAL_BACKOFF_SECONDS
++        while True:
++            streams = list(dict.fromkeys(get_streams()))
++            if not streams:
++                changed.clear()
++                await changed.wait()
++                continue
++            base_url, _ = self._get_ws_base_url(streams)
++            url = f"{base_url}?streams={'/'.join(streams)}"
++            subscribed = set(streams)
++            ws = None
++            recv_task: asyncio.Task | None = None
++            try:
++                started_at = _now_iso()
++                self._ws_transport.update(
++                    {
++                        "state": "connecting",
++                        "current_url": url,
++                        "streams": streams,
++                        "connect_attempts": self._ws_transport["connect_attempts"] + 1,
++                        "last_connect_started_at": started_at,
++                        "last_error_type": None,
++                        "last_error": None,
++                    }
++                )
++                logger.info(
++                    "Binance managed websocket connecting",
++                    extra={"aitos_extra": {"stage": "connect_started", "url": url, "label": label}},
++                )
++                async with self._ws_connector(url) as ws:
++                    handshake_at = _now_iso()
++                    self._ws_transport.update(
++                        {
++                            "state": "connected",
++                            "successful_handshakes": self._ws_transport[
++                                "successful_handshakes"
++                            ]
++                            + 1,
++                            "last_handshake_at": handshake_at,
++                        }
++                    )
++                    logger.info(
++                        "Binance managed websocket connected",
++                        extra={
++                            "aitos_extra": {
++                                "stage": "handshake_complete",
++                                "url": url,
++                                "subscription_mode": "combined_url+dynamic",
++                                "label": label,
++                            }
++                        },
++                    )
++                    backoff = INITIAL_BACKOFF_SECONDS
++                    first_message = True
++                    sub_request_id = 0
++                    async with asyncio.timeout(BINANCE_USDM_WS_MAX_LIFETIME_SECONDS):
++                        recv_task = asyncio.ensure_future(ws.recv())
++                        try:
++                            while True:
++                                change_task = asyncio.ensure_future(changed.wait())
++                                done, _pending = await asyncio.wait(
++                                    {recv_task, change_task},
++                                    return_when=asyncio.FIRST_COMPLETED,
++                                )
++                                if change_task in done:
++                                    changed.clear()
++                                    desired = set(dict.fromkeys(get_streams()))
++                                    to_add = sorted(desired - subscribed)
++                                    to_remove = sorted(subscribed - desired)
++                                    if to_add:
++                                        sub_request_id += 1
++                                        await ws.send(
++                                            json.dumps(
++                                                {
++                                                    "method": "SUBSCRIBE",
++                                                    "params": to_add,
++                                                    "id": sub_request_id,
++                                                }
++                                            )
++                                        )
++                                    if to_remove:
++                                        sub_request_id += 1
++                                        await ws.send(
++                                            json.dumps(
++                                                {
++                                                    "method": "UNSUBSCRIBE",
++                                                    "params": to_remove,
++                                                    "id": sub_request_id,
++                                                }
++                                            )
++                                        )
++                                    if to_add or to_remove:
++                                        logger.info(
++                                            "Binance managed subscription updated",
++                                            extra={
++                                                "aitos_extra": {
++                                                    "label": label,
++                                                    "added": to_add,
++                                                    "removed": to_remove,
++                                                    "total": len(desired),
++                                                }
++                                            },
++                                        )
++                                    subscribed = desired
++                                    self._ws_transport["streams"] = sorted(subscribed)
++                                else:
++                                    change_task.cancel()
++                                if recv_task in done:
++                                    raw_message = recv_task.result()
++                                    self._ws_transport["frames_received"] += 1
++                                    if first_message:
++                                        self._ws_transport["last_first_frame_at"] = (
++                                            _now_iso()
++                                        )
++                                        first_message = False
++                                    envelope = json.loads(raw_message)
++                                    payload, stream_name = envelope.get(
++                                        "data", envelope
++                                    ), envelope.get("stream", "")
++                                    self._ws_transport["market_events_received"] += 1
++                                    self._ws_transport["last_market_event_at"] = (
++                                        _now_iso()
++                                    )
++                                    recv_task = asyncio.ensure_future(ws.recv())
++                                    yield payload, stream_name
++                        finally:
++                            for pending_task in (recv_task, change_task):
++                                if pending_task is not None and not pending_task.done():
++                                    pending_task.cancel()
++                            await asyncio.gather(
++                                *(
++                                    t
++                                    for t in (recv_task, change_task)
++                                    if t is not None
++                                ),
++                                return_exceptions=True,
++                            )
++            except asyncio.CancelledError:
++                raise
++            except TimeoutError:
++                self._ws_transport.update(
++                    {
++                        "state": "lifecycle_rotation",
++                        "last_close_at": _now_iso(),
++                        "last_close_code": getattr(ws, "close_code", None),
++                        "last_close_reason": getattr(ws, "close_reason", None),
++                    }
++                )
++                logger.info(
++                    "Binance managed websocket reached proactive lifecycle rotation",
++                    extra={"aitos_extra": {"stage": "lifecycle_rotation", "url": url, "label": label}},
++                )
++            except Exception as exc:
++                close_code = getattr(ws, "close_code", None)
++                close_reason = getattr(ws, "close_reason", None)
++                self._ws_transport.update(
++                    {
++                        "state": "reconnecting",
++                        "close_count": self._ws_transport["close_count"] + 1,
++                        "last_close_at": _now_iso(),
++                        "last_close_code": close_code,
++                        "last_close_reason": close_reason,
++                        "last_error_type": type(exc).__name__,
++                        "last_error": str(exc)[:500],
++                    }
++                )
++                logger.error(
++                    "Binance managed websocket disconnected; reconnecting",
++                    extra={
++                        "aitos_extra": {
++                            "stage": "disconnect",
++                            "url": url,
++                            "error_type": type(exc).__name__,
++                            "error": str(exc),
++                            "close_code": close_code,
++                            "close_reason": close_reason,
++                            "backoff_seconds": backoff,
++                            "label": label,
++                        }
++                    },
++                )
++            if emit_reconnect:
++                logger.warning(
++                    "Binance managed market stream reconnecting",
++                    extra={
++                        "aitos_extra": {
++                            "stage": "reconnect_wait",
++                            "streams": streams,
++                            "backoff_seconds": backoff,
++                            "label": label,
++                        }
++                    },
++                )
++            await asyncio.sleep(backoff)
++            backoff = min(backoff * 2, MAX_BACKOFF_SECONDS)
++
++    def stream_trades_managed(self, symbols: list[str]) -> "ManagedStreamSet":
++        """Long-lived trade subscription; update via ``update_symbols()``.
++
++        Unlike ``stream_trades``, changing the symbol set does not cancel
++        or reconnect the underlying websocket — it sends an incremental
++        SUBSCRIBE/UNSUBSCRIBE control frame on the live connection.
++        """
++
++        def to_stream(symbol: str) -> str:
++            return f"{symbol.lower()}@aggTrade"
++
++        streams = [to_stream(s) for s in dict.fromkeys(s.upper() for s in symbols)]
++        return ManagedStreamSet(self, "trades", streams, to_stream=to_stream)
++
++    def stream_klines_managed(
++        self, symbols: list[str], timeframe: str
++    ) -> "ManagedStreamSet":
++        """Long-lived kline subscription; update via ``update_symbols()``."""
++
++        def to_stream(symbol: str) -> str:
++            return f"{symbol.lower()}@kline_{timeframe}"
++
++        streams = [to_stream(s) for s in dict.fromkeys(s.upper() for s in symbols)]
++        return ManagedStreamSet(self, "klines", streams, to_stream=to_stream)
++
++    def stream_order_book_managed(
++        self, symbols: list[str], levels: int = 20
++    ) -> "ManagedOrderBookStream":
++        """Long-lived orderbook subscription; update via ``update_symbols()``.
++
++        Existing per-symbol ``LocalOrderBook`` state is preserved across
++        symbol-set updates — only newly-added symbols get REST-bootstrapped,
++        instead of every symbol being re-bootstrapped on every change.
++        """
++        return ManagedOrderBookStream(self, symbols, levels)
++
+     async def __aenter__(self) -> BinanceFuturesAdapter:
+         await self.connect()
+         return self
+ 
+     async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+         await self.close()
++
++
++MANAGED_STREAM_QUEUE_SIZE = 20000
++
++
++class ManagedStreamSet:
++    """A single long-lived Binance combined-stream subscription that can be
++    updated live (``update_symbols`` / ``update_streams``) without the
++    caller having to cancel and recreate a task.
++
++    Only a genuine connection loss or Binance's own lifecycle rotation
++    causes a reconnect; ordinary symbol-set churn (a position opening or
++    closing, the scanner's ranking shifting) is handled with
++    SUBSCRIBE/UNSUBSCRIBE control frames on the existing websocket.
++    """
++
++    def __init__(
++        self,
++        adapter: BinanceFuturesAdapter,
++        kind: str,
++        initial_streams: list[str],
++        to_stream: Callable[[str], str] | None = None,
++    ) -> None:
++        self._adapter = adapter
++        self._kind = kind
++        self._to_stream = to_stream
++        self._streams: list[str] = list(dict.fromkeys(initial_streams))
++        self._changed = asyncio.Event()
++        self._queue: asyncio.Queue[tuple[Any, str]] = asyncio.Queue(
++            maxsize=MANAGED_STREAM_QUEUE_SIZE
++        )
++        self._closed = False
++        self._task = asyncio.create_task(
++            self._pump(), name=f"aitos-managed-stream-{kind}"
++        )
++
++    def _get_streams(self) -> list[str]:
++        return list(self._streams)
++
++    async def _pump(self) -> None:
++        async for data, stream_name in self._adapter._connect_raw_dynamic(
++            self._get_streams, self._changed, True, self._kind
++        ):
++            try:
++                self._queue.put_nowait((data, stream_name))
++            except asyncio.QueueFull:
++                try:
++                    self._queue.get_nowait()
++                except asyncio.QueueEmpty:
++                    pass
++                self._queue.put_nowait((data, stream_name))
++
++    async def update_streams(self, streams: list[str]) -> bool:
++        normalized = list(dict.fromkeys(streams))
++        if normalized == self._streams:
++            return False
++        self._streams = normalized
++        self._changed.set()
++        return True
++
++    async def update_symbols(self, symbols: list[str]) -> bool:
++        if self._to_stream is None:
++            raise RuntimeError(
++                f"ManagedStreamSet({self._kind}) was not created with a "
++                "symbol->stream converter; use update_streams() instead"
++            )
++        streams = [
++            self._to_stream(s) for s in dict.fromkeys(s.upper() for s in symbols)
++        ]
++        return await self.update_streams(streams)
++
++    def __aiter__(self) -> "ManagedStreamSet":
++        return self
++
++    async def __anext__(self) -> tuple[Any, str]:
++        if self._closed:
++            raise StopAsyncIteration
++        return await self._queue.get()
++
++    async def aclose(self) -> None:
++        if self._closed:
++            return
++        self._closed = True
++        self._task.cancel()
++        await asyncio.gather(self._task, return_exceptions=True)
++
++
++class ManagedOrderBookStream:
++    """Incrementally-updatable local order-book stream.
++
++    ``LocalOrderBook`` state for symbols that stay subscribed survives
++    symbol-set updates — only newly-added symbols are REST-bootstrapped.
++    Only a real websocket reconnect (handled inside ``ManagedStreamSet``)
++    forces a fresh per-symbol bootstrap, the same as Binance's own resync
++    contract, instead of every routine subscription change doing so.
++    """
++
++    def __init__(
++        self, adapter: BinanceFuturesAdapter, symbols: list[str], levels: int = 20
++    ) -> None:
++        self._adapter = adapter
++        self._levels = levels
++        self._symbols: list[str] = list(dict.fromkeys(s.upper() for s in symbols))
++        self._books: dict[str, LocalOrderBook] = {}
++        self._pending_bootstrap: set[str] = set(self._symbols)
++        self._lock = asyncio.Lock()
++
++        def to_stream(symbol: str) -> str:
++            return f"{symbol.lower()}@depth@100ms"
++
++        self._to_stream = to_stream
++        streams = [to_stream(s) for s in self._symbols]
++        self._stream_set = ManagedStreamSet(
++            adapter, "orderbook", streams, to_stream=to_stream
++        )
++
++    async def update_symbols(self, symbols: list[str]) -> bool:
++        normalized = list(dict.fromkeys(s.upper() for s in symbols))
++        async with self._lock:
++            if normalized == self._symbols:
++                return False
++            added = [s for s in normalized if s not in self._symbols]
++            removed = [s for s in self._symbols if s not in normalized]
++            for symbol in removed:
++                self._books.pop(symbol, None)
++                self._pending_bootstrap.discard(symbol)
++            self._pending_bootstrap.update(added)
++            self._symbols = normalized
++        await self._stream_set.update_symbols(normalized)
++        return True
++
++    async def update_levels(self, levels: int) -> None:
++        """Change local order-book depth truncation.
++
++        This never touches the websocket: Binance always sends full depth
++        diffs regardless of how many levels we keep locally, so a levels
++        change that previously forced a full stream restart now just
++        re-seeds each already-open book at the new depth without any
++        connection loss or freshness gap.
++        """
++        async with self._lock:
++            if levels == self._levels:
++                return
++            self._levels = levels
++            symbols = list(self._books)
++        for symbol in symbols:
++            try:
++                book = await self._bootstrap(symbol)
++            except Exception as exc:
++                logger.error(
++                    "managed orderbook re-bootstrap for level change failed",
++                    extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
++                )
++                continue
++            async with self._lock:
++                self._books[symbol] = book
++
++    async def _bootstrap(self, symbol: str) -> LocalOrderBook:
++        book = LocalOrderBook(symbol=symbol, max_levels=self._levels)
++        book.seed(
++            await self._adapter.fetch_order_book(symbol, limit=max(self._levels, 50))
++        )
++        return book
++
++    def __aiter__(self) -> "ManagedOrderBookStream":
++        return self
++
++    async def __anext__(self) -> OrderBookSnapshot:
++        while True:
++            data, stream_name = await self._stream_set.__anext__()
++            symbol = stream_name.split("@", 1)[0].upper()
++            async with self._lock:
++                if symbol not in self._symbols:
++                    continue
++                needs_bootstrap = symbol in self._pending_bootstrap or (
++                    symbol not in self._books
++                )
++            if needs_bootstrap:
++                try:
++                    book = await self._bootstrap(symbol)
++                except Exception as exc:
++                    logger.error(
++                        "managed orderbook bootstrap failed",
++                        extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
++                    )
++                    continue
++                async with self._lock:
++                    self._books[symbol] = book
++                    self._pending_bootstrap.discard(symbol)
++                # Apply this same message below rather than discarding it --
++                # LocalOrderBook.apply()'s awaiting-first-update bridge logic
++                # is what reconciles the fresh REST snapshot with the live
++                # diff stream, exactly as the original stream_order_book did.
++            else:
++                async with self._lock:
++                    book = self._books[symbol]
++            try:
++                snapshot = book.apply(parse_depth_diff_ws(data))
++            except OrderBookSequenceError:
++                try:
++                    book = await self._bootstrap(symbol)
++                except Exception as exc:
++                    logger.error(
++                        "managed orderbook re-bootstrap failed",
++                        extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
++                    )
++                    continue
++                async with self._lock:
++                    self._books[symbol] = book
++                continue
++            if snapshot is not None:
++                return snapshot
++
++    async def aclose(self) -> None:
++        await self._stream_set.aclose()
+diff --git a/aitos/intelligence/position_runtime.py b/aitos/intelligence/position_runtime.py
+index 96aa709..071776d 100644
+--- a/aitos/intelligence/position_runtime.py
++++ b/aitos/intelligence/position_runtime.py
+@@ -55,6 +55,15 @@ def _open_symbols() -> list[str]:
+     return symbols
+ 
+ 
++def get_tracked_lifecycles() -> list[TradeLifecycle]:
++    """Every ``TradeLifecycle`` instance created so far (weak references).
++
++    Used by ``aitos.trading.price_safety_net`` so it doesn't need its own
++    bookkeeping of which lifecycle instances exist.
++    """
++    return list(_LIFECYCLES)
++
++
+ def _merge_symbols(requested: list[str], protected: list[str]) -> list[str]:
+     result: list[str] = []
+     seen: set[str] = set()
+diff --git a/aitos/market_data/binance_adapter.py b/aitos/market_data/binance_adapter.py
+index ebd067d..da8c921 100644
+--- a/aitos/market_data/binance_adapter.py
++++ b/aitos/market_data/binance_adapter.py
+@@ -117,6 +117,39 @@ class BinanceCanonicalMarketDataAdapter:
+                 source=MarketSource.WEBSOCKET,
+             )
+ 
++    async def stream_trades_managed(
++        self, symbols: list[str]
++    ) -> "_ManagedCanonicalTradeStream":
++        """Long-lived trade subscription; ``update_symbols`` reconfigures it
++        in place via incremental SUBSCRIBE/UNSUBSCRIBE instead of a full
++        websocket reconnect.
++        """
++        bounded = await self._valid_symbols(symbols)
++        raw = self.exchange.stream_trades_managed(bounded)
++        return _ManagedCanonicalTradeStream(self, raw)
++
++    async def stream_klines_managed(
++        self, symbols: list[str], timeframe: str = KLINE_TIMEFRAME
++    ) -> "_ManagedCanonicalKlineStream":
++        """Long-lived kline subscription; ``update_symbols`` reconfigures it
++        in place instead of reconnecting.
++        """
++        bounded = (await self._valid_symbols(symbols))[:KLINE_SYMBOL_LIMIT]
++        raw = self.exchange.stream_klines_managed(bounded, timeframe)
++        return _ManagedCanonicalKlineStream(self, raw)
++
++    async def stream_order_books_managed(
++        self, symbols: list[str], levels: int = 20
++    ) -> "_ManagedCanonicalOrderBookStream":
++        """Long-lived orderbook subscription; ``update_symbols`` adds/drops
++        symbols in place, preserving already-bootstrapped local order books
++        for symbols that stay subscribed instead of re-bootstrapping every
++        symbol on every change.
++        """
++        bounded = await self._valid_symbols(symbols)
++        raw = self.exchange.stream_order_book_managed(bounded, levels=levels)
++        return _ManagedCanonicalOrderBookStream(self, raw)
++
+     async def stream_order_book_deltas(
+         self, symbols: list[str]
+     ) -> AsyncIterator[MarketEvent]:
+@@ -153,3 +186,88 @@ class BinanceCanonicalMarketDataAdapter:
+     @staticmethod
+     def age_seconds(event: MarketEvent) -> float:
+         return max(0.0, (datetime.now(timezone.utc) - event.event_time).total_seconds())
++
++
++class _ManagedCanonicalTradeStream:
++    """MarketEvent view over a raw managed trade stream.
++
++    ``update_symbols`` validates against exchange info (like the one-shot
++    ``stream_trades`` path) and then reconfigures the *existing* websocket
++    connection in place -- it never cancels or reconnects anything.
++    """
++
++    def __init__(self, parent: BinanceCanonicalMarketDataAdapter, raw) -> None:
++        self._parent = parent
++        self._raw = raw
++
++    def __aiter__(self) -> "_ManagedCanonicalTradeStream":
++        return self
++
++    async def __anext__(self) -> MarketEvent:
++        trade = await self._raw.__anext__()
++        return trade_event(
++            trade, market_type=self._parent.market_type, source=MarketSource.WEBSOCKET
++        )
++
++    async def update_symbols(self, symbols: list[str]) -> bool:
++        bounded = await self._parent._valid_symbols(symbols)
++        return await self._raw.update_symbols(bounded)
++
++    async def aclose(self) -> None:
++        await self._raw.aclose()
++
++
++class _ManagedCanonicalKlineStream:
++    """MarketEvent view over a raw managed kline stream (see
++    ``_ManagedCanonicalTradeStream``)."""
++
++    def __init__(self, parent: BinanceCanonicalMarketDataAdapter, raw) -> None:
++        self._parent = parent
++        self._raw = raw
++
++    def __aiter__(self) -> "_ManagedCanonicalKlineStream":
++        return self
++
++    async def __anext__(self) -> MarketEvent:
++        kline = await self._raw.__anext__()
++        return kline_event(
++            kline, market_type=self._parent.market_type, source=MarketSource.WEBSOCKET
++        )
++
++    async def update_symbols(self, symbols: list[str]) -> bool:
++        bounded = (await self._parent._valid_symbols(symbols))[:KLINE_SYMBOL_LIMIT]
++        return await self._raw.update_symbols(bounded)
++
++    async def aclose(self) -> None:
++        await self._raw.aclose()
++
++
++class _ManagedCanonicalOrderBookStream:
++    """MarketEvent view over a raw managed orderbook stream (see
++    ``_ManagedCanonicalTradeStream``). Symbols that stay subscribed across an
++    ``update_symbols`` call keep their already-bootstrapped local book."""
++
++    def __init__(self, parent: BinanceCanonicalMarketDataAdapter, raw) -> None:
++        self._parent = parent
++        self._raw = raw
++
++    def __aiter__(self) -> "_ManagedCanonicalOrderBookStream":
++        return self
++
++    async def __anext__(self) -> MarketEvent:
++        book = await self._raw.__anext__()
++        return book_snapshot_event(
++            book, market_type=self._parent.market_type, source=MarketSource.WEBSOCKET
++        )
++
++    async def update_symbols(self, symbols: list[str]) -> bool:
++        bounded = await self._parent._valid_symbols(symbols)
++        return await self._raw.update_symbols(bounded)
++
++    async def update_levels(self, levels: int) -> None:
++        update = getattr(self._raw, "update_levels", None)
++        if update is not None:
++            await update(levels)
++
++    async def aclose(self) -> None:
++        await self._raw.aclose()
+diff --git a/aitos/market_data/runtime.py b/aitos/market_data/runtime.py
+index 94c8ab5..bbebc3a 100644
+--- a/aitos/market_data/runtime.py
++++ b/aitos/market_data/runtime.py
+@@ -82,6 +82,9 @@ class CanonicalMarketDataRuntime:
+         self._first_canonical_event_seen = False
+         self._first_canonical_publish_seen = False
+         self._stream_telemetry: dict[str, dict[str, object]] = {}
++        self._trade_stream: object | None = None
++        self._kline_stream: object | None = None
++        self._orderbook_stream: object | None = None
+         exchange = getattr(self.adapter, "exchange", None)
+         if getattr(exchange, "websocket_transport_snapshot", None) is not None:
+             self.gateway._transport_snapshot_provider = self._transport_snapshot
+@@ -139,6 +142,9 @@ class CanonicalMarketDataRuntime:
+         self._stopped = False
+         self._first_canonical_event_seen = False
+         self._first_canonical_publish_seen = False
++        self._trade_stream = None
++        self._kline_stream = None
++        self._orderbook_stream = None
+         self.gateway.begin_connect()
+         self._drain_tasks = [
+             asyncio.create_task(
+@@ -147,48 +153,131 @@ class CanonicalMarketDataRuntime:
+             for i in range(GATEWAY_DRAIN_WORKERS)
+         ]
+         self._tasks = []
+-        if self.enable_trades and self.symbols:
+-            self._tasks.append(
+-                asyncio.create_task(
+-                    self._run(
+-                        "trades", lambda: self.adapter.stream_trades(self.symbols)
+-                    ),
+-                    name="market-data-trades",
+-                )
+-            )
++        self._start_trades_task()
+         self._start_orderbook_task()
+         self._start_kline_task()
+ 
++    # -- trades ---------------------------------------------------------
++
++    def _start_trades_task(self) -> None:
++        if not self.enable_trades or not self.symbols:
++            return
++        self._tasks.append(
++            asyncio.create_task(
++                self._run("trades", self._trade_stream_factory),
++                name="market-data-trades",
++            )
++        )
++
++    def _trade_stream_factory(self) -> AsyncIterator:
++        if hasattr(self.adapter, "stream_trades_managed"):
++            return self._managed_trade_stream_gen()
++        self._trade_stream = None
++        return self.adapter.stream_trades(self.symbols)
++
++    async def _managed_trade_stream_gen(self) -> AsyncIterator:
++        stream = await self.adapter.stream_trades_managed(self.symbols)
++        self._trade_stream = stream
++        try:
++            async for event in stream:
++                yield event
++        finally:
++            self._trade_stream = None
++            await stream.aclose()
++
++    async def update_trade_symbols(
++        self, symbols: list[str] | tuple[str, ...]
++    ) -> bool:
++        """Reconfigure the live trade cohort.
++
++        When the adapter supports managed streams, this updates the
++        existing websocket subscription in place (SUBSCRIBE/UNSUBSCRIBE on
++        the live connection) -- it does not cancel or reconnect anything,
++        so routine churn (a position opening or closing, the scanner's
++        ranking shifting) no longer costs a reconnect, an orderbook
++        re-bootstrap, or a freshness gap.
++        """
++        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))
++        async with self._reconfigure_lock:
++            if normalized == self.symbols:
++                return False
++            self.symbols = normalized
++            if self._stopped:
++                return True
++            if self._trade_stream is not None and hasattr(
++                self._trade_stream, "update_symbols"
++            ):
++                await self._trade_stream.update_symbols(normalized)
++                return True
++            tasks = [t for t in self._tasks if t.get_name() == "market-data-trades"]
++            for task in tasks:
++                task.cancel()
++            if tasks:
++                await asyncio.gather(*tasks, return_exceptions=True)
++            self._tasks = [t for t in self._tasks if t not in tasks]
++            self._start_trades_task()
++            return True
++
++    # -- orderbook --------------------------------------------------------
++
+     def _start_orderbook_task(self) -> None:
+         if not self.enable_orderbooks or not self.orderbook_symbols:
+             return
+         self._tasks.append(
+             asyncio.create_task(
+-                self._run(
+-                    "orderbook",
+-                    lambda: self.adapter.stream_order_books(
+-                        self.orderbook_symbols, self.orderbook_levels
+-                    ),
+-                ),
++                self._run("orderbook", self._orderbook_stream_factory),
+                 name="market-data-orderbook",
+             )
+         )
+ 
++    def _orderbook_stream_factory(self) -> AsyncIterator:
++        if hasattr(self.adapter, "stream_order_books_managed"):
++            return self._managed_orderbook_stream_gen()
++        self._orderbook_stream = None
++        return self.adapter.stream_order_books(
++            self.orderbook_symbols, self.orderbook_levels
++        )
++
++    async def _managed_orderbook_stream_gen(self) -> AsyncIterator:
++        stream = await self.adapter.stream_order_books_managed(
++            self.orderbook_symbols, levels=self.orderbook_levels
++        )
++        self._orderbook_stream = stream
++        try:
++            async for event in stream:
++                yield event
++        finally:
++            self._orderbook_stream = None
++            await stream.aclose()
++
+     def _start_kline_task(self) -> None:
+         if not self.enable_klines or not self.kline_symbols:
+             return
+         self._tasks.append(
+             asyncio.create_task(
+-                self._run(
+-                    "klines",
+-                    lambda: self.adapter.stream_klines(
+-                        self.kline_symbols, KLINE_TIMEFRAME
+-                    ),
+-                ),
++                self._run("klines", self._kline_stream_factory),
+                 name="market-data-klines",
+             )
+         )
+ 
++    def _kline_stream_factory(self) -> AsyncIterator:
++        if hasattr(self.adapter, "stream_klines_managed"):
++            return self._managed_kline_stream_gen()
++        self._kline_stream = None
++        return self.adapter.stream_klines(self.kline_symbols, KLINE_TIMEFRAME)
++
++    async def _managed_kline_stream_gen(self) -> AsyncIterator:
++        stream = await self.adapter.stream_klines_managed(
++            self.kline_symbols, KLINE_TIMEFRAME
++        )
++        self._kline_stream = stream
++        try:
++            async for event in stream:
++                yield event
++        finally:
++            self._kline_stream = None
++            await stream.aclose()
++
+     async def update_kline_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
+         normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[
+             :KLINE_SYMBOL_LIMIT
+@@ -199,6 +288,11 @@ class CanonicalMarketDataRuntime:
+             self.kline_symbols = normalized
+             if self._stopped:
+                 return True
++            if self._kline_stream is not None and hasattr(
++                self._kline_stream, "update_symbols"
++            ):
++                await self._kline_stream.update_symbols(normalized)
++                return True
+             tasks = [t for t in self._tasks if t.get_name() == "market-data-klines"]
+             for task in tasks:
+                 task.cancel()
+@@ -218,6 +312,11 @@ class CanonicalMarketDataRuntime:
+             self.orderbook_symbols = normalized
+             if self._stopped:
+                 return True
++            if self._orderbook_stream is not None and hasattr(
++                self._orderbook_stream, "update_symbols"
++            ):
++                await self._orderbook_stream.update_symbols(normalized)
++                return True
+             await self._restart_orderbook_task()
+             return True
+ 
+@@ -228,7 +327,15 @@ class CanonicalMarketDataRuntime:
+                 return False
+             self.orderbook_levels = levels
+             if not self._stopped:
+-                await self._restart_orderbook_task()
++                if self._orderbook_stream is not None and hasattr(
++                    self._orderbook_stream, "update_levels"
++                ):
++                    # Depth truncation is purely local -- Binance always
++                    # sends full depth diffs regardless of `levels`, so this
++                    # never needs to touch the websocket at all.
++                    await self._orderbook_stream.update_levels(levels)
++                else:
++                    await self._restart_orderbook_task()
+             return True
+ 
+     async def _restart_orderbook_task(self) -> None:
+diff --git a/aitos/trading/market_context.py b/aitos/trading/market_context.py
+index a8918d0..4a5e698 100644
+--- a/aitos/trading/market_context.py
++++ b/aitos/trading/market_context.py
+@@ -206,6 +206,11 @@ async def handle_position_market_event(
+                     }
+                 },
+             )
++
++    from aitos.trading.price_freshness import get_global_tracker
++
++    get_global_tracker().note_seen(symbol)
++
+     return True
+ 
+ 
+diff --git a/aitos/trading/price_freshness.py b/aitos/trading/price_freshness.py
+new file mode 100644
+index 0000000..0bfc22f
+--- /dev/null
++++ b/aitos/trading/price_freshness.py
+@@ -0,0 +1,43 @@
++"""Tracks the last time each symbol received a *live* price update.
++
++``TradeLifecycle.update_price()`` -- including its authoritative hard-SL
++check -- only ever runs when a ``market.trade``/``market.kline`` event
++arrives via the live websocket pipeline for that symbol (see
++``aitos.trading.market_context``'s bridge). This module is the shared
++signal that lets ``aitos.trading.price_safety_net`` know when that live
++path has gone quiet for a symbol and a REST-polled price should be used
++instead, without every caller needing to agree on their own bookkeeping.
++"""
++
++from __future__ import annotations
++
++import time
++
++
++class PriceFreshnessTracker:
++    def __init__(self) -> None:
++        self._last_seen: dict[str, float] = {}
++
++    def note_seen(self, symbol: str, when: float | None = None) -> None:
++        self._last_seen[symbol.upper()] = when if when is not None else time.monotonic()
++
++    def seconds_since_seen(
++        self, symbol: str, now: float | None = None
++    ) -> float | None:
++        last = self._last_seen.get(symbol.upper())
++        if last is None:
++            return None
++        return (now if now is not None else time.monotonic()) - last
++
++    def is_stale(
++        self, symbol: str, stale_after_seconds: float, now: float | None = None
++    ) -> bool:
++        elapsed = self.seconds_since_seen(symbol, now=now)
++        return elapsed is None or elapsed >= stale_after_seconds
++
++
++_GLOBAL_TRACKER = PriceFreshnessTracker()
++
++
++def get_global_tracker() -> PriceFreshnessTracker:
++    return _GLOBAL_TRACKER
+diff --git a/aitos/trading/price_safety_net.py b/aitos/trading/price_safety_net.py
+new file mode 100644
+index 0000000..877d790
+--- /dev/null
++++ b/aitos/trading/price_safety_net.py
+@@ -0,0 +1,153 @@
++"""REST-polling safety net for open-position SL/TP monitoring.
++
++Root-cause context: ``TradeLifecycle.update_price()`` -- which contains the
++authoritative, never-skipped hard-SL check -- only ever runs when a
++``market.trade``/``market.kline`` event arrives via the live websocket
++pipeline for that symbol. If that pipeline stalls for any reason (a
++reconnect, a freshness gap, a symbol briefly falling out of the subscribed
++set), any open position in that symbol silently stops being checked at
++all -- with no fallback, since only the scanner has a REST fallback path
++(``aitos.intelligence.scanner``'s ``rest_fallback``), not position
++monitoring. A stop-loss can be breached for hours with the system never
++noticing, purely because no price update ever arrived to trigger the check
++-- not because the check itself is wrong.
++
++This polls a lightweight REST endpoint for any open-position symbol whose
++last live price update is older than ``stale_after_seconds``, and feeds the
++result through the exact same ``update_price()`` call the live path uses,
++so hard-SL/TP enforcement is never fully dependent on an uninterrupted
++websocket connection. It is a safety net, not a replacement: the live path
++remains the primary, low-latency source, and the poll interval is
++deliberately coarse (default every 10s, only for symbols stale >20s).
++"""
++
++from __future__ import annotations
++
++import asyncio
++from collections.abc import Callable, Iterable
++from typing import Any
++
++from aitos.logging_setup import get_logger
++from aitos.trading.price_freshness import PriceFreshnessTracker, get_global_tracker
++
++logger = get_logger("aitos.trading.price_safety_net")
++
++DEFAULT_STALE_AFTER_SECONDS = 20.0
++DEFAULT_POLL_INTERVAL_SECONDS = 10.0
++
++
++class PositionPriceSafetyNet:
++    def __init__(
++        self,
++        exchange: Any,
++        lifecycles_provider: Callable[[], Iterable[Any]],
++        *,
++        freshness: PriceFreshnessTracker | None = None,
++        stale_after_seconds: float = DEFAULT_STALE_AFTER_SECONDS,
++        poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
++    ) -> None:
++        self._exchange = exchange
++        self._lifecycles_provider = lifecycles_provider
++        self._freshness = freshness or get_global_tracker()
++        self._stale_after = stale_after_seconds
++        self._interval = poll_interval_seconds
++        self._task: asyncio.Task | None = None
++        self._stopped = True
++        self.polls_run = 0
++        self.symbols_rescued = 0
++
++    def start(self) -> None:
++        if not self._stopped:
++            return
++        self._stopped = False
++        self._task = asyncio.create_task(
++            self._run(), name="position-price-safety-net"
++        )
++
++    async def stop(self) -> None:
++        self._stopped = True
++        task, self._task = self._task, None
++        if task is not None:
++            task.cancel()
++            await asyncio.gather(task, return_exceptions=True)
++
++    async def _run(self) -> None:
++        while not self._stopped:
++            try:
++                await self.poll_once()
++            except asyncio.CancelledError:
++                raise
++            except Exception:
++                logger.exception("position price safety net poll failed")
++            try:
++                await asyncio.sleep(self._interval)
++            except asyncio.CancelledError:
++                raise
++
++    async def poll_once(self) -> int:
++        """Check every open-position symbol for live-price staleness; for
++        any that are stale, fetch a REST price and route it through
++        ``update_price()``. Returns how many symbols were rescued.
++        """
++        self.polls_run += 1
++        stale: dict[str, list[tuple[Any, Any]]] = {}
++        for lifecycle in list(self._lifecycles_provider()):
++            try:
++                trades = list(lifecycle.get_open_trades())
++            except Exception:
++                continue
++            for trade in trades:
++                symbol = str(getattr(trade, "symbol", "") or "").upper()
++                if not symbol:
++                    continue
++                if self._freshness.is_stale(symbol, self._stale_after):
++                    stale.setdefault(symbol, []).append((lifecycle, trade))
++
++        rescued = 0
++        for symbol, pairs in stale.items():
++            try:
++                price = await self._fetch_last_price(symbol)
++            except Exception as exc:
++                logger.warning(
++                    "safety-net REST price fetch failed",
++                    extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
++                )
++                continue
++            if price is None:
++                continue
++            for lifecycle, trade in pairs:
++                try:
++                    await lifecycle.update_price(trade.trade_id, price)
++                except Exception:
++                    logger.exception(
++                        "safety-net update_price failed",
++                        extra={
++                            "aitos_extra": {
++                                "symbol": symbol,
++                                "trade_id": getattr(trade, "trade_id", None),
++                            }
++                        },
++                    )
++            # Mark seen so we don't hammer REST every interval while the
++            # websocket stays down; the live path overwrites this the
++            # instant it recovers for that symbol.
++            self._freshness.note_seen(symbol)
++            rescued += 1
++            logger.warning(
++                "position price safety net used REST fallback for a stale symbol",
++                extra={
++                    "aitos_extra": {
++                        "symbol": symbol,
++                        "positions": len(pairs),
++                        "price": price,
++                    }
++                },
++            )
++        self.symbols_rescued += rescued
++        return rescued
++
++    async def _fetch_last_price(self, symbol: str) -> float | None:
++        trades = await self._exchange.fetch_recent_trades(symbol, limit=1)
++        if not trades:
++            return None
++        return float(trades[-1].price)
+diff --git a/run_live_trading.py b/run_live_trading.py
+index 0ab89ed..a803bd6 100644
+--- a/run_live_trading.py
++++ b/run_live_trading.py
+@@ -202,6 +202,11 @@ async def main() -> None:
+         port=HEALTH_SERVER_PORT,
+     )
+     await health_server.start()
++    from aitos.intelligence.position_runtime import get_tracked_lifecycles
++    from aitos.trading.price_safety_net import PositionPriceSafetyNet
++
++    price_safety_net = PositionPriceSafetyNet(exchange, get_tracked_lifecycles)
++    price_safety_net.start()
+     tracker = PersistentLivePortfolioTracker(order_executor, state_store)
+     await tracker.restore()
+     stop_event = asyncio.Event()
+@@ -217,9 +222,17 @@ async def main() -> None:
+                     is_production=True,
+                     approved_by=approved_by,
+                 )
+-                rl_scorer.save_state()
+-                outcome_classifier.save_state()
+-                save_attention_model(attention_explainer, attention_path)
++                # These do blocking pickle.dump()+file-replace I/O. Run them
++                # off the event loop -- a synchronous call here previously
++                # stalled *all* concurrent async work (websocket recv,
++                # event-bus consumption) for however long the disk write
++                # took, and a stall past WS_PING_TIMEOUT_SECONDS could drop
++                # the market-data connection entirely.
++                await asyncio.to_thread(rl_scorer.save_state)
++                await asyncio.to_thread(outcome_classifier.save_state)
++                await asyncio.to_thread(
++                    save_attention_model, attention_explainer, attention_path
++                )
+                 logger.info(
+                     "live scan cycle complete",
+                     extra={
+@@ -245,9 +258,12 @@ async def main() -> None:
+             except asyncio.TimeoutError:
+                 pass
+     finally:
+-        rl_scorer.save_state()
+-        outcome_classifier.save_state()
+-        save_attention_model(attention_explainer, attention_path)
++        await price_safety_net.stop()
++        await asyncio.to_thread(rl_scorer.save_state)
++        await asyncio.to_thread(outcome_classifier.save_state)
++        await asyncio.to_thread(
++            save_attention_model, attention_explainer, attention_path
++        )
+         await filter_refresher.stop()
+         await health_server.stop()
+         await experience_recorder.shutdown()
+diff --git a/run_paper_trading.py b/run_paper_trading.py
+index 6530d4a..b05ddae 100644
+--- a/run_paper_trading.py
++++ b/run_paper_trading.py
+@@ -209,6 +209,11 @@ async def main() -> None:
+         port=HEALTH_SERVER_PORT,
+     )
+     await health_server.start()
++    from aitos.intelligence.position_runtime import get_tracked_lifecycles
++    from aitos.trading.price_safety_net import PositionPriceSafetyNet
++
++    price_safety_net = PositionPriceSafetyNet(exchange, get_tracked_lifecycles)
++    price_safety_net.start()
+     tracker = PaperPortfolioTracker(starting_equity_usd=STARTING_EQUITY_USD)
+     stop_event = asyncio.Event()
+     loop = asyncio.get_running_loop()
+@@ -218,9 +223,17 @@ async def main() -> None:
+         while not stop_event.is_set():
+             try:
+                 submitted = await run_scan_and_trade_cycle(components, tracker)
+-                rl_scorer.save_state()
+-                outcome_classifier.save_state()
+-                save_attention_model(attention_explainer, attention_path)
++                # These do blocking pickle.dump()+file-replace I/O. Run them
++                # off the event loop -- a synchronous call here previously
++                # stalled *all* concurrent async work (websocket recv,
++                # event-bus consumption) for however long the disk write
++                # took, and a stall past WS_PING_TIMEOUT_SECONDS could drop
++                # the market-data connection entirely.
++                await asyncio.to_thread(rl_scorer.save_state)
++                await asyncio.to_thread(outcome_classifier.save_state)
++                await asyncio.to_thread(
++                    save_attention_model, attention_explainer, attention_path
++                )
+                 logger.info(
+                     "scan cycle complete",
+                     extra={
+@@ -245,9 +258,12 @@ async def main() -> None:
+             except asyncio.TimeoutError:
+                 pass
+     finally:
+-        rl_scorer.save_state()
+-        outcome_classifier.save_state()
+-        save_attention_model(attention_explainer, attention_path)
++        await price_safety_net.stop()
++        await asyncio.to_thread(rl_scorer.save_state)
++        await asyncio.to_thread(outcome_classifier.save_state)
++        await asyncio.to_thread(
++            save_attention_model, attention_explainer, attention_path
++        )
+         await health_server.stop()
+         await experience_recorder.shutdown()
+         await market_os_persistence.shutdown()
+diff --git a/tests/exchange/test_binance_managed_stream.py b/tests/exchange/test_binance_managed_stream.py
+new file mode 100644
+index 0000000..71f6735
+--- /dev/null
++++ b/tests/exchange/test_binance_managed_stream.py
+@@ -0,0 +1,163 @@
++from __future__ import annotations
++
++import asyncio
++import json
++
++import pytest
++
++from aitos.exchange.binance import BinanceFuturesAdapter
++from aitos.models.market import OrderBookSnapshot
++
++
++class _FakeManagedWebSocket:
++    """Minimal fake supporting recv()/send(), driven by an inbox queue."""
++
++    close_code = 1000
++    close_reason = "test"
++
++    def __init__(self) -> None:
++        self.inbox: asyncio.Queue[str] = asyncio.Queue()
++        self.sent: list[dict] = []
++
++    async def recv(self) -> str:
++        return await self.inbox.get()
++
++    async def send(self, message: str) -> None:
++        self.sent.append(json.loads(message))
++
++    def push_trade(self, stream: str, symbol: str) -> None:
++        self.inbox.put_nowait(
++            json.dumps({"stream": stream, "data": {"e": "aggTrade", "s": symbol}})
++        )
++
++
++class _FakeManagedWebSocketContext:
++    def __init__(self, ws: _FakeManagedWebSocket) -> None:
++        self.ws = ws
++
++    async def __aenter__(self) -> _FakeManagedWebSocket:
++        return self.ws
++
++    async def __aexit__(self, exc_type, exc, tb) -> bool:
++        return False
++
++
++@pytest.mark.asyncio
++async def test_update_symbols_sends_incremental_subscribe_without_reconnect():
++    ws = _FakeManagedWebSocket()
++    connect_calls = 0
++
++    def connector(_url: str) -> _FakeManagedWebSocketContext:
++        nonlocal connect_calls
++        connect_calls += 1
++        return _FakeManagedWebSocketContext(ws)
++
++    adapter = BinanceFuturesAdapter(ws_connector=connector)
++    stream = adapter.stream_trades_managed(["BTCUSDT"])
++
++    ws.push_trade("btcusdt@aggTrade", "BTCUSDT")
++    payload, name = await stream.__anext__()
++    assert payload["s"] == "BTCUSDT"
++    assert name == "btcusdt@aggTrade"
++    assert connect_calls == 1
++
++    # Adding ETHUSDT must not reconnect -- it must send an incremental
++    # SUBSCRIBE frame on the same websocket connection.
++    changed = await stream.update_symbols(["BTCUSDT", "ETHUSDT"])
++    assert changed is True
++    # Give the pump task a chance to observe the change event and send it.
++    for _ in range(50):
++        if ws.sent:
++            break
++        await asyncio.sleep(0)
++    assert connect_calls == 1, "adding a symbol must not open a new connection"
++    assert ws.sent, "expected a SUBSCRIBE control frame to be sent"
++    assert ws.sent[-1]["method"] == "SUBSCRIBE"
++    assert ws.sent[-1]["params"] == ["ethusdt@aggTrade"]
++
++    ws.push_trade("ethusdt@aggTrade", "ETHUSDT")
++    payload, name = await stream.__anext__()
++    assert payload["s"] == "ETHUSDT"
++    assert connect_calls == 1
++
++    # Removing BTCUSDT must send UNSUBSCRIBE, still no reconnect.
++    await stream.update_symbols(["ETHUSDT"])
++    for _ in range(50):
++        if ws.sent[-1]["method"] == "UNSUBSCRIBE":
++            break
++        await asyncio.sleep(0)
++    assert ws.sent[-1]["method"] == "UNSUBSCRIBE"
++    assert ws.sent[-1]["params"] == ["btcusdt@aggTrade"]
++    assert connect_calls == 1
++
++    await stream.aclose()
++
++
++@pytest.mark.asyncio
++async def test_orderbook_stream_preserves_book_state_across_symbol_updates():
++    ws = _FakeManagedWebSocket()
++
++    def connector(_url: str) -> _FakeManagedWebSocketContext:
++        return _FakeManagedWebSocketContext(ws)
++
++    adapter = BinanceFuturesAdapter(ws_connector=connector)
++
++    bootstraps: list[str] = []
++
++    async def fake_fetch_order_book(symbol: str, limit: int = 50) -> OrderBookSnapshot:
++        bootstraps.append(symbol)
++        return OrderBookSnapshot(
++            symbol=symbol,
++            bids=((100.0, 1.0),),
++            asks=((101.0, 1.0),),
++            last_update_id=1,
++            timestamp="2026-01-01T00:00:00+00:00",
++        )
++
++    adapter.fetch_order_book = fake_fetch_order_book  # type: ignore[method-assign]
++
++    book_stream = adapter.stream_order_book_managed(["BTCUSDT"], levels=20)
++
++    ws.inbox.put_nowait(
++        json.dumps(
++            {
++                "stream": "btcusdt@depth@100ms",
++                "data": {
++                    "U": 2,
++                    "u": 2,
++                    "pu": 1,
++                    "b": [["100.0", "2.0"]],
++                    "a": [],
++                    "E": 1,
++                },
++            }
++        )
++    )
++    snapshot = await book_stream.__anext__()
++    assert snapshot.symbol == "BTCUSDT"
++    assert bootstraps == ["BTCUSDT"]
++
++    # Adding a second symbol must bootstrap only the new one, not BTCUSDT again.
++    await book_stream.update_symbols(["BTCUSDT", "ETHUSDT"])
++    ws.inbox.put_nowait(
++        json.dumps(
++            {
++                "stream": "ethusdt@depth@100ms",
++                "data": {
++                    "U": 2,
++                    "u": 2,
++                    "pu": 1,
++                    "b": [["10.0", "5.0"]],
++                    "a": [],
++                    "E": 1,
++                },
++            }
++        )
++    )
++    snapshot = await book_stream.__anext__()
++    assert snapshot.symbol == "ETHUSDT"
++    assert bootstraps == ["BTCUSDT", "ETHUSDT"], (
++        "BTCUSDT should not be re-bootstrapped just because ETHUSDT was added"
++    )
++
++    await book_stream.aclose()
+diff --git a/tests/market_data/test_runtime_managed_streams.py b/tests/market_data/test_runtime_managed_streams.py
+new file mode 100644
+index 0000000..db7f760
+--- /dev/null
++++ b/tests/market_data/test_runtime_managed_streams.py
+@@ -0,0 +1,144 @@
++import asyncio
++from datetime import datetime, timezone
++
++import pytest
++
++from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
++from aitos.market_data.gateway import MarketDataGateway
++from aitos.market_data.runtime import CanonicalMarketDataRuntime
++from aitos.market_data.venues import MarketType, Venue, VenueCapabilities
++
++
++class _FakeManagedStream:
++    def __init__(self, symbols, event_type, make_payload):
++        self.symbols = list(symbols)
++        self._event_type = event_type
++        self._make_payload = make_payload
++        self.update_calls: list[list[str]] = []
++        self.closed = False
++        self._queue: asyncio.Queue = asyncio.Queue()
++        self._tick = 0
++        self._pump_task = asyncio.create_task(self._pump())
++
++    async def _pump(self) -> None:
++        while True:
++            await asyncio.sleep(0.01)
++            self._tick += 1
++            if not self.symbols:
++                continue
++            symbol = self.symbols[0]
++            await self._queue.put(
++                MarketEvent(
++                    event_type=self._event_type,
++                    exchange="binance",
++                    market="usd_m_futures",
++                    symbol=symbol,
++                    event_time=datetime.now(timezone.utc),
++                    payload=self._make_payload(self._tick),
++                    source=MarketSource.WEBSOCKET,
++                )
++            )
++
++    def __aiter__(self):
++        return self
++
++    async def __anext__(self):
++        return await self._queue.get()
++
++    async def update_symbols(self, symbols):
++        self.symbols = list(symbols)
++        self.update_calls.append(list(symbols))
++        return True
++
++    async def aclose(self):
++        self.closed = True
++        self._pump_task.cancel()
++        await asyncio.gather(self._pump_task, return_exceptions=True)
++
++
++class ManagedFakeAdapter:
++    venue = Venue.BINANCE
++    market_type = MarketType.USD_M_FUTURES
++    capabilities = VenueCapabilities(trades=True, order_book=True)
++
++    def __init__(self) -> None:
++        self.trade_stream_creations = 0
++        self.book_stream_creations = 0
++        self.trade_streams: list[_FakeManagedStream] = []
++        self.book_streams: list[_FakeManagedStream] = []
++
++    async def stream_trades_managed(self, symbols):
++        self.trade_stream_creations += 1
++        stream = _FakeManagedStream(
++            symbols, MarketEventType.TRADE, lambda tick: {"trade_id": tick}
++        )
++        self.trade_streams.append(stream)
++        return stream
++
++    async def stream_order_books_managed(self, symbols, levels=20):
++        self.book_stream_creations += 1
++        stream = _FakeManagedStream(
++            symbols,
++            MarketEventType.BOOK_SNAPSHOT,
++            lambda tick: {"bids": [], "asks": [], "last_update_id": tick},
++        )
++        self.book_streams.append(stream)
++        return stream
++
++
++class NoopBus:
++    async def publish(self, event):
++        return None
++
++
++@pytest.mark.asyncio
++async def test_runtime_updates_orderbook_symbols_without_reconnect_when_managed():
++    adapter = ManagedFakeAdapter()
++    gateway = MarketDataGateway(
++        venue="binance", market_type="usd_m_futures", publisher=NoopBus().publish
++    )
++    runtime = CanonicalMarketDataRuntime(
++        adapter=adapter,
++        market_bus=NoopBus(),
++        gateway=gateway,
++        symbols=["BTCUSDT"],
++        orderbook_symbols=["BTCUSDT"],
++    )
++
++    await runtime.start()
++    await asyncio.sleep(0.05)
++    changed = await runtime.update_orderbook_symbols(["BTCUSDT", "ETHUSDT"])
++    await asyncio.sleep(0.05)
++    await runtime.stop()
++
++    assert changed is True
++    # Exactly one connection was ever created for the orderbook stream --
++    # the symbol change was handled as an incremental update, not a restart.
++    assert adapter.book_stream_creations == 1
++    assert adapter.book_streams[0].update_calls == [["BTCUSDT", "ETHUSDT"]]
++    assert adapter.book_streams[0].closed is True
++
++
++@pytest.mark.asyncio
++async def test_runtime_updates_trade_symbols_without_reconnect_when_managed():
++    adapter = ManagedFakeAdapter()
++    gateway = MarketDataGateway(
++        venue="binance", market_type="usd_m_futures", publisher=NoopBus().publish
++    )
++    runtime = CanonicalMarketDataRuntime(
++        adapter=adapter,
++        market_bus=NoopBus(),
++        gateway=gateway,
++        symbols=["BTCUSDT"],
++        enable_orderbooks=False,
++    )
++
++    await runtime.start()
++    await asyncio.sleep(0.05)
++    changed = await runtime.update_trade_symbols(["BTCUSDT", "ETHUSDT", "SOLUSDT"])
++    await asyncio.sleep(0.05)
++    await runtime.stop()
++
++    assert changed is True
++    assert adapter.trade_stream_creations == 1
++    assert adapter.trade_streams[0].update_calls == [["BTCUSDT", "ETHUSDT", "SOLUSDT"]]
+diff --git a/tests/test_price_safety_net.py b/tests/test_price_safety_net.py
+new file mode 100644
+index 0000000..bbbe0d7
+--- /dev/null
++++ b/tests/test_price_safety_net.py
+@@ -0,0 +1,110 @@
++import asyncio
++
++import pytest
++
++from aitos.trading.price_freshness import PriceFreshnessTracker
++from aitos.trading.price_safety_net import PositionPriceSafetyNet
++
++
++class _FakeTrade:
++    def __init__(self, trade_id: str, symbol: str) -> None:
++        self.trade_id = trade_id
++        self.symbol = symbol
++
++
++class _FakeTick:
++    def __init__(self, price: float) -> None:
++        self.price = price
++
++
++class _FakeLifecycle:
++    def __init__(self, trades: list[_FakeTrade]) -> None:
++        self._trades = trades
++        self.update_price_calls: list[tuple[str, float]] = []
++
++    def get_open_trades(self) -> list[_FakeTrade]:
++        return list(self._trades)
++
++    async def update_price(self, trade_id: str, current_price: float, **_kwargs):
++        self.update_price_calls.append((trade_id, current_price))
++
++
++class _FakeExchange:
++    def __init__(self, prices: dict[str, float]) -> None:
++        self._prices = prices
++        self.fetch_calls: list[str] = []
++
++    async def fetch_recent_trades(self, symbol: str, limit: int = 500):
++        self.fetch_calls.append(symbol)
++        if symbol not in self._prices:
++            return []
++        return [_FakeTick(self._prices[symbol])]
++
++
++@pytest.mark.asyncio
++async def test_stale_symbol_gets_rest_price_and_reaches_update_price():
++    lifecycle = _FakeLifecycle([_FakeTrade("t1", "SUSHIUSDT")])
++    exchange = _FakeExchange({"SUSHIUSDT": 0.85})
++    freshness = PriceFreshnessTracker()
++    # never seen live -> immediately stale
++    net = PositionPriceSafetyNet(
++        exchange,
++        lambda: [lifecycle],
++        freshness=freshness,
++        stale_after_seconds=20.0,
++    )
++
++    rescued = await net.poll_once()
++
++    assert rescued == 1
++    assert exchange.fetch_calls == ["SUSHIUSDT"]
++    assert lifecycle.update_price_calls == [("t1", 0.85)]
++
++
++@pytest.mark.asyncio
++async def test_fresh_symbol_is_not_polled():
++    lifecycle = _FakeLifecycle([_FakeTrade("t1", "BTCUSDT")])
++    exchange = _FakeExchange({"BTCUSDT": 65000.0})
++    freshness = PriceFreshnessTracker()
++    freshness.note_seen("BTCUSDT")  # just seen live
++    net = PositionPriceSafetyNet(
++        exchange,
++        lambda: [lifecycle],
++        freshness=freshness,
++        stale_after_seconds=20.0,
++    )
++
++    rescued = await net.poll_once()
++
++    assert rescued == 0
++    assert exchange.fetch_calls == []
++    assert lifecycle.update_price_calls == []
++
++
++@pytest.mark.asyncio
++async def test_live_update_marks_symbol_fresh_again():
++    freshness = PriceFreshnessTracker()
++    assert freshness.is_stale("ETHUSDT", 20.0) is True
++    freshness.note_seen("ETHUSDT")
++    assert freshness.is_stale("ETHUSDT", 20.0) is False
++
++
++@pytest.mark.asyncio
++async def test_start_stop_runs_and_shuts_down_cleanly():
++    lifecycle = _FakeLifecycle([_FakeTrade("t1", "SOLUSDT")])
++    exchange = _FakeExchange({"SOLUSDT": 150.0})
++    net = PositionPriceSafetyNet(
++        exchange,
++        lambda: [lifecycle],
++        stale_after_seconds=0.0,
++        poll_interval_seconds=0.01,
++    )
++    net.start()
++    for _ in range(200):
++        if lifecycle.update_price_calls:
++            break
++        await asyncio.sleep(0.01)
++    await net.stop()
++
++    assert lifecycle.update_price_calls
++    assert net.polls_run >= 1
