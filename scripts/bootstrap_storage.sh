@@ -58,6 +58,24 @@ log "Persisting mount in /etc/fstab"
 FSTAB_LINE="UUID=$DISK_UUID $DATA_ROOT $FSTYPE defaults,nofail,x-systemd.device-timeout=30s 0 2"
 if ! ${SUDO[@]} grep -Eq "^[[:space:]]*UUID=${DISK_UUID}[[:space:]]+" /etc/fstab; then printf '%s\n' "$FSTAB_LINE" | ${SUDO[@]} tee -a /etc/fstab >/dev/null; fi
 
+# If the verified data disk is already below the configured free-space floor,
+# the deployment is allowed to perform the explicit disposable-data reset
+# before recreating the databases. This prevents a full disk/corrupt Redis AOF
+# from blocking every subsequent deployment.
+MIN_FREE_GB="${DATA_DISK_MIN_FREE_GB:-20}"
+FREE_GB="$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')"
+if [[ "$FREE_GB" =~ ^[0-9]+$ && "$FREE_GB" -lt "$MIN_FREE_GB" ]]; then
+  log "Emergency database recovery"
+  echo "Data disk free: ${FREE_GB}G; configured minimum: ${MIN_FREE_GB}G"
+  if [[ "${AITOS_AUTO_RESET_DISPOSABLE_DATA:-true}" != "true" ]]; then
+    die "Data disk is below the configured free-space floor and automatic disposable-data reset is disabled."
+  fi
+  test -x "$REPO_ROOT/scripts/reset_market_data_v1.sh" || die "Disposable database reset script is missing."
+  AITOS_CONFIRM_RESET=YES bash "$REPO_ROOT/scripts/reset_market_data_v1.sh"
+  FREE_GB="$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')"
+  echo "Data disk free after emergency recovery: ${FREE_GB}G"
+fi
+
 has_entries() {
   [[ -n "$("${SUDO[@]}" find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]]
 }
