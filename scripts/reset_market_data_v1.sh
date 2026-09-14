@@ -27,6 +27,13 @@ mountpoint -q "$AITOS_DATA_ROOT" || {
   exit 1
 }
 
+SUDO=(sudo)
+[[ "$(id -u)" -eq 0 ]] && SUDO=()
+command -v sudo >/dev/null 2>&1 || [[ "$(id -u)" -eq 0 ]] || {
+  echo "sudo is required for the offline database reset" >&2
+  exit 1
+}
+
 DATA_PATHS=(
   "$AITOS_DATA_ROOT/eventbus/redis"
   "$AITOS_DATA_ROOT/databases/clickhouse"
@@ -49,7 +56,7 @@ for path in "${DATA_PATHS[@]}"; do
       exit 1
     }
   else
-    mkdir -p "$path"
+    "${SUDO[@]}" mkdir -p "$path"
   fi
 done
 
@@ -80,9 +87,9 @@ else
   echo "Database containers are not all running; performing an offline disposable-state reset."
   # Never follow symlinks while clearing database contents.
   for path in "${DATA_PATHS[@]}"; do
-    find "$path" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    "${SUDO[@]}" find "$path" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
   done
-  mkdir -p \
+  "${SUDO[@]}" mkdir -p \
     "$AITOS_DATA_ROOT/eventbus/redis/live" \
     "$AITOS_DATA_ROOT/eventbus/redis/archive" \
     "$AITOS_DATA_ROOT/databases/clickhouse" \
