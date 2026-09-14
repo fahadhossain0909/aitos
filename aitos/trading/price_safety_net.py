@@ -30,13 +30,17 @@ DEFAULT_POLL_INTERVAL_SECONDS = 5.0
 
 
 class _ExchangeLike(Protocol):
-    async def fetch_recent_trades(self, symbol: str, limit: int = 500) -> Sequence[Any]: ...
+    async def fetch_recent_trades(
+        self, symbol: str, limit: int = 500
+    ) -> Sequence[Any]: ...
 
 
 class _LifecycleLike(Protocol):
     def get_open_trades(self) -> Sequence[Any]: ...
 
-    async def update_price(self, trade_id: str, current_price: float, **kwargs: Any) -> Any: ...
+    async def update_price(
+        self, trade_id: str, current_price: float, **kwargs: Any
+    ) -> Any: ...
 
 
 class PositionPriceSafetyNet:
