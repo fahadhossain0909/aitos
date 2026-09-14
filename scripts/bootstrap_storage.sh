@@ -70,7 +70,7 @@ if [[ "$FREE_GB" =~ ^[0-9]+$ && "$FREE_GB" -lt "$MIN_FREE_GB" ]]; then
   if [[ "${AITOS_AUTO_RESET_DISPOSABLE_DATA:-true}" != "true" ]]; then
     die "Data disk is below the configured free-space floor and automatic disposable-data reset is disabled."
   fi
-  test -x "$REPO_ROOT/scripts/reset_market_data_v1.sh" || die "Disposable database reset script is missing."
+  test -f "$REPO_ROOT/scripts/reset_market_data_v1.sh" || die "Disposable database reset script is missing."
   AITOS_CONFIRM_RESET=YES bash "$REPO_ROOT/scripts/reset_market_data_v1.sh"
   FREE_GB="$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')"
   echo "Data disk free after emergency recovery: ${FREE_GB}G"
