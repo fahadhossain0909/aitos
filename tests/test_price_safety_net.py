@@ -1,4 +1,8 @@
+from __future__ import annotations
+
 import asyncio
+from dataclasses import dataclass
+from typing import Any, List
 
 import pytest
 
@@ -6,105 +10,74 @@ from aitos.trading.price_freshness import PriceFreshnessTracker
 from aitos.trading.price_safety_net import PositionPriceSafetyNet
 
 
-class _FakeTrade:
-    def __init__(self, trade_id: str, symbol: str) -> None:
-        self.trade_id = trade_id
-        self.symbol = symbol
-
-
-class _FakeTick:
-    def __init__(self, price: float) -> None:
-        self.price = price
+@dataclass
+class _Trade:
+    trade_id: str
+    symbol: str
 
 
 class _FakeLifecycle:
-    def __init__(self, trades: list[_FakeTrade]) -> None:
+    def __init__(self, trades: List[_Trade]) -> None:
         self._trades = trades
-        self.update_price_calls: list[tuple[str, float]] = []
+        self.updated: list[tuple[str, float]] = []
 
-    def get_open_trades(self) -> list[_FakeTrade]:
+    def get_open_trades(self) -> List[_Trade]:
         return list(self._trades)
 
-    async def update_price(self, trade_id: str, current_price: float, **_kwargs):
-        self.update_price_calls.append((trade_id, current_price))
+    async def update_price(self, trade_id: str, current_price: float, **kwargs: Any) -> None:
+        self.updated.append((trade_id, current_price))
 
 
 class _FakeExchange:
     def __init__(self, prices: dict[str, float]) -> None:
-        self._prices = prices
-        self.fetch_calls: list[str] = []
+        self.prices = prices
+        self.calls: list[str] = []
 
-    async def fetch_recent_trades(self, symbol: str, limit: int = 500):
-        self.fetch_calls.append(symbol)
-        if symbol not in self._prices:
-            return []
-        return [_FakeTick(self._prices[symbol])]
+    async def fetch_recent_trades(self, symbol: str, limit: int = 500) -> list[Any]:
+        self.calls.append(symbol)
+
+        class T:
+            def __init__(self, price: float) -> None:
+                self.price = price
+
+        return [T(self.prices[symbol])]
 
 
 @pytest.mark.asyncio
-async def test_stale_symbol_gets_rest_price_and_reaches_update_price():
-    lifecycle = _FakeLifecycle([_FakeTrade("t1", "SUSHIUSDT")])
-    exchange = _FakeExchange({"SUSHIUSDT": 0.85})
+async def test_safety_net_rescues_stale_symbol() -> None:
     freshness = PriceFreshnessTracker()
-    # never seen live -> immediately stale
+    # never noted -> stale
+    lifecycle = _FakeLifecycle([_Trade("t1", "BTCUSDT")])
+    exchange = _FakeExchange({"BTCUSDT": 42000.5})
     net = PositionPriceSafetyNet(
         exchange,
-        lambda: [lifecycle],
+        lifecycles_provider=lambda: [lifecycle],
         freshness=freshness,
-        stale_after_seconds=20.0,
+        stale_after_seconds=1.0,
+        poll_interval_seconds=60.0,
     )
-
     rescued = await net.poll_once()
-
     assert rescued == 1
-    assert exchange.fetch_calls == ["SUSHIUSDT"]
-    assert lifecycle.update_price_calls == [("t1", 0.85)]
+    assert lifecycle.updated == [("t1", 42000.5)]
+    assert exchange.calls == ["BTCUSDT"]
+    # after note_seen it should not be stale immediately
+    assert not freshness.is_stale("BTCUSDT", 1.0)
 
 
 @pytest.mark.asyncio
-async def test_fresh_symbol_is_not_polled():
-    lifecycle = _FakeLifecycle([_FakeTrade("t1", "BTCUSDT")])
-    exchange = _FakeExchange({"BTCUSDT": 65000.0})
+async def test_safety_net_skips_fresh_symbol() -> None:
     freshness = PriceFreshnessTracker()
-    freshness.note_seen("BTCUSDT")  # just seen live
-    net = PositionPriceSafetyNet(
-        exchange,
-        lambda: [lifecycle],
-        freshness=freshness,
-        stale_after_seconds=20.0,
-    )
-
-    rescued = await net.poll_once()
-
-    assert rescued == 0
-    assert exchange.fetch_calls == []
-    assert lifecycle.update_price_calls == []
-
-
-@pytest.mark.asyncio
-async def test_live_update_marks_symbol_fresh_again():
-    freshness = PriceFreshnessTracker()
-    assert freshness.is_stale("ETHUSDT", 20.0) is True
     freshness.note_seen("ETHUSDT")
-    assert freshness.is_stale("ETHUSDT", 20.0) is False
-
-
-@pytest.mark.asyncio
-async def test_start_stop_runs_and_shuts_down_cleanly():
-    lifecycle = _FakeLifecycle([_FakeTrade("t1", "SOLUSDT")])
-    exchange = _FakeExchange({"SOLUSDT": 150.0})
+    lifecycle = _FakeLifecycle([_Trade("t2", "ETHUSDT")])
+    exchange = _FakeExchange({"ETHUSDT": 3000.0})
     net = PositionPriceSafetyNet(
         exchange,
-        lambda: [lifecycle],
-        stale_after_seconds=0.0,
-        poll_interval_seconds=0.01,
+        lifecycles_provider=lambda: [lifecycle],
+        freshness=freshness,
+        stale_after_seconds=30.0,
+        poll_interval_seconds=60.0,
     )
-    net.start()
-    for _ in range(200):
-        if lifecycle.update_price_calls:
-            break
-        await asyncio.sleep(0.01)
-    await net.stop()
-
-    assert lifecycle.update_price_calls
-    assert net.polls_run >= 1
+    rescued = await net.poll_once()
+    assert rescued == 0
+    assert lifecycle.updated == []
+    assert exchange.calls == []

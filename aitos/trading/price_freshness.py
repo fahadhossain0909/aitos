@@ -1,52 +1,41 @@
-"""Tracks the last time each symbol received a *live* price update.
-
-``TradeLifecycle.update_price()`` -- including its authoritative hard-SL
-check -- only ever runs when a ``market.trade``/``market.kline`` event
-arrives via the live websocket pipeline for that symbol (see
-``aitos.trading.market_context.handle_position_market_event``). If that
-pipeline stalls, open positions stop being checked entirely.
-
-This module is the shared clock for the position-price safety net: the
-live path stamps symbols as seen, and the safety net treats any open
-position whose stamp is older than a threshold as stale and fetches a
-REST price so hard-SL can still fire.
-"""
+"""Track last-seen live prices per symbol for staleness detection."""
 
 from __future__ import annotations
 
 import time
+from typing import Dict
 
 
 class PriceFreshnessTracker:
-    """In-memory last-seen timestamps for live price updates per symbol."""
+    """In-memory last-seen timestamps for live market prices."""
 
     def __init__(self) -> None:
-        self._last_seen: dict[str, float] = {}
+        self._last_seen: Dict[str, float] = {}
 
     def note_seen(self, symbol: str, when: float | None = None) -> None:
-        key = str(symbol or "").upper()
-        if not key:
-            return
-        self._last_seen[key] = float(when if when is not None else time.monotonic())
+        self._last_seen[str(symbol).upper()] = float(when if when is not None else time.time())
 
     def last_seen(self, symbol: str) -> float | None:
-        return self._last_seen.get(str(symbol or "").upper())
+        return self._last_seen.get(str(symbol).upper())
 
-    def is_stale(self, symbol: str, stale_after_seconds: float) -> bool:
+    def age_seconds(self, symbol: str, now: float | None = None) -> float | None:
         ts = self.last_seen(symbol)
         if ts is None:
+            return None
+        return float(now if now is not None else time.time()) - ts
+
+    def is_stale(self, symbol: str, stale_after_seconds: float, now: float | None = None) -> bool:
+        age = self.age_seconds(symbol, now=now)
+        if age is None:
             return True
-        return (time.monotonic() - ts) > float(stale_after_seconds)
-
-    def clear(self, symbol: str | None = None) -> None:
-        if symbol is None:
-            self._last_seen.clear()
-            return
-        self._last_seen.pop(str(symbol).upper(), None)
+        return age >= float(stale_after_seconds)
 
 
-_GLOBAL = PriceFreshnessTracker()
+_GLOBAL: PriceFreshnessTracker | None = None
 
 
 def get_global_tracker() -> PriceFreshnessTracker:
+    global _GLOBAL
+    if _GLOBAL is None:
+        _GLOBAL = PriceFreshnessTracker()
     return _GLOBAL
