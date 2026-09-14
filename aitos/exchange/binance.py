@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -27,7 +26,6 @@ from aitos.exchange.symbol_filters import SymbolFilters, parse_exchange_info
 from aitos.logging_setup import get_logger
 from aitos.market_data.endpoints import (
     BINANCE_USDM_WS_COMBINED,
-    BINANCE_USDM_WS_MAX_LIFETIME_SECONDS,
     BINANCE_USDM_WS_RAW,
 )
 from aitos.models.market import (
