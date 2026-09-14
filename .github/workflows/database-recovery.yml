@@ -1,0 +1,72 @@
+name: Database Recovery
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: "Type RESET_DATABASES to clear disposable AITOS database state"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: aitos-database-recovery
+  cancel-in-progress: false
+
+env:
+  DEPLOY_PATH: /home/n41/aitos
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    environment: papertrade
+    timeout-minutes: 30
+    steps:
+      - name: Verify confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = RESET_DATABASES
+
+      - name: Prepare SSH key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_recovery_key
+          chmod 600 /tmp/aitos_recovery_key
+
+      - name: Clear disposable database state
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          DEPLOY_PATH: ${{ env.DEPLOY_PATH }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_recovery_key
+          command_timeout: 20m
+          envs: CONFIRMATION,DEPLOY_PATH
+          script: |
+            set -euo pipefail
+            cd "$DEPLOY_PATH"
+            test "$CONFIRMATION" = RESET_DATABASES
+            test -f scripts/reset_market_data_v1.sh
+            AITOS_CONFIRM_RESET=YES bash scripts/reset_market_data_v1.sh
+            df -h /mnt/aitos-data
+
+      - name: Re-run CD deployment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run cd.yml --repo "${GITHUB_REPOSITORY}" --ref main
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f /tmp/aitos_recovery_key
