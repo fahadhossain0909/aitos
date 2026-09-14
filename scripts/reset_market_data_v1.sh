@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Intentionally destructive development reset for the v1 market-data plane.
 # Run only when AITOS is stopped and disposable data has been approved.
+# This script is invoked through bash by CD emergency recovery; executable mode is not required.
 set -euo pipefail
 
 : "${AITOS_REDIS_CONTAINER:=aitos-redis}"
