@@ -22,3 +22,12 @@ class RoutedOrderExecutor(OrderExecutor):
     @property
     def supports_exchange_side_stops(self) -> bool:
         return self._router.supports_exchange_side_stops
+
+    async def get_account_balance(self, asset: str = "USDT") -> float:
+        """Delegate to the router so callers (e.g. ``PersistentLivePortfolioTracker
+        .refresh_equity()``) don't hit an ``AttributeError`` the moment
+        multi-venue capital routing is wired into a live equity-tracking
+        runner -- ``OrderExecutor`` has no ``get_account_balance`` in its
+        base contract, and this class previously had no fallback for it at
+        all (unlike ``IdempotentOrderExecutor``'s ``__getattr__``)."""
+        return await self._router.get_account_balance(asset)
