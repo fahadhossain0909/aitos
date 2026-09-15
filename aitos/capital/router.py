@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from aitos.capital.compliance import PropComplianceEngine
 from aitos.capital.models import AccountSnapshot, PropFirmProfile
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
+from aitos.logging_setup import get_logger
+
+logger = get_logger("aitos.capital.router")
 
 
 @dataclass(frozen=True)
@@ -51,6 +54,30 @@ class CapitalRouter:
         # order. Keep the capability conservative until protection routing is
         # implemented explicitly.
         return False
+
+    async def get_account_balance(self, asset: str = "USDT") -> float:
+        """Sum balances across every registered venue that can report one.
+
+        ``OrderExecutor`` doesn't declare ``get_account_balance`` as part of
+        its abstract contract (not every executor is bank-account-queryable
+        -- e.g. paper/simulated executors), so venues whose executor doesn't
+        implement it are skipped rather than raising. One venue's balance
+        call failing also doesn't abort the rest -- a single broker outage
+        shouldn't make the whole portfolio's equity unreadable.
+        """
+        total = 0.0
+        for venue, (executor, _profile, _account) in self._venues.items():
+            get_balance = getattr(executor, "get_account_balance", None)
+            if get_balance is None:
+                continue
+            try:
+                total += float(await get_balance(asset))
+            except Exception:
+                logger.exception(
+                    "capital router balance fetch failed",
+                    extra={"aitos_extra": {"venue": venue, "asset": asset}},
+                )
+        return total
 
     def candidates(
         self, request: OrderRequest, projected_loss: float = 0.0
