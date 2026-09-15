@@ -200,7 +200,11 @@ async def connect_raw_dynamic(
                             yield payload, stream_name
         except asyncio.CancelledError:
             raise
-        except TimeoutError:
+        # Python 3.10 exposes asyncio.TimeoutError separately from the
+        # built-in TimeoutError. A websocket recv timeout is therefore a
+        # lifecycle timeout and must not fall through to the generic error
+        # state, otherwise managed-stream lifecycle rotation never occurs.
+        except (TimeoutError, asyncio.TimeoutError):
             adapter._ws_transport.update(
                 {
                     "state": "lifecycle_rotation",
