@@ -1,8 +1,10 @@
 """Runtime enforcement for the capital-growth objective.
 
-The guard is installed when the intelligence package is imported. It protects
-the TradeLifecycle boundary itself so a caller cannot bypass the capital gate
-by skipping the scanner/application helper.
+The guard is installed by aitos/trading/__init__.py once TradeLifecycle is
+fully defined -- see the note below install_capital_guard() for why this
+module doesn't self-install on import anymore.
+It protects the TradeLifecycle boundary itself so a caller cannot bypass the
+capital gate by skipping the scanner/application helper.
 """
 
 from __future__ import annotations
@@ -10,11 +12,25 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
-from aitos.trading.lifecycle import TradeLifecycle
+
+if TYPE_CHECKING:
+    # Deferred to a function-local import in install_capital_guard() below:
+    # aitos.trading.lifecycle -> aitos.kernel.ai_kernel ->
+    # aitos.intelligence.contextual_decision -> aitos.intelligence
+    # (this module's own package) -> aitos.intelligence.capital_runtime, so
+    # importing TradeLifecycle at module level here closes a real import
+    # cycle. It only actually failed for a few entry points (`import
+    # aitos.trading`, `import aitos.kernel`, `import
+    # aitos.trading.lifecycle` directly) because aitos.app / aitos.intelligence
+    # happened to establish a safe order first -- but that made it fragile to
+    # any future reordering, not fixed. `from __future__ import annotations`
+    # above means the `self: TradeLifecycle` hint below never needed the
+    # runtime binding anyway.
+    from aitos.trading.lifecycle import TradeLifecycle
 
 _ORIGINAL_ATTR = "_aitos_capital_original_submit_opportunity"
 _GATEWAY_ATTR = "_aitos_capital_gateway"
@@ -113,6 +129,8 @@ async def _hard_limit_reason(self: TradeLifecycle, portfolio: Any) -> str | None
 
 def install_capital_guard() -> None:
     """Install the capital gate exactly once on TradeLifecycle."""
+    from aitos.trading.lifecycle import TradeLifecycle
+
     if hasattr(TradeLifecycle, _ORIGINAL_ATTR):
         return
 
@@ -176,4 +194,12 @@ def install_capital_guard() -> None:
     TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
 
 
-install_capital_guard()
+# NOT called eagerly here anymore -- see aitos/trading/__init__.py, which
+# calls this once TradeLifecycle is fully defined. Calling it at this
+# module's own import time was the other half of a real circular import
+# (aitos.trading -> aitos.kernel -> aitos.intelligence ->
+# aitos.intelligence.capital_runtime -> aitos.trading.lifecycle, closing the
+# loop before TradeLifecycle existed yet). It only "worked" for entry points
+# that happened to import aitos.app or aitos.intelligence first; importing
+# aitos.trading, aitos.kernel, or aitos.trading.lifecycle directly, as the
+# first import in a process, raised ImportError.

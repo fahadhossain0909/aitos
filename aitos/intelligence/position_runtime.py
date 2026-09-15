@@ -6,7 +6,7 @@ import os
 import weakref
 from datetime import datetime, timezone
 from functools import wraps
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from aitos.data.ingestion import DataIngestionService
 from aitos.intelligence.exit_intelligence import ExitAction
@@ -15,8 +15,25 @@ from aitos.intelligence.position_monitor import (
     PositionMonitorTier,
 )
 from aitos.logging_setup import get_logger
-from aitos.trading.lifecycle import TradeLifecycle
-from aitos.trading.position_manager import PositionAction, PositionManager
+
+if TYPE_CHECKING:
+    # Deferred to function-local imports in _install_lifecycle_wiring() and
+    # _install_lifecycle_telemetry() below (the only two functions that
+    # actually touch TradeLifecycle at runtime): importing it at module
+    # level here closed a real import cycle (aitos.trading -> aitos.kernel
+    # -> aitos.intelligence -> aitos.intelligence.position_runtime ->
+    # aitos.trading.lifecycle). See aitos/trading/__init__.py, which now
+    # calls both install functions once TradeLifecycle is fully defined.
+    from aitos.trading.lifecycle import TradeLifecycle
+
+    # Same reasoning applies to PositionManager/PositionAction: importing
+    # aitos.trading.position_manager as a submodule requires the aitos.trading
+    # *package* (__init__.py) to finish first, and that package needs this
+    # module's install_lifecycle_guards() to exist -- so a module-level
+    # import here closed a second cycle through aitos.trading. Deferred to
+    # function-local imports in _cheap_position_action() and
+    # _install_position_monitor() below.
+    from aitos.trading.position_manager import PositionAction, PositionManager
 
 logger = get_logger("aitos.intelligence.position_runtime")
 REFERENCE_SYMBOL = "BTCUSDT"
@@ -162,6 +179,8 @@ def _cheap_position_action(
     reasons: tuple[str, ...],
     market_state: Any = None,
 ) -> PositionAction:
+    from aitos.trading.position_manager import PositionAction
+
     return PositionAction(
         action=ExitAction.MANAGE,
         reason=f"POSITION_MONITOR:{tier.value} score={score:.2f} [{', '.join(reasons)}]",
@@ -196,6 +215,8 @@ def _warning_market_state(
 
 
 def _install_position_monitor() -> None:
+    from aitos.trading.position_manager import PositionAction, PositionManager
+
     if getattr(PositionManager, "_aitos_tiered_monitor_installed", False):
         return
     original_evaluate = PositionManager.evaluate
@@ -294,6 +315,8 @@ def _install_position_monitor() -> None:
 
 
 def _install_lifecycle_telemetry() -> None:
+    from aitos.trading.lifecycle import TradeLifecycle
+
     if getattr(TradeLifecycle, "_aitos_lifecycle_telemetry_installed", False):
         return
     original_update_price = getattr(TradeLifecycle, "update_price", None)
@@ -376,6 +399,8 @@ def _state_counts(states: Any) -> dict[str, int]:
 
 
 def _install_lifecycle_wiring() -> None:
+    from aitos.trading.lifecycle import TradeLifecycle
+
     if getattr(TradeLifecycle, "_aitos_position_runtime_installed", False):
         return
     original_init = TradeLifecycle.__init__
@@ -466,6 +491,29 @@ def _install_lifecycle_wiring() -> None:
 
 
 _install_ingestion_guards()
-_install_lifecycle_wiring()
-_install_lifecycle_telemetry()
-_install_position_monitor()
+
+
+def install_lifecycle_guards() -> None:
+    """Public entry point for aitos/trading/__init__.py to call once
+    TradeLifecycle and PositionManager are fully defined.
+
+    _install_position_monitor(), _install_lifecycle_wiring(), and
+    _install_lifecycle_telemetry() are NOT called eagerly at this module's
+    own import time anymore -- doing that closed two real circular imports:
+    aitos.trading -> aitos.kernel -> aitos.intelligence ->
+    aitos.intelligence.position_runtime -> aitos.trading.lifecycle (for the
+    first two) and aitos.trading -> aitos.intelligence.position_runtime ->
+    aitos.trading.position_manager -> aitos.trading package init (for
+    _install_position_monitor(), which needs PositionManager). Both close
+    the loop before the needed class exists yet. This only "worked" for
+    entry points that happened to import aitos.app or aitos.intelligence
+    before aitos.trading -- importing aitos.trading, aitos.kernel, or
+    aitos.trading.lifecycle directly, as the first import in a process,
+    raised ImportError either way.
+    _install_ingestion_guards() only touches DataIngestionService (from
+    aitos.data.ingestion, unrelated to this cycle) so it's unaffected and
+    still runs above, at this module's own import time.
+    """
+    _install_position_monitor()
+    _install_lifecycle_wiring()
+    _install_lifecycle_telemetry()
