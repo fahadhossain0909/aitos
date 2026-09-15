@@ -1,0 +1,18 @@
+[Unit]
+Description=AITOS Self-Running Trading Bot
+After=network.target redis.service clickhouse-server.service neo4j.service
+Wants=redis.service clickhouse-server.service neo4j.service
+
+[Service]
+Type=simple
+User=fahad
+WorkingDirectory=/home/fahad/aitos
+ExecStart=/home/fahad/aitos/.venv/bin/python /home/fahad/aitos/native-env/aitos_bot.py
+Restart=always
+RestartSec=10
+Environment=PATH=/home/fahad/aitos/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+StandardOutput=append:/tmp/aitos-bot.log
+StandardError=append:/tmp/aitos-bot.log
+
+[Install]
+WantedBy=multi-user.target
