@@ -18,6 +18,7 @@ from aitos.exchange.connect_raw_dynamic import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def make_transport(**overrides):
     transport = {
         "state": "idle",
@@ -59,6 +60,7 @@ async def wait_state(adapter, state, timeout=5.0):
 # 1. Incremental SUBSCRIBE / UNSUBSCRIBE
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_subscribe_delta_sends_subscribe_control_frame():
     """When changed is set with new streams, a SUBSCRIBE control frame is sent."""
@@ -90,7 +92,9 @@ async def test_subscribe_delta_sends_subscribe_control_frame():
     await asyncio.sleep(0.15)
 
     calls = [c for c in ws.send.call_args_list if c]
-    subscribe_calls = [c for c in calls if json.loads(c[0][0]).get("method") == "SUBSCRIBE"]
+    subscribe_calls = [
+        c for c in calls if json.loads(c[0][0]).get("method") == "SUBSCRIBE"
+    ]
     assert len(subscribe_calls) >= 1
     payload = json.loads(subscribe_calls[-1][0][0])
     assert "bnbusdt@ticker" in payload["params"]
@@ -134,7 +138,9 @@ async def test_unsubscribe_delta_sends_unsubscribe_control_frame():
     await asyncio.sleep(0.15)
 
     calls = [c for c in ws.send.call_args_list if c]
-    unsubscribe_calls = [c for c in calls if json.loads(c[0][0]).get("method") == "UNSUBSCRIBE"]
+    unsubscribe_calls = [
+        c for c in calls if json.loads(c[0][0]).get("method") == "UNSUBSCRIBE"
+    ]
     assert len(unsubscribe_calls) >= 1
     payload = json.loads(unsubscribe_calls[-1][0][0])
     assert "ethusdt@ticker" in payload["params"]
@@ -220,8 +226,14 @@ async def test_subscribe_unsubscribe_combined_delta():
     assert "SUBSCRIBE" in methods
     assert "UNSUBSCRIBE" in methods
 
-    sub_payload = json.loads([c for c in calls if json.loads(c[0][0]).get("method") == "SUBSCRIBE"][-1][0][0])
-    unsub_payload = json.loads([c for c in calls if json.loads(c[0][0]).get("method") == "UNSUBSCRIBE"][-1][0][0])
+    sub_payload = json.loads(
+        [c for c in calls if json.loads(c[0][0]).get("method") == "SUBSCRIBE"][-1][0][0]
+    )
+    unsub_payload = json.loads(
+        [c for c in calls if json.loads(c[0][0]).get("method") == "UNSUBSCRIBE"][-1][0][
+            0
+        ]
+    )
     assert "solusdt@ticker" in sub_payload["params"]
     assert "ethusdt@ticker" in unsub_payload["params"]
 
@@ -270,7 +282,8 @@ async def test_control_frame_ids_are_unique_and_ordered():
     await asyncio.sleep(0.1)
 
     subscribe_calls = [
-        c for c in ws.send.call_args_list
+        c
+        for c in ws.send.call_args_list
         if json.loads(c[0][0]).get("method") == "SUBSCRIBE"
     ]
     assert len(subscribe_calls) >= 1
@@ -288,6 +301,7 @@ async def test_control_frame_ids_are_unique_and_ordered():
 # ---------------------------------------------------------------------------
 # 2. Reconnect storm handling (backoff caps, no reconnect storm)
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_backoff_capped_at_max():
@@ -363,6 +377,7 @@ async def test_no_reconnect_marker_when_disabled():
 # ---------------------------------------------------------------------------
 # 3. Stream lifecycle management
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_lifecycle_rotation_on_timeout():
@@ -541,7 +556,9 @@ async def test_yields_market_events_with_stream_name():
     adapter = make_adapter()
     ws = AsyncMock()
     ws.recv.side_effect = [
-        json.dumps({"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}),
+        json.dumps(
+            {"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}
+        ),
         asyncio.TimeoutError(),
     ]
     adapter._ws_connector.return_value.__aenter__.return_value = ws
@@ -668,7 +685,9 @@ async def test_frames_received_counter_increments_on_market_event():
     adapter = make_adapter()
     ws = AsyncMock()
     ws.recv.side_effect = [
-        json.dumps({"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}),
+        json.dumps(
+            {"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}
+        ),
         asyncio.TimeoutError(),
     ]
     adapter._ws_connector.return_value.__aenter__.return_value = ws
@@ -704,7 +723,9 @@ async def test_market_events_received_counter_increments():
     adapter = make_adapter()
     ws = AsyncMock()
     ws.recv.side_effect = [
-        json.dumps({"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}),
+        json.dumps(
+            {"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}
+        ),
         asyncio.TimeoutError(),
     ]
     adapter._ws_connector.return_value.__aenter__.return_value = ws
@@ -740,7 +761,9 @@ async def test_last_first_frame_at_set_on_first_market_event():
     adapter = make_adapter()
     ws = AsyncMock()
     ws.recv.side_effect = [
-        json.dumps({"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}),
+        json.dumps(
+            {"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}
+        ),
         asyncio.TimeoutError(),
     ]
     adapter._ws_connector.return_value.__aenter__.return_value = ws
@@ -776,7 +799,9 @@ async def test_last_market_event_at_updated_per_event():
     adapter = make_adapter()
     ws = AsyncMock()
     ws.recv.side_effect = [
-        json.dumps({"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}),
+        json.dumps(
+            {"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "p": "65000.00"}}
+        ),
         asyncio.TimeoutError(),
     ]
     adapter._ws_connector.return_value.__aenter__.return_value = ws
