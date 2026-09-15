@@ -1,0 +1,11 @@
+[Unit]
+Description=AITOS Redis
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/redis-server --daemonize yes --requirepass REDIS_PASSWORD --port 6379
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
