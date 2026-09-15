@@ -8,6 +8,9 @@ without a config rewrite.
 
 from __future__ import annotations
 
+from dotenv import load_dotenv
+load_dotenv("/home/fahad/aitos/.env")
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -70,7 +73,7 @@ class BinanceSettings(BaseSettings):
 
 class AITOSSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+        env_file="/home/fahad/aitos/.env", env_file_encoding="utf-8", extra="ignore"
     )
 
     environment: str = Field(default="dev", description="dev | staging | production")
