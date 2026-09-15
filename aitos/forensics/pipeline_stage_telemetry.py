@@ -229,13 +229,16 @@ def _install_binance() -> None:
     # aitos.trading.__init__ (see eventbus/__init__.py).
     return
 
+
 def _install_eventbus() -> None:
     # Deferred: called after all import cycles are resolved.
     return
 
+
 def _install_live_state() -> None:
     # Deferred: called after all import cycles are resolved.
     return
+
 
 def install() -> None:
     global _INSTALLED
