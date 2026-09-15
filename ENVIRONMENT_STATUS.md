@@ -3,7 +3,7 @@
 ### Git Branch Analysis
 | Branch | Status |
 |--------|--------|
-| `origin/main` (HEAD=e77ce18) | 2260+ commits, has `ManagedStreamSet` + `ManagedOrderBookStream` inline in `binance.py` (1026 lines), plus `price_safety_net.py`, `price_freshness.py`, and `test_price_safety_net.py` |
+| `origin/main` (HEAD=08c0276) | 2260+ commits, has `ManagedStreamSet` + `ManagedOrderBookStream` inline in `binance.py` (1026 lines), plus `price_safety_net.py`, `price_freshness.py`, and `test_price_safety_net.py` |
 | `origin/fix/reconnect-storm-and-position-safety` | 33 commits ahead of main, has `managed_streams.py` (199 lines) + `connect_raw_dynamic.py` (255 lines) extracted from binance.py |
 | `origin/fix/reconnect-storm-position-safety-v2` | 0 commits ahead of main, has `binance.py` (553 lines), no `managed_streams.py` |
 | `origin/feat/exit-intelligence-v2` | 1168 commits behind main, same lifecycle as main |
