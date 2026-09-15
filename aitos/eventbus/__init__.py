@@ -1,9 +1,7 @@
 import asyncio
 
 from aitos.forensics.market_data_attribution import install_eventbus_attribution
-from aitos.forensics.pipeline_stage_telemetry import (
-    install as install_pipeline_stage_telemetry,
-)
+
 from aitos.forensics.root_cause_telemetry import install as install_root_cause_telemetry
 from aitos.forensics.runtime_contention_telemetry import (
     install as install_runtime_contention_telemetry,
@@ -21,6 +19,16 @@ from .redis_bus import DLQ_STREAM, EventBus, Subscription, validate_event_schema
 install_eventbus_consumer_concurrency(EventBus)
 install_eventbus_attribution(EventBus)
 install_safe_market_data_telemetry(EventBus)
+
+
+def install_pipeline_stage_telemetry():
+    """Lazy import wrapper to break circular import (eventbus → forensics
+    → exchange.binance → connect_raw_dynamic → market_data → eventbus)."""
+    from aitos.forensics.pipeline_stage_telemetry import install
+
+    install()
+
+
 install_pipeline_stage_telemetry()
 install_scanner_performance_telemetry()
 install_root_cause_telemetry()
