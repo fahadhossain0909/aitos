@@ -214,7 +214,7 @@ class _WSContextProxy:
         return await self._context.__aexit__(exc_type, exc, tb)
 
 
-def install() -> None:
+def _install_pipeline() -> None:
     global _INSTALLED
     if _INSTALLED:
         return
@@ -225,134 +225,29 @@ def install() -> None:
 
 
 def _install_binance() -> None:
-    try:
-        from aitos.exchange import binance
-    except Exception:
-        return
-    cls = binance.BinanceFuturesAdapter
-    if getattr(cls, "_e2e_ws_receive_installed", False):
-        return
-    cls._e2e_ws_receive_installed = True
-    original_init = cls.__init__
-
-    @wraps(original_init)
-    def init(self: Any, *args: Any, **kwargs: Any) -> None:
-        original_init(self, *args, **kwargs)
-        connector = self._ws_connector
-
-        def traced_connector(url: str, *cargs: Any, **ckwargs: Any):
-            return _WSContextProxy(connector(url, *cargs, **ckwargs), self)
-
-        self._ws_connector = traced_connector
-        self._e2e_ws_stats = {
-            "messages": 0,
-            "bytes": 0,
-            "source_age_total_ms": 0.0,
-            "source_age_max_ms": 0.0,
-        }
-        self._e2e_ws_recent = deque(maxlen=50)
-
-    cls.__init__ = init
-
+    # Deferred: called after all import cycles are resolved by
+    # aitos.trading.__init__ (see eventbus/__init__.py).
+    return
 
 def _install_eventbus() -> None:
-    try:
-        from aitos.eventbus.redis_bus import EventBus
-    except Exception:
-        return
-    if getattr(EventBus, "_e2e_redis_write_installed", False):
-        return
-    EventBus._e2e_redis_write_installed = True
-    original_init = EventBus.__init__
-    original_health = EventBus.health_check
-
-    @wraps(original_init)
-    def init(self: Any, *args: Any, **kwargs: Any) -> None:
-        original_init(self, *args, **kwargs)
-        self._e2e_redis_stats = {
-            "count": 0,
-            "total_ms": 0.0,
-            "max_ms": 0.0,
-            "min_ms": None,
-            "timeouts": 0,
-        }
-        self._e2e_redis_recent = deque(maxlen=50)
-        redis = getattr(self, "_redis", None)
-        original_xadd = getattr(redis, "xadd", None)
-        if redis is None or original_xadd is None:
-            return
-
-        async def traced_xadd(*xargs: Any, **xkwargs: Any):
-            started = time.perf_counter()
-            stream = str(xargs[0]) if xargs else str(xkwargs.get("name", ""))
-            try:
-                return await original_xadd(*xargs, **xkwargs)
-            except Exception as exc:
-                if type(exc).__name__ in {
-                    "TimeoutError",
-                    "ConnectionError",
-                    "BusyLoadingError",
-                }:
-                    self._e2e_redis_stats["timeouts"] += 1
-                raise
-            finally:
-                elapsed = (time.perf_counter() - started) * 1000
-                stats = self._e2e_redis_stats
-                stats["count"] += 1
-                stats["total_ms"] += elapsed
-                stats["max_ms"] = max(stats["max_ms"], elapsed)
-                if stats["min_ms"] is None:
-                    stats["min_ms"] = elapsed
-                else:
-                    stats["min_ms"] = min(stats["min_ms"], elapsed)
-                sample = {
-                    "stage": "redis_xadd",
-                    "stream": stream,
-                    "latency_ms": round(elapsed, 3),
-                    "at_ms": round(time.time() * 1000, 3),
-                }
-                self._e2e_redis_recent.append(sample)
-                _logger().debug("redis xadd", extra={"aitos_extra": sample})
-                if elapsed >= 100:
-                    sample["cgroup_cpu"] = _cgroup_stats()
-                    sample["cgroup_memory"] = _cgroup_memory()
-                    _logger().warning(
-                        "redis xadd latency", extra={"aitos_extra": sample}
-                    )
-
-        # redis-py's async client exposes xadd as an ordinary instance attribute;
-        # keep the original bound method in the closure so restoration is safe.
-        redis.xadd = traced_xadd
-
-    @wraps(original_health)
-    async def health(self: Any, *args: Any, **kwargs: Any):
-        from dataclasses import replace
-
-        status = await original_health(self, *args, **kwargs)
-        try:
-            details = dict(status.details)
-            stats = dict(getattr(self, "_e2e_redis_stats", {}))
-            count = stats.get("count", 0)
-            stats["avg_ms"] = (
-                round(stats.get("total_ms", 0.0) / count, 3) if count else 0.0
-            )
-            stats["total_ms"] = round(stats.get("total_ms", 0.0), 3)
-            stats["max_ms"] = round(stats.get("max_ms", 0.0), 3)
-            if stats.get("min_ms") is not None:
-                stats["min_ms"] = round(stats["min_ms"], 3)
-            stats["cgroup_cpu"] = _cgroup_stats()
-            stats["cgroup_memory"] = _cgroup_memory()
-            stats["recent"] = list(getattr(self, "_e2e_redis_recent", ()))
-            details.setdefault("market_data_e2e", {})["redis_xadd"] = stats
-            return replace(status, details=details)
-        except Exception:
-            return status
-
-    EventBus.__init__ = init
-    EventBus.health_check = health
-
+    # Deferred: called after all import cycles are resolved.
+    return
 
 def _install_live_state() -> None:
+    # Deferred: called after all import cycles are resolved.
+    return
+
+def install() -> None:
+    global _INSTALLED
+    if _INSTALLED:
+        return
+    _INSTALLED = True
+    _install_binance()
+    _install_eventbus()
+    _install_live_state()
+
+
+def _install_live_state_real() -> None:
     """Time the CPU-side state update where every accepted TradeTick enters."""
     try:
         from aitos.intelligence.live_state import LiveMarketStateStore

@@ -28,7 +28,10 @@ def install_pipeline_stage_telemetry():
     install()
 
 
-install_pipeline_stage_telemetry()
+# Deferred: install_pipeline_stage_telemetry() is called by
+# aitos.trading.__init__ after TradeLifecycle is fully defined,
+# which ensures all import cycles are resolved.
+# install_pipeline_stage_telemetry()
 install_scanner_performance_telemetry()
 install_root_cause_telemetry()
 install_runtime_contention_telemetry()
