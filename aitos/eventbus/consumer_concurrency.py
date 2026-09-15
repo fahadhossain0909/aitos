@@ -12,6 +12,7 @@ from aitos.logging_setup import get_logger
 
 from .redis_bus import (
     CONSUMER_BATCH_SIZE,
+    CONSUMER_BLOCK_MS,
     POLL_INTERVAL_SECONDS,
 )
 
@@ -130,18 +131,17 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
 
                 while True:
                     try:
-                        # This loop intentionally uses non-blocking XREADGROUP.
-                        # Each stream has its own task, so polling preserves the
-                        # per-stream ordering/concurrency model while allowing
-                        # asyncio cancellation to interrupt immediately. Blocking
-                        # fakeredis/aioredis reads can otherwise survive task
-                        # cancellation and prevent clean application shutdown.
+                        # Use the same short blocking interval as the base
+                        # EventBus consumer. A finite BLOCK lets Redis perform
+                        # an efficient wait while keeping cancellation bounded;
+                        # ``block=None`` can enter fakeredis' synchronous command
+                        # parser and stall the event loop during teardown.
                         resp = await self._redis.xreadgroup(
                             groupname=group,
                             consumername=consumer,
                             streams={stream_key: ">"},
                             count=CONSUMER_BATCH_SIZE,
-                            block=None,
+                            block=CONSUMER_BLOCK_MS,
                         )
                     except asyncio.CancelledError:
                         raise
