@@ -6,7 +6,6 @@ import asyncio
 import fnmatch
 import os
 import time
-from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
