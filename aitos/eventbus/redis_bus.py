@@ -6,6 +6,7 @@ import asyncio
 import fnmatch
 import os
 import time
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -241,12 +242,6 @@ class EventBus(AITOSModule):
         group: str = "default",
         start_id: str = "0",
     ) -> Subscription:
-        """Subscribe to a Redis Stream.
-
-        ``start_id='0'`` preserves replay/durable semantics. ``start_id='$'``
-        explicitly starts at the live tail and never reclaims abandoned PEL
-        entries, which prevents a live scanner from being blocked by old data.
-        """
         self._require_initialized()
         consumer_name = f"{group}-{id(handler)}"
         live_only = start_id == "$"
@@ -318,12 +313,6 @@ class EventBus(AITOSModule):
             await handler(event)
 
     async def _set_group_to_live(self, stream_key: str, group: str) -> None:
-        """Move an existing consumer group to the live tail safely.
-
-        Redis accepts XGROUP SETID '$' on a real stream. fakeredis versions
-        used by CI can raise IndexError when the stream is empty, so there is
-        nothing to reset in that case and we simply leave the group unchanged.
-        """
         if await self._redis.xlen(stream_key) == 0:
             return
         await self._redis.xgroup_setid(stream_key, group, id="$")
@@ -498,8 +487,10 @@ class EventBus(AITOSModule):
         """Retry without acknowledging the source until the replacement exists.
 
         Redis PEL entries cannot be mutated in-place. The replacement is written
-        first and only then is the failed entry acknowledged. This preserves
-        at-least-once semantics even if Redis rejects the retry write.
+        first and only then is the failed entry acknowledged. Retry republishing
+        intentionally omits MAXLEN trimming: normal publishes enforce retention,
+        while trimming during a failure path can block async stream cleanup in
+        fakeredis and is unnecessary for preserving at-least-once semantics.
         """
         attempts = int(fields.get("_delivery_attempts", 0)) + 1
         if attempts >= MAX_DELIVERY_ATTEMPTS:
@@ -523,10 +514,7 @@ class EventBus(AITOSModule):
 
         retry_fields = dict(fields)
         retry_fields["_delivery_attempts"] = attempts
-        maxlen = _stream_maxlen(stream_key.removeprefix("stream:")) or 25_000
-        await self._redis.xadd(
-            stream_key, retry_fields, maxlen=maxlen, approximate=True
-        )
+        await self._redis.xadd(stream_key, retry_fields)
         await self._redis.xack(stream_key, group, entry_id)
         self._retry_events += 1
         self._acked_events += 1
@@ -541,4 +529,4 @@ async def _await_cancelled(task: asyncio.Task) -> None:
     try:
         await task
     except asyncio.CancelledError:
-        pass
+        return
