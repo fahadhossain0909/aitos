@@ -9,6 +9,7 @@ without a config rewrite.
 from __future__ import annotations
 
 from dotenv import load_dotenv
+
 load_dotenv("/home/fahad/aitos/.env")
 
 from pydantic import Field
