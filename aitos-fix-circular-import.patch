@@ -1,0 +1,292 @@
+diff --git a/aitos/intelligence/capital_runtime.py b/aitos/intelligence/capital_runtime.py
+index a2aec84..cb43388 100644
+--- a/aitos/intelligence/capital_runtime.py
++++ b/aitos/intelligence/capital_runtime.py
+@@ -1,8 +1,10 @@
+ """Runtime enforcement for the capital-growth objective.
+ 
+-The guard is installed when the intelligence package is imported. It protects
+-the TradeLifecycle boundary itself so a caller cannot bypass the capital gate
+-by skipping the scanner/application helper.
++The guard is installed by aitos/trading/__init__.py once TradeLifecycle is
++fully defined -- see the note below install_capital_guard() for why this
++module doesn't self-install on import anymore.
++It protects the TradeLifecycle boundary itself so a caller cannot bypass the
++capital gate by skipping the scanner/application helper.
+ """
+ 
+ from __future__ import annotations
+@@ -10,11 +12,25 @@ from __future__ import annotations
+ from dataclasses import replace
+ from datetime import datetime, timezone
+ from functools import wraps
+-from typing import Any
++from typing import TYPE_CHECKING, Any
+ 
+ from aitos.intelligence.capital_gateway import CapitalGateway
+ from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
+-from aitos.trading.lifecycle import TradeLifecycle
++
++if TYPE_CHECKING:
++    # Deferred to a function-local import in install_capital_guard() below:
++    # aitos.trading.lifecycle -> aitos.kernel.ai_kernel ->
++    # aitos.intelligence.contextual_decision -> aitos.intelligence
++    # (this module's own package) -> aitos.intelligence.capital_runtime, so
++    # importing TradeLifecycle at module level here closes a real import
++    # cycle. It only actually failed for a few entry points (`import
++    # aitos.trading`, `import aitos.kernel`, `import
++    # aitos.trading.lifecycle` directly) because aitos.app / aitos.intelligence
++    # happened to establish a safe order first -- but that made it fragile to
++    # any future reordering, not fixed. `from __future__ import annotations`
++    # above means the `self: TradeLifecycle` hint below never needed the
++    # runtime binding anyway.
++    from aitos.trading.lifecycle import TradeLifecycle
+ 
+ _ORIGINAL_ATTR = "_aitos_capital_original_submit_opportunity"
+ _GATEWAY_ATTR = "_aitos_capital_gateway"
+@@ -113,6 +129,8 @@ async def _hard_limit_reason(self: TradeLifecycle, portfolio: Any) -> str | None
+ 
+ def install_capital_guard() -> None:
+     """Install the capital gate exactly once on TradeLifecycle."""
++    from aitos.trading.lifecycle import TradeLifecycle
++
+     if hasattr(TradeLifecycle, _ORIGINAL_ATTR):
+         return
+ 
+@@ -176,4 +194,12 @@ def install_capital_guard() -> None:
+     TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
+ 
+ 
+-install_capital_guard()
++# NOT called eagerly here anymore -- see aitos/trading/__init__.py, which
++# calls this once TradeLifecycle is fully defined. Calling it at this
++# module's own import time was the other half of a real circular import
++# (aitos.trading -> aitos.kernel -> aitos.intelligence ->
++# aitos.intelligence.capital_runtime -> aitos.trading.lifecycle, closing the
++# loop before TradeLifecycle existed yet). It only "worked" for entry points
++# that happened to import aitos.app or aitos.intelligence first; importing
++# aitos.trading, aitos.kernel, or aitos.trading.lifecycle directly, as the
++# first import in a process, raised ImportError.
+diff --git a/aitos/intelligence/position_runtime.py b/aitos/intelligence/position_runtime.py
+index 071776d..6d47ef5 100644
+--- a/aitos/intelligence/position_runtime.py
++++ b/aitos/intelligence/position_runtime.py
+@@ -6,7 +6,7 @@ import os
+ import weakref
+ from datetime import datetime, timezone
+ from functools import wraps
+-from typing import Any
++from typing import TYPE_CHECKING, Any
+ 
+ from aitos.data.ingestion import DataIngestionService
+ from aitos.intelligence.exit_intelligence import ExitAction
+@@ -15,8 +15,25 @@ from aitos.intelligence.position_monitor import (
+     PositionMonitorTier,
+ )
+ from aitos.logging_setup import get_logger
+-from aitos.trading.lifecycle import TradeLifecycle
+-from aitos.trading.position_manager import PositionAction, PositionManager
++
++if TYPE_CHECKING:
++    # Deferred to function-local imports in _install_lifecycle_wiring() and
++    # _install_lifecycle_telemetry() below (the only two functions that
++    # actually touch TradeLifecycle at runtime): importing it at module
++    # level here closed a real import cycle (aitos.trading -> aitos.kernel
++    # -> aitos.intelligence -> aitos.intelligence.position_runtime ->
++    # aitos.trading.lifecycle). See aitos/trading/__init__.py, which now
++    # calls both install functions once TradeLifecycle is fully defined.
++    from aitos.trading.lifecycle import TradeLifecycle
++
++    # Same reasoning applies to PositionManager/PositionAction: importing
++    # aitos.trading.position_manager as a submodule requires the aitos.trading
++    # *package* (__init__.py) to finish first, and that package needs this
++    # module's install_lifecycle_guards() to exist -- so a module-level
++    # import here closed a second cycle through aitos.trading. Deferred to
++    # function-local imports in _cheap_position_action() and
++    # _install_position_monitor() below.
++    from aitos.trading.position_manager import PositionAction, PositionManager
+ 
+ logger = get_logger("aitos.intelligence.position_runtime")
+ REFERENCE_SYMBOL = "BTCUSDT"
+@@ -162,6 +179,8 @@ def _cheap_position_action(
+     reasons: tuple[str, ...],
+     market_state: Any = None,
+ ) -> PositionAction:
++    from aitos.trading.position_manager import PositionAction
++
+     return PositionAction(
+         action=ExitAction.MANAGE,
+         reason=f"POSITION_MONITOR:{tier.value} score={score:.2f} [{', '.join(reasons)}]",
+@@ -196,6 +215,8 @@ def _warning_market_state(
+ 
+ 
+ def _install_position_monitor() -> None:
++    from aitos.trading.position_manager import PositionAction, PositionManager
++
+     if getattr(PositionManager, "_aitos_tiered_monitor_installed", False):
+         return
+     original_evaluate = PositionManager.evaluate
+@@ -294,6 +315,8 @@ def _install_position_monitor() -> None:
+ 
+ 
+ def _install_lifecycle_telemetry() -> None:
++    from aitos.trading.lifecycle import TradeLifecycle
++
+     if getattr(TradeLifecycle, "_aitos_lifecycle_telemetry_installed", False):
+         return
+     original_update_price = getattr(TradeLifecycle, "update_price", None)
+@@ -376,6 +399,8 @@ def _state_counts(states: Any) -> dict[str, int]:
+ 
+ 
+ def _install_lifecycle_wiring() -> None:
++    from aitos.trading.lifecycle import TradeLifecycle
++
+     if getattr(TradeLifecycle, "_aitos_position_runtime_installed", False):
+         return
+     original_init = TradeLifecycle.__init__
+@@ -466,6 +491,29 @@ def _install_lifecycle_wiring() -> None:
+ 
+ 
+ _install_ingestion_guards()
+-_install_lifecycle_wiring()
+-_install_lifecycle_telemetry()
+-_install_position_monitor()
++
++
++def install_lifecycle_guards() -> None:
++    """Public entry point for aitos/trading/__init__.py to call once
++    TradeLifecycle and PositionManager are fully defined.
++
++    _install_position_monitor(), _install_lifecycle_wiring(), and
++    _install_lifecycle_telemetry() are NOT called eagerly at this module's
++    own import time anymore -- doing that closed two real circular imports:
++    aitos.trading -> aitos.kernel -> aitos.intelligence ->
++    aitos.intelligence.position_runtime -> aitos.trading.lifecycle (for the
++    first two) and aitos.trading -> aitos.intelligence.position_runtime ->
++    aitos.trading.position_manager -> aitos.trading package init (for
++    _install_position_monitor(), which needs PositionManager). Both close
++    the loop before the needed class exists yet. This only "worked" for
++    entry points that happened to import aitos.app or aitos.intelligence
++    before aitos.trading -- importing aitos.trading, aitos.kernel, or
++    aitos.trading.lifecycle directly, as the first import in a process,
++    raised ImportError either way.
++    _install_ingestion_guards() only touches DataIngestionService (from
++    aitos.data.ingestion, unrelated to this cycle) so it's unaffected and
++    still runs above, at this module's own import time.
++    """
++    _install_position_monitor()
++    _install_lifecycle_wiring()
++    _install_lifecycle_telemetry()
+diff --git a/aitos/trading/__init__.py b/aitos/trading/__init__.py
+index 85bc9ee..3145e2b 100644
+--- a/aitos/trading/__init__.py
++++ b/aitos/trading/__init__.py
+@@ -5,6 +5,28 @@ from .reconciliation import ReconciliationScheduler
+ 
+ install_lifecycle_event_safety(TradeLifecycle)
+ 
++# These two intelligence-layer guards patch TradeLifecycle itself (capital
++# gate on submit_opportunity; position-monitor wiring + telemetry on
++# submit_opportunity/update_price). They used to self-install at their own
++# module's import time (aitos.intelligence.capital_runtime /
++# aitos.intelligence.position_runtime), which closed a real circular import:
++# aitos.trading -> aitos.kernel -> aitos.intelligence ->
++# [capital_runtime/position_runtime] -> aitos.trading.lifecycle, reached
++# before TradeLifecycle existed yet. That only "worked" for entry points
++# that happened to import aitos.app or aitos.intelligence before aitos.trading
++# -- importing aitos.trading, aitos.kernel, or aitos.trading.lifecycle
++# directly, as the first import in a process, raised ImportError. Triggering
++# them here instead is safe by construction: by this point TradeLifecycle
++# above has already fully imported, which means aitos.kernel and
++# aitos.intelligence (transitive dependencies of aitos.trading.lifecycle)
++# are already fully loaded too -- so importing from them below is just a
++# sys.modules lookup, never a fresh import.
++from aitos.intelligence.capital_runtime import install_capital_guard
++from aitos.intelligence.position_runtime import install_lifecycle_guards
++
++install_capital_guard()
++install_lifecycle_guards()
++
+ __all__ = [
+     "PositionAction",
+     "PositionManager",
+diff --git a/tests/test_circular_import_regression.py b/tests/test_circular_import_regression.py
+new file mode 100644
+index 0000000..d4b6784
+--- /dev/null
++++ b/tests/test_circular_import_regression.py
+@@ -0,0 +1,74 @@
++"""Regression test for a real circular import between aitos.trading,
++aitos.kernel, and aitos.intelligence.
++
++aitos.trading.lifecycle needs aitos.kernel.ai_kernel, which needs
++aitos.intelligence.contextual_decision (pulling in the whole aitos.intelligence
++package __init__), which used to eagerly install cross-package guards
++(aitos.intelligence.capital_runtime.install_capital_guard(),
++aitos.intelligence.position_runtime's lifecycle/position-monitor installers)
++that themselves needed aitos.trading.lifecycle.TradeLifecycle /
++aitos.trading.position_manager.PositionManager to already exist -- closing
++the loop before those classes were defined yet.
++
++This only "worked" because aitos.app and aitos.intelligence happened to
++establish a safe order first. Importing aitos.trading, aitos.kernel, or
++aitos.trading.lifecycle directly -- as the very first import in a fresh
++process -- raised ImportError/AttributeError. Each entry point below is
++exercised in its own fresh interpreter (sys.modules caching would otherwise
++hide the bug after the first import in-process), matching exactly how this
++was originally diagnosed.
++"""
++
++from __future__ import annotations
++
++import subprocess
++import sys
++
++import pytest
++
++ENTRY_POINTS = [
++    "aitos.app",
++    "aitos.intelligence",
++    "aitos.kernel",
++    "aitos.trading",
++    "aitos.trading.lifecycle",
++    "aitos.trading.position_manager",
++    "aitos.intelligence.capital_runtime",
++    "aitos.intelligence.position_runtime",
++]
++
++
++@pytest.mark.parametrize("module_name", ENTRY_POINTS)
++def test_module_imports_cleanly_as_the_first_import_in_a_fresh_process(
++    module_name: str,
++) -> None:
++    result = subprocess.run(
++        [sys.executable, "-c", f"import {module_name}"],
++        capture_output=True,
++        text=True,
++        timeout=30,
++    )
++    assert result.returncode == 0, (
++        f"import {module_name} failed as the first import in a fresh "
++        f"process:\n{result.stderr}"
++    )
++
++
++def test_capital_guard_and_position_monitor_actually_get_installed() -> None:
++    """Moving the install calls doesn't just avoid the ImportError -- the
++    guards still have to actually end up installed on TradeLifecycle /
++    PositionManager, whichever entry point triggers the import first."""
++    script = (
++        "import aitos.trading.lifecycle as lc\n"
++        "import aitos.trading.position_manager as pm\n"
++        "assert hasattr(lc.TradeLifecycle, '_aitos_capital_original_submit_opportunity')\n"
++        "assert hasattr(lc.TradeLifecycle, '_aitos_position_runtime_installed')\n"
++        "assert hasattr(lc.TradeLifecycle, '_aitos_lifecycle_telemetry_installed')\n"
++        "assert hasattr(pm.PositionManager, '_aitos_tiered_monitor_installed')\n"
++        "print('all guards installed')\n"
++    )
++    result = subprocess.run(
++        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30
++    )
++    assert result.returncode == 0, result.stderr
++    assert "all guards installed" in result.stdout
