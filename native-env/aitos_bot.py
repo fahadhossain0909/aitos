@@ -41,6 +41,7 @@ class AITOSBot:
     def check_redis(self) -> bool:
         try:
             import redis
+
             r = redis.Redis(host="localhost", port=6379, db=0)
             r.ping()
             return True
@@ -50,7 +51,10 @@ class AITOSBot:
     def check_clickhouse(self) -> bool:
         try:
             import clickhouse_connect
-            client = clickhouse_connect.get_client(host="localhost", port=8123, database="aitos")
+
+            client = clickhouse_connect.get_client(
+                host="localhost", port=8123, database="aitos"
+            )
             client.query("SELECT 1")
             return True
         except Exception:
@@ -59,6 +63,7 @@ class AITOSBot:
     def check_neo4j(self) -> bool:
         try:
             import requests
+
             resp = requests.get("http://localhost:7474/", timeout=5)
             return resp.status_code == 200
         except Exception:
@@ -67,6 +72,7 @@ class AITOSBot:
     def check_health_server(self) -> bool:
         try:
             import requests
+
             resp = requests.get("http://localhost:8090/health", timeout=5)
             return resp.status_code == 200
         except Exception:
@@ -74,7 +80,9 @@ class AITOSBot:
 
     def restart_service(self, name: str, command: list[str]) -> bool:
         try:
-            proc = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            proc = subprocess.Popen(
+                command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
             logger.info("Restarted %s (PID: %d)", name, proc.pid)
             return True
         except Exception as exc:
@@ -97,9 +105,18 @@ class AITOSBot:
 
     def restart_redis(self) -> None:
         logger.warning("Redis down, restarting...")
-        subprocess.run(["redis-server", "--daemonize", "yes", "--requirepass",
-                         os.environ.get("REDIS_PASSWORD", ""), "--port", "6379"],
-                        capture_output=True)
+        subprocess.run(
+            [
+                "redis-server",
+                "--daemonize",
+                "yes",
+                "--requirepass",
+                os.environ.get("REDIS_PASSWORD", ""),
+                "--port",
+                "6379",
+            ],
+            capture_output=True,
+        )
         time.sleep(1)
         if self.check_redis():
             logger.info("Redis restored")
@@ -108,8 +125,15 @@ class AITOSBot:
 
     def restart_clickhouse(self) -> None:
         logger.warning("ClickHouse down, restarting...")
-        subprocess.run(["clickhouse-server", "--daemon", "--config-file",
-                         "/etc/clickhouse-server/config.xml"], capture_output=True)
+        subprocess.run(
+            [
+                "clickhouse-server",
+                "--daemon",
+                "--config-file",
+                "/etc/clickhouse-server/config.xml",
+            ],
+            capture_output=True,
+        )
         time.sleep(2)
         if self.check_clickhouse():
             logger.info("ClickHouse restored")
@@ -130,9 +154,17 @@ class AITOSBot:
             return
         try:
             import requests
+
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            requests.post(url, json={"chat_id": TELEGRAM_CHAT_ID, "text": text,
-                                     "parse_mode": "Markdown"}, timeout=10)
+            requests.post(
+                url,
+                json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": text,
+                    "parse_mode": "Markdown",
+                },
+                timeout=10,
+            )
             logger.info("Telegram update sent")
         except Exception as exc:
             logger.error("Telegram send failed: %s", exc)
@@ -144,12 +176,18 @@ class AITOSBot:
         status.append("✅ Redis" if self.check_redis() else "❌ Redis")
         status.append("✅ ClickHouse" if self.check_clickhouse() else "❌ ClickHouse")
         status.append("✅ Neo4j" if self.check_neo4j() else "❌ Neo4j")
-        status.append("✅ Health Server" if self.check_health_server() else "❌ Health Server")
-        status.append("✅ Paper Trading" if self.paper_trading_proc and self.paper_trading_proc.poll() is None else "❌ Paper Trading")
+        status.append(
+            "✅ Health Server" if self.check_health_server() else "❌ Health Server"
+        )
+        status.append(
+            "✅ Paper Trading"
+            if self.paper_trading_proc and self.paper_trading_proc.poll() is None
+            else "❌ Paper Trading"
+        )
         status.append("")
         status.append("💰 Capital: $1,000 (paper)")
         status.append("📈 Mode: Binance Testnet")
-        status.append(f"📊 Symbols: 848 loaded")
+        status.append("📊 Symbols: 848 loaded")
         status.append("")
         status.append("---")
         return "\n".join(status)
@@ -167,7 +205,10 @@ class AITOSBot:
                     self.restart_neo4j()
                 if not self.check_health_server():
                     self.restart_paper_trading()
-                if self.paper_trading_proc is None or self.paper_trading_proc.poll() is not None:
+                if (
+                    self.paper_trading_proc is None
+                    or self.paper_trading_proc.poll() is not None
+                ):
                     self.restart_paper_trading()
 
                 # Hourly Telegram update

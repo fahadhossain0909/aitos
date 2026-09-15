@@ -9,7 +9,9 @@ AITOS_DIR = "/home/fahad/aitos"
 
 while True:
     # Check if paper trading is running
-    result = subprocess.run(["pgrep", "-f", "run_paper_trading.py"], capture_output=True)
+    result = subprocess.run(
+        ["pgrep", "-f", "run_paper_trading.py"], capture_output=True
+    )
     if result.returncode != 0:
         print("Paper trading not running, restarting...")
         env = os.environ.copy()
