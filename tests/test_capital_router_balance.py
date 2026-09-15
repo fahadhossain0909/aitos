@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from aitos.capital.models import AccountMode, AccountSnapshot, PropFirmProfile, PropRuleSet
-from aitos.capital.router import CapitalRouter
+from aitos.capital.models import (
+    AccountMode,
+    AccountSnapshot,
+    PropFirmProfile,
+    PropRuleSet,
+)
 from aitos.capital.routed_executor import RoutedOrderExecutor
+from aitos.capital.router import CapitalRouter
 
 
 def _profile() -> PropFirmProfile:
