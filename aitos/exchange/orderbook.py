@@ -90,8 +90,6 @@ class LocalOrderBook:
         self._forensics["max_bids_size"] = len(self._bids)
         self._forensics["max_asks_size"] = len(self._asks)
 
-
-
     def apply(self, update: DepthUpdate) -> OrderBookSnapshot | None:
         started = time.perf_counter()
         self._forensics["apply_count"] = int(self._forensics["apply_count"]) + 1
@@ -130,7 +128,9 @@ class LocalOrderBook:
                 <= self.last_update_id + 1
                 <= update.final_update_id
             ):
-                self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
+                self._forensics["stale_updates"] = (
+                    int(self._forensics["stale_updates"]) + 1
+                )
                 logger.warning(
                     "order-book bootstrap bridge gap, accepting new baseline",
                     extra={

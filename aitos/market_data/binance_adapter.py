@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
 from aitos.exchange.base import ExchangeAdapter
+from aitos.exchange.parsing import parse_agg_trade_ws, parse_kline_ws
 
 from .contracts import MarketEvent, MarketSource
 from .legacy_bridge import (
@@ -14,7 +15,6 @@ from .legacy_bridge import (
     kline_event,
     trade_event,
 )
-from aitos.exchange.parsing import parse_agg_trade_ws, parse_kline_ws
 from .venues import MarketType, Venue, VenueCapabilities
 
 KLINE_TIMEFRAME = "1m"

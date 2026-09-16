@@ -463,7 +463,8 @@ class RiskEngine(AITOSModule):
         # capital_runtime), not an emergency condition — firing the circuit
         # breaker on a single open position would permanently halt trading.
         systemic_breaches = [
-            b for b in hard_breaches
+            b
+            for b in hard_breaches
             if not b.limit_name.startswith("max_sector_exposure_pct")
         ]
         if action == RiskAction.EMERGENCY_STOP or systemic_breaches:

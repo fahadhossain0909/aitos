@@ -420,7 +420,11 @@ class CanonicalMarketDataRuntime:
                 stream = stream_factory().__aiter__()
                 while not self._stopped:
                     try:
-                        timeout = None if stream_name in ("orderbook", "trades", "klines") else self.stream_idle_timeout_seconds
+                        timeout = (
+                            None
+                            if stream_name in ("orderbook", "trades", "klines")
+                            else self.stream_idle_timeout_seconds
+                        )
                         event = await asyncio.wait_for(
                             stream.__anext__(), timeout=timeout
                         )

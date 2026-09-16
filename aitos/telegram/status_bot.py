@@ -42,6 +42,7 @@ class TelegramStatusBot:
             import clickhouse_connect
 
             from aitos.config.settings import get_settings
+
             ch_settings = get_settings().clickhouse
             client = clickhouse_connect.get_client(
                 host=ch_settings.host,
