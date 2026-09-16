@@ -51,7 +51,11 @@ class TokenBucketRateLimiter:
         self._last_critical = False
 
     def _is_critical_caller(self) -> bool:
-        return True
+        task = asyncio.current_task()
+        if task is None:
+            return False
+        caller = task.get_name()
+        return any(caller.startswith(prefix) for prefix in self._critical_task_prefixes)
 
     def snapshot(self) -> dict[str, Any]:
         """Return bounded limiter telemetry for forensic health snapshots."""

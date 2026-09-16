@@ -12,6 +12,7 @@ reverse proxy in any real deployment.
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from aiohttp import web
 
@@ -28,6 +29,21 @@ class HealthServer:
         self._modules: list[AITOSModule] = list(modules)
         self._host = host
         self._port = port
+        self._rate_limiter = None
+
+    def set_rate_limiter(self, rate_limiter) -> None:
+        """Attach the exchange rate limiter for health/metrics reporting."""
+        self._rate_limiter = rate_limiter
+
+    async def _get_rate_limiter_status(self) -> dict[str, Any]:
+        if self._rate_limiter is None:
+            return {}
+        try:
+            snap = self._rate_limiter.snapshot()
+            snap["_status"] = "OK" if snap.get("tokens_remaining", 0) > 0 else "CRITICAL"
+            return snap
+        except Exception:
+            return {"_status": "ERROR"}
         self._runner: web.AppRunner | None = None
 
     async def start(self) -> None:
@@ -75,6 +91,8 @@ class HealthServer:
                 }
             },
         )
+        # Check rate limiter status
+        rate_limiter_status = await self._get_rate_limiter_status()
         for module in self._modules:
             module_id = getattr(module, "module_id", module.__class__.__name__)
             logger.info(
@@ -208,6 +226,32 @@ class HealthServer:
             "# HELP aitos_module_healthy Whether a module reports healthy (1) or not (0)",
             "# TYPE aitos_module_healthy gauge",
         ]
+        # Add rate limiter metrics
+        rl_status = await self._get_rate_limiter_status()
+        if rl_status:
+            lines.append("# HELP aitos_rate_limiter_tokens Remaining tokens in the bucket")
+            lines.append("# TYPE aitos_rate_limiter_tokens gauge")
+            lines.append(
+                f'aitos_rate_limiter_tokens {rl_status.get("tokens_remaining", 0)}'
+            )
+            lines.append("# HELP aitos_rate_limiter_acquire_count Total acquires")
+            lines.append("# TYPE aitos_rate_limiter_acquire_count counter")
+            lines.append(
+                f'aitos_rate_limiter_acquire_count {rl_status.get("acquire_count", 0)}'
+            )
+            lines.append("# HELP aitos_rate_limiter_wait_count Total waits")
+            lines.append("# TYPE aitos_rate_limiter_wait_count counter")
+            lines.append(
+                f'aitos_rate_limiter_wait_count {rl_status.get("wait_count", 0)}'
+            )
+            lines.append("# HELP aitos_rate_limiter_slow_wait_count Total slow waits (>100ms)")
+            lines.append("# TYPE aitos_rate_limiter_slow_wait_count counter")
+            lines.append(
+                f'aitos_rate_limiter_slow_wait_count {rl_status.get("slow_wait_count", 0)}'
+            )
+            lines.append(
+                f'aitos_rate_limiter_status {1 if rl_status.get("_status") == "OK" else 0}'
+            )
         for module in self._modules:
             module_id = getattr(module, "module_id", module.__class__.__name__)
             try:

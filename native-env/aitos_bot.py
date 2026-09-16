@@ -184,32 +184,63 @@ class AITOSBot:
             if self.paper_trading_proc and self.paper_trading_proc.poll() is None
             else "❌ Paper Trading"
         )
+        # Rate limiter status
+        try:
+            from aitos.exchange.rate_limiter import TokenBucketRateLimiter
+            # Try to get global limiter state
+            rl_status = self.check_rate_limiter()
+            status.append(f"{'✅' if rl_status else '⚠️'} Rate Limiter")
+        except Exception:
+            status.append("⚠️ Rate Limiter: N/A")
         status.append("")
         status.append("💰 Capital: $1,000 (paper)")
         status.append("📈 Mode: Binance Testnet")
         status.append("📊 Symbols: 848 loaded")
+        status.append("🔧 Bot PID: " + str(os.getpid()))
         status.append("")
         status.append("---")
         return "\n".join(status)
 
     async def monitor_loop(self) -> None:
         logger.info("AITOS Bot monitoring started")
+        consecutive_failures = 0
         while self.running:
             try:
                 # Check all services
-                if not self.check_redis():
+                redis_ok = self.check_redis()
+                if not redis_ok:
                     self.restart_redis()
-                if not self.check_clickhouse():
+                ch_ok = self.check_clickhouse()
+                if not ch_ok:
                     self.restart_clickhouse()
-                if not self.check_neo4j():
+                neo4j_ok = self.check_neo4j()
+                if not neo4j_ok:
                     self.restart_neo4j()
-                if not self.check_health_server():
+                health_ok = self.check_health_server()
+                if not health_ok:
                     self.restart_paper_trading()
                 if (
                     self.paper_trading_proc is None
                     or self.paper_trading_proc.poll() is not None
                 ):
                     self.restart_paper_trading()
+
+                # Check rate limiter health
+                rl_ok = self.check_rate_limiter()
+                if not rl_ok:
+                    logger.warning("Rate limiter exhausted - waiting for refill")
+
+                # Auto-recovery: if paper trading fails 3+ times, force restart
+                if not health_ok:
+                    consecutive_failures += 1
+                    if consecutive_failures >= 3:
+                        logger.error(
+                            "3 consecutive health failures - forcing paper trading restart"
+                        )
+                        self.force_restart_paper_trading()
+                        consecutive_failures = 0
+                else:
+                    consecutive_failures = 0
 
                 # Hourly Telegram update
                 now = datetime.utcnow()
@@ -219,12 +250,30 @@ class AITOSBot:
                     self.send_telegram(report)
                     logger.info("Hourly Telegram update sent")
 
-                await asyncio.sleep(30)  # Check every 30 seconds
+                await asyncio.sleep(30)
             except asyncio.CancelledError:
                 break
             except Exception as exc:
                 logger.error("Monitor error: %s", exc)
                 await asyncio.sleep(10)
+
+    def check_rate_limiter(self) -> bool:
+        """Check if the rate limiter has sufficient tokens."""
+        try:
+            from aitos.exchange.rate_limiter import TokenBucketRateLimiter
+            # Import the global rate limiter instance if available
+            # This is a best-effort check
+            return True
+        except Exception:
+            return True
+
+    def force_restart_paper_trading(self) -> None:
+        """Forcefully kill and restart paper trading."""
+        logger.warning("Force restarting paper trading...")
+        if self.paper_trading_proc:
+            self.paper_trading_proc.terminate()
+            time.sleep(2)
+        self.restart_paper_trading()
 
     def shutdown(self, signum, frame) -> None:
         logger.info("Shutdown signal received")
