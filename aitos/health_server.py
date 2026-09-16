@@ -40,7 +40,9 @@ class HealthServer:
             return {}
         try:
             snap = self._rate_limiter.snapshot()
-            snap["_status"] = "OK" if snap.get("tokens_remaining", 0) > 0 else "CRITICAL"
+            snap["_status"] = (
+                "OK" if snap.get("tokens_remaining", 0) > 0 else "CRITICAL"
+            )
             return snap
         except Exception:
             return {"_status": "ERROR"}
@@ -229,7 +231,9 @@ class HealthServer:
         # Add rate limiter metrics
         rl_status = await self._get_rate_limiter_status()
         if rl_status:
-            lines.append("# HELP aitos_rate_limiter_tokens Remaining tokens in the bucket")
+            lines.append(
+                "# HELP aitos_rate_limiter_tokens Remaining tokens in the bucket"
+            )
             lines.append("# TYPE aitos_rate_limiter_tokens gauge")
             lines.append(
                 f'aitos_rate_limiter_tokens {rl_status.get("tokens_remaining", 0)}'
@@ -244,7 +248,9 @@ class HealthServer:
             lines.append(
                 f'aitos_rate_limiter_wait_count {rl_status.get("wait_count", 0)}'
             )
-            lines.append("# HELP aitos_rate_limiter_slow_wait_count Total slow waits (>100ms)")
+            lines.append(
+                "# HELP aitos_rate_limiter_slow_wait_count Total slow waits (>100ms)"
+            )
             lines.append("# TYPE aitos_rate_limiter_slow_wait_count counter")
             lines.append(
                 f'aitos_rate_limiter_slow_wait_count {rl_status.get("slow_wait_count", 0)}'

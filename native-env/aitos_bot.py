@@ -186,7 +186,7 @@ class AITOSBot:
         )
         # Rate limiter status
         try:
-            from aitos.exchange.rate_limiter import TokenBucketRateLimiter
+
             # Try to get global limiter state
             rl_status = self.check_rate_limiter()
             status.append(f"{'✅' if rl_status else '⚠️'} Rate Limiter")
@@ -260,7 +260,7 @@ class AITOSBot:
     def check_rate_limiter(self) -> bool:
         """Check if the rate limiter has sufficient tokens."""
         try:
-            from aitos.exchange.rate_limiter import TokenBucketRateLimiter
+
             # Import the global rate limiter instance if available
             # This is a best-effort check
             return True
