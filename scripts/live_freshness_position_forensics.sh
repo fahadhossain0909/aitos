@@ -16,13 +16,13 @@ REPORT="$OUT/report.md"
 docker logs --since "${WINDOW_MINUTES}m" --timestamps "$PAPER_CONTAINER" 2>&1 > "$LOG" || true
 curl -fsS --max-time 5 http://127.0.0.1:8090/health > "$HEALTH" 2>/dev/null || printf '{}\n' > "$HEALTH"
 
-python3 - "$LOG" "$HEALTH" "$TIMELINE" "$REPORT" <<'PY'
+python3 - "$LOG" "$HEALTH" "$TIMELINE" "$REPORT" "$WINDOW_MINUTES" <<'PY'
 from __future__ import annotations
 import json, re, sys
 from collections import Counter
 from datetime import datetime, timezone
 
-log_path, health_path, timeline_path, report_path = sys.argv[1:]
+log_path, health_path, timeline_path, report_path, window_minutes = sys.argv[1:]
 lines = open(log_path, errors="replace").read().splitlines()
 try:
     health = json.load(open(health_path))
@@ -116,7 +116,7 @@ health_hits=find_values(health,wanted)
 
 with open(report_path,"w") as f:
     f.write("# AITOS Live Freshness + Position Lifecycle Forensics\n\n")
-    f.write(f"Observation window: last {WINDOW_MINUTES} minutes\n\n")
+    f.write(f"Observation window: last {window_minutes} minutes\n\n")
     f.write("## Evidence counts\n\n")
     for key in sorted(counts):
         f.write(f"- `{key}`: **{counts[key]}**\n")
