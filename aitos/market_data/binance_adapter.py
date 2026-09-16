@@ -14,6 +14,7 @@ from .legacy_bridge import (
     kline_event,
     trade_event,
 )
+from aitos.exchange.parsing import parse_agg_trade_ws, parse_kline_ws
 from .venues import MarketType, Venue, VenueCapabilities
 
 KLINE_TIMEFRAME = "1m"
@@ -204,7 +205,13 @@ class _ManagedCanonicalTradeStream:
         return self
 
     async def __anext__(self) -> MarketEvent:
-        trade = await self._raw.__anext__()
+        item = await self._raw.__anext__()
+        # ManagedStreamSet yields (data, stream_name) tuples; data is raw dict.
+        if isinstance(item, tuple):
+            data = item[0]
+        else:
+            data = item
+        trade = parse_agg_trade_ws(data)
         return trade_event(
             trade, market_type=self._parent.market_type, source=MarketSource.WEBSOCKET
         )
@@ -229,7 +236,13 @@ class _ManagedCanonicalKlineStream:
         return self
 
     async def __anext__(self) -> MarketEvent:
-        kline = await self._raw.__anext__()
+        item = await self._raw.__anext__()
+        # ManagedStreamSet yields (data, stream_name) tuples; data is raw dict.
+        if isinstance(item, tuple):
+            data = item[0]
+        else:
+            data = item
+        kline = parse_kline_ws(data)
         return kline_event(
             kline, market_type=self._parent.market_type, source=MarketSource.WEBSOCKET
         )

@@ -110,6 +110,14 @@ class CanonicalMarketDataRuntime:
             and hasattr(exchange, "websocket_transport_snapshot")
             else {}
         )
+        # For managed (incremental) streams, the transport-level
+        # last_first_frame_at / last_handshake_at are shared across all
+        # streams on the *same* websocket.  The orderbook bootstrap
+        # classification therefore MUST NOT consult them — it would
+        # Trip on a handshake timestamp that belongs to a different
+        # stream's reconnect.
+        if snapshot.get("subscription_mode") == "managed_dynamic":
+            return "idle_timeout", snapshot
         if stream_name != "orderbook":
             return "idle_timeout", snapshot
         handshake = snapshot.get("last_handshake_at")
@@ -412,8 +420,9 @@ class CanonicalMarketDataRuntime:
                 stream = stream_factory().__aiter__()
                 while not self._stopped:
                     try:
+                        timeout = None if stream_name in ("orderbook", "trades", "klines") else self.stream_idle_timeout_seconds
                         event = await asyncio.wait_for(
-                            stream.__anext__(), timeout=self.stream_idle_timeout_seconds
+                            stream.__anext__(), timeout=timeout
                         )
                     except StopAsyncIteration:
                         failure_kind = "stream_end"

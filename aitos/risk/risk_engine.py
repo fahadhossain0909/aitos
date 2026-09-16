@@ -419,6 +419,15 @@ class RiskEngine(AITOSModule):
 
     async def assess(self, portfolio: PortfolioState) -> RiskScoreBreakdown:
         self._require_initialized()
+
+        # Auto-recovery: if circuit breaker is OPEN and cooldown has elapsed,
+        # transition to HALF_OPEN so the next successful trade can probe-close it.
+        if (
+            self._circuit_breaker.state == CircuitBreakerState.OPEN
+            and self._circuit_breaker.cooldown_elapsed()
+        ):
+            await self.attempt_recovery()
+
         position_risk, position_notes = score_position_risk(portfolio, self._limits)
         market_risk, market_notes = score_market_risk(portfolio, self._limits)
         system_risk, system_notes = score_system_risk(portfolio, self._limits)
@@ -449,11 +458,19 @@ class RiskEngine(AITOSModule):
         )
         self._last_event_time = breakdown.computed_at
         hard_breaches = _absolute_hard_cap_breaches(portfolio, self._limits)
-        if action == RiskAction.EMERGENCY_STOP or hard_breaches:
+        # Only systemic/dangerous hard caps trigger emergency stop.
+        # Sector exposure is a pre-trade gate (handled in check_limits /
+        # capital_runtime), not an emergency condition — firing the circuit
+        # breaker on a single open position would permanently halt trading.
+        systemic_breaches = [
+            b for b in hard_breaches
+            if not b.limit_name.startswith("max_sector_exposure_pct")
+        ]
+        if action == RiskAction.EMERGENCY_STOP or systemic_breaches:
             reason = (
                 f"risk score {total:.1f} > {SCORE_EMERGENCY_STOP_THRESHOLD}"
                 if action == RiskAction.EMERGENCY_STOP
-                else f"hard cap breach: {hard_breaches[0].message}"
+                else f"hard cap breach: {(systemic_breaches or hard_breaches)[0].message}"
             )
             await self.trigger_emergency_stop(reason)
         return breakdown

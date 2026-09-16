@@ -12,7 +12,7 @@ import os
 BINANCE_USDM_WS_BASE = "wss://fstream.binance.com"
 # Binance's current USDⓈ-M WebSocket Streams SDK connects to the market
 # routing path and then sends SUBSCRIBE requests over that connection.
-BINANCE_USDM_WS_COMBINED = f"{BINANCE_USDM_WS_BASE}/market/stream"
+BINANCE_USDM_WS_COMBINED = f"{BINANCE_USDM_WS_BASE}/stream"
 # Kept for compatibility with callers/tests that use the raw-stream constant.
 BINANCE_USDM_WS_RAW = f"{BINANCE_USDM_WS_BASE}/market/ws"
 # Legacy public-route names are retained as aliases. All USDⓈ-M public market

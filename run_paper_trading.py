@@ -42,7 +42,7 @@ from aitos.xai.persistence import load_attention_model, save_attention_model
 logger = get_logger("aitos.run_paper_trading")
 SCAN_INTERVAL_SECONDS = 60.0
 KLINE_TIMEFRAME = "15m"
-STARTING_EQUITY_USD = 10_000.0
+STARTING_EQUITY_USD = 1_000.0
 HEALTH_SERVER_PORT = 8090
 PAPER_MIN_SCORE_THRESHOLD = 50.0
 
@@ -209,6 +209,32 @@ async def main() -> None:
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
+
+    # Self-healing: periodically re-initialize modules that have died
+    async def _self_heal_loop() -> None:
+        while not stop_event.is_set():
+            await asyncio.sleep(300)  # Check every 5 minutes
+            for module in components.all_modules():
+                try:
+                    health = await module.health_check()
+                    if health.status.value == "unhealthy":
+                        logger.warning(
+                            "self-healing: restarting unhealthy module",
+                            extra={"aitos_extra": {"module": module.module_id}},
+                        )
+                        await module.initialize({})
+                except Exception as exc:
+                    logger.error(
+                        "self-healing: failed to re-initialize module",
+                        extra={
+                            "aitos_extra": {
+                                "module": getattr(module, "module_id", "unknown"),
+                                "error": str(exc),
+                            }
+                        },
+                    )
+
+    heal_task = asyncio.create_task(_self_heal_loop())
     from aitos.intelligence.position_runtime import get_tracked_lifecycles
     from aitos.trading.price_safety_net import PositionPriceSafetyNet
 
@@ -223,6 +249,16 @@ async def main() -> None:
         while not stop_event.is_set():
             try:
                 submitted = await run_scan_and_trade_cycle(components, tracker)
+                # Attempt circuit breaker recovery after each scan cycle so a
+                # stale OPEN state doesn't block new entries forever. A
+                # transient spike (API blip, stale data) can pause trading
+                # until someone manually intervenes without this.
+                recovered = await components.risk_engine.attempt_recovery()
+                if recovered:
+                    # Scan cycle succeeded while HALF_OPEN → confirm recovery
+                    components.risk_engine.circuit_breaker.record_probe_result(
+                        True, "scan cycle success"
+                    )
                 # These do blocking pickle.dump()+file-replace I/O. Run them
                 # off the event loop -- a synchronous call here previously
                 # stalled *all* concurrent async work (websocket recv,
@@ -258,6 +294,11 @@ async def main() -> None:
             except asyncio.TimeoutError:
                 pass
     finally:
+        heal_task.cancel()
+        try:
+            await heal_task
+        except asyncio.CancelledError:
+            pass
         await price_safety_net.stop()
         await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)

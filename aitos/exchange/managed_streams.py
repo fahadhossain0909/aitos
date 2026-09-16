@@ -95,15 +95,26 @@ class ManagedStreamSet:
             ):
                 if self._closed:
                     return
+                # Skip None sentinel from reconnects
+                if data is None:
+                    continue
                 try:
                     self._queue.put_nowait((data, stream_name))
                 except asyncio.QueueFull:
+                    # Drain oldest entries
                     while not self._queue.empty():
                         try:
                             self._queue.get_nowait()
                         except asyncio.QueueEmpty:
                             break
+                    # Retry once
+                    try:
                         self._queue.put_nowait((data, stream_name))
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "ManagedStreamSet queue full after drain, dropping event",
+                            extra={"aitos_extra": {"kind": self._kind}},
+                        )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -144,7 +155,6 @@ class ManagedOrderBookStream:
         self._levels = levels
         self._symbols: list[str] = list(dict.fromkeys(s.upper() for s in symbols))
         self._books: dict[str, LocalOrderBook] = {}
-        self._pending_bootstrap: set[str] = set(self._symbols)
         self._lock = asyncio.Lock()
 
         def to_stream(symbol: str) -> str:
@@ -163,7 +173,6 @@ class ManagedOrderBookStream:
             removed = [s for s in self._symbols if s not in normalized]
             for symbol in removed:
                 self._books.pop(symbol, None)
-            self._pending_bootstrap.update(added)
             self._symbols = normalized
         if self._to_stream is not None:
             streams = [self._to_stream(s) for s in normalized]
@@ -184,47 +193,22 @@ class ManagedOrderBookStream:
                 if book is None:
                     if symbol not in self._symbols:
                         continue
-                    try:
-                        book = await self._bootstrap(symbol)
-                    except Exception as exc:
-                        logger.error(
-                            "Managed orderbook bootstrap failed",
-                            extra={
-                                "aitos_extra": {
-                                    "symbol": symbol,
-                                    "error": str(exc),
-                                }
-                            },
-                        )
-                        continue
+                    diff = parse_depth_diff_ws(data)
+                    book = LocalOrderBook(symbol=symbol, max_levels=self._levels)
+                    book.seed_from_diff(diff)
                     self._books[symbol] = book
-                try:
-                    snapshot = book.apply(parse_depth_diff_ws(data))
-                except OrderBookSequenceError:
-                    try:
-                        book = await self._bootstrap(symbol)
-                    except Exception as exc:
-                        logger.error(
-                            "Managed orderbook re-bootstrap failed",
-                            extra={
-                                "aitos_extra": {
-                                    "symbol": symbol,
-                                    "error": str(exc),
-                                }
-                            },
-                        )
-                        continue
+                    return book.snapshot(diff.event_time_ms)
+            try:
+                snapshot = book.apply(parse_depth_diff_ws(data))
+            except OrderBookSequenceError:
+                diff = parse_depth_diff_ws(data)
+                book = LocalOrderBook(symbol=symbol, max_levels=self._levels)
+                book.seed_from_diff(diff)
+                async with self._lock:
                     self._books[symbol] = book
-                    continue
-                if snapshot is not None:
-                    return snapshot
-
-    async def _bootstrap(self, symbol: str) -> LocalOrderBook:
-        book = LocalOrderBook(symbol=symbol, max_levels=self._levels)
-        book.seed(
-            await self._adapter.fetch_order_book(symbol, limit=max(self._levels, 50))
-        )
-        return book
+                return book.snapshot(diff.event_time_ms)
+            if snapshot is not None:
+                return snapshot
 
     async def aclose(self) -> None:
         await self._stream_set.aclose()

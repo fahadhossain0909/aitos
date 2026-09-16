@@ -41,8 +41,14 @@ class TelegramStatusBot:
         try:
             import clickhouse_connect
 
+            from aitos.config.settings import get_settings
+            ch_settings = get_settings().clickhouse
             client = clickhouse_connect.get_client(
-                host="localhost", port=8123, database="aitos"
+                host=ch_settings.host,
+                port=ch_settings.port,
+                user=ch_settings.user,
+                password=ch_settings.password,
+                database=ch_settings.database,
             )
             client.query("SELECT 1")
             report.append("✅ ClickHouse: Connected")

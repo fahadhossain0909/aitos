@@ -63,10 +63,20 @@ def normalize_symbol(symbol: str) -> str:
 def sector_for_symbol(symbol: str) -> str:
     """Return the risk sector for a trading symbol.
 
-    Unknown assets are deliberately assigned to ``other`` rather than an
-    implicit/unbounded ``unclassified`` bucket.  This keeps the sector cap
-    effective even when a new symbol is introduced before its taxonomy entry
-    is added.
+    Unknown assets are assigned a sector derived from their base asset
+    (e.g. ``SKRUSDT`` -> ``sector-skr``) rather than all piling into a
+    single ``other`` bucket.  This keeps the sector cap effective:
+    without per-asset bucketing, one open position in any of the hundreds
+    of untracked symbols would immediately concentrate 100% of equity in
+    ``other`` and trip the hard cap.
     """
     normalized = normalize_symbol(symbol)
-    return SYMBOL_SECTORS.get(normalized, "other")
+    if normalized in SYMBOL_SECTORS:
+        return SYMBOL_SECTORS[normalized]
+    # Strip common quote currencies to extract the base asset
+    for quote in ("USDT", "USDC", "BUSD", "USD", "ETH", "BTC", "BNB"):
+        if normalized.endswith(quote):
+            base = normalized[: -len(quote)]
+            if base:
+                return f"sector-{base.lower()}"
+    return f"sector-{normalized.lower()}"

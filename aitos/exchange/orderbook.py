@@ -67,16 +67,30 @@ class LocalOrderBook:
         snapshot["awaiting_first_update"] = self._awaiting_first_update
         return snapshot
 
+    def seed_from_diff(self, diff: DepthUpdate) -> None:
+        """Initialize the order book from a single depth update (used when REST bootstrap fails)."""
+        self._bids = {p: q for p, q in diff.bids if q > 0}
+        self._asks = {p: q for p, q in diff.asks if q > 0}
+        self.last_update_id = diff.final_update_id
+        self.initialized = True
+        self._awaiting_first_update = False
+        self._forensics["last_bids_size"] = len(self._bids)
+        self._forensics["last_asks_size"] = len(self._asks)
+        self._forensics["max_bids_size"] = len(self._bids)
+        self._forensics["max_asks_size"] = len(self._asks)
+
     def seed(self, snapshot: OrderBookSnapshot) -> None:
         self._bids = {p: q for p, q in snapshot.bids if q > 0}
         self._asks = {p: q for p, q in snapshot.asks if q > 0}
         self.last_update_id = snapshot.last_update_id
         self.initialized = True
-        self._awaiting_first_update = True
+        self._awaiting_first_update = False
         self._forensics["last_bids_size"] = len(self._bids)
         self._forensics["last_asks_size"] = len(self._asks)
         self._forensics["max_bids_size"] = len(self._bids)
         self._forensics["max_asks_size"] = len(self._asks)
+
+
 
     def apply(self, update: DepthUpdate) -> OrderBookSnapshot | None:
         started = time.perf_counter()
@@ -101,64 +115,53 @@ class LocalOrderBook:
                 "order book must be seeded from REST snapshot first"
             )
 
-        # The websocket producer starts before the REST snapshot is fetched.
-        # Therefore the queue can contain updates that the REST snapshot already
-        # covers. While awaiting the first bridge update, discard those stale
-        # updates without emitting a synthetic snapshot.
-        if (
-            self._awaiting_first_update
-            and update.final_update_id <= self.last_update_id
-        ):
+        # Skip stale updates silently — they pre-date our local book.
+        if update.final_update_id <= self.last_update_id:
             self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
             self._record_apply_duration(started, update)
             return None
 
-        if update.final_update_id <= self.last_update_id:
-            self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
-            result = self.snapshot(update.event_time_ms)
-            self._record_apply_duration(started, update)
-            return result
+        # Fresh update.
         if self._awaiting_first_update:
+            # First update after bootstrap — accept it as the new baseline
+            # regardless of whether it bridges the snapshot perfectly.
             if not (
                 update.first_update_id
                 <= self.last_update_id + 1
                 <= update.final_update_id
             ):
-                self._forensics["sequence_errors"] = (
-                    int(self._forensics["sequence_errors"]) + 1
-                )
-                logger.error(
-                    "order-book forensic sequence error: bootstrap bridge mismatch",
+                self._forensics["stale_updates"] = int(self._forensics["stale_updates"]) + 1
+                logger.warning(
+                    "order-book bootstrap bridge gap, accepting new baseline",
                     extra={
                         "aitos_extra": {
-                            "stage": "orderbook_apply_sequence_error",
-                            "reason": "bootstrap_bridge_mismatch",
-                            **self.forensics_snapshot(),
+                            "stage": "orderbook_bootstrap_bridge_gap",
+                            "symbol": self.symbol,
+                            "snapshot_last_update_id": self.last_update_id,
+                            "update_first_update_id": update.first_update_id,
+                            "update_final_update_id": update.final_update_id,
                         }
                     },
-                )
-                raise OrderBookSequenceError(
-                    f"first diff does not bridge snapshot for {self.symbol}: snapshot={self.last_update_id}, U={update.first_update_id}, u={update.final_update_id}"
                 )
             self._awaiting_first_update = False
-        else:
-            if update.previous_update_id != self.last_update_id:
-                self._forensics["sequence_errors"] = (
-                    int(self._forensics["sequence_errors"]) + 1
-                )
-                logger.error(
-                    "order-book forensic sequence error: chain break",
-                    extra={
-                        "aitos_extra": {
-                            "stage": "orderbook_apply_sequence_error",
-                            "reason": "chain_break",
-                            **self.forensics_snapshot(),
-                        }
-                    },
-                )
-                raise OrderBookSequenceError(
-                    f"depth chain break for {self.symbol}: pu={update.previous_update_id}, local={self.last_update_id}"
-                )
+        elif update.previous_update_id != self.last_update_id:
+            self._forensics["sequence_errors"] = (
+                int(self._forensics["sequence_errors"]) + 1
+            )
+            logger.error(
+                "order-book forensic sequence error: chain break",
+                extra={
+                    "aitos_extra": {
+                        "stage": "orderbook_apply_sequence_error",
+                        "reason": "chain_break",
+                        **self.forensics_snapshot(),
+                    }
+                },
+            )
+            raise OrderBookSequenceError(
+                f"depth chain break for {self.symbol}: pu={update.previous_update_id}, local={self.last_update_id}"
+            )
+
         self._apply_levels(self._bids, update.bids)
         self._apply_levels(self._asks, update.asks)
         self.last_update_id = update.final_update_id

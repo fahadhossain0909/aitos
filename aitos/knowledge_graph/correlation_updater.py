@@ -52,6 +52,7 @@ class SymbolCorrelationUpdater(AITOSModule):
         self._kline_lookback = kline_lookback
         self._interval_seconds = interval_seconds
         self._initialized = False
+        self._shutting_down = False
         self._task: asyncio.Task | None = None
         self._last_run_at: str | None = None
         self._pairs_updated_last_run = 0
@@ -69,6 +70,12 @@ class SymbolCorrelationUpdater(AITOSModule):
 
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
+            # Self-healing: restart the loop if the task died
+            if self._task is not None and self._task.done():
+                logger.warning("correlation loop task was dead; restarting")
+                self._task = asyncio.create_task(
+                    self._run_loop(), name="correlation-update-loop"
+                )
             return
         self._task = asyncio.create_task(
             self._run_loop(), name="correlation-update-loop"
@@ -76,10 +83,21 @@ class SymbolCorrelationUpdater(AITOSModule):
         self._initialized = True
         logger.info(
             "SymbolCorrelationUpdater initialized",
-            extra={"aitos_extra": {"symbols": self._symbols}},
+            extra={"aitos_extra": {"symbols": len(self._symbols)}},
         )
 
     async def health_check(self) -> HealthStatus:
+        # Defensive restart: if the background task died (cancelled,
+        # exception, etc.), respawn it so correlation updates resume.
+        if self._task is None or self._task.done():
+            if self._initialized and not self._shutting_down:
+                logger.warning(
+                    "correlation update task died, restarting",
+                    extra={"aitos_extra": {"errors": self._errors}},
+                )
+                self._task = asyncio.create_task(
+                    self._run_loop(), name="correlation-update-loop"
+                )
         task_alive = self._task is not None and not self._task.done()
         return HealthStatus(
             module_id=self.module_id,
@@ -93,12 +111,14 @@ class SymbolCorrelationUpdater(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        self._shutting_down = True
         if self._task is not None:
             self._task.cancel()
             try:
                 await asyncio.wait_for(self._task, timeout=grace_period_seconds)
             except (asyncio.CancelledError, asyncio.TimeoutError):
                 pass
+        self._initialized = False
         logger.info("SymbolCorrelationUpdater shut down")
 
     async def emit_events(self) -> AsyncIterator[Event]:
@@ -154,11 +174,16 @@ class SymbolCorrelationUpdater(AITOSModule):
     # -- Internals --------------------------------------------------------------
 
     async def _run_loop(self) -> None:
+        """Background loop with per-iteration error isolation."""
         try:
-            while True:
+            while not self._shutting_down:
                 await asyncio.sleep(self._interval_seconds)
+                if self._shutting_down:
+                    break
                 try:
                     await self.run_once()
+                except asyncio.CancelledError:
+                    raise
                 except Exception as exc:  # noqa: BLE001
                     self._errors += 1
                     logger.error("correlation update loop iteration failed: %s", exc)
