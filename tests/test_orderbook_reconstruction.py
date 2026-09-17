@@ -21,7 +21,9 @@ def test_first_diff_bridges_rest_snapshot():
     book.seed(snapshot(100))
     # After seed, _awaiting_first_update is False; first update must have
     # previous_update_id == last_update_id to be accepted.
-    result = book.apply(DepthUpdate(101, 102, 100, ((100.0, 7.0),), ((101.0, 0.0),), 1000))
+    result = book.apply(
+        DepthUpdate(101, 102, 100, ((100.0, 7.0),), ((101.0, 0.0),), 1000)
+    )
     assert result.last_update_id == 102
     assert result.bids[0] == (100.0, 7.0)
     assert result.asks[0] == (102.0, 2.0)
