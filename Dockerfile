@@ -25,6 +25,14 @@ COPY --chown=aitos:aitos aitos/ ./aitos/
 COPY --chown=aitos:aitos scripts/ ./scripts/
 COPY --chown=aitos:aitos run_paper_trading.py run_live_trading.py run_continual_learning.py ./
 
+# app.py still references the historical /home/fahad/aitos/models path during
+# module import. Keep that legacy path as a symlink into the canonical /models
+# runtime volume so import-time directory creation is writable and persistent.
+# /models is mounted by docker-compose from MODEL_DATA_DIR.
+RUN mkdir -p /models /home/fahad/aitos \
+    && ln -s /models /home/fahad/aitos/models \
+    && chown -R aitos:aitos /models /home/fahad
+
 # Non-root user -- the app has no business running as root, and root
 # inside a container is one less thing to worry about if anything in the
 # dependency chain is ever compromised.

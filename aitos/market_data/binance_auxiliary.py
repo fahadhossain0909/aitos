@@ -7,6 +7,8 @@ from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from typing import Any
 
+from aitos.logging_setup import get_logger
+
 from .binance_adapter import BinanceCanonicalMarketDataAdapter
 from .contracts import MarketEvent, MarketEventType, MarketSource
 
@@ -15,6 +17,8 @@ OPEN_INTEREST_POLL_SECONDS = 15.0
 OPEN_INTEREST_FETCH_TIMEOUT_SECONDS = 5.0
 INSTRUMENT_POLL_SECONDS = 300.0
 TOP_SYMBOL_LIMIT = 50
+
+logger = get_logger("aitos.market_data.binance_auxiliary")
 
 
 def _dt(ms: float | str | None) -> datetime:
