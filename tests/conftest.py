@@ -13,6 +13,28 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
+import tempfile
+from pathlib import Path
+
+# ``aitos.app`` currently creates its online-model directories at import time
+# using a developer-specific ``/home/fahad`` path. Keep that legacy path from
+# breaking CI/test collection by redirecting only those exact model-directory
+# creations to a writable temporary location. This is deliberately test-only;
+# production path handling remains unchanged.
+_TEST_MODEL_ROOT = Path(tempfile.mkdtemp(prefix="aitos-models-"))
+_ORIGINAL_MAKEDIRS = os.makedirs
+_MODEL_PATH_PREFIX = "/home/fahad/aitos/models/"
+
+
+def _test_makedirs(path, mode=0o777, exist_ok=False):
+    raw_path = os.fspath(path)
+    if raw_path.startswith(_MODEL_PATH_PREFIX):
+        path = _TEST_MODEL_ROOT / raw_path[len(_MODEL_PATH_PREFIX) :]
+    return _ORIGINAL_MAKEDIRS(path, mode=mode, exist_ok=exist_ok)
+
+
+os.makedirs = _test_makedirs
 
 import pytest
 import pytest_asyncio
@@ -21,6 +43,13 @@ from fakeredis import aioredis as fake_aioredis
 from aitos.eventbus.redis_bus import EventBus
 from aitos.kernel.ai_kernel import AIKernel
 from aitos.risk.risk_engine import RiskEngine
+
+
+@pytest.fixture(scope="session", autouse=True)
+def restore_test_makedirs():
+    """Restore the process-global ``os.makedirs`` patch after the test run."""
+    yield
+    os.makedirs = _ORIGINAL_MAKEDIRS
 
 
 @pytest_asyncio.fixture
