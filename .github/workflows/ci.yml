@@ -64,7 +64,7 @@ jobs:
       CLICKHOUSE_PASSWORD: aitos_test_password
       CLICKHOUSE_DATABASE: aitos
       TESTING: 'true'
-      MODEL_DATA_DIR: ${{ runner.temp }}/aitos-models
+      MODEL_DATA_DIR: ${{ github.workspace }}/.ci-models
       INTEGRATION_REDIS_URL: redis://:ci-only-not-used@127.0.0.1:6379/0
       INTEGRATION_NEO4J_URI: bolt://127.0.0.1:7687
       INTEGRATION_NEO4J_USER: neo4j
