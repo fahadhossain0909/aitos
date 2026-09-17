@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-
-# Ensure the online RL model directory exists at import time so scorer
-# persistence never fails with FileNotFoundError on first save.
-import os as _os
+import os
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Protocol
 
 from aitos.core.contracts import AITOSModule, Event
@@ -22,11 +20,12 @@ from aitos.intelligence.rl_feedback import RLFeedbackLoop
 from aitos.intelligence.rl_policy import RLPolicyScorer, TabularBanditRLScorer
 from aitos.intelligence.scanner import OpportunityScanner
 
-for _rl_dir in (
-    "/home/fahad/aitos/models/online_rl",
-    "/home/fahad/aitos/models/online_ml",
-):
-    _os.makedirs(_rl_dir, exist_ok=True)
+# Keep model persistence independent of any developer-specific host path.
+# MODEL_DATA_DIR is already part of the deployment environment contract;
+# /models is the portable container default.
+_MODEL_DATA_DIR = Path(os.getenv("MODEL_DATA_DIR", "/models"))
+for _rl_dir in (_MODEL_DATA_DIR / "online_rl", _MODEL_DATA_DIR / "online_ml"):
+    _rl_dir.mkdir(parents=True, exist_ok=True)
 
 from aitos.journal.decision_repository import DecisionJournalRepository
 from aitos.journal.journal_system import JournalSystem
