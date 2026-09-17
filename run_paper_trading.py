@@ -8,6 +8,7 @@ import signal
 
 from redis.asyncio import Redis
 
+from aitos.agents import LearningAgent, MarketAgent, PortfolioAgent, RiskAgent
 from aitos.app import (
     PaperPortfolioTracker,
     build_system,
@@ -28,6 +29,7 @@ from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.journal.repository import JournalRepository
 from aitos.learning.recorder import LearningExperienceRecorder
+from aitos.learning.worker import ContinualLearningWorker
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
@@ -45,6 +47,41 @@ KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 1_000.0
 HEALTH_SERVER_PORT = 8090
 PAPER_MIN_SCORE_THRESHOLD = 50.0
+STALE_POSITION_MAX_HOURS = 72
+
+
+async def _close_stale_positions(components) -> None:
+    """Close open trades held longer than STALE_POSITION_MAX_HOURS."""
+    from datetime import datetime, timezone
+    from aitos.models.trade import TradeLifecycleState
+
+    now = datetime.now(timezone.utc)
+    for trade in list(components.trade_lifecycle.get_open_trades()):
+        if trade.state != TradeLifecycleState.POSITION_OPENED:
+            continue
+        try:
+            entry_dt = datetime.fromisoformat(trade.entry_time)
+            if entry_dt.tzinfo is None:
+                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+            age_hours = (now - entry_dt).total_seconds() / 3600
+            if age_hours >= STALE_POSITION_MAX_HOURS:
+                # Use last known price from trade's own tracking
+                last_price = getattr(trade, 'last_marked_price', None)
+                if last_price is None:
+                    last_price = trade.entry_price
+                await components.trade_lifecycle.close_trade(
+                    trade.trade_id, last_price, "stale_position_timeout"
+                )
+                logger.warning(
+                    "stale position auto-closed",
+                    extra={"aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "age_hours": round(age_hours, 1),
+                    }},
+                )
+        except Exception:
+            logger.exception("stale position check failed", extra={"aitos_extra": {"trade_id": trade.trade_id}})
 
 
 async def connect_redis_with_retry(settings) -> Redis:
@@ -144,7 +181,7 @@ async def main() -> None:
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
     outcome_classifier.load_state()
-    attention_path = "/models/online_ml/attention_explainer.pkl"
+    attention_path = "/home/fahad/aitos/models/online_ml/attention_explainer.pkl"
     attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
     components = await build_system(
         event_bus=event_bus,
@@ -195,6 +232,38 @@ async def main() -> None:
     )
     install_protected_position_monitor()
     await initialize_all(components)
+
+    # Start continual-learning worker to incrementally train on historical
+    # backtest experiences stored in ClickHouse. Runs in a background thread
+    # because its run_forever() loop is synchronous/blocking.
+    learning_worker = ContinualLearningWorker(
+        host=settings.clickhouse.host,
+        port=settings.clickhouse.port,
+        user=settings.clickhouse.user,
+        password=settings.clickhouse.password,
+        database=settings.clickhouse.database,
+    )
+    learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
+    learning_task.set_name("continual-learning-worker")
+
+    # Register AI Kernel agents for multi-agent consensus
+    market_agent = MarketAgent(event_bus=event_bus)
+    risk_agent = RiskAgent(event_bus=event_bus)
+    portfolio_agent = PortfolioAgent(event_bus=event_bus)
+    learning_agent = LearningAgent(event_bus=event_bus)
+
+    for agent in (market_agent, risk_agent, portfolio_agent, learning_agent):
+        await agent.initialize({})
+        await components.kernel.register_agent(agent)
+        logger.info(
+            "registered AI agent",
+            extra={"aitos_extra": {"agent_id": agent.module_id, "weight": agent.consensus_weight}},
+        )
+    logger.info(
+        "AI Kernel agents registered",
+        extra={"aitos_extra": {"agents": components.kernel._world_state.registered_agents}},
+    )
+
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     await market_os_persistence.initialize({})
     experience_recorder = LearningExperienceRecorder(
@@ -202,7 +271,7 @@ async def main() -> None:
     )
     await experience_recorder.initialize({})
     health_server = HealthServer(
-        components.all_modules() + [experience_recorder, market_os_persistence],
+        components.all_modules() + [experience_recorder, market_os_persistence, market_agent, risk_agent, portfolio_agent, learning_agent],
         # The health endpoint is intentionally container/network reachable.
         # nosec B104 - binding all interfaces is required for the Docker health check.
         host="0.0.0.0",  # nosec B104
@@ -238,7 +307,13 @@ async def main() -> None:
     from aitos.intelligence.position_runtime import get_tracked_lifecycles
     from aitos.trading.price_safety_net import PositionPriceSafetyNet
 
-    price_safety_net = PositionPriceSafetyNet(exchange, get_tracked_lifecycles)
+    from aitos.config.settings import get_settings as _get_settings
+    _settings = _get_settings()
+    price_safety_net = PositionPriceSafetyNet(
+        exchange,
+        get_tracked_lifecycles,
+        stale_symbol_blacklist=_settings.stale_symbol_blacklist,
+    )
     price_safety_net.start()
     tracker = PaperPortfolioTracker(starting_equity_usd=STARTING_EQUITY_USD)
     stop_event = asyncio.Event()
@@ -287,6 +362,9 @@ async def main() -> None:
                         }
                     },
                 )
+
+                # Close stale positions (holding > STALE_POSITION_MAX_HOURS)
+                await _close_stale_positions(components)
             except Exception as exc:
                 logger.error("scan cycle failed: %s", exc)
             try:
@@ -299,6 +377,13 @@ async def main() -> None:
             await heal_task
         except asyncio.CancelledError:
             pass
+        # Gracefully stop the continual-learning worker
+        learning_task.cancel()
+        try:
+            await learning_task
+        except asyncio.CancelledError:
+            pass
+        await asyncio.to_thread(learning_worker.shutdown)
         await price_safety_net.stop()
         await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)

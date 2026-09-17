@@ -26,7 +26,7 @@ from aitos.market_data.okx_adapter import OKXCanonicalMarketDataAdapter
 
 
 def test_binance_usdm_uses_current_market_stream_paths():
-    assert WS_MARKET_BASE_URL == "wss://fstream.binance.com/market/stream"
+    assert WS_MARKET_BASE_URL == "wss://fstream.binance.com/stream"
     assert WS_MARKET_RAW_BASE_URL == "wss://fstream.binance.com/market/ws"
     assert WS_PUBLIC_BASE_URL == WS_MARKET_BASE_URL
     assert WS_PUBLIC_RAW_BASE_URL == WS_MARKET_RAW_BASE_URL

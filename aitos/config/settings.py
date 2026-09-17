@@ -86,6 +86,15 @@ class AITOSSettings(BaseSettings):
     # Governance / safety — production changes require human approval per the AI Constitution.
     require_human_approval_for_prod: bool = True
 
+    # Stale symbols whose price is structurally unreliable (illiquid, delisted,
+    # etc.). The position price safety net skips these — it would otherwise
+    # hammer a REST endpoint for a symbol whose price never meaningfully
+    # changes, producing noisy REST-fallback log lines and wasting cycles.
+    stale_symbol_blacklist: list[str] = Field(
+        default=["TRUTHUSDT", "PDDUSDT"],
+        description="Symbols to skip in the position price safety-net REST fallback",
+    )
+
     redis: RedisSettings = RedisSettings()
     clickhouse: ClickHouseSettings = ClickHouseSettings()
     neo4j: Neo4jSettings = Neo4jSettings()

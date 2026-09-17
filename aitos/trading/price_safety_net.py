@@ -45,12 +45,14 @@ class PositionPriceSafetyNet:
         freshness: PriceFreshnessTracker | None = None,
         stale_after_seconds: float = DEFAULT_STALE_AFTER_SECONDS,
         poll_interval_seconds: float = DEFAULT_POLL_INTERVAL_SECONDS,
+        stale_symbol_blacklist: list[str] | None = None,
     ) -> None:
         self._exchange = exchange
         self._lifecycles_provider = lifecycles_provider
         self._freshness = freshness or get_global_tracker()
         self._stale_after = stale_after_seconds
         self._interval = poll_interval_seconds
+        self._blacklist = {s.upper() for s in (stale_symbol_blacklist or [])}
         self._task: asyncio.Task | None = None
         self._stopped = True
         self.polls_run = 0
@@ -97,6 +99,8 @@ class PositionPriceSafetyNet:
             for trade in trades:
                 symbol = str(getattr(trade, "symbol", "") or "").upper()
                 if not symbol:
+                    continue
+                if symbol in self._blacklist:
                     continue
                 if self._freshness.is_stale(symbol, self._stale_after):
                     stale.setdefault(symbol, []).append((lifecycle, trade))

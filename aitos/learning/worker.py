@@ -27,12 +27,16 @@ class ContinualLearningWorker:
         user: str = "default",
         password: str = "",
         database: str = "aitos",
-        state_path: str = "/models/online_rl/worker_state.json",
-        model_path: str = "/models/online_rl/deep_value.pkl",
+        state_path: str = "/home/fahad/aitos/models/online_rl/worker_state.json",
+        model_path: str = "/home/fahad/aitos/models/online_rl/deep_value.pkl",
         lookback_hours: int = 168,
         batch_limit: int = 5000,
         poll_seconds: int = 60,
     ) -> None:
+        self._stop = False
+        # Ensure model directories exist before any learning/persistence
+        for p in (state_path, model_path):
+            Path(p).parent.mkdir(parents=True, exist_ok=True)
         logger.info(
             "learning worker initializing",
             extra={
@@ -70,6 +74,25 @@ class ContinualLearningWorker:
     def close(self) -> None:
         self.client.close()
         logger.info("learning worker closed")
+
+    def shutdown(self) -> None:
+        """Signal the worker to stop after the current iteration, then clean up."""
+        self._stop = True
+        self._save_state()
+        self.close()
+        logger.info("learning worker shut down gracefully")
+
+    def run_forever(self) -> None:
+        logger.info("learning worker loop started")
+        try:
+            while not self._stop:
+                self.run_once()
+                for _ in range(self.poll_seconds):
+                    if self._stop:
+                        break
+                    time.sleep(1)
+        finally:
+            self.close()
 
     def _load_state(self) -> None:
         if not self.state_path.exists():
@@ -207,11 +230,4 @@ class ContinualLearningWorker:
         )
         return len(self._processed)
 
-    def run_forever(self) -> None:
-        logger.info("learning worker loop started")
-        try:
-            while True:
-                self.run_once()
-                time.sleep(self.poll_seconds)
-        finally:
-            self.close()
+

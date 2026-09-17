@@ -17,6 +17,13 @@ from aitos.execution.order_executor import OrderExecutor
 from aitos.intelligence.rl_feedback import RLFeedbackLoop
 from aitos.intelligence.rl_policy import RLPolicyScorer, TabularBanditRLScorer
 from aitos.intelligence.scanner import OpportunityScanner
+
+# Ensure the online RL model directory exists at import time so scorer
+# persistence never fails with FileNotFoundError on first save.
+import os as _os
+for _rl_dir in ("/home/fahad/aitos/models/online_rl", "/home/fahad/aitos/models/online_ml"):
+    _os.makedirs(_rl_dir, exist_ok=True)
+
 from aitos.journal.decision_repository import DecisionJournalRepository
 from aitos.journal.journal_system import JournalSystem
 from aitos.journal.performance_evaluator import DecisionPerformanceEvaluator
@@ -109,7 +116,13 @@ async def build_system(
 ) -> SystemComponents:
     kernel = kernel or AIKernel(event_bus=event_bus)
     risk_engine = RiskEngine(event_bus=event_bus, limits=risk_limits)
-    rl_scorer = rl_scorer or TabularBanditRLScorer()
+    if rl_scorer is None:
+        try:
+            from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
+
+            rl_scorer = DeepValueRLScorer()
+        except ImportError:
+            rl_scorer = TabularBanditRLScorer()
     scanner = OpportunityScanner(
         event_bus=event_bus,
         exchange=exchange,

@@ -296,6 +296,7 @@ class TradeLifecycle(AITOSModule):
         # Record every valid market observation before evaluating exits so
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
         trade.record_excursion(float(current_price))
+        trade.last_marked_price = current_price
         is_long = trade.side == TradeSide.LONG
 
         # ---- 1. Hard / structural SL (authoritative — never skipped) ---------

@@ -42,8 +42,9 @@ class SymbolCorrelationUpdater(AITOSModule):
         graph_writer: KnowledgeGraphWriter,
         symbols: list[str],
         timeframe: str = "1h",
-        kline_lookback: int = 100,
+        kline_lookback: int = 20,
         interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
+        fetch_delay_seconds: float = 0.05,
     ) -> None:
         self._exchange = exchange
         self._graph_writer = graph_writer
@@ -51,6 +52,7 @@ class SymbolCorrelationUpdater(AITOSModule):
         self._timeframe = timeframe
         self._kline_lookback = kline_lookback
         self._interval_seconds = interval_seconds
+        self._fetch_delay_seconds = fetch_delay_seconds
         self._initialized = False
         self._shutting_down = False
         self._task: asyncio.Task | None = None
@@ -146,6 +148,11 @@ class SymbolCorrelationUpdater(AITOSModule):
                     "failed to fetch klines for correlation update",
                     extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
                 )
+            # Spread 848+ REST calls over time so the exchange rate-limiter
+            # (2000-token bucket, ~33 refills/s) doesn't cause slow-wait
+            # pressure that stalls latency-sensitive callers.
+            if self._fetch_delay_seconds > 0:
+                await asyncio.sleep(self._fetch_delay_seconds)
 
         updated = 0
         now = utc_now_iso()

@@ -12,6 +12,7 @@ from .contracts import MarketEvent, MarketEventType, MarketSource
 
 TICKER_TIMEFRAME = "1s"
 OPEN_INTEREST_POLL_SECONDS = 15.0
+OPEN_INTEREST_FETCH_TIMEOUT_SECONDS = 5.0
 INSTRUMENT_POLL_SECONDS = 300.0
 TOP_SYMBOL_LIMIT = 50
 
@@ -106,28 +107,63 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
                 }
                 yield _event(MarketEventType.LIQUIDATION, symbol, payload, event_time)
 
+    async def _fetch_oi_with_timeout(
+        self, symbol: str
+    ) -> tuple[str, MarketEvent | None]:
+        """Fetch a single symbol's OI with a timeout so one slow symbol
+        doesn't stall the entire poll cycle for every other symbol."""
+        try:
+            oi = await asyncio.wait_for(
+                self.exchange.fetch_open_interest(symbol),
+                timeout=OPEN_INTEREST_FETCH_TIMEOUT_SECONDS,
+            )
+            return symbol, _event(
+                MarketEventType.OPEN_INTEREST,
+                oi.symbol,
+                {
+                    "symbol": oi.symbol,
+                    "open_interest": oi.open_interest,
+                    "timestamp": oi.timestamp.isoformat(),
+                },
+                oi.timestamp,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "open_interest fetch timed out",
+                extra={"aitos_extra": {"symbol": symbol}},
+            )
+            return symbol, None
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug(
+                "open_interest fetch failed",
+                extra={"aitos_extra": {"symbol": symbol}},
+            )
+            return symbol, None
+
     async def stream_open_interest(
         self, symbols: list[str]
     ) -> AsyncIterator[MarketEvent]:
         bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
+        if not bounded:
+            return
         while True:
-            for symbol in bounded:
-                try:
-                    oi = await self.exchange.fetch_open_interest(symbol)
-                    yield _event(
-                        MarketEventType.OPEN_INTEREST,
-                        oi.symbol,
-                        {
-                            "symbol": oi.symbol,
-                            "open_interest": oi.open_interest,
-                            "timestamp": oi.timestamp.isoformat(),
-                        },
-                        oi.timestamp,
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
+            # Fetch all symbols concurrently with per-symbol timeouts so a
+            # single slow/unresponsive REST call doesn't stall the entire
+            # poll cycle for every other symbol (BTCUSDT was seeing 15s
+            # receive gaps because the sequential loop blocked on other
+            # symbols first).
+            results = await asyncio.gather(
+                *(self._fetch_oi_with_timeout(s) for s in bounded),
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
                     continue
+                _symbol, event = result
+                if event is not None:
+                    yield event
             await asyncio.sleep(OPEN_INTEREST_POLL_SECONDS)
 
     async def stream_instruments(

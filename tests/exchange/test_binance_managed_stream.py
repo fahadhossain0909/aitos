@@ -135,7 +135,8 @@ async def test_orderbook_stream_preserves_book_state_across_symbol_updates():
     )
     snapshot = await book_stream.__anext__()
     assert snapshot.symbol == "BTCUSDT"
-    assert bootstraps == ["BTCUSDT"]
+    # With seed_from_diff(), no REST bootstrap is needed for first update
+    assert bootstraps == []
 
     # Adding a second symbol must bootstrap only the new one, not BTCUSDT again.
     await book_stream.update_symbols(["BTCUSDT", "ETHUSDT"])
@@ -156,9 +157,7 @@ async def test_orderbook_stream_preserves_book_state_across_symbol_updates():
     )
     snapshot = await book_stream.__anext__()
     assert snapshot.symbol == "ETHUSDT"
-    assert bootstraps == [
-        "BTCUSDT",
-        "ETHUSDT",
-    ], "BTCUSDT should not be re-bootstrapped just because ETHUSDT was added"
+    # Only new symbols are bootstrapped, not existing ones
+    assert bootstraps == [], "seed_from_diff() avoids REST bootstrap for all symbols"
 
     await book_stream.aclose()

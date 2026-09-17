@@ -51,6 +51,20 @@ class RLFeedbackLoop(AITOSModule):
         logger.info("RLFeedbackLoop initialized")
 
     async def health_check(self) -> HealthStatus:
+        scorer = self._scorer
+        model_fitted = bool(getattr(scorer, "is_fitted", False))
+        recent_rewards: list[float] = list(getattr(scorer, "_recent_rewards", []) or [])
+        avg_reward = (
+            round(sum(recent_rewards) / len(recent_rewards), 4)
+            if recent_rewards
+            else 0.0
+        )
+        recent_window = recent_rewards[-10:]
+        recent_rmultiple = (
+            round(sum(recent_window) / len(recent_window), 4)
+            if recent_window
+            else 0.0
+        )
         return HealthStatus(
             module_id=self.module_id,
             status=(
@@ -58,7 +72,12 @@ class RLFeedbackLoop(AITOSModule):
             ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
-            details={"updates_applied": self._updates_applied},
+            details={
+                "updates_applied": self._updates_applied,
+                "model_fitted": model_fitted,
+                "avg_reward": avg_reward,
+                "recent_rmultiple": recent_rmultiple,
+            },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:

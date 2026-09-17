@@ -331,7 +331,6 @@ class MarketOSPersistence(AITOSModule):
             int(p.get("last_update_id", 0)),
         ]
         await self._enqueue("order_book_events", row, event)
-        await self._flush_table("order_book_events", event)
         return None
 
     async def _handle_live_analytics(self, event: Event) -> EventResponse | None:

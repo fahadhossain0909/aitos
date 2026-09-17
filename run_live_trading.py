@@ -205,7 +205,13 @@ async def main() -> None:
     from aitos.intelligence.position_runtime import get_tracked_lifecycles
     from aitos.trading.price_safety_net import PositionPriceSafetyNet
 
-    price_safety_net = PositionPriceSafetyNet(exchange, get_tracked_lifecycles)
+    from aitos.config.settings import get_settings
+    _settings = get_settings()
+    price_safety_net = PositionPriceSafetyNet(
+        exchange,
+        get_tracked_lifecycles,
+        stale_symbol_blacklist=_settings.stale_symbol_blacklist,
+    )
     price_safety_net.start()
     tracker = PersistentLivePortfolioTracker(order_executor, state_store)
     await tracker.restore()
