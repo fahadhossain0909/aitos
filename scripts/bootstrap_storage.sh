@@ -17,6 +17,11 @@ DATA_ROOT="${AITOS_DATA_ROOT:-/mnt/aitos-data}"
 DISK_UUID="${AITOS_DATA_DISK_UUID:-}"
 HOST_UID="${AITOS_HOST_UID:-$(id -u)}"
 HOST_GID="${AITOS_HOST_GID:-$(id -g)}"
+# AITOS application containers use a stable UID/GID because their persistent
+# /models bind mount must remain writable regardless of the SSH/deploy user's
+# host UID. Keep these values aligned with the Dockerfile/compose contract.
+AITOS_UID="${AITOS_UID:-1000}"
+AITOS_GID="${AITOS_GID:-1000}"
 CLICKHOUSE_UID="${CLICKHOUSE_UID:-101}"
 CLICKHOUSE_GID="${CLICKHOUSE_GID:-101}"
 REDIS_UID="${REDIS_UID:-999}"
@@ -28,6 +33,7 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 [[ -n "$DISK_UUID" ]] || die "AITOS_DATA_DISK_UUID is required; refusing to write database data to the boot disk."
 [[ "$DATA_ROOT" = /* ]] || die "AITOS_DATA_ROOT must be absolute."
 [[ "$HOST_UID" =~ ^[0-9]+$ && "$HOST_GID" =~ ^[0-9]+$ ]] || die "AITOS_HOST_UID/GID must be numeric."
+[[ "$AITOS_UID" =~ ^[0-9]+$ && "$AITOS_GID" =~ ^[0-9]+$ ]] || die "AITOS_UID/GID must be numeric."
 [[ "$CLICKHOUSE_UID" =~ ^[0-9]+$ && "$CLICKHOUSE_GID" =~ ^[0-9]+$ ]] || die "ClickHouse UID/GID must be numeric."
 [[ "$REDIS_UID" =~ ^[0-9]+$ && "$REDIS_GID" =~ ^[0-9]+$ ]] || die "Redis UID/GID must be numeric."
 [[ "$NEO4J_UID" =~ ^[0-9]+$ && "$NEO4J_GID" =~ ^[0-9]+$ ]] || die "Neo4j UID/GID must be numeric."
@@ -58,10 +64,6 @@ log "Persisting mount in /etc/fstab"
 FSTAB_LINE="UUID=$DISK_UUID $DATA_ROOT $FSTYPE defaults,nofail,x-systemd.device-timeout=30s 0 2"
 if ! ${SUDO[@]} grep -Eq "^[[:space:]]*UUID=${DISK_UUID}[[:space:]]+" /etc/fstab; then printf '%s\n' "$FSTAB_LINE" | ${SUDO[@]} tee -a /etc/fstab >/dev/null; fi
 
-# If the verified data disk is already below the configured free-space floor,
-# the deployment is allowed to perform the explicit disposable-data reset
-# before recreating the databases. This prevents a full disk/corrupt Redis AOF
-# from blocking every subsequent deployment.
 MIN_FREE_GB="${DATA_DISK_MIN_FREE_GB:-20}"
 FREE_GB="$(df -BG --output=avail "$DATA_ROOT" | tail -1 | tr -dc '0-9')"
 if [[ "$FREE_GB" =~ ^[0-9]+$ && "$FREE_GB" -lt "$MIN_FREE_GB" ]]; then
@@ -107,9 +109,6 @@ ${SUDO[@]} mkdir -p \
   "$DATA_ROOT/artifacts/backups" "$DATA_ROOT/artifacts/snapshots" \
   "$DATA_ROOT/runtime/models" "$DATA_ROOT/runtime/logs/neo4j" "$DATA_ROOT/runtime/tmp"
 
-# Database/Redis directories are owned by their container UIDs and may be
-# intentionally inaccessible to the deployment user. Therefore all structural
-# verification before ownership normalization must be privileged.
 for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do
   ${SUDO[@]} test -d "$DATA_ROOT/$required" || {
     echo "=== CANONICAL LAYOUT DIAGNOSTICS ===" >&2
@@ -123,11 +122,17 @@ ${SUDO[@]} chown "$HOST_UID:$HOST_GID" "$DATA_ROOT"
 ${SUDO[@]} chown -R "$CLICKHOUSE_UID:$CLICKHOUSE_GID" "$DATA_ROOT/databases/clickhouse"
 ${SUDO[@]} chown -R "$NEO4J_UID:$NEO4J_GID" "$DATA_ROOT/databases/neo4j"
 ${SUDO[@]} chown -R "$REDIS_UID:$REDIS_GID" "$DATA_ROOT/eventbus/redis"
-${SUDO[@]} chown -R "$HOST_UID:$HOST_GID" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
+# Application runtime state must be writable by the fixed non-root AITOS UID,
+# not by whichever host user happened to run the deployment.
+${SUDO[@]} chown -R "$AITOS_UID:$AITOS_GID" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
 ${SUDO[@]} chmod 0755 "$DATA_ROOT" "$DATA_ROOT/databases" "$DATA_ROOT/eventbus" "$DATA_ROOT/research" "$DATA_ROOT/artifacts" "$DATA_ROOT/runtime"
 ${SUDO[@]} chmod 0750 "$DATA_ROOT/eventbus/redis" "$DATA_ROOT/eventbus/redis/live" "$DATA_ROOT/eventbus/redis/archive"
 log "Storage verification"
 df -h "$DATA_ROOT"; findmnt --target "$DATA_ROOT"
 for required in databases/clickhouse databases/neo4j eventbus/redis/live eventbus/redis/archive research/backtest research/replay artifacts/backups artifacts/snapshots runtime/models runtime/logs/neo4j runtime/tmp; do ${SUDO[@]} test -d "$DATA_ROOT/$required" || die "Missing required directory: $DATA_ROOT/$required"; done
 TMP_FILE="$DATA_ROOT/.aitos-storage-write-test"; ${SUDO[@]} touch "$TMP_FILE"; ${SUDO[@]} rm -f "$TMP_FILE"
+# Verify the actual application identity can write its persistent runtime path.
+AITOS_TEST_FILE="$DATA_ROOT/runtime/models/.aitos-runtime-write-test"
+${SUDO[@]} -u "#$AITOS_UID" touch "$AITOS_TEST_FILE" || die "Aitos UID $AITOS_UID cannot write runtime/models"
+${SUDO[@]} rm -f "$AITOS_TEST_FILE"
 echo "AITOS canonical storage bootstrap completed successfully."

@@ -16,19 +16,20 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 
-# Create the runtime user before copying application files so Docker can set
-# ownership during COPY instead of recursively walking the whole application
-# tree in a separate layer.
-RUN useradd --create-home --shell /bin/bash aitos
+# Keep the application UID/GID stable because /models is a host bind mount.
+# The host storage bootstrap grants this fixed identity access to runtime data.
+ARG AITOS_UID=1000
+ARG AITOS_GID=1000
+RUN groupadd --gid "$AITOS_GID" aitos \
+    && useradd --uid "$AITOS_UID" --gid "$AITOS_GID" --create-home --shell /bin/bash aitos
 
 COPY --chown=aitos:aitos aitos/ ./aitos/
 COPY --chown=aitos:aitos scripts/ ./scripts/
 COPY --chown=aitos:aitos run_paper_trading.py run_live_trading.py run_continual_learning.py ./
 
-# app.py still references the historical /home/fahad/aitos/models path during
-# module import. Keep that legacy path as a symlink into the canonical /models
-# runtime volume so import-time directory creation is writable and persistent.
-# /models is mounted by docker-compose from MODEL_DATA_DIR.
+# /models is the canonical persistent model volume. Keep the historical
+# in-image path as a compatibility symlink for older imports, but do not rely
+# on it for storage configuration.
 RUN mkdir -p /models /home/fahad/aitos \
     && ln -s /models /home/fahad/aitos/models \
     && chown -R aitos:aitos /models /home/fahad
