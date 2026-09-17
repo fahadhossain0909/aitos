@@ -56,8 +56,10 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._n_samples_seen = 0
         self._recent_rewards: list[float] = []
         model_data_dir = Path(os.getenv("MODEL_DATA_DIR", DEFAULT_MODEL_DATA_DIR))
-        self._state_path = Path(state_path) if state_path else (
-            model_data_dir / "online_rl" / "deep_value.pkl"
+        self._state_path = (
+            Path(state_path)
+            if state_path
+            else (model_data_dir / "online_rl" / "deep_value.pkl")
         )
 
     @property
