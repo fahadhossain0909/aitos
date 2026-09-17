@@ -15,6 +15,7 @@ from aitos.xai.ml_explainer import FEATURE_ORDER
 
 DEFAULT_MIN_SAMPLES_FOR_CONFIDENCE = 30
 DEFAULT_REWARD_SCALE_R_MULTIPLES = 2.0
+DEFAULT_MODEL_DATA_DIR = "/models"
 
 
 def _vectorize(context: dict[str, Any]) -> np.ndarray:
@@ -39,7 +40,7 @@ class DeepValueRLScorer(RLPolicyScorer):
         min_samples_for_confidence: int = DEFAULT_MIN_SAMPLES_FOR_CONFIDENCE,
         reward_scale_r_multiples: float = DEFAULT_REWARD_SCALE_R_MULTIPLES,
         random_state: int = 0,
-        state_path: str = "/home/fahad/aitos/models/online_rl/deep_value.pkl",
+        state_path: str | None = None,
     ) -> None:
         self._model = MLPRegressor(
             hidden_layer_sizes=hidden_layer_sizes,
@@ -54,7 +55,10 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._reward_scale = reward_scale_r_multiples
         self._n_samples_seen = 0
         self._recent_rewards: list[float] = []
-        self._state_path = Path(state_path)
+        model_data_dir = Path(os.getenv("MODEL_DATA_DIR", DEFAULT_MODEL_DATA_DIR))
+        self._state_path = Path(state_path) if state_path else (
+            model_data_dir / "online_rl" / "deep_value.pkl"
+        )
 
     @property
     def n_samples_seen(self) -> int:
