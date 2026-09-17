@@ -19,14 +19,22 @@ class MarketAgent(BaseAgent):
     """
 
     def __init__(self, event_bus: Any, consensus_weight: float = 1.0) -> None:
-        super().__init__(agent_id="market-agent", event_bus=event_bus, consensus_weight=consensus_weight)
+        super().__init__(
+            agent_id="market-agent",
+            event_bus=event_bus,
+            consensus_weight=consensus_weight,
+        )
         self._price_history: dict[str, list[float]] = {}
         self._volume_history: dict[str, list[float]] = {}
         self._last_signal: dict[str, str] = {}
 
     async def on_initialize(self, config: dict[str, Any]) -> None:
-        self.memory.remember_long_term("lookback_period", config.get("lookback_period", 20))
-        self.memory.remember_long_term("momentum_threshold", config.get("momentum_threshold", 0.02))
+        self.memory.remember_long_term(
+            "lookback_period", config.get("lookback_period", 20)
+        )
+        self.memory.remember_long_term(
+            "momentum_threshold", config.get("momentum_threshold", 0.02)
+        )
 
     async def on_handle_event(self, event: Event) -> EventResponse | None:
         """Process market data events to update internal state."""
@@ -40,28 +48,36 @@ class MarketAgent(BaseAgent):
                 self._price_history[symbol].append(float(close))
                 lookback = self.memory.recall_long_term("lookback_period", 20)
                 if len(self._price_history[symbol]) > lookback:
-                    self._price_history[symbol] = self._price_history[symbol][-lookback:]
+                    self._price_history[symbol] = self._price_history[symbol][
+                        -lookback:
+                    ]
                 if volume is not None:
                     if symbol not in self._volume_history:
                         self._volume_history[symbol] = []
                     self._volume_history[symbol].append(float(volume))
                     if len(self._volume_history[symbol]) > lookback:
-                        self._volume_history[symbol] = self._volume_history[symbol][-lookback:]
-                self.memory.remember_short_term({
-                    "type": "kline",
-                    "symbol": symbol,
-                    "close": close,
-                    "volume": volume,
-                })
+                        self._volume_history[symbol] = self._volume_history[symbol][
+                            -lookback:
+                        ]
+                self.memory.remember_short_term(
+                    {
+                        "type": "kline",
+                        "symbol": symbol,
+                        "close": close,
+                        "volume": volume,
+                    }
+                )
         elif event.topic.startswith("market.trade"):
             symbol = event.payload.get("symbol")
             price = event.payload.get("price")
             if symbol and price is not None:
-                self.memory.remember_short_term({
-                    "type": "trade",
-                    "symbol": symbol,
-                    "price": price,
-                })
+                self.memory.remember_short_term(
+                    {
+                        "type": "trade",
+                        "symbol": symbol,
+                        "price": price,
+                    }
+                )
         return None
 
     async def on_tick(self) -> None:
@@ -99,7 +115,11 @@ class MarketAgent(BaseAgent):
         if len(recent) < 2:
             return 0.0
         momentum = abs((recent[-1] - recent[0]) / recent[0]) if recent[0] != 0 else 0.0
-        returns = [(recent[i] - recent[i - 1]) / recent[i - 1] for i in range(1, len(recent)) if recent[i - 1] != 0]
+        returns = [
+            (recent[i] - recent[i - 1]) / recent[i - 1]
+            for i in range(1, len(recent))
+            if recent[i - 1] != 0
+        ]
         volatility = statistics.stdev(returns) if len(returns) >= 2 else 0.01
         confidence = min(momentum / (volatility + 0.001), 1.0)
         return round(confidence, 4)
@@ -121,8 +141,10 @@ class MarketAgent(BaseAgent):
             f"lookback={len(prices)} prices",
             f"last_price={prices[-1]:.4f}" if prices else "no prices",
         ]
-        if symbol in self._volume_history and self._volume_history[symbol]:
-            evidence.append(f"avg_volume={statistics.mean(self._volume_history[symbol]):.2f}")
+        if self._volume_history.get(symbol):
+            evidence.append(
+                f"avg_volume={statistics.mean(self._volume_history[symbol]):.2f}"
+            )
         return AgentDecision(
             agent_id=self.module_id,
             confidence=confidence,

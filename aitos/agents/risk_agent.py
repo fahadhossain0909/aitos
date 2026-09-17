@@ -31,16 +31,28 @@ class RiskAgent(BaseAgent):
     }
 
     def __init__(self, event_bus: Any, consensus_weight: float = 1.5) -> None:
-        super().__init__(agent_id="risk-agent", event_bus=event_bus, consensus_weight=consensus_weight)
+        super().__init__(
+            agent_id="risk-agent",
+            event_bus=event_bus,
+            consensus_weight=consensus_weight,
+        )
         self._current_score: float = 0.0
         self._current_tier: str = self.TIER_NORMAL
         self._score_history: list[tuple[str, float]] = []  # (timestamp, score)
 
     async def on_initialize(self, config: dict[str, Any]) -> None:
-        self.memory.remember_long_term("risk_threshold_reduce", config.get("risk_threshold_reduce", 70.0))
-        self.memory.remember_long_term("risk_threshold_no_new", config.get("risk_threshold_no_new", 85.0))
-        self.memory.remember_long_term("risk_threshold_emergency", config.get("risk_threshold_emergency", 95.0))
-        self.memory.remember_long_term("max_position_size", config.get("max_position_size", 0.1))
+        self.memory.remember_long_term(
+            "risk_threshold_reduce", config.get("risk_threshold_reduce", 70.0)
+        )
+        self.memory.remember_long_term(
+            "risk_threshold_no_new", config.get("risk_threshold_no_new", 85.0)
+        )
+        self.memory.remember_long_term(
+            "risk_threshold_emergency", config.get("risk_threshold_emergency", 95.0)
+        )
+        self.memory.remember_long_term(
+            "max_position_size", config.get("max_position_size", 0.1)
+        )
 
     async def on_handle_event(self, event: Event) -> EventResponse | None:
         """Process risk-related events."""
@@ -48,26 +60,31 @@ class RiskAgent(BaseAgent):
             score = event.payload.get("score")
             if isinstance(score, (int, float)):
                 self._current_score = float(score)
-                self._score_history.append((event.payload.get("timestamp", ""), float(score)))
+                self._score_history.append(
+                    (event.payload.get("timestamp", ""), float(score))
+                )
                 if len(self._score_history) > 100:
                     self._score_history = self._score_history[-100:]
                 self._current_tier = self._classify_tier(float(score))
-                self.memory.remember_short_term({
-                    "type": "risk_update",
-                    "score": float(score),
-                    "tier": self._current_tier,
-                })
+                self.memory.remember_short_term(
+                    {
+                        "type": "risk_update",
+                        "score": float(score),
+                        "tier": self._current_tier,
+                    }
+                )
         elif event.topic == "risk.emergency_stop":
             self._current_tier = self.TIER_EMERGENCY
-            self.memory.remember_short_term({
-                "type": "emergency_stop",
-                "reason": event.payload.get("reason", "unknown"),
-            })
+            self.memory.remember_short_term(
+                {
+                    "type": "emergency_stop",
+                    "reason": event.payload.get("reason", "unknown"),
+                }
+            )
         return None
 
     async def on_tick(self) -> None:
         """Periodic risk re-evaluation."""
-        pass
 
     async def on_emit_events(self) -> AsyncIterator[Event]:
         return
@@ -106,7 +123,9 @@ class RiskAgent(BaseAgent):
         if tier == self.TIER_EMERGENCY:
             direction = "neutral"
             confidence = 1.0
-            rationale = f"EMERGENCY: risk score {score:.1f} >= threshold. No new entries."
+            rationale = (
+                f"EMERGENCY: risk score {score:.1f} >= threshold. No new entries."
+            )
         elif tier == self.TIER_NO_NEW:
             direction = "neutral"
             confidence = 0.9
@@ -118,7 +137,9 @@ class RiskAgent(BaseAgent):
         else:
             direction = context.get("direction", "neutral")
             confidence = 0.8
-            rationale = f"Risk normal ({score:.1f}). Max position size {position_size:.1%}."
+            rationale = (
+                f"Risk normal ({score:.1f}). Max position size {position_size:.1%}."
+            )
 
         evidence = [
             f"current_score={score:.1f}",

@@ -61,9 +61,7 @@ class RLFeedbackLoop(AITOSModule):
         )
         recent_window = recent_rewards[-10:]
         recent_rmultiple = (
-            round(sum(recent_window) / len(recent_window), 4)
-            if recent_window
-            else 0.0
+            round(sum(recent_window) / len(recent_window), 4) if recent_window else 0.0
         )
         return HealthStatus(
             module_id=self.module_id,

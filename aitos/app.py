@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+
+# Ensure the online RL model directory exists at import time so scorer
+# persistence never fails with FileNotFoundError on first save.
+import os as _os
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Protocol
@@ -18,10 +22,10 @@ from aitos.intelligence.rl_feedback import RLFeedbackLoop
 from aitos.intelligence.rl_policy import RLPolicyScorer, TabularBanditRLScorer
 from aitos.intelligence.scanner import OpportunityScanner
 
-# Ensure the online RL model directory exists at import time so scorer
-# persistence never fails with FileNotFoundError on first save.
-import os as _os
-for _rl_dir in ("/home/fahad/aitos/models/online_rl", "/home/fahad/aitos/models/online_ml"):
+for _rl_dir in (
+    "/home/fahad/aitos/models/online_rl",
+    "/home/fahad/aitos/models/online_ml",
+):
     _os.makedirs(_rl_dir, exist_ok=True)
 
 from aitos.journal.decision_repository import DecisionJournalRepository

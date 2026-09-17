@@ -229,5 +229,3 @@ class ContinualLearningWorker:
             },
         )
         return len(self._processed)
-
-

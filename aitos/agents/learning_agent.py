@@ -20,7 +20,11 @@ class LearningAgent(BaseAgent):
     """
 
     def __init__(self, event_bus: Any, consensus_weight: float = 0.8) -> None:
-        super().__init__(agent_id="learning-agent", event_bus=event_bus, consensus_weight=consensus_weight)
+        super().__init__(
+            agent_id="learning-agent",
+            event_bus=event_bus,
+            consensus_weight=consensus_weight,
+        )
         self._outcomes: list[dict[str, Any]] = []  # past trade outcomes
         self._strategy_adjustments: dict[str, Any] = {}
         self._component_performance: dict[str, list[float]] = {}
@@ -28,8 +32,12 @@ class LearningAgent(BaseAgent):
 
     async def on_initialize(self, config: dict[str, Any]) -> None:
         self.memory.remember_long_term("min_samples", config.get("min_samples", 10))
-        self.memory.remember_long_term("adjustment_rate", config.get("adjustment_rate", 0.1))
-        self.memory.remember_long_term("lookback_trades", config.get("lookback_trades", 50))
+        self.memory.remember_long_term(
+            "adjustment_rate", config.get("adjustment_rate", 0.1)
+        )
+        self.memory.remember_long_term(
+            "lookback_trades", config.get("lookback_trades", 50)
+        )
 
     async def on_handle_event(self, event: Event) -> EventResponse | None:
         """Process learning-related events."""
@@ -58,11 +66,13 @@ class LearningAgent(BaseAgent):
                     self._regime_performance[regime] = []
                 self._regime_performance[regime].append(float(pnl))
 
-            self.memory.remember_short_term({
-                "type": "trade_outcome",
-                "pnl": pnl,
-                "regime": regime,
-            })
+            self.memory.remember_short_term(
+                {
+                    "type": "trade_outcome",
+                    "pnl": pnl,
+                    "regime": regime,
+                }
+            )
         elif event.topic.startswith("learning.experience"):
             component = event.payload.get("component")
             score = event.payload.get("score")
@@ -71,12 +81,16 @@ class LearningAgent(BaseAgent):
                     self._component_performance[component] = []
                 self._component_performance[component].append(float(score))
                 if len(self._component_performance[component]) > 100:
-                    self._component_performance[component] = self._component_performance[component][-100:]
-                self.memory.remember_short_term({
-                    "type": "learning_experience",
-                    "component": component,
-                    "score": float(score),
-                })
+                    self._component_performance[component] = (
+                        self._component_performance[component][-100:]
+                    )
+                self.memory.remember_short_term(
+                    {
+                        "type": "learning_experience",
+                        "component": component,
+                        "score": float(score),
+                    }
+                )
         return None
 
     async def on_tick(self) -> None:
@@ -92,7 +106,11 @@ class LearningAgent(BaseAgent):
         """Analyze outcomes and update strategy parameters."""
         if not self._outcomes:
             return
-        pnls = [o.get("pnl", 0.0) for o in self._outcomes if isinstance(o.get("pnl"), (int, float))]
+        pnls = [
+            o.get("pnl", 0.0)
+            for o in self._outcomes
+            if isinstance(o.get("pnl"), (int, float))
+        ]
         if not pnls:
             return
         avg_pnl = statistics.mean(pnls)
@@ -105,7 +123,13 @@ class LearningAgent(BaseAgent):
 
         self._strategy_adjustments = {
             "suggested_confidence_modifier": round(min(win_rate, 1.0), 4),
-            "suggested_size_modifier": round(max(0.5, 1.0 - adjustment_rate * (pnl_volatility / (abs(avg_pnl) + 0.001))), 4),
+            "suggested_size_modifier": round(
+                max(
+                    0.5,
+                    1.0 - adjustment_rate * (pnl_volatility / (abs(avg_pnl) + 0.001)),
+                ),
+                4,
+            ),
             "avg_pnl": round(avg_pnl, 4),
             "pnl_volatility": round(pnl_volatility, 4),
             "win_rate": round(win_rate, 4),
@@ -152,16 +176,25 @@ class LearningAgent(BaseAgent):
 
         best_regime, best_regime_pnl = self._identify_best_regime()
         worst_component, worst_component_score = self._identify_worst_component()
-        pnls = [o.get("pnl", 0.0) for o in self._outcomes if isinstance(o.get("pnl"), (int, float))]
+        pnls = [
+            o.get("pnl", 0.0)
+            for o in self._outcomes
+            if isinstance(o.get("pnl"), (int, float))
+        ]
         win_rate = sum(1 for p in pnls if p > 0) / len(pnls) if pnls else 0.0
-        confidence = min(len(self._outcomes) / (self.memory.recall_long_term("min_samples", 10) * 3), 1.0)
+        confidence = min(
+            len(self._outcomes) / (self.memory.recall_long_term("min_samples", 10) * 3),
+            1.0,
+        )
 
         if worst_component != "none" and worst_component_score < 3.0:
             direction = "neutral"
             rationale = f"Disable weak component '{worst_component}' (avg_score={worst_component_score:.2f}). Best regime: {best_regime}."
         elif win_rate < 0.4:
             direction = "neutral"
-            rationale = f"Win rate {win_rate:.1%} below threshold. Recommend reducing exposure."
+            rationale = (
+                f"Win rate {win_rate:.1%} below threshold. Recommend reducing exposure."
+            )
         else:
             direction = "long" if best_regime_pnl > 0 else "neutral"
             rationale = f"Learning: win_rate={win_rate:.1%}, best_regime={best_regime}, avg_pnl={statistics.mean(pnls):.2f}."
@@ -173,7 +206,9 @@ class LearningAgent(BaseAgent):
             f"worst_component={worst_component}",
         ]
         if self._strategy_adjustments:
-            evidence.append(f"size_modifier={self._strategy_adjustments.get('suggested_size_modifier', 1.0)}")
+            evidence.append(
+                f"size_modifier={self._strategy_adjustments.get('suggested_size_modifier', 1.0)}"
+            )
 
         return AgentDecision(
             agent_id=self.module_id,

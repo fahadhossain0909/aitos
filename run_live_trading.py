@@ -202,10 +202,10 @@ async def main() -> None:
         port=HEALTH_SERVER_PORT,
     )
     await health_server.start()
+    from aitos.config.settings import get_settings
     from aitos.intelligence.position_runtime import get_tracked_lifecycles
     from aitos.trading.price_safety_net import PositionPriceSafetyNet
 
-    from aitos.config.settings import get_settings
     _settings = get_settings()
     price_safety_net = PositionPriceSafetyNet(
         exchange,

@@ -18,7 +18,11 @@ class PortfolioAgent(BaseAgent):
     """
 
     def __init__(self, event_bus: Any, consensus_weight: float = 1.0) -> None:
-        super().__init__(agent_id="portfolio-agent", event_bus=event_bus, consensus_weight=consensus_weight)
+        super().__init__(
+            agent_id="portfolio-agent",
+            event_bus=event_bus,
+            consensus_weight=consensus_weight,
+        )
         self._positions: dict[str, dict[str, Any]] = {}
         self._total_pnl: float = 0.0
         self._total_trades: int = 0
@@ -26,8 +30,12 @@ class PortfolioAgent(BaseAgent):
 
     async def on_initialize(self, config: dict[str, Any]) -> None:
         self.memory.remember_long_term("max_positions", config.get("max_positions", 5))
-        self.memory.remember_long_term("rebalance_threshold", config.get("rebalance_threshold", 0.3))
-        self.memory.remember_long_term("target_per_position", config.get("target_per_position", 0.2))
+        self.memory.remember_long_term(
+            "rebalance_threshold", config.get("rebalance_threshold", 0.3)
+        )
+        self.memory.remember_long_term(
+            "target_per_position", config.get("target_per_position", 0.2)
+        )
 
     async def on_handle_event(self, event: Event) -> EventResponse | None:
         """Process portfolio-related events."""
@@ -41,12 +49,14 @@ class PortfolioAgent(BaseAgent):
                     "unrealized_pnl": event.payload.get("unrealized_pnl", 0.0),
                     "timestamp": event.payload.get("timestamp", ""),
                 }
-                self.memory.remember_short_term({
-                    "type": "position_update",
-                    "symbol": symbol,
-                    "side": event.payload.get("side"),
-                    "size": event.payload.get("size"),
-                })
+                self.memory.remember_short_term(
+                    {
+                        "type": "position_update",
+                        "symbol": symbol,
+                        "side": event.payload.get("side"),
+                        "size": event.payload.get("size"),
+                    }
+                )
         elif event.topic.startswith("trade.closed"):
             pnl = event.payload.get("realized_pnl", 0.0)
             if isinstance(pnl, (int, float)):
@@ -54,24 +64,27 @@ class PortfolioAgent(BaseAgent):
                 self._total_trades += 1
                 if float(pnl) > 0:
                     self._winning_trades += 1
-                self.memory.remember_short_term({
-                    "type": "trade_closed",
-                    "symbol": event.payload.get("symbol"),
-                    "pnl": float(pnl),
-                })
+                self.memory.remember_short_term(
+                    {
+                        "type": "trade_closed",
+                        "symbol": event.payload.get("symbol"),
+                        "pnl": float(pnl),
+                    }
+                )
         elif event.topic.startswith("trade.opened"):
             symbol = event.payload.get("symbol")
             if symbol and symbol not in self._positions:
-                self.memory.remember_short_term({
-                    "type": "trade_opened",
-                    "symbol": symbol,
-                    "side": event.payload.get("side"),
-                })
+                self.memory.remember_short_term(
+                    {
+                        "type": "trade_opened",
+                        "symbol": symbol,
+                        "side": event.payload.get("side"),
+                    }
+                )
         return None
 
     async def on_tick(self) -> None:
         """Periodic portfolio evaluation."""
-        pass
 
     async def on_emit_events(self) -> AsyncIterator[Event]:
         return
@@ -111,7 +124,11 @@ class PortfolioAgent(BaseAgent):
         concentration = self._compute_concentration()
         rebalance_needed = self._check_rebalance_needed()
 
-        win_rate = (self._winning_trades / self._total_trades) if self._total_trades > 0 else 0.0
+        win_rate = (
+            (self._winning_trades / self._total_trades)
+            if self._total_trades > 0
+            else 0.0
+        )
 
         if rebalance_needed:
             direction = "neutral"
@@ -124,7 +141,9 @@ class PortfolioAgent(BaseAgent):
         else:
             direction = "neutral"
             confidence = 0.6
-            rationale = f"Portfolio stable: {num_positions} positions, exposure={exposure:.1%}"
+            rationale = (
+                f"Portfolio stable: {num_positions} positions, exposure={exposure:.1%}"
+            )
 
         evidence = [
             f"open_positions={num_positions}",

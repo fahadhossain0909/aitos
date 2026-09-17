@@ -53,6 +53,7 @@ STALE_POSITION_MAX_HOURS = 72
 async def _close_stale_positions(components) -> None:
     """Close open trades held longer than STALE_POSITION_MAX_HOURS."""
     from datetime import datetime, timezone
+
     from aitos.models.trade import TradeLifecycleState
 
     now = datetime.now(timezone.utc)
@@ -66,7 +67,7 @@ async def _close_stale_positions(components) -> None:
             age_hours = (now - entry_dt).total_seconds() / 3600
             if age_hours >= STALE_POSITION_MAX_HOURS:
                 # Use last known price from trade's own tracking
-                last_price = getattr(trade, 'last_marked_price', None)
+                last_price = getattr(trade, "last_marked_price", None)
                 if last_price is None:
                     last_price = trade.entry_price
                 await components.trade_lifecycle.close_trade(
@@ -74,14 +75,19 @@ async def _close_stale_positions(components) -> None:
                 )
                 logger.warning(
                     "stale position auto-closed",
-                    extra={"aitos_extra": {
-                        "trade_id": trade.trade_id,
-                        "symbol": trade.symbol,
-                        "age_hours": round(age_hours, 1),
-                    }},
+                    extra={
+                        "aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                            "age_hours": round(age_hours, 1),
+                        }
+                    },
                 )
         except Exception:
-            logger.exception("stale position check failed", extra={"aitos_extra": {"trade_id": trade.trade_id}})
+            logger.exception(
+                "stale position check failed",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
 
 
 async def connect_redis_with_retry(settings) -> Redis:
@@ -257,11 +263,18 @@ async def main() -> None:
         await components.kernel.register_agent(agent)
         logger.info(
             "registered AI agent",
-            extra={"aitos_extra": {"agent_id": agent.module_id, "weight": agent.consensus_weight}},
+            extra={
+                "aitos_extra": {
+                    "agent_id": agent.module_id,
+                    "weight": agent.consensus_weight,
+                }
+            },
         )
     logger.info(
         "AI Kernel agents registered",
-        extra={"aitos_extra": {"agents": components.kernel._world_state.registered_agents}},
+        extra={
+            "aitos_extra": {"agents": components.kernel._world_state.registered_agents}
+        },
     )
 
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
@@ -271,7 +284,15 @@ async def main() -> None:
     )
     await experience_recorder.initialize({})
     health_server = HealthServer(
-        components.all_modules() + [experience_recorder, market_os_persistence, market_agent, risk_agent, portfolio_agent, learning_agent],
+        components.all_modules()
+        + [
+            experience_recorder,
+            market_os_persistence,
+            market_agent,
+            risk_agent,
+            portfolio_agent,
+            learning_agent,
+        ],
         # The health endpoint is intentionally container/network reachable.
         # nosec B104 - binding all interfaces is required for the Docker health check.
         host="0.0.0.0",  # nosec B104
@@ -304,10 +325,10 @@ async def main() -> None:
                     )
 
     heal_task = asyncio.create_task(_self_heal_loop())
+    from aitos.config.settings import get_settings as _get_settings
     from aitos.intelligence.position_runtime import get_tracked_lifecycles
     from aitos.trading.price_safety_net import PositionPriceSafetyNet
 
-    from aitos.config.settings import get_settings as _get_settings
     _settings = _get_settings()
     price_safety_net = PositionPriceSafetyNet(
         exchange,
