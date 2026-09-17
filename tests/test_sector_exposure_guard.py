@@ -10,7 +10,7 @@ def test_known_symbols_are_classified_without_unclassified_bucket():
     assert sector_for_symbol("BNBUSDT") == "exchange-token"
     assert sector_for_symbol("SOLUSDT") == "layer1"
     assert sector_for_symbol("LINKUSDT") == "oracle-infrastructure"
-    assert sector_for_symbol("UNKNOWNUSDT") == "other"
+    assert sector_for_symbol("UNKNOWNUSDT") == "sector-unknown"
 
 
 def test_position_exposure_auto_classifies_symbol():
