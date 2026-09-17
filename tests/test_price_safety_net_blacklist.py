@@ -1,4 +1,3 @@
-
 import pytest
 
 from aitos.trading.price_freshness import PriceFreshnessTracker
