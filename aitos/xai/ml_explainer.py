@@ -41,7 +41,11 @@ class TradeOutcomeClassifier:
         state_path: str | None = None,
     ) -> None:
         if state_path is None:
-            state_path = os.path.join(os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models"), "online_ml", "trade_outcome.pkl")
+            state_path = os.path.join(
+                os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models"),
+                "online_ml",
+                "trade_outcome.pkl",
+            )
         self._model = SGDClassifier(loss="log_loss", random_state=0)
         self._min_samples = min_samples_for_ready
         self._n_samples_seen = 0

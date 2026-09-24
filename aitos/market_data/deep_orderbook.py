@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -200,12 +200,8 @@ class DeepOrderBookStore:
                     int(p["first_update_id"]),
                     int(p["final_update_id"]),
                     int(p.get("previous_update_id", 0)),
-                    json.dumps(
-                        self._levels(p.get("bids", [])), separators=(",", ":")
-                    ),
-                    json.dumps(
-                        self._levels(p.get("asks", [])), separators=(",", ":")
-                    ),
+                    json.dumps(self._levels(p.get("bids", [])), separators=(",", ":")),
+                    json.dumps(self._levels(p.get("asks", [])), separators=(",", ":")),
                     event.event_id,
                 ]
                 self._delta_buffer.append(row)
@@ -222,12 +218,8 @@ class DeepOrderBookStore:
                     event.market_type or event.market,
                     event.symbol.upper(),
                     int(p["last_update_id"]),
-                    json.dumps(
-                        self._levels(p.get("bids", [])), separators=(",", ":")
-                    ),
-                    json.dumps(
-                        self._levels(p.get("asks", [])), separators=(",", ":")
-                    ),
+                    json.dumps(self._levels(p.get("bids", [])), separators=(",", ":")),
+                    json.dumps(self._levels(p.get("asks", [])), separators=(",", ":")),
                     event.event_id,
                 ]
                 self._checkpoint_buffer.append(row)

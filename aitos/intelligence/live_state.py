@@ -35,7 +35,9 @@ class LiveMarketStateStore:
             lambda: deque(maxlen=max_liquidity_events)
         )
         self._books: dict[str, OrderBookSnapshot] = {}
-        self._kline_cache: dict[str, tuple[float, list[Kline]]] = {}  # symbol -> (cache_time, klines)
+        self._kline_cache: dict[str, tuple[float, list[Kline]]] = (
+            {}
+        )  # symbol -> (cache_time, klines)
 
     @property
     def trades(self) -> dict[str, deque[TradeTick]]:
@@ -59,7 +61,9 @@ class LiveMarketStateStore:
         if symbol not in self._kline_cache:
             return False
         cached_at = self._kline_cache[symbol][0]
-        return (datetime.now(timezone.utc) - cached_at).total_seconds() < KLINE_CACHE_TTL_SECONDS
+        return (
+            datetime.now(timezone.utc) - cached_at
+        ).total_seconds() < KLINE_CACHE_TTL_SECONDS
 
     def get_cached_klines(self, symbol: str) -> list[Kline] | None:
         """Return cached klines if fresh, else None."""

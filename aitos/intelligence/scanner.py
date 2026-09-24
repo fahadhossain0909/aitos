@@ -291,7 +291,7 @@ class OpportunityScanner(AITOSModule):
             symbol, AMTEngine(tick_size, self._amt_value_area_pct, self._amt_ib_minutes)
         )
         # Check if we have a cached result and trades haven't changed since last scan
-        if not hasattr(self, '_last_amt_trades_cache'):
+        if not hasattr(self, "_last_amt_trades_cache"):
             self._last_amt_trades_cache = {}
         trade_key = (len(trades), trades[-1].trade_id if trades else 0)
         cached_key = self._last_amt_trades_cache.get(symbol)
@@ -504,7 +504,7 @@ class OpportunityScanner(AITOSModule):
         footprint_available = False
         if tick_size is not None and trades:
             # Fix 5: Incremental footprint — skip rebuild if trades haven't changed
-            if not hasattr(self, '_last_footprint_cache'):
+            if not hasattr(self, "_last_footprint_cache"):
                 self._last_footprint_cache = {}
             trade_key = (len(trades), trades[-1].trade_id if trades else 0)
             cached_footprint = self._last_footprint_cache.get(symbol)
@@ -676,16 +676,22 @@ class OpportunityScanner(AITOSModule):
         if self._reference_symbol:
             # Check kline cache for reference symbol
             if self._live_state_store is not None:
-                cached_ref = self._live_state_store.get_cached_klines(self._reference_symbol)
+                cached_ref = self._live_state_store.get_cached_klines(
+                    self._reference_symbol
+                )
                 if cached_ref is not None:
                     reference_klines = cached_ref
             if reference_klines is None:
                 try:
                     reference_klines = await self._exchange.fetch_klines(
-                        self._reference_symbol, self._timeframe, limit=self._kline_lookback
+                        self._reference_symbol,
+                        self._timeframe,
+                        limit=self._kline_lookback,
                     )
                     if self._live_state_store is not None:
-                        self._live_state_store.cache_klines(self._reference_symbol, reference_klines)
+                        self._live_state_store.cache_klines(
+                            self._reference_symbol, reference_klines
+                        )
                 except Exception as exc:
                     logger.error("failed to fetch reference symbol klines: %s", exc)
         candidates = []

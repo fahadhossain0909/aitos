@@ -35,8 +35,8 @@ stop. No existing emergency or exchange-side path is removed.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
 from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from aitos.core.contracts import (
@@ -168,12 +168,16 @@ class TradeLifecycle(AITOSModule):
         now = datetime.now(timezone.utc)
         open_trade_details = []
         for trade in self._open_trades.values():
-            current_price = getattr(trade, "last_marked_price", None) or trade.entry_price
+            current_price = (
+                getattr(trade, "last_marked_price", None) or trade.entry_price
+            )
             direction = 1 if trade.side == TradeSide.LONG else -1
             if trade.entry_price > 0:
                 unrealized_pnl = (
-                    (current_price - trade.entry_price) / trade.entry_price
-                ) * direction * trade.position_size_usd
+                    ((current_price - trade.entry_price) / trade.entry_price)
+                    * direction
+                    * trade.position_size_usd
+                )
             else:
                 unrealized_pnl = 0.0
             try:

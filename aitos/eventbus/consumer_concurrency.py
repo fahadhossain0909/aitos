@@ -8,14 +8,13 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
+from aitos.core.contracts import EventResponse
 from aitos.logging_setup import get_logger
 
 from .redis_bus import (
     CONSUMER_BATCH_SIZE,
     CONSUMER_BLOCK_MS,
-    POLL_INTERVAL_SECONDS,
 )
-from aitos.core.contracts import EventResponse
 
 logger = get_logger("aitos.eventbus")
 
@@ -75,7 +74,11 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                 await self._redis.xack(stream_key, group, entry_id)
                 self._acked_events += 1
                 self._last_acked_at = datetime.now(timezone.utc).isoformat()
-                if response is not None and isinstance(response, EventResponse) and hasattr(self, "_maybe_publish_response"):
+                if (
+                    response is not None
+                    and isinstance(response, EventResponse)
+                    and hasattr(self, "_maybe_publish_response")
+                ):
                     await self._maybe_publish_response(event, response)
             except Exception as exc:
                 self._handler_failures += 1

@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Protocol
 
 from dotenv import load_dotenv
-load_dotenv('/home/fahad/aitos/.env')
+
+load_dotenv("/home/fahad/aitos/.env")
 
 from aitos.core.contracts import AITOSModule, Event
 from aitos.data.ingestion import DataIngestionService
@@ -281,15 +282,18 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
     # Without this, events published to a stream before its group exists are
     # invisible to the consumer until a reclaim/poll cycle discovers them.
     from aitos.market_data.channels import ALL_CHANNELS
-    components.event_bus.register_expected_topics([
-        "market.kline",
-        "market.trade",
-        "market.orderbook",
-        "market.liquidity",
-        "market.orderflow",
-        "market.live_state",
-        *ALL_CHANNELS,
-    ])
+
+    components.event_bus.register_expected_topics(
+        [
+            "market.kline",
+            "market.trade",
+            "market.orderbook",
+            "market.liquidity",
+            "market.orderflow",
+            "market.live_state",
+            *ALL_CHANNELS,
+        ]
+    )
     components._price_feed_subscriptions = [
         await components.event_bus.subscribe(
             "market.kline.*",

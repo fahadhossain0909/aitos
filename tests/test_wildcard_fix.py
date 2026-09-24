@@ -1,4 +1,5 @@
 import asyncio
+
 import pytest
 
 from aitos.core.contracts import Event
@@ -18,10 +19,12 @@ async def test_wildcard_subscription_matches_base_topics():
     await bus.initialize({})
 
     # Simulate what app.py does
-    bus.register_expected_topics([
-        "market.kline",
-        "market.trade",
-    ])
+    bus.register_expected_topics(
+        [
+            "market.kline",
+            "market.trade",
+        ]
+    )
 
     received = []
 
@@ -66,8 +69,7 @@ async def test_wildcard_subscription_matches_base_topics():
 
 @pytest.mark.asyncio
 async def test_wildcard_subscription_matches_concrete_topics():
-    """fnmatch case: topics that already match via wildcard should still work.
-    """
+    """fnmatch case: topics that already match via wildcard should still work."""
     from fakeredis.aioredis import FakeRedis
 
     r = FakeRedis()

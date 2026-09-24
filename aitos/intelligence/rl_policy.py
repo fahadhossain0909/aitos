@@ -64,7 +64,11 @@ class TabularBanditRLScorer(RLPolicyScorer):
         self._counts: dict[tuple[str, str, str], int] = {}
         self._means: dict[tuple[str, str, str], float] = {}
         if state_path is None:
-            state_path = os.path.join(os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models"), "online_rl", "tabular_bandit.pkl")
+            state_path = os.path.join(
+                os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models"),
+                "online_rl",
+                "tabular_bandit.pkl",
+            )
         self._state_path = Path(state_path)
 
     def _key(self, symbol: str, regime: str, direction: str) -> tuple[str, str, str]:

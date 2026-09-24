@@ -34,7 +34,9 @@ class ModelRegistry:
 
     def __init__(self, path: str | None = None) -> None:
         if path is None:
-            path = os.path.join(os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models"), "registry.json")
+            path = os.path.join(
+                os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models"), "registry.json"
+            )
         self.path = path
 
     def _load(self) -> list[dict[str, Any]]:
