@@ -31,7 +31,6 @@ TRADE_STREAM_QUEUE_SIZE = 10_000
 TRADE_STREAM_BATCH_SIZE = 64
 TRADE_STREAM_BATCH_WAIT_SECONDS = 0.010
 TRADE_SINK_CONCURRENCY = 16
-TRADE_PERSIST_QUEUE_SIZE = 50_000
 TRADE_FALLBACK_LIMIT = 500
 ORDERBOOK_PERSIST_INTERVAL_SECONDS = 1.0
 STREAM_RESTART_DELAY_SECONDS = 1.0
@@ -108,10 +107,6 @@ class DataIngestionService(AITOSModule):
         self._trade_sink_semaphore = asyncio.Semaphore(TRADE_SINK_CONCURRENCY)
         self._live_trade_handler = live_trade_handler
         self._live_orderbook_handler = live_orderbook_handler
-        self._trade_persistence_queue: asyncio.Queue[
-            tuple[TradeTick, dict[str, Any]]
-        ] = asyncio.Queue(maxsize=TRADE_PERSIST_QUEUE_SIZE)
-        self._trade_persistence_dropped = 0
         self._live_state = LiveMarketStateStore(
             max_trades=max(5000, self._liquidity_trade_window)
         )
@@ -135,12 +130,6 @@ class DataIngestionService(AITOSModule):
             return
         await self._exchange.connect()
         self._tasks = [
-            *[
-                asyncio.create_task(
-                    self._run_trade_persistence(), name=f"aitos-trade-persistence-{i}"
-                )
-                for i in range(TRADE_SINK_CONCURRENCY)
-            ],
             asyncio.create_task(self._run_kline_stream(), name="aitos-kline-stream"),
         ]
         # Canonical MarketData V1 owns live trade/order-book transport when no
@@ -192,10 +181,15 @@ class DataIngestionService(AITOSModule):
                     )
             states.append(state)
         alive = sum(not t.done() for t in self._tasks)
+        # Reset cumulative error counter each health check so status reflects
+        # current state, not all-time total. A single transient blip at startup
+        # would otherwise keep the module degraded forever.
+        current_errors = self._errors
+        self._errors = 0
         status = (
             ModuleStatus.UNHEALTHY
             if alive < len(self._tasks)
-            else (ModuleStatus.DEGRADED if self._errors else ModuleStatus.HEALTHY)
+            else (ModuleStatus.DEGRADED if current_errors else ModuleStatus.HEALTHY)
         )
         return HealthStatus(
             module_id=self.module_id,
@@ -221,9 +215,6 @@ class DataIngestionService(AITOSModule):
                 "trade_stream_queue_capacity": TRADE_STREAM_QUEUE_SIZE,
                 "trade_stream_batch_size": TRADE_STREAM_BATCH_SIZE,
                 "trade_sink_concurrency": TRADE_SINK_CONCURRENCY,
-                "trade_persistence_queue_size": self._trade_persistence_queue.qsize(),
-                "trade_persistence_queue_capacity": TRADE_PERSIST_QUEUE_SIZE,
-                "trade_persistence_dropped": self._trade_persistence_dropped,
                 "last_trade_event_time": self._last_trade_event_time,
                 "task_states": states,
             },
@@ -349,7 +340,13 @@ class DataIngestionService(AITOSModule):
             self._trade_events_received += 1
             self._last_trade_event_time = datetime.now(timezone.utc).isoformat()
             try:
-                features = self._live_state.on_trade(trade)
+                # Fix 3: When a live trade handler (scanner cache) is wired,
+                # skip storing in LiveMarketStateStore to avoid duplicate deques.
+                # Only compute order-flow features.
+                if self._live_trade_handler is not None:
+                    features = self._live_state._flow[trade.symbol].ingest(trade)
+                else:
+                    features = self._live_state.on_trade(trade)
                 payload = {
                     "trade_count": features.trade_count,
                     "buy_volume": features.buy_volume,
@@ -445,49 +442,6 @@ class DataIngestionService(AITOSModule):
             )
         for trade, _payload in accepted:
             await self._publish_live_state(trade.symbol)
-
-    async def _run_trade_persistence(self) -> None:
-        """Legacy queue worker retained for compatibility with health metrics."""
-        while True:
-            trade, payload = await self._trade_persistence_queue.get()
-            try:
-                async with self._trade_sink_semaphore:
-                    jobs = [
-                        self._event_bus.publish(
-                            Event(
-                                topic=trade_topic(trade.symbol),
-                                payload=trade.to_dict(),
-                                source_module=self.module_id,
-                                priority=EventPriority.NORMAL,
-                            )
-                        ),
-                        self._event_bus.publish(
-                            Event(
-                                topic=orderflow_topic(trade.symbol),
-                                payload=payload,
-                                source_module=self.module_id,
-                                priority=EventPriority.NORMAL,
-                            )
-                        ),
-                    ]
-                    if self._repository is not None:
-                        jobs.append(self._repository.save_trade_tick(trade))
-                    await asyncio.gather(*jobs)
-            except Exception as exc:
-                self._errors += 1
-                self._trade_downstream_errors += 1
-                logger.exception(
-                    "trade persistence failed",
-                    extra={
-                        "aitos_extra": {
-                            "symbol": trade.symbol,
-                            "trade_id": trade.trade_id,
-                            "error": str(exc),
-                        }
-                    },
-                )
-            finally:
-                self._trade_persistence_queue.task_done()
 
     async def _recover_recent_trades(self) -> None:
         """Recover a REST window after a silent websocket gap; IDs prevent duplicates."""

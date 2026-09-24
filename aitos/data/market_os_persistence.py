@@ -202,7 +202,13 @@ class MarketOSPersistence(AITOSModule):
                 group="market-os-live-state",
             ),
             await self._event_bus.subscribe(
-                "market.orderbook.*",
+                "market.orderbook.BTCUSDT",
+                self._handle_orderbook,
+                group="clickhouse-orderbook-history-v1",
+                start_id="0",
+            ),
+            await self._event_bus.subscribe(
+                "market.orderbook.LTCUSDT",
                 self._handle_orderbook,
                 group="clickhouse-orderbook-history-v1",
                 start_id="0",

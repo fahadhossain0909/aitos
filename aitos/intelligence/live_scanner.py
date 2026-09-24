@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.intelligence.liquidity_tracker import LiquidityTracker
+from aitos.intelligence.order_flow_engine import OrderFlowEngine, OrderFlowFeatures
 from aitos.logging_setup import get_logger
 from aitos.market_data.bus import MarketDataBus, market_event_from_wire
 from aitos.market_data.contracts import MarketEventType, MarketSource
@@ -36,6 +38,8 @@ class LiveSymbolCache:
     duplicate_book_rejections: int = 0
     last_stale_trade_source_age_sec: float | None = None
     last_stale_book_source_age_sec: float | None = None
+    _flow_engine: OrderFlowEngine | None = field(default=None, repr=False)
+    _liquidity_tracker: LiquidityTracker | None = field(default=None, repr=False)
 
 
 class LiveScannerCache:
@@ -61,6 +65,22 @@ class LiveScannerCache:
     def snapshot(self, symbol: str) -> LiveSymbolCache | None:
         """Return the current live state without creating a cache entry."""
         return self._state.get(symbol.upper())
+
+    def flow_features(self, symbol: str) -> OrderFlowFeatures | None:
+        """Return live order-flow features from the running engine."""
+        state = self._state.get(symbol.upper())
+        if state is None:
+            return None
+        if state._flow_engine is None:
+            return None
+        return state._flow_engine.snapshot()
+
+    def liquidity_tracker(self, symbol: str) -> LiquidityTracker | None:
+        """Return the running LiquidityTracker for a symbol (shared with scanner)."""
+        state = self._state.get(symbol.upper())
+        if state is None or state._liquidity_tracker is None:
+            return None
+        return state._liquidity_tracker
 
     def _source_age_seconds(
         self, timestamp: datetime | None, now: datetime | None = None
@@ -165,6 +185,9 @@ class LiveScannerCache:
             state.duplicate_trade_rejections += 1
             return
         state.trades.append(trade)
+        if state._flow_engine is None:
+            state._flow_engine = OrderFlowEngine(max_trades=self._max_trades)
+        state._flow_engine.ingest(trade)
         state.last_trade_at = received_at
         state.last_trade_source_at = trade.timestamp
         state.last_trade_received_at = received_at
@@ -181,6 +204,9 @@ class LiveScannerCache:
         ):
             state.duplicate_book_rejections += 1
             return
+        if state._liquidity_tracker is None:
+            state._liquidity_tracker = LiquidityTracker()
+        state._liquidity_tracker.update(book, tuple(state.trades))
         state.order_book = book
         state.last_book_at = received_at
         state.last_book_source_at = book.timestamp
@@ -207,6 +233,9 @@ class LiveScannerCache:
             state.duplicate_trade_rejections += 1
             return
         state.trades.append(trade)
+        if state._flow_engine is None:
+            state._flow_engine = OrderFlowEngine(max_trades=self._max_trades)
+        state._flow_engine.ingest(trade)
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
@@ -235,6 +264,9 @@ class LiveScannerCache:
         ):
             state.duplicate_book_rejections += 1
             return
+        if state._liquidity_tracker is None:
+            state._liquidity_tracker = LiquidityTracker()
+        state._liquidity_tracker.update(book, tuple(state.trades))
         state.order_book = book
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time

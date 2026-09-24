@@ -10,6 +10,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Protocol
 
+from dotenv import load_dotenv
+load_dotenv('/home/fahad/aitos/.env')
+
 from aitos.core.contracts import AITOSModule, Event
 from aitos.data.ingestion import DataIngestionService
 from aitos.data.repository import MarketDataRepository
@@ -23,7 +26,7 @@ from aitos.intelligence.scanner import OpportunityScanner
 # Keep model persistence independent of any developer-specific host path.
 # MODEL_DATA_DIR is already part of the deployment environment contract;
 # /models is the portable container default.
-_MODEL_DATA_DIR = Path(os.getenv("MODEL_DATA_DIR", "/models"))
+_MODEL_DATA_DIR = Path(os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models"))
 for _rl_dir in (_MODEL_DATA_DIR / "online_rl", _MODEL_DATA_DIR / "online_ml"):
     _rl_dir.mkdir(parents=True, exist_ok=True)
 
@@ -126,6 +129,13 @@ async def build_system(
             rl_scorer = DeepValueRLScorer()
         except ImportError:
             rl_scorer = TabularBanditRLScorer()
+    data_ingestion = DataIngestionService(
+        exchange=exchange,
+        event_bus=event_bus,
+        symbols=symbols,
+        kline_timeframe=kline_timeframe,
+        repository=market_data_repository,
+    )
     scanner = OpportunityScanner(
         event_bus=event_bus,
         exchange=exchange,
@@ -134,7 +144,11 @@ async def build_system(
         rl_scorer=rl_scorer,
         min_score_threshold=min_score_threshold,
         top_n=top_n,
+        live_state_store=data_ingestion.live_state,
     )
+    # Wire the scanner's live handlers to the ingestion service
+    data_ingestion._live_trade_handler = scanner.accept_live_trade
+    data_ingestion._live_orderbook_handler = scanner.accept_live_order_book
     rl_feedback = RLFeedbackLoop(event_bus=event_bus, scorer=rl_scorer)
     outcome_classifier = outcome_classifier or TradeOutcomeClassifier()
     ml_feedback = MLExplainerFeedbackLoop(
@@ -154,15 +168,6 @@ async def build_system(
         kernel=kernel,
         use_exchange_side_stops=use_exchange_side_stops,
         position_manager=position_manager,
-    )
-    data_ingestion = DataIngestionService(
-        exchange=exchange,
-        event_bus=event_bus,
-        symbols=symbols,
-        kline_timeframe=kline_timeframe,
-        repository=market_data_repository,
-        live_trade_handler=scanner.accept_live_trade,
-        live_orderbook_handler=scanner.accept_live_order_book,
     )
     if position_manager is not None:
         from aitos.trading.market_context import LiveStateContextProvider
@@ -271,6 +276,20 @@ async def _health_status(module: AITOSModule):
 async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) -> None:
     for module in components.all_modules():
         await module.initialize({})
+    # Pre-declare all known market topics so wildcard subscriptions create
+    # consumer groups for every stream BEFORE the first event is published.
+    # Without this, events published to a stream before its group exists are
+    # invisible to the consumer until a reclaim/poll cycle discovers them.
+    from aitos.market_data.channels import ALL_CHANNELS
+    components.event_bus.register_expected_topics([
+        "market.kline",
+        "market.trade",
+        "market.orderbook",
+        "market.liquidity",
+        "market.orderflow",
+        "market.live_state",
+        *ALL_CHANNELS,
+    ])
     components._price_feed_subscriptions = [
         await components.event_bus.subscribe(
             "market.kline.*",

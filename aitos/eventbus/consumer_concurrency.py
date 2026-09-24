@@ -12,8 +12,10 @@ from aitos.logging_setup import get_logger
 
 from .redis_bus import (
     CONSUMER_BATCH_SIZE,
+    CONSUMER_BLOCK_MS,
     POLL_INTERVAL_SECONDS,
 )
+from aitos.core.contracts import EventResponse
 
 logger = get_logger("aitos.eventbus")
 
@@ -73,7 +75,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                 await self._redis.xack(stream_key, group, entry_id)
                 self._acked_events += 1
                 self._last_acked_at = datetime.now(timezone.utc).isoformat()
-                if response is not None and hasattr(self, "_maybe_publish_response"):
+                if response is not None and isinstance(response, EventResponse) and hasattr(self, "_maybe_publish_response"):
                     await self._maybe_publish_response(event, response)
             except Exception as exc:
                 self._handler_failures += 1
@@ -130,19 +132,45 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
 
                 while True:
                     try:
-                        # This loop intentionally uses non-blocking XREADGROUP.
-                        # Each stream has its own task, so polling preserves the
-                        # per-stream ordering/concurrency model while allowing
-                        # asyncio cancellation to interrupt immediately. Blocking
-                        # fakeredis/aioredis reads can otherwise survive task
-                        # cancellation and prevent clean application shutdown.
-                        resp = await self._redis.xreadgroup(
-                            groupname=group,
-                            consumername=consumer,
-                            streams={stream_key: ">"},
-                            count=CONSUMER_BATCH_SIZE,
-                            block=None,
-                        )
+                        # Use a blocking read so we never miss events between
+                        # poll cycles. The block timeout is short enough to
+                        # allow clean cancellation on shutdown.
+                        try:
+                            resp = await self._redis.xreadgroup(
+                                groupname=group,
+                                consumername=consumer,
+                                streams={stream_key: ">"},
+                                count=CONSUMER_BATCH_SIZE,
+                                block=CONSUMER_BLOCK_MS,
+                            )
+                        except Exception as nogroup_exc:
+                            if "NOGROUP" in str(nogroup_exc):
+                                logger.warning(
+                                    "NOGROUP error for %s/%s, recreating group",
+                                    group,
+                                    stream_key,
+                                )
+                                if hasattr(self, "_handle_nogroup_recovery"):
+                                    await self._handle_nogroup_recovery(
+                                        [stream_key], group, start_id
+                                    )
+                                else:
+                                    recovery_key = (stream_key, group)
+                                    self._ensured_groups.discard(recovery_key)
+                                    try:
+                                        await self._redis.xgroup_create(
+                                            stream_key,
+                                            group,
+                                            id=start_id,
+                                            mkstream=True,
+                                        )
+                                    except Exception as create_exc:
+                                        if "BUSYGROUP" not in str(create_exc):
+                                            raise
+                                    self._ensured_groups.add(recovery_key)
+                                await asyncio.sleep(0.5)
+                                continue
+                            raise
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
@@ -159,7 +187,6 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                         await asyncio.sleep(1.0)
                         continue
                     if not resp:
-                        await asyncio.sleep(POLL_INTERVAL_SECONDS)
                         continue
                     for returned_stream, messages in resp:
                         if isinstance(returned_stream, bytes):

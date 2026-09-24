@@ -5,9 +5,18 @@
             <async_insert>1</async_insert>
             <wait_for_async_insert>1</wait_for_async_insert>
             <async_insert_use_adaptive_busy_timeout>0</async_insert_use_adaptive_busy_timeout>
-            <!-- Keep synchronous acknowledgement while further reducing persistence wait. -->
-            <async_insert_busy_timeout_ms>100</async_insert_busy_timeout_ms>
+            <!--
+                Increase async_insert_busy_timeout_ms to 1000ms so that
+                asynchronous INSERTs buffer more data before flushing.
+                Reduces per-INSERT overhead from ~100ms to ~1s batching,
+                dramatically lowering write latency for single-row inserts.
+            -->
+            <async_insert_busy_timeout_ms>1000</async_insert_busy_timeout_ms>
             <async_insert_max_data_size>1048576</async_insert_max_data_size>
+            <async_insert_max_query_number>450</async_insert_max_query_number>
+            <parts_to_delay_insert>300</parts_to_delay_insert>
+            <parts_to_throw_insert>1000</parts_to_throw_insert>
+            <max_parts_in_total>10000</max_parts_in_total>
         </default>
     </profiles>
 </clickhouse>

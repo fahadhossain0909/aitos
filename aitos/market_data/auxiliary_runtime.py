@@ -25,7 +25,7 @@ class BinanceAuxiliaryMarketDataRuntime:
     ) -> None:
         self.adapter = adapter
         self.gateway = gateway
-        self.symbols = list(dict.fromkeys(s.upper() for s in symbols if s))[:50]
+        self.symbols = list(dict.fromkeys(s.upper() for s in symbols if s))[:10]
         self._tasks: list[asyncio.Task] = []
         self._drain_tasks: list[asyncio.Task] = []
         self._stopped = True
@@ -44,8 +44,6 @@ class BinanceAuxiliaryMarketDataRuntime:
         self._start(
             "open_interest", lambda: self.adapter.stream_open_interest(self.symbols)
         )
-        self._start("liquidation", lambda: self.adapter.stream_liquidations())
-        self._start("instrument", lambda: self.adapter.stream_instruments(self.symbols))
         logger.info(
             "Binance auxiliary market-data runtime started",
             extra={"aitos_extra": {"symbols": self.symbols}},
@@ -106,7 +104,7 @@ class BinanceAuxiliaryMarketDataRuntime:
                 delay = min(delay * 2.0, 30.0)
 
     async def update_symbols(self, symbols: list[str] | tuple[str, ...]) -> bool:
-        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[:50]
+        normalized = list(dict.fromkeys(s.upper() for s in symbols if s))[:10]
         async with self._lock:
             if normalized == self.symbols:
                 return False

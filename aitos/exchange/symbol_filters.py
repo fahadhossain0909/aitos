@@ -47,9 +47,17 @@ class SymbolFilters:
 
 
 def parse_exchange_info(raw: dict) -> dict[str, SymbolFilters]:
-    """Parse a ``/fapi/v1/exchangeInfo`` response into ``{symbol: SymbolFilters}``."""
+    """Parse a ``/fapi/v1/exchangeInfo`` response into ``{symbol: SymbolFilters}``.
+
+    Only symbols with ``status == "TRADING"`` are included. Symbols in
+    PENDING_TRADING/SETTLING/BREAK/DELISTING reject kline/orderbook REST
+    calls with 400 "Invalid symbol status", which previously polluted logs
+    and wasted rate-limiter tokens.
+    """
     result: dict[str, SymbolFilters] = {}
     for symbol_info in raw.get("symbols", []):
+        if symbol_info.get("status", "TRADING") != "TRADING":
+            continue
         symbol = symbol_info["symbol"]
         step_size = 0.0
         tick_size = 0.0

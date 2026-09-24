@@ -276,7 +276,8 @@ def install_trade_lifecycle_market_bridge() -> None:
 
             async def _position_market_handler(event: Event):
                 provider = getattr(lifecycle, "market_context_provider", None)
-                return await handle_position_market_event(lifecycle, provider, event)
+                await handle_position_market_event(lifecycle, provider, event)
+                return None
 
             handler = _position_market_handler
             logger.info(

@@ -152,7 +152,11 @@ class OpportunityScanner(AITOSModule):
         live_state_stale_seconds: float = 5.0,
         amt_value_area_pct: float = 0.70,
         amt_ib_minutes: int = 60,
+        live_scanner_cache: LiveScannerCache | None = None,
+        live_state_store: Any | None = None,
     ) -> None:
+        from aitos.intelligence.live_state import LiveMarketStateStore
+
         self._event_bus = event_bus
         self._exchange = exchange
         self._symbols = symbols
@@ -170,14 +174,15 @@ class OpportunityScanner(AITOSModule):
         self._last_oi = {}
         self._last_amt_profile = {}
         self._last_amt_context = {}
-        self._liquidity_trackers = {}
+        self._liquidity_trackers: dict[str, LiquidityTracker] = {}
         self._footprint_engines = {}
         self._amt_engines = {}
         self._footprint_signal_engine = FootprintSignalEngine()
         self._interaction_engine = FlowLiquidityInteractionEngine()
-        self._live_cache = LiveScannerCache(
+        self._live_cache = live_scanner_cache or LiveScannerCache(
             event_bus, symbols, max_trades=max(5000, trade_lookback)
         )
+        self._live_state_store: LiveMarketStateStore | None = live_state_store
         self._last_scan_at = None
         self._last_candidate_count = 0
 
@@ -281,9 +286,18 @@ class OpportunityScanner(AITOSModule):
         tick_size = self._footprint_tick_size(symbol)
         if tick_size is None or not trades:
             return None
+        # Fix 5: Incremental AMT — reuse previous profile, only recompute with new trades
         engine = self._amt_engines.setdefault(
             symbol, AMTEngine(tick_size, self._amt_value_area_pct, self._amt_ib_minutes)
         )
+        # Check if we have a cached result and trades haven't changed since last scan
+        if not hasattr(self, '_last_amt_trades_cache'):
+            self._last_amt_trades_cache = {}
+        trade_key = (len(trades), trades[-1].trade_id if trades else 0)
+        cached_key = self._last_amt_trades_cache.get(symbol)
+        if cached_key == trade_key and symbol in self._last_amt_context:
+            return self._last_amt_context[symbol]
+        self._last_amt_trades_cache[symbol] = trade_key
         context = engine.analyze(
             trades,
             klines=klines,
@@ -298,9 +312,18 @@ class OpportunityScanner(AITOSModule):
         self, symbol: str, reference_klines: list | None = None
     ) -> ScanCandidate | None:
         self._require_initialized()
-        klines = await self._exchange.fetch_klines(
-            symbol, self._timeframe, limit=self._kline_lookback
-        )
+        # Fix 1: Check shared kline cache first
+        cached_klines = None
+        if self._live_state_store is not None:
+            cached_klines = self._live_state_store.get_cached_klines(symbol)
+        if cached_klines is not None:
+            klines = cached_klines
+        else:
+            klines = await self._exchange.fetch_klines(
+                symbol, self._timeframe, limit=self._kline_lookback
+            )
+            if self._live_state_store is not None:
+                self._live_state_store.cache_klines(symbol, klines)
         if len(klines) < 20:
             logger.info(
                 "paper signal diagnostics",
@@ -339,13 +362,17 @@ class OpportunityScanner(AITOSModule):
             market_structure.bos_direction,
             market_structure.bos_strength,
         )
-        flow_features = (
-            OrderFlowEngine(max_trades=max(100, self._trade_lookback)).ingest_many(
-                trades
+        # Fix 2: Reuse running order-flow features from the live cache
+        flow_features = self._live_cache.flow_features(symbol)
+        if flow_features is None or flow_features.trade_count == 0:
+            # Fallback: re-ingest trades if engine is empty
+            flow_features = (
+                OrderFlowEngine(max_trades=max(100, self._trade_lookback)).ingest_many(
+                    trades
+                )
+                if trades
+                else None
             )
-            if trades
-            else None
-        )
         candle_cvd = indicators.cvd_trend_score(klines)
         flow_score = flow_features.bias_score if flow_features else candle_cvd
         direction = determine_direction(
@@ -464,14 +491,30 @@ class OpportunityScanner(AITOSModule):
             )
         else:
             amt_score = live_auction if live_fresh else candle_auction
-        tracker = self._liquidity_trackers.setdefault(symbol, LiquidityTracker())
-        liquidity_events = tracker.update(order_book, trades)
+        # Fix 4: Use shared liquidity tracker from LiveScannerCache
+        shared_tracker = self._live_cache.liquidity_tracker(symbol)
+        if shared_tracker is not None:
+            # Already updated during event ingestion; use for interaction context
+            tracker = shared_tracker
+            liquidity_events: list = []
+        else:
+            tracker = self._liquidity_trackers.setdefault(symbol, LiquidityTracker())
+            liquidity_events = tracker.update(order_book, trades)
         tick_size = self._footprint_tick_size(symbol)
         footprint_available = False
         if tick_size is not None and trades:
-            footprint = self._footprint_engines.setdefault(
-                symbol, FootprintEngine(tick_size)
-            ).build(trades)
+            # Fix 5: Incremental footprint — skip rebuild if trades haven't changed
+            if not hasattr(self, '_last_footprint_cache'):
+                self._last_footprint_cache = {}
+            trade_key = (len(trades), trades[-1].trade_id if trades else 0)
+            cached_footprint = self._last_footprint_cache.get(symbol)
+            if cached_footprint is not None and cached_footprint[0] == trade_key:
+                footprint = cached_footprint[1]
+            else:
+                footprint = self._footprint_engines.setdefault(
+                    symbol, FootprintEngine(tick_size)
+                ).build(trades)
+                self._last_footprint_cache[symbol] = (trade_key, footprint)
             footprint_signals = self._footprint_signal_engine.evaluate(footprint)
             interaction = self._interaction_engine.evaluate(
                 footprint_signals, liquidity_events
@@ -631,12 +674,20 @@ class OpportunityScanner(AITOSModule):
         self._require_initialized()
         reference_klines = None
         if self._reference_symbol:
-            try:
-                reference_klines = await self._exchange.fetch_klines(
-                    self._reference_symbol, self._timeframe, limit=self._kline_lookback
-                )
-            except Exception as exc:
-                logger.error("failed to fetch reference symbol klines: %s", exc)
+            # Check kline cache for reference symbol
+            if self._live_state_store is not None:
+                cached_ref = self._live_state_store.get_cached_klines(self._reference_symbol)
+                if cached_ref is not None:
+                    reference_klines = cached_ref
+            if reference_klines is None:
+                try:
+                    reference_klines = await self._exchange.fetch_klines(
+                        self._reference_symbol, self._timeframe, limit=self._kline_lookback
+                    )
+                    if self._live_state_store is not None:
+                        self._live_state_store.cache_klines(self._reference_symbol, reference_klines)
+                except Exception as exc:
+                    logger.error("failed to fetch reference symbol klines: %s", exc)
         candidates = []
         for symbol in self._symbols:
             try:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -31,7 +32,9 @@ class ModelRegistry:
 
     VALID_STATUSES = {"candidate", "champion", "rejected", "archived"}
 
-    def __init__(self, path: str = "/models/registry.json") -> None:
+    def __init__(self, path: str | None = None) -> None:
+        if path is None:
+            path = os.path.join(os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models"), "registry.json")
         self.path = path
 
     def _load(self) -> list[dict[str, Any]]:

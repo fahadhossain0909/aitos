@@ -8,8 +8,9 @@ silently corrupted book.
 
 from __future__ import annotations
 
+import asyncio
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -66,14 +67,32 @@ class DeepOrderBookGap(RuntimeError):
 
 
 class DeepOrderBookStore:
-    """ClickHouse writer for every raw delta and periodic full checkpoints."""
+    """ClickHouse writer for every raw delta and periodic full checkpoints.
 
-    def __init__(self, repository: DeepOrderBookRepository) -> None:
+    Buffers rows in memory and flushes in batches to avoid single-row INSERT
+    overhead. Previously every event triggered its own INSERT, causing
+    ~500ms+ write latency per event. With batching, each INSERT handles
+    hundreds of rows at once, amortizing the cost.
+    """
+
+    def __init__(
+        self,
+        repository: DeepOrderBookRepository,
+        *,
+        batch_size: int = 200,
+        flush_interval_seconds: float = 1.0,
+    ) -> None:
         self._repository = repository
         self._initialized = False
         self.deltas_persisted = 0
         self.checkpoints_persisted = 0
         self.rejected_symbols = 0
+        self._batch_size = max(1, batch_size)
+        self._flush_interval_seconds = max(0.05, flush_interval_seconds)
+        self._delta_buffer: list[list[Any]] = []
+        self._checkpoint_buffer: list[list[Any]] = []
+        self._flush_task: asyncio.Task[None] | None = None
+        self._flush_lock = asyncio.Lock()
 
     async def initialize(self) -> None:
         if self._initialized:
@@ -83,7 +102,83 @@ class DeepOrderBookStore:
             raise RuntimeError("repository ClickHouse client is not initialized")
         for ddl in CREATE_DEEP_ORDERBOOK_TABLES:
             await client.command(ddl)
+        self._flush_task = asyncio.create_task(self._flush_loop())
         self._initialized = True
+
+    async def shutdown(self) -> None:
+        if self._flush_task is not None:
+            self._flush_task.cancel()
+            try:
+                await self._flush_task
+            except asyncio.CancelledError:
+                pass
+            self._flush_task = None
+        await self._flush()
+
+    async def _flush_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._flush_interval_seconds)
+                await self._flush()
+        except asyncio.CancelledError:
+            raise
+
+    async def _flush(self) -> None:
+        client = getattr(self._repository, "_client", None)
+        if client is None:
+            return
+        async with self._flush_lock:
+            delta_rows = self._delta_buffer
+            checkpoint_rows = self._checkpoint_buffer
+            self._delta_buffer = []
+            self._checkpoint_buffer = []
+        if delta_rows:
+            try:
+                await client.insert(
+                    DEEP_DELTA_TABLE,
+                    delta_rows,
+                    column_names=[
+                        "event_time",
+                        "ingest_time",
+                        "venue",
+                        "market_type",
+                        "symbol",
+                        "first_update_id",
+                        "final_update_id",
+                        "previous_update_id",
+                        "bids",
+                        "asks",
+                        "event_id",
+                    ],
+                )
+                self.deltas_persisted += len(delta_rows)
+            except Exception:
+                # Re-queue on failure so we don't lose data
+                async with self._flush_lock:
+                    self._delta_buffer[0:0] = delta_rows
+                raise
+        if checkpoint_rows:
+            try:
+                await client.insert(
+                    DEEP_CHECKPOINT_TABLE,
+                    checkpoint_rows,
+                    column_names=[
+                        "event_time",
+                        "ingest_time",
+                        "venue",
+                        "market_type",
+                        "symbol",
+                        "update_id",
+                        "bids",
+                        "asks",
+                        "event_id",
+                    ],
+                )
+                self.checkpoints_persisted += len(checkpoint_rows)
+            except Exception:
+                async with self._flush_lock:
+                    self._checkpoint_buffer[0:0] = checkpoint_rows
+                raise
 
     @staticmethod
     def _levels(value: Any) -> list[list[float]]:
@@ -93,87 +188,105 @@ class DeepOrderBookStore:
         if event.symbol.upper() not in DEEP_SYMBOLS:
             self.rejected_symbols += 1
             return
+        async with self._flush_lock:
+            if event.event_type is MarketEventType.BOOK_DELTA:
+                p = event.payload
+                row = [
+                    event.event_time,
+                    event.ingest_time,
+                    event.venue or event.exchange,
+                    event.market_type or event.market,
+                    event.symbol.upper(),
+                    int(p["first_update_id"]),
+                    int(p["final_update_id"]),
+                    int(p.get("previous_update_id", 0)),
+                    json.dumps(
+                        self._levels(p.get("bids", [])), separators=(",", ":")
+                    ),
+                    json.dumps(
+                        self._levels(p.get("asks", [])), separators=(",", ":")
+                    ),
+                    event.event_id,
+                ]
+                self._delta_buffer.append(row)
+                if len(self._delta_buffer) >= self._batch_size:
+                    buffer = self._delta_buffer
+                    self._delta_buffer = []
+                    await self._flush_deltas(buffer)
+            elif event.event_type is MarketEventType.BOOK_SNAPSHOT:
+                p = event.payload
+                row = [
+                    event.event_time,
+                    event.ingest_time,
+                    event.venue or event.exchange,
+                    event.market_type or event.market,
+                    event.symbol.upper(),
+                    int(p["last_update_id"]),
+                    json.dumps(
+                        self._levels(p.get("bids", [])), separators=(",", ":")
+                    ),
+                    json.dumps(
+                        self._levels(p.get("asks", [])), separators=(",", ":")
+                    ),
+                    event.event_id,
+                ]
+                self._checkpoint_buffer.append(row)
+                if len(self._checkpoint_buffer) >= self._batch_size:
+                    buffer = self._checkpoint_buffer
+                    self._checkpoint_buffer = []
+                    await self._flush_checkpoints(buffer)
+
+    async def _flush_deltas(self, rows: list[list[Any]]) -> None:
         client = getattr(self._repository, "_client", None)
-        if client is None:
-            raise RuntimeError("repository ClickHouse client is not initialized")
-        if event.event_type is MarketEventType.BOOK_DELTA:
-            p = event.payload
-            await client.insert(
-                DEEP_DELTA_TABLE,
-                [
-                    [
-                        event.event_time,
-                        event.ingest_time,
-                        event.venue or event.exchange,
-                        event.market_type or event.market,
-                        event.symbol.upper(),
-                        int(p["first_update_id"]),
-                        int(p["final_update_id"]),
-                        int(p.get("previous_update_id", 0)),
-                        json.dumps(
-                            self._levels(p.get("bids", [])), separators=(",", ":")
-                        ),
-                        json.dumps(
-                            self._levels(p.get("asks", [])), separators=(",", ":")
-                        ),
-                        event.event_id,
-                    ]
-                ],
-                column_names=[
-                    "event_time",
-                    "ingest_time",
-                    "venue",
-                    "market_type",
-                    "symbol",
-                    "first_update_id",
-                    "final_update_id",
-                    "previous_update_id",
-                    "bids",
-                    "asks",
-                    "event_id",
-                ],
-            )
-            self.deltas_persisted += 1
-        elif event.event_type is MarketEventType.BOOK_SNAPSHOT:
-            p = event.payload
-            await client.insert(
-                DEEP_CHECKPOINT_TABLE,
-                [
-                    [
-                        event.event_time,
-                        event.ingest_time,
-                        event.venue or event.exchange,
-                        event.market_type or event.market,
-                        event.symbol.upper(),
-                        int(p["last_update_id"]),
-                        json.dumps(
-                            self._levels(p.get("bids", [])), separators=(",", ":")
-                        ),
-                        json.dumps(
-                            self._levels(p.get("asks", [])), separators=(",", ":")
-                        ),
-                        event.event_id,
-                    ]
-                ],
-                column_names=[
-                    "event_time",
-                    "ingest_time",
-                    "venue",
-                    "market_type",
-                    "symbol",
-                    "update_id",
-                    "bids",
-                    "asks",
-                    "event_id",
-                ],
-            )
-            self.checkpoints_persisted += 1
+        if client is None or not rows:
+            return
+        await client.insert(
+            DEEP_DELTA_TABLE,
+            rows,
+            column_names=[
+                "event_time",
+                "ingest_time",
+                "venue",
+                "market_type",
+                "symbol",
+                "first_update_id",
+                "final_update_id",
+                "previous_update_id",
+                "bids",
+                "asks",
+                "event_id",
+            ],
+        )
+        self.deltas_persisted += len(rows)
+
+    async def _flush_checkpoints(self, rows: list[list[Any]]) -> None:
+        client = getattr(self._repository, "_client", None)
+        if client is None or not rows:
+            return
+        await client.insert(
+            DEEP_CHECKPOINT_TABLE,
+            rows,
+            column_names=[
+                "event_time",
+                "ingest_time",
+                "venue",
+                "market_type",
+                "symbol",
+                "update_id",
+                "bids",
+                "asks",
+                "event_id",
+            ],
+        )
+        self.checkpoints_persisted += len(rows)
 
     def snapshot(self) -> dict[str, int]:
         return {
             "deltas_persisted": self.deltas_persisted,
             "checkpoints_persisted": self.checkpoints_persisted,
             "rejected_symbols": self.rejected_symbols,
+            "delta_buffer_pending": len(self._delta_buffer),
+            "checkpoint_buffer_pending": len(self._checkpoint_buffer),
         }
 
 

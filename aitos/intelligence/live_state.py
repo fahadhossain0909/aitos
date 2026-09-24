@@ -8,9 +8,10 @@ from datetime import datetime, timedelta, timezone
 
 from aitos.intelligence.liquidity_tracker import LiquidityEvent, LiquidityTracker
 from aitos.intelligence.order_flow_engine import OrderFlowEngine, OrderFlowFeatures
-from aitos.models.market import OrderBookSnapshot, TradeTick
+from aitos.models.market import Kline, OrderBookSnapshot, TradeTick
 
 LIVE_TRADE_MAX_AGE_SECONDS = 15.0
+KLINE_CACHE_TTL_SECONDS = 60.0
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class LiveMarketStateStore:
             lambda: deque(maxlen=max_liquidity_events)
         )
         self._books: dict[str, OrderBookSnapshot] = {}
+        self._kline_cache: dict[str, tuple[float, list[Kline]]] = {}  # symbol -> (cache_time, klines)
 
     @property
     def trades(self) -> dict[str, deque[TradeTick]]:
@@ -51,6 +53,23 @@ class LiveMarketStateStore:
             return self._flow[trade.symbol].snapshot()
         self._trades[trade.symbol].append(trade)
         return self._flow[trade.symbol].ingest(trade)
+
+    def is_kline_cache_fresh(self, symbol: str) -> bool:
+        """Return True if cached klines for symbol are under 60s old."""
+        if symbol not in self._kline_cache:
+            return False
+        cached_at = self._kline_cache[symbol][0]
+        return (datetime.now(timezone.utc) - cached_at).total_seconds() < KLINE_CACHE_TTL_SECONDS
+
+    def get_cached_klines(self, symbol: str) -> list[Kline] | None:
+        """Return cached klines if fresh, else None."""
+        if not self.is_kline_cache_fresh(symbol):
+            return None
+        return self._kline_cache[symbol][1]
+
+    def cache_klines(self, symbol: str, klines: list[Kline]) -> None:
+        """Store klines in the shared cache."""
+        self._kline_cache[symbol] = (datetime.now(timezone.utc), klines)
 
     def on_order_book(self, book: OrderBookSnapshot) -> tuple[LiquidityEvent, ...]:
         events = tuple(

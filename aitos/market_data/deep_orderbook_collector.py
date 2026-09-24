@@ -52,6 +52,7 @@ class DeepOrderBookCollector:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._producer = None
         self._writer = None
+        await self._store.shutdown()
 
     async def _produce(self) -> None:
         stream = self._adapter.stream_order_book_deltas

@@ -15,7 +15,7 @@ from aitos.xai.ml_explainer import FEATURE_ORDER
 
 DEFAULT_MIN_SAMPLES_FOR_CONFIDENCE = 30
 DEFAULT_REWARD_SCALE_R_MULTIPLES = 2.0
-DEFAULT_MODEL_DATA_DIR = "/models"
+DEFAULT_MODEL_DATA_DIR = os.getenv("MODEL_DATA_DIR", "/home/fahad/aitos/models")
 
 
 def _vectorize(context: dict[str, Any]) -> np.ndarray:

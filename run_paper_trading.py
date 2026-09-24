@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
 
 from redis.asyncio import Redis
@@ -184,11 +185,11 @@ async def main() -> None:
         extra={"aitos_extra": {"symbol_count": len(symbols)}},
     )
     rl_scorer = DeepValueRLScorer()
-    rl_scorer.load_state()
+    await asyncio.to_thread(rl_scorer.load_state)
     outcome_classifier = TradeOutcomeClassifier()
-    outcome_classifier.load_state()
+    await asyncio.to_thread(outcome_classifier.load_state)
     attention_path = "/home/fahad/aitos/models/online_ml/attention_explainer.pkl"
-    attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
+    attention_explainer = await asyncio.to_thread(load_attention_model, attention_path) or AttentionExplainer()
     components = await build_system(
         event_bus=event_bus,
         exchange=exchange,

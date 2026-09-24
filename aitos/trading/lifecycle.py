@@ -35,6 +35,7 @@ stop. No existing emergency or exchange-side path is removed.
 from __future__ import annotations
 
 import math
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -164,6 +165,45 @@ class TradeLifecycle(AITOSModule):
         )
 
     async def health_check(self) -> HealthStatus:
+        now = datetime.now(timezone.utc)
+        open_trade_details = []
+        for trade in self._open_trades.values():
+            current_price = getattr(trade, "last_marked_price", None) or trade.entry_price
+            direction = 1 if trade.side == TradeSide.LONG else -1
+            if trade.entry_price > 0:
+                unrealized_pnl = (
+                    (current_price - trade.entry_price) / trade.entry_price
+                ) * direction * trade.position_size_usd
+            else:
+                unrealized_pnl = 0.0
+            try:
+                entry_dt = datetime.fromisoformat(trade.entry_time)
+                if entry_dt.tzinfo is None:
+                    entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                duration_seconds = (now - entry_dt).total_seconds()
+            except (ValueError, TypeError):
+                duration_seconds = 0.0
+            open_trade_details.append(
+                {
+                    "symbol": trade.symbol,
+                    "side": trade.side.value,
+                    "entry_price": trade.entry_price,
+                    "current_price": current_price,
+                    "unrealized_pnl": round(unrealized_pnl, 4),
+                    "duration_seconds": round(duration_seconds, 1),
+                }
+            )
+        closed_trade_details = []
+        for trade in self._closed_trades:
+            closed_trade_details.append(
+                {
+                    "symbol": trade.symbol,
+                    "entry_price": trade.entry_price,
+                    "exit_price": trade.exit_price,
+                    "realized_pnl": trade.pnl,
+                    "exit_reason": trade.exit_reason,
+                }
+            )
         return HealthStatus(
             module_id=self.module_id,
             status=(
@@ -176,6 +216,8 @@ class TradeLifecycle(AITOSModule):
                 "closed_trades": len(self._closed_trades),
                 "exit_intelligence": self._position_manager is not None,
                 "market_context": self._market_context_provider is not None,
+                "open_trade_details": open_trade_details,
+                "closed_trade_details": closed_trade_details,
             },
         )
 
@@ -299,13 +341,14 @@ class TradeLifecycle(AITOSModule):
         trade.last_marked_price = current_price
         is_long = trade.side == TradeSide.LONG
 
-        # ---- 1. Hard / structural SL (authoritative — never skipped) ---------
+        # ---- 1. Soft SL reference — let Exit Intelligence decide -------------
         sl_hit = (
             current_price <= trade.sl_price
             if is_long
             else current_price >= trade.sl_price
         )
-        if sl_hit:
+        if sl_hit and self._position_manager is None:
+            # No Exit Intelligence available — treat SL as authoritative
             return await self._trigger_exit(
                 trade, current_price, "sl_triggered", TOPIC_SL_TRIGGERED
             )

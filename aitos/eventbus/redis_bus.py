@@ -33,11 +33,13 @@ CONSUMER_BLOCK_MS = 100
 CONSUMER_BATCH_SIZE = 100
 PENDING_RECLAIM_IDLE_MS = 5_000
 PENDING_RECLAIM_BATCH_SIZE = 100
+NOGROUP_ERROR = "NOGROUP"
+GROUP_HEALTH_CHECK_INTERVAL_SECONDS = 30.0
 
 STREAM_MAXLEN_DEFAULTS = {
     "market.trade": 25_000,
     "market.book.delta": 25_000,
-    "market.book.snapshot": 5_000,
+    "market.book.snapshot": 100,
     "market.ticker": 10_000,
     "market.funding": 5_000,
     "market.open_interest": 10_000,
@@ -49,6 +51,18 @@ STREAM_MAXLEN_DEFAULTS = {
     "market.liquidity.": 100_000,
     "market.live_state.": 25_000,
 }
+
+
+def _topic_matches_pattern(topic: str, pattern: str) -> bool:
+    """Check if a topic matches a wildcard pattern.
+
+    Supports both fnmatch-style matching and base-topic matching, where
+    a base topic like ``market.kline`` matches a wildcard pattern like
+    ``market.kline.*``.
+    """
+    if fnmatch.fnmatch(topic, pattern):
+        return True
+    return pattern.startswith(topic + ".")
 
 
 def _stream_key(topic: str) -> str:
@@ -127,6 +141,8 @@ class EventBus(AITOSModule):
         self._retry_events = 0
         self._dlq_events = 0
         self._group_create_busy = 0
+        self._monitored_groups: set[tuple[str, str]] = set()
+        self._group_health_task: asyncio.Task | None = None
 
     @property
     def module_id(self) -> str:
@@ -176,6 +192,13 @@ class EventBus(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        if self._group_health_task is not None:
+            self._group_health_task.cancel()
+            try:
+                await self._group_health_task
+            except asyncio.CancelledError:
+                pass
+            self._group_health_task = None
         for sub in self._subscriptions:
             sub.cancel()
         if self._subscriptions:
@@ -252,14 +275,21 @@ class EventBus(AITOSModule):
         live_only = start_id == "$"
         if "*" in topic:
             resolved_topics = [
-                t for t in self._known_topics if fnmatch.fnmatch(t, topic)
+                t for t in self._known_topics if _topic_matches_pattern(t, topic)
             ]
         else:
             resolved_topics = [topic]
             self._known_topics.add(topic)
-        for t in resolved_topics or [topic]:
+        for t in resolved_topics:
             await self._ensure_group(
                 _stream_key(t), group, start_id=start_id, reset_existing=live_only
+            )
+        for t in resolved_topics:
+            self._monitored_groups.add((_stream_key(t), group))
+        if self._group_health_task is None or self._group_health_task.done():
+            self._group_health_task = asyncio.create_task(
+                self._monitor_group_health(),
+                name="eventbus-group-health",
             )
         task = asyncio.create_task(
             self._consume_loop(
@@ -401,7 +431,7 @@ class EventBus(AITOSModule):
                     topics = [
                         t
                         for t in self._known_topics
-                        if fnmatch.fnmatch(t, topic_pattern)
+                        if _topic_matches_pattern(t, topic_pattern)
                     ]
                 else:
                     topics = [topic_pattern]
@@ -415,6 +445,7 @@ class EventBus(AITOSModule):
                             reset_existing=False,
                         )
                         streams_seen.add(stream_key)
+                        self._monitored_groups.add((stream_key, group))
                 if not stream_names:
                     await asyncio.sleep(POLL_INTERVAL_SECONDS)
                     continue
@@ -428,13 +459,25 @@ class EventBus(AITOSModule):
                 if pending_entries:
                     batches = pending_entries
                 else:
-                    result = await self._redis.xreadgroup(
-                        group,
-                        consumer,
-                        {s: ">" for s in stream_names},
-                        count=CONSUMER_BATCH_SIZE,
-                        block=CONSUMER_BLOCK_MS,
-                    )
+                    try:
+                        result = await self._redis.xreadgroup(
+                            group,
+                            consumer,
+                            {s: ">" for s in stream_names},
+                            count=CONSUMER_BATCH_SIZE,
+                            block=CONSUMER_BLOCK_MS,
+                        )
+                    except Exception as exc:
+                        if NOGROUP_ERROR in str(exc):
+                            logger.warning(
+                                "NOGROUP error for consumer %s, recreating groups",
+                                group,
+                            )
+                            await self._handle_nogroup_recovery(
+                                stream_names, group, start_id
+                            )
+                            continue
+                        raise
                     batches = [
                         (stream_key, entry_id, fields)
                         for stream_key, entries in result
@@ -475,8 +518,11 @@ class EventBus(AITOSModule):
             logger.exception("event consumer stopped: %s", exc)
 
     async def _maybe_publish_response(
-        self, request: Event, response: EventResponse
+        self, request: Event, response: EventResponse | bool
     ) -> None:
+        """Publish a reply event if the handler returned a successful response."""
+        if isinstance(response, bool):
+            return
         if not response.success:
             return
         reply_event = Event(
@@ -535,6 +581,77 @@ class EventBus(AITOSModule):
     def _require_initialized(self) -> None:
         if not self._initialized:
             raise ModuleNotInitializedError(f"{self.module_id} is not initialized")
+
+    def register_expected_topics(self, topics: list[str]) -> None:
+        """Pre-declare topics so wildcard subscriptions create groups for them.
+
+        Call before subscribing with a wildcard pattern to ensure consumer
+        groups exist for all expected topics from the start, even before any
+        event has been published on those topics.
+        """
+        self._known_topics.update(topics)
+
+    async def _handle_nogroup_recovery(
+        self, stream_names: list[str], group: str, start_id: str
+    ) -> None:
+        """Recreate missing consumer groups after a NOGROUP error."""
+        for stream_key in stream_names:
+            key = (stream_key, group)
+            self._ensured_groups.discard(key)
+            try:
+                await self._redis.xgroup_create(
+                    stream_key, group, id=start_id, mkstream=True
+                )
+            except Exception as exc:
+                if "BUSYGROUP" not in str(exc):
+                    logger.warning(
+                        "Failed to recreate group %s on %s: %s",
+                        group,
+                        stream_key,
+                        exc,
+                    )
+            self._ensured_groups.add(key)
+
+    async def _monitor_group_health(self) -> None:
+        """Periodically verify consumer groups exist and recreate if missing."""
+        while True:
+            try:
+                monitored = list(self._monitored_groups)
+                for stream_key, group in monitored:
+                    try:
+                        groups = await self._redis.xinfo_groups(stream_key)
+                        found = False
+                        for g in groups:
+                            name = g.get("name", b"") if isinstance(g, dict) else g
+                            if isinstance(name, bytes):
+                                name = name.decode()
+                            if name == group:
+                                found = True
+                                break
+                        if not found:
+                            logger.warning(
+                                "Consumer group %s missing on %s, recreating",
+                                group,
+                                stream_key,
+                            )
+                            await self._handle_nogroup_recovery(
+                                [stream_key], group, start_id="0"
+                            )
+                    except Exception as exc:
+                        if "no such key" in str(exc).lower():
+                            pass
+                        else:
+                            logger.debug(
+                                "Group health check failed for %s/%s: %s",
+                                stream_key,
+                                group,
+                                exc,
+                            )
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.debug("Group health monitor error: %s", exc)
+            await asyncio.sleep(GROUP_HEALTH_CHECK_INTERVAL_SECONDS)
 
 
 async def _await_cancelled(task: asyncio.Task) -> None:

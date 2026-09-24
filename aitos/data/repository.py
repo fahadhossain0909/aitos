@@ -135,6 +135,8 @@ class MarketDataRepository(AITOSModule):
             username=username,
             password=password,
             database=database,
+            send_receive_timeout=30,
+            connect_timeout=10,
         )
         self._client = None
         self._initialized = False
