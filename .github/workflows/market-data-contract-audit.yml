@@ -35,6 +35,7 @@ jobs:
       INTEGRATION_NEO4J_USER: neo4j
       INTEGRATION_NEO4J_PASSWORD: aitos_test_password
       TESTING: 'true'
+      MODEL_DATA_DIR: ${{ github.workspace }}/.ci-models
     services:
       clickhouse:
         image: clickhouse/clickhouse-server:24.12-alpine
@@ -128,7 +129,7 @@ jobs:
           PYTHONPATH: .
         run: |
           set -o pipefail
-          pytest -vv --timeout=120 --timeout-method=thread -o faulthandler_timeout=60 --durations=25 --maxfail=5 2>&1 | tee pytest-full-suite.log
+          pytest -vv --timeout=120 --timeout-method=signal -o faulthandler_timeout=60 --durations=25 --maxfail=5 2>&1 | tee pytest-full-suite.log
       - name: Upload full-suite diagnostics
         if: always()
         uses: actions/upload-artifact@v4
