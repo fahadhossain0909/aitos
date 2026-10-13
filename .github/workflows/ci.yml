@@ -166,7 +166,7 @@ jobs:
       - name: Run Bandit security scan
         run: bandit -r aitos run_live_trading.py run_paper_trading.py -x tests -ll -f json -o bandit-report.json
       - name: Check project dependencies for vulnerabilities
-        run: safety check --file requirements.txt --json
+        run: safety check requirements.txt --json
       - name: Upload security reports
         if: always()
         uses: actions/upload-artifact@v7.0.1
