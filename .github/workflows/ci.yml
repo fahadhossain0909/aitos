@@ -34,7 +34,7 @@ jobs:
     name: Lint & Code Quality
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7.0.0
+        uses: actions/checkout@v7.0.1
       - name: Set up Python
         uses: actions/setup-python@v7.0.0
         with:
@@ -165,11 +165,11 @@ jobs:
           pip install bandit safety
       - name: Run Bandit security scan
         run: bandit -r aitos run_live_trading.py run_paper_trading.py -x tests -ll -f json -o bandit-report.json
-      - name: Check dependencies for vulnerabilities
-        run: safety check --json
+      - name: Check project dependencies for vulnerabilities
+        run: safety check --file requirements.txt --json
       - name: Upload security reports
-        uses: actions/upload-artifact@v7.0.1
         if: always()
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: security-reports
           path: bandit-report.json
@@ -232,5 +232,5 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `CI Pipeline passed\n\n| Step | Status |\n|------|--------|\n| Formatting | ${{ needs.format.result }} |\n| Linting | ${{ needs.lint.result }} |\n| Tests | ${{ needs.test.result }} |\n| Security | ${{ needs.security.result }} |\n| Docker | ${{ needs.docker-validate.result }} |`
+              body: `CI Pipeline passed\\n\\n| Step | Status |\\n|------|--------|\\n| Formatting | ${{ needs.format.result }} |\\n| Linting | ${{ needs.lint.result }} |\\n| Tests | ${{ needs.test.result }} |\\n| Security | ${{ needs.security.result }} |\\n| Docker | ${{ needs.docker-validate.result }} |`
             })
