@@ -35,6 +35,7 @@ jobs:
       INTEGRATION_NEO4J_USER: neo4j
       INTEGRATION_NEO4J_PASSWORD: aitos_test_password
       TESTING: 'true'
+      MODEL_DATA_DIR: ${{ github.workspace }}/.ci-models
     services:
       clickhouse:
         image: clickhouse/clickhouse-server:24.12-alpine
