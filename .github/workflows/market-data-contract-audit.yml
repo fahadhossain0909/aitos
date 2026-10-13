@@ -129,7 +129,7 @@ jobs:
           PYTHONPATH: .
         run: |
           set -o pipefail
-          pytest -vv --timeout=120 --timeout-method=thread -o faulthandler_timeout=60 --durations=25 --maxfail=5 2>&1 | tee pytest-full-suite.log
+          pytest -vv --timeout=120 --timeout-method=signal -o faulthandler_timeout=60 --durations=25 --maxfail=5 2>&1 | tee pytest-full-suite.log
       - name: Upload full-suite diagnostics
         if: always()
         uses: actions/upload-artifact@v4
