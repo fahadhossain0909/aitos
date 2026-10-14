@@ -11,7 +11,7 @@ from typing import Any
 
 import clickhouse_connect
 
-from aitos.config.paths import get_model_data_dir
+from aitos.config.paths import get_model_data_dir, resolve_project_path
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,18 @@ class ContinualLearningWorker:
     ) -> None:
         self._stop = False
         model_root = get_model_data_dir() / "online_rl"
-        state_path = str(state_path or (model_root / "worker_state.json"))
-        model_path = str(model_path or (model_root / "deep_value.pkl"))
+        state_file = (
+            resolve_project_path(state_path)
+            if state_path
+            else model_root / "worker_state.json"
+        )
+        model_file = (
+            resolve_project_path(model_path)
+            if model_path
+            else model_root / "deep_value.pkl"
+        )
+        state_path = str(state_file)
+        model_path = str(model_file)
         # Ensure model directories exist before any learning/persistence
         for p in (state_path, model_path):
             Path(p).parent.mkdir(parents=True, exist_ok=True)
