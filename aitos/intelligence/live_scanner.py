@@ -254,12 +254,23 @@ class LiveScannerCache:
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
         try:
-            from aitos.forensics.data_flow_hooks import record_input, record_output
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_input,
+                record_output,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
             record_output(
                 PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
+            )
+            note_trace(
+                trace_id=event.trace_id,
+                stage=PipelineStage.LIVE_STATE.value,
+                symbol=str(event.symbol or ""),
+                event_id=event.event_id,
+                extra={"event_type": event.event_type.value, "phase": "state_updated"},
             )
         except Exception:
             pass
