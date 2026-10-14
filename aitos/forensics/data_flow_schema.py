@@ -4,6 +4,7 @@ Stages mirror the live path and persistence side branch. Trace identifiers are
 stable across adapters and Redis serialization; instrumentation must never
 change trading decisions.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -76,6 +77,7 @@ def parse_trace_id(trace_id: str) -> tuple[str, str] | None:
 @dataclass
 class StageTimestamps:
     """Per-event wall-clock timestamps in milliseconds since epoch."""
+
     source_timestamp_ms: float | None = None
     received_at_ms: float | None = None
     decoded_at_ms: float | None = None
