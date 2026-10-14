@@ -16,7 +16,7 @@
       },
       "event_bus": {
         "consumer_concurrency": 2,
-        "connection_pool_size": 64,
+        "connection_pool_size": 128,
         "consumer_batch_size": 25
       },
       "positions": {
