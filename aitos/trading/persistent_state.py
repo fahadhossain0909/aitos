@@ -287,10 +287,9 @@ class TradeStatePersistence:
     async def restore(self) -> int:
         """Restore durable lifecycle state without assuming market streams are ready.
 
-        DataIngestionService is constructed before this method is called, but its
-        canonical runtime is not started until initialize_all(). Subscription
-        requests made here can therefore be no-ops; market-data recovery is an
-        explicit post-initialization step.
+        The canonical runtime can accept symbol configuration before it starts,
+        but that alone does not prove the active feed is subscribed after startup.
+        An explicit post-initialization reconciliation verifies effective symbols.
         """
         trades = await self._store.load_open_trades()
         for trade in trades:
