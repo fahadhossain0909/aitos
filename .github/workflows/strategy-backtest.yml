@@ -61,24 +61,24 @@ jobs:
     environment: papertrade
     steps:
       - name: Checkout strategy ref
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || github.ref }}
           fetch-depth: 1
 
       - name: Set up Python
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install backtest dependencies
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
         run: python -m pip install -r requirements-backtest.txt
 
       - name: Validate strategy module
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
+        if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call' }}
         env:
           MODULE: ${{ inputs.module || 'aitos.backtest.conditional_hedge_replay' }}
         run: |
@@ -87,7 +87,7 @@ jobs:
           python -c "import importlib; importlib.import_module('${MODULE}'); print('strategy module import: OK')"
 
       - name: Validate required secrets
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
+        if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
         env:
           CH_PASSWORD: ${{ secrets.CLICKHOUSE_PASSWORD }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -101,7 +101,7 @@ jobs:
           test -n "$DEPLOY_SSH_KEY" || { echo '::error::DEPLOY_SSH_KEY unavailable'; exit 1; }
 
       - name: Prepare SSH key
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
+        if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
@@ -110,7 +110,7 @@ jobs:
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/aitos_key"
 
       - name: Replay historical ClickHouse data
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
+        if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -151,7 +151,7 @@ jobs:
           python -m json.tool backtest-result.json > backtest-result.pretty.json
 
       - name: Validate canonical result contract
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
+        if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
         run: |
           python - <<'PY'
           import json
@@ -165,7 +165,7 @@ jobs:
           PY
 
       - name: Publish result summary
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
+        if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call') }}
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
           import json
