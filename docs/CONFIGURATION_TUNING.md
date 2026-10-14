@@ -13,6 +13,7 @@ position-management limits. Profiles are capacity presets, not trading advice.
 
 Set `AITOS_TUNING_PROFILE` to `low_resource`, `balanced` (default), or
 `high_performance`. Set `AITOS_MODE` to `paper` (default) or `live`.
+The paper entrypoint requires `AITOS_MODE=paper`; the live entrypoint requires `AITOS_MODE=live` and fails closed on a mismatch.
 
 ## Common controls
 
