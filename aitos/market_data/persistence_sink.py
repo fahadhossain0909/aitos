@@ -134,7 +134,30 @@ class CanonicalMarketDataPersistenceSink:
             return
         try:
             self._queue.put_nowait(event)
-            from aitos.forensics.data_flow_hooks import note_trace, record_input, set_queue
+        except asyncio.QueueFull:
+            # Historical persistence is best-effort and must never block live ingestion.
+            self._rejected += 1
+            try:
+                from aitos.forensics.data_flow_hooks import record_drop
+                from aitos.forensics.data_flow_schema import (
+                    DataIssueClass,
+                    PipelineStage,
+                )
+
+                record_drop(
+                    PipelineStage.PERSISTENCE.value,
+                    symbol=event.symbol,
+                    issue=DataIssueClass.DROPPED_BACKPRESSURE.value,
+                )
+            except Exception:
+                pass
+            return
+        try:
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_input,
+                set_queue,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(
@@ -154,20 +177,9 @@ class CanonicalMarketDataPersistenceSink:
                 depth=self._queue.qsize(),
                 symbol=event.symbol,
             )
-        except asyncio.QueueFull:
-            # Historical persistence is best-effort and must never block live ingestion.
-            self._rejected += 1
-            try:
-                from aitos.forensics.data_flow_hooks import record_drop
-                from aitos.forensics.data_flow_schema import DataIssueClass, PipelineStage
-
-                record_drop(
-                    PipelineStage.PERSISTENCE.value,
-                    symbol=event.symbol,
-                    issue=DataIssueClass.DROPPED_BACKPRESSURE.value,
-                )
-            except Exception:
-                pass
+        except Exception:
+            # Telemetry must never interfere with the best-effort persistence path.
+            pass
 
     async def _worker(self, worker_id: int) -> None:
         while True:
