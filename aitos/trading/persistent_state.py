@@ -319,9 +319,7 @@ class TradeStatePersistence:
         """Reconcile restored position symbols with initialized live market feeds."""
         trades = list(self._lifecycle.get_open_trades())
         symbols = list(
-            dict.fromkeys(
-                str(trade.symbol).upper() for trade in trades if trade.symbol
-            )
+            dict.fromkeys(str(trade.symbol).upper() for trade in trades if trade.symbol)
         )
         if not symbols:
             return {"symbols": [], "ingestions": 0, "verified": 0, "failures": 0}
@@ -338,10 +336,12 @@ class TradeStatePersistence:
                 ingestion_count += 1
 
                 live_trade_symbols = {
-                    str(s).upper() for s in getattr(ingestion, "_live_trade_symbols", [])
+                    str(s).upper()
+                    for s in getattr(ingestion, "_live_trade_symbols", [])
                 }
                 live_kline_symbols = {
-                    str(s).upper() for s in getattr(ingestion, "_live_kline_symbols", [])
+                    str(s).upper()
+                    for s in getattr(ingestion, "_live_kline_symbols", [])
                 }
                 missing_trade = sorted(set(symbols) - live_trade_symbols)
                 missing_kline = sorted(set(symbols) - live_kline_symbols)
