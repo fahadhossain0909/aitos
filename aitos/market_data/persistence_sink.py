@@ -134,9 +134,40 @@ class CanonicalMarketDataPersistenceSink:
             return
         try:
             self._queue.put_nowait(event)
+            from aitos.forensics.data_flow_hooks import note_trace, record_input, set_queue
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(
+                PipelineStage.PERSISTENCE.value,
+                symbol=event.symbol,
+                source_age_ms=event.source_age_seconds * 1000.0,
+            )
+            note_trace(
+                trace_id=event.trace_id,
+                stage=PipelineStage.PERSISTENCE.value,
+                symbol=event.symbol,
+                event_id=event.event_id,
+                extra={"phase": "queued"},
+            )
+            set_queue(
+                PipelineStage.PERSISTENCE.value,
+                depth=self._queue.qsize(),
+                symbol=event.symbol,
+            )
         except asyncio.QueueFull:
             # Historical persistence is best-effort and must never block live ingestion.
             self._rejected += 1
+            try:
+                from aitos.forensics.data_flow_hooks import record_drop
+                from aitos.forensics.data_flow_schema import DataIssueClass, PipelineStage
+
+                record_drop(
+                    PipelineStage.PERSISTENCE.value,
+                    symbol=event.symbol,
+                    issue=DataIssueClass.DROPPED_BACKPRESSURE.value,
+                )
+            except Exception:
+                pass
 
     async def _worker(self, worker_id: int) -> None:
         while True:
@@ -158,6 +189,18 @@ class CanonicalMarketDataPersistenceSink:
                     raise
                 except Exception:
                     self._errors += len(batch)
+                    try:
+                        from aitos.forensics.data_flow_hooks import record_error
+                        from aitos.forensics.data_flow_schema import PipelineStage
+
+                        for event in batch:
+                            record_error(
+                                PipelineStage.PERSISTENCE.value,
+                                symbol=event.symbol,
+                                issue="processing_error",
+                            )
+                    except Exception:
+                        pass
                 else:
                     self._processed += len(batch)
                     self._batches += 1
@@ -187,6 +230,38 @@ class CanonicalMarketDataPersistenceSink:
                 payload["timestamp"] = event.event_time.isoformat()
                 snapshots.append(OrderBookSnapshot.from_dict(payload))
             await self._repository.save_order_book_snapshots(snapshots)
+
+        try:
+            from aitos.forensics.data_flow_hooks import note_trace, record_output, set_queue
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            for event in events:
+                latency_ms = max(
+                    0.0,
+                    (datetime.now(timezone.utc) - event.ingest_time).total_seconds()
+                    * 1000.0,
+                )
+                record_output(
+                    PipelineStage.PERSISTENCE.value,
+                    symbol=event.symbol,
+                    latency_ms=latency_ms,
+                )
+                note_trace(
+                    trace_id=event.trace_id,
+                    stage=PipelineStage.PERSISTENCE.value,
+                    symbol=event.symbol,
+                    event_id=event.event_id,
+                    latency_ms=latency_ms,
+                    extra={"phase": "persisted", "event_type": event.event_type.value},
+                )
+                set_queue(
+                    PipelineStage.PERSISTENCE.value,
+                    depth=self._queue.qsize(),
+                    symbol=event.symbol,
+                )
+        except Exception:
+            # Observability must not turn successful persistence into a failure.
+            pass
 
     def snapshot(self) -> dict[str, object]:
         return {
