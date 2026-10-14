@@ -20,7 +20,7 @@ env:
 
 jobs:
   recover:
-    if: ${{ inputs.confirm == 'RECOVER' }}
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' && (inputs.confirm == 'RECOVER') }}
     runs-on: ubuntu-latest
     environment: papertrade
     steps:
