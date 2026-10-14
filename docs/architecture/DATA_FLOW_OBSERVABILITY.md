@@ -37,12 +37,12 @@ Canonical trace id: `md:{SYMBOL}:{event_id}` (same pattern as existing forensic 
 | `LIVE_STATE` | `CanonicalScannerFeed`, `LiveScannerCache.accept_*`, `MarketStateEngine.compute` |
 | `FEATURE` | `MarketStateEngine.compute` + `OpportunityScanner.scan_symbol` |
 | `SCANNER` | `OpportunityScanner.scan_symbol` |
-| `TRADE_LIFECYCLE` | `TradeLifecycle.submit_opportunity` / `update_price` / `_trigger_exit` |
+| `TRADE_LIFECYCLE` | `TradeLifecycle.submit_opportunity` / `close_trade` |
 
 ## Phase 2 — dashboard signals
 
 - `GET /data-flow` and `GET /data-flow/{symbol}`
-- `/metrics` exports `aitos_data_flow_*` gauges per stage
+- `/metrics` exports per-stage input/output rates, p50/p95/p99 latency, queue depth, oldest/source age, drops, errors, and pressure gauges
 - Grafana starter: `deploy/grafana/aitos_data_flow.json`
 
 ## Safety
