@@ -1,12 +1,11 @@
 name: CI Auto-Fix
 
 on:
-  # PRs from same-repository branches are handled by pull_request_target below.
-  # Restrict push-triggered autofix to main to avoid one run per feature-branch commit.
+  # Auto-fix only main pushes. PR branches are validated by CI; bot-created
+  # commits on PR branches can suppress follow-up workflow runs and leave checks
+  # in action_required, so PR code is never rewritten automatically here.
   push:
     branches: [main]
-  pull_request_target:
-    branches: [main, master, develop]
 
 permissions:
   contents: write
@@ -22,16 +21,12 @@ jobs:
   python-autofix:
     name: Safe Python Auto-Fix
     runs-on: ubuntu-latest
-    if: >-
-      (github.event_name == 'push' && github.ref_name != 'architecture/market-data-v1') ||
-      (github.event_name == 'pull_request_target' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref != 'architecture/market-data-v1')
+    if: github.ref_name != 'architecture/market-data-v1'
     steps:
       - name: Check out source branch
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.ref || github.ref_name }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - name: Set up Python
