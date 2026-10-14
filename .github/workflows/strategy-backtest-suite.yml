@@ -30,6 +30,7 @@ permissions:
 
 jobs:
   matrix-backtest:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     strategy:
       fail-fast: false
       matrix:
