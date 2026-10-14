@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from aitos.config.tuning import TuningSettings, load_tuning_settings
 from aitos.core.contracts import (
     AITOSModule,
     Event,
@@ -146,22 +148,31 @@ class OpportunityScanner(AITOSModule):
         rl_scorer: RLPolicyScorer | None = None,
         weights: dict[str, float] | None = None,
         min_score_threshold: float = 60.0,
-        top_n: int = 5,
+        top_n: int | None = None,
         kline_lookback: int = 100,
         trade_lookback: int = 500,
         footprint_tick_sizes: dict[str, float] | None = None,
         live_state_stale_seconds: float = 5.0,
         amt_value_area_pct: float = 0.70,
         amt_ib_minutes: int = 60,
+        tuning: TuningSettings | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._exchange = exchange
-        self._symbols = symbols
+        self._tuning = tuning or load_tuning_settings()
+        scanner_tuning = self._tuning.scanner
+        configured_symbols = list(symbols)
+        if scanner_tuning.universe_mode == "allowlist":
+            allowed = set(scanner_tuning.symbol_allowlist)
+            configured_symbols = [symbol for symbol in configured_symbols if symbol.upper() in allowed]
+        self._symbols = configured_symbols[:scanner_tuning.universe_limit]
         self._timeframe = timeframe
         self._reference_symbol = reference_symbol
         self._rl_scorer = rl_scorer or NeutralRLScorer()
         self._weights = weights or DEFAULT_WEIGHTS
-        self._min_score_threshold, self._top_n = min_score_threshold, top_n
+        self._min_score_threshold = min_score_threshold
+        self._top_n = top_n if top_n is not None else scanner_tuning.top_n
+        self._scan_semaphore = asyncio.Semaphore(self._tuning.analysis.expensive_analysis_concurrency)
         self._kline_lookback, self._trade_lookback = kline_lookback, trade_lookback
         self._footprint_tick_sizes = footprint_tick_sizes or {}
         self._live_state_stale_seconds = max(0.5, live_state_stale_seconds)
@@ -744,17 +755,19 @@ class OpportunityScanner(AITOSModule):
                 )
             except Exception as exc:
                 logger.error("failed to fetch reference symbol klines: %s", exc)
-        candidates = []
-        for symbol in self._symbols:
-            try:
-                candidate = await self.scan_symbol(symbol, reference_klines)
-                if candidate is not None:
-                    candidates.append(candidate)
-            except Exception as exc:
-                logger.error(
-                    "scan failed for symbol",
-                    extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
-                )
+        async def _scan_one(symbol: str) -> ScanCandidate | None:
+            async with self._scan_semaphore:
+                try:
+                    return await self.scan_symbol(symbol, reference_klines)
+                except Exception as exc:
+                    logger.error(
+                        "scan failed for symbol",
+                        extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                    )
+                    return None
+
+        results = await asyncio.gather(*(_scan_one(symbol) for symbol in self._symbols))
+        candidates = [candidate for candidate in results if candidate is not None]
         self._last_scan_at, self._last_candidate_count = _utc_now_iso(), len(candidates)
         await self._event_bus.publish(
             Event(
