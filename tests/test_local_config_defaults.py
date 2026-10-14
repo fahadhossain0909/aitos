@@ -17,6 +17,12 @@ def test_env_example_uses_local_safe_defaults() -> None:
 def test_local_compose_does_not_prune_data_by_default() -> None:
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     override = (ROOT / "docker-compose.override.yml").read_text(encoding="utf-8")
-    assert 'STORAGE_MAINTENANCE_DRY_RUN: "${STORAGE_MAINTENANCE_DRY_RUN:-true}"' in compose
-    assert 'STORAGE_MAINTENANCE_DRY_RUN: "${STORAGE_MAINTENANCE_DRY_RUN:-true}"' in override
+    assert (
+        'STORAGE_MAINTENANCE_DRY_RUN: "${STORAGE_MAINTENANCE_DRY_RUN:-true}"'
+        in compose
+    )
+    assert (
+        'STORAGE_MAINTENANCE_DRY_RUN: "${STORAGE_MAINTENANCE_DRY_RUN:-true}"'
+        in override
+    )
     assert "${AITOS_DATA_ROOT:-./data}" in compose
