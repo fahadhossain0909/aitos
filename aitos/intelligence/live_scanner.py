@@ -162,7 +162,10 @@ class LiveScannerCache:
             state.duplicate_trade_rejections += 1
             try:
                 from aitos.forensics.data_flow_hooks import record_drop
-                from aitos.forensics.data_flow_schema import DataIssueClass, PipelineStage
+                from aitos.forensics.data_flow_schema import (
+                    DataIssueClass,
+                    PipelineStage,
+                )
 
                 record_drop(
                     PipelineStage.LIVE_STATE.value,
@@ -181,7 +184,9 @@ class LiveScannerCache:
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.LIVE_STATE.value, symbol=str(trade.symbol or ""))
-            record_output(PipelineStage.LIVE_STATE.value, symbol=str(trade.symbol or ""))
+            record_output(
+                PipelineStage.LIVE_STATE.value, symbol=str(trade.symbol or "")
+            )
         except Exception:
             pass
 
@@ -250,7 +255,9 @@ class LiveScannerCache:
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
-            record_output(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
+            record_output(
+                PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
+            )
         except Exception:
             pass
 
