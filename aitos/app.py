@@ -170,16 +170,41 @@ async def build_system(
         },
     )
     if risk_limits is None:
-        risk_limits = RiskLimits(max_open_positions=tuning.positions.max_open_positions)
+        risk_limits = RiskLimits(
+            max_open_positions=tuning.positions.max_open_positions,
+            max_risk_per_trade_pct=tuning.risk.max_risk_per_trade_pct,
+            max_leverage=tuning.risk.max_leverage,
+            max_drawdown_pct=tuning.risk.max_drawdown_pct,
+            max_correlated_exposure_pct=tuning.risk.max_correlated_exposure_pct,
+            max_sector_exposure_pct=tuning.risk.max_sector_exposure_pct,
+        )
     else:
-        # A capacity profile may lower the active position limit, never raise
-        # a caller-provided risk limit or its hard cap.
+        # Central tuning may tighten caller-supplied limits but can never relax
+        # them. The schema itself also caps values at the established defaults.
         risk_limits = risk_limits.model_copy(
             update={
                 "max_open_positions": min(
                     risk_limits.max_open_positions,
                     tuning.positions.max_open_positions,
-                )
+                ),
+                "max_risk_per_trade_pct": min(
+                    risk_limits.max_risk_per_trade_pct,
+                    tuning.risk.max_risk_per_trade_pct,
+                ),
+                "max_leverage": min(
+                    risk_limits.max_leverage, tuning.risk.max_leverage
+                ),
+                "max_drawdown_pct": min(
+                    risk_limits.max_drawdown_pct, tuning.risk.max_drawdown_pct
+                ),
+                "max_correlated_exposure_pct": min(
+                    risk_limits.max_correlated_exposure_pct,
+                    tuning.risk.max_correlated_exposure_pct,
+                ),
+                "max_sector_exposure_pct": min(
+                    risk_limits.max_sector_exposure_pct,
+                    tuning.risk.max_sector_exposure_pct,
+                ),
             }
         )
     kernel = kernel or AIKernel(event_bus=event_bus)
