@@ -21,6 +21,14 @@ def get_project_root() -> Path:
     return root.resolve()
 
 
+def resolve_project_path(value: str | Path) -> Path:
+    """Resolve absolute paths as-is and relative paths from the AITOS root."""
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = get_project_root() / candidate
+    return candidate.resolve()
+
+
 def get_model_data_dir() -> Path:
     # Load repository-local defaults before modules resolve paths at import time.
     from dotenv import load_dotenv
@@ -31,10 +39,7 @@ def get_model_data_dir() -> Path:
 
     configured = os.getenv("MODEL_DATA_DIR")
     if configured:
-        configured_path = Path(configured).expanduser()
-        if not configured_path.is_absolute():
-            configured_path = get_project_root() / configured_path
-        return configured_path.resolve()
+        return resolve_project_path(configured)
 
     # Docker images provide /.dockerenv and mount the persistent model volume at
     # /models. Native Windows/Linux/macOS runs should keep state in the checkout.
