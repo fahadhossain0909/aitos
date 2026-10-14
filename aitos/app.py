@@ -202,9 +202,7 @@ async def build_system(
                     risk_limits.max_risk_per_trade_pct,
                     tuning.risk.max_risk_per_trade_pct,
                 ),
-                "max_leverage": min(
-                    risk_limits.max_leverage, tuning.risk.max_leverage
-                ),
+                "max_leverage": min(risk_limits.max_leverage, tuning.risk.max_leverage),
                 "max_drawdown_pct": min(
                     risk_limits.max_drawdown_pct, tuning.risk.max_drawdown_pct
                 ),
