@@ -100,6 +100,12 @@ class MarketEvent:
     trace_id: str | None = None
 
     def __post_init__(self) -> None:
+        # Use one identity convention throughout adapters, Redis, and consumers.
+        # Import lazily to keep the market contract lightweight at module import.
+        if self.trace_id is None:
+            from aitos.forensics.data_flow_schema import make_trace_id
+
+            object.__setattr__(self, "trace_id", make_trace_id(self.symbol, self.event_id))
         if self.venue is None:
             object.__setattr__(self, "venue", self.exchange)
         if self.market_type is None:
@@ -108,8 +114,6 @@ class MarketEvent:
             object.__setattr__(self, "instrument_id", self.symbol)
         if self.correlation_id is None:
             object.__setattr__(self, "correlation_id", self.event_id)
-        if self.trace_id is None:
-            object.__setattr__(self, "trace_id", self.event_id)
 
     @property
     def source_age_seconds(self) -> float:
