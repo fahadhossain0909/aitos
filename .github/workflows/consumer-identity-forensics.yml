@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   consumer-identity-forensics:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
