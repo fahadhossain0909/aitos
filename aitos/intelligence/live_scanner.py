@@ -270,7 +270,10 @@ class LiveScannerCache:
                 stage=PipelineStage.LIVE_STATE.value,
                 symbol=str(event.symbol or ""),
                 event_id=event.event_id,
-                extra={"event_type": event.event_type.value, "phase": "state_updated"},
+                extra={
+                    "event_type": event.event_type.value,
+                    "phase": "state_updated",
+                },
             )
         except Exception:
             pass
