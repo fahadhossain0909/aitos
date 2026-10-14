@@ -1,10 +1,16 @@
 name: CI
 
 on:
+  # Feature branches are validated by their PR, avoiding duplicate push + PR runs.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     branches: [main, master, develop]
+
+# Keep only the newest validation for each PR/branch.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
