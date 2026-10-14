@@ -54,6 +54,35 @@ class PositionTuning(BaseModel):
     intensive_analysis_budget: int = Field(default=2, ge=0, le=100)
 
 
+class HardwareTuning(BaseModel):
+    """Capacity guardrails for a host; these do not grant more trading risk."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    cpu_worker_budget: int = Field(default=4, ge=1, le=256)
+    memory_budget_mb: int = Field(default=4096, ge=256, le=1_048_576)
+    memory_reserve_pct: int = Field(default=20, ge=5, le=80)
+    max_background_tasks: int = Field(default=4, ge=0, le=512)
+
+
+class StorageTuning(BaseModel):
+    """Limits for non-live historical/storage work."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    historical_backfill_concurrency: int = Field(default=1, ge=1, le=64)
+    clickhouse_batch_size: int = Field(default=1000, ge=1, le=100_000)
+    clickhouse_query_timeout_seconds: float = Field(default=10.0, gt=0, le=600)
+    retention_days: int = Field(default=30, ge=1, le=3650)
+
+
+class TelemetryTuning(BaseModel):
+    """Operational observability cadence and sampling."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    health_interval_seconds: float = Field(default=15.0, gt=0, le=3600)
+    metrics_sample_interval_seconds: float = Field(default=5.0, gt=0, le=3600)
+    trace_sample_rate: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
 class RuntimeTuning(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     adaptive_tuning_enabled: bool = False
@@ -70,6 +99,9 @@ class TuningSettings(BaseModel):
     analysis: AnalysisTuning = Field(default_factory=AnalysisTuning)
     event_bus: EventBusTuning = Field(default_factory=EventBusTuning)
     positions: PositionTuning = Field(default_factory=PositionTuning)
+    hardware: HardwareTuning = Field(default_factory=HardwareTuning)
+    storage: StorageTuning = Field(default_factory=StorageTuning)
+    telemetry: TelemetryTuning = Field(default_factory=TelemetryTuning)
     runtime: RuntimeTuning = Field(default_factory=RuntimeTuning)
 
     @model_validator(mode="after")
@@ -81,6 +113,11 @@ class TuningSettings(BaseModel):
             raise ValueError(
                 "scanner.symbol_allowlist must be non-empty when "
                 "universe_mode='allowlist'"
+            )
+        if self.mode == "live" and self.runtime.adaptive_tuning_enabled:
+            raise ValueError(
+                "adaptive tuning is not permitted in live mode; change settings "
+                "only through the approved risk/configuration workflow"
             )
         return self
 
@@ -192,6 +229,17 @@ def _env_overrides() -> dict[str, Any]:
             "intensive_analysis_budget",
             int,
         ),
+        "AITOS_TUNING_HARDWARE_CPU_WORKER_BUDGET": ("hardware", "cpu_worker_budget", int),
+        "AITOS_TUNING_HARDWARE_MEMORY_BUDGET_MB": ("hardware", "memory_budget_mb", int),
+        "AITOS_TUNING_HARDWARE_MEMORY_RESERVE_PCT": ("hardware", "memory_reserve_pct", int),
+        "AITOS_TUNING_HARDWARE_MAX_BACKGROUND_TASKS": ("hardware", "max_background_tasks", int),
+        "AITOS_TUNING_STORAGE_HISTORICAL_BACKFILL_CONCURRENCY": ("storage", "historical_backfill_concurrency", int),
+        "AITOS_TUNING_STORAGE_CLICKHOUSE_BATCH_SIZE": ("storage", "clickhouse_batch_size", int),
+        "AITOS_TUNING_STORAGE_CLICKHOUSE_QUERY_TIMEOUT_SECONDS": ("storage", "clickhouse_query_timeout_seconds", float),
+        "AITOS_TUNING_STORAGE_RETENTION_DAYS": ("storage", "retention_days", int),
+        "AITOS_TUNING_TELEMETRY_HEALTH_INTERVAL_SECONDS": ("telemetry", "health_interval_seconds", float),
+        "AITOS_TUNING_TELEMETRY_METRICS_SAMPLE_INTERVAL_SECONDS": ("telemetry", "metrics_sample_interval_seconds", float),
+        "AITOS_TUNING_TELEMETRY_TRACE_SAMPLE_RATE": ("telemetry", "trace_sample_rate", float),
         "AITOS_TUNING_RUNTIME_ADAPTIVE_TUNING_ENABLED": (
             "runtime",
             "adaptive_tuning_enabled",
