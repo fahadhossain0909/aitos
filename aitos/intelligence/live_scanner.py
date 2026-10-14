@@ -28,6 +28,10 @@ class LiveSymbolCache:
     last_book_source_at: datetime | None = None
     last_trade_received_at: datetime | None = None
     last_book_received_at: datetime | None = None
+    last_trade_trace_id: str | None = None
+    last_book_trace_id: str | None = None
+    last_trade_event_id: str | None = None
+    last_book_event_id: str | None = None
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
     stale_trade_rejections: int = 0
@@ -253,6 +257,8 @@ class LiveScannerCache:
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
+        state.last_trade_trace_id = event.trace_id
+        state.last_trade_event_id = event.event_id
         try:
             from aitos.forensics.data_flow_hooks import (
                 note_trace,
@@ -306,6 +312,8 @@ class LiveScannerCache:
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time
         state.last_book_received_at = received_at
+        state.last_book_trace_id = event.trace_id
+        state.last_book_event_id = event.event_id
         try:
             from aitos.forensics.data_flow_hooks import (
                 note_trace,
