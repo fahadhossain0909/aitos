@@ -36,15 +36,15 @@ def _percentile(samples: list[float], pct: float) -> float | None:
 
 class _StageBucket:
     __slots__ = (
-        "input_count",
-        "output_count",
-        "error_count",
         "drop_count",
-        "queue_depth",
-        "oldest_event_age_ms",
-        "source_age_ms",
-        "latencies_ms",
+        "error_count",
+        "input_count",
         "issues",
+        "latencies_ms",
+        "oldest_event_age_ms",
+        "output_count",
+        "queue_depth",
+        "source_age_ms",
         "window_inputs",
         "window_outputs",
     )

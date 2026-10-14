@@ -303,9 +303,9 @@ class OpportunityScanner(AITOSModule):
         started = time.perf_counter()
         try:
             from aitos.forensics.data_flow_hooks import (
+                record_error,
                 record_input,
                 record_output,
-                record_error,
             )
             from aitos.forensics.data_flow_schema import PipelineStage
 

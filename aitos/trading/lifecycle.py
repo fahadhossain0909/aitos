@@ -236,9 +236,9 @@ class TradeLifecycle(AITOSModule):
         symbol = str(getattr(opportunity, "symbol", "") or "")
         try:
             from aitos.forensics.data_flow_hooks import (
+                record_error,
                 record_input,
                 record_output,
-                record_error,
             )
             from aitos.forensics.data_flow_schema import PipelineStage
 
@@ -528,9 +528,9 @@ class TradeLifecycle(AITOSModule):
         symbol = str(getattr(trade, "symbol", "") or "")
         try:
             from aitos.forensics.data_flow_hooks import (
+                record_error,
                 record_input,
                 record_output,
-                record_error,
             )
             from aitos.forensics.data_flow_schema import PipelineStage
 
