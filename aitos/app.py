@@ -479,7 +479,9 @@ async def run_scan_and_trade_cycle(
     )
     open_symbol_counts: dict[str, int] = {}
     for open_trade in components.trade_lifecycle.get_open_trades():
-        open_symbol_counts[open_trade.symbol] = open_symbol_counts.get(open_trade.symbol, 0) + 1
+        open_symbol_counts[open_trade.symbol] = (
+            open_symbol_counts.get(open_trade.symbol, 0) + 1
+        )
     max_per_symbol = get_settings().tuning.positions.max_positions_per_symbol
     submitted = 0
     for candidate in ranked:
@@ -577,5 +579,7 @@ async def run_scan_and_trade_cycle(
             },
         )
         if trade.state == TradeLifecycleState.POSITION_OPENED:
-            open_symbol_counts[candidate.symbol] = open_symbol_counts.get(candidate.symbol, 0) + 1
+            open_symbol_counts[candidate.symbol] = (
+                open_symbol_counts.get(candidate.symbol, 0) + 1
+            )
     return submitted
