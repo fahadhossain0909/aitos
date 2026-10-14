@@ -23,14 +23,23 @@ MAX_CONSUMER_CONCURRENCY = 32
 
 
 def consumer_concurrency() -> int:
+    """Resolve concurrency from central tuning, preserving the legacy override."""
     raw = os.getenv("REDIS_CONSUMER_CONCURRENCY")
-    if raw is None:
-        return DEFAULT_CONSUMER_CONCURRENCY
-    try:
-        value = int(raw)
-    except ValueError:
-        return DEFAULT_CONSUMER_CONCURRENCY
-    return max(1, min(value, MAX_CONSUMER_CONCURRENCY))
+    if raw is not None:
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError("REDIS_CONSUMER_CONCURRENCY must be an integer") from exc
+        if not 1 <= value <= MAX_CONSUMER_CONCURRENCY:
+            raise ValueError(
+                f"REDIS_CONSUMER_CONCURRENCY must be between 1 and {MAX_CONSUMER_CONCURRENCY}"
+            )
+        return value
+
+    # Lazy import avoids eventbus -> config -> application import cycles.
+    from aitos.config.tuning import load_tuning_settings
+
+    return load_tuning_settings().event_bus.consumer_concurrency
 
 
 def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
