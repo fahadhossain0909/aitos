@@ -1,0 +1,66 @@
+{
+  "title": "AITOS Data Flow",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "tags": ["aitos", "data-flow", "observability"],
+  "templating": {
+    "list": [
+      {
+        "name": "symbol",
+        "type": "custom",
+        "query": "*,BTCUSDT,ETHUSDT",
+        "current": { "text": "*", "value": "*" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "text",
+      "title": "How to use",
+      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "Poll `GET /data-flow` or `GET /data-flow/BTCUSDT` on the HealthServer.\nWire Prometheus gauges from stage snapshots (input_rate, output_rate, latency p99, queue depth).\nPressure point = first stage with input_rate > output_rate and rising oldest_event_age_ms."
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Stage throughput (placeholder metric names)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "aitos_data_flow_input_rate", "legendFormat": "input" },
+        { "expr": "aitos_data_flow_output_rate", "legendFormat": "output" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency percentiles (placeholder)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "aitos_data_flow_latency_p50_ms", "legendFormat": "p50" },
+        { "expr": "aitos_data_flow_latency_p95_ms", "legendFormat": "p95" },
+        { "expr": "aitos_data_flow_latency_p99_ms", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue depth / oldest age",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "targets": [
+        { "expr": "aitos_data_flow_queue_depth", "legendFormat": "depth" },
+        { "expr": "aitos_data_flow_oldest_event_age_ms", "legendFormat": "oldest_age_ms" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Drops and errors",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "aitos_data_flow_drop_count", "legendFormat": "drops" },
+        { "expr": "aitos_data_flow_error_count", "legendFormat": "errors" }
+      ]
+    }
+  ]
+}
