@@ -85,7 +85,9 @@ def market_event_from_wire(payload: dict[str, Any]) -> MarketEvent:
     event_time_raw = payload.get("event_time") or payload.get("source_ts")
     ingest_time_raw = payload.get("ingest_time") or payload.get("received_ts")
     if event_time_raw is None or ingest_time_raw is None:
-        raise ValueError("market event wire payload requires event/source and ingest/received timestamps")
+        raise ValueError(
+            "market event wire payload requires event/source and ingest/received timestamps"
+        )
     event_time = _datetime_from_wire(event_time_raw)
     ingest_time = _datetime_from_wire(ingest_time_raw)
     return MarketEvent(
@@ -159,7 +161,10 @@ class MarketDataBus:
                 result = check_trade_payload(
                     checked_payload, now_ms=time.time() * 1000.0
                 )
-            elif event.event_type in (MarketEventType.BOOK_SNAPSHOT, MarketEventType.BOOK_DELTA):
+            elif event.event_type in (
+                MarketEventType.BOOK_SNAPSHOT,
+                MarketEventType.BOOK_DELTA,
+            ):
                 result = check_orderbook_payload(checked_payload)
             if result is not None and not result.ok:
                 record_error(
@@ -224,7 +229,10 @@ class MarketDataBus:
                 symbol=symbol,
                 latency_ms=latency_ms,
                 event_id=event.event_id,
-                extra={"event_type": event.event_type.value, "source": event.source.value},
+                extra={
+                    "event_type": event.event_type.value,
+                    "source": event.source.value,
+                },
             )
         except Exception:
             pass
@@ -253,7 +261,10 @@ class MarketDataBus:
                     stage=PipelineStage.REDIS_CONSUMER.value,
                     symbol=symbol,
                     event_id=market_event.event_id,
-                    extra={"event_type": market_event.event_type.value, "source": market_event.source.value},
+                    extra={
+                        "event_type": market_event.event_type.value,
+                        "source": market_event.source.value,
+                    },
                 )
             except Exception:
                 pass
