@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from aitos.config.paths import get_model_data_dir
+
 
 @dataclass(frozen=True)
 class ModelArtifact:
@@ -31,8 +33,8 @@ class ModelRegistry:
 
     VALID_STATUSES = {"candidate", "champion", "rejected", "archived"}
 
-    def __init__(self, path: str = "/models/registry.json") -> None:
-        self.path = path
+    def __init__(self, path: str | None = None) -> None:
+        self.path = str(path or (get_model_data_dir() / "registry.json"))
 
     def _load(self) -> list[dict[str, Any]]:
         try:
