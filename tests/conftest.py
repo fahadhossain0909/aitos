@@ -20,7 +20,7 @@ from pathlib import Path
 # Keep online-model artifacts outside the checkout during tests. The same
 # environment override is used by local development and CI path resolution.
 _TEST_MODEL_ROOT = Path(tempfile.mkdtemp(prefix="aitos-models-"))
-os.environ.setdefault("MODEL_DATA_DIR", str(_TEST_MODEL_ROOT))
+os.environ["MODEL_DATA_DIR"] = str(_TEST_MODEL_ROOT)
 
 import pytest
 import pytest_asyncio
