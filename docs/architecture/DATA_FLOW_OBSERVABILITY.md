@@ -23,6 +23,7 @@ Canonical trace id: `md:{SYMBOL}:{event_id}` (same pattern as existing forensic 
 | `aitos/forensics/data_flow_registry.py` | Counters, rates, p50/p95/p99 latency |
 | `aitos/forensics/data_flow_debugger.py` | Symbol snapshot + pressure-point detection |
 | `aitos/forensics/data_contract.py` | Stage checkpoints (stale vs corrupted) |
+| `aitos/forensics/data_flow_hooks.py` | Safe no-raise wrappers for hot-path calls |
 
 ## Phase 1 — consistent schema (landed)
 
@@ -44,6 +45,28 @@ reg.record_input(PipelineStage.RECEIVE, symbol="BTCUSDT", source_age_ms=32)
 reg.record_output(PipelineStage.RECEIVE, symbol="BTCUSDT", latency_ms=1.2)
 ```
 
+Safe hot-path helper (never raises):
+
+```python
+from aitos.forensics.data_flow_hooks import record_input, record_output
+from aitos.forensics.data_flow_schema import PipelineStage
+
+record_input(PipelineStage.GATEWAY_QUEUE.value, symbol="BTCUSDT", source_age_ms=12)
+record_output(PipelineStage.GATEWAY_QUEUE.value, symbol="BTCUSDT", latency_ms=0.4)
+```
+
+## Instrumentation map (landed)
+
+| Stage | Wired in |
+|-------|----------|
+| `RECEIVE` | `StreamTelemetry.mark_received` |
+| `DECODE` | `StreamTelemetry.mark_parsed` |
+| `GATEWAY_QUEUE` | `MarketDataGateway.accept` / `_accept_latest` (incl. drop/stale) |
+| `REDIS_PUBLISH` | `MarketDataGateway.drain_once` + `MarketDataBus.publish` |
+| `REDIS_CONSUMER` | `MarketDataBus.subscribe` handler wrapper |
+
+Still open for a follow-up PR: `LIVE_STATE`, `FEATURE`, `SCANNER`, `TRADE_LIFECYCLE`.
+
 ## Phase 2 — dashboard signals
 
 Expose via `/data-flow` (JSON) and Prometheus-friendly fields on stage snapshots:
@@ -53,6 +76,14 @@ Expose via `/data-flow` (JSON) and Prometheus-friendly fields on stage snapshots
 - latency percentiles (p50 / p95 / p99 / max)
 - queue depth, drops, errors
 - pressure flag when `input_rate > output_rate` and age/queue grow
+
+`/metrics` also exports:
+
+- `aitos_data_flow_input_rate{stage=...}`
+- `aitos_data_flow_output_rate{stage=...}`
+- `aitos_data_flow_latency_p99_ms{stage=...}`
+- `aitos_data_flow_queue_depth{stage=...}`
+- `aitos_data_flow_pressure{stage=...}`
 
 Grafana starter dashboard: `deploy/grafana/aitos_data_flow.json`.
 
@@ -78,3 +109,4 @@ The first stage where input exceeds output and oldest age rises is the pressure 
 
 These modules are observational only. They must not drop, reorder, or alter
 trading decisions. Production behavior changes require a separate reviewed PR.
+All hot-path hooks go through `data_flow_hooks` and swallow exceptions.
