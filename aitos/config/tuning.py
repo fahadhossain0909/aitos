@@ -217,3 +217,31 @@ def load_tuning_settings(
         )
     except ValidationError:
         raise
+
+
+
+def reload_tuning_settings(
+    *, profile: ProfileName | None = None, mode: TradingMode | None = None
+) -> TuningSettings:
+    """Explicitly reload the profile document and return a newly validated snapshot.
+
+    Callers must deliberately apply the returned snapshot to live components;
+    this function never mutates running components behind their back.
+    """
+    _read_profiles.cache_clear()
+    return load_tuning_settings(profile=profile, mode=mode)
+
+
+def effective_tuning_report(settings: TuningSettings | None = None) -> dict[str, Any]:
+    """Return a secret-free, stable audit record for the effective tuning."""
+    import hashlib
+
+    resolved = settings or load_tuning_settings()
+    payload = resolved.model_dump(mode="json")
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return {
+        "profile": resolved.profile,
+        "mode": resolved.mode,
+        "config_version": hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16],
+        "settings": payload,
+    }
