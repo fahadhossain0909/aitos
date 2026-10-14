@@ -59,7 +59,6 @@ class LiveScannerCache:
         return self._state[symbol]
 
     def snapshot(self, symbol: str) -> LiveSymbolCache | None:
-        """Return the current live state without creating a cache entry."""
         return self._state.get(symbol.upper())
 
     def _source_age_seconds(
@@ -71,7 +70,6 @@ class LiveScannerCache:
         return max(0.0, (now - timestamp).total_seconds())
 
     def is_book_fresh(self, symbol: str, max_age_seconds: float) -> bool:
-        """Return whether the cached book source timestamp is within the limit."""
         state = self._state.get(symbol.upper())
         if state is None or state.order_book is None:
             return False
@@ -79,7 +77,6 @@ class LiveScannerCache:
         return age is not None and age <= max_age_seconds
 
     def is_trade_fresh(self, symbol: str, max_age_seconds: float) -> bool:
-        """Return whether the cached trade source timestamp is within the limit."""
         state = self._state.get(symbol.upper())
         if state is None or state.last_trade_at is None:
             return False
@@ -163,11 +160,35 @@ class LiveScannerCache:
         received_at = datetime.now(timezone.utc)
         if state.trades and trade.trade_id <= state.trades[-1].trade_id:
             state.duplicate_trade_rejections += 1
+            try:
+                from aitos.forensics.data_flow_hooks import record_drop
+                from aitos.forensics.data_flow_schema import (
+                    DataIssueClass,
+                    PipelineStage,
+                )
+
+                record_drop(
+                    PipelineStage.LIVE_STATE.value,
+                    symbol=str(trade.symbol or ""),
+                    issue=DataIssueClass.DUPLICATE.value,
+                )
+            except Exception:
+                pass
             return
         state.trades.append(trade)
         state.last_trade_at = received_at
         state.last_trade_source_at = trade.timestamp
         state.last_trade_received_at = received_at
+        try:
+            from aitos.forensics.data_flow_hooks import record_input, record_output
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.LIVE_STATE.value, symbol=str(trade.symbol or ""))
+            record_output(
+                PipelineStage.LIVE_STATE.value, symbol=str(trade.symbol or "")
+            )
+        except Exception:
+            pass
 
     async def accept_live_order_book(self, book: OrderBookSnapshot) -> None:
         if book.symbol.upper() not in self._symbols:
@@ -180,11 +201,33 @@ class LiveScannerCache:
             and state.order_book.timestamp == book.timestamp
         ):
             state.duplicate_book_rejections += 1
+            try:
+                from aitos.forensics.data_flow_hooks import record_drop
+                from aitos.forensics.data_flow_schema import (
+                    DataIssueClass,
+                    PipelineStage,
+                )
+
+                record_drop(
+                    PipelineStage.LIVE_STATE.value,
+                    symbol=str(book.symbol or ""),
+                    issue=DataIssueClass.DUPLICATE.value,
+                )
+            except Exception:
+                pass
             return
         state.order_book = book
         state.last_book_at = received_at
         state.last_book_source_at = book.timestamp
         state.last_book_received_at = received_at
+        try:
+            from aitos.forensics.data_flow_hooks import record_input, record_output
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.LIVE_STATE.value, symbol=str(book.symbol or ""))
+            record_output(PipelineStage.LIVE_STATE.value, symbol=str(book.symbol or ""))
+        except Exception:
+            pass
 
     async def _on_trade_event(self, event) -> None:
         if event.symbol.upper() not in self._symbols:
@@ -210,6 +253,16 @@ class LiveScannerCache:
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
+        try:
+            from aitos.forensics.data_flow_hooks import record_input, record_output
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
+            record_output(
+                PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
+            )
+        except Exception:
+            pass
 
     async def _on_book_event(self, event) -> None:
         if event.symbol.upper() not in self._symbols:
@@ -239,6 +292,16 @@ class LiveScannerCache:
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time
         state.last_book_received_at = received_at
+        try:
+            from aitos.forensics.data_flow_hooks import record_input, record_output
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
+            record_output(
+                PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
+            )
+        except Exception:
+            pass
 
     async def _on_liquidity(self, event) -> None:
         if event.symbol.upper() in self._symbols:

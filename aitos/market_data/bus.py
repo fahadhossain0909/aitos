@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
@@ -120,6 +121,16 @@ class MarketDataBus:
         channel = channel_for(event.event_type)
         payload = market_event_to_wire(event)
         payload["retention_maxlen"] = maxlen_for(channel)
+        symbol = str(event.symbol or "")
+        started = time.perf_counter()
+        try:
+            from aitos.forensics.data_flow_hooks import record_input
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            # Downstream of gateway drain: consumer-side ingress onto Redis stream.
+            record_input(PipelineStage.REDIS_PUBLISH.value, symbol=symbol)
+        except Exception:
+            pass
         await self._event_bus.publish(
             Event(
                 topic=channel,
@@ -130,6 +141,24 @@ class MarketDataBus:
                 schema_version=event.schema_version,
             )
         )
+        try:
+            from aitos.forensics.data_flow_hooks import note_trace, record_output
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            record_output(
+                PipelineStage.REDIS_PUBLISH.value,
+                symbol=symbol,
+                latency_ms=latency_ms,
+            )
+            note_trace(
+                trace_id=event.trace_id,
+                stage=PipelineStage.REDIS_PUBLISH.value,
+                symbol=symbol,
+                latency_ms=latency_ms,
+            )
+        except Exception:
+            pass
 
     async def subscribe(
         self,
@@ -142,7 +171,43 @@ class MarketDataBus:
         channel = channel_for(event_type)
 
         async def _handle(event: Event) -> Any:
-            return await handler(market_event_from_wire(event.payload))
+            started = time.perf_counter()
+            market_event = market_event_from_wire(event.payload)
+            symbol = str(market_event.symbol or "")
+            try:
+                from aitos.forensics.data_flow_hooks import record_input
+                from aitos.forensics.data_flow_schema import PipelineStage
+
+                record_input(PipelineStage.REDIS_CONSUMER.value, symbol=symbol)
+            except Exception:
+                pass
+            try:
+                result = await handler(market_event)
+            except Exception:
+                try:
+                    from aitos.forensics.data_flow_hooks import record_error
+                    from aitos.forensics.data_flow_schema import PipelineStage
+
+                    record_error(
+                        PipelineStage.REDIS_CONSUMER.value,
+                        symbol=symbol,
+                        issue="handler_error",
+                    )
+                except Exception:
+                    pass
+                raise
+            try:
+                from aitos.forensics.data_flow_hooks import record_output
+                from aitos.forensics.data_flow_schema import PipelineStage
+
+                record_output(
+                    PipelineStage.REDIS_CONSUMER.value,
+                    symbol=symbol,
+                    latency_ms=(time.perf_counter() - started) * 1000.0,
+                )
+            except Exception:
+                pass
+            return result
 
         return await self._event_bus.subscribe(
             channel,

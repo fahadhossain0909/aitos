@@ -81,6 +81,16 @@ class MarketStateEngine:
         Missing optional signals degrade gracefully to UNKNOWN / NEUTRAL
         rather than raising; the feature bag always records what was used.
         """
+        import time as _time
+
+        _t0 = _time.perf_counter()
+        try:
+            from aitos.forensics.data_flow_hooks import record_input
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.LIVE_STATE.value, symbol=str(symbol or ""))
+        except Exception:
+            pass
         ts = timestamp or datetime.now(timezone.utc)
         features: dict[str, float] = {}
         notes: list[str] = []
@@ -156,6 +166,23 @@ class MarketStateEngine:
                 }
             },
         )
+        try:
+            from aitos.forensics.data_flow_hooks import record_output
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            latency_ms = (_time.perf_counter() - _t0) * 1000.0
+            record_output(
+                PipelineStage.LIVE_STATE.value,
+                symbol=str(symbol or ""),
+                latency_ms=latency_ms,
+            )
+            record_output(
+                PipelineStage.FEATURE.value,
+                symbol=str(symbol or ""),
+                latency_ms=latency_ms,
+            )
+        except Exception:
+            pass
         return state
 
     # ------------------------------------------------------------------

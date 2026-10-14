@@ -71,9 +71,24 @@ class MarketDataGateway:
         """Return the wall-clock age of the exchange event itself."""
         return max(0.0, (datetime.now(timezone.utc) - event.event_time).total_seconds())
 
+    def _data_flow_symbol(self, event: MarketEvent) -> str:
+        return str(getattr(event, "symbol", "") or "")
+
     def _validate_event(self, event: MarketEvent) -> bool:
         self.health.record_event()
         age = self._source_freshness_age_seconds(event)
+        symbol = self._data_flow_symbol(event)
+        try:
+            from aitos.forensics.data_flow_hooks import record_input
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(
+                PipelineStage.GATEWAY_QUEUE.value,
+                symbol=symbol,
+                source_age_ms=age * 1000.0,
+            )
+        except Exception:
+            pass
         if (
             event.source == MarketSource.WEBSOCKET
             and age > self.config.max_source_age_seconds
@@ -82,6 +97,20 @@ class MarketDataGateway:
                 "stale_websocket", f"source age {age:.3f}s exceeded limit"
             )
             self.state = GatewayState.DEGRADED
+            try:
+                from aitos.forensics.data_flow_hooks import record_drop
+                from aitos.forensics.data_flow_schema import (
+                    DataIssueClass,
+                    PipelineStage,
+                )
+
+                record_drop(
+                    PipelineStage.GATEWAY_QUEUE.value,
+                    symbol=symbol,
+                    issue=DataIssueClass.STALE.value,
+                )
+            except Exception:
+                pass
             return False
         if event.source == MarketSource.REST:
             self.health.degraded = True
@@ -93,11 +122,47 @@ class MarketDataGateway:
         replaced_before = self.queue.stats.replaced_oldest
         if self.queue.put_latest_nowait(event):
             self.health.record_accept()
+            symbol = self._data_flow_symbol(event)
+            try:
+                from aitos.forensics.data_flow_hooks import record_output, set_queue
+                from aitos.forensics.data_flow_schema import PipelineStage
+
+                record_output(PipelineStage.GATEWAY_QUEUE.value, symbol=symbol)
+                qsnap = self.queue.snapshot()
+                depth = int(qsnap.get("depth", qsnap.get("size", 0)) or 0)
+                set_queue(PipelineStage.GATEWAY_QUEUE.value, depth=depth, symbol=symbol)
+            except Exception:
+                pass
             if self.queue.stats.replaced_oldest > replaced_before:
                 self.health.backpressure_events += 1
                 self.health.dropped_events += 1
+                try:
+                    from aitos.forensics.data_flow_hooks import record_drop
+                    from aitos.forensics.data_flow_schema import (
+                        DataIssueClass,
+                        PipelineStage,
+                    )
+
+                    record_drop(
+                        PipelineStage.GATEWAY_QUEUE.value,
+                        symbol=self._data_flow_symbol(event),
+                        issue=DataIssueClass.DROPPED_BACKPRESSURE.value,
+                    )
+                except Exception:
+                    pass
             return True
         self.health.record_freshness_drop("unable to enqueue newest market event")
+        try:
+            from aitos.forensics.data_flow_hooks import record_drop
+            from aitos.forensics.data_flow_schema import DataIssueClass, PipelineStage
+
+            record_drop(
+                PipelineStage.GATEWAY_QUEUE.value,
+                symbol=self._data_flow_symbol(event),
+                issue=DataIssueClass.DROPPED_BACKPRESSURE.value,
+            )
+        except Exception:
+            pass
         return False
 
     def accept(self, event: MarketEvent) -> bool:
@@ -134,6 +199,14 @@ class MarketDataGateway:
         queue_started = time.perf_counter()
         event = await self.queue.get()
         self._record_drain_stage("queue_get", queue_started)
+        symbol = self._data_flow_symbol(event)
+        try:
+            from aitos.forensics.data_flow_hooks import record_input
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.REDIS_PUBLISH.value, symbol=symbol)
+        except Exception:
+            pass
         try:
             age_started = time.perf_counter()
             queue_age = self._queue_age_seconds(event)
@@ -143,6 +216,20 @@ class MarketDataGateway:
                     f"queued market event age {queue_age:.3f}s exceeded "
                     f"{self.config.max_queue_age_seconds:.3f}s"
                 )
+                try:
+                    from aitos.forensics.data_flow_hooks import record_drop
+                    from aitos.forensics.data_flow_schema import (
+                        DataIssueClass,
+                        PipelineStage,
+                    )
+
+                    record_drop(
+                        PipelineStage.REDIS_PUBLISH.value,
+                        symbol=symbol,
+                        issue=DataIssueClass.STALE.value,
+                    )
+                except Exception:
+                    pass
                 return False
             try:
                 publish_started = time.perf_counter()
@@ -159,9 +246,41 @@ class MarketDataGateway:
                 self.health.record_publish_error(str(exc))
                 self.health.dropped_events += 1
                 self.state = GatewayState.DEGRADED
+                try:
+                    from aitos.forensics.data_flow_hooks import record_error
+                    from aitos.forensics.data_flow_schema import PipelineStage
+
+                    record_error(
+                        PipelineStage.REDIS_PUBLISH.value,
+                        symbol=symbol,
+                        issue="publish_error",
+                    )
+                except Exception:
+                    pass
                 raise
             else:
                 self.health.record_publish()
+                latency_ms = (time.perf_counter() - queue_started) * 1000.0
+                try:
+                    from aitos.forensics.data_flow_hooks import (
+                        note_trace,
+                        record_output,
+                    )
+                    from aitos.forensics.data_flow_schema import PipelineStage
+
+                    record_output(
+                        PipelineStage.REDIS_PUBLISH.value,
+                        symbol=symbol,
+                        latency_ms=latency_ms,
+                    )
+                    note_trace(
+                        trace_id=getattr(event, "trace_id", None),
+                        stage=PipelineStage.REDIS_PUBLISH.value,
+                        symbol=symbol,
+                        latency_ms=latency_ms,
+                    )
+                except Exception:
+                    pass
                 return True
         finally:
             task_started = time.perf_counter()

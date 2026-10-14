@@ -229,6 +229,47 @@ class TradeLifecycle(AITOSModule):
     async def submit_opportunity(
         self, opportunity: Opportunity, portfolio: PortfolioState
     ) -> Trade:
+        """Measure opportunity-to-lifecycle handling; preserve existing policy."""
+        import time
+
+        started = time.perf_counter()
+        symbol = str(getattr(opportunity, "symbol", "") or "")
+        try:
+            from aitos.forensics.data_flow_hooks import (
+                record_input,
+                record_output,
+                record_error,
+            )
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.TRADE_LIFECYCLE.value, symbol=symbol)
+        except Exception:
+            pass
+        try:
+            trade = await self._submit_opportunity_impl(opportunity, portfolio)
+        except Exception:
+            try:
+                record_error(
+                    PipelineStage.TRADE_LIFECYCLE.value,
+                    symbol=symbol,
+                    issue="processing_error",
+                )
+            except Exception:
+                pass
+            raise
+        try:
+            record_output(
+                PipelineStage.TRADE_LIFECYCLE.value,
+                symbol=symbol,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+            )
+        except Exception:
+            pass
+        return trade
+
+    async def _submit_opportunity_impl(
+        self, opportunity: Opportunity, portfolio: PortfolioState
+    ) -> Trade:
         self._require_initialized()
         await self._event_bus.publish(
             Event(
@@ -479,6 +520,48 @@ class TradeLifecycle(AITOSModule):
         return None
 
     async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
+        """Measure close transitions while leaving hard exit logic authoritative."""
+        import time
+
+        started = time.perf_counter()
+        trade = self._open_trades.get(trade_id)
+        symbol = str(getattr(trade, "symbol", "") or "")
+        try:
+            from aitos.forensics.data_flow_hooks import (
+                record_input,
+                record_output,
+                record_error,
+            )
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.TRADE_LIFECYCLE.value, symbol=symbol)
+        except Exception:
+            pass
+        try:
+            result = await self._close_trade_impl(trade_id, exit_price, reason)
+        except Exception:
+            try:
+                record_error(
+                    PipelineStage.TRADE_LIFECYCLE.value,
+                    symbol=symbol,
+                    issue="processing_error",
+                )
+            except Exception:
+                pass
+            raise
+        try:
+            record_output(
+                PipelineStage.TRADE_LIFECYCLE.value,
+                symbol=symbol,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+            )
+        except Exception:
+            pass
+        return result
+
+    async def _close_trade_impl(
+        self, trade_id: str, exit_price: float, reason: str
+    ) -> Trade:
         self._require_initialized()
         if not _valid_market_price(exit_price):
             raise ValueError(

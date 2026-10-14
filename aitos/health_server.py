@@ -3,6 +3,9 @@
 so a process supervisor (systemd, Kubernetes, a load balancer) or a
 monitoring stack has something real to poll instead of just watching logs.
 
+Also exposes ``/data-flow`` and ``/data-flow/{symbol}`` for end-to-end
+market-data pipeline observability (Phase 2/3 of DATA_FLOW_OBSERVABILITY).
+
 Deliberately minimal: no auth, no TLS, no histogram/summary metric types
 — just per-module status and a handful of counters already sitting in
 each module's ``health_check()`` output. Bind it to localhost or behind a
@@ -46,7 +49,6 @@ class HealthServer:
             return snap
         except Exception:
             return {"_status": "ERROR"}
-        self._runner: web.AppRunner | None = None
 
     async def start(self) -> None:
         logger.info(
@@ -73,6 +75,8 @@ class HealthServer:
         app = web.Application()
         app.router.add_get("/health", self._handle_health)
         app.router.add_get("/metrics", self._handle_metrics)
+        app.router.add_get("/data-flow", self._handle_data_flow)
+        app.router.add_get("/data-flow/{symbol}", self._handle_data_flow_symbol)
         return app
 
     async def stop(self) -> None:
@@ -80,6 +84,149 @@ class HealthServer:
             logger.info("stopping health server")
             await self._runner.cleanup()
             self._runner = None
+
+    async def _handle_data_flow(self, request: web.Request) -> web.Response:
+        """Aggregate pipeline snapshot + pressure-point diagnosis."""
+        try:
+            from aitos.forensics.data_flow_debugger import (
+                build_data_flow_report,
+                render_text_report,
+            )
+
+            report = build_data_flow_report("")
+            want_text = request.query.get("format", "").lower() in ("text", "txt")
+            if want_text:
+                return web.Response(
+                    text=render_text_report(report),
+                    content_type="text/plain",
+                )
+            return web.json_response(report)
+        except Exception as exc:
+            logger.exception("data-flow handler failed")
+            return web.json_response(
+                {"error": str(exc), "error_type": type(exc).__name__},
+                status=500,
+            )
+
+    async def _handle_data_flow_symbol(self, request: web.Request) -> web.Response:
+        """Per-symbol pipeline snapshot + pressure-point diagnosis."""
+        symbol = str(request.match_info.get("symbol") or "").strip().upper()
+        if not symbol:
+            return web.json_response({"error": "symbol required"}, status=400)
+        try:
+            from aitos.forensics.data_flow_debugger import (
+                build_data_flow_report,
+                render_text_report,
+            )
+
+            report = build_data_flow_report(symbol)
+            want_text = request.query.get("format", "").lower() in ("text", "txt")
+            if want_text:
+                return web.Response(
+                    text=render_text_report(report),
+                    content_type="text/plain",
+                )
+            return web.json_response(report)
+        except Exception as exc:
+            logger.exception("data-flow symbol handler failed")
+            return web.json_response(
+                {"error": str(exc), "error_type": type(exc).__name__},
+                status=500,
+            )
+
+    def _append_data_flow_metrics(self, lines: list[str]) -> None:
+        """Export aggregate stage rates/latencies for Grafana."""
+        try:
+            from aitos.forensics.data_flow_registry import get_data_flow_registry
+            from aitos.forensics.data_flow_schema import PIPELINE_ORDER
+
+            reg = get_data_flow_registry()
+            lines.append(
+                "# HELP aitos_data_flow_input_rate Stage input events per second"
+            )
+            lines.append("# TYPE aitos_data_flow_input_rate gauge")
+            lines.append(
+                "# HELP aitos_data_flow_output_rate Stage output events per second"
+            )
+            lines.append("# TYPE aitos_data_flow_output_rate gauge")
+            lines.append(
+                "# HELP aitos_data_flow_latency_p99_ms Stage processing latency p99"
+            )
+            lines.append("# TYPE aitos_data_flow_latency_p99_ms gauge")
+            lines.append(
+                "# HELP aitos_data_flow_latency_p50_ms Stage processing latency p50"
+            )
+            lines.append("# TYPE aitos_data_flow_latency_p50_ms gauge")
+            lines.append(
+                "# HELP aitos_data_flow_latency_p95_ms Stage processing latency p95"
+            )
+            lines.append("# TYPE aitos_data_flow_latency_p95_ms gauge")
+            lines.append(
+                "# HELP aitos_data_flow_oldest_event_age_ms Oldest queued event age"
+            )
+            lines.append("# TYPE aitos_data_flow_oldest_event_age_ms gauge")
+            lines.append("# HELP aitos_data_flow_source_age_ms Latest source event age")
+            lines.append("# TYPE aitos_data_flow_source_age_ms gauge")
+            lines.append("# HELP aitos_data_flow_drop_count Dropped events")
+            lines.append("# TYPE aitos_data_flow_drop_count gauge")
+            lines.append("# HELP aitos_data_flow_error_count Processing errors")
+            lines.append("# TYPE aitos_data_flow_error_count gauge")
+            lines.append("# HELP aitos_data_flow_queue_depth Stage queue depth")
+            lines.append("# TYPE aitos_data_flow_queue_depth gauge")
+            lines.append(
+                "# HELP aitos_data_flow_pressure Whether stage is under pressure (1/0)"
+            )
+            lines.append("# TYPE aitos_data_flow_pressure gauge")
+            # Keep missing samples numeric so Prometheus/Grafana queries stay stable.
+            for stage in PIPELINE_ORDER:
+                snap = reg.snapshot_stage(stage, "")
+                stage_label = snap.stage
+                lines.append(
+                    f'aitos_data_flow_input_rate{{stage="{stage_label}"}} '
+                    f"{snap.input_rate}"
+                )
+                lines.append(
+                    f'aitos_data_flow_output_rate{{stage="{stage_label}"}} '
+                    f"{snap.output_rate}"
+                )
+                p99 = snap.latency_p99_ms if snap.latency_p99_ms is not None else 0
+                lines.append(
+                    f'aitos_data_flow_latency_p99_ms{{stage="{stage_label}"}} {p99}'
+                )
+                lines.append(
+                    f'aitos_data_flow_queue_depth{{stage="{stage_label}"}} '
+                    f"{snap.queue_depth}"
+                )
+                lines.append(
+                    f'aitos_data_flow_latency_p50_ms{{stage="{stage_label}"}} '
+                    f"{snap.latency_p50_ms or 0}"
+                )
+                lines.append(
+                    f'aitos_data_flow_latency_p95_ms{{stage="{stage_label}"}} '
+                    f"{snap.latency_p95_ms or 0}"
+                )
+                lines.append(
+                    f'aitos_data_flow_oldest_event_age_ms{{stage="{stage_label}"}} '
+                    f"{snap.oldest_event_age_ms or 0}"
+                )
+                lines.append(
+                    f'aitos_data_flow_source_age_ms{{stage="{stage_label}"}} '
+                    f"{snap.source_age_ms or 0}"
+                )
+                lines.append(
+                    f'aitos_data_flow_drop_count{{stage="{stage_label}"}} '
+                    f"{snap.drop_count}"
+                )
+                lines.append(
+                    f'aitos_data_flow_error_count{{stage="{stage_label}"}} '
+                    f"{snap.error_count}"
+                )
+                lines.append(
+                    f'aitos_data_flow_pressure{{stage="{stage_label}"}} '
+                    f"{1 if snap.pressure else 0}"
+                )
+        except Exception:
+            logger.exception("data-flow metrics export failed")
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         results = []
@@ -296,6 +443,8 @@ class HealthServer:
                         )
                         lines.append(f"# TYPE {metric_name} gauge")
                         lines.append(f"{metric_name} {val}")
+
+        self._append_data_flow_metrics(lines)
 
         logger.info("metrics check completed")
         return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")

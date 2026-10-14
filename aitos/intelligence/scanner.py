@@ -297,6 +297,46 @@ class OpportunityScanner(AITOSModule):
     async def scan_symbol(
         self, symbol: str, reference_klines: list | None = None
     ) -> ScanCandidate | None:
+        """Measure scanner stage execution without changing signal decisions."""
+        import time
+
+        started = time.perf_counter()
+        try:
+            from aitos.forensics.data_flow_hooks import (
+                record_input,
+                record_output,
+                record_error,
+            )
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.SCANNER.value, symbol=symbol)
+        except Exception:
+            pass
+        try:
+            result = await self._scan_symbol_impl(symbol, reference_klines)
+        except Exception:
+            try:
+                record_error(
+                    PipelineStage.SCANNER.value,
+                    symbol=symbol,
+                    issue="processing_error",
+                )
+            except Exception:
+                pass
+            raise
+        try:
+            record_output(
+                PipelineStage.SCANNER.value,
+                symbol=symbol,
+                latency_ms=(time.perf_counter() - started) * 1000.0,
+            )
+        except Exception:
+            pass
+        return result
+
+    async def _scan_symbol_impl(
+        self, symbol: str, reference_klines: list | None = None
+    ) -> ScanCandidate | None:
         self._require_initialized()
         klines = await self._exchange.fetch_klines(
             symbol, self._timeframe, limit=self._kline_lookback
