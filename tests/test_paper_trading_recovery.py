@@ -80,6 +80,7 @@ async def test_reconciliation_detects_missing_internal_position():
 
     assert mismatch is True
 
+
 class FakeIngestion:
     def __init__(self, trade_symbols=None, kline_symbols=None):
         self._live_trade_symbols = list(trade_symbols or [])
