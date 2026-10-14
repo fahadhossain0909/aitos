@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, call
 
 import pytest
 
-from aitos.config.tuning import load_tuning_settings
 from aitos.data.repository import MarketDataRepository
 
 
