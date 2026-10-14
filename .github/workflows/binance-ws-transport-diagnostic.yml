@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   transport-diagnostic:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: VPS Binance WebSocket transport probe
     runs-on: ubuntu-latest
     timeout-minutes: 10
