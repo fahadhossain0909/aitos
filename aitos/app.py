@@ -166,6 +166,10 @@ async def build_system(
                 "analysis": tuning.analysis.model_dump(mode="json"),
                 "event_bus": tuning.event_bus.model_dump(mode="json"),
                 "positions": tuning.positions.model_dump(mode="json"),
+                "risk": tuning.risk.model_dump(mode="json"),
+                "hardware": tuning.hardware.model_dump(mode="json"),
+                "storage": tuning.storage.model_dump(mode="json"),
+                "telemetry": tuning.telemetry.model_dump(mode="json"),
             }
         },
     )
