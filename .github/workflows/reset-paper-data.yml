@@ -20,6 +20,7 @@ env:
 
 jobs:
   reset:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: Reset paper-trading state on VPS
     runs-on: ubuntu-latest
     environment: papertrade
