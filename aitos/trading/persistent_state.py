@@ -285,6 +285,13 @@ class TradeStatePersistence:
         self._subscriptions: list[Subscription] = []
 
     async def restore(self) -> int:
+        """Restore durable lifecycle state without assuming market streams are ready.
+
+        DataIngestionService is constructed before this method is called, but its
+        canonical runtime is not started until initialize_all(). Subscription
+        requests made here can therefore be no-ops; market-data recovery is an
+        explicit post-initialization step.
+        """
         trades = await self._store.load_open_trades()
         for trade in trades:
             self._lifecycle._open_trades[trade.trade_id] = trade
@@ -294,36 +301,92 @@ class TradeStatePersistence:
                     str(trade.symbol).upper() for trade in trades if trade.symbol
                 )
             )
-            resubscribed = 0
-            for ingestion in list(_INGESTIONS):
-                try:
-                    if symbols:
-                        await ingestion.update_live_trade_symbols(symbols)
-                        await ingestion.update_live_kline_symbols(symbols)
-                        resubscribed += 1
-                except Exception as exc:
-                    logger.exception(
-                        "failed to resubscribe restored position market data",
-                        extra={
-                            "aitos_extra": {
-                                "symbols": symbols,
-                                "error": str(exc),
-                            }
-                        },
-                    )
             logger.warning(
                 "restored open trades after process restart",
                 extra={
                     "aitos_extra": {
                         "count": len(trades),
                         "symbols": symbols,
-                        "market_data_resubscriptions": resubscribed,
+                        "market_data_resubscriptions": "pending_until_ingestion_initialized",
                     }
                 },
             )
         else:
             logger.info("no open trades to restore from durable state")
         return len(trades)
+
+    async def resubscribe_restored_positions(self) -> dict[str, Any]:
+        """Reconcile restored position symbols with initialized live market feeds."""
+        trades = list(self._lifecycle.get_open_trades())
+        symbols = list(
+            dict.fromkeys(
+                str(trade.symbol).upper() for trade in trades if trade.symbol
+            )
+        )
+        if not symbols:
+            return {"symbols": [], "ingestions": 0, "verified": 0, "failures": 0}
+
+        ingestion_count = 0
+        verified_count = 0
+        failures = 0
+        for ingestion in list(_INGESTIONS):
+            try:
+                # Install protected-position wrappers before this method is called,
+                # so scanner subscription churn cannot evict restored symbols.
+                await ingestion.update_live_trade_symbols(symbols)
+                await ingestion.update_live_kline_symbols(symbols)
+                ingestion_count += 1
+
+                live_trade_symbols = {
+                    str(s).upper() for s in getattr(ingestion, "_live_trade_symbols", [])
+                }
+                live_kline_symbols = {
+                    str(s).upper() for s in getattr(ingestion, "_live_kline_symbols", [])
+                }
+                missing_trade = sorted(set(symbols) - live_trade_symbols)
+                missing_kline = sorted(set(symbols) - live_kline_symbols)
+                if not missing_trade and not missing_kline:
+                    verified_count += 1
+                else:
+                    failures += 1
+                    logger.error(
+                        "restored position symbols missing from live subscriptions",
+                        extra={
+                            "aitos_extra": {
+                                "symbols": symbols,
+                                "missing_trade_symbols": missing_trade,
+                                "missing_kline_symbols": missing_kline,
+                            }
+                        },
+                    )
+            except Exception as exc:
+                failures += 1
+                logger.exception(
+                    "failed to resubscribe restored position market data",
+                    extra={
+                        "aitos_extra": {
+                            "symbols": symbols,
+                            "error": str(exc),
+                        }
+                    },
+                )
+
+        result = {
+            "symbols": symbols,
+            "ingestions": ingestion_count,
+            "verified": verified_count,
+            "failures": failures,
+        }
+        logger.info(
+            "restored position market-data reconciliation complete",
+            extra={"aitos_extra": result},
+        )
+        if not _INGESTIONS:
+            logger.error(
+                "no DataIngestionService registered for restored position recovery",
+                extra={"aitos_extra": {"symbols": symbols}},
+            )
+        return result
 
     async def initialize(self) -> None:
         await self._store.initialize()
