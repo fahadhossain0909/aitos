@@ -85,3 +85,13 @@ when a VPS is available.
 
 CI, unit tests, lint/format checks, and local backtests remain available without
 that variable.
+
+## 6. GitHub Actions validation behavior
+
+Feature branches are validated by their pull request; CI and Backtest Tests do
+not also start a duplicate run for every feature-branch push. For each PR or
+branch, a newer validation supersedes an older pending run. Automatic formatting
+runs on pushes to `main` only, so it does not create bot-authored commits on a
+PR branch that can suppress follow-up validation. If older runs created before
+these rules are still queued, inspect the Actions page and cancel obsolete runs
+there; new commits use the deduplicated configuration.
