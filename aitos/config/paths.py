@@ -22,6 +22,13 @@ def get_project_root() -> Path:
 
 
 def get_model_data_dir() -> Path:
+    # Load repository-local defaults before modules resolve paths at import time.
+    from dotenv import load_dotenv
+
+    env_file = get_env_file()
+    if env_file.is_file():
+        load_dotenv(env_file, override=False)
+
     configured = os.getenv("MODEL_DATA_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
