@@ -3,6 +3,9 @@
 so a process supervisor (systemd, Kubernetes, a load balancer) or a
 monitoring stack has something real to poll instead of just watching logs.
 
+Also exposes ``/data-flow`` and ``/data-flow/{symbol}`` for end-to-end
+market-data pipeline observability (Phase 2/3 of DATA_FLOW_OBSERVABILITY).
+
 Deliberately minimal: no auth, no TLS, no histogram/summary metric types
 — just per-module status and a handful of counters already sitting in
 each module's ``health_check()`` output. Bind it to localhost or behind a
@@ -46,7 +49,6 @@ class HealthServer:
             return snap
         except Exception:
             return {"_status": "ERROR"}
-        self._runner: web.AppRunner | None = None
 
     async def start(self) -> None:
         logger.info(
@@ -73,6 +75,8 @@ class HealthServer:
         app = web.Application()
         app.router.add_get("/health", self._handle_health)
         app.router.add_get("/metrics", self._handle_metrics)
+        app.router.add_get("/data-flow", self._handle_data_flow)
+        app.router.add_get("/data-flow/{symbol}", self._handle_data_flow_symbol)
         return app
 
     async def stop(self) -> None:
@@ -80,6 +84,55 @@ class HealthServer:
             logger.info("stopping health server")
             await self._runner.cleanup()
             self._runner = None
+
+    async def _handle_data_flow(self, request: web.Request) -> web.Response:
+        """Aggregate pipeline snapshot + pressure-point diagnosis."""
+        try:
+            from aitos.forensics.data_flow_debugger import (
+                build_data_flow_report,
+                render_text_report,
+            )
+
+            report = build_data_flow_report("")
+            want_text = request.query.get("format", "").lower() in ("text", "txt")
+            if want_text:
+                return web.Response(
+                    text=render_text_report(report),
+                    content_type="text/plain",
+                )
+            return web.json_response(report)
+        except Exception as exc:
+            logger.exception("data-flow handler failed")
+            return web.json_response(
+                {"error": str(exc), "error_type": type(exc).__name__},
+                status=500,
+            )
+
+    async def _handle_data_flow_symbol(self, request: web.Request) -> web.Response:
+        """Per-symbol pipeline snapshot + pressure-point diagnosis."""
+        symbol = str(request.match_info.get("symbol") or "").strip().upper()
+        if not symbol:
+            return web.json_response({"error": "symbol required"}, status=400)
+        try:
+            from aitos.forensics.data_flow_debugger import (
+                build_data_flow_report,
+                render_text_report,
+            )
+
+            report = build_data_flow_report(symbol)
+            want_text = request.query.get("format", "").lower() in ("text", "txt")
+            if want_text:
+                return web.Response(
+                    text=render_text_report(report),
+                    content_type="text/plain",
+                )
+            return web.json_response(report)
+        except Exception as exc:
+            logger.exception("data-flow symbol handler failed")
+            return web.json_response(
+                {"error": str(exc), "error_type": type(exc).__name__},
+                status=500,
+            )
 
     async def _handle_health(self, request: web.Request) -> web.Response:
         results = []
