@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   e2e-forensics:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: VPS market-data chain-of-custody
     runs-on: ubuntu-latest
     timeout-minutes: 15
