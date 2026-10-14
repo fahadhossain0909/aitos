@@ -244,7 +244,11 @@ class CanonicalMarketDataPersistenceSink:
             await self._repository.save_order_book_snapshots(snapshots)
 
         try:
-            from aitos.forensics.data_flow_hooks import note_trace, record_output, set_queue
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_output,
+                set_queue,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             for event in events:
