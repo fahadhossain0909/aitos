@@ -382,6 +382,8 @@ class TradeStatePersistence:
             extra={"aitos_extra": result},
         )
         if not _INGESTIONS:
+            failures = 1
+            result["failures"] = failures
             logger.error(
                 "no DataIngestionService registered for restored position recovery",
                 extra={"aitos_extra": {"symbols": symbols}},
