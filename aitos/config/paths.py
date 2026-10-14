@@ -31,7 +31,10 @@ def get_model_data_dir() -> Path:
 
     configured = os.getenv("MODEL_DATA_DIR")
     if configured:
-        return Path(configured).expanduser().resolve()
+        configured_path = Path(configured).expanduser()
+        if not configured_path.is_absolute():
+            configured_path = get_project_root() / configured_path
+        return configured_path.resolve()
 
     # Docker images provide /.dockerenv and mount the persistent model volume at
     # /models. Native Windows/Linux/macOS runs should keep state in the checkout.
@@ -44,5 +47,8 @@ def get_model_data_dir() -> Path:
 def get_env_file() -> Path:
     configured = os.getenv("AITOS_ENV_FILE")
     if configured:
-        return Path(configured).expanduser().resolve()
+        configured_path = Path(configured).expanduser()
+        if not configured_path.is_absolute():
+            configured_path = get_project_root() / configured_path
+        return configured_path.resolve()
     return get_project_root() / ".env"
