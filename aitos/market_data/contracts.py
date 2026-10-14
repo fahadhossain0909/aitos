@@ -98,6 +98,7 @@ class MarketEvent:
     sequence: int | None = None
     correlation_id: str | None = None
     trace_id: str | None = None
+    stage_timestamps: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Use one identity convention throughout adapters, Redis, and consumers.
