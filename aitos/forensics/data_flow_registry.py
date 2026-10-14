@@ -169,10 +169,26 @@ class DataFlowRegistry:
         symbol: str = "",
     ) -> None:
         with self._lock:
-            b = self._bucket(stage, symbol)
-            b.queue_depth = int(depth)
+            stage_key = _stage_name(stage)
+            symbol_key = str(symbol or "").upper()
+            b = self._bucket(stage, symbol_key)
+            b.queue_depth = max(0, int(depth))
             if oldest_event_age_ms is not None:
-                b.oldest_event_age_ms = float(oldest_event_age_ms)
+                b.oldest_event_age_ms = max(0.0, float(oldest_event_age_ms))
+            if symbol_key:
+                aggregate = self._bucket(stage_key, "")
+                symbol_buckets = [
+                    bucket
+                    for (bucket_stage, bucket_symbol), bucket in self._buckets.items()
+                    if bucket_stage == stage_key and bucket_symbol
+                ]
+                aggregate.queue_depth = sum(item.queue_depth for item in symbol_buckets)
+                ages = [
+                    item.oldest_event_age_ms
+                    for item in symbol_buckets
+                    if item.oldest_event_age_ms is not None
+                ]
+                aggregate.oldest_event_age_ms = max(ages) if ages else None
 
     def note_trace(
         self,
