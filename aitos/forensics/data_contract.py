@@ -52,7 +52,9 @@ def check_trade_payload(
     if price is None or price <= 0:
         return ContractResult(False, DataIssueClass.SEMANTIC_INVALID, "invalid_price")
     if qty is None or qty < 0:
-        return ContractResult(False, DataIssueClass.SEMANTIC_INVALID, "invalid_quantity")
+        return ContractResult(
+            False, DataIssueClass.SEMANTIC_INVALID, "invalid_quantity"
+        )
 
     event_ms = _num(payload.get("T", payload.get("E", payload.get("timestamp_ms"))))
     if event_ms is not None and now_ms is not None:
@@ -76,7 +78,9 @@ def check_orderbook_payload(payload: dict[str, Any]) -> ContractResult:
     bids = payload.get("bids") or payload.get("b")
     asks = payload.get("asks") or payload.get("a")
     if bids is None and asks is None:
-        return ContractResult(False, DataIssueClass.SCHEMA_INVALID, "missing_book_sides")
+        return ContractResult(
+            False, DataIssueClass.SCHEMA_INVALID, "missing_book_sides"
+        )
     return ContractResult(True, DataIssueClass.NONE, "ok")
 
 
