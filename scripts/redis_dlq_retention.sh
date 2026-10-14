@@ -1,5 +1,4 @@
-#!/usr/bin/env sh
-set -eu
+#!/bin/sh
 
 REDIS_HOST="${REDIS_HOST:-redis}"
 REDIS_PORT="${REDIS_PORT:-6379}"

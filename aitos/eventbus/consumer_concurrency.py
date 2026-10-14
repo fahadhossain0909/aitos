@@ -134,12 +134,15 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                         # Use a finite block so Redis can wait efficiently while
                         # bounding cancellation latency. Some fakeredis/redis-py
                         # combinations can stall event-loop teardown on block=None.
-                        resp = await self._redis.xreadgroup(
-                            groupname=group,
-                            consumername=consumer,
-                            streams={stream_key: ">"},
-                            count=CONSUMER_BATCH_SIZE,
-                            block=CONSUMER_BLOCK_MS,
+                        resp = await asyncio.wait_for(
+                            self._redis.xreadgroup(
+                                groupname=group,
+                                consumername=consumer,
+                                streams={stream_key: ">"},
+                                count=CONSUMER_BATCH_SIZE,
+                                block=CONSUMER_BLOCK_MS,
+                            ),
+                            timeout=1.0,
                         )
                     except asyncio.CancelledError:
                         raise
@@ -204,7 +207,11 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                     task = stream_tasks.get(stream_topic)
                     if task is None or task.done():
                         stream_tasks[stream_topic] = asyncio.create_task(
-                            consume_stream(stream_topic)
+                            consume_stream(stream_topic),
+                            name=f"consume-stream-{stream_topic}",
+                        )
+                        stream_tasks[stream_topic].add_done_callback(
+                            lambda t, s=stream_topic: stream_tasks.pop(s, None) if t.done() else None
                         )
                 await asyncio.sleep(0.2)
         except asyncio.CancelledError:

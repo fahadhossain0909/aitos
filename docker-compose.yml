@@ -82,7 +82,7 @@ services:
       - ./docker/clickhouse/users.d/aitos.xml:/etc/clickhouse-server/users.d/aitos.xml:ro
     cpus: "${CLICKHOUSE_CPUS:-0.35}"
     mem_limit: "${CLICKHOUSE_MEM_LIMIT:-2.5g}"
-    healthcheck: {test: ["CMD-SHELL", "wget --spider -q --timeout=5 http://127.0.0.1:8123/ping || exit 1"], interval: 10s, timeout: 7s, retries: 12, start_period: 120s}
+    healthcheck: {test: ["CMD-SHELL", "clickhouse-client --query 'SELECT 1' || exit 1"], interval: 10s, timeout: 7s, retries: 12, start_period: 120s}
     restart: unless-stopped
 
   clickhouse-init:
