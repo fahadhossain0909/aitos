@@ -131,7 +131,11 @@ class MarketDataGateway:
             self.health.record_accept()
             symbol = self._data_flow_symbol(event)
             try:
-                from aitos.forensics.data_flow_hooks import note_trace, record_output, set_queue
+                from aitos.forensics.data_flow_hooks import (
+                    note_trace,
+                    record_output,
+                    set_queue,
+                )
                 from aitos.forensics.data_flow_schema import PipelineStage
 
                 record_output(PipelineStage.GATEWAY_QUEUE.value, symbol=symbol)
