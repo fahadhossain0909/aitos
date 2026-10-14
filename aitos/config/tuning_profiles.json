@@ -45,6 +45,13 @@
         "health_interval_seconds": 15,
         "metrics_sample_interval_seconds": 10,
         "trace_sample_rate": 0.25
+      },
+      "risk": {
+        "max_risk_per_trade_pct": 1,
+        "max_leverage": 10,
+        "max_drawdown_pct": 10,
+        "max_correlated_exposure_pct": 15,
+        "max_sector_exposure_pct": 20
       }
     },
     "balanced": {
@@ -91,6 +98,13 @@
         "health_interval_seconds": 15,
         "metrics_sample_interval_seconds": 5,
         "trace_sample_rate": 0.5
+      },
+      "risk": {
+        "max_risk_per_trade_pct": 1,
+        "max_leverage": 10,
+        "max_drawdown_pct": 10,
+        "max_correlated_exposure_pct": 15,
+        "max_sector_exposure_pct": 20
       }
     },
     "high_performance": {
@@ -137,6 +151,13 @@
         "health_interval_seconds": 10,
         "metrics_sample_interval_seconds": 2,
         "trace_sample_rate": 1
+      },
+      "risk": {
+        "max_risk_per_trade_pct": 1,
+        "max_leverage": 10,
+        "max_drawdown_pct": 10,
+        "max_correlated_exposure_pct": 15,
+        "max_sector_exposure_pct": 20
       }
     }
   },
