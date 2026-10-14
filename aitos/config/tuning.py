@@ -72,8 +72,14 @@ class TuningSettings(BaseModel):
 
     @model_validator(mode="after")
     def validate_allowlist(self) -> "TuningSettings":
-        if self.scanner.universe_mode == "allowlist" and not self.scanner.symbol_allowlist:
-            raise ValueError("scanner.symbol_allowlist must be non-empty when universe_mode='allowlist'")
+        if (
+            self.scanner.universe_mode == "allowlist"
+            and not self.scanner.symbol_allowlist
+        ):
+            raise ValueError(
+                "scanner.symbol_allowlist must be non-empty when "
+                "universe_mode='allowlist'"
+            )
         return self
 
 
@@ -111,7 +117,15 @@ def _env_overrides() -> dict[str, Any]:
         "AITOS_TUNING_SCANNER_UNIVERSE_MODE": ("scanner", "universe_mode", str),
         "AITOS_TUNING_SCANNER_UNIVERSE_LIMIT": ("scanner", "universe_limit", int),
         "AITOS_TUNING_SCANNER_REFRESH_INTERVAL_SECONDS": ("scanner", "refresh_interval_seconds", float),
-        "AITOS_TUNING_SCANNER_SYMBOL_ALLOWLIST": ("scanner", "symbol_allowlist", lambda v: tuple(s.strip().upper() for s in v.split(",") if s.strip())),
+        "AITOS_TUNING_SCANNER_SYMBOL_ALLOWLIST": (
+            "scanner",
+            "symbol_allowlist",
+            lambda v: tuple(
+                symbol.strip().upper()
+                for symbol in v.split(",")
+                if symbol.strip()
+            ),
+        ),
         "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_LIMIT": ("analysis", "expensive_analysis_limit", int),
         "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY": ("analysis", "expensive_analysis_concurrency", int),
         "AITOS_TUNING_ANALYSIS_LIGHTWEIGHT_CONCURRENCY": ("analysis", "lightweight_concurrency", int),
