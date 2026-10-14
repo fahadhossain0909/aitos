@@ -8,6 +8,7 @@ permissions:
 
 jobs:
   duplicate-forensics:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: VPS market-data duplicate audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
