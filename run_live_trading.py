@@ -124,6 +124,10 @@ async def try_connect_neo4j(settings):
 
 async def main() -> None:
     settings = get_settings()
+    if settings.tuning.mode != "live":
+        raise RuntimeError(
+            "Trading entrypoint/configuration mode mismatch: run_live_trading.py requires AITOS_MODE=live"
+        )
     configure_logging(settings.log_level)
     redis_client = await connect_redis_with_retry(settings)
     from aitos.eventbus.redis_bus import EventBus
