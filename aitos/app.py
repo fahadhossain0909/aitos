@@ -477,7 +477,15 @@ async def run_scan_and_trade_cycle(
     approved_by: str | None = None,
 ) -> int:
     if components.scanner._tuning.runtime.config_reload_enabled:
-        components.reload_runtime_tuning()
+        try:
+            components.reload_runtime_tuning()
+        except ValueError as exc:
+            # Keep the last known-good snapshot active. Changes requiring
+            # infrastructure rebuild are reported and applied after restart.
+            logger.error(
+                "runtime tuning reload rejected; retaining current snapshot: %s",
+                exc,
+            )
     refresh = getattr(portfolio_tracker, "refresh_equity", None)
     if refresh is not None:
         await refresh()
