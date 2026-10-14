@@ -73,7 +73,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                 response = await handler(event)
                 await self._redis.xack(stream_key, group, entry_id)
                 self._acked_events += 1
-                self._last_acked_at = datetime.now(UTC).isoformat()
+                self._last_acked_at = datetime.now(timezone.utc).isoformat()
                 if response is not None and hasattr(self, "_maybe_publish_response"):
                     await self._maybe_publish_response(event, response)
             except Exception as exc:
