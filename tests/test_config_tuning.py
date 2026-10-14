@@ -83,7 +83,6 @@ def test_live_position_limit_is_part_of_selected_profile():
     assert settings.runtime.adaptive_tuning_enabled is False
 
 
-
 def test_effective_tuning_report_is_secret_free_and_stable():
     from aitos.config.tuning import effective_tuning_report
 
@@ -98,11 +97,14 @@ def test_effective_tuning_report_is_secret_free_and_stable():
 
 def test_runtime_reload_environment_override_is_validated(monkeypatch):
     monkeypatch.setenv("AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED", "true")
-    assert load_tuning_settings(profile="balanced", mode="paper").runtime.config_reload_enabled
+    assert load_tuning_settings(
+        profile="balanced", mode="paper"
+    ).runtime.config_reload_enabled
     monkeypatch.setenv("AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED", "sometimes")
-    with pytest.raises(ValueError, match="AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED"):
+    with pytest.raises(
+        ValueError, match="AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED"
+    ):
         load_tuning_settings(profile="balanced", mode="paper")
-
 
 
 def test_intensive_exit_analysis_budget_is_bounded_per_window():
