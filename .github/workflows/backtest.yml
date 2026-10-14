@@ -1,8 +1,15 @@
 name: Backtest Tests
 
 on:
+  # Feature branches are tested by pull_request, not by duplicate push events.
   push:
+    branches: [main]
   pull_request:
+    branches: [main, master, develop]
+
+concurrency:
+  group: backtest-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backtest:
