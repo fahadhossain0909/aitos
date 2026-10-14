@@ -62,7 +62,8 @@ jobs:
         run: isort .
       - name: Run Ruff safe fixes (full repository)
         if: steps.scope.outputs.mode == 'all'
-        run: ruff check --fix --exit-zero .
+        # Keep fixes compatible with the lowest supported runtime (Python 3.10).
+        run: ruff check --target-version py310 --ignore UP017 --fix --exit-zero .
 
       - name: Run safe fixes (changed Python files)
         if: steps.scope.outputs.mode == 'changed'
@@ -89,7 +90,8 @@ jobs:
             [[ -f "$file" ]] || continue
             black "$file"
             isort "$file"
-            ruff check --fix --exit-zero "$file"
+            # UP017 would rewrite timezone.utc to datetime.UTC (Python 3.11+ only).
+            ruff check --target-version py310 --ignore UP017 --fix --exit-zero "$file"
           done
 
       - name: Commit and push safe fixes
