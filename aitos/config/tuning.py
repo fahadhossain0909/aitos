@@ -114,6 +114,15 @@ def _read_profiles() -> dict[str, Any]:
     return payload
 
 
+def _parse_bool(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError("expected one of: true/false, yes/no, on/off, 1/0")
+
+
 def _env_overrides() -> dict[str, Any]:
     """Read a whitelist of environment overrides; ignore unrelated variables."""
     mapping: dict[str, tuple[str, str, Any]] = {
@@ -182,6 +191,16 @@ def _env_overrides() -> dict[str, Any]:
             "positions",
             "intensive_analysis_budget",
             int,
+        ),
+        "AITOS_TUNING_RUNTIME_ADAPTIVE_TUNING_ENABLED": (
+            "runtime",
+            "adaptive_tuning_enabled",
+            _parse_bool,
+        ),
+        "AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED": (
+            "runtime",
+            "config_reload_enabled",
+            _parse_bool,
         ),
     }
     result: dict[str, Any] = {}
