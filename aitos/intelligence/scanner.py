@@ -175,7 +175,10 @@ class OpportunityScanner(AITOSModule):
         self._min_score_threshold = min_score_threshold
         self._top_n = top_n if top_n is not None else scanner_tuning.top_n
         self._scan_semaphore = asyncio.Semaphore(
-            self._tuning.analysis.expensive_analysis_concurrency
+            min(
+                self._tuning.analysis.expensive_analysis_concurrency,
+                self._tuning.hardware.cpu_worker_budget,
+            )
         )
         self._kline_lookback, self._trade_lookback = kline_lookback, trade_lookback
         self._footprint_tick_sizes = footprint_tick_sizes or {}
@@ -213,7 +216,10 @@ class OpportunityScanner(AITOSModule):
         self._tuning = settings
         self._top_n = incoming.top_n
         self._scan_semaphore = asyncio.Semaphore(
-            settings.analysis.expensive_analysis_concurrency
+            min(
+                settings.analysis.expensive_analysis_concurrency,
+                settings.hardware.cpu_worker_budget,
+            )
         )
 
     @property
