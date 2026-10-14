@@ -393,7 +393,10 @@ async def main() -> None:
             except Exception as exc:
                 logger.error("scan cycle failed: %s", exc)
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=get_settings().tuning.scanner.refresh_interval_seconds,
+                )
             except TimeoutError:
                 pass
     finally:
