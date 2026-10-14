@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from aitos.config.paths import get_model_data_dir
@@ -330,7 +330,7 @@ class PaperPortfolioTracker:
         realized_pnl = sum(t.pnl for t in closed if t.pnl is not None)
         equity = self.starting_equity_usd + realized_pnl
         self._peak_equity_usd = max(self._peak_equity_usd, equity)
-        day_ago, week_ago = datetime.now(UTC) - timedelta(
+        day_ago, week_ago = datetime.now(timezone.utc) - timedelta(
             days=1
         ), datetime.now(UTC) - timedelta(days=7)
         daily_pnl = sum(
