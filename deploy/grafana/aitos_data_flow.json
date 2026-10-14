@@ -1,55 +1,93 @@
 {
   "title": "AITOS Data Flow",
+  "uid": "aitos-data-flow",
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "10s",
   "tags": ["aitos", "data-flow", "observability"],
   "panels": [
     {
       "type": "text",
-      "title": "How to use",
-      "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
+      "title": "Pipeline map and diagnosis",
+      "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
       "options": {
         "mode": "markdown",
-        "content": "Aggregate view: `GET /data-flow`. Per-symbol view: `GET /data-flow/BTCUSDT` on the HealthServer.\nWire Prometheus gauges from stage snapshots (input/output rate, p50/p95/p99 latency, queue depth, oldest/source age, drops, errors).\nPressure point = first stage with input_rate > output_rate and rising oldest_event_age_ms."
+        "content": "Inspect `GET /data-flow` for aggregate stage snapshots and `GET /data-flow/BTCUSDT` for symbol-specific snapshots. Trace entries carry the canonical `md:{SYMBOL}:{event_id}` identity where available. A pressure marker is a heuristic, not proof: correlate input/output rates, queue age, source age, drops, errors and trace timeline before assigning a root cause. Contract checkpoints currently classify data and report issues without discarding events."
       }
     },
     {
       "type": "timeseries",
       "title": "Stage throughput",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
       "targets": [
-        { "expr": "aitos_data_flow_input_rate", "legendFormat": "input" },
-        { "expr": "aitos_data_flow_output_rate", "legendFormat": "output" }
+        {"expr": "aitos_data_flow_input_rate", "legendFormat": "{{stage}} input"},
+        {"expr": "aitos_data_flow_output_rate", "legendFormat": "{{stage}} output"}
       ]
     },
     {
       "type": "timeseries",
-      "title": "Latency percentiles",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "title": "Processing latency percentiles",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
       "targets": [
-        { "expr": "aitos_data_flow_latency_p50_ms", "legendFormat": "p50" },
-        { "expr": "aitos_data_flow_latency_p95_ms", "legendFormat": "p95" },
-        { "expr": "aitos_data_flow_latency_p99_ms", "legendFormat": "p99" }
+        {"expr": "aitos_data_flow_latency_p50_ms", "legendFormat": "{{stage}} p50"},
+        {"expr": "aitos_data_flow_latency_p95_ms", "legendFormat": "{{stage}} p95"},
+        {"expr": "aitos_data_flow_latency_p99_ms", "legendFormat": "{{stage}} p99"}
       ]
     },
     {
       "type": "timeseries",
-      "title": "Queue depth / oldest age",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "title": "Queue depth and oldest event age",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
       "targets": [
-        { "expr": "aitos_data_flow_queue_depth", "legendFormat": "depth" },
-        { "expr": "aitos_data_flow_oldest_event_age_ms", "legendFormat": "oldest_age_ms" }
+        {"expr": "aitos_data_flow_queue_depth", "legendFormat": "{{stage}} depth"},
+        {"expr": "aitos_data_flow_oldest_event_age_ms", "legendFormat": "{{stage}} oldest age ms"}
       ]
     },
     {
       "type": "timeseries",
-      "title": "Drops and errors",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "title": "Source freshness by symbol",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
       "targets": [
-        { "expr": "aitos_data_flow_drop_count", "legendFormat": "drops" },
-        { "expr": "aitos_data_flow_error_count", "legendFormat": "errors" }
+        {"expr": "aitos_data_flow_symbol_source_age_ms", "legendFormat": "{{symbol}} source age ms"}
+      ],
+      "fieldConfig": {"defaults": {"thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1000}, {"color": "red", "value": 5000}]}}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Drops and processing errors",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 20},
+      "targets": [
+        {"expr": "aitos_data_flow_drop_count", "legendFormat": "{{stage}} drops"},
+        {"expr": "aitos_data_flow_error_count", "legendFormat": "{{stage}} errors"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Classified data-quality issues",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 20},
+      "targets": [
+        {"expr": "aitos_data_flow_issue_count", "legendFormat": "{{stage}} / {{issue}}"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Likely pressure points",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 28},
+      "targets": [
+        {"expr": "aitos_data_flow_pressure", "legendFormat": "{{stage}} pressure (1=yes)"}
+      ],
+      "fieldConfig": {"defaults": {"min": 0, "max": 1, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Redis publish and consumer throughput",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 28},
+      "targets": [
+        {"expr": "aitos_data_flow_input_rate{stage=\"redis_publish\"}", "legendFormat": "publish input"},
+        {"expr": "aitos_data_flow_output_rate{stage=\"redis_publish\"}", "legendFormat": "publish output"},
+        {"expr": "aitos_data_flow_input_rate{stage=\"redis_consumer\"}", "legendFormat": "consumer input"},
+        {"expr": "aitos_data_flow_output_rate{stage=\"redis_consumer\"}", "legendFormat": "consumer output"}
       ]
     }
   ]
