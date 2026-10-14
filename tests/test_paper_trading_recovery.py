@@ -81,7 +81,6 @@ async def test_reconciliation_detects_missing_internal_position():
     assert mismatch is True
 
 
-
 class FakeIngestion:
     def __init__(self, trade_symbols=None, kline_symbols=None):
         self._live_trade_symbols = list(trade_symbols or [])
@@ -91,12 +90,16 @@ class FakeIngestion:
 
     async def update_live_trade_symbols(self, symbols):
         self.trade_updates.append(list(symbols))
-        self._live_trade_symbols = list(dict.fromkeys([*self._live_trade_symbols, *symbols]))
+        self._live_trade_symbols = list(
+            dict.fromkeys([*self._live_trade_symbols, *symbols])
+        )
         return True
 
     async def update_live_kline_symbols(self, symbols):
         self.kline_updates.append(list(symbols))
-        self._live_kline_symbols = list(dict.fromkeys([*symbols, *self._live_kline_symbols]))
+        self._live_kline_symbols = list(
+            dict.fromkeys([*symbols, *self._live_kline_symbols])
+        )
         return True
 
 
