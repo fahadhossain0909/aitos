@@ -54,6 +54,17 @@ class PositionTuning(BaseModel):
     intensive_analysis_budget: int = Field(default=2, ge=0, le=100)
 
 
+class RiskTuning(BaseModel):
+    """Central risk ceilings; capacity profiles cannot raise these hard bounds."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    max_risk_per_trade_pct: float = Field(default=1.0, gt=0, le=1.0)
+    max_leverage: float = Field(default=10.0, ge=1.0, le=10.0)
+    max_drawdown_pct: float = Field(default=10.0, gt=0, le=10.0)
+    max_correlated_exposure_pct: float = Field(default=15.0, gt=0, le=15.0)
+    max_sector_exposure_pct: float = Field(default=20.0, gt=0, le=20.0)
+
+
 class HardwareTuning(BaseModel):
     """Capacity guardrails for a host; these do not grant more trading risk."""
 
@@ -99,6 +110,7 @@ class TuningSettings(BaseModel):
     analysis: AnalysisTuning = Field(default_factory=AnalysisTuning)
     event_bus: EventBusTuning = Field(default_factory=EventBusTuning)
     positions: PositionTuning = Field(default_factory=PositionTuning)
+    risk: RiskTuning = Field(default_factory=RiskTuning)
     hardware: HardwareTuning = Field(default_factory=HardwareTuning)
     storage: StorageTuning = Field(default_factory=StorageTuning)
     telemetry: TelemetryTuning = Field(default_factory=TelemetryTuning)
@@ -229,6 +241,11 @@ def _env_overrides() -> dict[str, Any]:
             "intensive_analysis_budget",
             int,
         ),
+        "AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT": ("risk", "max_risk_per_trade_pct", float),
+        "AITOS_TUNING_RISK_MAX_LEVERAGE": ("risk", "max_leverage", float),
+        "AITOS_TUNING_RISK_MAX_DRAWDOWN_PCT": ("risk", "max_drawdown_pct", float),
+        "AITOS_TUNING_RISK_MAX_CORRELATED_EXPOSURE_PCT": ("risk", "max_correlated_exposure_pct", float),
+        "AITOS_TUNING_RISK_MAX_SECTOR_EXPOSURE_PCT": ("risk", "max_sector_exposure_pct", float),
         "AITOS_TUNING_HARDWARE_CPU_WORKER_BUDGET": ("hardware", "cpu_worker_budget", int),
         "AITOS_TUNING_HARDWARE_MEMORY_BUDGET_MB": ("hardware", "memory_budget_mb", int),
         "AITOS_TUNING_HARDWARE_MEMORY_RESERVE_PCT": ("hardware", "memory_reserve_pct", int),
