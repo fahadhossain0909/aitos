@@ -117,7 +117,7 @@ class TuningSettings(BaseModel):
     runtime: RuntimeTuning = Field(default_factory=RuntimeTuning)
 
     @model_validator(mode="after")
-    def validate_allowlist(self) -> "TuningSettings":
+    def validate_allowlist(self) -> TuningSettings:
         if (
             self.scanner.universe_mode == "allowlist"
             and not self.scanner.symbol_allowlist

@@ -468,7 +468,9 @@ class MarketDataRepository(AITOSModule):
         result = await self._client.query(
             "SELECT * FROM market_ohlcv WHERE symbol = {symbol:String} AND timeframe = {timeframe:String} ORDER BY time DESC LIMIT {limit:UInt32}",
             parameters={"symbol": symbol, "timeframe": timeframe, "limit": limit},
-            settings={"max_execution_time": max(1, math.ceil(self._query_timeout_seconds))},
+            settings={
+                "max_execution_time": max(1, math.ceil(self._query_timeout_seconds))
+            },
         )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
@@ -479,7 +481,9 @@ class MarketDataRepository(AITOSModule):
         result = await self._client.query(
             sql,
             parameters=parameters,
-            settings={"max_execution_time": max(1, math.ceil(self._query_timeout_seconds))},
+            settings={
+                "max_execution_time": max(1, math.ceil(self._query_timeout_seconds))
+            },
         )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
