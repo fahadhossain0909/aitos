@@ -27,11 +27,18 @@ class PipelineStage(str, Enum):
 
 
 PIPELINE_ORDER: tuple[PipelineStage, ...] = (
-    PipelineStage.TRANSPORT, PipelineStage.RECEIVE, PipelineStage.DECODE,
-    PipelineStage.NORMALIZE, PipelineStage.GATEWAY_QUEUE,
-    PipelineStage.REDIS_PUBLISH, PipelineStage.REDIS_CONSUMER,
-    PipelineStage.LIVE_STATE, PipelineStage.FEATURE, PipelineStage.SCANNER,
-    PipelineStage.TRADE_LIFECYCLE, PipelineStage.PERSISTENCE,
+    PipelineStage.TRANSPORT,
+    PipelineStage.RECEIVE,
+    PipelineStage.DECODE,
+    PipelineStage.NORMALIZE,
+    PipelineStage.GATEWAY_QUEUE,
+    PipelineStage.REDIS_PUBLISH,
+    PipelineStage.REDIS_CONSUMER,
+    PipelineStage.LIVE_STATE,
+    PipelineStage.FEATURE,
+    PipelineStage.SCANNER,
+    PipelineStage.TRADE_LIFECYCLE,
+    PipelineStage.PERSISTENCE,
 )
 
 
@@ -115,5 +122,12 @@ class StageSnapshot:
         return asdict(self)
 
 
-__all__ = ["PIPELINE_ORDER", "DataIssueClass", "PipelineStage", "StageSnapshot",
-           "StageTimestamps", "make_trace_id", "parse_trace_id"]
+__all__ = [
+    "PIPELINE_ORDER",
+    "DataIssueClass",
+    "PipelineStage",
+    "StageSnapshot",
+    "StageTimestamps",
+    "make_trace_id",
+    "parse_trace_id",
+]
