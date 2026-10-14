@@ -3,6 +3,7 @@
 Infrastructure credentials and connection settings live here. Performance and
 workload knobs are provided by the validated tuning profile resolver.
 """
+
 from __future__ import annotations
 
 from dotenv import load_dotenv
@@ -63,6 +64,7 @@ class BinanceSettings(BaseSettings):
     Public market-data paths do not require these credentials. Testnet stays
     enabled by default so mainnet use remains a deliberate action.
     """
+
     model_config = SettingsConfigDict(env_prefix="BINANCE_")
 
     api_key: str = ""
