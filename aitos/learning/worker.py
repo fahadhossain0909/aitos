@@ -140,7 +140,7 @@ class ContinualLearningWorker:
         )
 
     def _rows(self) -> list[dict[str, Any]]:
-        start = datetime.now(UTC) - self.lookback
+        start = datetime.now(timezone.utc) - self.lookback
         sql = """
         SELECT experience_id, source, symbol, outcome, reward, features_json
         FROM learning_experiences
