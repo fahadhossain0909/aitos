@@ -281,7 +281,7 @@ class DataFlowRegistry:
         if symbol:
             symbol_n = str(symbol).strip().upper()
             items = [item for item in items if item.get("symbol") == symbol_n]
-        return items[-max(0, limit):]
+        return items[-max(0, limit) :]
 
     def reset(self) -> None:
         with self._lock:
