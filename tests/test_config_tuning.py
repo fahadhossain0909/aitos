@@ -153,3 +153,15 @@ def test_live_mode_rejects_adaptive_tuning(monkeypatch):
     monkeypatch.setenv("AITOS_TUNING_RUNTIME_ADAPTIVE_TUNING_ENABLED", "true")
     with pytest.raises(ValidationError, match="adaptive tuning is not permitted in live mode"):
         load_tuning_settings(profile="balanced", mode="live")
+
+
+
+def test_risk_ceilings_are_centralized_and_cannot_be_relaxed(monkeypatch):
+    settings = load_tuning_settings(profile="high_performance", mode="paper")
+    assert settings.risk.max_risk_per_trade_pct == 1.0
+    assert settings.risk.max_leverage == 10.0
+    monkeypatch.setenv("AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT", "0.5")
+    assert load_tuning_settings(profile="balanced", mode="paper").risk.max_risk_per_trade_pct == 0.5
+    monkeypatch.setenv("AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT", "1.5")
+    with pytest.raises(ValidationError):
+        load_tuning_settings(profile="balanced", mode="paper")
