@@ -113,6 +113,7 @@ services:
     env_file: [.env]
     environment:
       REDIS_HOST: redis
+      MODEL_DATA_DIR: /models
       REDIS_MAX_CONNECTIONS: "256"
       CLICKHOUSE_HOST: clickhouse
       NEO4J_URI: bolt://neo4j:7687
@@ -133,7 +134,7 @@ services:
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "run_continual_learning.py"]
     env_file: [.env]
-    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
+    environment: {MODEL_DATA_DIR: /models, CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
     volumes: ["${MODEL_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/models}:/models"]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "${LEARNING_CPUS:-0.10}"
@@ -170,7 +171,7 @@ services:
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "run_live_trading.py"]
     env_file: [.env]
-    environment: {REDIS_HOST: redis, CLICKHOUSE_HOST: clickhouse, NEO4J_URI: bolt://neo4j:7687}
+    environment: {MODEL_DATA_DIR: /models, REDIS_HOST: redis, CLICKHOUSE_HOST: clickhouse, NEO4J_URI: bolt://neo4j:7687}
     volumes: ["${MODEL_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/models}:/models"]
     ports: ["127.0.0.1:8091:8091"]
     mem_limit: "${AITOS_TRADING_MEM_LIMIT:-2g}"
