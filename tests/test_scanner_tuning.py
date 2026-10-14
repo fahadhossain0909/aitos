@@ -50,3 +50,20 @@ async def test_lightweight_screen_respects_expensive_analysis_budget(event_bus):
     selected = await scanner._lightweight_rank_symbols()
     assert len(selected) == 1
     assert selected[0] == "BTCUSDT"
+
+
+
+@pytest.mark.asyncio
+async def test_hardware_worker_budget_caps_expensive_analysis(event_bus):
+    base = load_tuning_settings(profile="balanced", mode="paper")
+    analysis = base.analysis.model_copy(update={"expensive_analysis_concurrency": 8})
+    hardware = base.hardware.model_copy(update={"cpu_worker_budget": 2})
+    tuning = base.model_copy(update={"analysis": analysis, "hardware": hardware})
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=FakeScannerExchange(),
+        symbols=["BTCUSDT", "ETHUSDT"],
+        reference_symbol="",
+        tuning=tuning,
+    )
+    assert scanner._scan_semaphore._value == 2
