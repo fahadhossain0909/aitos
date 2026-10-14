@@ -24,6 +24,7 @@ Click any topic below to jump directly to that section.
 - [System at a glance](#system-at-a-glance)
 - [Current capabilities](#current-capabilities)
 - [Quick start](#quick-start)
+- [VPS-free local development](docs/LOCAL_DEVELOPMENT.md)
 - [Configuration](#configuration)
 - [Runnable entrypoints](#runnable-entrypoints)
 
@@ -102,6 +103,8 @@ The core application is event-driven: components communicate through the Event B
 [↑ Back to Index](#-interactive-index)
 
 ## Quick start
+
+For a workstation-only setup with portable `./data` storage and no VPS credentials, follow the [VPS-free local development guide](docs/LOCAL_DEVELOPMENT.md).
 
 ### 1. Clone and create the environment
 
