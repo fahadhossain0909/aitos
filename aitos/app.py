@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from aitos.config.paths import get_model_data_dir
+from aitos.config.settings import get_settings
 from aitos.core.contracts import AITOSModule, Event
 from aitos.data.ingestion import DataIngestionService
 from aitos.data.repository import MarketDataRepository
@@ -113,9 +114,24 @@ async def build_system(
     attention_explainer: AttentionExplainer | None = None,
     use_exchange_side_stops: bool = False,
     min_score_threshold: float = 60.0,
-    top_n: int = 5,
+    top_n: int | None = None,
     enable_exit_intelligence: bool = False,
 ) -> SystemComponents:
+    settings = get_settings()
+    tuning = settings.tuning
+    if risk_limits is None:
+        risk_limits = RiskLimits(max_open_positions=tuning.positions.max_open_positions)
+    else:
+        # A capacity profile may lower the active position limit, never raise
+        # a caller-provided risk limit or its hard cap.
+        risk_limits = risk_limits.model_copy(
+            update={
+                "max_open_positions": min(
+                    risk_limits.max_open_positions,
+                    tuning.positions.max_open_positions,
+                )
+            }
+        )
     kernel = kernel or AIKernel(event_bus=event_bus)
     risk_engine = RiskEngine(event_bus=event_bus, limits=risk_limits)
     if rl_scorer is None:
@@ -133,6 +149,7 @@ async def build_system(
         rl_scorer=rl_scorer,
         min_score_threshold=min_score_threshold,
         top_n=top_n,
+        tuning=tuning,
     )
     rl_feedback = RLFeedbackLoop(event_bus=event_bus, scorer=rl_scorer)
     outcome_classifier = outcome_classifier or TradeOutcomeClassifier()
