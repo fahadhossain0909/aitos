@@ -84,3 +84,48 @@ AITOS_TUNING_SCANNER_UNIVERSE_MODE=allowlist AITOS_TUNING_SCANNER_SYMBOL_ALLOWLI
   engine and approval controls. Do not use a capacity profile as a substitute
   for risk validation.
 - Secrets are not stored in the profile file.
+
+
+## Configuration domains and implementation status
+
+The current repository keeps one authoritative Pydantic schema in
+`aitos/config/tuning.py` and capacity presets in
+`aitos/config/tuning_profiles.json`. This is intentionally a smaller migration
+than introducing a new YAML tree and duplicate defaults. The schema now groups
+values into scanner, analysis, Event Bus, positions, hardware, storage,
+telemetry, and runtime sections. Profile values are validated and included in
+the effective configuration hash.
+
+### Additional environment overrides
+
+- `AITOS_TUNING_HARDWARE_CPU_WORKER_BUDGET`
+- `AITOS_TUNING_HARDWARE_MEMORY_BUDGET_MB`
+- `AITOS_TUNING_HARDWARE_MEMORY_RESERVE_PCT`
+- `AITOS_TUNING_HARDWARE_MAX_BACKGROUND_TASKS`
+- `AITOS_TUNING_STORAGE_HISTORICAL_BACKFILL_CONCURRENCY`
+- `AITOS_TUNING_STORAGE_CLICKHOUSE_BATCH_SIZE`
+- `AITOS_TUNING_STORAGE_CLICKHOUSE_QUERY_TIMEOUT_SECONDS`
+- `AITOS_TUNING_STORAGE_RETENTION_DAYS`
+- `AITOS_TUNING_TELEMETRY_HEALTH_INTERVAL_SECONDS`
+- `AITOS_TUNING_TELEMETRY_METRICS_SAMPLE_INTERVAL_SECONDS`
+- `AITOS_TUNING_TELEMETRY_TRACE_SAMPLE_RATE`
+
+### Important scope boundary
+
+The scanner's expensive-analysis semaphore is capped by both its configured
+concurrency and the hardware profile's `cpu_worker_budget`. Hardware memory
+budget/reserve, background-task limits, storage backfill/batch/retention values,
+and telemetry sampling intervals are currently validated configuration
+contracts and profile hints; they are **not yet universal runtime governors**.
+They must not be interpreted as proof that the running process is enforcing
+those limits in every storage, health, metrics, or background worker. Automatic
+CPU/RAM detection, adaptive resource control, a dashboard editor, and complete
+inventory/removal of all legacy strategy/execution constants are also not
+implemented by this PR.
+
+The schema rejects adaptive tuning in live mode. It does not let hardware
+profiles increase the financial risk limits of a caller-supplied risk engine.
+Before declaring this initiative complete, these staged settings must be wired
+to their owning components and covered by runtime integration tests; use the
+effective config report to distinguish configured intent from measured runtime
+behavior.
