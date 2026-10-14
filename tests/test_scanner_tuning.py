@@ -34,7 +34,6 @@ async def test_scanner_applies_configured_universe_and_top_n(event_bus):
     )
 
 
-
 @pytest.mark.asyncio
 async def test_lightweight_screen_respects_expensive_analysis_budget(event_bus):
     base = load_tuning_settings(profile="balanced", mode="paper")
