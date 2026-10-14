@@ -182,11 +182,15 @@ class DataFlowRegistry:
         symbol: str = "",
         latency_ms: float | None = None,
         extra: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        parent_trace_id: str | None = None,
     ) -> None:
         if not trace_id:
             return
         sample = {
             "trace_id": trace_id,
+            "event_id": event_id,
+            "parent_trace_id": parent_trace_id,
             "stage": _stage_name(stage),
             "symbol": str(symbol or "").upper(),
             "latency_ms": latency_ms,
@@ -196,6 +200,23 @@ class DataFlowRegistry:
             sample.update(extra)
         with self._lock:
             self._recent_traces.append(sample)
+
+    def symbols(self) -> list[str]:
+        """Return symbols currently represented in the registry (aggregate excluded)."""
+        with self._lock:
+            return sorted({symbol for _, symbol in self._buckets if symbol})
+
+    def trace_for_event(
+        self, *, trace_id: str, event_id: str | None = None,
+        parent_trace_id: str | None = None, stage: str | PipelineStage,
+        symbol: str = "", latency_ms: float | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Record one stage in an event's causal timeline."""
+        self.note_trace(
+            trace_id=trace_id, stage=stage, symbol=symbol, latency_ms=latency_ms,
+            event_id=event_id, parent_trace_id=parent_trace_id, extra=extra,
+        )
 
     def _rate(self, window: deque[tuple[float, int]]) -> float:
         if not window:
