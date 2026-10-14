@@ -58,7 +58,6 @@ def book_snapshot_event(
         ingest_time=received,
         sequence=book.last_update_id,
         correlation_id=f"binance:{market_type}:{book.symbol}:book:{book.last_update_id}",
-        trace_id=book.symbol,
     )
 
 
@@ -109,5 +108,4 @@ def kline_event(
         source=source,
         ingest_time=received,
         correlation_id=f"binance:{market_type}:{kline.symbol}:kline:{kline.timeframe}",
-        trace_id=kline.symbol,
     )
