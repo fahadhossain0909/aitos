@@ -157,7 +157,7 @@ services:
     container_name: aitos-storage-maintenance
     command: ["python3", "-m", "aitos.storage.maintenance"]
     env_file: [.env]
-    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}", AITOS_BOOT_RUNTIME_DIR: /boot-runtime, DATA_DISK_DIR: /data-disk, DATA_DISK_MIN_FREE_GB: "2.5", DATA_DISK_TARGET_FREE_GB: "25", STORAGE_AUTO_DELETE_PERCENT: "2.5", STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300", STORAGE_MAINTENANCE_DRY_RUN: "false"}
+    environment: {CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}", CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}", AITOS_BOOT_RUNTIME_DIR: /boot-runtime, DATA_DISK_DIR: /data-disk, DATA_DISK_MIN_FREE_GB: "2.5", DATA_DISK_TARGET_FREE_GB: "25", STORAGE_AUTO_DELETE_PERCENT: "2.5", STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300", STORAGE_MAINTENANCE_DRY_RUN: "${STORAGE_MAINTENANCE_DRY_RUN:-true}"}
     volumes: ["${AITOS_BOOT_RUNTIME_DIR:-/var/lib/aitos}:/boot-runtime", "${AITOS_DATA_ROOT:-./data}:/data-disk"]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "${STORAGE_MAINTENANCE_CPUS:-0.05}"
