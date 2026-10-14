@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -446,7 +446,10 @@ class OpportunityScanner(AITOSModule):
                 stage=PipelineStage.FEATURE.value,
                 symbol=symbol,
                 event_id=trace_event_id,
-                extra={"phase": "features_ready", "market_source": market_source},
+                extra={
+                    "phase": "features_ready",
+                    "market_source": market_source,
+                },
             )
         except Exception:
             pass
