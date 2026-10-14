@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   hard-reset:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: papertrade
     timeout-minutes: 30
