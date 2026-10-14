@@ -27,7 +27,11 @@ class RedisSettings(BaseSettings):
     db: int = 0
     password: str | None = None
     # Bounded pool sized for blocking stream readers plus publishers and checks.
-    max_connections: int = 256
+    max_connections: int = Field(
+        default_factory=lambda: load_tuning_settings().event_bus.connection_pool_size,
+        ge=8,
+        le=4096,
+    )
 
     @property
     def url(self) -> str:
