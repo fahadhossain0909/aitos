@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   docker-cleanup:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: Clean disposable Docker data on VPS
     runs-on: ubuntu-latest
     environment: papertrade
