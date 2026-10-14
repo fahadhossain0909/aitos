@@ -73,9 +73,7 @@ class LocalOrderBook:
         self._asks = {p: q for p, q in diff.asks if q > 0}
         self.last_update_id = diff.final_update_id
         self.initialized = True
-        # REST snapshot and queued websocket diffs overlap; discard covered diffs
-        # and require the first newer diff to bridge snapshot.last_update_id.
-        self._awaiting_first_update = True
+        self._awaiting_first_update = False
         self._forensics["last_bids_size"] = len(self._bids)
         self._forensics["last_asks_size"] = len(self._asks)
         self._forensics["max_bids_size"] = len(self._bids)
@@ -86,7 +84,9 @@ class LocalOrderBook:
         self._asks = {p: q for p, q in snapshot.asks if q > 0}
         self.last_update_id = snapshot.last_update_id
         self.initialized = True
-        self._awaiting_first_update = False
+        # REST snapshot and queued websocket diffs overlap; discard covered diffs
+        # and require the first newer diff to bridge snapshot.last_update_id.
+        self._awaiting_first_update = True
         self._forensics["last_bids_size"] = len(self._bids)
         self._forensics["last_asks_size"] = len(self._asks)
         self._forensics["max_bids_size"] = len(self._bids)
