@@ -749,6 +749,74 @@ class OpportunityScanner(AITOSModule):
             regime=regime,
         )
 
+    async def _lightweight_rank_symbols(self) -> list[str]:
+        """Rank the configured universe cheaply before invoking full intelligence.
+
+        This stage only requests a short candle window. It intentionally does not
+        fetch order books, recent trades, funding, or open interest. Failed
+        lightweight requests retain a deterministic fallback rank so temporary
+        data-source issues do not crash the scan cycle.
+        """
+        limit = self._tuning.analysis.expensive_analysis_limit
+        if limit >= len(self._symbols):
+            return list(self._symbols)
+
+        semaphore = asyncio.Semaphore(
+            self._tuning.analysis.lightweight_concurrency
+        )
+
+        async def _score(symbol: str, index: int) -> tuple[str, float, int]:
+            async with semaphore:
+                try:
+                    candles = await asyncio.wait_for(
+                        self._exchange.fetch_klines(
+                            symbol, self._timeframe, limit=20
+                        ),
+                        timeout=self._tuning.analysis.timeout_seconds,
+                    )
+                    if len(candles) < 5:
+                        return symbol, -1.0, index
+                    first_close = float(candles[0].close)
+                    last_close = float(candles[-1].close)
+                    if first_close <= 0 or last_close <= 0:
+                        return symbol, -1.0, index
+                    momentum_pct = abs(last_close - first_close) / first_close * 100.0
+                    high = max(float(c.high) for c in candles)
+                    low = min(float(c.low) for c in candles)
+                    range_pct = max(0.0, high - low) / last_close * 100.0
+                    # A simple, explainable activity score; the full scanner
+                    # remains authoritative for trade direction and eligibility.
+                    return symbol, momentum_pct + 0.5 * range_pct, index
+                except Exception as exc:
+                    logger.debug(
+                        "lightweight scanner screen failed; preserving fallback rank",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "error": str(exc),
+                            }
+                        },
+                    )
+                    return symbol, -1.0, index
+
+        scores = await asyncio.gather(
+            *(_score(symbol, index) for index, symbol in enumerate(self._symbols))
+        )
+        ranked = sorted(scores, key=lambda item: (-item[1], item[2]))
+        selected = [symbol for symbol, _, _ in ranked[:limit]]
+        logger.info(
+            "lightweight scanner screening complete",
+            extra={
+                "aitos_extra": {
+                    "universe_size": len(self._symbols),
+                    "deep_analysis_budget": limit,
+                    "selected_symbols": selected,
+                    "screened_symbols": len(scores),
+                }
+            },
+        )
+        return selected
+
     async def scan_all(self) -> list[ScanCandidate]:
         self._require_initialized()
         reference_klines = None
@@ -759,6 +827,8 @@ class OpportunityScanner(AITOSModule):
                 )
             except Exception as exc:
                 logger.error("failed to fetch reference symbol klines: %s", exc)
+
+        selected_symbols = await self._lightweight_rank_symbols()
 
         async def _scan_one(symbol: str) -> ScanCandidate | None:
             async with self._scan_semaphore:
@@ -774,14 +844,19 @@ class OpportunityScanner(AITOSModule):
                     )
                     return None
 
-        results = await asyncio.gather(*(_scan_one(symbol) for symbol in self._symbols))
+        results = await asyncio.gather(
+            *(_scan_one(symbol) for symbol in selected_symbols)
+        )
         candidates = [candidate for candidate in results if candidate is not None]
         self._last_scan_at, self._last_candidate_count = _utc_now_iso(), len(candidates)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_SCAN_COMPLETE,
                 payload={
-                    "symbols_scanned": len(self._symbols),
+                    "universe_symbols": len(self._symbols),
+                    "symbols_screened": len(self._symbols),
+                    "symbols_scanned": len(selected_symbols),
+                    "deep_analysis_budget": self._tuning.analysis.expensive_analysis_limit,
                     "candidates_found": len(candidates),
                 },
                 source_module=self.module_id,
