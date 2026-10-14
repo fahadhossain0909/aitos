@@ -302,7 +302,11 @@ class OpportunityScanner(AITOSModule):
 
         started = time.perf_counter()
         try:
-            from aitos.forensics.data_flow_hooks import record_input, record_output, record_error
+            from aitos.forensics.data_flow_hooks import (
+                record_input,
+                record_output,
+                record_error,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.SCANNER.value, symbol=symbol)
@@ -312,7 +316,11 @@ class OpportunityScanner(AITOSModule):
             result = await self._scan_symbol_impl(symbol, reference_klines)
         except Exception:
             try:
-                record_error(PipelineStage.SCANNER.value, symbol=symbol, issue="processing_timeout")
+                record_error(
+                    PipelineStage.SCANNER.value,
+                    symbol=symbol,
+                    issue="processing_timeout",
+                )
             except Exception:
                 pass
             raise
