@@ -759,6 +759,7 @@ class OpportunityScanner(AITOSModule):
                 )
             except Exception as exc:
                 logger.error("failed to fetch reference symbol klines: %s", exc)
+
         async def _scan_one(symbol: str) -> ScanCandidate | None:
             async with self._scan_semaphore:
                 try:
