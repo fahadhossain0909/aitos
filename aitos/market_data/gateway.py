@@ -79,13 +79,20 @@ class MarketDataGateway:
         age = self._source_freshness_age_seconds(event)
         symbol = self._data_flow_symbol(event)
         try:
-            from aitos.forensics.data_flow_hooks import record_input
+            from aitos.forensics.data_flow_hooks import note_trace, record_input
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(
                 PipelineStage.GATEWAY_QUEUE.value,
                 symbol=symbol,
                 source_age_ms=age * 1000.0,
+            )
+            note_trace(
+                trace_id=event.trace_id,
+                stage=PipelineStage.GATEWAY_QUEUE.value,
+                symbol=symbol,
+                event_id=event.event_id,
+                extra={"phase": "ingress", "source_age_ms": age * 1000.0},
             )
         except Exception:
             pass
@@ -124,10 +131,17 @@ class MarketDataGateway:
             self.health.record_accept()
             symbol = self._data_flow_symbol(event)
             try:
-                from aitos.forensics.data_flow_hooks import record_output, set_queue
+                from aitos.forensics.data_flow_hooks import note_trace, record_output, set_queue
                 from aitos.forensics.data_flow_schema import PipelineStage
 
                 record_output(PipelineStage.GATEWAY_QUEUE.value, symbol=symbol)
+                note_trace(
+                    trace_id=event.trace_id,
+                    stage=PipelineStage.GATEWAY_QUEUE.value,
+                    symbol=symbol,
+                    event_id=event.event_id,
+                    extra={"phase": "enqueued"},
+                )
                 qsnap = self.queue.snapshot()
                 depth = int(qsnap.get("depth", qsnap.get("size", 0)) or 0)
                 set_queue(PipelineStage.GATEWAY_QUEUE.value, depth=depth, symbol=symbol)
@@ -278,6 +292,8 @@ class MarketDataGateway:
                         stage=PipelineStage.REDIS_PUBLISH.value,
                         symbol=symbol,
                         latency_ms=latency_ms,
+                        event_id=event.event_id,
+                        extra={"phase": "gateway_drain_to_publish"},
                     )
                 except Exception:
                     pass
