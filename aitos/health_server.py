@@ -225,6 +225,18 @@ class HealthServer:
                     f'aitos_data_flow_pressure{{stage="{stage_label}"}} '
                     f"{1 if snap.pressure else 0}"
                 )
+            # Per-symbol freshness is intentionally limited to source-age gauges
+            # to keep Prometheus cardinality bounded while exposing stale markets.
+            lines.append("# HELP aitos_data_flow_symbol_source_age_ms Latest observed source age per symbol")
+            lines.append("# TYPE aitos_data_flow_symbol_source_age_ms gauge")
+            for symbol in reg.symbols():
+                snap = reg.snapshot_stage("normalize", symbol)
+                if snap.source_age_ms is not None:
+                    safe_symbol = symbol.replace("\\", "\\\\").replace('"', '\\"')
+                    lines.append(
+                        f'aitos_data_flow_symbol_source_age_ms{{symbol="{safe_symbol}"}} '
+                        f"{snap.source_age_ms}"
+                    )
         except Exception:
             logger.exception("data-flow metrics export failed")
 
