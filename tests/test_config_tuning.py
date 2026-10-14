@@ -101,9 +101,7 @@ def test_runtime_reload_environment_override_is_validated(monkeypatch):
         profile="balanced", mode="paper"
     ).runtime.config_reload_enabled
     monkeypatch.setenv("AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED", "sometimes")
-    with pytest.raises(
-        ValueError, match="AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED"
-    ):
+    with pytest.raises(ValueError, match="AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED"):
         load_tuning_settings(profile="balanced", mode="paper")
 
 
