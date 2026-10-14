@@ -170,6 +170,10 @@ async def try_connect_neo4j(settings):
 
 async def main() -> None:
     settings = get_settings()
+    if settings.tuning.mode != "paper":
+        raise RuntimeError(
+            "Trading entrypoint/configuration mode mismatch: run_paper_trading.py requires AITOS_MODE=paper"
+        )
     configure_logging(settings.log_level)
     redis_client = await connect_redis_with_retry(settings)
     from aitos.eventbus.redis_bus import EventBus
