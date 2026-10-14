@@ -780,17 +780,13 @@ class OpportunityScanner(AITOSModule):
         if limit >= len(self._symbols):
             return list(self._symbols)
 
-        semaphore = asyncio.Semaphore(
-            self._tuning.analysis.lightweight_concurrency
-        )
+        semaphore = asyncio.Semaphore(self._tuning.analysis.lightweight_concurrency)
 
         async def _score(symbol: str, index: int) -> tuple[str, float, int]:
             async with semaphore:
                 try:
                     candles = await asyncio.wait_for(
-                        self._exchange.fetch_klines(
-                            symbol, self._timeframe, limit=20
-                        ),
+                        self._exchange.fetch_klines(symbol, self._timeframe, limit=20),
                         timeout=self._tuning.analysis.timeout_seconds,
                     )
                     if len(candles) < 5:
