@@ -5,6 +5,8 @@ from __future__ import annotations
 import pickle
 from pathlib import Path
 
+from aitos.config.paths import get_model_data_dir
+
 import numpy as np
 from sklearn.linear_model import SGDClassifier
 
@@ -37,14 +39,14 @@ class TradeOutcomeClassifier:
     def __init__(
         self,
         min_samples_for_ready: int = DEFAULT_MIN_SAMPLES,
-        state_path: str = "/models/online_ml/trade_outcome.pkl",
+        state_path: str | None = None,
     ) -> None:
         self._model = SGDClassifier(loss="log_loss", random_state=0)
         self._min_samples = min_samples_for_ready
         self._n_samples_seen = 0
         self._classes_seen: set = set()
         self._background: list[list[float]] = []
-        self._state_path = Path(state_path)
+        self._state_path = Path(state_path) if state_path else get_model_data_dir() / "online_ml" / "trade_outcome.pkl"
 
     @property
     def n_samples_seen(self) -> int:
