@@ -6,7 +6,7 @@
         "top_n": 2,
         "universe_mode": "all_eligible",
         "universe_limit": 50,
-        "refresh_interval_seconds": 15
+        "refresh_interval_seconds": 60
       },
       "analysis": {
         "expensive_analysis_limit": 2,
@@ -35,7 +35,7 @@
         "top_n": 5,
         "universe_mode": "all_eligible",
         "universe_limit": 100,
-        "refresh_interval_seconds": 10
+        "refresh_interval_seconds": 60
       },
       "analysis": {
         "expensive_analysis_limit": 5,
@@ -64,7 +64,7 @@
         "top_n": 5,
         "universe_mode": "all_eligible",
         "universe_limit": 200,
-        "refresh_interval_seconds": 5
+        "refresh_interval_seconds": 30
       },
       "analysis": {
         "expensive_analysis_limit": 10,
