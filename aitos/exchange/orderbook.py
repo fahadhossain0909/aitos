@@ -73,7 +73,9 @@ class LocalOrderBook:
         self._asks = {p: q for p, q in diff.asks if q > 0}
         self.last_update_id = diff.final_update_id
         self.initialized = True
-        self._awaiting_first_update = False
+        # REST snapshot and queued websocket diffs overlap; discard covered diffs
+        # and require the first newer diff to bridge snapshot.last_update_id.
+        self._awaiting_first_update = True
         self._forensics["last_bids_size"] = len(self._bids)
         self._forensics["last_asks_size"] = len(self._asks)
         self._forensics["max_bids_size"] = len(self._bids)
@@ -119,29 +121,31 @@ class LocalOrderBook:
             self._record_apply_duration(started, update)
             return None
 
-        # Fresh update.
+        # The first newer websocket diff must bridge the REST snapshot. A gap
+        # invalidates the local book and must trigger a fresh bootstrap upstream.
         if self._awaiting_first_update:
-            # First update after bootstrap — accept it as the new baseline
-            # regardless of whether it bridges the snapshot perfectly.
             if not (
                 update.first_update_id
                 <= self.last_update_id + 1
                 <= update.final_update_id
             ):
-                self._forensics["stale_updates"] = (
-                    int(self._forensics["stale_updates"]) + 1
+                self._forensics["sequence_errors"] = (
+                    int(self._forensics["sequence_errors"]) + 1
                 )
-                logger.warning(
-                    "order-book bootstrap bridge gap, accepting new baseline",
+                logger.error(
+                    "order-book forensic sequence error: bootstrap bridge mismatch",
                     extra={
                         "aitos_extra": {
-                            "stage": "orderbook_bootstrap_bridge_gap",
-                            "symbol": self.symbol,
-                            "snapshot_last_update_id": self.last_update_id,
-                            "update_first_update_id": update.first_update_id,
-                            "update_final_update_id": update.final_update_id,
+                            "stage": "orderbook_apply_sequence_error",
+                            "reason": "bootstrap_bridge_mismatch",
+                            **self.forensics_snapshot(),
                         }
                     },
+                )
+                raise OrderBookSequenceError(
+                    f"first diff does not bridge snapshot for {self.symbol}: "
+                    f"snapshot={self.last_update_id}, U={update.first_update_id}, "
+                    f"u={update.final_update_id}"
                 )
             self._awaiting_first_update = False
         elif update.previous_update_id != self.last_update_id:
