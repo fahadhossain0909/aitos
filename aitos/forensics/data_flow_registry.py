@@ -207,15 +207,25 @@ class DataFlowRegistry:
             return sorted({symbol for _, symbol in self._buckets if symbol})
 
     def trace_for_event(
-        self, *, trace_id: str, event_id: str | None = None,
-        parent_trace_id: str | None = None, stage: str | PipelineStage,
-        symbol: str = "", latency_ms: float | None = None,
+        self,
+        *,
+        trace_id: str,
+        event_id: str | None = None,
+        parent_trace_id: str | None = None,
+        stage: str | PipelineStage,
+        symbol: str = "",
+        latency_ms: float | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         """Record one stage in an event's causal timeline."""
         self.note_trace(
-            trace_id=trace_id, stage=stage, symbol=symbol, latency_ms=latency_ms,
-            event_id=event_id, parent_trace_id=parent_trace_id, extra=extra,
+            trace_id=trace_id,
+            stage=stage,
+            symbol=symbol,
+            latency_ms=latency_ms,
+            event_id=event_id,
+            parent_trace_id=parent_trace_id,
+            extra=extra,
         )
 
     def _rate(self, window: deque[tuple[float, int]]) -> float:
