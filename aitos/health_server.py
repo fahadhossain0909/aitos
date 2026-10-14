@@ -225,6 +225,15 @@ class HealthServer:
                     f'aitos_data_flow_pressure{{stage="{stage_label}"}} '
                     f"{1 if snap.pressure else 0}"
                 )
+            lines.append("# HELP aitos_data_flow_issue_count Classified data-quality issues")
+            lines.append("# TYPE aitos_data_flow_issue_count gauge")
+            for stage in PIPELINE_ORDER:
+                snap = reg.snapshot_stage(stage, "")
+                for issue, count in snap.issues.items():
+                    safe_issue = issue.replace("\\", "\\\\").replace('"', '\\"')
+                    lines.append(
+                        f'aitos_data_flow_issue_count{{stage="{snap.stage}",issue="{safe_issue}"}} {count}'
+                    )
             # Per-symbol freshness is intentionally limited to source-age gauges
             # to keep Prometheus cardinality bounded while exposing stale markets.
             lines.append("# HELP aitos_data_flow_symbol_source_age_ms Latest observed source age per symbol")
