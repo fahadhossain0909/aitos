@@ -257,8 +257,8 @@ class LiveScannerCache:
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
-        state.last_trade_trace_id = event.trace_id
-        state.last_trade_event_id = event.event_id
+        state.last_trade_trace_id = getattr(event, "trace_id", None)
+        state.last_trade_event_id = getattr(event, "event_id", None)
         try:
             from aitos.forensics.data_flow_hooks import (
                 note_trace,
@@ -272,10 +272,10 @@ class LiveScannerCache:
                 PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
             )
             note_trace(
-                trace_id=event.trace_id,
+                trace_id=getattr(event, "trace_id", None),
                 stage=PipelineStage.LIVE_STATE.value,
                 symbol=str(event.symbol or ""),
-                event_id=event.event_id,
+                event_id=getattr(event, "event_id", None),
                 extra={
                     "event_type": event.event_type.value,
                     "phase": "state_updated",
@@ -312,8 +312,8 @@ class LiveScannerCache:
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time
         state.last_book_received_at = received_at
-        state.last_book_trace_id = event.trace_id
-        state.last_book_event_id = event.event_id
+        state.last_book_trace_id = getattr(event, "trace_id", None)
+        state.last_book_event_id = getattr(event, "event_id", None)
         try:
             from aitos.forensics.data_flow_hooks import (
                 note_trace,
@@ -327,10 +327,10 @@ class LiveScannerCache:
                 PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
             )
             note_trace(
-                trace_id=event.trace_id,
+                trace_id=getattr(event, "trace_id", None),
                 stage=PipelineStage.LIVE_STATE.value,
                 symbol=str(event.symbol or ""),
-                event_id=event.event_id,
+                event_id=getattr(event, "event_id", None),
                 extra={"event_type": event.event_type.value, "phase": "state_updated"},
             )
         except Exception:
