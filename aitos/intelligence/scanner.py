@@ -758,7 +758,10 @@ class OpportunityScanner(AITOSModule):
         async def _scan_one(symbol: str) -> ScanCandidate | None:
             async with self._scan_semaphore:
                 try:
-                    return await self.scan_symbol(symbol, reference_klines)
+                    return await asyncio.wait_for(
+                        self.scan_symbol(symbol, reference_klines),
+                        timeout=self._tuning.analysis.timeout_seconds,
+                    )
                 except Exception as exc:
                     logger.error(
                         "scan failed for symbol",
