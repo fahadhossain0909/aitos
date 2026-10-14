@@ -35,6 +35,7 @@ def test_native_model_data_defaults_inside_project(monkeypatch, tmp_path):
 
 def test_relative_paths_resolve_from_project_root(monkeypatch, tmp_path):
     monkeypatch.setenv("AITOS_HOME", str(tmp_path))
-    assert resolve_project_path("data/models/checkpoint.pkl") == (
-        tmp_path / "data/models/checkpoint.pkl"
-    ).resolve()
+    assert (
+        resolve_project_path("data/models/checkpoint.pkl")
+        == (tmp_path / "data/models/checkpoint.pkl").resolve()
+    )
