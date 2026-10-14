@@ -33,7 +33,6 @@ def trade_event(
         ingest_time=received,
         sequence=trade.trade_id,
         correlation_id=f"binance:{market_type}:{trade.symbol}:{trade.trade_id}",
-        trace_id=trade.symbol,
     )
 
 
@@ -90,7 +89,6 @@ def book_delta_event(
         ingest_time=received,
         sequence=delta.final_update_id,
         correlation_id=f"binance:{market_type}:{symbol}:depth:{delta.final_update_id}",
-        trace_id=symbol,
     )
 
 
