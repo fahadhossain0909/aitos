@@ -4,6 +4,7 @@ AITOS_HOME selects the checkout root; MODEL_DATA_DIR explicitly overrides model
 storage. Docker keeps using /models, while native/local runs default to a
 repository-local data/models directory so they do not require root permissions.
 """
+
 from __future__ import annotations
 
 import os
@@ -12,7 +13,11 @@ from pathlib import Path
 
 def get_project_root() -> Path:
     configured = os.getenv("AITOS_HOME")
-    root = Path(configured).expanduser() if configured else Path(__file__).resolve().parents[2]
+    root = (
+        Path(configured).expanduser()
+        if configured
+        else Path(__file__).resolve().parents[2]
+    )
     return root.resolve()
 
 
