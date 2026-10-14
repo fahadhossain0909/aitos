@@ -27,13 +27,11 @@ def consumer_concurrency() -> int:
     if raw is not None:
         try:
             value = int(raw)
-        except ValueError as exc:
-            raise ValueError("REDIS_CONSUMER_CONCURRENCY must be an integer") from exc
-        if not 1 <= value <= MAX_CONSUMER_CONCURRENCY:
-            raise ValueError(
-                f"REDIS_CONSUMER_CONCURRENCY must be between 1 and {MAX_CONSUMER_CONCURRENCY}"
-            )
-        return value
+        except ValueError:
+            # Preserve the historical compatibility contract for this legacy
+            # variable. New AITOS_TUNING_* values remain strictly validated.
+            return DEFAULT_CONSUMER_CONCURRENCY
+        return max(1, min(MAX_CONSUMER_CONCURRENCY, value))
 
     # Lazy import avoids eventbus -> config -> application import cycles.
     from aitos.config.tuning import load_tuning_settings
