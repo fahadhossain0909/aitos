@@ -10,6 +10,7 @@ from typing import Protocol
 
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
+from aitos.config.tuning import effective_tuning_report, reload_tuning_settings
 from aitos.core.contracts import AITOSModule, Event
 from aitos.data.ingestion import DataIngestionService
 from aitos.data.repository import MarketDataRepository
@@ -73,6 +74,38 @@ class SystemComponents:
     correlation_updater: SymbolCorrelationUpdater | None = None
     _price_feed_subscriptions: list[Subscription] = field(default_factory=list)
 
+    def reload_runtime_tuning(self) -> dict[str, object]:
+        """Reload tunings that can be changed without rebuilding infrastructure.
+
+        Universe subscriptions, Redis pool/consumer configuration and the hard
+        max-open-position risk cap are restart-bound; reject those changes
+        instead of silently applying only part of a new profile.
+        """
+        current = self.scanner._tuning
+        updated = reload_tuning_settings()
+        if (
+            current.event_bus != updated.event_bus
+            or current.positions.max_open_positions
+            != updated.positions.max_open_positions
+        ):
+            raise ValueError(
+                "Runtime reload changed Event Bus or hard position-limit settings; "
+                "restart AITOS to apply this profile safely"
+            )
+        self.scanner.apply_tuning_settings(updated)
+        self.trade_lifecycle.apply_tuning_settings(updated)
+        report = effective_tuning_report(updated)
+        logger.info(
+            "AITOS runtime tuning reloaded",
+            extra={"aitos_extra": {
+                "profile": report["profile"],
+                "mode": report["mode"],
+                "config_version": report["config_version"],
+                "restart_required": False,
+            }},
+        )
+        return report
+
     def all_modules(self) -> list[AITOSModule]:
         modules: list[AITOSModule] = [
             self.event_bus,
@@ -119,6 +152,19 @@ async def build_system(
 ) -> SystemComponents:
     settings = get_settings()
     tuning = settings.tuning
+    tuning_report = effective_tuning_report(tuning)
+    logger.info(
+        "AITOS effective runtime tuning",
+        extra={"aitos_extra": {
+            "profile": tuning_report["profile"],
+            "mode": tuning_report["mode"],
+            "config_version": tuning_report["config_version"],
+            "scanner": tuning.scanner.model_dump(mode="json"),
+            "analysis": tuning.analysis.model_dump(mode="json"),
+            "event_bus": tuning.event_bus.model_dump(mode="json"),
+            "positions": tuning.positions.model_dump(mode="json"),
+        }},
+    )
     if risk_limits is None:
         risk_limits = RiskLimits(max_open_positions=tuning.positions.max_open_positions)
     else:
@@ -430,6 +476,8 @@ async def run_scan_and_trade_cycle(
     is_production: bool = False,
     approved_by: str | None = None,
 ) -> int:
+    if components.scanner._tuning.runtime.config_reload_enabled:
+        components.reload_runtime_tuning()
     refresh = getattr(portfolio_tracker, "refresh_equity", None)
     if refresh is not None:
         await refresh()
