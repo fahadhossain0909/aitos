@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   forensic-pass:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: VPS causal-chain forensic pass
     runs-on: ubuntu-latest
     timeout-minutes: 15
