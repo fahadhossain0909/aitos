@@ -1,6 +1,9 @@
 """Production forensic instrumentation helpers."""
 
-from aitos.forensics.data_flow_debugger import build_data_flow_report, find_pressure_point
+from aitos.forensics.data_flow_debugger import (
+    build_data_flow_report,
+    find_pressure_point,
+)
 from aitos.forensics.data_flow_registry import DataFlowRegistry, get_data_flow_registry
 from aitos.forensics.data_flow_schema import (
     DataIssueClass,
