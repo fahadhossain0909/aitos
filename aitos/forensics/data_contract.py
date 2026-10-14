@@ -75,8 +75,8 @@ def check_orderbook_payload(payload: dict[str, Any]) -> ContractResult:
     symbol = payload.get("symbol") or payload.get("s")
     if not symbol:
         return ContractResult(False, DataIssueClass.SCHEMA_INVALID, "missing_symbol")
-    bids = payload.get("bids") or payload.get("b")
-    asks = payload.get("asks") or payload.get("a")
+    bids = payload.get("bids") if "bids" in payload else payload.get("b")
+    asks = payload.get("asks") if "asks" in payload else payload.get("a")
     if bids is None and asks is None:
         return ContractResult(
             False, DataIssueClass.SCHEMA_INVALID, "missing_book_sides"

@@ -21,6 +21,10 @@ from aitos.forensics.data_flow_schema import (
 )
 
 
+def _stage_name(stage: str | PipelineStage) -> str:
+    return stage.value if isinstance(stage, PipelineStage) else str(stage)
+
+
 def _percentile(samples: list[float], pct: float) -> float | None:
     if not samples:
         return None
@@ -73,7 +77,7 @@ class DataFlowRegistry:
         self._recent_traces: deque[dict[str, Any]] = deque(maxlen=200)
 
     def _bucket(self, stage: str | PipelineStage, symbol: str = "") -> _StageBucket:
-        key = (str(stage), str(symbol or "").upper())
+        key = (_stage_name(stage), str(symbol or "").upper())
         if key not in self._buckets:
             self._buckets[key] = _StageBucket()
         return self._buckets[key]
@@ -183,7 +187,7 @@ class DataFlowRegistry:
             return
         sample = {
             "trace_id": trace_id,
-            "stage": str(stage),
+            "stage": _stage_name(stage),
             "symbol": str(symbol or "").upper(),
             "latency_ms": latency_ms,
             "ts": time.time(),
@@ -216,7 +220,7 @@ class DataFlowRegistry:
                 (b.oldest_event_age_ms or 0) > 50 or b.queue_depth > 0
             )
             return StageSnapshot(
-                stage=str(stage),
+                stage=_stage_name(stage),
                 input_count=b.input_count,
                 output_count=b.output_count,
                 error_count=b.error_count,
