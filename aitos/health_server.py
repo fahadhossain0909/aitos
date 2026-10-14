@@ -153,6 +153,18 @@ class HealthServer:
                 "# HELP aitos_data_flow_latency_p99_ms Stage processing latency p99"
             )
             lines.append("# TYPE aitos_data_flow_latency_p99_ms gauge")
+            lines.append("# HELP aitos_data_flow_latency_p50_ms Stage processing latency p50")
+            lines.append("# TYPE aitos_data_flow_latency_p50_ms gauge")
+            lines.append("# HELP aitos_data_flow_latency_p95_ms Stage processing latency p95")
+            lines.append("# TYPE aitos_data_flow_latency_p95_ms gauge")
+            lines.append("# HELP aitos_data_flow_oldest_event_age_ms Oldest queued event age")
+            lines.append("# TYPE aitos_data_flow_oldest_event_age_ms gauge")
+            lines.append("# HELP aitos_data_flow_source_age_ms Latest source event age")
+            lines.append("# TYPE aitos_data_flow_source_age_ms gauge")
+            lines.append("# HELP aitos_data_flow_drop_count Dropped events")
+            lines.append("# TYPE aitos_data_flow_drop_count gauge")
+            lines.append("# HELP aitos_data_flow_error_count Processing errors")
+            lines.append("# TYPE aitos_data_flow_error_count gauge")
             lines.append("# HELP aitos_data_flow_queue_depth Stage queue depth")
             lines.append("# TYPE aitos_data_flow_queue_depth gauge")
             lines.append(
@@ -178,6 +190,12 @@ class HealthServer:
                     f'aitos_data_flow_queue_depth{{stage="{stage_label}"}} '
                     f"{snap.queue_depth}"
                 )
+                lines.append(f'aitos_data_flow_latency_p50_ms{{stage="{stage_label}"}} {snap.latency_p50_ms or 0}')
+                lines.append(f'aitos_data_flow_latency_p95_ms{{stage="{stage_label}"}} {snap.latency_p95_ms or 0}')
+                lines.append(f'aitos_data_flow_oldest_event_age_ms{{stage="{stage_label}"}} {snap.oldest_event_age_ms or 0}')
+                lines.append(f'aitos_data_flow_source_age_ms{{stage="{stage_label}"}} {snap.source_age_ms or 0}')
+                lines.append(f'aitos_data_flow_drop_count{{stage="{stage_label}"}} {snap.drop_count}')
+                lines.append(f'aitos_data_flow_error_count{{stage="{stage_label}"}} {snap.error_count}')
                 lines.append(
                     f'aitos_data_flow_pressure{{stage="{stage_label}"}} '
                     f"{1 if snap.pressure else 0}"
