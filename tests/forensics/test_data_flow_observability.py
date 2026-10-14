@@ -53,6 +53,7 @@ def test_pressure_point_detection() -> None:
         oldest_event_age_ms=500,
         symbol="ETHUSDT",
     )
+    assert reg.snapshot_stage(PipelineStage.REDIS_PUBLISH, "").queue_depth == 40
     stages = reg.pipeline_snapshot("ETHUSDT")
     pp = find_pressure_point(stages)
     assert pp is not None
