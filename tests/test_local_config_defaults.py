@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -18,8 +17,7 @@ def test_local_compose_does_not_prune_data_by_default() -> None:
     compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     override = (ROOT / "docker-compose.override.yml").read_text(encoding="utf-8")
     assert (
-        'STORAGE_MAINTENANCE_DRY_RUN: "${STORAGE_MAINTENANCE_DRY_RUN:-true}"'
-        in compose
+        'STORAGE_MAINTENANCE_DRY_RUN: "${STORAGE_MAINTENANCE_DRY_RUN:-true}"' in compose
     )
     assert (
         'STORAGE_MAINTENANCE_DRY_RUN: "${STORAGE_MAINTENANCE_DRY_RUN:-true}"'
