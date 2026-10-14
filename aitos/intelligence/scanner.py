@@ -164,15 +164,19 @@ class OpportunityScanner(AITOSModule):
         configured_symbols = list(symbols)
         if scanner_tuning.universe_mode == "allowlist":
             allowed = set(scanner_tuning.symbol_allowlist)
-            configured_symbols = [symbol for symbol in configured_symbols if symbol.upper() in allowed]
-        self._symbols = configured_symbols[:scanner_tuning.universe_limit]
+            configured_symbols = [
+                symbol for symbol in configured_symbols if symbol.upper() in allowed
+            ]
+        self._symbols = configured_symbols[: scanner_tuning.universe_limit]
         self._timeframe = timeframe
         self._reference_symbol = reference_symbol
         self._rl_scorer = rl_scorer or NeutralRLScorer()
         self._weights = weights or DEFAULT_WEIGHTS
         self._min_score_threshold = min_score_threshold
         self._top_n = top_n if top_n is not None else scanner_tuning.top_n
-        self._scan_semaphore = asyncio.Semaphore(self._tuning.analysis.expensive_analysis_concurrency)
+        self._scan_semaphore = asyncio.Semaphore(
+            self._tuning.analysis.expensive_analysis_concurrency
+        )
         self._kline_lookback, self._trade_lookback = kline_lookback, trade_lookback
         self._footprint_tick_sizes = footprint_tick_sizes or {}
         self._live_state_stale_seconds = max(0.5, live_state_stale_seconds)
@@ -188,7 +192,7 @@ class OpportunityScanner(AITOSModule):
         self._footprint_signal_engine = FootprintSignalEngine()
         self._interaction_engine = FlowLiquidityInteractionEngine()
         self._live_cache = LiveScannerCache(
-            event_bus, symbols, max_trades=max(5000, trade_lookback)
+            event_bus, self._symbols, max_trades=max(5000, trade_lookback)
         )
         self._last_scan_at = None
         self._last_candidate_count = 0
