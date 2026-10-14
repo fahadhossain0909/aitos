@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from datetime import UTC
 
 from redis.asyncio import Redis
 
@@ -54,18 +53,18 @@ STALE_POSITION_MAX_HOURS = 72
 
 async def _close_stale_positions(components) -> None:
     """Close open trades held longer than STALE_POSITION_MAX_HOURS."""
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     from aitos.models.trade import TradeLifecycleState
 
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     for trade in list(components.trade_lifecycle.get_open_trades()):
         if trade.state != TradeLifecycleState.POSITION_OPENED:
             continue
         try:
             entry_dt = datetime.fromisoformat(trade.entry_time)
             if entry_dt.tzinfo is None:
-                entry_dt = entry_dt.replace(tzinfo=UTC)
+                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
             age_hours = (now - entry_dt).total_seconds() / 3600
             if age_hours >= STALE_POSITION_MAX_HOURS:
                 # Use last known price from trade's own tracking
