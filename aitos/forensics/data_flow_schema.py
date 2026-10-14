@@ -57,6 +57,7 @@ class DataIssueClass(str, Enum):
     DECODE_ERROR = "decode_error"
     DROPPED_BACKPRESSURE = "dropped_backpressure"
     PROCESSING_TIMEOUT = "processing_timeout"
+    PROCESSING_ERROR = "processing_error"
     NONE = "none"
 
 
