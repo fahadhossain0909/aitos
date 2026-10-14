@@ -8,6 +8,7 @@ permissions:
 
 jobs:
   market-data-forensics:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
