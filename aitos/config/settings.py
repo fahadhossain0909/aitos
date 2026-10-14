@@ -10,7 +10,11 @@ from __future__ import annotations
 
 from dotenv import load_dotenv
 
-load_dotenv("/home/fahad/aitos/.env")
+from aitos.config.paths import get_env_file
+
+_ENV_FILE = get_env_file()
+if _ENV_FILE.is_file():
+    load_dotenv(_ENV_FILE)
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -74,7 +78,7 @@ class BinanceSettings(BaseSettings):
 
 class AITOSSettings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file="/home/fahad/aitos/.env", env_file_encoding="utf-8", extra="ignore"
+        env_file=str(_ENV_FILE), env_file_encoding="utf-8", extra="ignore"
     )
 
     environment: str = Field(default="dev", description="dev | staging | production")
