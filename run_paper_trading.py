@@ -43,7 +43,7 @@ from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
 
 logger = get_logger("aitos.run_paper_trading")
-SCAN_INTERVAL_SECONDS = 60.0
+SCAN_INTERVAL_SECONDS = get_settings().tuning.scanner.refresh_interval_seconds
 KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 1_000.0
 HEALTH_SERVER_PORT = 8090
