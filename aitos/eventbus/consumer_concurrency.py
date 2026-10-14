@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from aitos.logging_setup import get_logger
@@ -61,7 +61,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
             handler: Any,
         ) -> None:
             self._consumed_events += 1
-            self._last_consumed_at = datetime.now(timezone.utc).isoformat()
+            self._last_consumed_at = datetime.now(UTC).isoformat()
             try:
                 event = self._event_from_wire(fields)
             except AttributeError:
@@ -73,7 +73,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                 response = await handler(event)
                 await self._redis.xack(stream_key, group, entry_id)
                 self._acked_events += 1
-                self._last_acked_at = datetime.now(timezone.utc).isoformat()
+                self._last_acked_at = datetime.now(UTC).isoformat()
                 if response is not None and hasattr(self, "_maybe_publish_response"):
                     await self._maybe_publish_response(event, response)
             except Exception as exc:
