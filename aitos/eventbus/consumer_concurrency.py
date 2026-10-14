@@ -120,6 +120,9 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
     ) -> None:
         streams_seen: set[str] = set()
         stream_tasks: dict[str, asyncio.Task] = {}
+        from aitos.config.tuning import load_tuning_settings
+
+        batch_size = load_tuning_settings().event_bus.consumer_batch_size
         semaphore = asyncio.Semaphore(consumer_concurrency())
 
         async def consume_stream(stream_topic: str) -> None:
@@ -147,7 +150,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                             groupname=group,
                             consumername=consumer,
                             streams={stream_key: ">"},
-                            count=CONSUMER_BATCH_SIZE,
+                            count=batch_size,
                             block=CONSUMER_BLOCK_MS,
                         )
                     except asyncio.CancelledError:
