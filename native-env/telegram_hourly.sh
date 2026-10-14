@@ -1,7 +1,8 @@
 #!/bin/bash
 # Send hourly Telegram status update
-source /home/fahad/aitos/.venv/bin/activate
-cd /home/fahad/aitos
+AITOS_DIR="${AITOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+cd "$AITOS_DIR"
+source "$AITOS_DIR/.venv/bin/activate"
 python3 -c "
 from aitos.telegram.status_bot import send_hourly_status
 import os

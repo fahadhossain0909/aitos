@@ -10,12 +10,13 @@ from typing import Any
 import numpy as np
 from sklearn.neural_network import MLPRegressor
 
+from aitos.config.paths import get_model_data_dir
 from aitos.intelligence.rl_policy import RLPolicyScorer
 from aitos.xai.ml_explainer import FEATURE_ORDER
 
 DEFAULT_MIN_SAMPLES_FOR_CONFIDENCE = 30
 DEFAULT_REWARD_SCALE_R_MULTIPLES = 2.0
-DEFAULT_MODEL_DATA_DIR = "/models"
+DEFAULT_MODEL_DATA_DIR = str(get_model_data_dir())
 
 
 def _vectorize(context: dict[str, Any]) -> np.ndarray:
@@ -55,7 +56,7 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._reward_scale = reward_scale_r_multiples
         self._n_samples_seen = 0
         self._recent_rewards: list[float] = []
-        model_data_dir = Path(os.getenv("MODEL_DATA_DIR", DEFAULT_MODEL_DATA_DIR))
+        model_data_dir = get_model_data_dir()
         self._state_path = (
             Path(state_path)
             if state_path

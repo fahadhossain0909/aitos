@@ -25,7 +25,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-AITOS_DIR = Path("/home/fahad/aitos")
+AITOS_DIR = (
+    Path(os.environ.get("AITOS_HOME", Path(__file__).resolve().parents[1]))
+    .expanduser()
+    .resolve()
+)
 PAPER_TRADING_PID_FILE = Path("/tmp/aitos-paper.pid")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")

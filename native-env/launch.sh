@@ -1,7 +1,9 @@
 #!/bin/bash
 # AITOS 24/7 Self-Running Launcher
-cd /home/fahad/aitos
-source .venv/bin/activate
+AITOS_DIR="${AITOS_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+export AITOS_HOME="$AITOS_DIR"
+cd "$AITOS_DIR"
+source "$AITOS_DIR/.venv/bin/activate"
 
 # Start paper trading if not running
 if ! pgrep -f "run_paper_trading.py" > /dev/null; then

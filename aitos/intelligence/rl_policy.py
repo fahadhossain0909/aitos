@@ -17,6 +17,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
+from aitos.config.paths import get_model_data_dir
+
 
 class RLPolicyScorer(ABC):
     @abstractmethod
@@ -51,7 +53,7 @@ class TabularBanditRLScorer(RLPolicyScorer):
         self,
         reward_scale_r_multiples: float = 2.0,
         min_samples_for_confidence: int = 5,
-        state_path: str = "/models/online_rl/tabular_bandit.pkl",
+        state_path: str | None = None,
     ) -> None:
         """``reward_scale_r_multiples`` sets how many R of average reward
         maps to the extreme ends of the 0-10 scale (e.g. 2.0 means an
@@ -63,7 +65,11 @@ class TabularBanditRLScorer(RLPolicyScorer):
         self._min_samples = min_samples_for_confidence
         self._counts: dict[tuple[str, str, str], int] = {}
         self._means: dict[tuple[str, str, str], float] = {}
-        self._state_path = Path(state_path)
+        self._state_path = (
+            Path(state_path)
+            if state_path
+            else get_model_data_dir() / "online_rl" / "tabular_bandit.pkl"
+        )
 
     def _key(self, symbol: str, regime: str, direction: str) -> tuple[str, str, str]:
         return (symbol, regime, direction)

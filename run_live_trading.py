@@ -14,6 +14,7 @@ from aitos.app import (
     run_scan_and_trade_cycle,
     shutdown_all,
 )
+from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.data.repository import MarketDataRepository
@@ -146,7 +147,7 @@ async def main() -> None:
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
     outcome_classifier.load_state()
-    attention_path = "/models/online_ml/attention_explainer.pkl"
+    attention_path = str(get_model_data_dir() / "online_ml" / "attention_explainer.pkl")
     attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
     components = await build_system(
         event_bus=event_bus,
@@ -261,7 +262,7 @@ async def main() -> None:
                 logger.error("scan/trade cycle failed: %s", exc)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
     finally:
         await price_safety_net.stop()

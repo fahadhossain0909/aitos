@@ -4,8 +4,13 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
-AITOS_DIR = "/home/fahad/aitos"
+AITOS_DIR = (
+    Path(os.environ.get("AITOS_HOME", Path(__file__).resolve().parents[1]))
+    .expanduser()
+    .resolve()
+)
 
 while True:
     # Check if paper trading is running
@@ -17,9 +22,11 @@ while True:
         env = os.environ.copy()
         proc = subprocess.Popen(
             [sys.executable, "run_paper_trading.py"],
-            cwd=AITOS_DIR,
+            cwd=str(AITOS_DIR),
             env=env,
-            stdout=open("/tmp/aitos-paper.log", "a"),
+            stdout=open(
+                Path(os.environ.get("AITOS_LOG_DIR", "/tmp")) / "aitos-paper.log", "a"
+            ),
             stderr=subprocess.STDOUT,
         )
         time.sleep(5)
