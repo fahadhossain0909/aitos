@@ -1,10 +1,11 @@
 name: CI Auto-Fix
 
 on:
+  # Keep automatic formatting on main only. PR validation must run on the
+  # contributor's commit, not be replaced by a bot-authored commit that can
+  # suppress follow-up workflow runs.
   push:
-    branches: ["**"]
-  pull_request_target:
-    branches: [main, master, develop]
+    branches: [main]
 
 permissions:
   contents: write
@@ -14,22 +15,18 @@ permissions:
 # must not be rewritten underneath implementation commits.
 concurrency:
   group: auto-fix-${{ github.repository }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   python-autofix:
     name: Safe Python Auto-Fix
     runs-on: ubuntu-latest
-    if: >-
-      (github.event_name == 'push' && github.ref_name != 'architecture/market-data-v1') ||
-      (github.event_name == 'pull_request_target' &&
-       github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref != 'architecture/market-data-v1')
+    if: github.ref_name != 'architecture/market-data-v1'
     steps:
       - name: Check out source branch
         uses: actions/checkout@v7.0.1
         with:
-          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.ref || github.ref_name }}
+          ref: ${{ github.ref_name }}
           fetch-depth: 0
 
       - name: Set up Python
