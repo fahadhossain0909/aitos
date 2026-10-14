@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -420,7 +421,11 @@ class OpportunityScanner(AITOSModule):
             else None
         )
         try:
-            from aitos.forensics.data_flow_hooks import note_trace, record_input, record_output
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_input,
+                record_output,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             state = self._live_cache.snapshot(symbol)
