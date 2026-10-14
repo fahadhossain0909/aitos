@@ -3,6 +3,7 @@
 Profiles are capacity hints, not trading-risk recommendations. Live risk
 limits remain owned by the risk engine; adaptive tuning/reload are opt-in.
 """
+
 from __future__ import annotations
 
 import json
@@ -61,6 +62,7 @@ class RuntimeTuning(BaseModel):
 
 class TuningSettings(BaseModel):
     """Immutable, validated snapshot of effective tuning values."""
+
     model_config = ConfigDict(extra="forbid", frozen=True)
     profile: ProfileName = "balanced"
     mode: TradingMode = "paper"
@@ -104,7 +106,9 @@ def _read_profiles() -> dict[str, Any]:
         with path.open("r", encoding="utf-8") as stream:
             payload = json.load(stream)
     except (OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Cannot load AITOS tuning profiles from {path}: {exc}") from exc
+        raise RuntimeError(
+            f"Cannot load AITOS tuning profiles from {path}: {exc}"
+        ) from exc
     if payload.get("version") != 1 or not isinstance(payload.get("profiles"), dict):
         raise RuntimeError(f"Unsupported or malformed AITOS tuning profiles: {path}")
     return payload
@@ -116,27 +120,69 @@ def _env_overrides() -> dict[str, Any]:
         "AITOS_TUNING_SCANNER_TOP_N": ("scanner", "top_n", int),
         "AITOS_TUNING_SCANNER_UNIVERSE_MODE": ("scanner", "universe_mode", str),
         "AITOS_TUNING_SCANNER_UNIVERSE_LIMIT": ("scanner", "universe_limit", int),
-        "AITOS_TUNING_SCANNER_REFRESH_INTERVAL_SECONDS": ("scanner", "refresh_interval_seconds", float),
+        "AITOS_TUNING_SCANNER_REFRESH_INTERVAL_SECONDS": (
+            "scanner",
+            "refresh_interval_seconds",
+            float,
+        ),
         "AITOS_TUNING_SCANNER_SYMBOL_ALLOWLIST": (
             "scanner",
             "symbol_allowlist",
             lambda v: tuple(
-                symbol.strip().upper()
-                for symbol in v.split(",")
-                if symbol.strip()
+                symbol.strip().upper() for symbol in v.split(",") if symbol.strip()
             ),
         ),
-        "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_LIMIT": ("analysis", "expensive_analysis_limit", int),
-        "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY": ("analysis", "expensive_analysis_concurrency", int),
-        "AITOS_TUNING_ANALYSIS_LIGHTWEIGHT_CONCURRENCY": ("analysis", "lightweight_concurrency", int),
+        "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_LIMIT": (
+            "analysis",
+            "expensive_analysis_limit",
+            int,
+        ),
+        "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY": (
+            "analysis",
+            "expensive_analysis_concurrency",
+            int,
+        ),
+        "AITOS_TUNING_ANALYSIS_LIGHTWEIGHT_CONCURRENCY": (
+            "analysis",
+            "lightweight_concurrency",
+            int,
+        ),
         "AITOS_TUNING_ANALYSIS_TIMEOUT_SECONDS": ("analysis", "timeout_seconds", float),
-        "AITOS_TUNING_EVENT_BUS_CONSUMER_CONCURRENCY": ("event_bus", "consumer_concurrency", int),
-        "AITOS_TUNING_EVENT_BUS_CONNECTION_POOL_SIZE": ("event_bus", "connection_pool_size", int),
-        "AITOS_TUNING_EVENT_BUS_CONSUMER_BATCH_SIZE": ("event_bus", "consumer_batch_size", int),
-        "AITOS_TUNING_POSITIONS_MAX_OPEN_POSITIONS": ("positions", "max_open_positions", int),
-        "AITOS_TUNING_POSITIONS_MAX_POSITIONS_PER_SYMBOL": ("positions", "max_positions_per_symbol", int),
-        "AITOS_TUNING_POSITIONS_MONITORING_INTERVAL_SECONDS": ("positions", "monitoring_interval_seconds", float),
-        "AITOS_TUNING_POSITIONS_INTENSIVE_ANALYSIS_BUDGET": ("positions", "intensive_analysis_budget", int),
+        "AITOS_TUNING_EVENT_BUS_CONSUMER_CONCURRENCY": (
+            "event_bus",
+            "consumer_concurrency",
+            int,
+        ),
+        "AITOS_TUNING_EVENT_BUS_CONNECTION_POOL_SIZE": (
+            "event_bus",
+            "connection_pool_size",
+            int,
+        ),
+        "AITOS_TUNING_EVENT_BUS_CONSUMER_BATCH_SIZE": (
+            "event_bus",
+            "consumer_batch_size",
+            int,
+        ),
+        "AITOS_TUNING_POSITIONS_MAX_OPEN_POSITIONS": (
+            "positions",
+            "max_open_positions",
+            int,
+        ),
+        "AITOS_TUNING_POSITIONS_MAX_POSITIONS_PER_SYMBOL": (
+            "positions",
+            "max_positions_per_symbol",
+            int,
+        ),
+        "AITOS_TUNING_POSITIONS_MONITORING_INTERVAL_SECONDS": (
+            "positions",
+            "monitoring_interval_seconds",
+            float,
+        ),
+        "AITOS_TUNING_POSITIONS_INTENSIVE_ANALYSIS_BUDGET": (
+            "positions",
+            "intensive_analysis_budget",
+            int,
+        ),
     }
     result: dict[str, Any] = {}
     for env_name, (section, key, converter) in mapping.items():
