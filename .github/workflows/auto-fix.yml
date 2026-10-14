@@ -1,9 +1,9 @@
 name: CI Auto-Fix
 
 on:
-  # Auto-fix only main pushes. PR branches are validated by CI; bot-created
-  # commits on PR branches can suppress follow-up workflow runs and leave checks
-  # in action_required, so PR code is never rewritten automatically here.
+  # Keep automatic formatting on main only. PR validation must run on the
+  # contributor's commit, not be replaced by a bot-authored commit that can
+  # suppress follow-up workflow runs.
   push:
     branches: [main]
 
