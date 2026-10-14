@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -16,7 +16,7 @@ def _snapshot(update_id: int = 100) -> OrderBookSnapshot:
         bids=((100.0, 1.0),),
         asks=((101.0, 1.0),),
         last_update_id=update_id,
-        timestamp=datetime.now(timezone.utc),
+        timestamp=datetime.now(UTC),
     )
 
 
@@ -27,7 +27,7 @@ def _update(first: int, final: int, previous: int = 0) -> DepthUpdate:
         previous_update_id=previous,
         bids=((100.0, 2.0),),
         asks=(),
-        event_time_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+        event_time_ms=int(datetime.now(UTC).timestamp() * 1000),
     )
 
 
