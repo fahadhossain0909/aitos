@@ -12,6 +12,7 @@ from aitos.forensics.data_flow_debugger import (
 )
 from aitos.forensics.data_flow_registry import DataFlowRegistry
 from aitos.forensics.data_flow_schema import (
+    PIPELINE_ORDER,
     DataIssueClass,
     PipelineStage,
     make_trace_id,
@@ -138,9 +139,7 @@ def test_canonical_market_event_trace_id_and_persistence_stage() -> None:
         event_id="trade-123",
     )
     assert event.trace_id == "md:BTCUSDT:trade-123"
-    assert PipelineStage.PERSISTENCE in __import__(
-        "aitos.forensics.data_flow_schema", fromlist=["PIPELINE_ORDER"]
-    ).PIPELINE_ORDER
+    assert PipelineStage.PERSISTENCE in PIPELINE_ORDER
 
 
 def test_trace_timeline_keeps_event_and_parent_identity() -> None:
@@ -168,3 +167,23 @@ def test_symbol_freshness_is_tracked_independently() -> None:
     )
     assert "BTCUSDT" in reg.symbols()
     assert reg.snapshot_stage(PipelineStage.NORMALIZE, "BTCUSDT").source_age_ms == 42.0
+
+
+
+def test_legacy_symbol_only_trace_is_upgraded() -> None:
+    from datetime import datetime, timezone
+
+    from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
+
+    event = MarketEvent(
+        event_type=MarketEventType.TRADE,
+        exchange="binance",
+        market="futures",
+        symbol="BTCUSDT",
+        event_time=datetime.now(timezone.utc),
+        payload={"price": 100.0, "quantity": 0.1},
+        source=MarketSource.WEBSOCKET,
+        event_id="legacy-42",
+        trace_id="BTCUSDT",
+    )
+    assert event.trace_id == "md:BTCUSDT:legacy-42"
