@@ -83,14 +83,21 @@ class SystemComponents:
         """
         current = self.scanner._tuning
         updated = reload_tuning_settings()
-        if (
-            current.event_bus != updated.event_bus
+        restart_required = (
+            current.mode != updated.mode
+            or current.event_bus != updated.event_bus
+            or current.risk != updated.risk
+            or current.hardware != updated.hardware
+            or current.storage != updated.storage
+            or current.telemetry != updated.telemetry
             or current.positions.max_open_positions
             != updated.positions.max_open_positions
-        ):
+        )
+        if restart_required:
             raise ValueError(
-                "Runtime reload changed Event Bus or hard position-limit settings; "
-                "restart AITOS to apply this profile safely"
+                "Runtime reload changed mode, infrastructure, hardware, storage, "
+                "telemetry, risk ceilings or the hard position limit; restart AITOS "
+                "to apply this profile safely"
             )
         self.scanner.apply_tuning_settings(updated)
         self.trade_lifecycle.apply_tuning_settings(updated)
