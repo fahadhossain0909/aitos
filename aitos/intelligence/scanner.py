@@ -319,7 +319,7 @@ class OpportunityScanner(AITOSModule):
                 record_error(
                     PipelineStage.SCANNER.value,
                     symbol=symbol,
-                    issue="processing_timeout",
+                    issue="processing_error",
                 )
             except Exception:
                 pass
