@@ -156,6 +156,8 @@ class MarketDataBus:
                 stage=PipelineStage.REDIS_PUBLISH.value,
                 symbol=symbol,
                 latency_ms=latency_ms,
+                event_id=event.event_id,
+                extra={"event_type": event.event_type.value, "source": event.source.value},
             )
         except Exception:
             pass
@@ -175,10 +177,17 @@ class MarketDataBus:
             market_event = market_event_from_wire(event.payload)
             symbol = str(market_event.symbol or "")
             try:
-                from aitos.forensics.data_flow_hooks import record_input
+                from aitos.forensics.data_flow_hooks import note_trace, record_input
                 from aitos.forensics.data_flow_schema import PipelineStage
 
                 record_input(PipelineStage.REDIS_CONSUMER.value, symbol=symbol)
+                note_trace(
+                    trace_id=market_event.trace_id,
+                    stage=PipelineStage.REDIS_CONSUMER.value,
+                    symbol=symbol,
+                    event_id=market_event.event_id,
+                    extra={"event_type": market_event.event_type.value, "source": market_event.source.value},
+                )
             except Exception:
                 pass
             try:
@@ -200,10 +209,18 @@ class MarketDataBus:
                 from aitos.forensics.data_flow_hooks import record_output
                 from aitos.forensics.data_flow_schema import PipelineStage
 
+                consumer_latency_ms = (time.perf_counter() - started) * 1000.0
                 record_output(
                     PipelineStage.REDIS_CONSUMER.value,
                     symbol=symbol,
-                    latency_ms=(time.perf_counter() - started) * 1000.0,
+                    latency_ms=consumer_latency_ms,
+                )
+                note_trace(
+                    trace_id=market_event.trace_id,
+                    stage=PipelineStage.REDIS_CONSUMER.value,
+                    symbol=symbol,
+                    latency_ms=consumer_latency_ms,
+                    event_id=market_event.event_id,
                 )
             except Exception:
                 pass
