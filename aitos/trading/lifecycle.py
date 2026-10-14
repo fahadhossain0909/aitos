@@ -35,9 +35,11 @@ stop. No existing emergency or exchange-side path is removed.
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from aitos.config.tuning import TuningSettings, load_tuning_settings
 from aitos.core.contracts import (
     AITOSModule,
     Event,
@@ -125,10 +127,32 @@ class TradeLifecycle(AITOSModule):
         # identical to the pre-Phase-E lifecycle.
         self._position_manager = position_manager
         self._market_context_provider = market_context_provider
+        self._tuning = load_tuning_settings()
+        self._intensive_window_started_at = time.monotonic()
+        self._intensive_analyses_used = 0
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
         self._closed_trades: list[Trade] = []
         self._last_event_time: str | None = None
+
+    def apply_tuning_settings(self, settings: TuningSettings) -> None:
+        """Apply an explicitly reloaded tuning snapshot to position monitoring."""
+        self._tuning = settings
+        self._intensive_window_started_at = time.monotonic()
+        self._intensive_analyses_used = 0
+
+    def _allow_intensive_analysis(self) -> bool:
+        """Budget deep exit analysis without ever throttling hard-stop checks."""
+        now = time.monotonic()
+        interval = self._tuning.positions.monitoring_interval_seconds
+        if now - self._intensive_window_started_at >= interval:
+            self._intensive_window_started_at = now
+            self._intensive_analyses_used = 0
+        budget = self._tuning.positions.intensive_analysis_budget
+        if budget <= 0 or self._intensive_analyses_used >= budget:
+            return False
+        self._intensive_analyses_used += 1
+        return True
 
     @property
     def module_id(self) -> str:
@@ -381,25 +405,40 @@ class TradeLifecycle(AITOSModule):
 
         # ---- 2. Optional Exit Intelligence (Phase E) -------------------------
         eie_action = None
+        eie_evaluated_this_update = False
         if self._position_manager is not None:
-            eie_action = await self._apply_exit_intelligence(
-                trade,
-                current_price,
-                order_flow=order_flow,
-                volume_profile=volume_profile,
-                liquidity_events=liquidity_events,
-                prior_highs=prior_highs,
-                prior_lows=prior_lows,
-                swing_highs=swing_highs,
-                swing_lows=swing_lows,
-                structure_break_level=structure_break_level,
-                atr=atr,
-                trend_strength=trend_strength,
-                extra_features=extra_features,
-            )
-            if eie_action is not None:
-                # Full EXIT already performed inside _apply_exit_intelligence
-                return eie_action
+            if self._allow_intensive_analysis():
+                eie_evaluated_this_update = True
+                eie_action = await self._apply_exit_intelligence(
+                    trade,
+                    current_price,
+                    order_flow=order_flow,
+                    volume_profile=volume_profile,
+                    liquidity_events=liquidity_events,
+                    prior_highs=prior_highs,
+                    prior_lows=prior_lows,
+                    swing_highs=swing_highs,
+                    swing_lows=swing_lows,
+                    structure_break_level=structure_break_level,
+                    atr=atr,
+                    trend_strength=trend_strength,
+                    extra_features=extra_features,
+                )
+                if eie_action is not None:
+                    # Full EXIT already performed inside _apply_exit_intelligence
+                    return eie_action
+            else:
+                logger.debug(
+                    "intensive exit analysis budget exhausted; hard exits remain active",
+                    extra={
+                        "aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                            "budget": self._tuning.positions.intensive_analysis_budget,
+                            "interval_seconds": self._tuning.positions.monitoring_interval_seconds,
+                        }
+                    },
+                )
 
         # ---- 3. Static TP path (preserved; HOLD may defer full exit) ---------
         if trade.take_profit_levels:
@@ -411,6 +450,7 @@ class TradeLifecycle(AITOSModule):
                 # levels remain; otherwise defer full exit (winner may continue).
                 defer_full_tp = (
                     self._position_manager is not None
+                    and eie_evaluated_this_update
                     and getattr(trade, "_last_eie_action", None) == "HOLD"
                 )
                 if len(trade.take_profit_levels) > 1:

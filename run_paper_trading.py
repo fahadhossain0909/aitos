@@ -43,7 +43,7 @@ from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.persistence import load_attention_model, save_attention_model
 
 logger = get_logger("aitos.run_paper_trading")
-SCAN_INTERVAL_SECONDS = 60.0
+SCAN_INTERVAL_SECONDS = get_settings().tuning.scanner.refresh_interval_seconds
 KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 1_000.0
 HEALTH_SERVER_PORT = 8090
@@ -170,6 +170,10 @@ async def try_connect_neo4j(settings):
 
 async def main() -> None:
     settings = get_settings()
+    if settings.tuning.mode != "paper":
+        raise RuntimeError(
+            "Trading entrypoint/configuration mode mismatch: run_paper_trading.py requires AITOS_MODE=paper"
+        )
     configure_logging(settings.log_level)
     redis_client = await connect_redis_with_retry(settings)
     from aitos.eventbus.redis_bus import EventBus
@@ -393,7 +397,10 @@ async def main() -> None:
             except Exception as exc:
                 logger.error("scan cycle failed: %s", exc)
             try:
-                await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
+                await asyncio.wait_for(
+                    stop_event.wait(),
+                    timeout=get_settings().tuning.scanner.refresh_interval_seconds,
+                )
             except TimeoutError:
                 pass
     finally:

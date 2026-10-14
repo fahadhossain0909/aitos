@@ -11,7 +11,6 @@ from typing import Any
 from aitos.logging_setup import get_logger
 
 from .redis_bus import (
-    CONSUMER_BATCH_SIZE,
     CONSUMER_BLOCK_MS,
     POLL_INTERVAL_SECONDS,
 )
@@ -23,14 +22,21 @@ MAX_CONSUMER_CONCURRENCY = 32
 
 
 def consumer_concurrency() -> int:
+    """Resolve concurrency from central tuning, preserving the legacy override."""
     raw = os.getenv("REDIS_CONSUMER_CONCURRENCY")
-    if raw is None:
-        return DEFAULT_CONSUMER_CONCURRENCY
-    try:
-        value = int(raw)
-    except ValueError:
-        return DEFAULT_CONSUMER_CONCURRENCY
-    return max(1, min(value, MAX_CONSUMER_CONCURRENCY))
+    if raw is not None:
+        try:
+            value = int(raw)
+        except ValueError:
+            # Preserve the historical compatibility contract for this legacy
+            # variable. New AITOS_TUNING_* values remain strictly validated.
+            return DEFAULT_CONSUMER_CONCURRENCY
+        return max(1, min(MAX_CONSUMER_CONCURRENCY, value))
+
+    # Lazy import avoids eventbus -> config -> application import cycles.
+    from aitos.config.tuning import load_tuning_settings
+
+    return load_tuning_settings().event_bus.consumer_concurrency
 
 
 def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
@@ -111,6 +117,9 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
     ) -> None:
         streams_seen: set[str] = set()
         stream_tasks: dict[str, asyncio.Task] = {}
+        from aitos.config.tuning import load_tuning_settings
+
+        batch_size = load_tuning_settings().event_bus.consumer_batch_size
         semaphore = asyncio.Semaphore(consumer_concurrency())
 
         async def consume_stream(stream_topic: str) -> None:
@@ -138,7 +147,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                             groupname=group,
                             consumername=consumer,
                             streams={stream_key: ">"},
-                            count=CONSUMER_BATCH_SIZE,
+                            count=batch_size,
                             block=CONSUMER_BLOCK_MS,
                         )
                     except asyncio.CancelledError:
