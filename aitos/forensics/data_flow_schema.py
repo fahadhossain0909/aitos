@@ -1,14 +1,9 @@
 """Canonical data-flow observability schema for AITOS market pipeline.
 
-Phase 1 of the Data Flow Observability plan consolidates scattered telemetry
-into one consistent vocabulary so stages can be correlated end-to-end without
-OpenTelemetry (yet).
-
-Stages mirror the live path:
-  transport → receive → decode → normalize → gateway_queue → redis_publish →
-  redis_consumer → live_state → feature → scanner → trade_lifecycle
+Stages mirror the live path and persistence side branch. Trace identifiers are
+stable across adapters and Redis serialization; instrumentation must never
+change trading decisions.
 """
-
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -32,23 +27,15 @@ class PipelineStage(str, Enum):
 
 
 PIPELINE_ORDER: tuple[PipelineStage, ...] = (
-    PipelineStage.TRANSPORT,
-    PipelineStage.RECEIVE,
-    PipelineStage.DECODE,
-    PipelineStage.NORMALIZE,
-    PipelineStage.GATEWAY_QUEUE,
-    PipelineStage.REDIS_PUBLISH,
-    PipelineStage.REDIS_CONSUMER,
-    PipelineStage.LIVE_STATE,
-    PipelineStage.FEATURE,
-    PipelineStage.SCANNER,
-    PipelineStage.TRADE_LIFECYCLE,
+    PipelineStage.TRANSPORT, PipelineStage.RECEIVE, PipelineStage.DECODE,
+    PipelineStage.NORMALIZE, PipelineStage.GATEWAY_QUEUE,
+    PipelineStage.REDIS_PUBLISH, PipelineStage.REDIS_CONSUMER,
+    PipelineStage.LIVE_STATE, PipelineStage.FEATURE, PipelineStage.SCANNER,
+    PipelineStage.TRADE_LIFECYCLE, PipelineStage.PERSISTENCE,
 )
 
 
 class DataIssueClass(str, Enum):
-    """Separate late/valid data from corrupted data (plan section 26)."""
-
     STALE = "stale"
     DUPLICATE = "duplicate"
     SCHEMA_INVALID = "schema_invalid"
@@ -62,26 +49,26 @@ class DataIssueClass(str, Enum):
 
 
 def make_trace_id(symbol: str, event_id: Any) -> str | None:
-    """Canonical market-data trace identity: ``md:{SYMBOL}:{event_id}``."""
+    """Canonical identity for one source event: md:{SYMBOL}:{event_id}."""
     symbol_n = str(symbol or "").strip().upper()
-    if not symbol_n or event_id is None:
+    event_n = str(event_id).strip() if event_id is not None else ""
+    if not symbol_n or not event_n:
         return None
-    return f"md:{symbol_n}:{event_id}"
+    return f"md:{symbol_n}:{event_n}"
 
 
 def parse_trace_id(trace_id: str) -> tuple[str, str] | None:
     if not trace_id or not trace_id.startswith("md:"):
         return None
     parts = trace_id.split(":", 2)
-    if len(parts) != 3:
+    if len(parts) != 3 or not parts[1] or not parts[2]:
         return None
     return parts[1], parts[2]
 
 
 @dataclass
 class StageTimestamps:
-    """Per-event stage clock (milliseconds since epoch where known)."""
-
+    """Per-event wall-clock timestamps in milliseconds since epoch."""
     source_timestamp_ms: float | None = None
     received_at_ms: float | None = None
     decoded_at_ms: float | None = None
@@ -93,10 +80,10 @@ class StageTimestamps:
     state_update_ms: float | None = None
     feature_ready_ms: float | None = None
     scanner_evaluated_ms: float | None = None
+    persistence_written_ms: float | None = None
 
     def latency_ms(self, start: str, end: str) -> float | None:
-        a = getattr(self, start, None)
-        b = getattr(self, end, None)
+        a, b = getattr(self, start, None), getattr(self, end, None)
         if a is None or b is None:
             return None
         return max(0.0, float(b) - float(a))
@@ -128,12 +115,5 @@ class StageSnapshot:
         return asdict(self)
 
 
-__all__ = [
-    "PIPELINE_ORDER",
-    "DataIssueClass",
-    "PipelineStage",
-    "StageSnapshot",
-    "StageTimestamps",
-    "make_trace_id",
-    "parse_trace_id",
-]
+__all__ = ["PIPELINE_ORDER", "DataIssueClass", "PipelineStage", "StageSnapshot",
+           "StageTimestamps", "make_trace_id", "parse_trace_id"]
