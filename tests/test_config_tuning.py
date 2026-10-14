@@ -25,11 +25,16 @@ def test_low_resource_profile_reduces_workload():
 
 def test_allowlist_mode_requires_symbols():
     with pytest.raises(ValidationError):
-        TuningSettings.model_validate({
-            "profile": "balanced",
-            "mode": "paper",
-            "scanner": {"universe_mode": "allowlist", "symbol_allowlist": []},
-        })
+        TuningSettings.model_validate(
+            {
+                "profile": "balanced",
+                "mode": "paper",
+                "scanner": {
+                    "universe_mode": "allowlist",
+                    "symbol_allowlist": [],
+                },
+            }
+        )
 
 
 def test_invalid_numeric_ranges_are_rejected():
@@ -72,7 +77,7 @@ def test_event_bus_profile_exposes_pool_and_batch_budgets():
     assert balanced.event_bus.consumer_batch_size < high.event_bus.consumer_batch_size
 
 
-def test_live_position_limit_never_exceeds_selected_profile():
+def test_live_position_limit_is_part_of_selected_profile():
     settings = load_tuning_settings(profile="low_resource", mode="live")
     assert settings.positions.max_open_positions == 2
     assert settings.runtime.adaptive_tuning_enabled is False
