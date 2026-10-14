@@ -21,6 +21,7 @@ def test_project_root_respects_aitos_home(monkeypatch, tmp_path):
 def test_native_model_data_defaults_inside_project(monkeypatch, tmp_path):
     monkeypatch.delenv("MODEL_DATA_DIR", raising=False)
     monkeypatch.setenv("AITOS_HOME", str(tmp_path))
+    monkeypatch.setenv("AITOS_ENV_FILE", str(tmp_path / "missing.env"))
     original_exists = Path.exists
 
     def local_exists(path):
