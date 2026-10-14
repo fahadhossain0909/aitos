@@ -29,5 +29,7 @@ async def test_scanner_applies_configured_universe_and_top_n(event_bus):
 
     assert scanner._symbols == ["ETHUSDT"]
     assert scanner._top_n == 2
-    assert scanner._scan_semaphore._value == tuning.analysis.expensive_analysis_concurrency
-    await scanner.shutdown()
+    assert (
+        scanner._scan_semaphore._value
+        == tuning.analysis.expensive_analysis_concurrency
+    )
