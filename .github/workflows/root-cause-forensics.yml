@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   root-cause-forensics:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: VPS unified root-cause evidence
     runs-on: ubuntu-latest
     timeout-minutes: 20
