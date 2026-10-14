@@ -27,6 +27,7 @@ concurrency:
 
 jobs:
   orderbook-forensics:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: VPS order-book forensic pass
     runs-on: ubuntu-latest
     timeout-minutes: 8
