@@ -197,6 +197,25 @@ class OpportunityScanner(AITOSModule):
         self._last_scan_at = None
         self._last_candidate_count = 0
 
+    def apply_tuning_settings(self, settings: TuningSettings) -> None:
+        """Apply runtime-safe scanner budgets; universe changes require restart."""
+        previous = self._tuning.scanner
+        incoming = settings.scanner
+        if (
+            previous.universe_mode != incoming.universe_mode
+            or previous.universe_limit != incoming.universe_limit
+            or previous.symbol_allowlist != incoming.symbol_allowlist
+        ):
+            raise ValueError(
+                "Runtime reload changed scanner universe settings; restart AITOS "
+                "to rebuild market-data subscriptions safely"
+            )
+        self._tuning = settings
+        self._top_n = incoming.top_n
+        self._scan_semaphore = asyncio.Semaphore(
+            settings.analysis.expensive_analysis_concurrency
+        )
+
     @property
     def module_id(self) -> str:
         return "opportunity-scanner"
