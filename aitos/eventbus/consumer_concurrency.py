@@ -11,7 +11,6 @@ from typing import Any
 from aitos.logging_setup import get_logger
 
 from .redis_bus import (
-    CONSUMER_BATCH_SIZE,
     CONSUMER_BLOCK_MS,
     POLL_INTERVAL_SECONDS,
 )
