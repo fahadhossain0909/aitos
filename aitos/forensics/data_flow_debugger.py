@@ -74,7 +74,7 @@ def build_data_flow_report(
         "symbol": symbol_n or "*",
         "stages": [_format_stage(s) for s in stages],
         "pressure_point": pressure,
-        "recent_traces": reg.recent_traces(limit=30),
+        "recent_traces": reg.recent_traces(limit=30, symbol=symbol_n),
         "pipeline_order": [s.value for s in PIPELINE_ORDER],
     }
 
