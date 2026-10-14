@@ -6,7 +6,7 @@ import heapq
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from aitos.logging_setup import get_logger
@@ -259,9 +259,9 @@ class LocalOrderBook:
                 },
             )
         timestamp = (
-            datetime.fromtimestamp(event_time_ms / 1000, tz=UTC)
+            datetime.fromtimestamp(event_time_ms / 1000, tz=timezone.utc)
             if event_time_ms
-            else datetime.now(UTC)
+            else datetime.now(timezone.utc)
         )
         return OrderBookSnapshot(
             symbol=self.symbol,
