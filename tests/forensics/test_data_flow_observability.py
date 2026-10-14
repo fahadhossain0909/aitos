@@ -122,7 +122,6 @@ def test_health_metrics_match_dashboard_contract() -> None:
         assert name in metrics
 
 
-
 def test_canonical_market_event_trace_id_and_persistence_stage() -> None:
     from datetime import datetime, timezone
 
@@ -167,7 +166,6 @@ def test_symbol_freshness_is_tracked_independently() -> None:
     )
     assert "BTCUSDT" in reg.symbols()
     assert reg.snapshot_stage(PipelineStage.NORMALIZE, "BTCUSDT").source_age_ms == 42.0
-
 
 
 def test_legacy_symbol_only_trace_is_upgraded() -> None:
