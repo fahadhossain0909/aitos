@@ -102,10 +102,12 @@ class MarketEvent:
     def __post_init__(self) -> None:
         # Use one identity convention throughout adapters, Redis, and consumers.
         # Import lazily to keep the market contract lightweight at module import.
-        if self.trace_id is None:
+        if self.trace_id is None or self.trace_id == self.symbol:
             from aitos.forensics.data_flow_schema import make_trace_id
 
-            object.__setattr__(self, "trace_id", make_trace_id(self.symbol, self.event_id))
+            object.__setattr__(
+                self, "trace_id", make_trace_id(self.symbol, self.event_id)
+            )
         if self.venue is None:
             object.__setattr__(self, "venue", self.exchange)
         if self.market_type is None:
