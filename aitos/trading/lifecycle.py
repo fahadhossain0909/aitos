@@ -405,8 +405,10 @@ class TradeLifecycle(AITOSModule):
 
         # ---- 2. Optional Exit Intelligence (Phase E) -------------------------
         eie_action = None
+        eie_evaluated_this_update = False
         if self._position_manager is not None:
             if self._allow_intensive_analysis():
+                eie_evaluated_this_update = True
                 eie_action = await self._apply_exit_intelligence(
                     trade,
                     current_price,
@@ -448,6 +450,7 @@ class TradeLifecycle(AITOSModule):
                 # levels remain; otherwise defer full exit (winner may continue).
                 defer_full_tp = (
                     self._position_manager is not None
+                    and eie_evaluated_this_update
                     and getattr(trade, "_last_eie_action", None) == "HOLD"
                 )
                 if len(trade.take_profit_levels) > 1:
