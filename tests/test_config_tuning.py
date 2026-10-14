@@ -126,14 +126,16 @@ def test_intensive_exit_analysis_budget_is_bounded_per_window():
     assert lifecycle._allow_intensive_analysis() is True
 
 
-
 def test_hardware_storage_and_telemetry_profiles_are_resolved():
     low = load_tuning_settings(profile="low_resource", mode="paper")
     high = load_tuning_settings(profile="high_performance", mode="paper")
     assert low.hardware.cpu_worker_budget < high.hardware.cpu_worker_budget
     assert low.hardware.memory_reserve_pct > high.hardware.memory_reserve_pct
     assert low.storage.clickhouse_batch_size < high.storage.clickhouse_batch_size
-    assert low.storage.historical_backfill_concurrency < high.storage.historical_backfill_concurrency
+    assert (
+        low.storage.historical_backfill_concurrency
+        < high.storage.historical_backfill_concurrency
+    )
     assert low.telemetry.trace_sample_rate < high.telemetry.trace_sample_rate
 
 
@@ -151,9 +153,10 @@ def test_hardware_and_storage_environment_overrides_are_validated(monkeypatch):
 
 def test_live_mode_rejects_adaptive_tuning(monkeypatch):
     monkeypatch.setenv("AITOS_TUNING_RUNTIME_ADAPTIVE_TUNING_ENABLED", "true")
-    with pytest.raises(ValidationError, match="adaptive tuning is not permitted in live mode"):
+    with pytest.raises(
+        ValidationError, match="adaptive tuning is not permitted in live mode"
+    ):
         load_tuning_settings(profile="balanced", mode="live")
-
 
 
 def test_risk_ceilings_are_centralized_and_cannot_be_relaxed(monkeypatch):
@@ -161,7 +164,12 @@ def test_risk_ceilings_are_centralized_and_cannot_be_relaxed(monkeypatch):
     assert settings.risk.max_risk_per_trade_pct == 1.0
     assert settings.risk.max_leverage == 10.0
     monkeypatch.setenv("AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT", "0.5")
-    assert load_tuning_settings(profile="balanced", mode="paper").risk.max_risk_per_trade_pct == 0.5
+    assert (
+        load_tuning_settings(
+            profile="balanced", mode="paper"
+        ).risk.max_risk_per_trade_pct
+        == 0.5
+    )
     monkeypatch.setenv("AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT", "1.5")
     with pytest.raises(ValidationError):
         load_tuning_settings(profile="balanced", mode="paper")
