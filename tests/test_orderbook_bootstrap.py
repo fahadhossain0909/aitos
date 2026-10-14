@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 
-from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
+import pytest
+
+from aitos.exchange.orderbook import (
+    DepthUpdate,
+    LocalOrderBook,
+    OrderBookSequenceError,
+)
 from aitos.models.market import OrderBookSnapshot
 
 
@@ -21,7 +27,7 @@ def _update(first: int, final: int, previous: int = 0) -> DepthUpdate:
         previous_update_id=previous,
         bids=((100.0, 2.0),),
         asks=(),
-        event_time_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+        event_time_ms=int(datetime.now(UTC).timestamp() * 1000),
     )
 
 
@@ -34,8 +40,8 @@ def test_bootstrap_discards_diffs_already_covered_by_rest_snapshot():
     assert result is None
     assert book.last_update_id == 100
     assert book.forensics_snapshot()["stale_updates"] == 1
-    # After seed(), book is immediately initialized and ready
-    assert book.forensics_snapshot()["awaiting_first_update"] is False
+    # Covered websocket diffs must not complete the bootstrap bridge.
+    assert book.forensics_snapshot()["awaiting_first_update"] is True
 
 
 def test_bootstrap_accepts_first_diff_that_bridges_rest_snapshot():
@@ -50,3 +56,16 @@ def test_bootstrap_accepts_first_diff_that_bridges_rest_snapshot():
     assert result.last_update_id == 102
     assert result.bids == ((100.0, 2.0),)
     assert book.forensics_snapshot()["awaiting_first_update"] is False
+
+
+def test_bootstrap_rejects_first_new_diff_that_does_not_bridge_snapshot():
+    book = LocalOrderBook("BTCUSDT", max_levels=20)
+    book.seed(_snapshot(100))
+
+    assert book.apply(_update(95, 100)) is None
+    with pytest.raises(OrderBookSequenceError, match="does not bridge snapshot"):
+        book.apply(_update(105, 106, previous=104))
+
+    diagnostics = book.forensics_snapshot()
+    assert diagnostics["sequence_errors"] == 1
+    assert diagnostics["awaiting_first_update"] is True
