@@ -177,6 +177,7 @@ class HealthServer:
                 "# HELP aitos_data_flow_pressure Whether stage is under pressure (1/0)"
             )
             lines.append("# TYPE aitos_data_flow_pressure gauge")
+            # Keep missing samples numeric so Prometheus/Grafana queries stay stable.
             for stage in PIPELINE_ORDER:
                 snap = reg.snapshot_stage(stage, "")
                 stage_label = snap.stage
