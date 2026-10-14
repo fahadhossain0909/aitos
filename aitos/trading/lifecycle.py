@@ -226,7 +226,9 @@ class TradeLifecycle(AITOSModule):
     def get_closed_trades(self) -> list[Trade]:
         return list(self._closed_trades)
 
-    async def submit_opportunity(self, opportunity: Opportunity) -> Trade:
+    async def submit_opportunity(
+        self, opportunity: Opportunity, portfolio: PortfolioState
+    ) -> Trade:
         """Measure opportunity-to-lifecycle handling; preserve existing policy."""
         import time
 
@@ -244,7 +246,7 @@ class TradeLifecycle(AITOSModule):
         except Exception:
             pass
         try:
-            trade = await self._submit_opportunity_impl(opportunity)
+            trade = await self._submit_opportunity_impl(opportunity, portfolio)
         except Exception:
             try:
                 record_error(
