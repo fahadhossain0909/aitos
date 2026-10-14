@@ -226,19 +226,22 @@ async def main() -> None:
     # created on a fresh/recreated ClickHouse volume.
     await trade_state_persistence.initialize()
     set_open_position_provider(components.trade_lifecycle.get_open_trades)
-    await trade_state_persistence.restore()
+    # Install protection before recovery/resubscription so every subsequent
+    # scanner-driven subscription update preserves restored position symbols.
+    install_protected_position_monitor()
+    restored_count = await trade_state_persistence.restore()
     logger.info(
         "paper lifecycle recovery initialized",
         extra={
             "aitos_extra": {
-                "restored_open_trades": len(
-                    components.trade_lifecycle.get_open_trades()
-                ),
+                "restored_open_trades": restored_count,
             }
         },
     )
-    install_protected_position_monitor()
     await initialize_all(components)
+    # Canonical market streams only become active during initialize_all().
+    # Reconcile subscriptions afterwards and verify the effective symbol sets.
+    await trade_state_persistence.resubscribe_restored_positions()
 
     # Start continual-learning worker to incrementally train on historical
     # backtest experiences stored in ClickHouse. Runs in a background thread
