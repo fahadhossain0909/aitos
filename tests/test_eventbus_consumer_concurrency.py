@@ -7,7 +7,9 @@ import asyncio
 import pytest
 
 from aitos.core.contracts import Event
-from aitos.eventbus.consumer_concurrency import install_eventbus_consumer_concurrency
+from aitos.eventbus.consumer_concurrency import (
+    install_eventbus_consumer_concurrency,
+)
 from aitos.eventbus.redis_bus import EventBus
 
 
@@ -26,7 +28,12 @@ async def test_live_subscription_receives_events_published_after_subscribe(fake_
 
     topic = "market.trade.PR195TEST"
     try:
-        await bus.subscribe(topic, handler, group="pr195-live-subscription", start_id="$")
+        await bus.subscribe(
+            topic,
+            handler,
+            group="pr195-live-subscription",
+            start_id="$",
+        )
         # Allow the consumer group and reader task to start before publishing.
         await asyncio.sleep(0.05)
         await bus.publish(
