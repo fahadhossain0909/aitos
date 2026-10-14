@@ -525,7 +525,11 @@ class TradeLifecycle(AITOSModule):
         trade = self._open_trades.get(trade_id)
         symbol = str(getattr(trade, "symbol", "") or "")
         try:
-            from aitos.forensics.data_flow_hooks import record_input, record_output, record_error
+            from aitos.forensics.data_flow_hooks import (
+                record_input,
+                record_output,
+                record_error,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.TRADE_LIFECYCLE.value, symbol=symbol)
@@ -535,7 +539,11 @@ class TradeLifecycle(AITOSModule):
             result = await self._close_trade_impl(trade_id, exit_price, reason)
         except Exception:
             try:
-                record_error(PipelineStage.TRADE_LIFECYCLE.value, symbol=symbol, issue="processing_timeout")
+                record_error(
+                    PipelineStage.TRADE_LIFECYCLE.value,
+                    symbol=symbol,
+                    issue="processing_timeout",
+                )
             except Exception:
                 pass
             raise
