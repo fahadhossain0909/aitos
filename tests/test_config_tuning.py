@@ -61,3 +61,18 @@ def test_live_mode_does_not_enable_adaptive_tuning_by_default():
     assert settings.mode == "live"
     assert settings.runtime.adaptive_tuning_enabled is False
     assert settings.runtime.config_reload_enabled is False
+
+
+def test_event_bus_profile_exposes_pool_and_batch_budgets():
+    low = load_tuning_settings(profile="low_resource", mode="paper")
+    balanced = load_tuning_settings(profile="balanced", mode="paper")
+    high = load_tuning_settings(profile="high_performance", mode="paper")
+    assert low.event_bus.consumer_concurrency < balanced.event_bus.consumer_concurrency
+    assert low.event_bus.connection_pool_size < balanced.event_bus.connection_pool_size
+    assert balanced.event_bus.consumer_batch_size < high.event_bus.consumer_batch_size
+
+
+def test_live_position_limit_never_exceeds_selected_profile():
+    settings = load_tuning_settings(profile="low_resource", mode="live")
+    assert settings.positions.max_open_positions == 2
+    assert settings.runtime.adaptive_tuning_enabled is False
