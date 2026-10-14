@@ -252,7 +252,7 @@ class TradeLifecycle(AITOSModule):
                 record_error(
                     PipelineStage.TRADE_LIFECYCLE.value,
                     symbol=symbol,
-                    issue="processing_timeout",
+                    issue="processing_error",
                 )
             except Exception:
                 pass
@@ -544,7 +544,7 @@ class TradeLifecycle(AITOSModule):
                 record_error(
                     PipelineStage.TRADE_LIFECYCLE.value,
                     symbol=symbol,
-                    issue="processing_timeout",
+                    issue="processing_error",
                 )
             except Exception:
                 pass
