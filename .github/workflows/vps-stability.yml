@@ -14,6 +14,7 @@ concurrency:
 
 jobs:
   check:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     name: Check Redis and paper runtime
     runs-on: ubuntu-latest
     environment: papertrade
