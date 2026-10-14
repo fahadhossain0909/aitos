@@ -47,7 +47,6 @@ def _event(
             else MarketSource.REST
         ),
         correlation_id=f"binance:usd_m_futures:{symbol}:{event_type.value}:{event_time.timestamp()}",
-        trace_id=symbol,
     )
 
 
