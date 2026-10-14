@@ -22,12 +22,12 @@
       "gridPos": { "h": 4, "w": 24, "x": 0, "y": 0 },
       "options": {
         "mode": "markdown",
-        "content": "Poll `GET /data-flow` or `GET /data-flow/BTCUSDT` on the HealthServer.\nWire Prometheus gauges from stage snapshots (input_rate, output_rate, latency p99, queue depth).\nPressure point = first stage with input_rate > output_rate and rising oldest_event_age_ms."
+        "content": "Poll `GET /data-flow` or `GET /data-flow/BTCUSDT` on the HealthServer.\nWire Prometheus gauges from stage snapshots (input/output rate, p50/p95/p99 latency, queue depth, oldest/source age, drops, errors).\nPressure point = first stage with input_rate > output_rate and rising oldest_event_age_ms."
       }
     },
     {
       "type": "timeseries",
-      "title": "Stage throughput (placeholder metric names)",
+      "title": "Stage throughput",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
       "targets": [
         { "expr": "aitos_data_flow_input_rate", "legendFormat": "input" },
@@ -36,7 +36,7 @@
     },
     {
       "type": "timeseries",
-      "title": "Latency percentiles (placeholder)",
+      "title": "Latency percentiles",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
       "targets": [
         { "expr": "aitos_data_flow_latency_p50_ms", "legendFormat": "p50" },
