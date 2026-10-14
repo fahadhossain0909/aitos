@@ -107,7 +107,7 @@ class FakeIngestion:
 async def test_restore_defers_market_resubscription_until_explicit_reconcile(
     event_bus, paper_trade, monkeypatch
 ):
-    import aitos.trading.persistent_state as persistent_state
+    from aitos.trading import persistent_state
 
     lifecycle = FakeLifecycle()
     ingestion = FakeIngestion()
@@ -132,7 +132,7 @@ async def test_restore_defers_market_resubscription_until_explicit_reconcile(
 async def test_resubscription_reports_missing_symbols_as_failure(
     event_bus, paper_trade, monkeypatch
 ):
-    import aitos.trading.persistent_state as persistent_state
+    from aitos.trading import persistent_state
 
     class NoopIngestion:
         _live_trade_symbols = []
