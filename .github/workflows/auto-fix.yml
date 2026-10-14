@@ -1,8 +1,10 @@
 name: CI Auto-Fix
 
 on:
+  # PRs from same-repository branches are handled by pull_request_target below.
+  # Restrict push-triggered autofix to main to avoid one run per feature-branch commit.
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request_target:
     branches: [main, master, develop]
 
@@ -14,7 +16,7 @@ permissions:
 # must not be rewritten underneath implementation commits.
 concurrency:
   group: auto-fix-${{ github.repository }}-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   python-autofix:
