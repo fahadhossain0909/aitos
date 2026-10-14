@@ -16,7 +16,8 @@
       },
       "event_bus": {
         "consumer_concurrency": 2,
-        "queue_maxsize": 250
+        "queue_maxsize": 250,
+        "connection_pool_size": 64
       },
       "positions": {
         "max_open_positions": 2,
@@ -44,7 +45,8 @@
       },
       "event_bus": {
         "consumer_concurrency": 8,
-        "queue_maxsize": 1000
+        "queue_maxsize": 1000,
+        "connection_pool_size": 256
       },
       "positions": {
         "max_open_positions": 3,
@@ -72,7 +74,8 @@
       },
       "event_bus": {
         "consumer_concurrency": 16,
-        "queue_maxsize": 2000
+        "queue_maxsize": 2000,
+        "connection_pool_size": 512
       },
       "positions": {
         "max_open_positions": 3,
