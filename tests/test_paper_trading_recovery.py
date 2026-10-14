@@ -20,6 +20,9 @@ class FakeLifecycle:
     def __init__(self):
         self._open_trades = {}
 
+    def get_open_trades(self):
+        return list(self._open_trades.values())
+
 
 @pytest.fixture
 def paper_trade():
