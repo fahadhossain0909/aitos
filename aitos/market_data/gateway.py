@@ -99,7 +99,10 @@ class MarketDataGateway:
             self.state = GatewayState.DEGRADED
             try:
                 from aitos.forensics.data_flow_hooks import record_drop
-                from aitos.forensics.data_flow_schema import DataIssueClass, PipelineStage
+                from aitos.forensics.data_flow_schema import (
+                    DataIssueClass,
+                    PipelineStage,
+                )
 
                 record_drop(
                     PipelineStage.GATEWAY_QUEUE.value,
@@ -259,7 +262,10 @@ class MarketDataGateway:
                 self.health.record_publish()
                 latency_ms = (time.perf_counter() - queue_started) * 1000.0
                 try:
-                    from aitos.forensics.data_flow_hooks import note_trace, record_output
+                    from aitos.forensics.data_flow_hooks import (
+                        note_trace,
+                        record_output,
+                    )
                     from aitos.forensics.data_flow_schema import PipelineStage
 
                     record_output(
