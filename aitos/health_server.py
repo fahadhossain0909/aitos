@@ -134,6 +134,57 @@ class HealthServer:
                 status=500,
             )
 
+    def _append_data_flow_metrics(self, lines: list[str]) -> None:
+        """Export aggregate stage rates/latencies for Grafana."""
+        try:
+            from aitos.forensics.data_flow_registry import get_data_flow_registry
+            from aitos.forensics.data_flow_schema import PIPELINE_ORDER
+
+            reg = get_data_flow_registry()
+            lines.append(
+                "# HELP aitos_data_flow_input_rate Stage input events per second"
+            )
+            lines.append("# TYPE aitos_data_flow_input_rate gauge")
+            lines.append(
+                "# HELP aitos_data_flow_output_rate Stage output events per second"
+            )
+            lines.append("# TYPE aitos_data_flow_output_rate gauge")
+            lines.append(
+                "# HELP aitos_data_flow_latency_p99_ms Stage processing latency p99"
+            )
+            lines.append("# TYPE aitos_data_flow_latency_p99_ms gauge")
+            lines.append("# HELP aitos_data_flow_queue_depth Stage queue depth")
+            lines.append("# TYPE aitos_data_flow_queue_depth gauge")
+            lines.append(
+                "# HELP aitos_data_flow_pressure Whether stage is under pressure (1/0)"
+            )
+            lines.append("# TYPE aitos_data_flow_pressure gauge")
+            for stage in PIPELINE_ORDER:
+                snap = reg.snapshot_stage(stage, "")
+                stage_label = snap.stage
+                lines.append(
+                    f'aitos_data_flow_input_rate{{stage="{stage_label}"}} '
+                    f"{snap.input_rate}"
+                )
+                lines.append(
+                    f'aitos_data_flow_output_rate{{stage="{stage_label}"}} '
+                    f"{snap.output_rate}"
+                )
+                p99 = snap.latency_p99_ms if snap.latency_p99_ms is not None else 0
+                lines.append(
+                    f'aitos_data_flow_latency_p99_ms{{stage="{stage_label}"}} {p99}'
+                )
+                lines.append(
+                    f'aitos_data_flow_queue_depth{{stage="{stage_label}"}} '
+                    f"{snap.queue_depth}"
+                )
+                lines.append(
+                    f'aitos_data_flow_pressure{{stage="{stage_label}"}} '
+                    f"{1 if snap.pressure else 0}"
+                )
+        except Exception:
+            logger.exception("data-flow metrics export failed")
+
     async def _handle_health(self, request: web.Request) -> web.Response:
         results = []
         overall_healthy = True
@@ -349,6 +400,8 @@ class HealthServer:
                         )
                         lines.append(f"# TYPE {metric_name} gauge")
                         lines.append(f"{metric_name} {val}")
+
+        self._append_data_flow_metrics(lines)
 
         logger.info("metrics check completed")
         return web.Response(text="\n".join(lines) + "\n", content_type="text/plain")
