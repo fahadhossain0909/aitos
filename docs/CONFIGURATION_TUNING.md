@@ -96,6 +96,18 @@ values into scanner, analysis, Event Bus, positions, hardware, storage,
 telemetry, and runtime sections. Profile values are validated and included in
 the effective configuration hash.
 
+### Risk ceiling overrides
+
+The risk section is deliberately conservative. Central tuning can lower, but
+not raise, the current baseline ceilings. It is applied by `build_system()`
+using the stricter of the supplied risk-engine value and the central ceiling.
+
+- `AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT` (maximum 1.0)
+- `AITOS_TUNING_RISK_MAX_LEVERAGE` (maximum 10.0)
+- `AITOS_TUNING_RISK_MAX_DRAWDOWN_PCT` (maximum 10.0)
+- `AITOS_TUNING_RISK_MAX_CORRELATED_EXPOSURE_PCT` (maximum 15.0)
+- `AITOS_TUNING_RISK_MAX_SECTOR_EXPOSURE_PCT` (maximum 20.0)
+
 ### Additional environment overrides
 
 - `AITOS_TUNING_HARDWARE_CPU_WORKER_BUDGET`
@@ -113,7 +125,9 @@ the effective configuration hash.
 ### Important scope boundary
 
 The scanner's expensive-analysis semaphore is capped by both its configured
-concurrency and the hardware profile's `cpu_worker_budget`. Hardware memory
+concurrency and the hardware profile's `cpu_worker_budget`. Central risk ceilings
+are wired into `build_system()` and can tighten, but never relax, caller-supplied
+risk limits. Hardware memory
 budget/reserve, background-task limits, storage backfill/batch/retention values,
 and telemetry sampling intervals are currently validated configuration
 contracts and profile hints; they are **not yet universal runtime governors**.
