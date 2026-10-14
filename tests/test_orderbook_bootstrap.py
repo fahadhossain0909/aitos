@@ -1,6 +1,12 @@
 from datetime import datetime, timezone
 
-from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
+import pytest
+
+from aitos.exchange.orderbook import (
+    DepthUpdate,
+    LocalOrderBook,
+    OrderBookSequenceError,
+)
 from aitos.models.market import OrderBookSnapshot
 
 
@@ -53,10 +59,6 @@ def test_bootstrap_accepts_first_diff_that_bridges_rest_snapshot():
 
 
 def test_bootstrap_rejects_first_new_diff_that_does_not_bridge_snapshot():
-    import pytest
-
-    from aitos.exchange.orderbook import OrderBookSequenceError
-
     book = LocalOrderBook("BTCUSDT", max_levels=20)
     book.seed(_snapshot(100))
 
