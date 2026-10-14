@@ -40,7 +40,8 @@ class AnalysisTuning(BaseModel):
 
 class EventBusTuning(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    consumer_concurrency: int = Field(default=8, ge=1, le=512)
+    consumer_concurrency: int = Field(default=8, ge=1, le=32)
+    connection_pool_size: int = Field(default=256, ge=8, le=4096)
     queue_maxsize: int = Field(default=1000, ge=1, le=1_000_000)
 
 
@@ -116,6 +117,7 @@ def _env_overrides() -> dict[str, Any]:
         "AITOS_TUNING_ANALYSIS_LIGHTWEIGHT_CONCURRENCY": ("analysis", "lightweight_concurrency", int),
         "AITOS_TUNING_ANALYSIS_TIMEOUT_SECONDS": ("analysis", "timeout_seconds", float),
         "AITOS_TUNING_EVENT_BUS_CONSUMER_CONCURRENCY": ("event_bus", "consumer_concurrency", int),
+        "AITOS_TUNING_EVENT_BUS_CONNECTION_POOL_SIZE": ("event_bus", "connection_pool_size", int),
         "AITOS_TUNING_EVENT_BUS_QUEUE_MAXSIZE": ("event_bus", "queue_maxsize", int),
         "AITOS_TUNING_POSITIONS_MAX_OPEN_POSITIONS": ("positions", "max_open_positions", int),
         "AITOS_TUNING_POSITIONS_MAX_POSITIONS_PER_SYMBOL": ("positions", "max_positions_per_symbol", int),
