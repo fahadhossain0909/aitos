@@ -80,7 +80,11 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                 await self._redis.xack(stream_key, group, entry_id)
                 self._acked_events += 1
                 self._last_acked_at = datetime.now(timezone.utc).isoformat()
-                if response is not None and hasattr(self, "_maybe_publish_response"):
+                if (
+                    response is not None
+                    and hasattr(response, "success")
+                    and hasattr(self, "_maybe_publish_response")
+                ):
                     await self._maybe_publish_response(event, response)
             except Exception as exc:
                 self._handler_failures += 1
@@ -140,9 +144,9 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
 
                 while True:
                     try:
-                        # Use a finite block so Redis can wait efficiently while
-                        # bounding cancellation latency. Some fakeredis/redis-py
-                        # combinations can stall event-loop teardown on block=None.
+                        # A finite Redis block bounds cancellation latency. A
+                        # second outer timeout is intentionally avoided: it can
+                        # cancel a healthy read during transient Redis latency.
                         resp = await self._redis.xreadgroup(
                             groupname=group,
                             consumername=consumer,
@@ -183,6 +187,40 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
             except asyncio.CancelledError:
                 raise
 
+        def _on_stream_task_done(topic: str, task: asyncio.Task) -> None:
+            # A completed older task must never remove a newer replacement.
+            if stream_tasks.get(topic) is task:
+                stream_tasks.pop(topic, None)
+            if task.cancelled():
+                return
+            try:
+                error = task.exception()
+            except asyncio.CancelledError:
+                return
+            if error is not None:
+                logger.error(
+                    "stream consumer task exited; supervisor will restart it",
+                    exc_info=(type(error), error, error.__traceback__),
+                    extra={
+                        "aitos_extra": {
+                            "stream": topic,
+                            "group": group,
+                            "consumer": consumer,
+                        }
+                    },
+                )
+            else:
+                logger.warning(
+                    "stream consumer task exited unexpectedly; supervisor will restart it",
+                    extra={
+                        "aitos_extra": {
+                            "stream": topic,
+                            "group": group,
+                            "consumer": consumer,
+                        }
+                    },
+                )
+
         try:
             while True:
                 if "*" in topic_pattern:
@@ -212,15 +250,23 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
                 for stream_topic in sorted(streams_seen):
                     task = stream_tasks.get(stream_topic)
                     if task is None or task.done():
-                        stream_tasks[stream_topic] = asyncio.create_task(
-                            consume_stream(stream_topic)
+                        task = asyncio.create_task(
+                            consume_stream(stream_topic),
+                            name=f"consume-stream-{stream_topic}",
+                        )
+                        stream_tasks[stream_topic] = task
+                        task.add_done_callback(
+                            lambda completed, topic=stream_topic: _on_stream_task_done(
+                                topic, completed
+                            )
                         )
                 await asyncio.sleep(0.2)
         except asyncio.CancelledError:
-            for task in stream_tasks.values():
+            tasks = list(stream_tasks.values())
+            for task in tasks:
                 task.cancel()
-            if stream_tasks:
-                await asyncio.gather(*stream_tasks.values(), return_exceptions=True)
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
             raise
 
     event_bus_cls._consume_loop = _consume_loop
