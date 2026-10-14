@@ -272,10 +272,16 @@ class DataFlowRegistry:
     def pipeline_snapshot(self, symbol: str = "") -> list[StageSnapshot]:
         return [self.snapshot_stage(stage, symbol) for stage in PIPELINE_ORDER]
 
-    def recent_traces(self, limit: int = 50) -> list[dict[str, Any]]:
+    def recent_traces(
+        self, limit: int = 50, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return recent trace events, optionally restricted to one symbol."""
         with self._lock:
             items = list(self._recent_traces)
-        return items[-limit:]
+        if symbol:
+            symbol_n = str(symbol).strip().upper()
+            items = [item for item in items if item.get("symbol") == symbol_n]
+        return items[-max(0, limit):]
 
     def reset(self) -> None:
         with self._lock:
