@@ -175,6 +175,8 @@ class DataFlowRegistry:
             b.queue_depth = max(0, int(depth))
             if oldest_event_age_ms is not None:
                 b.oldest_event_age_ms = max(0.0, float(oldest_event_age_ms))
+            elif b.queue_depth == 0:
+                b.oldest_event_age_ms = None
             if symbol_key:
                 aggregate = self._bucket(stage_key, "")
                 symbol_buckets = [
