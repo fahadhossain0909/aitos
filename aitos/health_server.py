@@ -197,22 +197,28 @@ class HealthServer:
                     f"{snap.queue_depth}"
                 )
                 lines.append(
-                    f'aitos_data_flow_latency_p50_ms{{stage="{stage_label}"}} {snap.latency_p50_ms or 0}'
+                    f'aitos_data_flow_latency_p50_ms{{stage="{stage_label}"}} '
+                    f"{snap.latency_p50_ms or 0}"
                 )
                 lines.append(
-                    f'aitos_data_flow_latency_p95_ms{{stage="{stage_label}"}} {snap.latency_p95_ms or 0}'
+                    f'aitos_data_flow_latency_p95_ms{{stage="{stage_label}"}} '
+                    f"{snap.latency_p95_ms or 0}"
                 )
                 lines.append(
-                    f'aitos_data_flow_oldest_event_age_ms{{stage="{stage_label}"}} {snap.oldest_event_age_ms or 0}'
+                    f'aitos_data_flow_oldest_event_age_ms{{stage="{stage_label}"}} '
+                    f"{snap.oldest_event_age_ms or 0}"
                 )
                 lines.append(
-                    f'aitos_data_flow_source_age_ms{{stage="{stage_label}"}} {snap.source_age_ms or 0}'
+                    f'aitos_data_flow_source_age_ms{{stage="{stage_label}"}} '
+                    f"{snap.source_age_ms or 0}"
                 )
                 lines.append(
-                    f'aitos_data_flow_drop_count{{stage="{stage_label}"}} {snap.drop_count}'
+                    f'aitos_data_flow_drop_count{{stage="{stage_label}"}} '
+                    f"{snap.drop_count}"
                 )
                 lines.append(
-                    f'aitos_data_flow_error_count{{stage="{stage_label}"}} {snap.error_count}'
+                    f'aitos_data_flow_error_count{{stage="{stage_label}"}} '
+                    f"{snap.error_count}"
                 )
                 lines.append(
                     f'aitos_data_flow_pressure{{stage="{stage_label}"}} '
