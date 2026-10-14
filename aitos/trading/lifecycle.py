@@ -226,16 +226,18 @@ class TradeLifecycle(AITOSModule):
     def get_closed_trades(self) -> list[Trade]:
         return list(self._closed_trades)
 
-    async def submit_opportunity(
-        self, opportunity: Opportunity
-    ) -> Trade:
+    async def submit_opportunity(self, opportunity: Opportunity) -> Trade:
         """Measure opportunity-to-lifecycle handling; preserve existing policy."""
         import time
 
         started = time.perf_counter()
         symbol = str(getattr(opportunity, "symbol", "") or "")
         try:
-            from aitos.forensics.data_flow_hooks import record_input, record_output, record_error
+            from aitos.forensics.data_flow_hooks import (
+                record_input,
+                record_output,
+                record_error,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.TRADE_LIFECYCLE.value, symbol=symbol)
@@ -245,7 +247,11 @@ class TradeLifecycle(AITOSModule):
             trade = await self._submit_opportunity_impl(opportunity)
         except Exception:
             try:
-                record_error(PipelineStage.TRADE_LIFECYCLE.value, symbol=symbol, issue="processing_timeout")
+                record_error(
+                    PipelineStage.TRADE_LIFECYCLE.value,
+                    symbol=symbol,
+                    issue="processing_timeout",
+                )
             except Exception:
                 pass
             raise
@@ -543,7 +549,9 @@ class TradeLifecycle(AITOSModule):
             pass
         return result
 
-    async def _close_trade_impl(self, trade_id: str, exit_price: float, reason: str) -> Trade:
+    async def _close_trade_impl(
+        self, trade_id: str, exit_price: float, reason: str
+    ) -> Trade:
         self._require_initialized()
         if not _valid_market_price(exit_price):
             raise ValueError(
