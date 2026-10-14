@@ -262,7 +262,7 @@ async def main() -> None:
                 logger.error("scan/trade cycle failed: %s", exc)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
     finally:
         await price_safety_net.stop()
