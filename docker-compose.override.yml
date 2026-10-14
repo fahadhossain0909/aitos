@@ -22,4 +22,4 @@ services:
       STORAGE_MAINTENANCE_INTERVAL_SECONDS: "300"
       STORAGE_MAINTENANCE_DRY_RUN: "false"
     volumes:
-      - "${AITOS_DATA_ROOT:-/mnt/aitos-data}:/data-disk"
+      - "${AITOS_DATA_ROOT:-./data}:/data-disk"
