@@ -332,7 +332,7 @@ class PaperPortfolioTracker:
         self._peak_equity_usd = max(self._peak_equity_usd, equity)
         day_ago, week_ago = datetime.now(timezone.utc) - timedelta(
             days=1
-        ), datetime.now(UTC) - timedelta(days=7)
+        ), datetime.now(timezone.utc) - timedelta(days=7)
         daily_pnl = sum(
             t.pnl
             for t in closed
