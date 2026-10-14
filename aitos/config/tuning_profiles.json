@@ -28,6 +28,23 @@
       "runtime": {
         "adaptive_tuning_enabled": false,
         "config_reload_enabled": false
+      },
+      "hardware": {
+        "cpu_worker_budget": 2,
+        "memory_budget_mb": 2048,
+        "memory_reserve_pct": 30,
+        "max_background_tasks": 1
+      },
+      "storage": {
+        "historical_backfill_concurrency": 1,
+        "clickhouse_batch_size": 250,
+        "clickhouse_query_timeout_seconds": 15,
+        "retention_days": 14
+      },
+      "telemetry": {
+        "health_interval_seconds": 15,
+        "metrics_sample_interval_seconds": 10,
+        "trace_sample_rate": 0.25
       }
     },
     "balanced": {
@@ -57,6 +74,23 @@
       "runtime": {
         "adaptive_tuning_enabled": false,
         "config_reload_enabled": false
+      },
+      "hardware": {
+        "cpu_worker_budget": 4,
+        "memory_budget_mb": 8192,
+        "memory_reserve_pct": 20,
+        "max_background_tasks": 4
+      },
+      "storage": {
+        "historical_backfill_concurrency": 2,
+        "clickhouse_batch_size": 1000,
+        "clickhouse_query_timeout_seconds": 10,
+        "retention_days": 30
+      },
+      "telemetry": {
+        "health_interval_seconds": 15,
+        "metrics_sample_interval_seconds": 5,
+        "trace_sample_rate": 0.5
       }
     },
     "high_performance": {
@@ -86,6 +120,23 @@
       "runtime": {
         "adaptive_tuning_enabled": false,
         "config_reload_enabled": false
+      },
+      "hardware": {
+        "cpu_worker_budget": 8,
+        "memory_budget_mb": 32768,
+        "memory_reserve_pct": 15,
+        "max_background_tasks": 8
+      },
+      "storage": {
+        "historical_backfill_concurrency": 4,
+        "clickhouse_batch_size": 5000,
+        "clickhouse_query_timeout_seconds": 10,
+        "retention_days": 90
+      },
+      "telemetry": {
+        "health_interval_seconds": 10,
+        "metrics_sample_interval_seconds": 2,
+        "trace_sample_rate": 1
       }
     }
   },
