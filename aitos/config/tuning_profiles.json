@@ -1,0 +1,98 @@
+{
+  "version": 1,
+  "profiles": {
+    "low_resource": {
+      "scanner": {
+        "top_n": 2,
+        "universe_mode": "all_eligible",
+        "universe_limit": 50,
+        "refresh_interval_seconds": 15
+      },
+      "analysis": {
+        "expensive_analysis_limit": 2,
+        "expensive_analysis_concurrency": 1,
+        "lightweight_concurrency": 2,
+        "timeout_seconds": 8
+      },
+      "event_bus": {
+        "consumer_concurrency": 2,
+        "queue_maxsize": 250
+      },
+      "positions": {
+        "max_open_positions": 2,
+        "max_positions_per_symbol": 1,
+        "monitoring_interval_seconds": 1,
+        "intensive_analysis_budget": 1
+      },
+      "runtime": {
+        "adaptive_tuning_enabled": false,
+        "config_reload_enabled": false
+      }
+    },
+    "balanced": {
+      "scanner": {
+        "top_n": 5,
+        "universe_mode": "all_eligible",
+        "universe_limit": 100,
+        "refresh_interval_seconds": 10
+      },
+      "analysis": {
+        "expensive_analysis_limit": 5,
+        "expensive_analysis_concurrency": 2,
+        "lightweight_concurrency": 8,
+        "timeout_seconds": 5
+      },
+      "event_bus": {
+        "consumer_concurrency": 8,
+        "queue_maxsize": 1000
+      },
+      "positions": {
+        "max_open_positions": 3,
+        "max_positions_per_symbol": 1,
+        "monitoring_interval_seconds": 1,
+        "intensive_analysis_budget": 2
+      },
+      "runtime": {
+        "adaptive_tuning_enabled": false,
+        "config_reload_enabled": false
+      }
+    },
+    "high_performance": {
+      "scanner": {
+        "top_n": 5,
+        "universe_mode": "all_eligible",
+        "universe_limit": 200,
+        "refresh_interval_seconds": 5
+      },
+      "analysis": {
+        "expensive_analysis_limit": 10,
+        "expensive_analysis_concurrency": 4,
+        "lightweight_concurrency": 16,
+        "timeout_seconds": 5
+      },
+      "event_bus": {
+        "consumer_concurrency": 16,
+        "queue_maxsize": 2000
+      },
+      "positions": {
+        "max_open_positions": 3,
+        "max_positions_per_symbol": 1,
+        "monitoring_interval_seconds": 1,
+        "intensive_analysis_budget": 3
+      },
+      "runtime": {
+        "adaptive_tuning_enabled": false,
+        "config_reload_enabled": false
+      }
+    }
+  },
+  "modes": {
+    "paper": {},
+    "live": {
+      "runtime": {
+        "adaptive_tuning_enabled": false,
+        "config_reload_enabled": false
+      }
+    }
+  }
+}
