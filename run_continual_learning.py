@@ -31,10 +31,8 @@ def main() -> int:
         user=os.getenv("CLICKHOUSE_USER", "default"),
         password=os.getenv("CLICKHOUSE_PASSWORD", ""),
         database=os.getenv("CLICKHOUSE_DB", os.getenv("CLICKHOUSE_DATABASE", "aitos")),
-        state_path=os.getenv(
-            "LEARNING_STATE_PATH", "models/online_rl/worker_state.json"
-        ),
-        model_path=os.getenv("LEARNING_MODEL_PATH", "models/online_rl/deep_value.pkl"),
+        state_path=os.getenv("LEARNING_STATE_PATH") or None,
+        model_path=os.getenv("LEARNING_MODEL_PATH") or None,
         lookback_hours=args.lookback_hours,
         poll_seconds=args.poll_seconds,
     )
