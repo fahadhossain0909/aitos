@@ -74,7 +74,21 @@ class CanonicalScannerFeed:
         payload.pop("_market_source", None)
         payload["symbol"] = event.symbol
         payload["timestamp"] = event.event_time.isoformat()
+        try:
+            from aitos.forensics.data_flow_hooks import record_input
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
+        except Exception:
+            pass
         await self._trade_handler(TradeTick.from_dict(payload))
+        try:
+            from aitos.forensics.data_flow_hooks import record_output
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_output(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
+        except Exception:
+            pass
         self._last_event_at = datetime.now(timezone.utc)
 
     async def _on_book(self, event: MarketEvent) -> None:
@@ -84,7 +98,21 @@ class CanonicalScannerFeed:
         payload.pop("_market_source", None)
         payload["symbol"] = event.symbol
         payload["timestamp"] = event.event_time.isoformat()
+        try:
+            from aitos.forensics.data_flow_hooks import record_input
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
+        except Exception:
+            pass
         await self._book_handler(OrderBookSnapshot.from_dict(payload))
+        try:
+            from aitos.forensics.data_flow_hooks import record_output
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_output(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
+        except Exception:
+            pass
         self._last_event_at = datetime.now(timezone.utc)
 
     @property
