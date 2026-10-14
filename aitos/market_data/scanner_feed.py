@@ -112,7 +112,9 @@ class CanonicalScannerFeed:
             from aitos.forensics.data_flow_hooks import record_output
             from aitos.forensics.data_flow_schema import PipelineStage
 
-            record_output(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
+            record_output(
+                PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
+            )
         except Exception:
             pass
         self._last_event_at = datetime.now(timezone.utc)
