@@ -97,12 +97,14 @@ class SystemComponents:
         report = effective_tuning_report(updated)
         logger.info(
             "AITOS runtime tuning reloaded",
-            extra={"aitos_extra": {
-                "profile": report["profile"],
-                "mode": report["mode"],
-                "config_version": report["config_version"],
-                "restart_required": False,
-            }},
+            extra={
+                "aitos_extra": {
+                    "profile": report["profile"],
+                    "mode": report["mode"],
+                    "config_version": report["config_version"],
+                    "restart_required": False,
+                }
+            },
         )
         return report
 
@@ -155,15 +157,17 @@ async def build_system(
     tuning_report = effective_tuning_report(tuning)
     logger.info(
         "AITOS effective runtime tuning",
-        extra={"aitos_extra": {
-            "profile": tuning_report["profile"],
-            "mode": tuning_report["mode"],
-            "config_version": tuning_report["config_version"],
-            "scanner": tuning.scanner.model_dump(mode="json"),
-            "analysis": tuning.analysis.model_dump(mode="json"),
-            "event_bus": tuning.event_bus.model_dump(mode="json"),
-            "positions": tuning.positions.model_dump(mode="json"),
-        }},
+        extra={
+            "aitos_extra": {
+                "profile": tuning_report["profile"],
+                "mode": tuning_report["mode"],
+                "config_version": tuning_report["config_version"],
+                "scanner": tuning.scanner.model_dump(mode="json"),
+                "analysis": tuning.analysis.model_dump(mode="json"),
+                "event_bus": tuning.event_bus.model_dump(mode="json"),
+                "positions": tuning.positions.model_dump(mode="json"),
+            }
+        },
     )
     if risk_limits is None:
         risk_limits = RiskLimits(max_open_positions=tuning.positions.max_open_positions)
