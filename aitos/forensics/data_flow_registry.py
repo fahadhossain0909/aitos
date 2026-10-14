@@ -213,6 +213,7 @@ class DataFlowRegistry:
             "symbol": str(symbol or "").upper(),
             "latency_ms": latency_ms,
             "ts": time.time(),
+            "timestamp_ms": time.time() * 1000.0,
         }
         if extra:
             sample.update(extra)
