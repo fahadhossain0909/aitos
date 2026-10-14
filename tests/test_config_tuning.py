@@ -102,3 +102,25 @@ def test_runtime_reload_environment_override_is_validated(monkeypatch):
     monkeypatch.setenv("AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED", "sometimes")
     with pytest.raises(ValueError, match="AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED"):
         load_tuning_settings(profile="balanced", mode="paper")
+
+
+
+def test_intensive_exit_analysis_budget_is_bounded_per_window():
+    import time
+
+    from aitos.trading.lifecycle import TradeLifecycle
+
+    base = load_tuning_settings(profile="balanced", mode="paper")
+    positions = base.positions.model_copy(
+        update={"monitoring_interval_seconds": 60, "intensive_analysis_budget": 1}
+    )
+    lifecycle = object.__new__(TradeLifecycle)
+    lifecycle._tuning = base.model_copy(update={"positions": positions})
+    lifecycle._intensive_window_started_at = time.monotonic()
+    lifecycle._intensive_analyses_used = 0
+
+    assert lifecycle._allow_intensive_analysis() is True
+    assert lifecycle._allow_intensive_analysis() is False
+
+    lifecycle._intensive_window_started_at -= 61
+    assert lifecycle._allow_intensive_analysis() is True
