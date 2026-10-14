@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import os
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from aitos.logging_setup import get_logger
@@ -61,7 +61,7 @@ def install_eventbus_consumer_concurrency(event_bus_cls: type[Any]) -> None:
             handler: Any,
         ) -> None:
             self._consumed_events += 1
-            self._last_consumed_at = datetime.now(UTC).isoformat()
+            self._last_consumed_at = datetime.now(timezone.utc).isoformat()
             try:
                 event = self._event_from_wire(fields)
             except AttributeError:
