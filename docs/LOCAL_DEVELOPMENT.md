@@ -32,7 +32,9 @@ docker compose up -d redis clickhouse clickhouse-init neo4j
 ```
 
 Check service status with `docker compose ps`. The default published ports are
-bound to localhost only.
+bound to localhost only. Storage maintenance defaults to dry-run mode so a local
+full-stack run cannot automatically prune local data; explicitly set
+`STORAGE_MAINTENANCE_DRY_RUN=false` only when you intentionally want cleanup.
 
 ## 3. Install Python dependencies
 
