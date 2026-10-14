@@ -46,7 +46,19 @@ on:
       side:
         required: true
         type: string
-    secrets: inherit
+    secrets:
+      CLICKHOUSE_PASSWORD:
+        required: false
+      CLICKHOUSE_USER:
+        required: false
+      CLICKHOUSE_DATABASE:
+        required: false
+      DEPLOY_HOST:
+        required: false
+      DEPLOY_USER:
+        required: false
+      DEPLOY_SSH_KEY:
+        required: false
 
 permissions:
   contents: read
