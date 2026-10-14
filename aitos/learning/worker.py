@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -122,7 +122,7 @@ class ContinualLearningWorker:
     def _save_state(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "processed_experiences": sorted(self._processed)[-10000:],
             "n_samples_seen": self.scorer.n_samples_seen,
         }
@@ -140,7 +140,7 @@ class ContinualLearningWorker:
         )
 
     def _rows(self) -> list[dict[str, Any]]:
-        start = datetime.now(timezone.utc) - self.lookback
+        start = datetime.now(UTC) - self.lookback
         sql = """
         SELECT experience_id, source, symbol, outcome, reward, features_json
         FROM learning_experiences

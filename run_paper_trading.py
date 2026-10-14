@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+from datetime import UTC
 
 from redis.asyncio import Redis
 
@@ -53,18 +54,18 @@ STALE_POSITION_MAX_HOURS = 72
 
 async def _close_stale_positions(components) -> None:
     """Close open trades held longer than STALE_POSITION_MAX_HOURS."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from aitos.models.trade import TradeLifecycleState
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     for trade in list(components.trade_lifecycle.get_open_trades()):
         if trade.state != TradeLifecycleState.POSITION_OPENED:
             continue
         try:
             entry_dt = datetime.fromisoformat(trade.entry_time)
             if entry_dt.tzinfo is None:
-                entry_dt = entry_dt.replace(tzinfo=timezone.utc)
+                entry_dt = entry_dt.replace(tzinfo=UTC)
             age_hours = (now - entry_dt).total_seconds() / 3600
             if age_hours >= STALE_POSITION_MAX_HOURS:
                 # Use last known price from trade's own tracking
@@ -188,7 +189,7 @@ async def main() -> None:
     rl_scorer.load_state()
     outcome_classifier = TradeOutcomeClassifier()
     outcome_classifier.load_state()
-    attention_path = str(get_model_data_dir() / "online_ml" / "attention_explainer.pkl" )
+    attention_path = str(get_model_data_dir() / "online_ml" / "attention_explainer.pkl")
     attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
     components = await build_system(
         event_bus=event_bus,
@@ -391,7 +392,7 @@ async def main() -> None:
                 logger.error("scan cycle failed: %s", exc)
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=SCAN_INTERVAL_SECONDS)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 pass
     finally:
         heal_task.cancel()

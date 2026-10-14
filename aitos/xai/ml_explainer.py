@@ -5,10 +5,10 @@ from __future__ import annotations
 import pickle
 from pathlib import Path
 
-from aitos.config.paths import get_model_data_dir
-
 import numpy as np
 from sklearn.linear_model import SGDClassifier
+
+from aitos.config.paths import get_model_data_dir
 
 FEATURE_ORDER: list[str] = [
     "trend_strength",
@@ -46,7 +46,11 @@ class TradeOutcomeClassifier:
         self._n_samples_seen = 0
         self._classes_seen: set = set()
         self._background: list[list[float]] = []
-        self._state_path = Path(state_path) if state_path else get_model_data_dir() / "online_ml" / "trade_outcome.pkl"
+        self._state_path = (
+            Path(state_path)
+            if state_path
+            else get_model_data_dir() / "online_ml" / "trade_outcome.pkl"
+        )
 
     @property
     def n_samples_seen(self) -> int:
