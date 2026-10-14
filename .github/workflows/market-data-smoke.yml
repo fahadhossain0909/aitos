@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   smoke:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     environment: papertrade
     timeout-minutes: 10
