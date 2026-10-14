@@ -155,6 +155,7 @@ class DataFlowRegistry:
                 agg = self._bucket(stage, "")
                 agg.drop_count += n
                 agg.issues[issue_key] += n
+
     def set_queue(
         self,
         stage: str | PipelineStage,
