@@ -52,7 +52,6 @@ async def test_lightweight_screen_respects_expensive_analysis_budget(event_bus):
     assert selected[0] == "BTCUSDT"
 
 
-
 @pytest.mark.asyncio
 async def test_hardware_worker_budget_caps_expensive_analysis(event_bus):
     base = load_tuning_settings(profile="balanced", mode="paper")
