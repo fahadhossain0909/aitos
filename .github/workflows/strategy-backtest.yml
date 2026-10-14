@@ -56,6 +56,7 @@ env:
 
 jobs:
   backtest:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     environment: papertrade
