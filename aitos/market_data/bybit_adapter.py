@@ -90,7 +90,6 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                     source=MarketSource.WEBSOCKET,
                     sequence=sequence,
                     correlation_id=f"bybit:{self.market_type.value}:{symbol}:{trade_id}",
-                    trace_id=symbol,
                 )
             )
         if not events:
@@ -136,5 +135,4 @@ class BybitCanonicalMarketDataAdapter(JsonWebSocketAdapter):
             source=MarketSource.WEBSOCKET,
             sequence=update_id,
             correlation_id=f"bybit:{self.market_type.value}:{symbol}:book:{update_id}",
-            trace_id=symbol,
         )

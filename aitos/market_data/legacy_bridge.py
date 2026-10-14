@@ -33,7 +33,6 @@ def trade_event(
         ingest_time=received,
         sequence=trade.trade_id,
         correlation_id=f"binance:{market_type}:{trade.symbol}:{trade.trade_id}",
-        trace_id=trade.symbol,
     )
 
 
@@ -59,7 +58,6 @@ def book_snapshot_event(
         ingest_time=received,
         sequence=book.last_update_id,
         correlation_id=f"binance:{market_type}:{book.symbol}:book:{book.last_update_id}",
-        trace_id=book.symbol,
     )
 
 
@@ -90,7 +88,6 @@ def book_delta_event(
         ingest_time=received,
         sequence=delta.final_update_id,
         correlation_id=f"binance:{market_type}:{symbol}:depth:{delta.final_update_id}",
-        trace_id=symbol,
     )
 
 
@@ -111,5 +108,4 @@ def kline_event(
         source=source,
         ingest_time=received,
         correlation_id=f"binance:{market_type}:{kline.symbol}:kline:{kline.timeframe}",
-        trace_id=kline.symbol,
     )

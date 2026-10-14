@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -303,6 +304,7 @@ class OpportunityScanner(AITOSModule):
         started = time.perf_counter()
         try:
             from aitos.forensics.data_flow_hooks import (
+                note_trace,
                 record_error,
                 record_input,
                 record_output,
@@ -310,6 +312,26 @@ class OpportunityScanner(AITOSModule):
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.SCANNER.value, symbol=symbol)
+            state = self._live_cache.snapshot(symbol)
+            trace_id = (
+                (state.last_trade_trace_id or state.last_book_trace_id)
+                if state is not None
+                else None
+            )
+            trace_event_id = (
+                (state.last_trade_event_id or state.last_book_event_id)
+                if state is not None
+                else None
+            )
+            if not trace_id:
+                trace_id = f"scan:{symbol.upper()}:{time.time_ns()}"
+            note_trace(
+                trace_id=trace_id,
+                stage=PipelineStage.SCANNER.value,
+                symbol=symbol,
+                event_id=trace_event_id,
+                extra={"phase": "scan_started"},
+            )
         except Exception:
             pass
         try:
@@ -325,10 +347,22 @@ class OpportunityScanner(AITOSModule):
                 pass
             raise
         try:
+            latency_ms = (time.perf_counter() - started) * 1000.0
             record_output(
                 PipelineStage.SCANNER.value,
                 symbol=symbol,
-                latency_ms=(time.perf_counter() - started) * 1000.0,
+                latency_ms=latency_ms,
+            )
+            note_trace(
+                trace_id=trace_id,
+                stage=PipelineStage.SCANNER.value,
+                symbol=symbol,
+                latency_ms=latency_ms,
+                event_id=trace_event_id,
+                extra={
+                    "phase": "scan_completed",
+                    "candidate_found": result is not None,
+                },
             )
         except Exception:
             pass
@@ -386,6 +420,39 @@ class OpportunityScanner(AITOSModule):
             if trades
             else None
         )
+        try:
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_input,
+                record_output,
+            )
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            state = self._live_cache.snapshot(symbol)
+            trace_id = (
+                (state.last_trade_trace_id or state.last_book_trace_id)
+                if state is not None
+                else None
+            ) or f"feature:{symbol.upper()}:{time.time_ns()}"
+            trace_event_id = (
+                (state.last_trade_event_id or state.last_book_event_id)
+                if state is not None
+                else None
+            )
+            record_input(PipelineStage.FEATURE.value, symbol=symbol)
+            record_output(PipelineStage.FEATURE.value, symbol=symbol)
+            note_trace(
+                trace_id=trace_id,
+                stage=PipelineStage.FEATURE.value,
+                symbol=symbol,
+                event_id=trace_event_id,
+                extra={
+                    "phase": "features_ready",
+                    "market_source": market_source,
+                },
+            )
+        except Exception:
+            pass
         candle_cvd = indicators.cvd_trend_score(klines)
         flow_score = flow_features.bias_score if flow_features else candle_cvd
         direction = determine_direction(

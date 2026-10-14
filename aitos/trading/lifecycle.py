@@ -236,13 +236,27 @@ class TradeLifecycle(AITOSModule):
         symbol = str(getattr(opportunity, "symbol", "") or "")
         try:
             from aitos.forensics.data_flow_hooks import (
+                note_trace,
                 record_error,
                 record_input,
                 record_output,
             )
             from aitos.forensics.data_flow_schema import PipelineStage
 
+            trace_id = str(
+                opportunity.agent_consensus.get("trace_id")
+                or f"op:{symbol.upper()}:{opportunity.opportunity_id}"
+            )
+            parent_trace_id = opportunity.agent_consensus.get("parent_trace_id")
             record_input(PipelineStage.TRADE_LIFECYCLE.value, symbol=symbol)
+            note_trace(
+                trace_id=trace_id,
+                parent_trace_id=parent_trace_id,
+                stage=PipelineStage.TRADE_LIFECYCLE.value,
+                symbol=symbol,
+                event_id=opportunity.opportunity_id,
+                extra={"phase": "opportunity_submitted"},
+            )
         except Exception:
             pass
         try:
@@ -258,10 +272,24 @@ class TradeLifecycle(AITOSModule):
                 pass
             raise
         try:
+            latency_ms = (time.perf_counter() - started) * 1000.0
             record_output(
                 PipelineStage.TRADE_LIFECYCLE.value,
                 symbol=symbol,
-                latency_ms=(time.perf_counter() - started) * 1000.0,
+                latency_ms=latency_ms,
+            )
+            note_trace(
+                trace_id=trace_id,
+                parent_trace_id=parent_trace_id,
+                stage=PipelineStage.TRADE_LIFECYCLE.value,
+                symbol=symbol,
+                latency_ms=latency_ms,
+                event_id=opportunity.opportunity_id,
+                extra={
+                    "phase": "opportunity_completed",
+                    "trade_id": trade.trade_id,
+                    "state": trade.state.value,
+                },
             )
         except Exception:
             pass

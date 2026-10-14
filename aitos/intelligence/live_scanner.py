@@ -28,6 +28,10 @@ class LiveSymbolCache:
     last_book_source_at: datetime | None = None
     last_trade_received_at: datetime | None = None
     last_book_received_at: datetime | None = None
+    last_trade_trace_id: str | None = None
+    last_book_trace_id: str | None = None
+    last_trade_event_id: str | None = None
+    last_book_event_id: str | None = None
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
     stale_trade_rejections: int = 0
@@ -253,13 +257,29 @@ class LiveScannerCache:
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
+        state.last_trade_trace_id = getattr(event, "trace_id", None)
+        state.last_trade_event_id = getattr(event, "event_id", None)
         try:
-            from aitos.forensics.data_flow_hooks import record_input, record_output
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_input,
+                record_output,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
             record_output(
                 PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
+            )
+            note_trace(
+                trace_id=getattr(event, "trace_id", None),
+                stage=PipelineStage.LIVE_STATE.value,
+                symbol=str(event.symbol or ""),
+                event_id=getattr(event, "event_id", None),
+                extra={
+                    "event_type": event.event_type.value,
+                    "phase": "state_updated",
+                },
             )
         except Exception:
             pass
@@ -292,13 +312,26 @@ class LiveScannerCache:
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time
         state.last_book_received_at = received_at
+        state.last_book_trace_id = getattr(event, "trace_id", None)
+        state.last_book_event_id = getattr(event, "event_id", None)
         try:
-            from aitos.forensics.data_flow_hooks import record_input, record_output
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_input,
+                record_output,
+            )
             from aitos.forensics.data_flow_schema import PipelineStage
 
             record_input(PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or ""))
             record_output(
                 PipelineStage.LIVE_STATE.value, symbol=str(event.symbol or "")
+            )
+            note_trace(
+                trace_id=getattr(event, "trace_id", None),
+                stage=PipelineStage.LIVE_STATE.value,
+                symbol=str(event.symbol or ""),
+                event_id=getattr(event, "event_id", None),
+                extra={"event_type": event.event_type.value, "phase": "state_updated"},
             )
         except Exception:
             pass

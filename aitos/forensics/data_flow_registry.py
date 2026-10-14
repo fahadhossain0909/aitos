@@ -169,10 +169,28 @@ class DataFlowRegistry:
         symbol: str = "",
     ) -> None:
         with self._lock:
-            b = self._bucket(stage, symbol)
-            b.queue_depth = int(depth)
+            stage_key = _stage_name(stage)
+            symbol_key = str(symbol or "").upper()
+            b = self._bucket(stage, symbol_key)
+            b.queue_depth = max(0, int(depth))
             if oldest_event_age_ms is not None:
-                b.oldest_event_age_ms = float(oldest_event_age_ms)
+                b.oldest_event_age_ms = max(0.0, float(oldest_event_age_ms))
+            elif b.queue_depth == 0:
+                b.oldest_event_age_ms = None
+            if symbol_key:
+                aggregate = self._bucket(stage_key, "")
+                symbol_buckets = [
+                    bucket
+                    for (bucket_stage, bucket_symbol), bucket in self._buckets.items()
+                    if bucket_stage == stage_key and bucket_symbol
+                ]
+                aggregate.queue_depth = sum(item.queue_depth for item in symbol_buckets)
+                ages = [
+                    item.oldest_event_age_ms
+                    for item in symbol_buckets
+                    if item.oldest_event_age_ms is not None
+                ]
+                aggregate.oldest_event_age_ms = max(ages) if ages else None
 
     def note_trace(
         self,
@@ -182,20 +200,52 @@ class DataFlowRegistry:
         symbol: str = "",
         latency_ms: float | None = None,
         extra: dict[str, Any] | None = None,
+        event_id: str | None = None,
+        parent_trace_id: str | None = None,
     ) -> None:
         if not trace_id:
             return
         sample = {
             "trace_id": trace_id,
+            "event_id": event_id,
+            "parent_trace_id": parent_trace_id,
             "stage": _stage_name(stage),
             "symbol": str(symbol or "").upper(),
             "latency_ms": latency_ms,
             "ts": time.time(),
+            "timestamp_ms": time.time() * 1000.0,
         }
         if extra:
             sample.update(extra)
         with self._lock:
             self._recent_traces.append(sample)
+
+    def symbols(self) -> list[str]:
+        """Return symbols currently represented in the registry (aggregate excluded)."""
+        with self._lock:
+            return sorted({symbol for _, symbol in self._buckets if symbol})
+
+    def trace_for_event(
+        self,
+        *,
+        trace_id: str,
+        event_id: str | None = None,
+        parent_trace_id: str | None = None,
+        stage: str | PipelineStage,
+        symbol: str = "",
+        latency_ms: float | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Record one stage in an event's causal timeline."""
+        self.note_trace(
+            trace_id=trace_id,
+            stage=stage,
+            symbol=symbol,
+            latency_ms=latency_ms,
+            event_id=event_id,
+            parent_trace_id=parent_trace_id,
+            extra=extra,
+        )
 
     def _rate(self, window: deque[tuple[float, int]]) -> float:
         if not window:
@@ -241,10 +291,16 @@ class DataFlowRegistry:
     def pipeline_snapshot(self, symbol: str = "") -> list[StageSnapshot]:
         return [self.snapshot_stage(stage, symbol) for stage in PIPELINE_ORDER]
 
-    def recent_traces(self, limit: int = 50) -> list[dict[str, Any]]:
+    def recent_traces(
+        self, limit: int = 50, symbol: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return recent trace events, optionally restricted to one symbol."""
         with self._lock:
             items = list(self._recent_traces)
-        return items[-limit:]
+        if symbol:
+            symbol_n = str(symbol).strip().upper()
+            items = [item for item in items if item.get("symbol") == symbol_n]
+        return items[-max(0, limit) :]
 
     def reset(self) -> None:
         with self._lock:

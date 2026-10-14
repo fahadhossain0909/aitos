@@ -70,11 +70,27 @@ def build_data_flow_report(
     symbol_n = str(symbol or "").strip().upper()
     stages = reg.pipeline_snapshot(symbol_n)
     pressure = find_pressure_point(stages)
+    traces = reg.recent_traces(limit=30, symbol=symbol_n)
+    timeline = []
+    previous_by_trace: dict[str, float] = {}
+    for item in traces:
+        sample = dict(item)
+        timestamp_ms = float(item.get("ts", 0.0)) * 1000.0
+        sample["timestamp_ms"] = timestamp_ms
+        trace_id = str(item.get("trace_id") or "")
+        previous_ms = previous_by_trace.get(trace_id)
+        sample["since_previous_stage_ms"] = (
+            max(0.0, timestamp_ms - previous_ms) if previous_ms is not None else None
+        )
+        if trace_id:
+            previous_by_trace[trace_id] = timestamp_ms
+        timeline.append(sample)
     return {
         "symbol": symbol_n or "*",
         "stages": [_format_stage(s) for s in stages],
         "pressure_point": pressure,
-        "recent_traces": reg.recent_traces(limit=30),
+        "recent_traces": traces,
+        "trace_timeline": timeline,
         "pipeline_order": [s.value for s in PIPELINE_ORDER],
     }
 

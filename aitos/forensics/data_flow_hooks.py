@@ -92,6 +92,8 @@ def note_trace(
     symbol: str = "",
     latency_ms: float | None = None,
     extra: dict[str, Any] | None = None,
+    event_id: str | None = None,
+    parent_trace_id: str | None = None,
 ) -> None:
     try:
         _reg().note_trace(
@@ -100,6 +102,8 @@ def note_trace(
             symbol=symbol,
             latency_ms=latency_ms,
             extra=extra,
+            event_id=event_id,
+            parent_trace_id=parent_trace_id,
         )
     except Exception:
         pass

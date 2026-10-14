@@ -104,7 +104,6 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
                     source=MarketSource.WEBSOCKET,
                     sequence=sequence,
                     correlation_id=f"okx:{self.market_type.value}:{symbol}:{trade_id}",
-                    trace_id=symbol,
                     instrument_id=f"okx:{self.market_type.value}:{instrument.upper()}",
                 )
             )
@@ -151,6 +150,5 @@ class OKXCanonicalMarketDataAdapter(JsonWebSocketAdapter):
             source=MarketSource.WEBSOCKET,
             sequence=sequence,
             correlation_id=f"okx:{self.market_type.value}:{symbol}:book:{sequence}",
-            trace_id=symbol,
             instrument_id=f"okx:{self.market_type.value}:{instrument.upper()}",
         )
