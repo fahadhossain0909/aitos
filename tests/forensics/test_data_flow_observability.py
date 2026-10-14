@@ -94,3 +94,26 @@ def test_trade_contract_valid_and_stale() -> None:
 def test_orderbook_contract() -> None:
     assert check_orderbook_payload({"symbol": "BTCUSDT", "bids": [], "asks": []}).ok
     assert not check_orderbook_payload({"bids": []}).ok
+
+
+def test_health_metrics_match_dashboard_contract() -> None:
+    from aitos.health_server import HealthServer
+
+    server = HealthServer([])
+    lines: list[str] = []
+    server._append_data_flow_metrics(lines)
+    metrics = "\n".join(lines)
+    for name in (
+        "aitos_data_flow_input_rate",
+        "aitos_data_flow_output_rate",
+        "aitos_data_flow_latency_p50_ms",
+        "aitos_data_flow_latency_p95_ms",
+        "aitos_data_flow_latency_p99_ms",
+        "aitos_data_flow_queue_depth",
+        "aitos_data_flow_oldest_event_age_ms",
+        "aitos_data_flow_source_age_ms",
+        "aitos_data_flow_drop_count",
+        "aitos_data_flow_error_count",
+        "aitos_data_flow_pressure",
+    ):
+        assert name in metrics
