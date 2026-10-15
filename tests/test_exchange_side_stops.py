@@ -314,7 +314,6 @@ async def test_reconcile_trade_no_op_without_exchange_side_stops(
     assert reconciled.state == TradeLifecycleState.POSITION_OPENED
 
 
-
 @pytest.mark.asyncio
 async def test_cancel_failure_keeps_triggered_position_open_for_retry(
     event_bus, risk_engine
