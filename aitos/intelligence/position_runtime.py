@@ -240,13 +240,24 @@ def _install_position_monitor() -> None:
         **kwargs: Any,
     ) -> PositionAction:
         if not getattr(self, "_aitos_tiered_monitoring_enabled", False):
-            return original_evaluate(
+            started = datetime.now(timezone.utc)
+            action = original_evaluate(
                 self,
                 trade=trade,
                 current_price=current_price,
                 extra_features=extra_features,
                 **kwargs,
             )
+            emit_position_event(
+                "position.evaluation.completed", trade,
+                current_price=current_price, monitor_tier="full_analysis",
+                action=str(getattr(action.action, "value", action.action)),
+                decision_reason=action.reason,
+                evaluation_duration_ms=(datetime.now(timezone.utc) - started).total_seconds() * 1000.0,
+                market_context_available=action.market_state is not None,
+                notes=action.notes,
+            )
+            return action
         decision = monitor_for(self).evaluate(
             trade=trade, current_price=current_price, extra_features=extra_features
         )
@@ -547,6 +558,11 @@ def _install_lifecycle_wiring() -> None:
                 },
             )
             if state == "position_opened" and symbol:
+                emit_position_event(
+                    "position.opened", trade,
+                    open_before=before, open_after=len(self.get_open_trades()),
+                    source="submit_opportunity",
+                )
                 for ingestion in list(_INGESTIONS):
                     try:
                         trade_ok = await ingestion.update_live_trade_symbols([symbol])
