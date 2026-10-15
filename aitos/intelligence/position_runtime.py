@@ -55,6 +55,7 @@ _MONITORS: weakref.WeakKeyDictionary[PositionManager, PositionMonitorController]
     weakref.WeakKeyDictionary()
 )
 _DEEP_PRIORITY_SYMBOLS: dict[str, tuple[PositionMonitorTier, float]] = {}
+_PRECOMPUTED_MONITOR_DECISIONS: dict[tuple[int, str], Any] = {}
 
 
 def _open_symbols() -> list[str]:
@@ -215,6 +216,37 @@ def _warning_market_state(
         return None
 
 
+def _evaluate_lightweight_monitor(
+    manager: Any,
+    trade: Any,
+    current_price: float,
+    extra_features: Any = None,
+) -> Any:
+    """Evaluate every open position independently of the deep-analysis budget."""
+    controller = _MONITORS.get(manager)
+    if controller is None:
+        controller = PositionMonitorController()
+        _MONITORS[manager] = controller
+    decision = controller.evaluate(
+        trade=trade,
+        current_price=current_price,
+        extra_features=extra_features,
+    )
+    trade_id = str(getattr(trade, "trade_id", ""))
+    if trade_id:
+        _PRECOMPUTED_MONITOR_DECISIONS[(id(manager), trade_id)] = decision
+    symbol = str(getattr(trade, "symbol", "") or "").upper()
+    if symbol:
+        if decision.tier == PositionMonitorTier.NORMAL:
+            _DEEP_PRIORITY_SYMBOLS.pop(symbol, None)
+        else:
+            _DEEP_PRIORITY_SYMBOLS[symbol] = (
+                decision.tier,
+                decision.priority_score,
+            )
+    return decision
+
+
 def _install_position_monitor() -> None:
     from aitos.trading.position_manager import PositionAction, PositionManager
 
@@ -263,9 +295,15 @@ def _install_position_monitor() -> None:
                 notes=action.notes,
             )
             return action
-        decision = monitor_for(self).evaluate(
-            trade=trade, current_price=current_price, extra_features=extra_features
+        decision = _PRECOMPUTED_MONITOR_DECISIONS.pop(
+            (id(self), str(getattr(trade, "trade_id", ""))), None
         )
+        if decision is None:
+            decision = monitor_for(self).evaluate(
+                trade=trade,
+                current_price=current_price,
+                extra_features=extra_features,
+            )
         health = decision.health
         health_snapshot = (
             {
@@ -382,6 +420,7 @@ def _install_position_monitor() -> None:
     ) -> None:
         original_clear(self, trade_id, symbol=symbol)
         monitor_for(self).clear(trade_id)
+        _PRECOMPUTED_MONITOR_DECISIONS.pop((id(self), str(trade_id)), None)
         if symbol:
             _DEEP_PRIORITY_SYMBOLS.pop(str(symbol).upper(), None)
 
@@ -412,6 +451,42 @@ def _install_lifecycle_telemetry() -> None:
                 for t in before_trades
             }
             started = datetime.now(timezone.utc)
+            requested_trade_id = args[0] if args else kwargs.get("trade_id")
+            requested_price = args[1] if len(args) > 1 else kwargs.get("current_price")
+            manager = getattr(self, "position_manager", None)
+            if (
+                manager is not None
+                and requested_trade_id is not None
+                and requested_price is not None
+            ):
+                monitored_trade = next(
+                    (
+                        t
+                        for t in before_trades
+                        if str(getattr(t, "trade_id", "")) == str(requested_trade_id)
+                    ),
+                    None,
+                )
+                if monitored_trade is not None:
+                    try:
+                        _evaluate_lightweight_monitor(
+                            manager,
+                            monitored_trade,
+                            float(requested_price),
+                            kwargs.get("extra_features"),
+                        )
+                    except Exception:
+                        # Monitoring telemetry must never interrupt hard-stop
+                        # processing; preserve the lifecycle's existing behavior.
+                        logger.exception(
+                            "lightweight position monitor failed",
+                            extra={
+                                "aitos_extra": {
+                                    "trade_id": str(requested_trade_id),
+                                    "symbol": getattr(monitored_trade, "symbol", None),
+                                }
+                            },
+                        )
             try:
                 result = await original_update_price(self, *args, **kwargs)
                 after_trades = list(self.get_open_trades())
