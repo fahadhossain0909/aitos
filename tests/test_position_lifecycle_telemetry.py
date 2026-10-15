@@ -30,9 +30,7 @@ def test_emit_position_event_never_raises_for_unserializable_values(monkeypatch)
     import aitos.telemetry.position_lifecycle as telemetry
 
     captured = []
-    monkeypatch.setattr(
-        telemetry.logger, "info", lambda *a, **kw: captured.append(kw)
-    )
+    monkeypatch.setattr(telemetry.logger, "info", lambda *a, **kw: captured.append(kw))
     emit_position_event(
         "position.test",
         SimpleNamespace(trade_id="t1", symbol="ETHUSDT"),
