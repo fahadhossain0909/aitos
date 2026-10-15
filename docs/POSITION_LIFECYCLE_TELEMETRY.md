@@ -51,3 +51,16 @@ Then run the repository's normal CI and paper-trading regression suite. Verify
 that logs correlate a position from evaluation through close, including failed
 and partial close paths, and compare runtime overhead before enabling high-volume
 debug logging.
+
+
+## Forensic report
+
+The CLI report groups events by position and highlights positions without a recent
+evaluation or with no evaluation evidence. It consumes the existing JSON-lines
+logs and does not query or mutate trading state:
+
+    python scripts/position_lifecycle_telemetry_report.py aitos.log --stale-after-seconds 120
+
+Use '-' instead of a logfile path to read stdin. A stale report is a diagnostic
+signal, not a command to close a position; verify current exchange state and the
+live monitor before taking action.
