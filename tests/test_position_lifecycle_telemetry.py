@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 
-from aitos.telemetry.position_lifecycle import emit_position_event, position_snapshot
+from aitos.telemetry.position_lifecycle import (
+    emit_position_event,
+    position_snapshot,
+    snapshot_position_events,
+)
 
 
 def test_position_snapshot_adds_stable_position_and_trace_correlation():
@@ -24,6 +28,17 @@ def test_position_snapshot_handles_missing_optional_fields():
     snapshot = position_snapshot(SimpleNamespace(trade_id="t1", symbol="ETHUSDT"))
     assert snapshot["position_id"] == "t1"
     assert "entry_price" not in snapshot
+
+
+def test_recent_position_events_are_available_by_position_id():
+    trade = SimpleNamespace(trade_id="telemetry-registry-test", symbol="BTCUSDT")
+    emit_position_event("position.test", trade, outcome="observed")
+    events = snapshot_position_events(
+        position_id="telemetry-registry-test", limit=10
+    )
+    assert events
+    assert events[-1]["event"] == "position.test"
+    assert events[-1]["trace_id"] == "position:telemetry-registry-test"
 
 
 def test_emit_position_event_never_raises_for_unserializable_values(monkeypatch):
