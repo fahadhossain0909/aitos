@@ -694,6 +694,9 @@ class TradeLifecycle(AITOSModule):
                 trade.symbol, trade.sl_order_id
             )
             if status == "FILLED":
+                # The exchange has already consumed this stop; do not try to
+                # cancel the filled order during the local close transition.
+                trade.sl_order_id = None
                 return await self.close_trade(
                     trade.trade_id, trade.sl_price, "sl_triggered_exchange"
                 )
@@ -707,12 +710,15 @@ class TradeLifecycle(AITOSModule):
                     if trade.take_profit_levels
                     else trade.tp_price
                 )
+                # Remove the already-filled order from the cancellation set.
+                # The remaining resting orders are still canceled by close_trade.
+                if trade.tp_order_ids:
+                    trade.tp_order_ids.pop(0)
                 if len(trade.take_profit_levels) > 1:
                     await self._partial_close(
                         trade, trigger_price, DEFAULT_PARTIAL_CLOSE_FRACTION
                     )
                     trade.take_profit_levels.pop(0)
-                    trade.tp_order_ids.pop(0)
                     return trade
                 return await self.close_trade(
                     trade.trade_id, trigger_price, "tp_triggered_exchange"
