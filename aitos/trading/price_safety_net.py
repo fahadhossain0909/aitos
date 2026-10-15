@@ -119,8 +119,11 @@ class PositionPriceSafetyNet:
             except Exception as exc:
                 for _lifecycle, stale_trade in pairs:
                     emit_position_event(
-                        "position.monitor.stale_recovery_failed", stale_trade,
-                        symbol=symbol, error_type=type(exc).__name__, error=str(exc),
+                        "position.monitor.stale_recovery_failed",
+                        stale_trade,
+                        symbol=symbol,
+                        error_type=type(exc).__name__,
+                        error=str(exc),
                         source="position_price_safety_net",
                     )
                 logger.warning(
@@ -134,15 +137,20 @@ class PositionPriceSafetyNet:
                 try:
                     await lifecycle.update_price(trade.trade_id, price)
                     emit_position_event(
-                        "position.monitor.stale_recovered", trade,
-                        symbol=symbol, fallback_price=price,
+                        "position.monitor.stale_recovered",
+                        trade,
+                        symbol=symbol,
+                        fallback_price=price,
                         source="rest_fallback",
                     )
                 except Exception as exc:
                     emit_position_event(
-                        "position.monitor.stale_recovery_failed", trade,
-                        symbol=symbol, fallback_price=price,
-                        source="rest_fallback", error_type=type(exc).__name__,
+                        "position.monitor.stale_recovery_failed",
+                        trade,
+                        symbol=symbol,
+                        fallback_price=price,
+                        source="rest_fallback",
+                        error_type=type(exc).__name__,
                         error=str(exc),
                     )
                     logger.exception(
