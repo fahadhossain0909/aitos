@@ -185,6 +185,22 @@ class PositionMonitorController:
             score += 4.0
             reasons.append("explicit_exit_signal")
 
+        # Risk vectors must influence escalation, not only deep-monitor priority.
+        # Otherwise a NORMAL-tier position can skip the full evaluator even when
+        # its thesis/liquidity context is already materially deteriorating.
+        for weight, names, reason in (
+            (2.0, ("thesis_risk", "thesis_deterioration", "thesis_invalidity"), "thesis_risk"),
+            (1.5, ("adverse_order_flow_risk", "order_flow_risk"), "adverse_order_flow_risk"),
+            (1.5, ("liquidity_risk", "liquidity_stress"), "liquidity_risk"),
+            (1.0, ("volatility_risk", "volatility_stress"), "volatility_risk"),
+            (1.0, ("regime_risk", "market_regime_risk"), "regime_risk"),
+            (1.0, ("reference_risk", "btc_relationship_risk", "lead_lag_risk"), "reference_risk"),
+        ):
+            risk_value = self._risk_feature(features, *names)
+            if risk_value is not None and risk_value > 0:
+                score += weight * risk_value
+                reasons.append(reason)
+
         raw_tier = (
             PositionMonitorTier.EXIT_CANDIDATE
             if score >= self.exit_score
