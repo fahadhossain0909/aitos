@@ -33,9 +33,7 @@ def test_position_snapshot_handles_missing_optional_fields():
 def test_recent_position_events_are_available_by_position_id():
     trade = SimpleNamespace(trade_id="telemetry-registry-test", symbol="BTCUSDT")
     emit_position_event("position.test", trade, outcome="observed")
-    events = snapshot_position_events(
-        position_id="telemetry-registry-test", limit=10
-    )
+    events = snapshot_position_events(position_id="telemetry-registry-test", limit=10)
     assert events
     assert events[-1]["event"] == "position.test"
     assert events[-1]["trace_id"] == "position:telemetry-registry-test"
