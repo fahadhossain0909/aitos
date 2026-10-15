@@ -28,6 +28,7 @@ from collections.abc import Callable, Iterable
 from typing import Any
 
 from aitos.logging_setup import get_logger
+from aitos.telemetry.position_lifecycle import emit_position_event
 from aitos.trading.price_freshness import PriceFreshnessTracker, get_global_tracker
 
 logger = get_logger("aitos.trading.price_safety_net")
@@ -103,6 +104,12 @@ class PositionPriceSafetyNet:
                 if symbol in self._blacklist:
                     continue
                 if self._freshness.is_stale(symbol, self._stale_after):
+                    emit_position_event(
+                        "position.monitor.stale_candidate", trade,
+                        symbol=symbol, stale_after_seconds=self._stale_after,
+                        source="position_price_safety_net",
+                        action="rest_fallback_requested",
+                    )
                     stale.setdefault(symbol, []).append((lifecycle, trade))
 
         rescued = 0
@@ -110,6 +117,12 @@ class PositionPriceSafetyNet:
             try:
                 price = await self._fetch_last_price(symbol)
             except Exception as exc:
+                for _lifecycle, stale_trade in pairs:
+                    emit_position_event(
+                        "position.monitor.stale_recovery_failed", stale_trade,
+                        symbol=symbol, error_type=type(exc).__name__, error=str(exc),
+                        source="position_price_safety_net",
+                    )
                 logger.warning(
                     "safety-net REST price fetch failed",
                     extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
@@ -120,7 +133,18 @@ class PositionPriceSafetyNet:
             for lifecycle, trade in pairs:
                 try:
                     await lifecycle.update_price(trade.trade_id, price)
-                except Exception:
+                    emit_position_event(
+                        "position.monitor.stale_recovered", trade,
+                        symbol=symbol, fallback_price=price,
+                        source="rest_fallback",
+                    )
+                except Exception as exc:
+                    emit_position_event(
+                        "position.monitor.stale_recovery_failed", trade,
+                        symbol=symbol, fallback_price=price,
+                        source="rest_fallback", error_type=type(exc).__name__,
+                        error=str(exc),
+                    )
                     logger.exception(
                         "safety-net update_price failed",
                         extra={
