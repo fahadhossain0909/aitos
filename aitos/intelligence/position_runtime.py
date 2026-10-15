@@ -261,6 +261,23 @@ def _install_position_monitor() -> None:
         decision = monitor_for(self).evaluate(
             trade=trade, current_price=current_price, extra_features=extra_features
         )
+        health = decision.health
+        health_snapshot = (
+            {
+                "pnl_pct": health.pnl_pct,
+                "stop_distance_pct": health.stop_distance_pct,
+                "cvd": health.cvd,
+                "delta": health.delta,
+                "liquidity_risk": health.liquidity_risk,
+                "volatility_risk": health.volatility_risk,
+                "regime_risk": health.regime_risk,
+                "reference_risk": health.reference_risk,
+                "thesis_risk": health.thesis_risk,
+                "data_freshness_seconds": health.data_freshness_seconds,
+            }
+            if health is not None
+            else {}
+        )
         symbol = str(getattr(trade, "symbol", "")).upper()
         if decision.tier == PositionMonitorTier.NORMAL:
             _DEEP_PRIORITY_SYMBOLS.pop(symbol, None)
@@ -276,7 +293,9 @@ def _install_position_monitor() -> None:
                 current_price=current_price, monitor_tier=decision.tier.value,
                 score=decision.score, priority_score=decision.priority_score,
                 reasons=decision.reasons, action=action.action.value,
-                decision_reason=action.reason, market_context_available=bool(extra_features),
+                decision_reason=action.reason,
+                market_context_available=bool(extra_features),
+                health=health_snapshot,
             )
             return action
         _DEEP_PRIORITY_SYMBOLS[symbol] = (decision.tier, decision.priority_score)
@@ -301,6 +320,7 @@ def _install_position_monitor() -> None:
                 action=action.action.value,
                 decision_reason=action.reason,
                 market_context_available=market_state is not None,
+                health=health_snapshot,
             )
             return action
         action = original_evaluate(
@@ -342,6 +362,7 @@ def _install_position_monitor() -> None:
             action=result.action.value,
             decision_reason=result.reason,
             market_context_available=result.market_state is not None,
+            health=health_snapshot,
             exit_decision=str(getattr(result.exit_decision, "action", "") or ""),
             notes=result.notes,
         )
