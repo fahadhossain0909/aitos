@@ -694,9 +694,14 @@ class TradeLifecycle(AITOSModule):
                 trade.symbol, trade.sl_order_id
             )
             if status == "FILLED":
-                # The exchange has already consumed this stop; do not try to
-                # cancel the filled order during the local close transition.
-                trade.sl_order_id = None
+                # Remember the exchange-filled order but retain its ID until
+                # close succeeds, so a failed cancellation of another order
+                # cannot lose the reconciliation signal.
+                filled_ids = set(
+                    getattr(trade, "_aitos_filled_resting_order_ids", set())
+                )
+                filled_ids.add(trade.sl_order_id)
+                trade._aitos_filled_resting_order_ids = filled_ids
                 return await self.close_trade(
                     trade.trade_id, trade.sl_price, "sl_triggered_exchange"
                 )
@@ -710,16 +715,20 @@ class TradeLifecycle(AITOSModule):
                     if trade.take_profit_levels
                     else trade.tp_price
                 )
-                # Remove the already-filled order from the cancellation set.
-                # The remaining resting orders are still canceled by close_trade.
-                if trade.tp_order_ids:
-                    trade.tp_order_ids.pop(0)
                 if len(trade.take_profit_levels) > 1:
+                    # A filled partial TP is already consumed by the exchange.
                     await self._partial_close(
                         trade, trigger_price, DEFAULT_PARTIAL_CLOSE_FRACTION
                     )
                     trade.take_profit_levels.pop(0)
+                    if trade.tp_order_ids:
+                        trade.tp_order_ids.pop(0)
                     return trade
+                filled_ids = set(
+                    getattr(trade, "_aitos_filled_resting_order_ids", set())
+                )
+                filled_ids.add(trade.tp_order_ids[0])
+                trade._aitos_filled_resting_order_ids = filled_ids
                 return await self.close_trade(
                     trade.trade_id, trigger_price, "tp_triggered_exchange"
                 )
@@ -787,14 +796,21 @@ class TradeLifecycle(AITOSModule):
         # Cancel take-profit orders first and keep the protective stop active
         # until every TP cancellation succeeds. Remove IDs only after confirmed
         # cancellation so a later retry can resume from the remaining orders.
+        filled_ids = set(
+            getattr(trade, "_aitos_filled_resting_order_ids", set())
+        )
         for order_id in list(trade.tp_order_ids):
-            await self._order_executor.cancel_resting_order(trade.symbol, order_id)
+            if order_id not in filled_ids:
+                await self._order_executor.cancel_resting_order(trade.symbol, order_id)
             trade.tp_order_ids.remove(order_id)
         if trade.sl_order_id:
-            await self._order_executor.cancel_resting_order(
-                trade.symbol, trade.sl_order_id
-            )
+            if trade.sl_order_id not in filled_ids:
+                await self._order_executor.cancel_resting_order(
+                    trade.symbol, trade.sl_order_id
+                )
             trade.sl_order_id = None
+        if hasattr(trade, "_aitos_filled_resting_order_ids"):
+            del trade._aitos_filled_resting_order_ids
 
     def _project_portfolio(
         self,
