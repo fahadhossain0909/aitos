@@ -18,6 +18,7 @@ from aitos.intelligence.position_runtime import (
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionManager
 
+
 def test_position_policy_keeps_monitoring_metadata_without_fixed_position_size():
     assert MAX_DEEP_SYMBOLS >= 1
     portfolio = SimpleNamespace(
@@ -33,12 +34,14 @@ def test_position_policy_keeps_monitoring_metadata_without_fixed_position_size()
     assert policy["fixed_per_position_capital_pct"] is None
     assert policy["fixed_per_position_capital_usd"] is None
 
+
 def test_merge_symbols_preserves_requested_order_and_adds_open_positions():
     merged = _merge_symbols(
         ["BTCUSDT", "ETHUSDT", "BTCUSDT"],
         ["SOLUSDT", "ETHUSDT", "XRPUSDT"],
     )
     assert merged == ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT"]
+
 
 def test_position_symbols_can_be_placed_first_to_survive_kline_budget():
     scanner_symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"]
@@ -47,9 +50,11 @@ def test_position_symbols_can_be_placed_first_to_survive_kline_budget():
     assert merged[:2] == protected_symbols
     assert merged[-1] == "DOGEUSDT"
 
+
 def test_position_runtime_is_installed_before_lifecycle_and_manager_instances():
     assert getattr(TradeLifecycle, "_aitos_position_runtime_installed", False)
     assert getattr(PositionManager, "_aitos_tiered_monitor_installed", False)
+
 
 def test_monitor_does_not_make_stop_breach_an_exit_decision():
     action = _cheap_position_action(
@@ -71,6 +76,7 @@ def _trade(trade_id: str = "t1", sl: float = 95.0):
         record_excursion=lambda _price: None,
     )
 
+
 def test_position_monitor_stays_normal_for_healthy_position():
     decision = PositionMonitorController().evaluate(
         trade=_trade(), current_price=102.0, extra_features={}
@@ -79,6 +85,7 @@ def test_position_monitor_stays_normal_for_healthy_position():
     assert decision.health is not None
     assert decision.health.pnl_pct > 0
     assert decision.priority_score == 0.0
+
 
 def test_position_monitor_warning_uses_hysteresis_before_returning_to_normal():
     controller = PositionMonitorController(hysteresis_updates=3)
@@ -97,6 +104,7 @@ def test_position_monitor_warning_uses_hysteresis_before_returning_to_normal():
     )
     assert final_clear.tier == PositionMonitorTier.NORMAL
 
+
 def test_position_monitor_uses_adverse_order_flow_features():
     decision = PositionMonitorController().evaluate(
         trade=_trade(),
@@ -105,6 +113,7 @@ def test_position_monitor_uses_adverse_order_flow_features():
     )
     assert decision.tier == PositionMonitorTier.WARNING
     assert "cvd_divergence" in decision.reasons
+
 
 def test_priority_score_prefers_more_urgent_warning_position():
     controller = PositionMonitorController()
@@ -127,6 +136,7 @@ def test_priority_score_prefers_more_urgent_warning_position():
     )
     assert urgent.priority_score > mild.priority_score
 
+
 def test_deep_priority_order_uses_health_urgency_before_symbol_order():
     priorities = {
         "ETHUSDT": (PositionMonitorTier.WARNING, 52.0),
@@ -135,6 +145,7 @@ def test_deep_priority_order_uses_health_urgency_before_symbol_order():
         "DOGEUSDT": (PositionMonitorTier.NORMAL, 100.0),
     }
     assert _deep_priority_order(priorities) == ["XRPUSDT", "SOLUSDT", "ETHUSDT"]
+
 
 def test_priority_score_caps_at_100_and_health_vector_is_optional_input_only():
     decision = PositionMonitorController().evaluate(
@@ -155,6 +166,7 @@ def test_priority_score_caps_at_100_and_health_vector_is_optional_input_only():
     assert 0.0 <= decision.priority_score <= 100.0
     assert decision.health is not None
 
+
 def test_material_risk_vectors_escalate_without_price_or_exit_flags():
     controller = PositionMonitorController()
     decision = controller.evaluate(
@@ -164,6 +176,7 @@ def test_material_risk_vectors_escalate_without_price_or_exit_flags():
     )
     assert decision.tier == PositionMonitorTier.WARNING
     assert "thesis_risk" in decision.reasons
+
 
 def test_combined_market_risks_escalate_to_exit_candidate():
     controller = PositionMonitorController()
@@ -180,6 +193,7 @@ def test_combined_market_risks_escalate_to_exit_candidate():
     assert {"thesis_risk", "liquidity_risk", "adverse_order_flow_risk"}.issubset(
         set(decision.reasons)
     )
+
 
 def test_lightweight_monitor_updates_priority_independent_of_deep_budget():
     manager = PositionManager()
@@ -200,6 +214,7 @@ def test_lightweight_monitor_updates_priority_independent_of_deep_budget():
     finally:
         _DEEP_PRIORITY_SYMBOLS.pop(trade.symbol, None)
         _PRECOMPUTED_MONITOR_DECISIONS.pop(key, None)
+
 
 def test_healthy_lightweight_monitor_clears_stale_deep_priority():
     manager = PositionManager()
