@@ -796,9 +796,7 @@ class TradeLifecycle(AITOSModule):
         # Cancel take-profit orders first and keep the protective stop active
         # until every TP cancellation succeeds. Remove IDs only after confirmed
         # cancellation so a later retry can resume from the remaining orders.
-        filled_ids = set(
-            getattr(trade, "_aitos_filled_resting_order_ids", set())
-        )
+        filled_ids = set(getattr(trade, "_aitos_filled_resting_order_ids", set()))
         for order_id in list(trade.tp_order_ids):
             if order_id not in filled_ids:
                 await self._order_executor.cancel_resting_order(trade.symbol, order_id)
