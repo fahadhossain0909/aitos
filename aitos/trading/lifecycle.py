@@ -635,9 +635,16 @@ class TradeLifecycle(AITOSModule):
             raise ValueError(
                 f"exit_price must be a finite positive number, got {exit_price!r}"
             )
-        trade = self._open_trades.pop(trade_id, None)
+        trade = self._open_trades.get(trade_id)
         if trade is None:
             raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
+        # Cancel exchange-side resting orders before committing the local
+        # close transition. If cancellation fails, keep the trade registered
+        # as open so monitoring/reconciliation can retry instead of silently
+        # orphaning an exchange position or leaving stale orders behind.
+        if self._use_exchange_side_stops:
+            await self._cancel_resting_orders(trade)
+        self._open_trades.pop(trade_id, None)
         direction = 1 if trade.side == TradeSide.LONG else -1
         pnl_pct = ((exit_price - trade.entry_price) / trade.entry_price) * direction
         realized_on_remaining = trade.position_size_usd * pnl_pct
@@ -660,8 +667,6 @@ class TradeLifecycle(AITOSModule):
         trade.state = TradeLifecycleState.POSITION_CLOSED
         trade.updated_at = trade.exit_time
         self._closed_trades.append(trade)
-        if self._use_exchange_side_stops:
-            await self._cancel_resting_orders(trade)
         if self._position_manager is not None:
             self._position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
         await self._event_bus.publish(
@@ -983,7 +988,15 @@ class TradeLifecycle(AITOSModule):
                 priority=EventPriority.HIGH,
             )
         )
-        return await self.close_trade(trade.trade_id, price, reason)
+        try:
+            return await self.close_trade(trade.trade_id, price, reason)
+        except Exception:
+            # If closing cannot complete (for example, exchange-side resting
+            # orders could not be canceled), keep the position eligible for
+            # subsequent price updates and reconciliation.
+            if trade.trade_id in self._open_trades:
+                trade.state = TradeLifecycleState.POSITION_OPENED
+            raise
 
     async def _partial_close(
         self, trade: Trade, price: float, close_fraction: float
