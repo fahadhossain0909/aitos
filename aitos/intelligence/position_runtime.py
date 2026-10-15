@@ -15,6 +15,7 @@ from aitos.intelligence.position_monitor import (
     PositionMonitorTier,
 )
 from aitos.logging_setup import get_logger
+from aitos.telemetry.position_lifecycle import emit_position_event
 
 if TYPE_CHECKING:
     # Deferred to function-local imports in _install_lifecycle_wiring() and
@@ -239,15 +240,48 @@ def _install_position_monitor() -> None:
         **kwargs: Any,
     ) -> PositionAction:
         if not getattr(self, "_aitos_tiered_monitoring_enabled", False):
-            return original_evaluate(
+            started = datetime.now(timezone.utc)
+            action = original_evaluate(
                 self,
                 trade=trade,
                 current_price=current_price,
                 extra_features=extra_features,
                 **kwargs,
             )
+            emit_position_event(
+                "position.evaluation.completed",
+                trade,
+                current_price=current_price,
+                monitor_tier="full_analysis",
+                action=str(getattr(action.action, "value", action.action)),
+                decision_reason=action.reason,
+                evaluation_duration_ms=(
+                    datetime.now(timezone.utc) - started
+                ).total_seconds()
+                * 1000.0,
+                market_context_available=action.market_state is not None,
+                notes=action.notes,
+            )
+            return action
         decision = monitor_for(self).evaluate(
             trade=trade, current_price=current_price, extra_features=extra_features
+        )
+        health = decision.health
+        health_snapshot = (
+            {
+                "pnl_pct": health.pnl_pct,
+                "stop_distance_pct": health.stop_distance_pct,
+                "cvd": health.cvd,
+                "delta": health.delta,
+                "liquidity_risk": health.liquidity_risk,
+                "volatility_risk": health.volatility_risk,
+                "regime_risk": health.regime_risk,
+                "reference_risk": health.reference_risk,
+                "thesis_risk": health.thesis_risk,
+                "data_freshness_seconds": health.data_freshness_seconds,
+            }
+            if health is not None
+            else {}
         )
         symbol = str(getattr(trade, "symbol", "")).upper()
         if decision.tier == PositionMonitorTier.NORMAL:
@@ -256,22 +290,48 @@ def _install_position_monitor() -> None:
                 trade.record_excursion(current_price)
             except Exception:
                 pass
-            return _cheap_position_action(
+            action = _cheap_position_action(
                 decision.tier, decision.score, decision.reasons
             )
+            emit_position_event(
+                "position.evaluation.completed",
+                trade,
+                current_price=current_price,
+                monitor_tier=decision.tier.value,
+                score=decision.score,
+                priority_score=decision.priority_score,
+                reasons=decision.reasons,
+                action=action.action.value,
+                decision_reason=action.reason,
+                market_context_available=bool(extra_features),
+                health=health_snapshot,
+            )
+            return action
         _DEEP_PRIORITY_SYMBOLS[symbol] = (decision.tier, decision.priority_score)
         if decision.tier == PositionMonitorTier.WARNING:
-            return _cheap_position_action(
-                decision.tier,
-                decision.score,
-                decision.reasons,
-                _warning_market_state(
-                    self,
-                    trade=trade,
-                    current_price=current_price,
-                    kwargs={**kwargs, "extra_features": extra_features},
-                ),
+            market_state = _warning_market_state(
+                self,
+                trade=trade,
+                current_price=current_price,
+                kwargs={**kwargs, "extra_features": extra_features},
             )
+            action = _cheap_position_action(
+                decision.tier, decision.score, decision.reasons, market_state
+            )
+            emit_position_event(
+                "position.evaluation.completed",
+                trade,
+                current_price=current_price,
+                monitor_tier=decision.tier.value,
+                score=decision.score,
+                priority_score=decision.priority_score,
+                reasons=decision.reasons,
+                action=action.action.value,
+                decision_reason=action.reason,
+                market_context_available=market_state is not None,
+                health=health_snapshot,
+            )
+            return action
         action = original_evaluate(
             self,
             trade=trade,
@@ -279,7 +339,7 @@ def _install_position_monitor() -> None:
             extra_features=extra_features,
             **kwargs,
         )
-        return PositionAction(
+        result = PositionAction(
             action=action.action,
             reason=f"POSITION_MONITOR:{decision.tier.value} priority={decision.priority_score:.2f} score={decision.score:.2f}; {action.reason}",
             reduce_fraction=action.reduce_fraction,
@@ -300,6 +360,22 @@ def _install_position_monitor() -> None:
                 *action.notes,
             ),
         )
+        emit_position_event(
+            "position.evaluation.completed",
+            trade,
+            current_price=current_price,
+            monitor_tier=decision.tier.value,
+            score=decision.score,
+            priority_score=decision.priority_score,
+            reasons=decision.reasons,
+            action=result.action.value,
+            decision_reason=result.reason,
+            market_context_available=result.market_state is not None,
+            health=health_snapshot,
+            exit_decision=str(getattr(result.exit_decision, "action", "") or ""),
+            notes=result.notes,
+        )
+        return result
 
     def guarded_clear(
         self: PositionManager, trade_id: str, symbol: str | None = None
@@ -339,6 +415,46 @@ def _install_lifecycle_telemetry() -> None:
             try:
                 result = await original_update_price(self, *args, **kwargs)
                 after_trades = list(self.get_open_trades())
+                duration_ms = (
+                    datetime.now(timezone.utc) - started
+                ).total_seconds() * 1000.0
+                requested_trade_id = args[0] if args else kwargs.get("trade_id")
+                requested_price = (
+                    args[1] if len(args) > 1 else kwargs.get("current_price")
+                )
+                for observed_trade in before_trades:
+                    if requested_trade_id and str(
+                        getattr(observed_trade, "trade_id", "")
+                    ) != str(requested_trade_id):
+                        continue
+                    emit_position_event(
+                        "position.monitor.heartbeat",
+                        observed_trade,
+                        requested_trade_id=requested_trade_id,
+                        current_price=requested_price,
+                        duration_ms=duration_ms,
+                        open_before=len(before_trades),
+                        open_after=len(after_trades),
+                        state_before=before_states.get(
+                            str(getattr(observed_trade, "trade_id", ""))
+                        ),
+                        state_after=next(
+                            (
+                                str(
+                                    getattr(
+                                        getattr(t, "state", None),
+                                        "value",
+                                        getattr(t, "state", None),
+                                    )
+                                )
+                                for t in after_trades
+                                if str(getattr(t, "trade_id", ""))
+                                == str(getattr(observed_trade, "trade_id", ""))
+                            ),
+                            "not_open_after_update",
+                        ),
+                        outcome="evaluated",
+                    )
                 logger.info(
                     "lifecycle root-cause telemetry",
                     extra={
@@ -387,6 +503,67 @@ def _install_lifecycle_telemetry() -> None:
                 raise
 
         TradeLifecycle.update_price = traced_update_price  # type: ignore[method-assign]
+
+    original_close = getattr(TradeLifecycle, "close_trade", None)
+    if callable(original_close):
+
+        @wraps(original_close)
+        async def traced_close_trade(
+            self: TradeLifecycle, trade_id: str, exit_price: float, reason: str
+        ) -> Any:
+            trade = next(
+                (
+                    t
+                    for t in self.get_open_trades()
+                    if str(getattr(t, "trade_id", "")) == str(trade_id)
+                ),
+                None,
+            )
+            started = datetime.now(timezone.utc)
+            emit_position_event(
+                "position.close.attempt",
+                trade,
+                trade_id=str(trade_id),
+                requested_exit_price=exit_price,
+                close_reason=reason,
+                open_before=len(self.get_open_trades()),
+            )
+            try:
+                closed_trade = await original_close(self, trade_id, exit_price, reason)
+            except Exception as exc:
+                emit_position_event(
+                    "position.close.failed",
+                    trade,
+                    trade_id=str(trade_id),
+                    requested_exit_price=exit_price,
+                    close_reason=reason,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    duration_ms=(datetime.now(timezone.utc) - started).total_seconds()
+                    * 1000.0,
+                    open_after=len(self.get_open_trades()),
+                )
+                raise
+            emit_position_event(
+                "position.close.completed",
+                closed_trade or trade,
+                requested_exit_price=exit_price,
+                close_reason=reason,
+                duration_ms=(datetime.now(timezone.utc) - started).total_seconds()
+                * 1000.0,
+                open_after=len(self.get_open_trades()),
+                confirmed_state=str(
+                    getattr(
+                        getattr(closed_trade, "state", None),
+                        "value",
+                        getattr(closed_trade, "state", None),
+                    )
+                ),
+                outcome="lifecycle_close_returned",
+            )
+            return closed_trade
+
+        TradeLifecycle.close_trade = traced_close_trade  # type: ignore[method-assign]
     TradeLifecycle._aitos_lifecycle_telemetry_installed = True  # type: ignore[attr-defined]
 
 
@@ -455,6 +632,13 @@ def _install_lifecycle_wiring() -> None:
                 },
             )
             if state == "position_opened" and symbol:
+                emit_position_event(
+                    "position.opened",
+                    trade,
+                    open_before=before,
+                    open_after=len(self.get_open_trades()),
+                    source="submit_opportunity",
+                )
                 for ingestion in list(_INGESTIONS):
                     try:
                         trade_ok = await ingestion.update_live_trade_symbols([symbol])

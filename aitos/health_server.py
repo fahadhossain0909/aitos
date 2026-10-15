@@ -77,6 +77,10 @@ class HealthServer:
         app.router.add_get("/metrics", self._handle_metrics)
         app.router.add_get("/data-flow", self._handle_data_flow)
         app.router.add_get("/data-flow/{symbol}", self._handle_data_flow_symbol)
+        app.router.add_get("/position-lifecycle", self._handle_position_lifecycle)
+        app.router.add_get(
+            "/position-lifecycle/{position_id}", self._handle_position_lifecycle
+        )
         return app
 
     async def stop(self) -> None:
@@ -84,6 +88,47 @@ class HealthServer:
             logger.info("stopping health server")
             await self._runner.cleanup()
             self._runner = None
+
+    async def _handle_position_lifecycle(self, request: web.Request) -> web.Response:
+        """Recent position lifecycle events for local dashboards and diagnostics."""
+        try:
+            from aitos.telemetry.position_lifecycle import snapshot_position_events
+
+            raw_limit = request.query.get("limit", "200")
+            try:
+                limit = max(1, min(int(raw_limit), 1000))
+            except (TypeError, ValueError):
+                return web.json_response(
+                    {"error": "limit must be an integer between 1 and 1000"},
+                    status=400,
+                )
+            position_id = request.match_info.get("position_id")
+            events = snapshot_position_events(position_id=position_id, limit=limit)
+            latest_by_position: dict[str, dict[str, Any]] = {}
+            for event in events:
+                key = str(event.get("position_id") or event.get("trade_id") or "")
+                if key:
+                    latest_by_position[key] = event
+            return web.json_response(
+                {
+                    "position_id": position_id,
+                    "event_count": len(events),
+                    "position_count": len(latest_by_position),
+                    "retention_limit": 2000,
+                    "events": events,
+                    "positions": list(latest_by_position.values()),
+                    "note": (
+                        "Process-local recent events only; use structured logs "
+                        "for durable history. Missing events do not imply HOLD."
+                    ),
+                }
+            )
+        except Exception as exc:
+            logger.exception("position lifecycle telemetry handler failed")
+            return web.json_response(
+                {"error": str(exc), "error_type": type(exc).__name__},
+                status=500,
+            )
 
     async def _handle_data_flow(self, request: web.Request) -> web.Response:
         """Aggregate pipeline snapshot + pressure-point diagnosis."""
