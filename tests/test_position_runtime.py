@@ -164,7 +164,6 @@ def test_priority_score_caps_at_100_and_health_vector_is_optional_input_only():
     assert decision.health is not None
 
 
-
 def test_material_risk_vectors_escalate_without_price_or_exit_flags():
     controller = PositionMonitorController()
     decision = controller.evaluate(
