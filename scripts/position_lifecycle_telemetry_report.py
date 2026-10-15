@@ -87,6 +87,15 @@ def build_report(
         state = str(last.get("state", last.get("confirmed_state", "unknown")))
         age_seconds = max(0.0, (now - eval_time).total_seconds()) if eval_time else None
         close_outcome = str(latest_close.get("event")) if latest_close else "no_close_event"
+        is_closed = (
+            close_outcome == "position.close.completed"
+            or state.lower() in {"closed", "position_closed"}
+        )
+        monitor_stale = (
+            False
+            if is_closed
+            else age_seconds is None or age_seconds > stale_after_seconds
+        )
         rows.append({
             "position_id": position_id,
             "symbol": last.get("symbol", "unknown"),
@@ -96,7 +105,7 @@ def build_report(
             "last_event_at": last.get("timestamp"),
             "last_evaluation_at": last_eval.get("timestamp") if last_eval else None,
             "evaluation_age_seconds": round(age_seconds, 1) if age_seconds is not None else None,
-            "monitor_stale": age_seconds is None or age_seconds > stale_after_seconds,
+            "monitor_stale": monitor_stale,
             "close_evidence": close_outcome,
             "trace_id": last.get("trace_id", f"position:{position_id}"),
         })
