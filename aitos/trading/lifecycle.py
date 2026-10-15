@@ -778,14 +778,17 @@ class TradeLifecycle(AITOSModule):
         trade.sl_order_id = result.order_id if result.success else None
 
     async def _cancel_resting_orders(self, trade: Trade) -> None:
+        # Cancel take-profit orders first and keep the protective stop active
+        # until every TP cancellation succeeds. Remove IDs only after confirmed
+        # cancellation so a later retry can resume from the remaining orders.
+        for order_id in list(trade.tp_order_ids):
+            await self._order_executor.cancel_resting_order(trade.symbol, order_id)
+            trade.tp_order_ids.remove(order_id)
         if trade.sl_order_id:
             await self._order_executor.cancel_resting_order(
                 trade.symbol, trade.sl_order_id
             )
             trade.sl_order_id = None
-        for order_id in trade.tp_order_ids:
-            await self._order_executor.cancel_resting_order(trade.symbol, order_id)
-        trade.tp_order_ids.clear()
 
     def _project_portfolio(
         self,
