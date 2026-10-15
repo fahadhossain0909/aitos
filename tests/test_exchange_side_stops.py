@@ -312,3 +312,33 @@ async def test_reconcile_trade_no_op_without_exchange_side_stops(
 
     reconciled = await lifecycle.reconcile_trade(trade.trade_id)
     assert reconciled.state == TradeLifecycleState.POSITION_OPENED
+
+
+
+@pytest.mark.asyncio
+async def test_cancel_failure_keeps_triggered_position_open_for_retry(
+    event_bus, risk_engine
+):
+    class FailingCancelExecutor(FakeExchangeCapableExecutor):
+        async def cancel_resting_order(self, symbol: str, order_id: str) -> None:
+            raise RuntimeError("exchange cancel unavailable")
+
+    executor = FailingCancelExecutor()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+
+    with pytest.raises(RuntimeError, match="exchange cancel unavailable"):
+        await lifecycle.update_price(trade.trade_id, 97.0)
+
+    assert trade.trade_id in [t.trade_id for t in lifecycle.get_open_trades()]
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    assert trade.trade_id not in [t.trade_id for t in lifecycle.get_closed_trades()]
+    assert trade.sl_order_id is not None
