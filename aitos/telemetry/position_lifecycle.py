@@ -3,6 +3,7 @@
 Telemetry is observational: failures are swallowed and never alter trading decisions.
 Events are correlated by trade_id/position_id and use bounded, structured fields.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -24,9 +25,20 @@ def position_snapshot(trade: Any) -> dict[str, Any]:
     if trade is None:
         return {}
     fields = (
-        "trade_id", "symbol", "strategy_id", "side", "state", "entry_price",
-        "last_marked_price", "quantity", "remaining_quantity", "sl_price",
-        "tp_price", "entry_time", "exit_time", "exit_reason",
+        "trade_id",
+        "symbol",
+        "strategy_id",
+        "side",
+        "state",
+        "entry_price",
+        "last_marked_price",
+        "quantity",
+        "remaining_quantity",
+        "sl_price",
+        "tp_price",
+        "entry_time",
+        "exit_time",
+        "exit_reason",
     )
     snapshot: dict[str, Any] = {}
     for name in fields:
@@ -63,7 +75,8 @@ def emit_position_event(event: str, trade: Any = None, **fields: Any) -> None:
                 payload[key] = [str(item) for item in value[:32]]
             elif isinstance(value, dict):
                 payload[key] = {
-                    str(k): v for k, v in list(value.items())[:32]
+                    str(k): v
+                    for k, v in list(value.items())[:32]
                     if v is None or isinstance(v, (str, int, float, bool))
                 }
             else:
