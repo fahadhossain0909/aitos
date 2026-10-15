@@ -64,3 +64,16 @@ logs and does not query or mutate trading state:
 Use '-' instead of a logfile path to read stdin. A stale report is a diagnostic
 signal, not a command to close a position; verify current exchange state and the
 live monitor before taking action.
+
+
+## Live health endpoint
+
+The local HealthServer exposes recent in-process events at:
+
+- `GET /position-lifecycle?limit=200`
+- `GET /position-lifecycle/{position_id}?limit=200`
+
+The limit is capped at 1,000 and the in-memory event buffer at 2,000 events. This
+endpoint is intended for local dashboards and rapid diagnosis; it is not durable
+storage and must be bound to localhost or placed behind an authenticated reverse
+proxy. Structured JSON logs remain the durable forensic source.
