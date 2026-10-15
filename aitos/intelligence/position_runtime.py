@@ -289,10 +289,14 @@ def _install_position_monitor() -> None:
                 decision.tier, decision.score, decision.reasons
             )
             emit_position_event(
-                "position.evaluation.completed", trade,
-                current_price=current_price, monitor_tier=decision.tier.value,
-                score=decision.score, priority_score=decision.priority_score,
-                reasons=decision.reasons, action=action.action.value,
+                "position.evaluation.completed",
+                trade,
+                current_price=current_price,
+                monitor_tier=decision.tier.value,
+                score=decision.score,
+                priority_score=decision.priority_score,
+                reasons=decision.reasons,
+                action=action.action.value,
                 decision_reason=action.reason,
                 market_context_available=bool(extra_features),
                 health=health_snapshot,
