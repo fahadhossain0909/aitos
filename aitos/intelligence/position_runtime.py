@@ -291,11 +291,16 @@ def _install_position_monitor() -> None:
                 decision.tier, decision.score, decision.reasons, market_state
             )
             emit_position_event(
-                "position.evaluation.completed", trade,
-                current_price=current_price, monitor_tier=decision.tier.value,
-                score=decision.score, priority_score=decision.priority_score,
-                reasons=decision.reasons, action=action.action.value,
-                decision_reason=action.reason, market_context_available=market_state is not None,
+                "position.evaluation.completed",
+                trade,
+                current_price=current_price,
+                monitor_tier=decision.tier.value,
+                score=decision.score,
+                priority_score=decision.priority_score,
+                reasons=decision.reasons,
+                action=action.action.value,
+                decision_reason=action.reason,
+                market_context_available=market_state is not None,
             )
             return action
         action = original_evaluate(
@@ -327,11 +332,16 @@ def _install_position_monitor() -> None:
             ),
         )
         emit_position_event(
-            "position.evaluation.completed", trade,
-            current_price=current_price, monitor_tier=decision.tier.value,
-            score=decision.score, priority_score=decision.priority_score,
-            reasons=decision.reasons, action=result.action.value,
-            decision_reason=result.reason, market_context_available=result.market_state is not None,
+            "position.evaluation.completed",
+            trade,
+            current_price=current_price,
+            monitor_tier=decision.tier.value,
+            score=decision.score,
+            priority_score=decision.priority_score,
+            reasons=decision.reasons,
+            action=result.action.value,
+            decision_reason=result.reason,
+            market_context_available=result.market_state is not None,
             exit_decision=str(getattr(result.exit_decision, "action", "") or ""),
             notes=result.notes,
         )
@@ -378,26 +388,38 @@ def _install_lifecycle_telemetry() -> None:
                 duration_ms = (
                     datetime.now(timezone.utc) - started
                 ).total_seconds() * 1000.0
-                requested_trade_id = (
-                    args[0] if args else kwargs.get("trade_id")
+                requested_trade_id = args[0] if args else kwargs.get("trade_id")
+                requested_price = (
+                    args[1] if len(args) > 1 else kwargs.get("current_price")
                 )
-                requested_price = args[1] if len(args) > 1 else kwargs.get("current_price")
                 for observed_trade in before_trades:
-                    if requested_trade_id and str(getattr(observed_trade, "trade_id", "")) != str(requested_trade_id):
+                    if requested_trade_id and str(
+                        getattr(observed_trade, "trade_id", "")
+                    ) != str(requested_trade_id):
                         continue
                     emit_position_event(
-                        "position.monitor.heartbeat", observed_trade,
+                        "position.monitor.heartbeat",
+                        observed_trade,
                         requested_trade_id=requested_trade_id,
                         current_price=requested_price,
                         duration_ms=duration_ms,
                         open_before=len(before_trades),
                         open_after=len(after_trades),
-                        state_before=before_states.get(str(getattr(observed_trade, "trade_id", ""))),
+                        state_before=before_states.get(
+                            str(getattr(observed_trade, "trade_id", ""))
+                        ),
                         state_after=next(
                             (
-                                str(getattr(getattr(t, "state", None), "value", getattr(t, "state", None)))
+                                str(
+                                    getattr(
+                                        getattr(t, "state", None),
+                                        "value",
+                                        getattr(t, "state", None),
+                                    )
+                                )
                                 for t in after_trades
-                                if str(getattr(t, "trade_id", "")) == str(getattr(observed_trade, "trade_id", ""))
+                                if str(getattr(t, "trade_id", ""))
+                                == str(getattr(observed_trade, "trade_id", ""))
                             ),
                             "not_open_after_update",
                         ),
@@ -459,32 +481,55 @@ def _install_lifecycle_telemetry() -> None:
             self: TradeLifecycle, trade_id: str, exit_price: float, reason: str
         ) -> Any:
             trade = next(
-                (t for t in self.get_open_trades() if str(getattr(t, "trade_id", "")) == str(trade_id)),
+                (
+                    t
+                    for t in self.get_open_trades()
+                    if str(getattr(t, "trade_id", "")) == str(trade_id)
+                ),
                 None,
             )
             started = datetime.now(timezone.utc)
             emit_position_event(
-                "position.close.attempt", trade, trade_id=str(trade_id),
-                requested_exit_price=exit_price, close_reason=reason,
+                "position.close.attempt",
+                trade,
+                trade_id=str(trade_id),
+                requested_exit_price=exit_price,
+                close_reason=reason,
                 open_before=len(self.get_open_trades()),
             )
             try:
-                closed_trade = await original_close(self, trade_id, exit_price, reason)
+                closed_trade = await original_close(
+                    self, trade_id, exit_price, reason
+                )
             except Exception as exc:
                 emit_position_event(
-                    "position.close.failed", trade, trade_id=str(trade_id),
-                    requested_exit_price=exit_price, close_reason=reason,
-                    error_type=type(exc).__name__, error=str(exc),
-                    duration_ms=(datetime.now(timezone.utc) - started).total_seconds() * 1000.0,
+                    "position.close.failed",
+                    trade,
+                    trade_id=str(trade_id),
+                    requested_exit_price=exit_price,
+                    close_reason=reason,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    duration_ms=(datetime.now(timezone.utc) - started).total_seconds()
+                    * 1000.0,
                     open_after=len(self.get_open_trades()),
                 )
                 raise
             emit_position_event(
-                "position.close.completed", closed_trade or trade,
-                requested_exit_price=exit_price, close_reason=reason,
-                duration_ms=(datetime.now(timezone.utc) - started).total_seconds() * 1000.0,
+                "position.close.completed",
+                closed_trade or trade,
+                requested_exit_price=exit_price,
+                close_reason=reason,
+                duration_ms=(datetime.now(timezone.utc) - started).total_seconds()
+                * 1000.0,
                 open_after=len(self.get_open_trades()),
-                confirmed_state=str(getattr(getattr(closed_trade, "state", None), "value", getattr(closed_trade, "state", None))),
+                confirmed_state=str(
+                    getattr(
+                        getattr(closed_trade, "state", None),
+                        "value",
+                        getattr(closed_trade, "state", None),
+                    )
+                ),
                 outcome="lifecycle_close_returned",
             )
             return closed_trade
@@ -559,8 +604,10 @@ def _install_lifecycle_wiring() -> None:
             )
             if state == "position_opened" and symbol:
                 emit_position_event(
-                    "position.opened", trade,
-                    open_before=before, open_after=len(self.get_open_trades()),
+                    "position.opened",
+                    trade,
+                    open_before=before,
+                    open_after=len(self.get_open_trades()),
                     source="submit_opportunity",
                 )
                 for ingestion in list(_INGESTIONS):
