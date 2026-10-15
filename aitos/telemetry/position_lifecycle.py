@@ -6,13 +6,37 @@ Events are correlated by trade_id/position_id and use bounded, structured fields
 
 from __future__ import annotations
 
+from collections import deque
 from datetime import datetime, timezone
+from threading import Lock
 from typing import Any
 from uuid import uuid4
 
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.telemetry.position_lifecycle")
+_RECENT_EVENTS: deque[dict[str, Any]] = deque(maxlen=2000)
+_EVENTS_LOCK = Lock()
+
+
+def snapshot_position_events(
+    *, position_id: str | None = None, limit: int = 200
+) -> list[dict[str, Any]]:
+    """Return a bounded, read-only snapshot for the local health/dashboard API."""
+    bounded_limit = max(1, min(int(limit), 1000))
+    try:
+        with _EVENTS_LOCK:
+            events = list(_RECENT_EVENTS)
+        if position_id:
+            events = [
+                event
+                for event in events
+                if str(event.get("position_id") or event.get("trade_id") or "")
+                == str(position_id)
+            ]
+        return [dict(event) for event in events[-bounded_limit:]]
+    except Exception:
+        return []
 
 
 def _value(obj: Any, name: str, default: Any = None) -> Any:
@@ -81,6 +105,8 @@ def emit_position_event(event: str, trade: Any = None, **fields: Any) -> None:
                 }
             else:
                 payload[key] = str(value)
+        with _EVENTS_LOCK:
+            _RECENT_EVENTS.append(dict(payload))
         logger.info(
             "position lifecycle telemetry",
             extra={"aitos_extra": payload},
