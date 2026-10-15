@@ -452,9 +452,7 @@ def _install_lifecycle_telemetry() -> None:
             }
             started = datetime.now(timezone.utc)
             requested_trade_id = args[0] if args else kwargs.get("trade_id")
-            requested_price = (
-                args[1] if len(args) > 1 else kwargs.get("current_price")
-            )
+            requested_price = args[1] if len(args) > 1 else kwargs.get("current_price")
             manager = getattr(self, "position_manager", None)
             if (
                 manager is not None
@@ -465,8 +463,7 @@ def _install_lifecycle_telemetry() -> None:
                     (
                         t
                         for t in before_trades
-                        if str(getattr(t, "trade_id", ""))
-                        == str(requested_trade_id)
+                        if str(getattr(t, "trade_id", "")) == str(requested_trade_id)
                     ),
                     None,
                 )
