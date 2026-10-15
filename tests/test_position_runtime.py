@@ -6,14 +6,14 @@ from aitos.intelligence.position_monitor import (
     PositionMonitorTier,
 )
 from aitos.intelligence.position_runtime import (
+    _DEEP_PRIORITY_SYMBOLS,
+    _PRECOMPUTED_MONITOR_DECISIONS,
     MAX_DEEP_SYMBOLS,
     _capital_policy_consensus,
     _cheap_position_action,
     _deep_priority_order,
-    _merge_symbols,
-    _DEEP_PRIORITY_SYMBOLS,
-    _PRECOMPUTED_MONITOR_DECISIONS,
     _evaluate_lightweight_monitor,
+    _merge_symbols,
 )
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.position_manager import PositionManager
