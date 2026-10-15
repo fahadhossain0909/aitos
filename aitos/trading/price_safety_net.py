@@ -105,8 +105,10 @@ class PositionPriceSafetyNet:
                     continue
                 if self._freshness.is_stale(symbol, self._stale_after):
                     emit_position_event(
-                        "position.monitor.stale_candidate", trade,
-                        symbol=symbol, stale_after_seconds=self._stale_after,
+                        "position.monitor.stale_candidate",
+                        trade,
+                        symbol=symbol,
+                        stale_after_seconds=self._stale_after,
                         source="position_price_safety_net",
                         action="rest_fallback_requested",
                     )
