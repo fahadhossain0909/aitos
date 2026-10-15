@@ -89,9 +89,7 @@ class HealthServer:
             await self._runner.cleanup()
             self._runner = None
 
-    async def _handle_position_lifecycle(
-        self, request: web.Request
-    ) -> web.Response:
+    async def _handle_position_lifecycle(self, request: web.Request) -> web.Response:
         """Recent position lifecycle events for local dashboards and diagnostics."""
         try:
             from aitos.telemetry.position_lifecycle import snapshot_position_events
@@ -105,9 +103,7 @@ class HealthServer:
                     status=400,
                 )
             position_id = request.match_info.get("position_id")
-            events = snapshot_position_events(
-                position_id=position_id, limit=limit
-            )
+            events = snapshot_position_events(position_id=position_id, limit=limit)
             latest_by_position: dict[str, dict[str, Any]] = {}
             for event in events:
                 key = str(event.get("position_id") or event.get("trade_id") or "")
