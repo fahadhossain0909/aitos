@@ -2,7 +2,11 @@ import importlib.util
 from datetime import datetime, timezone
 from pathlib import Path
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "position_lifecycle_telemetry_report.py"
+SCRIPT = (
+    Path(__file__).resolve().parents[1]
+    / "scripts"
+    / "position_lifecycle_telemetry_report.py"
+)
 spec = importlib.util.spec_from_file_location(
     "position_lifecycle_telemetry_report", SCRIPT
 )
@@ -63,9 +67,11 @@ def test_closed_positions_are_not_reported_as_stale():
 
 
 def test_load_events_counts_malformed_lines_and_uses_trade_id_fallback():
-    positions, malformed = reporter.load_events([
-        '{"event":"position.close.failed","trade_id":"t9","symbol":"SOLUSDT"}',
-        'not-json',
-    ])
+    positions, malformed = reporter.load_events(
+        [
+            '{"event":"position.close.failed","trade_id":"t9","symbol":"SOLUSDT"}',
+            "not-json",
+        ]
+    )
     assert malformed == 1
     assert "t9" in positions
