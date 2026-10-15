@@ -162,3 +162,32 @@ def test_priority_score_caps_at_100_and_health_vector_is_optional_input_only():
     assert decision.tier == PositionMonitorTier.EXIT_CANDIDATE
     assert 0.0 <= decision.priority_score <= 100.0
     assert decision.health is not None
+
+
+
+def test_material_risk_vectors_escalate_without_price_or_exit_flags():
+    controller = PositionMonitorController()
+    decision = controller.evaluate(
+        trade=_trade("risk-only"),
+        current_price=101.0,
+        extra_features={"thesis_risk": 1.0},
+    )
+    assert decision.tier == PositionMonitorTier.WARNING
+    assert "thesis_risk" in decision.reasons
+
+
+def test_combined_market_risks_escalate_to_exit_candidate():
+    controller = PositionMonitorController()
+    decision = controller.evaluate(
+        trade=_trade("combined-risk"),
+        current_price=101.0,
+        extra_features={
+            "thesis_risk": 1.0,
+            "liquidity_risk": 1.0,
+            "adverse_order_flow_risk": 1.0,
+        },
+    )
+    assert decision.tier == PositionMonitorTier.EXIT_CANDIDATE
+    assert {"thesis_risk", "liquidity_risk", "adverse_order_flow_risk"}.issubset(
+        set(decision.reasons)
+    )
