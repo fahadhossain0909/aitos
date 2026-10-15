@@ -1003,20 +1003,20 @@ class TradeLifecycle(AITOSModule):
     ) -> Trade:
         trade.state = TradeLifecycleState.EXIT_TRIGGERED
         trade.updated_at = utc_now_iso()
-        await self._event_bus.publish(
-            Event(
-                topic=topic,
-                payload={**trade.to_dict(), "trigger_price": price},
-                source_module=self.module_id,
-                priority=EventPriority.HIGH,
-            )
-        )
         try:
+            await self._event_bus.publish(
+                Event(
+                    topic=topic,
+                    payload={**trade.to_dict(), "trigger_price": price},
+                    source_module=self.module_id,
+                    priority=EventPriority.HIGH,
+                )
+            )
             return await self.close_trade(trade.trade_id, price, reason)
         except Exception:
-            # If closing cannot complete (for example, exchange-side resting
-            # orders could not be canceled), keep the position eligible for
-            # subsequent price updates and reconciliation.
+            # If exit-event publication or closing fails, do not leave the
+            # trade stuck in EXIT_TRIGGERED: the live price loop skips states
+            # other than POSITION_OPENED, so this would disable further checks.
             if trade.trade_id in self._open_trades:
                 trade.state = TradeLifecycleState.POSITION_OPENED
             raise
