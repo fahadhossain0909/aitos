@@ -56,11 +56,19 @@ def load_events(lines) -> tuple[dict[str, list[dict[str, Any]]], int]:
         if event and position_id:
             positions[str(position_id)].append(payload)
     for events in positions.values():
-        events.sort(key=lambda item: _parse_time(item.get("timestamp")) or datetime.min.replace(tzinfo=timezone.utc))
+        events.sort(
+            key=lambda item: _parse_time(item.get("timestamp"))
+            or datetime.min.replace(tzinfo=timezone.utc)
+        )
     return positions, malformed
 
 
-def build_report(positions, *, now: datetime | None = None, stale_after_seconds: float = 120.0) -> dict[str, Any]:
+def build_report(
+    positions,
+    *,
+    now: datetime | None = None,
+    stale_after_seconds: float = 120.0,
+) -> dict[str, Any]:
     now = now or datetime.now(timezone.utc)
     rows = []
     for position_id, events in sorted(positions.items()):
@@ -105,13 +113,19 @@ def main() -> int:
     parser.add_argument("logfile", help="JSON-lines AITOS log file, or '-' for stdin")
     parser.add_argument("--stale-after-seconds", type=float, default=120.0)
     args = parser.parse_args()
-    stream = sys.stdin if args.logfile == "-" else open(args.logfile, encoding="utf-8")
+    stream = (
+        sys.stdin
+        if args.logfile == "-"
+        else open(args.logfile, encoding="utf-8")
+    )
     try:
         positions, malformed = load_events(stream)
     finally:
         if stream is not sys.stdin:
             stream.close()
-    report = build_report(positions, stale_after_seconds=max(1.0, args.stale_after_seconds))
+    report = build_report(
+        positions, stale_after_seconds=max(1.0, args.stale_after_seconds)
+    )
     print(json.dumps({**report, "malformed_lines": malformed}, indent=2, default=str))
     return 0
 
