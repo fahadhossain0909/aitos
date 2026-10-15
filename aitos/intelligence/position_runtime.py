@@ -506,6 +506,7 @@ def _install_lifecycle_telemetry() -> None:
 
     original_close = getattr(TradeLifecycle, "close_trade", None)
     if callable(original_close):
+
         @wraps(original_close)
         async def traced_close_trade(
             self: TradeLifecycle, trade_id: str, exit_price: float, reason: str
