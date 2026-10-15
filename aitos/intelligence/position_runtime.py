@@ -249,11 +249,16 @@ def _install_position_monitor() -> None:
                 **kwargs,
             )
             emit_position_event(
-                "position.evaluation.completed", trade,
-                current_price=current_price, monitor_tier="full_analysis",
+                "position.evaluation.completed",
+                trade,
+                current_price=current_price,
+                monitor_tier="full_analysis",
                 action=str(getattr(action.action, "value", action.action)),
                 decision_reason=action.reason,
-                evaluation_duration_ms=(datetime.now(timezone.utc) - started).total_seconds() * 1000.0,
+                evaluation_duration_ms=(
+                    datetime.now(timezone.utc) - started
+                ).total_seconds()
+                * 1000.0,
                 market_context_available=action.market_state is not None,
                 notes=action.notes,
             )
@@ -523,9 +528,7 @@ def _install_lifecycle_telemetry() -> None:
                 open_before=len(self.get_open_trades()),
             )
             try:
-                closed_trade = await original_close(
-                    self, trade_id, exit_price, reason
-                )
+                closed_trade = await original_close(self, trade_id, exit_price, reason)
             except Exception as exc:
                 emit_position_event(
                     "position.close.failed",
