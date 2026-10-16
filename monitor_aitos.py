@@ -183,16 +183,32 @@ def check_clickhouse_write_health():
     """
     # grep exits 1 when nothing matches, which is the healthy case here.
     rc1, out1 = run_argv(
-        ["docker", "exec", CLICKHOUSE_CONTAINER, "grep", "-ac", "Code: 1001", CLICKHOUSE_LOG],
+        [
+            "docker",
+            "exec",
+            CLICKHOUSE_CONTAINER,
+            "grep",
+            "-ac",
+            "Code: 1001",
+            CLICKHOUSE_LOG,
+        ],
         timeout=60,
     )
     code1001 = _last_int(out1) if rc1 in (0, 1) else -1
 
     rc2, out2 = run_argv(
         [
-            "docker", "exec", CLICKHOUSE_CONTAINER,
-            "find", "/var/lib/clickhouse/store",
-            "-maxdepth", "3", "-name", "tmp_insert*", "-type", "d",
+            "docker",
+            "exec",
+            CLICKHOUSE_CONTAINER,
+            "find",
+            "/var/lib/clickhouse/store",
+            "-maxdepth",
+            "3",
+            "-name",
+            "tmp_insert*",
+            "-type",
+            "d",
         ],
         timeout=180,
     )
@@ -233,7 +249,8 @@ def check_paper_trading_errors():
 
     error_lines = [ln for ln in output.splitlines() if '"level": "ERROR"' in ln]
     persistence = [
-        ln for ln in error_lines
+        ln
+        for ln in error_lines
         if "failed to save" in ln or "persistence failed" in ln or "Code: 1001" in ln
     ]
 
@@ -271,8 +288,15 @@ def check_test_status():
 
 METRICS_URL = "http://localhost:8090/metrics"
 
-TRADE_TABLES = ["trades", "trade_runtime_state", "journal_entries", "decision_journal",
-                "learning_experiences", "order_book_snapshots", "live_analytics_events"]
+TRADE_TABLES = [
+    "trades",
+    "trade_runtime_state",
+    "journal_entries",
+    "decision_journal",
+    "learning_experiences",
+    "order_book_snapshots",
+    "live_analytics_events",
+]
 
 
 def check_trading_summary():
@@ -284,7 +308,11 @@ def check_trading_summary():
     recent = []
     rc, out = run_argv(
         [
-            "docker", "exec", CLICKHOUSE_CONTAINER, "clickhouse-client", "--query",
+            "docker",
+            "exec",
+            CLICKHOUSE_CONTAINER,
+            "clickhouse-client",
+            "--query",
             "SELECT symbol, side, entry_price, state, pnl, entry_time "
             "FROM aitos.trades ORDER BY recorded_at DESC LIMIT 6",
         ],
@@ -299,19 +327,25 @@ def check_trading_summary():
                 pnl = parts[4] if len(parts) > 4 else None
                 if pnl in ("\\N", ""):
                     pnl = None
-                recent.append({
-                    "symbol": parts[0],
-                    "side": parts[1],
-                    "entry_price": parts[2],
-                    "state": parts[3],
-                    "pnl": pnl,
-                    "entry_time": parts[5] if len(parts) > 5 else None,
-                })
+                recent.append(
+                    {
+                        "symbol": parts[0],
+                        "side": parts[1],
+                        "entry_price": parts[2],
+                        "state": parts[3],
+                        "pnl": pnl,
+                        "entry_time": parts[5] if len(parts) > 5 else None,
+                    }
+                )
 
     counts = {}
     rc2, out2 = run_argv(
         [
-            "docker", "exec", CLICKHOUSE_CONTAINER, "clickhouse-client", "--query",
+            "docker",
+            "exec",
+            CLICKHOUSE_CONTAINER,
+            "clickhouse-client",
+            "--query",
             "SELECT table, sum(rows) FROM system.parts WHERE active AND database='aitos' "
             "GROUP BY table ORDER BY sum(rows) DESC",
         ],
@@ -428,8 +462,8 @@ def check_disk_space():
     try:
         usage = shutil.disk_usage(str(PROJECT_DIR.drive) + "\\")
         return {
-            "free_gb": round(usage.free / (1024 ** 3), 1),
-            "total_gb": round(usage.total / (1024 ** 3), 1),
+            "free_gb": round(usage.free / (1024**3), 1),
+            "total_gb": round(usage.total / (1024**3), 1),
             "used_percent": round(100 * (1 - usage.free / usage.total), 1),
         }
     except Exception as exc:  # pragma: no cover - defensive
@@ -520,7 +554,9 @@ def generate_report():
         if docker_status["unhealthy"] > 0:
             issues.append(f"{docker_status['unhealthy']} unhealthy Docker service(s)")
         if docker_status["missing"]:
-            issues.append(f"Containers not running: {', '.join(docker_status['missing'])}")
+            issues.append(
+                f"Containers not running: {', '.join(docker_status['missing'])}"
+            )
     if not health["reachable"]:
         issues.append("Health endpoint not reachable on port 8090")
     if (

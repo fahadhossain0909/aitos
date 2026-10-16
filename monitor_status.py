@@ -72,7 +72,9 @@ def _last_int(text):
 def main():
     lines = []
 
-    rc, out = run_argv(["docker", "compose", *COMPOSE_PROFILES, "ps", "--format", "json"])
+    rc, out = run_argv(
+        ["docker", "compose", *COMPOSE_PROFILES, "ps", "--format", "json"]
+    )
     if rc != 0:
         lines.append("docker=unavailable")
     else:
@@ -87,10 +89,14 @@ def main():
                 continue
         names = {s.get("Name") for s in services}
         running = sorted(
-            s.get("Name") for s in services if (s.get("State") or "").lower() == "running"
+            s.get("Name")
+            for s in services
+            if (s.get("State") or "").lower() == "running"
         )
         unhealthy = sorted(
-            s.get("Name") for s in services if (s.get("Health") or "").lower() == "unhealthy"
+            s.get("Name")
+            for s in services
+            if (s.get("Health") or "").lower() == "unhealthy"
         )
         missing = sorted(n for n in EXPECTED_SERVICES if n not in names)
         lines.append(f"containers_running={len(running)}/{len(EXPECTED_SERVICES)}")
@@ -107,8 +113,12 @@ def main():
 
     rc, out = run_argv(
         [
-            "docker", "exec", "aitos-clickhouse",
-            "grep", "-ac", "Code: 1001",
+            "docker",
+            "exec",
+            "aitos-clickhouse",
+            "grep",
+            "-ac",
+            "Code: 1001",
             "/var/log/clickhouse-server/clickhouse-server.err.log",
         ]
     )
@@ -116,9 +126,17 @@ def main():
 
     rc, out = run_argv(
         [
-            "docker", "exec", "aitos-clickhouse",
-            "find", "/var/lib/clickhouse/store",
-            "-maxdepth", "3", "-name", "tmp_insert*", "-type", "d",
+            "docker",
+            "exec",
+            "aitos-clickhouse",
+            "find",
+            "/var/lib/clickhouse/store",
+            "-maxdepth",
+            "3",
+            "-name",
+            "tmp_insert*",
+            "-type",
+            "d",
         ],
         timeout=180,
     )
@@ -146,8 +164,11 @@ def main():
     else:
         errs = [ln for ln in out.splitlines() if '"level": "ERROR"' in ln]
         persist = [
-            ln for ln in errs
-            if "failed to save" in ln or "persistence failed" in ln or "Code: 1001" in ln
+            ln
+            for ln in errs
+            if "failed to save" in ln
+            or "persistence failed" in ln
+            or "Code: 1001" in ln
         ]
         # Only a data-loss signal belongs in the change-detector. Raw error counts
         # change every tick (websocket churn) and would wake the agent constantly.
