@@ -321,7 +321,11 @@ def check_test_status():
     if rc == 0:
         return {"collectable": True, "output": tail[:300]}
     if "No module named pytest" in output or "No module named 'pytest'" in output:
-        return {"collectable": None, "reason": "pytest unavailable in this interpreter", "output": tail[:200]}
+        return {
+            "collectable": None,
+            "reason": "pytest unavailable in this interpreter",
+            "output": tail[:200],
+        }
     return {"collectable": False, "output": tail[:300]}
 
 
