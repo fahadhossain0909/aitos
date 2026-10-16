@@ -77,7 +77,12 @@ services:
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: 1
     volumes:
-      - "${CLICKHOUSE_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/databases/clickhouse}:/var/lib/clickhouse"
+      # Named volume (ext4 inside the Docker VM) instead of a Windows bind mount.
+      # The 9p/DrvFs bind mount does not support MergeTree's atomic directory
+      # renames: every async insert failed with "rename: Permission denied",
+      # which left tens of thousands of orphaned tmp_insert_* dirs behind and
+      # blocked startup for ~30 min while ClickHouse cleaned them one by one.
+      - clickhouse-data:/var/lib/clickhouse
       - ./docker/clickhouse/config.d/aitos.xml:/etc/clickhouse-server/config.d/aitos.xml:ro
       - ./docker/clickhouse/users.d/aitos.xml:/etc/clickhouse-server/users.d/aitos.xml:ro
     cpus: "${CLICKHOUSE_CPUS:-0.35}"
@@ -212,5 +217,6 @@ services:
     profiles: [observability]
 
 volumes:
+  clickhouse-data:
   prometheus-data:
   grafana-data:
