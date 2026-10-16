@@ -10,6 +10,8 @@ keep this output purely state-based.
 """
 
 import json
+import os
+import shutil
 import subprocess
 import urllib.error
 import urllib.request
@@ -37,7 +39,34 @@ EXPECTED_SERVICES = [
 ]
 
 
+def _find_docker() -> str:
+    """Return the docker CLI path.
+
+    The cron scheduler does not inherit the interactive shell PATH, so a bare
+    "docker" lookup fails with WinError 2 even though Docker Desktop is
+    installed. Fall back to the known install locations.
+    """
+    found = shutil.which("docker")
+    if found:
+        return "docker"
+    candidates = [
+        os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            r"Programs\DockerDesktop\resources\bin\docker.exe",
+        ),
+        r"C:\Program Files\Docker\Docker\resources\bin\docker.exe",
+    ]
+    for cand in candidates:
+        if cand and os.path.exists(cand):
+            return cand
+    return "docker"
+
+
+DOCKER = _find_docker()
+
+
 def run_argv(argv, timeout=90):
+    argv = [DOCKER if a == "docker" else a for a in argv]
     try:
         proc = subprocess.run(
             argv,
@@ -118,11 +147,11 @@ def main():
             "aitos-clickhouse",
             "grep",
             "-ac",
-            "Code: 1001",
+            "in rename: Permission denied",
             "/var/log/clickhouse-server/clickhouse-server.err.log",
         ]
     )
-    code1001 = _last_int(out) if rc in (0, 1) else -1
+    rename_errors = _last_int(out) if rc in (0, 1) else -1
 
     rc, out = run_argv(
         [
@@ -145,7 +174,7 @@ def main():
     # Emit a coarse verdict, not the raw count. A few tmp_insert_* dirs exist
     # while async inserts are in flight, so the raw number changes every tick and
     # would wake the agent constantly. Only an accumulation means real failure.
-    writes_ok = code1001 == 0 and 0 <= orphans <= ORPHAN_TMP_THRESHOLD
+    writes_ok = rename_errors == 0 and 0 <= orphans <= ORPHAN_TMP_THRESHOLD
     lines.append(f"clickhouse_writes={'ok' if writes_ok else 'failing'}")
 
     rc, out = run_argv(["docker", "exec", "aitos-clickhouse", "cat", "/proc/mounts"])
@@ -168,7 +197,7 @@ def main():
             for ln in errs
             if "failed to save" in ln
             or "persistence failed" in ln
-            or "Code: 1001" in ln
+            or "in rename: Permission denied" in ln
         ]
         # Only a data-loss signal belongs in the change-detector. Raw error counts
         # change every tick (websocket churn) and would wake the agent constantly.

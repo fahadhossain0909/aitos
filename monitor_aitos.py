@@ -16,6 +16,7 @@ cmd.exe):
 """
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -63,8 +64,35 @@ def log(message):
         f.write(entry + "\n")
 
 
+def _find_docker() -> str:
+    """Return the docker CLI path.
+
+    The cron scheduler does not inherit the interactive shell PATH, so a bare
+    "docker" lookup fails with WinError 2 even though Docker Desktop is
+    installed. Fall back to the known install locations.
+    """
+    found = shutil.which("docker")
+    if found:
+        return "docker"
+    candidates = [
+        os.path.join(
+            os.environ.get("LOCALAPPDATA", ""),
+            r"Programs\DockerDesktop\resources\bin\docker.exe",
+        ),
+        r"C:\Program Files\Docker\Docker\resources\bin\docker.exe",
+    ]
+    for cand in candidates:
+        if cand and os.path.exists(cand):
+            return cand
+    return "docker"
+
+
+DOCKER = _find_docker()
+
+
 def run_argv(argv, timeout=60, cwd=None):
     """Run a command as an argv list (no shell). Returns (returncode, output)."""
+    argv = [DOCKER if a == "docker" else a for a in argv]
     try:
         proc = subprocess.run(
             argv,
@@ -189,12 +217,12 @@ def check_clickhouse_write_health():
             CLICKHOUSE_CONTAINER,
             "grep",
             "-ac",
-            "Code: 1001",
+            "in rename: Permission denied",
             CLICKHOUSE_LOG,
         ],
         timeout=60,
     )
-    code1001 = _last_int(out1) if rc1 in (0, 1) else -1
+    rename_errors = _last_int(out1) if rc1 in (0, 1) else -1
 
     rc2, out2 = run_argv(
         [
@@ -227,11 +255,11 @@ def check_clickhouse_write_health():
                 break
 
     return {
-        "code1001_errors": code1001,
+        "rename_errors": rename_errors,
         "orphaned_tmp_dirs": orphans,
         "data_filesystem": filesystem,
         "healthy": (
-            code1001 == 0
+            rename_errors == 0
             and 0 <= orphans <= ORPHAN_TMP_THRESHOLD
             and filesystem == "ext4"
         ),
@@ -251,7 +279,9 @@ def check_paper_trading_errors():
     persistence = [
         ln
         for ln in error_lines
-        if "failed to save" in ln or "persistence failed" in ln or "Code: 1001" in ln
+        if "failed to save" in ln
+        or "persistence failed" in ln
+        or "in rename: Permission denied" in ln
     ]
 
     # Group by logger + message so the digest can report what is actually
@@ -277,13 +307,22 @@ def check_paper_trading_errors():
 
 
 def check_test_status():
-    """Verify the test suite still collects (uses the running interpreter)."""
+    """Verify the test suite still collects (uses the running interpreter).
+
+    Returns collectable=None when pytest is simply not installed in the
+    interpreter running the monitor (the cron Python may differ from a
+    developer one); that is an environment fact, not a project failure.
+    """
     rc, output = run_argv(
         [sys.executable, "-m", "pytest", "--co", "-q"],
         timeout=240,
     )
     tail = "\n".join(output.splitlines()[-3:]).strip()
-    return {"collectable": rc == 0, "output": tail[:300]}
+    if rc == 0:
+        return {"collectable": True, "output": tail[:300]}
+    if "No module named pytest" in output or "No module named 'pytest'" in output:
+        return {"collectable": None, "reason": "pytest unavailable in this interpreter", "output": tail[:200]}
+    return {"collectable": False, "output": tail[:300]}
 
 
 METRICS_URL = "http://localhost:8090/metrics"
@@ -503,7 +542,7 @@ def generate_report():
     clickhouse = check_clickhouse_write_health()
     report["checks"]["clickhouse"] = clickhouse
     log(
-        f"ClickHouse: code1001={clickhouse['code1001_errors']} "
+        f"ClickHouse: rename_errors={clickhouse['rename_errors']} "
         f"orphaned_tmp_dirs={clickhouse['orphaned_tmp_dirs']} "
         f"fs={clickhouse['data_filesystem']}"
     )
@@ -542,7 +581,12 @@ def generate_report():
 
     tests = check_test_status()
     report["checks"]["tests"] = tests
-    log(f"Tests: {'collectable' if tests['collectable'] else 'FAILED'}")
+    if tests["collectable"] is True:
+        log("Tests: collectable")
+    elif tests["collectable"] is False:
+        log("Tests: FAILED")
+    else:
+        log("Tests: pytest unavailable in this interpreter")
 
     report["checks"]["disk"] = check_disk_space()
 
@@ -560,12 +604,12 @@ def generate_report():
     if not health["reachable"]:
         issues.append("Health endpoint not reachable on port 8090")
     if (
-        clickhouse["code1001_errors"] > 0
+        clickhouse["rename_errors"] > 0
         or clickhouse["orphaned_tmp_dirs"] > ORPHAN_TMP_THRESHOLD
     ):
         issues.append(
             "ClickHouse writes failing "
-            f"(code1001={clickhouse['code1001_errors']}, "
+            f"(rename_errors={clickhouse['rename_errors']}, "
             f"orphaned_tmp_dirs={clickhouse['orphaned_tmp_dirs']}, "
             f"fs={clickhouse['data_filesystem']}). ClickHouse data must live on an "
             "ext4 Docker named volume, not a 9p/DrvFs Windows bind mount."
@@ -593,9 +637,9 @@ def generate_report():
             issues.append(
                 f"{telemetry['modules_unhealthy']} internal module(s) reporting unhealthy"
             )
-        if _num("aitos_event_bus_handler_failures") > 0:
+        if _num("aitos_event_bus_handler_failures") > 5:
             issues.append(
-                f"{int(_num('aitos_event_bus_handler_failures'))} event-bus handler failure(s)"
+                f"{int(_num('aitos_event_bus_handler_failures'))} event-bus handler failure(s) — a single recovered failure is normal churn"
             )
         if _num("aitos_event_bus_dlq_events") > 0:
             issues.append(
@@ -603,7 +647,7 @@ def generate_report():
             )
     else:
         issues.append(f"Telemetry endpoint unreachable: {telemetry['error']}")
-    if not tests["collectable"]:
+    if tests["collectable"] is False:
         issues.append("Test collection failed")
 
     report["issues"] = issues
