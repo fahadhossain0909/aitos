@@ -116,3 +116,18 @@ async def test_gateway_drain_stage_telemetry_breaks_out_publisher() -> None:
         "queue_task_done",
     }
     assert stages["publisher"]["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_drain_once_returns_false_on_empty_queue() -> None:
+    published = []
+
+    async def publish(event):
+        published.append(event)
+
+    gateway = MarketDataGateway(
+        "binance", "usd_m_futures", publish, GatewayConfig(queue_capacity=4)
+    )
+    assert await gateway.drain_once() is False
+    assert published == []
+    assert gateway.queue.qsize() == 0

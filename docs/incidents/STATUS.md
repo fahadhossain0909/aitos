@@ -1,12 +1,11 @@
 # AITOS Incident Status — quick operational summary
 
-Updated: 2026-10-18T17:45Z | Branch: `fix/market-data-publish-and-flow` | Mode: paper (Docker)
-
+Updated: 2026-10-19T22:12Z | Branch: `fix/market-data-publish-and-flow` | Mode: paper (Docker)
 ## Open incidents
 
 | ID | Severity | Status | Summary |
 |---|---|---|---|
-| [INC-20261018-02](INC-20261018-02-clickhouse-single-row-write-latency.md) | P2-low | INVESTIGATING | ClickHouse single-row book-snapshot writes 100–300ms; no backlog/loss; remediation options prepared, needs approval |
+| [INC-20261018-02](INC-20261018-02-clickhouse-single-row-write-latency.md) | P2-low | INVESTIGATING | ClickHouse single-row book-snapshot writes 100-300ms; no backlog/loss; remediation options prepared, needs approval |
 
 ## Resolved
 
@@ -14,8 +13,8 @@ Updated: 2026-10-18T17:45Z | Branch: `fix/market-data-publish-and-flow` | Mode: 
 |---|---|---|
 | [INC-20261018-01](INC-20261018-01-windows-signal-notimplemented.md) | P1 | Windows `add_signal_handler` NotImplementedError crashed native startup; fixed via `aitos.runtime_signals` helper + regression test |
 | [INC-20261018-03](INC-20261018-03-docker-desktop-down-stack-recovery.md) | P1 | Docker Desktop force-closed while host up → whole stack down ~3h (containers Exited 137, no auto-restart); recovered via Docker Desktop start + compose up; 2 positions restored cleanly; host-level watchdog proposed for true 24/7 |
-
-## Known non-incidents / signatures (do not re-derive)
+| [INC-20261019-01](INC-20261019-01-gateway-drain-unbound-event.md) | P2 | `drain_once` idle timeout could raise `UnboundLocalError`; initialized `event = None`, added regression test, runtime verified |
+| [INC-20261019-02](INC-20261019-02-a-stat-side-blind-and-duplicate-history.md) | P2 | A-Stat funding/OI side-blind conversion, duplicate history accumulation, and missing finiteness guards; runtime verified |## Known non-incidents / signatures (do not re-derive)
 
 - **Stack fully down + all containers `Exited (137)` + Docker Desktop process absent + host uptime predates last healthy check** → Docker Desktop closed/crashed (NOT a PC reboot). Recovery: start `Docker Desktop.exe`, wait for engine, `docker compose --profile observability up -d`, then verify `restored_open_trades` in aitos-paper logs. See INC-20261018-03.
 - pip `BackendUnavailable: Cannot import 'setuptools.build_meta'` → AutoClaw2 vendored interpreter; use system Python or Docker.

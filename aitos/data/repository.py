@@ -493,11 +493,20 @@ class MarketDataRepository(AITOSModule):
         """Insert bounded batches so historical writes cannot create huge payloads."""
         self._require_initialized()
         for offset in range(0, len(rows), self._batch_size):
-            await self._client.insert(
-                table,
-                rows[offset : offset + self._batch_size],
-                column_names=column_names,
-            )
+            batch = rows[offset : offset + self._batch_size]
+            try:
+                await self._client.insert(
+                    table,
+                    batch,
+                    column_names=column_names,
+                    settings={"async_insert": 1, "wait_for_async_insert": 1},
+                )
+            except TypeError:
+                await self._client.insert(
+                    table,
+                    batch,
+                    column_names=column_names,
+                )
 
     def _require_initialized(self) -> None:
         if not self._initialized:

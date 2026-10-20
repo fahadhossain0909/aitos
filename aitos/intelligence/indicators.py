@@ -222,8 +222,8 @@ def analyze_market_structure(
         return empty
 
     highs, lows = _local_swing_highs_lows(klines, left=pivot, right=pivot)
-    # Fallback to window extremes when pivots are sparse (short history).
-    swing_window = klines[-(swing_lookback + 1) : -1]
+    # Use the last N candles for window extremes (include the latest candle).
+    swing_window = klines[-swing_lookback:]
     window_high = max(k.high for k in swing_window)
     window_low = min(k.low for k in swing_window)
     latest_close = klines[-1].close

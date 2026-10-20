@@ -21,6 +21,7 @@ escalation, and the scheduled automation relies on the report files.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -134,6 +135,13 @@ def check_health() -> dict:
         result["modules_total"] = len(module_items)
         result["top_level_status"] = payload.get("status")
         result["payload_keys"] = sorted(payload.keys())
+        serialized = json.dumps(payload)
+        lag_matches = re.findall(r'"max_lag_ms"\s*:\s*([0-9.]+)', serialized)
+        over_matches = re.findall(r'"over_100ms"\s*:\s*(\d+)', serialized)
+        max_lag = max((float(v) for v in lag_matches), default=0.0)
+        over_100 = max((int(v) for v in over_matches), default=0)
+        result["event_loop_max_lag_ms"] = round(max_lag, 3)
+        result["event_loop_over_100ms"] = over_100
     return result
 
 
@@ -213,6 +221,16 @@ def evaluate(sections: dict) -> tuple[str, list[str]]:
     logs = sections.get("paper_logs", {})
     if logs.get("available") and logs.get("persistence_errors", 0) > 0:
         issues.append(f"persistence errors in logs: {logs['persistence_errors']}")
+
+    health = sections.get("health", {})
+    if health.get("event_loop_max_lag_ms", 0) > 250:
+        issues.append(
+            f"event loop lag high: {health['event_loop_max_lag_ms']}ms max"
+        )
+    if health.get("event_loop_over_100ms", 0) > 20:
+        issues.append(
+            f"event loop lag frequent: {health['event_loop_over_100ms']} samples over 100ms"
+        )
 
     disk = sections.get("disk", {})
     if disk.get("free_gb", 999) < 20:
