@@ -15,6 +15,7 @@ from .contracts import MarketEvent, MarketEventType, MarketSource
 TICKER_TIMEFRAME = "1s"
 OPEN_INTEREST_POLL_SECONDS = 15.0
 OPEN_INTEREST_FETCH_TIMEOUT_SECONDS = 5.0
+OPEN_INTEREST_RETRY_DELAY_SECONDS = 0.5
 INSTRUMENT_POLL_SECONDS = 300.0
 TOP_SYMBOL_LIMIT = 50
 
@@ -114,36 +115,47 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
         self, symbol: str
     ) -> tuple[str, MarketEvent | None]:
         """Fetch a single symbol's OI with a timeout so one slow symbol
-        doesn't stall the entire poll cycle for every other symbol."""
-        try:
-            oi = await asyncio.wait_for(
-                self.exchange.fetch_open_interest(symbol),
-                timeout=OPEN_INTEREST_FETCH_TIMEOUT_SECONDS,
-            )
-            return symbol, _event(
-                MarketEventType.OPEN_INTEREST,
-                oi.symbol,
-                {
-                    "symbol": oi.symbol,
-                    "open_interest": oi.open_interest,
-                    "timestamp": oi.timestamp.isoformat(),
-                },
-                oi.timestamp,
-            )
-        except asyncio.TimeoutError:
-            logger.warning(
-                "open_interest fetch timed out",
-                extra={"aitos_extra": {"symbol": symbol}},
-            )
-            return symbol, None
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.debug(
-                "open_interest fetch failed",
-                extra={"aitos_extra": {"symbol": symbol}},
-            )
-            return symbol, None
+        doesn't stall the entire poll cycle for every other symbol.
+
+        One bounded retry absorbs transient throttling: this poll fires
+        ~50 concurrent REST calls every 15s and a small fraction time out
+        under burst rate limits; retrying once after a short delay recovers
+        most misses without meaningfully delaying the cycle.
+        """
+        for attempt in (1, 2):
+            try:
+                oi = await asyncio.wait_for(
+                    self.exchange.fetch_open_interest(symbol),
+                    timeout=OPEN_INTEREST_FETCH_TIMEOUT_SECONDS,
+                )
+                return symbol, _event(
+                    MarketEventType.OPEN_INTEREST,
+                    oi.symbol,
+                    {
+                        "symbol": oi.symbol,
+                        "open_interest": oi.open_interest,
+                        "timestamp": oi.timestamp.isoformat(),
+                    },
+                    oi.timestamp,
+                )
+            except asyncio.TimeoutError:
+                if attempt == 1:
+                    await asyncio.sleep(OPEN_INTEREST_RETRY_DELAY_SECONDS)
+                    continue
+                logger.warning(
+                    "open_interest fetch timed out",
+                    extra={"aitos_extra": {"symbol": symbol}},
+                )
+                return symbol, None
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug(
+                    "open_interest fetch failed",
+                    extra={"aitos_extra": {"symbol": symbol}},
+                )
+                return symbol, None
+        return symbol, None
 
     async def stream_open_interest(
         self, symbols: list[str]

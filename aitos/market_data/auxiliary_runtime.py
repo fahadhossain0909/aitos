@@ -113,7 +113,7 @@ class BinanceAuxiliaryMarketDataRuntime:
             self.symbols = normalized
             if self._stopped:
                 return True
-            names = {"ticker", "funding", "open_interest"}
+            names = {"ticker", "funding", "open_interest", "instrument"}
             tasks = [
                 t
                 for t in self._tasks

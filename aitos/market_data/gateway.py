@@ -26,8 +26,8 @@ class GatewayState(str, Enum):
 class GatewayConfig:
     queue_capacity: int = 8192
     max_source_age_seconds: float = 15.0
-    max_queue_age_seconds: float = 1.0
-    publish_timeout_seconds: float = 1.0
+    max_queue_age_seconds: float = 10.0
+    publish_timeout_seconds: float = 5.0
     backpressure_poll_seconds: float = 0.005
 
 
@@ -52,6 +52,7 @@ class MarketDataGateway:
     def begin_connect(self) -> None:
         self.state = GatewayState.CONNECTING
         self.health.connected = False
+        self.health.degraded = False
 
     def mark_connected(self) -> None:
         self.state = GatewayState.CONNECTED
@@ -215,7 +216,13 @@ class MarketDataGateway:
     async def drain_once(self) -> bool:
         """Publish one event, or drop it if doing so would violate freshness."""
         queue_started = time.perf_counter()
-        event = await self.queue.get()
+        event = None
+        try:
+            event = await asyncio.wait_for(self.queue.get(), timeout=0.01)
+        except asyncio.TimeoutError:
+            return False
+        except asyncio.CancelledError:
+            raise
         self._record_drain_stage("queue_get", queue_started)
         symbol = self._data_flow_symbol(event)
         try:
@@ -275,6 +282,17 @@ class MarketDataGateway:
                     )
                 except Exception:
                     pass
+                logger.warning(
+                    "gateway publish failed",
+                    extra={
+                        "aitos_extra": {
+                            "stage": "gateway_publish_error",
+                            "error": str(exc),
+                            "error_type": type(exc).__name__,
+                            "symbol": symbol,
+                        }
+                    },
+                )
                 raise
             else:
                 self.health.record_publish()
@@ -303,9 +321,10 @@ class MarketDataGateway:
                     pass
                 return True
         finally:
-            task_started = time.perf_counter()
-            self.queue.task_done()
-            self._record_drain_stage("queue_task_done", task_started)
+            if event is not None:
+                task_started = time.perf_counter()
+                self.queue.task_done()
+                self._record_drain_stage("queue_task_done", task_started)
 
     def snapshot(self) -> dict[str, object]:
         snapshot: dict[str, object] = {

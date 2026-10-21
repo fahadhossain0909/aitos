@@ -115,8 +115,11 @@ services:
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     container_name: aitos-paper
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
-    command: ["python3", "run_paper_trading.py"]
+    command: ["python3", "/app/run_paper_trading.py"]
     env_file: [.env]
+    volumes:
+      - "${AITOS_SOURCE_ROOT:-.}:/app:ro"
+      - "${MODEL_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/models}:/models"
     environment:
       REDIS_HOST: redis
       MODEL_DATA_DIR: /models
@@ -127,7 +130,6 @@ services:
       REDIS_STREAM_MAXLEN_MARKET_ORDERBOOK: "10000"
       REDIS_STREAM_MAXLEN_MARKET_LIQUIDITY: "20000"
       REDIS_STREAM_MAXLEN_MARKET_LIVE_STATE: "10000"
-    volumes: ["${MODEL_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/models}:/models"]
     ports: ["127.0.0.1:8090:8090"]
     mem_limit: "${AITOS_TRADING_MEM_LIMIT:-2g}"
     depends_on: {redis: {condition: service_healthy}, clickhouse-init: {condition: service_completed_successfully}, neo4j: {condition: service_healthy}}

@@ -80,7 +80,7 @@ class FakeScannerExchange(ExchangeAdapter):
 
 
 def test_determine_direction_bullish_bos_with_confirming_flow():
-    assert determine_direction("bullish_bos", cvd_score=6.0) == TradeSide.LONG
+    assert determine_direction("bullish_bos", cvd_score=7.0) == TradeSide.LONG
 
 
 def test_determine_direction_bullish_bos_without_confirming_flow_is_none():

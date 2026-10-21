@@ -22,6 +22,7 @@ from aitos.eventbus.redis_bus import EventBus
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence import indicators
 from aitos.intelligence.amt.engine import AMTContext, AMTEngine
+from aitos.intelligence.a_stat_bridge import AStatBridge
 from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
@@ -60,6 +61,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "open_interest_trend": 0.08,
     "rl_confidence": 0.04,
     "footprint_interaction": 0.10,
+    "a_stat": 0.08,
 }
 REGIME_FIT_SCORE = {
     "trending": 9.0,
@@ -115,15 +117,15 @@ def determine_direction(
 
     # CHOCH: allow structural flip when flow confirms
     if event == "choch":
-        if structure_direction == "bullish_bos" and cvd_score >= 5.0:
+        if structure_direction == "bullish_bos" and cvd_score >= 6.5:
             return TradeSide.LONG
-        if structure_direction == "bearish_bos" and cvd_score <= 5.0:
+        if structure_direction == "bearish_bos" and cvd_score <= 3.5:
             return TradeSide.SHORT
         return None
 
-    if structure_direction == "bullish_bos" and cvd_score >= 5.0:
+    if structure_direction == "bullish_bos" and cvd_score >= 6.5:
         return TradeSide.LONG
-    if structure_direction == "bearish_bos" and cvd_score <= 5.0:
+    if structure_direction == "bearish_bos" and cvd_score <= 3.5:
         return TradeSide.SHORT
     if structure_direction == "none":
         if cvd_score >= 6.5:
@@ -194,6 +196,7 @@ class OpportunityScanner(AITOSModule):
         self._amt_engines = {}
         self._footprint_signal_engine = FootprintSignalEngine()
         self._interaction_engine = FlowLiquidityInteractionEngine()
+        self._a_stat_bridge = AStatBridge()
         self._live_cache = LiveScannerCache(
             event_bus, self._symbols, max_trades=max(5000, trade_lookback)
         )
@@ -693,6 +696,23 @@ class OpportunityScanner(AITOSModule):
                         rl_available = False
                 except Exception:
                     pass
+        a_stat_score, a_stat_result = await asyncio.to_thread(
+            self._a_stat_bridge.evaluate,
+            symbol=symbol,
+            direction=direction,
+            klines=klines,
+            flow_score=flow_score,
+            candle_cvd=candle_cvd,
+            orderflow_vwap=orderflow_vwap,
+            depth_imbalance=depth_imbalance,
+            funding_score=funding_score,
+            oi_score=oi_score,
+            lead_lag=lead_lag,
+            last_close=float(klines[-1].close),
+        )
+        a_stat_component = (
+            a_stat_score if a_stat_score is not None else 5.0
+        )
         component_scores = {
             "trend_strength": round(trend_score, 2),
             "liquidity_quality": liquidity_score,
@@ -705,6 +725,7 @@ class OpportunityScanner(AITOSModule):
             "open_interest_trend": oi_score,
             "rl_confidence": round(rl_score, 2),
             "footprint_interaction": interaction_score,
+            "a_stat": a_stat_component,
         }
         component_availability = {
             "trend_strength": True,
@@ -718,6 +739,7 @@ class OpportunityScanner(AITOSModule):
             "open_interest_trend": oi_previous is not None,
             "rl_confidence": rl_available,
             "footprint_interaction": footprint_available,
+            "a_stat": a_stat_score is not None,
         }
         weight_total = sum(
             self._weights.get(k, 0.0)
@@ -762,6 +784,16 @@ class OpportunityScanner(AITOSModule):
                 f"unavailable_features={[k for k, ok in component_availability.items() if not ok]}",
             ]
         )
+        if a_stat_result is not None:
+            rationale.append(
+                f"a_stat p_up={a_stat_result.direction.up:.3f}, "
+                f"p_down={a_stat_result.direction.down:.3f}, "
+                f"ev={a_stat_result.expected_value:.6f}, "
+                f"vol={a_stat_result.expected_volatility:.6f}, "
+                f"tail={a_stat_result.tail_loss_probability:.3f}, "
+                f"confidence={a_stat_result.probability_confidence:.3f}, "
+                f"advanced_stack={a_stat_result.advanced is not None}"
+            )
         return ScanCandidate(
             symbol=symbol,
             direction=direction,

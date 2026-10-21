@@ -21,7 +21,7 @@ _RECONNECT_MAX_DELAY_SECONDS = 30.0
 RECONNECT_STABLE_SECONDS = 10.0
 PUBLISH_RETRY_DELAY_SECONDS = 0.05
 DEFAULT_STREAM_IDLE_TIMEOUT_SECONDS = 30.0
-GATEWAY_DRAIN_WORKERS = 4
+GATEWAY_DRAIN_WORKERS = 8
 DEPTH_PRESSURE_THRESHOLD = 100
 KLINE_TIMEFRAME = "1m"
 KLINE_SYMBOL_LIMIT = 5
@@ -383,6 +383,7 @@ class CanonicalMarketDataRuntime:
                         "aitos_extra": {
                             "stage": "canonical_publish_error",
                             "error": str(exc),
+                            "error_type": type(exc).__name__,
                             "worker_id": worker_id,
                         }
                     },

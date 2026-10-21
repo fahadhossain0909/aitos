@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import asyncio
-import signal
 
 from redis.asyncio import Redis
 
@@ -29,6 +28,7 @@ from aitos.live_trading import confirm_live_trading, prepare_live_executor
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
+from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
     IdempotentOrderExecutor,
@@ -221,9 +221,7 @@ async def main() -> None:
     tracker = PersistentLivePortfolioTracker(order_executor, state_store)
     await tracker.restore()
     stop_event = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, stop_event.set)
+    install_signal_handlers(stop_event)
     try:
         while not stop_event.is_set():
             try:
