@@ -201,7 +201,7 @@ class EventBus(AITOSModule):
                     asyncio.ensure_future(_await_cancelled(s._task))
                     for s in self._subscriptions
                 ],
-                timeout=grace_period_seconds,
+                timeout=min(grace_period_seconds, 2.0),
             )
         self._subscriptions.clear()
         logger.info("EventBus shut down")
