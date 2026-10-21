@@ -55,6 +55,23 @@ def _stream_key(topic: str) -> str:
     return f"stream:{topic}"
 
 
+def _normalize_fields(fields: dict[Any, Any]) -> dict[str, Any]:
+    """Decode bytes keys and values to ``str``.
+
+    The bus is handed a client created without ``decode_responses=True``, so
+    stream entries arrive with ``bytes`` keys and values. Retry bookkeeping
+    looked ``_delivery_attempts`` up with a ``str`` key, missed every time, and
+    pinned the attempt counter at 1: the failed event was re-published forever
+    instead of ever reaching the DLQ. Normalizing first also stops ``dict(fields)``
+    from carrying both a ``bytes`` and a ``str`` copy of the same field.
+    """
+
+    def _s(value: Any) -> Any:
+        return value.decode() if isinstance(value, (bytes, bytearray)) else value
+
+    return {_s(key): _s(value) for key, value in fields.items()}
+
+
 def _stream_maxlen(topic: str) -> int | None:
     for prefix, default in sorted(
         STREAM_MAXLEN_DEFAULTS.items(), key=lambda item: -len(item[0])
@@ -501,6 +518,7 @@ class EventBus(AITOSModule):
         first and only then is the failed entry acknowledged. This preserves
         at-least-once semantics even if Redis rejects the retry write.
         """
+        fields = _normalize_fields(fields)
         attempts = int(fields.get("_delivery_attempts", 0)) + 1
         if attempts >= MAX_DELIVERY_ATTEMPTS:
             dlq_fields = dict(fields)

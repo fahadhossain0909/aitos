@@ -1,0 +1,12 @@
+# Normalize line endings so Windows checkouts never break Linux containers.
+* text=auto eol=lf
+
+# Shell scripts must stay LF — /bin/sh in Alpine images fails on CRLF
+# (e.g. "set: illegal option -" from a trailing carriage return).
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Windows-only script types keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
