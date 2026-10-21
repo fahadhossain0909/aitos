@@ -68,7 +68,11 @@ async def _cancel_stray_tasks():
     next test on the shared event loop."""
     yield
     loop = asyncio.get_running_loop()
-    tasks = [t for t in asyncio.all_tasks(loop) if not t.done() and t is not asyncio.current_task(loop)]
+    tasks = [
+        t
+        for t in asyncio.all_tasks(loop)
+        if not t.done() and t is not asyncio.current_task(loop)
+    ]
     for t in tasks:
         t.cancel()
     if tasks:
@@ -77,9 +81,9 @@ async def _cancel_stray_tasks():
     try:
         for task in tasks:
             coro = task.get_coro()
-            if coro and hasattr(coro, '__self__'):
+            if coro and hasattr(coro, "__self__"):
                 obj = coro.__self__
-                if hasattr(obj, 'aclose'):
+                if hasattr(obj, "aclose"):
                     try:
                         await obj.aclose()
                     except Exception:
