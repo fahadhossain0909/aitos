@@ -62,6 +62,36 @@ async def risk_engine(event_bus):
     await engine.shutdown()
 
 
+@pytest_asyncio.fixture(autouse=True)
+async def _cancel_stray_tasks():
+    """Cancel any tasks a test left running so they cannot leak into the
+    next test on the shared event loop."""
+    yield
+    loop = asyncio.get_running_loop()
+    tasks = [
+        t
+        for t in asyncio.all_tasks(loop)
+        if not t.done() and t is not asyncio.current_task(loop)
+    ]
+    for t in tasks:
+        t.cancel()
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=True)
+    # Also close any remaining Redis connections to avoid resource leaks
+    try:
+        for task in tasks:
+            coro = task.get_coro()
+            if coro and hasattr(coro, "__self__"):
+                obj = coro.__self__
+                if hasattr(obj, "aclose"):
+                    try:
+                        await obj.aclose()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+
 @pytest.fixture(autouse=True)
 def async_task_watchdog(request):
     """Expose async lifecycle hangs instead of letting CI sit silently."""
