@@ -87,7 +87,7 @@ class AStatBridge:
         if previous_klines <= 0 or len(closes) <= previous_klines:
             new_returns = returns if previous_klines <= 0 else ()
         else:
-            new_returns = returns[previous_klines - 1:]
+            new_returns = returns[previous_klines - 1 :]
         self._last_kline_count[symbol] = len(closes)
         window = returns[-MOMENTUM_WINDOW:]
         momentum = sum(window)

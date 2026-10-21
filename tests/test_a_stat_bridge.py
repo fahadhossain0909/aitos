@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 import random
 
-from aitos.intelligence.a_stat_bridge import AStatBridge, MIN_KLINES_FOR_STACK
+from aitos.intelligence.a_stat_bridge import MIN_KLINES_FOR_STACK, AStatBridge
 from aitos.models.trade import TradeSide
 
 

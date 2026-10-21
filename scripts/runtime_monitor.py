@@ -25,7 +25,6 @@ import re
 import shutil
 import subprocess
 import sys
-import time
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -55,7 +54,9 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _run_docker(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[str] | None:
+def _run_docker(
+    *args: str, timeout: int = 30
+) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(
             ("docker", *args),
@@ -71,9 +72,7 @@ def _run_docker(*args: str, timeout: int = 30) -> subprocess.CompletedProcess[st
 def check_docker() -> dict:
     # {{.Health}} errors on containers without a healthcheck; {{.Status}}
     # always exists and carries "(healthy)"/"(unhealthy)" for those that have one.
-    proc = _run_docker(
-        "ps", "-a", "--format", "{{.Names}}\t{{.State}}\t{{.Status}}"
-    )
+    proc = _run_docker("ps", "-a", "--format", "{{.Names}}\t{{.State}}\t{{.Status}}")
     if proc is None:
         return {"available": False, "issues": ["docker CLI unavailable"]}
     if proc.returncode != 0:
@@ -120,9 +119,7 @@ def check_health() -> dict:
         module_items = (
             list(modules.values())
             if isinstance(modules, dict)
-            else modules
-            if isinstance(modules, list)
-            else []
+            else modules if isinstance(modules, list) else []
         )
         healthy = sum(
             1
@@ -151,9 +148,7 @@ def check_dataflow() -> dict:
     if isinstance(payload, dict):
         result["top_keys"] = sorted(payload.keys())[:20]
         result["summary"] = {
-            k: v
-            for k, v in payload.items()
-            if isinstance(v, (int, float, str, bool))
+            k: v for k, v in payload.items() if isinstance(v, (int, float, str, bool))
         }
     return result
 
@@ -170,16 +165,12 @@ def check_positions() -> dict:
 
 
 def check_paper_logs() -> dict:
-    proc = _run_docker(
-        "logs", "--tail", str(LOG_TAIL_LINES), "aitos-paper", timeout=45
-    )
+    proc = _run_docker("logs", "--tail", str(LOG_TAIL_LINES), "aitos-paper", timeout=45)
     if proc is None or (proc.returncode != 0 and not proc.stdout and not proc.stderr):
         return {"available": False, "issues": ["cannot read aitos-paper logs"]}
     text = (proc.stdout or "") + (proc.stderr or "")
     error_lines = [
-        line
-        for line in text.splitlines()
-        if "ERROR" in line or "Traceback" in line
+        line for line in text.splitlines() if "ERROR" in line or "Traceback" in line
     ]
     persistence = [line for line in error_lines if "persist" in line.lower()]
     return {
@@ -224,9 +215,7 @@ def evaluate(sections: dict) -> tuple[str, list[str]]:
 
     health = sections.get("health", {})
     if health.get("event_loop_max_lag_ms", 0) > 250:
-        issues.append(
-            f"event loop lag high: {health['event_loop_max_lag_ms']}ms max"
-        )
+        issues.append(f"event loop lag high: {health['event_loop_max_lag_ms']}ms max")
     if health.get("event_loop_over_100ms", 0) > 20:
         issues.append(
             f"event loop lag frequent: {health['event_loop_over_100ms']} samples over 100ms"
@@ -238,10 +227,16 @@ def evaluate(sections: dict) -> tuple[str, list[str]]:
 
     status = "HEALTHY"
     if issues:
-        status = "CRITICAL" if any(
-            i.startswith(("docker unavailable", "health endpoint", "missing containers"))
-            for i in issues
-        ) else "DEGRADED"
+        status = (
+            "CRITICAL"
+            if any(
+                i.startswith(
+                    ("docker unavailable", "health endpoint", "missing containers")
+                )
+                for i in issues
+            )
+            else "DEGRADED"
+        )
     return status, issues
 
 
@@ -279,7 +274,9 @@ def main() -> int:
         ALERTS_PATH.unlink(missing_ok=True)
     else:
         ALERTS_PATH.write_text(
-            json.dumps({"timestamp": _now_iso(), "status": status, "issues": issues}, indent=2),
+            json.dumps(
+                {"timestamp": _now_iso(), "status": status, "issues": issues}, indent=2
+            ),
             encoding="utf-8",
         )
     print(summary)

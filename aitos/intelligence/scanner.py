@@ -21,8 +21,8 @@ from aitos.core.exceptions import ModuleNotInitializedError
 from aitos.eventbus.redis_bus import EventBus
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence import indicators
-from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.a_stat_bridge import AStatBridge
+from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
@@ -710,9 +710,7 @@ class OpportunityScanner(AITOSModule):
             lead_lag=lead_lag,
             last_close=float(klines[-1].close),
         )
-        a_stat_component = (
-            a_stat_score if a_stat_score is not None else 5.0
-        )
+        a_stat_component = a_stat_score if a_stat_score is not None else 5.0
         component_scores = {
             "trend_strength": round(trend_score, 2),
             "liquidity_quality": liquidity_score,
