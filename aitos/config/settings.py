@@ -1,9 +1,7 @@
 """Centralized configuration. Reads from environment / .env file.
 
-Only Redis is actually wired up by the foundation layer today (it backs the
-Event Bus). ClickHouse and Neo4j settings are included now so the Docker
-Compose stack and future Data Layer / Knowledge Graph modules can plug in
-without a config rewrite.
+Infrastructure credentials and connection settings live here. Performance and
+workload knobs are provided by the validated tuning profile resolver.
 """
 
 from __future__ import annotations
@@ -19,6 +17,8 @@ if _ENV_FILE.is_file():
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from aitos.config.tuning import TuningSettings, load_tuning_settings
+
 
 class RedisSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="REDIS_")
@@ -27,12 +27,12 @@ class RedisSettings(BaseSettings):
     port: int = 6379
     db: int = 0
     password: str | None = None
-    # Redis Streams consumers use long-lived blocking connections. The
-    # previous 64-connection ceiling was too small once the scanner,
-    # lifecycle, journal, learning, and market-data consumers were active.
-    # Keep the pool bounded, but leave headroom for blocking readers,
-    # publishers, health checks, and short bursts.
-    max_connections: int = 256
+    # Bounded pool sized for blocking stream readers plus publishers and checks.
+    max_connections: int = Field(
+        default_factory=lambda: load_tuning_settings().event_bus.connection_pool_size,
+        ge=8,
+        le=4096,
+    )
 
     @property
     def url(self) -> str:
@@ -59,12 +59,10 @@ class Neo4jSettings(BaseSettings):
 
 
 class BinanceSettings(BaseSettings):
-    """Credentials for LIVE order placement (aitos.execution.binance_executor).
+    """Credentials for LIVE order placement.
 
-    Not needed for anything else in this codebase — the data layer and
-    Opportunity Scanner only use Binance's public endpoints. ``testnet``
-    defaults to True as a safety rail; switching to mainnet is an
-    explicit, deliberate action, not a config default.
+    Public market-data paths do not require these credentials. Testnet stays
+    enabled by default so mainnet use remains a deliberate action.
     """
 
     model_config = SettingsConfigDict(env_prefix="BINANCE_")
@@ -82,27 +80,18 @@ class AITOSSettings(BaseSettings):
     )
 
     environment: str = Field(default="dev", description="dev | staging | production")
-    # Shared application logging configuration. Keep this at the top level
-    # because both paper and live entrypoints consume settings.log_level and
-    # the deployment environment supplies LOG_LEVEL.
     log_level: str = Field(default="INFO", description="Python logging level")
-
-    # Governance / safety — production changes require human approval per the AI Constitution.
     require_human_approval_for_prod: bool = True
-
-    # Stale symbols whose price is structurally unreliable (illiquid, delisted,
-    # etc.). The position price safety net skips these — it would otherwise
-    # hammer a REST endpoint for a symbol whose price never meaningfully
-    # changes, producing noisy REST-fallback log lines and wasting cycles.
     stale_symbol_blacklist: list[str] = Field(
         default=["TRUTHUSDT", "PDDUSDT"],
         description="Symbols to skip in the position price safety-net REST fallback",
     )
 
-    redis: RedisSettings = RedisSettings()
-    clickhouse: ClickHouseSettings = ClickHouseSettings()
-    neo4j: Neo4jSettings = Neo4jSettings()
-    binance: BinanceSettings = BinanceSettings()
+    redis: RedisSettings = Field(default_factory=RedisSettings)
+    clickhouse: ClickHouseSettings = Field(default_factory=ClickHouseSettings)
+    neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
+    binance: BinanceSettings = Field(default_factory=BinanceSettings)
+    tuning: TuningSettings = Field(default_factory=load_tuning_settings)
 
 
 def get_settings() -> AITOSSettings:

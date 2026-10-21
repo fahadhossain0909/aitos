@@ -286,3 +286,28 @@ async def test_existing_sector_hard_cap_rejects_candidate_before_order(
     assert trade.state == TradeLifecycleState.REJECTED
     assert "hard limit breach" in trade.rejection_reason
     assert lifecycle.get_open_trades() == []
+
+
+@pytest.mark.asyncio
+async def test_exit_event_publish_failure_does_not_stick_trade_in_exit_triggered(
+    event_bus, risk_engine, monkeypatch
+):
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+    original_publish = event_bus.publish
+
+    async def fail_stop_event(event):
+        if event.topic == "trade.sl_triggered":
+            raise RuntimeError("event bus unavailable")
+        return await original_publish(event)
+
+    monkeypatch.setattr(event_bus, "publish", fail_stop_event)
+
+    with pytest.raises(RuntimeError, match="event bus unavailable"):
+        await lifecycle.update_price(trade.trade_id, 97.0)
+
+    assert trade.trade_id in [t.trade_id for t in lifecycle.get_open_trades()]
+    assert trade.state == TradeLifecycleState.POSITION_OPENED

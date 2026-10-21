@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from aitos.config.paths import get_model_data_dir
+from aitos.config.settings import get_settings
+from aitos.config.tuning import effective_tuning_report, reload_tuning_settings
 from aitos.core.contracts import AITOSModule, Event
 from aitos.data.ingestion import DataIngestionService
 from aitos.data.repository import MarketDataRepository
@@ -72,6 +74,47 @@ class SystemComponents:
     correlation_updater: SymbolCorrelationUpdater | None = None
     _price_feed_subscriptions: list[Subscription] = field(default_factory=list)
 
+    def reload_runtime_tuning(self) -> dict[str, object]:
+        """Reload tunings that can be changed without rebuilding infrastructure.
+
+        Universe subscriptions, Redis pool/consumer configuration and the hard
+        max-open-position risk cap are restart-bound; reject those changes
+        instead of silently applying only part of a new profile.
+        """
+        current = self.scanner._tuning
+        updated = reload_tuning_settings()
+        restart_required = (
+            current.mode != updated.mode
+            or current.event_bus != updated.event_bus
+            or current.risk != updated.risk
+            or current.hardware != updated.hardware
+            or current.storage != updated.storage
+            or current.telemetry != updated.telemetry
+            or current.positions.max_open_positions
+            != updated.positions.max_open_positions
+        )
+        if restart_required:
+            raise ValueError(
+                "Runtime reload changed mode, infrastructure, hardware, storage, "
+                "telemetry, risk ceilings or the hard position limit; restart AITOS "
+                "to apply this profile safely"
+            )
+        self.scanner.apply_tuning_settings(updated)
+        self.trade_lifecycle.apply_tuning_settings(updated)
+        report = effective_tuning_report(updated)
+        logger.info(
+            "AITOS runtime tuning reloaded",
+            extra={
+                "aitos_extra": {
+                    "profile": report["profile"],
+                    "mode": report["mode"],
+                    "config_version": report["config_version"],
+                    "restart_required": False,
+                }
+            },
+        )
+        return report
+
     def all_modules(self) -> list[AITOSModule]:
         modules: list[AITOSModule] = [
             self.event_bus,
@@ -113,9 +156,66 @@ async def build_system(
     attention_explainer: AttentionExplainer | None = None,
     use_exchange_side_stops: bool = False,
     min_score_threshold: float = 60.0,
-    top_n: int = 5,
+    top_n: int | None = None,
     enable_exit_intelligence: bool = False,
 ) -> SystemComponents:
+    settings = get_settings()
+    tuning = settings.tuning
+    tuning_report = effective_tuning_report(tuning)
+    logger.info(
+        "AITOS effective runtime tuning",
+        extra={
+            "aitos_extra": {
+                "profile": tuning_report["profile"],
+                "mode": tuning_report["mode"],
+                "config_version": tuning_report["config_version"],
+                "scanner": tuning.scanner.model_dump(mode="json"),
+                "analysis": tuning.analysis.model_dump(mode="json"),
+                "event_bus": tuning.event_bus.model_dump(mode="json"),
+                "positions": tuning.positions.model_dump(mode="json"),
+                "risk": tuning.risk.model_dump(mode="json"),
+                "hardware": tuning.hardware.model_dump(mode="json"),
+                "storage": tuning.storage.model_dump(mode="json"),
+                "telemetry": tuning.telemetry.model_dump(mode="json"),
+            }
+        },
+    )
+    if risk_limits is None:
+        risk_limits = RiskLimits(
+            max_open_positions=tuning.positions.max_open_positions,
+            max_risk_per_trade_pct=tuning.risk.max_risk_per_trade_pct,
+            max_leverage=tuning.risk.max_leverage,
+            max_drawdown_pct=tuning.risk.max_drawdown_pct,
+            max_correlated_exposure_pct=tuning.risk.max_correlated_exposure_pct,
+            max_sector_exposure_pct=tuning.risk.max_sector_exposure_pct,
+        )
+    else:
+        # Central tuning may tighten caller-supplied limits but can never relax
+        # them. The schema itself also caps values at the established defaults.
+        risk_limits = risk_limits.model_copy(
+            update={
+                "max_open_positions": min(
+                    risk_limits.max_open_positions,
+                    tuning.positions.max_open_positions,
+                ),
+                "max_risk_per_trade_pct": min(
+                    risk_limits.max_risk_per_trade_pct,
+                    tuning.risk.max_risk_per_trade_pct,
+                ),
+                "max_leverage": min(risk_limits.max_leverage, tuning.risk.max_leverage),
+                "max_drawdown_pct": min(
+                    risk_limits.max_drawdown_pct, tuning.risk.max_drawdown_pct
+                ),
+                "max_correlated_exposure_pct": min(
+                    risk_limits.max_correlated_exposure_pct,
+                    tuning.risk.max_correlated_exposure_pct,
+                ),
+                "max_sector_exposure_pct": min(
+                    risk_limits.max_sector_exposure_pct,
+                    tuning.risk.max_sector_exposure_pct,
+                ),
+            }
+        )
     kernel = kernel or AIKernel(event_bus=event_bus)
     risk_engine = RiskEngine(event_bus=event_bus, limits=risk_limits)
     if rl_scorer is None:
@@ -133,6 +233,7 @@ async def build_system(
         rl_scorer=rl_scorer,
         min_score_threshold=min_score_threshold,
         top_n=top_n,
+        tuning=tuning,
     )
     rl_feedback = RLFeedbackLoop(event_bus=event_bus, scorer=rl_scorer)
     outcome_classifier = outcome_classifier or TradeOutcomeClassifier()
@@ -413,6 +514,16 @@ async def run_scan_and_trade_cycle(
     is_production: bool = False,
     approved_by: str | None = None,
 ) -> int:
+    if components.scanner._tuning.runtime.config_reload_enabled:
+        try:
+            components.reload_runtime_tuning()
+        except ValueError as exc:
+            # Keep the last known-good snapshot active. Changes requiring
+            # infrastructure rebuild are reported and applied after restart.
+            logger.error(
+                "runtime tuning reload rejected; retaining current snapshot: %s",
+                exc,
+            )
     refresh = getattr(portfolio_tracker, "refresh_equity", None)
     if refresh is not None:
         await refresh()
@@ -460,16 +571,22 @@ async def run_scan_and_trade_cycle(
             }
         },
     )
-    open_symbols = {t.symbol for t in components.trade_lifecycle.get_open_trades()}
+    open_symbol_counts: dict[str, int] = {}
+    for open_trade in components.trade_lifecycle.get_open_trades():
+        open_symbol_counts[open_trade.symbol] = (
+            open_symbol_counts.get(open_trade.symbol, 0) + 1
+        )
+    max_per_symbol = get_settings().tuning.positions.max_positions_per_symbol
     submitted = 0
     for candidate in ranked:
-        if candidate.symbol in open_symbols:
+        if open_symbol_counts.get(candidate.symbol, 0) >= max_per_symbol:
             logger.info(
                 "trade candidate skipped",
                 extra={
                     "aitos_extra": {
                         "symbol": candidate.symbol,
-                        "reason": "symbol_already_open",
+                        "reason": "max_positions_per_symbol_reached",
+                        "max_positions_per_symbol": max_per_symbol,
                         "score": candidate.composite_score,
                     }
                 },
@@ -556,5 +673,7 @@ async def run_scan_and_trade_cycle(
             },
         )
         if trade.state == TradeLifecycleState.POSITION_OPENED:
-            open_symbols.add(candidate.symbol)
+            open_symbol_counts[candidate.symbol] = (
+                open_symbol_counts.get(candidate.symbol, 0) + 1
+            )
     return submitted

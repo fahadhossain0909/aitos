@@ -35,9 +35,11 @@ stop. No existing emergency or exchange-side path is removed.
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
+from aitos.config.tuning import TuningSettings, load_tuning_settings
 from aitos.core.contracts import (
     AITOSModule,
     Event,
@@ -125,10 +127,32 @@ class TradeLifecycle(AITOSModule):
         # identical to the pre-Phase-E lifecycle.
         self._position_manager = position_manager
         self._market_context_provider = market_context_provider
+        self._tuning = load_tuning_settings()
+        self._intensive_window_started_at = time.monotonic()
+        self._intensive_analyses_used = 0
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
         self._closed_trades: list[Trade] = []
         self._last_event_time: str | None = None
+
+    def apply_tuning_settings(self, settings: TuningSettings) -> None:
+        """Apply an explicitly reloaded tuning snapshot to position monitoring."""
+        self._tuning = settings
+        self._intensive_window_started_at = time.monotonic()
+        self._intensive_analyses_used = 0
+
+    def _allow_intensive_analysis(self) -> bool:
+        """Budget deep exit analysis without ever throttling hard-stop checks."""
+        now = time.monotonic()
+        interval = self._tuning.positions.monitoring_interval_seconds
+        if now - self._intensive_window_started_at >= interval:
+            self._intensive_window_started_at = now
+            self._intensive_analyses_used = 0
+        budget = self._tuning.positions.intensive_analysis_budget
+        if budget <= 0 or self._intensive_analyses_used >= budget:
+            return False
+        self._intensive_analyses_used += 1
+        return True
 
     @property
     def module_id(self) -> str:
@@ -381,25 +405,40 @@ class TradeLifecycle(AITOSModule):
 
         # ---- 2. Optional Exit Intelligence (Phase E) -------------------------
         eie_action = None
+        eie_evaluated_this_update = False
         if self._position_manager is not None:
-            eie_action = await self._apply_exit_intelligence(
-                trade,
-                current_price,
-                order_flow=order_flow,
-                volume_profile=volume_profile,
-                liquidity_events=liquidity_events,
-                prior_highs=prior_highs,
-                prior_lows=prior_lows,
-                swing_highs=swing_highs,
-                swing_lows=swing_lows,
-                structure_break_level=structure_break_level,
-                atr=atr,
-                trend_strength=trend_strength,
-                extra_features=extra_features,
-            )
-            if eie_action is not None:
-                # Full EXIT already performed inside _apply_exit_intelligence
-                return eie_action
+            if self._allow_intensive_analysis():
+                eie_evaluated_this_update = True
+                eie_action = await self._apply_exit_intelligence(
+                    trade,
+                    current_price,
+                    order_flow=order_flow,
+                    volume_profile=volume_profile,
+                    liquidity_events=liquidity_events,
+                    prior_highs=prior_highs,
+                    prior_lows=prior_lows,
+                    swing_highs=swing_highs,
+                    swing_lows=swing_lows,
+                    structure_break_level=structure_break_level,
+                    atr=atr,
+                    trend_strength=trend_strength,
+                    extra_features=extra_features,
+                )
+                if eie_action is not None:
+                    # Full EXIT already performed inside _apply_exit_intelligence
+                    return eie_action
+            else:
+                logger.debug(
+                    "intensive exit analysis budget exhausted; hard exits remain active",
+                    extra={
+                        "aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                            "budget": self._tuning.positions.intensive_analysis_budget,
+                            "interval_seconds": self._tuning.positions.monitoring_interval_seconds,
+                        }
+                    },
+                )
 
         # ---- 3. Static TP path (preserved; HOLD may defer full exit) ---------
         if trade.take_profit_levels:
@@ -411,6 +450,7 @@ class TradeLifecycle(AITOSModule):
                 # levels remain; otherwise defer full exit (winner may continue).
                 defer_full_tp = (
                     self._position_manager is not None
+                    and eie_evaluated_this_update
                     and getattr(trade, "_last_eie_action", None) == "HOLD"
                 )
                 if len(trade.take_profit_levels) > 1:
@@ -595,9 +635,16 @@ class TradeLifecycle(AITOSModule):
             raise ValueError(
                 f"exit_price must be a finite positive number, got {exit_price!r}"
             )
-        trade = self._open_trades.pop(trade_id, None)
+        trade = self._open_trades.get(trade_id)
         if trade is None:
             raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
+        # Cancel exchange-side resting orders before committing the local
+        # close transition. If cancellation fails, keep the trade registered
+        # as open so monitoring/reconciliation can retry instead of silently
+        # orphaning an exchange position or leaving stale orders behind.
+        if self._use_exchange_side_stops:
+            await self._cancel_resting_orders(trade)
+        self._open_trades.pop(trade_id, None)
         direction = 1 if trade.side == TradeSide.LONG else -1
         pnl_pct = ((exit_price - trade.entry_price) / trade.entry_price) * direction
         realized_on_remaining = trade.position_size_usd * pnl_pct
@@ -620,8 +667,6 @@ class TradeLifecycle(AITOSModule):
         trade.state = TradeLifecycleState.POSITION_CLOSED
         trade.updated_at = trade.exit_time
         self._closed_trades.append(trade)
-        if self._use_exchange_side_stops:
-            await self._cancel_resting_orders(trade)
         if self._position_manager is not None:
             self._position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
         await self._event_bus.publish(
@@ -649,6 +694,14 @@ class TradeLifecycle(AITOSModule):
                 trade.symbol, trade.sl_order_id
             )
             if status == "FILLED":
+                # Remember the exchange-filled order but retain its ID until
+                # close succeeds, so a failed cancellation of another order
+                # cannot lose the reconciliation signal.
+                filled_ids = set(
+                    getattr(trade, "_aitos_filled_resting_order_ids", set())
+                )
+                filled_ids.add(trade.sl_order_id)
+                trade._aitos_filled_resting_order_ids = filled_ids
                 return await self.close_trade(
                     trade.trade_id, trade.sl_price, "sl_triggered_exchange"
                 )
@@ -663,12 +716,19 @@ class TradeLifecycle(AITOSModule):
                     else trade.tp_price
                 )
                 if len(trade.take_profit_levels) > 1:
+                    # A filled partial TP is already consumed by the exchange.
                     await self._partial_close(
                         trade, trigger_price, DEFAULT_PARTIAL_CLOSE_FRACTION
                     )
                     trade.take_profit_levels.pop(0)
-                    trade.tp_order_ids.pop(0)
+                    if trade.tp_order_ids:
+                        trade.tp_order_ids.pop(0)
                     return trade
+                filled_ids = set(
+                    getattr(trade, "_aitos_filled_resting_order_ids", set())
+                )
+                filled_ids.add(trade.tp_order_ids[0])
+                trade._aitos_filled_resting_order_ids = filled_ids
                 return await self.close_trade(
                     trade.trade_id, trigger_price, "tp_triggered_exchange"
                 )
@@ -733,14 +793,22 @@ class TradeLifecycle(AITOSModule):
         trade.sl_order_id = result.order_id if result.success else None
 
     async def _cancel_resting_orders(self, trade: Trade) -> None:
+        # Cancel take-profit orders first and keep the protective stop active
+        # until every TP cancellation succeeds. Remove IDs only after confirmed
+        # cancellation so a later retry can resume from the remaining orders.
+        filled_ids = set(getattr(trade, "_aitos_filled_resting_order_ids", set()))
+        for order_id in list(trade.tp_order_ids):
+            if order_id not in filled_ids:
+                await self._order_executor.cancel_resting_order(trade.symbol, order_id)
+            trade.tp_order_ids.remove(order_id)
         if trade.sl_order_id:
-            await self._order_executor.cancel_resting_order(
-                trade.symbol, trade.sl_order_id
-            )
+            if trade.sl_order_id not in filled_ids:
+                await self._order_executor.cancel_resting_order(
+                    trade.symbol, trade.sl_order_id
+                )
             trade.sl_order_id = None
-        for order_id in trade.tp_order_ids:
-            await self._order_executor.cancel_resting_order(trade.symbol, order_id)
-        trade.tp_order_ids.clear()
+        if hasattr(trade, "_aitos_filled_resting_order_ids"):
+            del trade._aitos_filled_resting_order_ids
 
     def _project_portfolio(
         self,
@@ -935,15 +1003,23 @@ class TradeLifecycle(AITOSModule):
     ) -> Trade:
         trade.state = TradeLifecycleState.EXIT_TRIGGERED
         trade.updated_at = utc_now_iso()
-        await self._event_bus.publish(
-            Event(
-                topic=topic,
-                payload={**trade.to_dict(), "trigger_price": price},
-                source_module=self.module_id,
-                priority=EventPriority.HIGH,
+        try:
+            await self._event_bus.publish(
+                Event(
+                    topic=topic,
+                    payload={**trade.to_dict(), "trigger_price": price},
+                    source_module=self.module_id,
+                    priority=EventPriority.HIGH,
+                )
             )
-        )
-        return await self.close_trade(trade.trade_id, price, reason)
+            return await self.close_trade(trade.trade_id, price, reason)
+        except Exception:
+            # If exit-event publication or closing fails, do not leave the
+            # trade stuck in EXIT_TRIGGERED: the live price loop skips states
+            # other than POSITION_OPENED, so this would disable further checks.
+            if trade.trade_id in self._open_trades:
+                trade.state = TradeLifecycleState.POSITION_OPENED
+            raise
 
     async def _partial_close(
         self, trade: Trade, price: float, close_fraction: float

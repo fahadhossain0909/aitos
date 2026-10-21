@@ -6,10 +6,13 @@ from aitos.intelligence.position_monitor import (
     PositionMonitorTier,
 )
 from aitos.intelligence.position_runtime import (
+    _DEEP_PRIORITY_SYMBOLS,
+    _PRECOMPUTED_MONITOR_DECISIONS,
     MAX_DEEP_SYMBOLS,
     _capital_policy_consensus,
     _cheap_position_action,
     _deep_priority_order,
+    _evaluate_lightweight_monitor,
     _merge_symbols,
 )
 from aitos.trading.lifecycle import TradeLifecycle
@@ -162,3 +165,70 @@ def test_priority_score_caps_at_100_and_health_vector_is_optional_input_only():
     assert decision.tier == PositionMonitorTier.EXIT_CANDIDATE
     assert 0.0 <= decision.priority_score <= 100.0
     assert decision.health is not None
+
+
+def test_material_risk_vectors_escalate_without_price_or_exit_flags():
+    controller = PositionMonitorController()
+    decision = controller.evaluate(
+        trade=_trade("risk-only"),
+        current_price=101.0,
+        extra_features={"thesis_risk": 1.0},
+    )
+    assert decision.tier == PositionMonitorTier.WARNING
+    assert "thesis_risk" in decision.reasons
+
+
+def test_combined_market_risks_escalate_to_exit_candidate():
+    controller = PositionMonitorController()
+    decision = controller.evaluate(
+        trade=_trade("combined-risk"),
+        current_price=101.0,
+        extra_features={
+            "thesis_risk": 1.0,
+            "liquidity_risk": 1.0,
+            "adverse_order_flow_risk": 1.0,
+        },
+    )
+    assert decision.tier == PositionMonitorTier.EXIT_CANDIDATE
+    assert {"thesis_risk", "liquidity_risk", "adverse_order_flow_risk"}.issubset(
+        set(decision.reasons)
+    )
+
+
+def test_lightweight_monitor_updates_priority_independent_of_deep_budget():
+    manager = PositionManager()
+    trade = _trade("budget-independent")
+    key = (id(manager), trade.trade_id)
+    _DEEP_PRIORITY_SYMBOLS.pop(trade.symbol, None)
+    _PRECOMPUTED_MONITOR_DECISIONS.pop(key, None)
+    try:
+        decision = _evaluate_lightweight_monitor(
+            manager,
+            trade,
+            101.0,
+            {"thesis_risk": 1.0},
+        )
+        assert decision.tier == PositionMonitorTier.WARNING
+        assert _DEEP_PRIORITY_SYMBOLS[trade.symbol][0] == PositionMonitorTier.WARNING
+        assert _PRECOMPUTED_MONITOR_DECISIONS[key] is decision
+    finally:
+        _DEEP_PRIORITY_SYMBOLS.pop(trade.symbol, None)
+        _PRECOMPUTED_MONITOR_DECISIONS.pop(key, None)
+
+
+def test_healthy_lightweight_monitor_clears_stale_deep_priority():
+    manager = PositionManager()
+    trade = _trade("priority-clear")
+    key = (id(manager), trade.trade_id)
+    _DEEP_PRIORITY_SYMBOLS[trade.symbol] = (
+        PositionMonitorTier.WARNING,
+        45.0,
+    )
+    _PRECOMPUTED_MONITOR_DECISIONS.pop(key, None)
+    try:
+        decision = _evaluate_lightweight_monitor(manager, trade, 102.0, {})
+        assert decision.tier == PositionMonitorTier.NORMAL
+        assert trade.symbol not in _DEEP_PRIORITY_SYMBOLS
+    finally:
+        _DEEP_PRIORITY_SYMBOLS.pop(trade.symbol, None)
+        _PRECOMPUTED_MONITOR_DECISIONS.pop(key, None)

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from typing import Any
 
 import clickhouse_connect
 
+from aitos.config.tuning import load_tuning_settings
 from aitos.core.contracts import (
     AITOSModule,
     Event,
@@ -128,13 +130,21 @@ class MarketDataRepository(AITOSModule):
         username: str = "default",
         password: str = "",
         database: str = "aitos",
+        batch_size: int | None = None,
+        query_timeout_seconds: float | None = None,
     ) -> None:
+        storage = load_tuning_settings().storage
+        self._batch_size = batch_size or storage.clickhouse_batch_size
+        self._query_timeout_seconds = (
+            query_timeout_seconds or storage.clickhouse_query_timeout_seconds
+        )
         self._conn_params = dict(
             host=host,
             port=port,
             username=username,
             password=password,
             database=database,
+            send_receive_timeout=max(1, math.ceil(self._query_timeout_seconds)),
         )
         self._client = None
         self._initialized = False
@@ -337,7 +347,7 @@ class MarketDataRepository(AITOSModule):
             ]
             for book in books
         ]
-        await self._client.insert(
+        await self._insert_rows(
             "order_book_snapshots",
             rows,
             column_names=[
@@ -370,7 +380,7 @@ class MarketDataRepository(AITOSModule):
             ]
             for trade in trades
         ]
-        await self._client.insert(
+        await self._insert_rows(
             "trade_ticks",
             rows,
             column_names=[
@@ -458,6 +468,9 @@ class MarketDataRepository(AITOSModule):
         result = await self._client.query(
             "SELECT * FROM market_ohlcv WHERE symbol = {symbol:String} AND timeframe = {timeframe:String} ORDER BY time DESC LIMIT {limit:UInt32}",
             parameters={"symbol": symbol, "timeframe": timeframe, "limit": limit},
+            settings={
+                "max_execution_time": max(1, math.ceil(self._query_timeout_seconds))
+            },
         )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
@@ -465,8 +478,26 @@ class MarketDataRepository(AITOSModule):
         self, sql: str, parameters: dict[str, Any]
     ) -> list[dict[str, Any]]:
         self._require_initialized()
-        result = await self._client.query(sql, parameters=parameters)
+        result = await self._client.query(
+            sql,
+            parameters=parameters,
+            settings={
+                "max_execution_time": max(1, math.ceil(self._query_timeout_seconds))
+            },
+        )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
+
+    async def _insert_rows(
+        self, table: str, rows: list[list[Any]], column_names: list[str]
+    ) -> None:
+        """Insert bounded batches so historical writes cannot create huge payloads."""
+        self._require_initialized()
+        for offset in range(0, len(rows), self._batch_size):
+            await self._client.insert(
+                table,
+                rows[offset : offset + self._batch_size],
+                column_names=column_names,
+            )
 
     def _require_initialized(self) -> None:
         if not self._initialized:
