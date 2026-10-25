@@ -9,9 +9,13 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any
 
+from aitos.logging_setup import get_logger
+
 from .backpressure import BoundedMarketQueue
 from .contracts import MarketEvent, MarketSource
 from .gateway_health import GatewayHealth
+
+logger = get_logger("aitos.market_data.gateway")
 
 
 class GatewayState(str, Enum):
