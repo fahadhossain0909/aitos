@@ -39,7 +39,8 @@
         "historical_backfill_concurrency": 1,
         "clickhouse_batch_size": 250,
         "clickhouse_query_timeout_seconds": 15,
-        "retention_days": 14
+        "retention_days": 14,
+        "historical_orderbook_levels": 100
       },
       "telemetry": {
         "health_interval_seconds": 15,
@@ -92,7 +93,8 @@
         "historical_backfill_concurrency": 2,
         "clickhouse_batch_size": 1000,
         "clickhouse_query_timeout_seconds": 10,
-        "retention_days": 30
+        "retention_days": 30,
+        "historical_orderbook_levels": 100
       },
       "telemetry": {
         "health_interval_seconds": 15,
@@ -145,7 +147,8 @@
         "historical_backfill_concurrency": 4,
         "clickhouse_batch_size": 5000,
         "clickhouse_query_timeout_seconds": 10,
-        "retention_days": 90
+        "retention_days": 90,
+        "historical_orderbook_levels": 100
       },
       "telemetry": {
         "health_interval_seconds": 10,
