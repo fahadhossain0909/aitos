@@ -49,7 +49,9 @@ class CanonicalMarketDataPersistenceSink:
         self._historical_books = {s.upper() for s in historical_book_symbols}
         self._historical_trades = {s.upper() for s in historical_trade_symbols}
         self._book_interval = max(0.1, book_interval_seconds)
-        self._historical_orderbook_levels = max(1, min(1000, historical_orderbook_levels))
+        self._historical_orderbook_levels = max(
+            1, min(1000, historical_orderbook_levels)
+        )
         self._queue: asyncio.Queue[MarketEvent] = asyncio.Queue(maxsize=queue_capacity)
         self._workers_count = max(1, workers)
         self._batch_size = max(1, batch_size)
