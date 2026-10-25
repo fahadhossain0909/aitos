@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 
 from redis.asyncio import Redis
 
@@ -67,12 +68,29 @@ async def _close_stale_positions(components) -> None:
                 entry_dt = entry_dt.replace(tzinfo=timezone.utc)
             age_hours = (now - entry_dt).total_seconds() / 3600
             if age_hours >= STALE_POSITION_MAX_HOURS:
-                # Use last known price from trade's own tracking
+                # Never synthesize a close price from entry price: doing so
+                # fabricates a zero-PnL close when the market feed is stale or
+                # the process has just recovered a position. Keep the position
+                # open and observable until a valid mark is available.
                 last_price = getattr(trade, "last_marked_price", None)
-                if last_price is None:
-                    last_price = trade.entry_price
+                if (
+                    not isinstance(last_price, (int, float))
+                    or not math.isfinite(last_price)
+                    or last_price <= 0
+                ):
+                    logger.warning(
+                        "stale position close deferred: no valid marked price",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                                "age_hours": round(age_hours, 1),
+                            }
+                        },
+                    )
+                    continue
                 await components.trade_lifecycle.close_trade(
-                    trade.trade_id, last_price, "stale_position_timeout"
+                    trade.trade_id, float(last_price), "stale_position_timeout"
                 )
                 logger.warning(
                     "stale position auto-closed",
