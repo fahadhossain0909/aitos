@@ -6,6 +6,7 @@ import asyncio
 import os
 from typing import Any
 
+from aitos.config.settings import get_settings
 from aitos.logging_setup import get_logger
 from aitos.market_data.auxiliary_runtime import BinanceAuxiliaryMarketDataRuntime
 from aitos.market_data.binance_adapter import BinanceCanonicalMarketDataAdapter
@@ -29,7 +30,7 @@ from .ingestion_legacy import (
 
 logger = get_logger("aitos.data.ingestion")
 DEEP_HISTORICAL_SYMBOLS = ("BTCUSDT", "LTCUSDT")
-DEEP_ORDERBOOK_LEVELS = 1000
+DEEP_ORDERBOOK_LEVELS = 100
 LIVE_ORDERBOOK_LEVELS = 1000
 LIVE_ORDERBOOK_FALLBACK_LEVELS = 100
 LIVE_DEEP_ANCHOR = "BTCUSDT"
@@ -156,11 +157,15 @@ class DataIngestionService(_LegacyDataIngestionService):
                 gateway=auxiliary_gateway,
                 symbols=initial_trades,
             )
+            historical_orderbook_levels = (
+                get_settings().tuning.storage.historical_orderbook_levels
+            )
             self._canonical_persistence = CanonicalMarketDataPersistenceSink(
                 self._event_bus,
                 self._repository,
                 historical_book_symbols=DEEP_HISTORICAL_SYMBOLS,
                 book_interval_seconds=1.0,
+                historical_orderbook_levels=historical_orderbook_levels,
                 historical_trade_symbols=DEEP_HISTORICAL_SYMBOLS,
             )
             if self._deep_history_enabled:
@@ -177,7 +182,7 @@ class DataIngestionService(_LegacyDataIngestionService):
                     gateway=deep_gateway,
                     symbols=[],
                     orderbook_symbols=list(DEEP_HISTORICAL_SYMBOLS),
-                    orderbook_levels=DEEP_ORDERBOOK_LEVELS,
+                    orderbook_levels=historical_orderbook_levels,
                     enable_trades=False,
                     enable_orderbooks=True,
                 )
