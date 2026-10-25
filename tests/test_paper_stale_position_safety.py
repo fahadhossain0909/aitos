@@ -61,6 +61,4 @@ async def test_stale_position_closes_at_a_valid_last_mark():
 
     await _close_stale_positions(components)
 
-    assert lifecycle.closed == [
-        ("stale-paper-trade", 101.25, "stale_position_timeout")
-    ]
+    assert lifecycle.closed == [("stale-paper-trade", 101.25, "stale_position_timeout")]
