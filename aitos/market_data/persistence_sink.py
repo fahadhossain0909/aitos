@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
@@ -33,6 +34,7 @@ class CanonicalMarketDataPersistenceSink:
         historical_book_symbols: tuple[str, ...] = ("BTCUSDT", "LTCUSDT"),
         historical_trade_symbols: tuple[str, ...] = ("BTCUSDT", "LTCUSDT"),
         book_interval_seconds: float = 1.0,
+        historical_orderbook_levels: int = 100,
         queue_capacity: int = 10_000,
         workers: int = 4,
         batch_size: int = 100,
@@ -47,6 +49,7 @@ class CanonicalMarketDataPersistenceSink:
         self._historical_books = {s.upper() for s in historical_book_symbols}
         self._historical_trades = {s.upper() for s in historical_trade_symbols}
         self._book_interval = max(0.1, book_interval_seconds)
+        self._historical_orderbook_levels = max(1, min(1000, historical_orderbook_levels))
         self._queue: asyncio.Queue[MarketEvent] = asyncio.Queue(maxsize=queue_capacity)
         self._workers_count = max(1, workers)
         self._batch_size = max(1, batch_size)
@@ -240,7 +243,14 @@ class CanonicalMarketDataPersistenceSink:
                 payload: dict[str, Any] = dict(event.payload)
                 payload["symbol"] = event.symbol
                 payload["timestamp"] = event.event_time.isoformat()
-                snapshots.append(OrderBookSnapshot.from_dict(payload))
+                snapshot = OrderBookSnapshot.from_dict(payload)
+                snapshots.append(
+                    replace(
+                        snapshot,
+                        bids=snapshot.bids[: self._historical_orderbook_levels],
+                        asks=snapshot.asks[: self._historical_orderbook_levels],
+                    )
+                )
             await self._repository.save_order_book_snapshots(snapshots)
 
         try:
@@ -296,6 +306,7 @@ class CanonicalMarketDataPersistenceSink:
                 item.value for item in self._persist_event_types
             ),
             "historical_book_symbols": sorted(self._historical_books),
+            "historical_orderbook_levels": self._historical_orderbook_levels,
             "historical_trade_symbols": sorted(self._historical_trades),
             "backpressure_policy": "drop_history_never_block_live",
         }
