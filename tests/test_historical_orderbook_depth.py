@@ -22,9 +22,7 @@ class FakeRepository:
         return None
 
 
-@pytest.mark.parametrize(
-    "profile", ["low_resource", "balanced", "high_performance"]
-)
+@pytest.mark.parametrize("profile", ["low_resource", "balanced", "high_performance"])
 def test_all_tuning_profiles_default_historical_orderbook_depth_to_100(profile):
     settings = load_tuning_settings(profile=profile, mode="paper")
 
