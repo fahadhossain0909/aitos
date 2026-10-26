@@ -1,0 +1,45 @@
+{
+  "name": "AITOS Paper Trading",
+  "image": "mcr.microsoft.com/devcontainers/python:3.12",
+  "features": {
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {
+      "moby": true,
+      "dockerDashComposeVersion": "v2"
+    },
+    "ghcr.io/devcontainers/features/github-cli:1": {}
+  },
+  "hostRequirements": {
+    "cpus": 4,
+    "memory": "8gb",
+    "storage": "32gb"
+  },
+  "forwardPorts": [8090, 6379, 8123, 7474, 7687, 3000, 9090],
+  "portsAttributes": {
+    "8090": { "label": "AITOS Health", "onAutoForward": "notify" },
+    "3000": { "label": "Grafana", "onAutoForward": "silent" },
+    "9090": { "label": "Prometheus", "onAutoForward": "silent" }
+  },
+  "postCreateCommand": "bash scripts/codespace_bootstrap.sh",
+  "postStartCommand": "bash scripts/codespace_post_start.sh || true",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-azuretools.vscode-docker",
+        "redhat.vscode-yaml"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "AITOS_MODE": "paper",
+    "ENVIRONMENT": "dev",
+    "BINANCE_TESTNET": "true",
+    "PYTHONUNBUFFERED": "1"
+  }
+}
