@@ -222,8 +222,10 @@ def analyze_market_structure(
         return empty
 
     highs, lows = _local_swing_highs_lows(klines, left=pivot, right=pivot)
-    # Use the last N candles for window extremes (include the latest candle).
-    swing_window = klines[-swing_lookback:]
+    # Compare the latest close against the preceding candles only. Including
+    # the breakout candle in its own reference range makes a close beyond the
+    # range impossible because a candle's close is bounded by its high/low.
+    swing_window = klines[-swing_lookback - 1 : -1]
     window_high = max(k.high for k in swing_window)
     window_low = min(k.low for k in swing_window)
     latest_close = klines[-1].close

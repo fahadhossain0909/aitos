@@ -83,6 +83,7 @@ class StorageTuning(BaseModel):
     clickhouse_batch_size: int = Field(default=1000, ge=1, le=100_000)
     clickhouse_query_timeout_seconds: float = Field(default=10.0, gt=0, le=600)
     retention_days: int = Field(default=30, ge=1, le=3650)
+    historical_orderbook_levels: int = Field(default=100, ge=1, le=1000)
 
 
 class TelemetryTuning(BaseModel):
@@ -290,6 +291,11 @@ def _env_overrides() -> dict[str, Any]:
             float,
         ),
         "AITOS_TUNING_STORAGE_RETENTION_DAYS": ("storage", "retention_days", int),
+        "AITOS_TUNING_STORAGE_HISTORICAL_ORDERBOOK_LEVELS": (
+            "storage",
+            "historical_orderbook_levels",
+            int,
+        ),
         "AITOS_TUNING_TELEMETRY_HEALTH_INTERVAL_SECONDS": (
             "telemetry",
             "health_interval_seconds",

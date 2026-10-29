@@ -46,11 +46,18 @@ def test_determine_direction_blocks_cvd_against_live_bias():
 
 
 def test_determine_direction_choch_requires_confirming_flow():
+    # CHoCH reversals require the configured 6.5 CVD confirmation threshold.
     assert (
         determine_direction(
-            "bullish_bos", 6.0, structure_bias="bearish", structure_event="choch"
+            "bullish_bos", 6.5, structure_bias="bearish", structure_event="choch"
         )
         == TradeSide.LONG
+    )
+    assert (
+        determine_direction(
+            "bullish_bos", 6.49, structure_bias="bearish", structure_event="choch"
+        )
+        is None
     )
     assert (
         determine_direction(

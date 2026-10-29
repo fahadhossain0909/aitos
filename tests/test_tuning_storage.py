@@ -29,7 +29,22 @@ async def test_clickhouse_bulk_insert_is_split_into_configured_batches():
 
     assert repository._client.insert.await_count == 3
     assert repository._client.insert.await_args_list == [
-        call("trade_ticks", [[1], [2]], column_names=["value"]),
-        call("trade_ticks", [[3], [4]], column_names=["value"]),
-        call("trade_ticks", [[5]], column_names=["value"]),
+        call(
+            "trade_ticks",
+            [[1], [2]],
+            column_names=["value"],
+            settings={"async_insert": 1, "wait_for_async_insert": 1},
+        ),
+        call(
+            "trade_ticks",
+            [[3], [4]],
+            column_names=["value"],
+            settings={"async_insert": 1, "wait_for_async_insert": 1},
+        ),
+        call(
+            "trade_ticks",
+            [[5]],
+            column_names=["value"],
+            settings={"async_insert": 1, "wait_for_async_insert": 1},
+        ),
     ]
