@@ -100,14 +100,22 @@ async def test_connect_clickhouse_repositories_initializes_both(monkeypatch) -> 
 
     market_repo = FakeRepository()
     journal_repo = FakeRepository()
+    market_kwargs = {}
+    journal_kwargs = {}
     monkeypatch.setattr(
-        data_repository, "MarketDataRepository", lambda **kwargs: market_repo
+        data_repository,
+        "MarketDataRepository",
+        lambda **kwargs: market_kwargs.update(kwargs) or market_repo,
     )
     monkeypatch.setattr(
-        journal_repository, "JournalRepository", lambda **kwargs: journal_repo
+        journal_repository,
+        "JournalRepository",
+        lambda **kwargs: journal_kwargs.update(kwargs) or journal_repo,
     )
+    retry_calls = []
 
     async def run_once(fn, **kwargs):
+        retry_calls.append(kwargs)
         return await fn()
 
     monkeypatch.setattr(runtime_connections, "retry_with_backoff", run_once)
@@ -128,6 +136,20 @@ async def test_connect_clickhouse_repositories_initializes_both(monkeypatch) -> 
     assert result == (market_repo, journal_repo)
     assert market_repo.initialized
     assert journal_repo.initialized
+    expected_connection = {
+        "host": "localhost",
+        "port": 8123,
+        "username": "aitos",
+        "password": "test",
+        "database": "aitos_test",
+    }
+    assert market_kwargs == expected_connection
+    assert journal_kwargs == expected_connection
+    assert [call["operation_name"] for call in retry_calls] == [
+        "ClickHouse market repository initialization",
+        "ClickHouse journal repository initialization",
+    ]
+    assert all(call["max_attempts"] == 5 for call in retry_calls)
 
 
 @pytest.mark.asyncio
