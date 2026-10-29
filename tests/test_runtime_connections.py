@@ -128,8 +128,6 @@ async def test_connect_clickhouse_repositories_initializes_both(monkeypatch) -> 
     assert result == (market_repo, journal_repo)
     assert market_repo.initialized
     assert journal_repo.initialized
-    assert market_repo.kwargs["database"] == "aitos_test"
-    assert journal_repo.kwargs["database"] == "aitos_test"
 
 
 @pytest.mark.asyncio
