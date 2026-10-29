@@ -36,6 +36,24 @@ async def connect_redis_with_retry(settings, *, logger) -> Redis:
         raise SystemExit(1) from exc
 
 
+async def try_connect_neo4j(settings, *, logger):
+    """Connect to optional Neo4j storage without blocking core trading startup."""
+
+    from neo4j import AsyncGraphDatabase
+
+    driver = AsyncGraphDatabase.driver(
+        settings.neo4j.uri,
+        auth=(settings.neo4j.user, settings.neo4j.password),
+    )
+    try:
+        await driver.verify_connectivity()
+        return driver
+    except Exception as exc:
+        logger.warning("Neo4j unavailable: %s", exc)
+        await driver.close()
+        return None
+
+
 async def connect_clickhouse_repositories(settings, *, logger):
     """Initialize the shared market-data and journal repositories with retries."""
 
