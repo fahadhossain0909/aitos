@@ -79,6 +79,7 @@ async def test_connect_redis_with_retry_exits_after_retries_exhausted(
     assert exc_info.value.code == 1
     assert logger.errors == [("could not connect to Redis: %s", failure)]
 
+
 class FakeRepository:
     def __init__(self, **kwargs) -> None:
         self.kwargs = kwargs
@@ -187,9 +188,7 @@ async def test_try_connect_neo4j_returns_connected_driver(monkeypatch) -> None:
 
     driver = FakeDriver()
     neo4j_module = ModuleType("neo4j")
-    neo4j_module.AsyncGraphDatabase = SimpleNamespace(
-        driver=lambda uri, auth: driver
-    )
+    neo4j_module.AsyncGraphDatabase = SimpleNamespace(driver=lambda uri, auth: driver)
     monkeypatch.setitem(sys.modules, "neo4j", neo4j_module)
     settings = SimpleNamespace(
         neo4j=SimpleNamespace(
@@ -197,9 +196,7 @@ async def test_try_connect_neo4j_returns_connected_driver(monkeypatch) -> None:
         )
     )
 
-    result = await runtime_connections.try_connect_neo4j(
-        settings, logger=FakeLogger()
-    )
+    result = await runtime_connections.try_connect_neo4j(settings, logger=FakeLogger())
 
     assert result is driver
 
@@ -229,9 +226,7 @@ async def test_try_connect_neo4j_closes_driver_when_unavailable(monkeypatch) -> 
         )
     )
 
-    result = await runtime_connections.try_connect_neo4j(
-        settings, logger=logger
-    )
+    result = await runtime_connections.try_connect_neo4j(settings, logger=logger)
 
     assert result is None
     assert driver.close_count == 1
