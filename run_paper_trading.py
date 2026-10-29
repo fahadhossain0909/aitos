@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import math
 
-from redis.asyncio import Redis
 
 from aitos.agents import LearningAgent, MarketAgent, PortfolioAgent, RiskAgent
 from aitos.app import (
@@ -34,6 +33,7 @@ from aitos.learning.worker import ContinualLearningWorker
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
 from aitos.resilience import RetryExhaustedError, retry_with_backoff
+from aitos.runtime_connections import connect_redis_with_retry
 from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
@@ -107,28 +107,6 @@ async def _close_stale_positions(components) -> None:
                 "stale position check failed",
                 extra={"aitos_extra": {"trade_id": trade.trade_id}},
             )
-
-
-async def connect_redis_with_retry(settings) -> Redis:
-    async def _attempt() -> Redis:
-        client = Redis.from_url(
-            settings.redis.url,
-            max_connections=settings.redis.max_connections,
-        )
-        await client.ping()
-        return client
-
-    try:
-        return await retry_with_backoff(
-            _attempt,
-            max_attempts=5,
-            base_delay_seconds=2.0,
-            max_delay_seconds=30.0,
-            operation_name="Redis connection",
-        )
-    except RetryExhaustedError as exc:
-        logger.error("could not connect to Redis: %s", exc)
-        raise SystemExit(1) from exc
 
 
 async def connect_clickhouse_repositories(
