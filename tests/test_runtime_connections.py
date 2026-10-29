@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -20,9 +21,13 @@ class FakeRedis:
 class FakeLogger:
     def __init__(self) -> None:
         self.errors: list[tuple[str, object]] = []
+        self.warnings: list[tuple[str, object]] = []
 
     def error(self, message: str, error: object) -> None:
         self.errors.append((message, error))
+
+    def warning(self, message: str, error: object) -> None:
+        self.warnings.append((message, error))
 
 
 @pytest.mark.asyncio
@@ -168,4 +173,68 @@ async def test_connect_clickhouse_repositories_shuts_down_on_retry_exhaustion(
     assert journal_repo.shutdown_count == 1
     assert logger.errors == [
         ("ClickHouse persistence unavailable after retries: %s", failure)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_try_connect_neo4j_returns_connected_driver(monkeypatch) -> None:
+    class FakeDriver:
+        async def verify_connectivity(self) -> None:
+            return None
+
+        async def close(self) -> None:
+            raise AssertionError("connected driver must not be closed")
+
+    driver = FakeDriver()
+    neo4j_module = ModuleType("neo4j")
+    neo4j_module.AsyncGraphDatabase = SimpleNamespace(
+        driver=lambda uri, auth: driver
+    )
+    monkeypatch.setitem(sys.modules, "neo4j", neo4j_module)
+    settings = SimpleNamespace(
+        neo4j=SimpleNamespace(
+            uri="bolt://localhost:7687", user="neo4j", password="test"
+        )
+    )
+
+    result = await runtime_connections.try_connect_neo4j(
+        settings, logger=FakeLogger()
+    )
+
+    assert result is driver
+
+
+@pytest.mark.asyncio
+async def test_try_connect_neo4j_closes_driver_when_unavailable(monkeypatch) -> None:
+    class FakeDriver:
+        def __init__(self) -> None:
+            self.close_count = 0
+
+        async def verify_connectivity(self) -> None:
+            raise ConnectionError("neo4j unavailable")
+
+        async def close(self) -> None:
+            self.close_count += 1
+
+    driver = FakeDriver()
+    neo4j_module = ModuleType("neo4j")
+    neo4j_module.AsyncGraphDatabase = SimpleNamespace(
+        driver=lambda uri, auth: driver
+    )
+    monkeypatch.setitem(sys.modules, "neo4j", neo4j_module)
+    logger = FakeLogger()
+    settings = SimpleNamespace(
+        neo4j=SimpleNamespace(
+            uri="bolt://localhost:7687", user="neo4j", password="test"
+        )
+    )
+
+    result = await runtime_connections.try_connect_neo4j(
+        settings, logger=logger
+    )
+
+    assert result is None
+    assert driver.close_count == 1
+    assert logger.warnings == [
+        ("Neo4j unavailable: %s", ConnectionError("neo4j unavailable"))
     ]
