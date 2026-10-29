@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 
-
 from aitos.app import (
     build_system,
     initialize_all,
@@ -107,7 +106,7 @@ async def main() -> None:
             "Trading entrypoint/configuration mode mismatch: run_live_trading.py requires AITOS_MODE=live"
         )
     configure_logging(settings.log_level)
-    redis_client = await connect_redis_with_retry(settings)
+    redis_client = await connect_redis_with_retry(settings, logger=logger)
     from aitos.eventbus.redis_bus import EventBus
 
     event_bus = EventBus(redis_client=redis_client)
