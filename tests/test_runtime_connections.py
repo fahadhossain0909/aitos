@@ -40,9 +40,7 @@ async def test_connect_redis_with_retry_returns_pinged_client(monkeypatch) -> No
 
     monkeypatch.setattr(runtime_connections.Redis, "from_url", fake_from_url)
 
-    result = await runtime_connections.connect_redis_with_retry(
-        settings, logger=logger
-    )
+    result = await runtime_connections.connect_redis_with_retry(settings, logger=logger)
 
     assert result is client
     assert client.ping_count == 1
