@@ -235,6 +235,6 @@ async def test_try_connect_neo4j_closes_driver_when_unavailable(monkeypatch) -> 
 
     assert result is None
     assert driver.close_count == 1
-    assert logger.warnings == [
-        ("Neo4j unavailable: %s", ConnectionError("neo4j unavailable"))
-    ]
+    assert len(logger.warnings) == 1
+    assert logger.warnings[0][0] == "Neo4j unavailable: %s"
+    assert isinstance(logger.warnings[0][1], ConnectionError)
