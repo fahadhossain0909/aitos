@@ -11,12 +11,15 @@ Reduce accidental duplication and make module ownership easier to understand wit
 1. **Runtime entrypoint is a large composition root.** `run_paper_trading.py` imports configuration, market data, persistence, learning, execution, monitoring, and explainability components and defines operational constants. Some of this is appropriate for orchestration, but the file should be checked for business logic that belongs in dedicated services. Do not move code until imports and lifecycle ordering are mapped.
 2. **Tuning environment-variable mapping is explicit and lengthy.** `aitos/config/tuning.py` contains typed Pydantic settings plus a large environment-variable-to-field mapping. The mapping is not automatically a defect: explicit whitelisting provides validation and avoids reading unrelated variables. Consider table-driven declarations only if tests prove behavior remains identical.
 3. **The repository has many long-lived branches.** The branch list includes several similarly named market-data, order-book, Redis archive, position-recovery, and observability branches. Similar names are not proof of duplicate changes; compare each branch with `main` and check associated PRs before deleting anything.
-4. **Existing architecture boundaries should be preserved.** Current package areas include configuration, data, exchange adapters, execution, intelligence, learning, market-data, trading state, and explainability. Avoid broad folder moves until import references, packaging, Docker, CI, scripts, and docs have been inventoried.
+4. **Duplicate basenames are not automatically duplicate implementations.** A recursive Git tree inventory found 701 tracked files and repeated generic names such as `engine.py`, `models.py`, `contracts.py`, `repository.py`, and `__init__.py` across domain packages. These are mostly domain-local modules, not safe candidates for consolidation based on filename alone. The two Binance adapter test files also cover different layers: the exchange protocol adapter versus the canonical market-data adapter.
+5. **Unreferenced root placeholders were present.** `tmp.txt`, `tmp2.txt`, and `tmp3.txt` each contained only `x`; repository search found no references. They were removed on this refactor branch.
+6. **Existing architecture boundaries should be preserved.** Current package areas include configuration, data, exchange adapters, execution, intelligence, learning, market-data, trading state, and explainability. Avoid broad folder moves until import references, packaging, Docker, CI, scripts, and docs have been inventoried.
 
 ## Refactoring plan
 
 ### Phase 1 — inventory and evidence
-- Enumerate tracked files by package and file type.
+- Enumerate tracked files by package and file type (initial recursive tree inventory: 701 tracked files).
+- Treat duplicate basenames as review signals, not proof of duplicated logic; compare contents and responsibilities before moving or deleting.
 - Identify exact duplicate files and high-similarity functions; separate generated/vendor/test fixtures from production code.
 - Map entrypoints, imports, plugin/registry loading, event subscriptions, configuration sources, and persistence owners.
 - Compare branch diffs against `main`; classify as merged-equivalent, unique useful change, obsolete, or unsafe/unknown.
