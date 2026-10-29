@@ -73,3 +73,99 @@ async def test_connect_redis_with_retry_exits_after_retries_exhausted(
 
     assert exc_info.value.code == 1
     assert logger.errors == [("could not connect to Redis: %s", failure)]
+
+class FakeRepository:
+    def __init__(self, **kwargs) -> None:
+        self.kwargs = kwargs
+        self.initialized = False
+        self.shutdown_count = 0
+
+    async def initialize(self, config) -> None:
+        self.initialized = True
+
+    async def shutdown(self) -> None:
+        self.shutdown_count += 1
+
+
+@pytest.mark.asyncio
+async def test_connect_clickhouse_repositories_initializes_both(monkeypatch) -> None:
+    from aitos.data import repository as data_repository
+    from aitos.journal import repository as journal_repository
+
+    market_repo = FakeRepository()
+    journal_repo = FakeRepository()
+    monkeypatch.setattr(
+        data_repository, "MarketDataRepository", lambda **kwargs: market_repo
+    )
+    monkeypatch.setattr(
+        journal_repository, "JournalRepository", lambda **kwargs: journal_repo
+    )
+
+    async def run_once(fn, **kwargs):
+        return await fn()
+
+    monkeypatch.setattr(runtime_connections, "retry_with_backoff", run_once)
+    settings = SimpleNamespace(
+        clickhouse=SimpleNamespace(
+            host="localhost",
+            port=8123,
+            user="aitos",
+            password="test",
+            database="aitos_test",
+        )
+    )
+
+    result = await runtime_connections.connect_clickhouse_repositories(
+        settings, logger=FakeLogger()
+    )
+
+    assert result == (market_repo, journal_repo)
+    assert market_repo.initialized
+    assert journal_repo.initialized
+    assert market_repo.kwargs["database"] == "aitos_test"
+    assert journal_repo.kwargs["database"] == "aitos_test"
+
+
+@pytest.mark.asyncio
+async def test_connect_clickhouse_repositories_shuts_down_on_retry_exhaustion(
+    monkeypatch,
+) -> None:
+    from aitos.data import repository as data_repository
+    from aitos.journal import repository as journal_repository
+
+    market_repo = FakeRepository()
+    journal_repo = FakeRepository()
+    monkeypatch.setattr(
+        data_repository, "MarketDataRepository", lambda **kwargs: market_repo
+    )
+    monkeypatch.setattr(
+        journal_repository, "JournalRepository", lambda **kwargs: journal_repo
+    )
+    failure = RetryExhaustedError(5, ConnectionError("ClickHouse unavailable"))
+
+    async def fail_retry(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(runtime_connections, "retry_with_backoff", fail_retry)
+    logger = FakeLogger()
+    settings = SimpleNamespace(
+        clickhouse=SimpleNamespace(
+            host="localhost",
+            port=8123,
+            user="aitos",
+            password="test",
+            database="aitos_test",
+        )
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        await runtime_connections.connect_clickhouse_repositories(
+            settings, logger=logger
+        )
+
+    assert exc_info.value.code == 1
+    assert market_repo.shutdown_count == 1
+    assert journal_repo.shutdown_count == 1
+    assert logger.errors == [
+        ("ClickHouse persistence unavailable after retries: %s", failure)
+    ]
