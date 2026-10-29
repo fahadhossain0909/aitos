@@ -26,6 +26,8 @@ Reduce accidental duplication and make module ownership easier to understand wit
 - Record baseline test/lint/type-check results before production refactors.
 
 ### Phase 2 — safe deduplication
+- **Completed on the refactor branch:** extracted the duplicate Redis connection/retry helper, ClickHouse market-data/journal repository initialization, and optional Neo4j connection helper from the paper/live entrypoints into `aitos/runtime_connections.py`.
+- Added focused tests for Redis success/failure, ClickHouse initialization/cleanup, and Neo4j success/fallback. The CI, Market Data Contract Audit, and Backtest Tests passed on commit `43e60608db435fc995be52282a2cb13997f0d490`; the latest assertion-strengthening commit is awaiting its own CI results.
 - Extract shared logic only where implementations have the same contract and failure semantics.
 - Prefer one authoritative source for paths, ports, configuration defaults, retry policy, and serialization schemas.
 - Keep exchange-specific protocol adapters separate when behavior genuinely differs.
