@@ -213,9 +213,7 @@ async def test_try_connect_neo4j_closes_driver_when_unavailable(monkeypatch) -> 
 
     driver = FakeDriver()
     neo4j_module = ModuleType("neo4j")
-    neo4j_module.AsyncGraphDatabase = SimpleNamespace(
-        driver=lambda uri, auth: driver
-    )
+    neo4j_module.AsyncGraphDatabase = SimpleNamespace(driver=lambda uri, auth: driver)
     monkeypatch.setitem(sys.modules, "neo4j", neo4j_module)
     logger = FakeLogger()
     settings = SimpleNamespace(
