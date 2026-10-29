@@ -32,6 +32,7 @@ from aitos.market_data.universe import resolve_live_universe
 from aitos.runtime_connections import (
     connect_clickhouse_repositories,
     connect_redis_with_retry,
+    try_connect_neo4j,
 )
 from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
@@ -108,21 +109,6 @@ async def _close_stale_positions(components) -> None:
             )
 
 
-async def try_connect_neo4j(settings):
-    from neo4j import AsyncGraphDatabase
-
-    driver = AsyncGraphDatabase.driver(
-        settings.neo4j.uri, auth=(settings.neo4j.user, settings.neo4j.password)
-    )
-    try:
-        await driver.verify_connectivity()
-        return driver
-    except Exception as exc:
-        logger.warning("Neo4j unavailable: %s", exc)
-        await driver.close()
-        return None
-
-
 async def main() -> None:
     settings = get_settings()
     if settings.tuning.mode != "paper":
@@ -138,7 +124,7 @@ async def main() -> None:
     market_repo, journal_repo = await connect_clickhouse_repositories(
         settings, logger=logger
     )
-    graph_driver = await try_connect_neo4j(settings)
+    graph_driver = await try_connect_neo4j(settings, logger=logger)
     exchange = BinanceFuturesAdapter()
     symbols = await resolve_live_universe(exchange)
     logger.info(
