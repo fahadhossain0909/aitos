@@ -73,7 +73,7 @@ async def main() -> None:
 
     event_bus = EventBus(redis_client=redis_client)
     await event_bus.initialize({})
-    market_repo, journal_repo = await connect_clickhouse_repositories(settings)
+    market_repo, journal_repo = await connect_clickhouse_repositories(settings, logger=logger)
     graph_driver = await try_connect_neo4j(settings)
     exchange = BinanceFuturesAdapter()
     symbols = await resolve_live_universe(exchange)
