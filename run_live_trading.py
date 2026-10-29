@@ -14,19 +14,19 @@ from aitos.app import (
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
-from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
-from aitos.journal.repository import JournalRepository
 from aitos.kernel.ai_kernel import AIKernel
 from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.live_trading import confirm_live_trading, prepare_live_executor
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
-from aitos.resilience import RetryExhaustedError, retry_with_backoff
-from aitos.runtime_connections import connect_redis_with_retry
+from aitos.runtime_connections import (
+    connect_clickhouse_repositories,
+    connect_redis_with_retry,
+)
 from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
@@ -43,44 +43,6 @@ SCAN_INTERVAL_SECONDS = get_settings().tuning.scanner.refresh_interval_seconds
 KLINE_TIMEFRAME = "15m"
 HEALTH_SERVER_PORT = 8091
 SYMBOL_FILTER_TTL_SECONDS = 300.0
-
-
-async def connect_clickhouse_repositories(settings):
-    market_repo = MarketDataRepository(
-        host=settings.clickhouse.host,
-        port=settings.clickhouse.port,
-        username=settings.clickhouse.user,
-        password=settings.clickhouse.password,
-        database=settings.clickhouse.database,
-    )
-    journal_repo = JournalRepository(
-        host=settings.clickhouse.host,
-        port=settings.clickhouse.port,
-        username=settings.clickhouse.user,
-        password=settings.clickhouse.password,
-        database=settings.clickhouse.database,
-    )
-    try:
-        await retry_with_backoff(
-            lambda: market_repo.initialize({}),
-            max_attempts=5,
-            base_delay_seconds=2.0,
-            max_delay_seconds=30.0,
-            operation_name="ClickHouse market repository initialization",
-        )
-        await retry_with_backoff(
-            lambda: journal_repo.initialize({}),
-            max_attempts=5,
-            base_delay_seconds=2.0,
-            max_delay_seconds=30.0,
-            operation_name="ClickHouse journal repository initialization",
-        )
-        return market_repo, journal_repo
-    except RetryExhaustedError as exc:
-        await market_repo.shutdown()
-        await journal_repo.shutdown()
-        logger.error("ClickHouse persistence unavailable after retries: %s", exc)
-        raise SystemExit(1) from exc
 
 
 async def try_connect_neo4j(settings):
