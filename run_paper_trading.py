@@ -6,7 +6,6 @@ from __future__ import annotations
 import asyncio
 import math
 
-
 from aitos.agents import LearningAgent, MarketAgent, PortfolioAgent, RiskAgent
 from aitos.app import (
     PaperPortfolioTracker,
@@ -171,7 +170,7 @@ async def main() -> None:
             "Trading entrypoint/configuration mode mismatch: run_paper_trading.py requires AITOS_MODE=paper"
         )
     configure_logging(settings.log_level)
-    redis_client = await connect_redis_with_retry(settings)
+    redis_client = await connect_redis_with_retry(settings, logger=logger)
     from aitos.eventbus.redis_bus import EventBus
 
     event_bus = EventBus(redis_client=redis_client)
