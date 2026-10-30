@@ -6,8 +6,6 @@ from __future__ import annotations
 import asyncio
 import math
 
-from redis.asyncio import Redis
-
 from aitos.agents import LearningAgent, MarketAgent, PortfolioAgent, RiskAgent
 from aitos.app import (
     PaperPortfolioTracker,
@@ -23,17 +21,19 @@ from aitos.data.protected_position_monitor import (
     install_protected_position_monitor,
     set_open_position_provider,
 )
-from aitos.data.repository import MarketDataRepository
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.execution.order_executor import SimulatedOrderExecutor
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
-from aitos.journal.repository import JournalRepository
 from aitos.learning.recorder import LearningExperienceRecorder
 from aitos.learning.worker import ContinualLearningWorker
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
-from aitos.resilience import RetryExhaustedError, retry_with_backoff
+from aitos.runtime_connections import (
+    connect_clickhouse_repositories,
+    connect_redis_with_retry,
+    try_connect_neo4j,
+)
 from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
@@ -109,83 +109,6 @@ async def _close_stale_positions(components) -> None:
             )
 
 
-async def connect_redis_with_retry(settings) -> Redis:
-    async def _attempt() -> Redis:
-        client = Redis.from_url(
-            settings.redis.url,
-            max_connections=settings.redis.max_connections,
-        )
-        await client.ping()
-        return client
-
-    try:
-        return await retry_with_backoff(
-            _attempt,
-            max_attempts=5,
-            base_delay_seconds=2.0,
-            max_delay_seconds=30.0,
-            operation_name="Redis connection",
-        )
-    except RetryExhaustedError as exc:
-        logger.error("could not connect to Redis: %s", exc)
-        raise SystemExit(1) from exc
-
-
-async def connect_clickhouse_repositories(
-    settings,
-) -> tuple[MarketDataRepository, JournalRepository]:
-    market_repo = MarketDataRepository(
-        host=settings.clickhouse.host,
-        port=settings.clickhouse.port,
-        username=settings.clickhouse.user,
-        password=settings.clickhouse.password,
-        database=settings.clickhouse.database,
-    )
-    journal_repo = JournalRepository(
-        host=settings.clickhouse.host,
-        port=settings.clickhouse.port,
-        username=settings.clickhouse.user,
-        password=settings.clickhouse.password,
-        database=settings.clickhouse.database,
-    )
-    try:
-        await retry_with_backoff(
-            lambda: market_repo.initialize({}),
-            max_attempts=5,
-            base_delay_seconds=2.0,
-            max_delay_seconds=30.0,
-            operation_name="ClickHouse market repository initialization",
-        )
-        await retry_with_backoff(
-            lambda: journal_repo.initialize({}),
-            max_attempts=5,
-            base_delay_seconds=2.0,
-            max_delay_seconds=30.0,
-            operation_name="ClickHouse journal repository initialization",
-        )
-        return market_repo, journal_repo
-    except RetryExhaustedError as exc:
-        await market_repo.shutdown()
-        await journal_repo.shutdown()
-        logger.error("ClickHouse persistence unavailable after retries: %s", exc)
-        raise SystemExit(1) from exc
-
-
-async def try_connect_neo4j(settings):
-    from neo4j import AsyncGraphDatabase
-
-    driver = AsyncGraphDatabase.driver(
-        settings.neo4j.uri, auth=(settings.neo4j.user, settings.neo4j.password)
-    )
-    try:
-        await driver.verify_connectivity()
-        return driver
-    except Exception as exc:
-        logger.warning("Neo4j unavailable: %s", exc)
-        await driver.close()
-        return None
-
-
 async def main() -> None:
     settings = get_settings()
     if settings.tuning.mode != "paper":
@@ -193,13 +116,15 @@ async def main() -> None:
             "Trading entrypoint/configuration mode mismatch: run_paper_trading.py requires AITOS_MODE=paper"
         )
     configure_logging(settings.log_level)
-    redis_client = await connect_redis_with_retry(settings)
+    redis_client = await connect_redis_with_retry(settings, logger=logger)
     from aitos.eventbus.redis_bus import EventBus
 
     event_bus = EventBus(redis_client=redis_client)
     await event_bus.initialize({})
-    market_repo, journal_repo = await connect_clickhouse_repositories(settings)
-    graph_driver = await try_connect_neo4j(settings)
+    market_repo, journal_repo = await connect_clickhouse_repositories(
+        settings, logger=logger
+    )
+    graph_driver = await try_connect_neo4j(settings, logger=logger)
     exchange = BinanceFuturesAdapter()
     symbols = await resolve_live_universe(exchange)
     logger.info(
