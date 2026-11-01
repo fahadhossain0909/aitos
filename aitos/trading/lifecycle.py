@@ -130,6 +130,9 @@ class TradeLifecycle(AITOSModule):
         self._tuning = load_tuning_settings()
         self._intensive_window_started_at = time.monotonic()
         self._intensive_analyses_used = 0
+        # Fair, per-position cadence: one busy symbol must not consume another
+        # position's exit-analysis allowance.
+        self._last_intensive_analysis_at: dict[str, float] = {}
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
         self._closed_trades: list[Trade] = []
@@ -140,19 +143,23 @@ class TradeLifecycle(AITOSModule):
         self._tuning = settings
         self._intensive_window_started_at = time.monotonic()
         self._intensive_analyses_used = 0
+        self._last_intensive_analysis_at.clear()
 
-    def _allow_intensive_analysis(self) -> bool:
-        """Budget deep exit analysis without ever throttling hard-stop checks."""
+    def _allow_intensive_analysis(
+        self, trade_id: str, *, force: bool = False
+    ) -> bool:
+        """Throttle per position, never globally across unrelated open trades.
+
+        A soft-stop or TP boundary forces an immediate evaluation. Ordinary
+        observations are evaluated at the configured per-position cadence.
+        """
         now = time.monotonic()
         interval = self._tuning.positions.monitoring_interval_seconds
-        if now - self._intensive_window_started_at >= interval:
-            self._intensive_window_started_at = now
-            self._intensive_analyses_used = 0
-        budget = self._tuning.positions.intensive_analysis_budget
-        if budget <= 0 or self._intensive_analyses_used >= budget:
-            return False
-        self._intensive_analyses_used += 1
-        return True
+        last = self._last_intensive_analysis_at.get(trade_id)
+        if force or last is None or now - last >= interval:
+            self._last_intensive_analysis_at[trade_id] = now
+            return True
+        return False
 
     @property
     def module_id(self) -> str:
@@ -392,23 +399,53 @@ class TradeLifecycle(AITOSModule):
         trade.last_marked_price = current_price
         is_long = trade.side == TradeSide.LONG
 
-        # ---- 1. Hard / structural SL (authoritative — never skipped) ---------
+        # The scanner's initial SL is a soft risk boundary while EIE is active.
+        # It triggers an urgent thesis evaluation; it is not allowed to bypass
+        # HOLD/MANAGE. A separate, wider emergency-loss boundary remains
+        # authoritative. Without EIE, preserve the legacy protective SL.
         sl_hit = (
             current_price <= trade.sl_price
             if is_long
             else current_price >= trade.sl_price
         )
-        if sl_hit:
+        emergency_r = float(
+            getattr(self._tuning.positions, "emergency_stop_r_multiple", 2.0)
+        )
+        adverse_r = max(0.0, -trade.unrealized_r_multiple(current_price))
+        emergency_stop_hit = emergency_r > 0 and adverse_r >= emergency_r
+        if emergency_stop_hit:
+            logger.warning(
+                "position emergency loss boundary reached",
+                extra={"aitos_extra": {
+                    "trade_id": trade.trade_id,
+                    "symbol": trade.symbol,
+                    "adverse_r": adverse_r,
+                    "emergency_stop_r_multiple": emergency_r,
+                }},
+            )
+            return await self._trigger_exit(
+                trade, current_price, "emergency_risk_limit", TOPIC_SL_TRIGGERED
+            )
+        if sl_hit and self._position_manager is None:
             return await self._trigger_exit(
                 trade, current_price, "sl_triggered", TOPIC_SL_TRIGGERED
             )
 
-        # ---- 2. Optional Exit Intelligence (Phase E) -------------------------
+        # A breached soft stop and a reached TP are urgent decision points.
+        # Otherwise each position receives its own regular EIE evaluation slot.
+        tp_boundary_hit = False
+        if trade.take_profit_levels:
+            next_tp = trade.take_profit_levels[0]
+            tp_boundary_hit = (
+                current_price >= next_tp if is_long else current_price <= next_tp
+            )
         eie_action = None
         eie_evaluated_this_update = False
-        if self._position_manager is not None:
-            if self._allow_intensive_analysis():
-                eie_evaluated_this_update = True
+        if self._position_manager is not None and self._allow_intensive_analysis(
+            trade.trade_id, force=sl_hit or tp_boundary_hit
+        ):
+            eie_evaluated_this_update = True
+            try:
                 eie_action = await self._apply_exit_intelligence(
                     trade,
                     current_price,
@@ -424,33 +461,49 @@ class TradeLifecycle(AITOSModule):
                     trend_strength=trend_strength,
                     extra_features=extra_features,
                 )
-                if eie_action is not None:
-                    # Full EXIT already performed inside _apply_exit_intelligence
-                    return eie_action
-            else:
-                logger.debug(
-                    "intensive exit analysis budget exhausted; hard exits remain active",
-                    extra={
-                        "aitos_extra": {
-                            "trade_id": trade.trade_id,
-                            "symbol": trade.symbol,
-                            "budget": self._tuning.positions.intensive_analysis_budget,
-                            "interval_seconds": self._tuning.positions.monitoring_interval_seconds,
-                        }
-                    },
+            except Exception:
+                logger.exception(
+                    "exit intelligence evaluation failed",
+                    extra={"aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "soft_stop_breached": sl_hit,
+                    }},
                 )
+                # If the soft stop is already breached and the decision system
+                # is unavailable, fail closed at the protective boundary.
+                if sl_hit:
+                    return await self._trigger_exit(
+                        trade, current_price, "sl_triggered_eie_unavailable",
+                        TOPIC_SL_TRIGGERED
+                    )
+                raise
+            if eie_action is not None:
+                return eie_action
 
-        # ---- 3. Static TP path (preserved; HOLD may defer full exit) ---------
+        if sl_hit:
+            # EIE has explicitly chosen HOLD or MANAGE. Continue monitoring,
+            # but never loosen the existing protective stop here.
+            logger.info(
+                "soft stop breached; position retained by exit intelligence",
+                extra={"aitos_extra": {
+                    "trade_id": trade.trade_id,
+                    "symbol": trade.symbol,
+                    "price": current_price,
+                    "stop_price": trade.sl_price,
+                    "last_eie_action": getattr(trade, "_last_eie_action", None),
+                    "adverse_r": adverse_r,
+                }},
+            )
+
+        # ---- Static TP path: HOLD can defer full exit; partial targets remain
+        # available as controlled scale-out destinations. ---------------------
         if trade.take_profit_levels:
             next_tp = trade.take_profit_levels[0]
             tp_hit = current_price >= next_tp if is_long else current_price <= next_tp
             if tp_hit:
-                # When Exit Intelligence is active and last decision was HOLD,
-                # treat TP as a soft destination: partial reduce only if multiple
-                # levels remain; otherwise defer full exit (winner may continue).
                 defer_full_tp = (
                     self._position_manager is not None
-                    and eie_evaluated_this_update
                     and getattr(trade, "_last_eie_action", None) == "HOLD"
                 )
                 if len(trade.take_profit_levels) > 1:
@@ -467,13 +520,11 @@ class TradeLifecycle(AITOSModule):
                 if defer_full_tp:
                     logger.info(
                         "TP level reached but EIE=HOLD — deferring full exit",
-                        extra={
-                            "aitos_extra": {
-                                "trade_id": trade.trade_id,
-                                "tp": next_tp,
-                                "price": current_price,
-                            }
-                        },
+                        extra={"aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "tp": next_tp,
+                            "price": current_price,
+                        }},
                     )
                     return trade
                 return await self._trigger_exit(
