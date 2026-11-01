@@ -190,6 +190,8 @@ class Trade:
             "pnl_percent": self.pnl_percent,
             "rejection_reason": self.rejection_reason,
             "trailing_sl_enabled": self.trailing_sl_enabled,
+            "breakeven_triggered": self.breakeven_triggered,
+            "breakeven_at_r_multiple": self.breakeven_at_r_multiple,
             "sl_order_id": self.sl_order_id,
             "tp_order_ids": list(self.tp_order_ids),
             "regime": self.regime,
