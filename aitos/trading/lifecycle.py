@@ -148,9 +148,7 @@ class TradeLifecycle(AITOSModule):
         self._soft_stop_breached.clear()
         self._tp_boundary_breached.clear()
 
-    def _allow_intensive_analysis(
-        self, trade_id: str, *, force: bool = False
-    ) -> bool:
+    def _allow_intensive_analysis(self, trade_id: str, *, force: bool = False) -> bool:
         """Throttle per position, never globally across unrelated open trades.
 
         A soft-stop or TP boundary forces an immediate evaluation. Ordinary
@@ -442,12 +440,14 @@ class TradeLifecycle(AITOSModule):
         if emergency_stop_hit:
             logger.warning(
                 "position emergency loss boundary reached",
-                extra={"aitos_extra": {
-                    "trade_id": trade.trade_id,
-                    "symbol": trade.symbol,
-                    "adverse_r": adverse_r,
-                    "emergency_stop_r_multiple": emergency_r,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "adverse_r": adverse_r,
+                        "emergency_stop_r_multiple": emergency_r,
+                    }
+                },
             )
             return await self._trigger_exit(
                 trade, current_price, "emergency_risk_limit", TOPIC_SL_TRIGGERED
@@ -509,18 +509,22 @@ class TradeLifecycle(AITOSModule):
             except Exception:
                 logger.exception(
                     "exit intelligence evaluation failed",
-                    extra={"aitos_extra": {
-                        "trade_id": trade.trade_id,
-                        "symbol": trade.symbol,
-                        "soft_stop_breached": sl_hit,
-                    }},
+                    extra={
+                        "aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                            "soft_stop_breached": sl_hit,
+                        }
+                    },
                 )
                 # If the soft stop is already breached and the decision system
                 # is unavailable, fail closed at the protective boundary.
                 if sl_hit:
                     return await self._trigger_exit(
-                        trade, current_price, "sl_triggered_eie_unavailable",
-                        TOPIC_SL_TRIGGERED
+                        trade,
+                        current_price,
+                        "sl_triggered_eie_unavailable",
+                        TOPIC_SL_TRIGGERED,
                     )
                 raise
             if eie_action is not None:
@@ -531,14 +535,16 @@ class TradeLifecycle(AITOSModule):
             # but never loosen the existing protective stop here.
             logger.info(
                 "soft stop breached; position retained by exit intelligence",
-                extra={"aitos_extra": {
-                    "trade_id": trade.trade_id,
-                    "symbol": trade.symbol,
-                    "price": current_price,
-                    "stop_price": trade.sl_price,
-                    "last_eie_action": getattr(trade, "_last_eie_action", None),
-                    "adverse_r": adverse_r,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "price": current_price,
+                        "stop_price": trade.sl_price,
+                        "last_eie_action": getattr(trade, "_last_eie_action", None),
+                        "adverse_r": adverse_r,
+                    }
+                },
             )
 
         # ---- TP handling ------------------------------------------------------
@@ -551,13 +557,15 @@ class TradeLifecycle(AITOSModule):
             self._tp_boundary_breached.discard(trade.trade_id)
             logger.info(
                 "EIE TP checkpoint reached; target consumed without automatic exit",
-                extra={"aitos_extra": {
-                    "trade_id": trade.trade_id,
-                    "symbol": trade.symbol,
-                    "tp_checkpoint": reached_tp,
-                    "price": current_price,
-                    "eie_action": getattr(trade, "_last_eie_action", None),
-                }},
+                extra={
+                    "aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "tp_checkpoint": reached_tp,
+                        "price": current_price,
+                        "eie_action": getattr(trade, "_last_eie_action", None),
+                    }
+                },
             )
         elif self._position_manager is None and trade.take_profit_levels:
             # Preserve legacy static TP behavior when Exit Intelligence is off.
@@ -897,11 +905,7 @@ class TradeLifecycle(AITOSModule):
         # A resting exchange TP would bypass an EIE HOLD decision. EIE-managed
         # positions therefore monitor TP destinations locally and let EIE
         # arbitrate full exits; legacy positions retain their exchange TPs.
-        levels = (
-            []
-            if self._position_manager is not None
-            else trade.take_profit_levels
-        )
+        levels = [] if self._position_manager is not None else trade.take_profit_levels
         for i, level_price in enumerate(levels):
             leg_qty = (
                 remaining_qty
@@ -993,3 +997,306 @@ class TradeLifecycle(AITOSModule):
         )
 
     async def _validate_and_open(
+        self, opportunity: Opportunity, portfolio: PortfolioState
+    ) -> Trade:
+        from aitos.risk.position_sizing import calculate_position_size
+        from aitos.risk.sector import sector_for_symbol
+
+        risk_score = (
+            self._risk_engine.last_assessment.total
+            if self._risk_engine.last_assessment
+            else 0.0
+        )
+        candidate_sector = sector_for_symbol(opportunity.symbol)
+        existing_sector_notional = sum(
+            p.notional_usd for p in portfolio.positions if p.sector == candidate_sector
+        )
+        # Size against the actual catastrophic boundary when EIE is enabled,
+        # not the closer soft thesis stop. This preserves the configured account
+        # risk even though a valid thesis may be held beyond the soft stop.
+        sizing_stop_price = opportunity.stop_loss_price
+        if self._position_manager is not None:
+            initial_distance = abs(
+                opportunity.entry_price - opportunity.stop_loss_price
+            )
+            emergency_multiple = float(self._tuning.positions.emergency_stop_r_multiple)
+            sizing_stop_price = (
+                opportunity.entry_price - initial_distance * emergency_multiple
+                if opportunity.side == TradeSide.LONG
+                else opportunity.entry_price + initial_distance * emergency_multiple
+            )
+            if not _valid_market_price(sizing_stop_price):
+                return await self._reject(
+                    opportunity,
+                    "invalid emergency stop price for EIE-managed position",
+                )
+        sizing = calculate_position_size(
+            equity_usd=portfolio.equity_usd,
+            entry_price=opportunity.entry_price,
+            stop_loss_price=sizing_stop_price,
+            risk_limits=self._risk_engine.limits,
+            risk_score=risk_score,
+            volatility_percentile=portfolio.volatility_percentile,
+            correlation_penalty=portfolio.max_pairwise_correlation,
+            existing_sector_notional_usd=existing_sector_notional,
+            sector_limit_pct=self._risk_engine.limits.max_sector_exposure_pct,
+        )
+        if sizing.position_size_usd <= 0.0:
+            return await self._reject(
+                opportunity, f"sector exposure cap exhausted for {candidate_sector}"
+            )
+        projected_portfolio = self._project_portfolio(portfolio, opportunity, sizing)
+        projected_hard_breaches = [
+            b
+            for b in self._risk_engine.check_limits(projected_portfolio)
+            if b.is_hard_cap
+        ]
+        if projected_hard_breaches:
+            return await self._reject(
+                opportunity,
+                f"projected hard limit breach: {projected_hard_breaches[0].message}",
+            )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_ENTRY_SIGNAL,
+                payload={
+                    "symbol": opportunity.symbol,
+                    "side": opportunity.side.value,
+                    "sizing_rationale": sizing.rationale,
+                },
+                source_module=self.module_id,
+            )
+        )
+        quantity = sizing.position_size_usd / opportunity.entry_price
+        order_result = await self._order_executor.submit_order(
+            OrderRequest(
+                symbol=opportunity.symbol,
+                side=opportunity.side,
+                quantity=quantity,
+                reference_price=opportunity.entry_price,
+            )
+        )
+        if not order_result.success:
+            return await self._reject(
+                opportunity, f"order submission failed: {order_result.error}"
+            )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_ORDER_SUBMITTED,
+                payload={
+                    "symbol": opportunity.symbol,
+                    "side": opportunity.side.value,
+                    "quantity": quantity,
+                },
+                source_module=self.module_id,
+            )
+        )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_ORDER_FILLED,
+                payload={
+                    "order_id": order_result.order_id,
+                    "fill_price": order_result.fill_price,
+                },
+                source_module=self.module_id,
+            )
+        )
+        trade = Trade(
+            trade_id=new_trade_id(),
+            symbol=opportunity.symbol,
+            side=opportunity.side,
+            entry_price=order_result.fill_price,
+            quantity=order_result.filled_quantity,
+            leverage=sizing.leverage,
+            position_size_usd=sizing.position_size_usd,
+            risk_amount_usd=sizing.risk_amount_usd,
+            strategy_id=opportunity.strategy_id,
+            agent_consensus=opportunity.agent_consensus,
+            explanation=opportunity.rationale,
+            sl_price=opportunity.stop_loss_price,
+            tp_price=(
+                opportunity.take_profit_levels[0]
+                if opportunity.take_profit_levels
+                else opportunity.entry_price
+            ),
+            take_profit_levels=list(opportunity.take_profit_levels),
+            state=TradeLifecycleState.POSITION_OPENED,
+            entry_time=utc_now_iso(),
+            trailing_sl_enabled=opportunity.trailing_sl_enabled,
+            breakeven_at_r_multiple=opportunity.breakeven_at_r_multiple,
+            regime=opportunity.regime,
+            emergency_sl_price=(
+                (
+                    (
+                        order_result.fill_price
+                        - abs(order_result.fill_price - opportunity.stop_loss_price)
+                        * float(self._tuning.positions.emergency_stop_r_multiple)
+                    )
+                    if opportunity.side == TradeSide.LONG
+                    else (
+                        order_result.fill_price
+                        + abs(order_result.fill_price - opportunity.stop_loss_price)
+                        * float(self._tuning.positions.emergency_stop_r_multiple)
+                    )
+                )
+                if self._position_manager is not None
+                else None
+            ),
+        )
+        self._open_trades[trade.trade_id] = trade
+        if self._position_manager is not None:
+            register_entry_thesis = getattr(
+                self._position_manager, "register_entry_thesis", None
+            )
+            if callable(register_entry_thesis):
+                try:
+                    entry_context = (
+                        self._market_context_provider.get_context(
+                            trade.symbol
+                        ).as_kwargs()
+                        if self._market_context_provider is not None
+                        else {}
+                    )
+                    register_entry_thesis(trade, **entry_context)
+                    logger.info(
+                        "entry thesis captured",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                                "has_entry_market_context": bool(entry_context),
+                                "entry_thesis_captured": trade.entry_thesis is not None,
+                            }
+                        },
+                    )
+                except Exception:
+                    # Keep the position open but make the degraded entry snapshot
+                    # visible; PositionManager has a deterministic fallback path.
+                    logger.exception(
+                        "entry thesis capture failed",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                            }
+                        },
+                    )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_POSITION_OPENED,
+                payload=trade.to_dict(),
+                source_module=self.module_id,
+            )
+        )
+        self._last_event_time = trade.entry_time
+        if self._use_exchange_side_stops:
+            await self._place_exchange_side_stops(trade)
+        return trade
+
+    async def _reject(self, opportunity: Opportunity, reason: str) -> Trade:
+        trade = Trade(
+            trade_id=new_trade_id(),
+            symbol=opportunity.symbol,
+            side=opportunity.side,
+            entry_price=opportunity.entry_price,
+            quantity=0.0,
+            leverage=0.0,
+            position_size_usd=0.0,
+            risk_amount_usd=0.0,
+            strategy_id=opportunity.strategy_id,
+            agent_consensus=opportunity.agent_consensus,
+            explanation=opportunity.rationale,
+            sl_price=opportunity.stop_loss_price,
+            tp_price=(
+                opportunity.take_profit_levels[0]
+                if opportunity.take_profit_levels
+                else opportunity.entry_price
+            ),
+            take_profit_levels=list(opportunity.take_profit_levels),
+            state=TradeLifecycleState.REJECTED,
+            entry_time=utc_now_iso(),
+            rejection_reason=reason,
+        )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_REJECTED,
+                payload=trade.to_dict(),
+                source_module=self.module_id,
+            )
+        )
+        logger.info(
+            "opportunity rejected",
+            extra={"aitos_extra": {"symbol": opportunity.symbol, "reason": reason}},
+        )
+        return trade
+
+    async def _trigger_exit(
+        self, trade: Trade, price: float, reason: str, topic: str
+    ) -> Trade:
+        trade.state = TradeLifecycleState.EXIT_TRIGGERED
+        trade.updated_at = utc_now_iso()
+        try:
+            await self._event_bus.publish(
+                Event(
+                    topic=topic,
+                    payload={**trade.to_dict(), "trigger_price": price},
+                    source_module=self.module_id,
+                    priority=EventPriority.HIGH,
+                )
+            )
+            return await self.close_trade(trade.trade_id, price, reason)
+        except Exception:
+            # If exit-event publication or closing fails, do not leave the
+            # trade stuck in EXIT_TRIGGERED: the live price loop skips states
+            # other than POSITION_OPENED, so this would disable further checks.
+            if trade.trade_id in self._open_trades:
+                trade.state = TradeLifecycleState.POSITION_OPENED
+            raise
+
+    async def _partial_close(
+        self, trade: Trade, price: float, close_fraction: float
+    ) -> None:
+        if not _valid_market_price(price):
+            raise ValueError(f"price must be a finite positive number, got {price!r}")
+        if not 0.0 < close_fraction <= 1.0:
+            raise ValueError(
+                f"close_fraction must be in (0, 1], got {close_fraction!r}"
+            )
+        if trade.position_size_usd <= 0.0 or trade.quantity <= 0.0:
+            raise ValueError(
+                f"trade has no remaining position to close: {trade.trade_id}"
+            )
+        direction = 1 if trade.side == TradeSide.LONG else -1
+        pnl_pct = ((price - trade.entry_price) / trade.entry_price) * direction
+        closed_notional = trade.position_size_usd * close_fraction
+        closed_quantity = trade.quantity * close_fraction
+        realized = closed_notional * pnl_pct
+        trade.partial_exits.append(
+            PartialExit(
+                price=price,
+                size_usd=round(closed_notional, 2),
+                r_multiple=round(trade.unrealized_r_multiple(price), 4),
+            )
+        )
+        trade.position_size_usd = round(trade.position_size_usd - closed_notional, 2)
+        trade.quantity = max(0.0, trade.quantity - closed_quantity)
+        trade.pnl = round((trade.pnl or 0.0) + realized, 4)
+        trade.updated_at = utc_now_iso()
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_PARTIAL_CLOSE,
+                payload={
+                    **trade.to_dict(),
+                    "closed_notional_usd": closed_notional,
+                    "closed_quantity": closed_quantity,
+                    "realized_pnl": realized,
+                },
+                source_module=self.module_id,
+            )
+        )
+
+    def _require_initialized(self) -> None:
+        if not self._initialized:
+            raise ModuleNotInitializedError(
+                "TradeLifecycle.initialize() must be called first"
+            )
