@@ -547,46 +547,42 @@ class TradeLifecycle(AITOSModule):
                 },
             )
 
-        # ---- Static TP path: HOLD can defer full exit; partial targets remain
-        # available as controlled scale-out destinations. ---------------------
-        if trade.take_profit_levels:
+        # ---- TP handling ------------------------------------------------------
+        # With EIE enabled, target prices are observation/checkpoint levels only.
+        # They never cause an automatic full exit or static partial reduction.
+        # EIE may explicitly EXIT or MANAGE (including a partial reduction) after
+        # evaluating the live thesis, path, order flow and structure.
+        if self._position_manager is not None and tp_boundary_hit:
+            reached_tp = trade.take_profit_levels.pop(0)
+            self._tp_boundary_breached.discard(trade.trade_id)
+            logger.info(
+                "EIE TP checkpoint reached; target consumed without automatic exit",
+                extra={
+                    "aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "tp_checkpoint": reached_tp,
+                        "price": current_price,
+                        "eie_action": getattr(trade, "_last_eie_action", None),
+                    }
+                },
+            )
+        elif self._position_manager is None and trade.take_profit_levels:
+            # Preserve legacy static TP behavior when Exit Intelligence is off.
             next_tp = trade.take_profit_levels[0]
             tp_hit = current_price >= next_tp if is_long else current_price <= next_tp
             if tp_hit:
-                defer_full_tp = self._position_manager is not None and getattr(
-                    trade, "_last_eie_action", None
-                ) in {"HOLD", "MANAGE"}
                 if len(trade.take_profit_levels) > 1:
-                    # Avoid double-reducing when EIE already returned MANAGE
-                    # with a partial reduction on this same price observation.
-                    eie_already_reduced = (
-                        eie_evaluated_this_update
-                        and len(trade.partial_exits) > partial_exit_count_before
+                    await self._partial_close(
+                        trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
                     )
-                    if not eie_already_reduced:
-                        await self._partial_close(
-                            trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
-                        )
                     trade.take_profit_levels.pop(0)
-                    # The next TP level is a new decision boundary.
                     self._tp_boundary_breached.discard(trade.trade_id)
                     if self._use_exchange_side_stops and trade.tp_order_ids:
                         consumed_order_id = trade.tp_order_ids.pop(0)
                         await self._order_executor.cancel_resting_order(
                             trade.symbol, consumed_order_id
                         )
-                    return trade
-                if defer_full_tp:
-                    logger.info(
-                        "TP level reached but EIE continues to manage — deferring full exit",
-                        extra={
-                            "aitos_extra": {
-                                "trade_id": trade.trade_id,
-                                "tp": next_tp,
-                                "price": current_price,
-                            }
-                        },
-                    )
                     return trade
                 return await self._trigger_exit(
                     trade, current_price, "tp_triggered", TOPIC_TP_TRIGGERED
@@ -726,7 +722,7 @@ class TradeLifecycle(AITOSModule):
                         source_module=self.module_id,
                     )
                 )
-        # HOLD → fall through to TP / trailing logic
+        # HOLD → retain the position; only independent protection logic follows
         return None
 
     async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
