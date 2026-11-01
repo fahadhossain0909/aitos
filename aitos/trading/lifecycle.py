@@ -432,7 +432,7 @@ class TradeLifecycle(AITOSModule):
             getattr(self._tuning.positions, "emergency_stop_r_multiple", 2.0)
         )
         emergency_price = self._emergency_stop_price(trade)
-        emergency_stop_hit = (
+        emergency_stop_hit = self._position_manager is not None and (
             current_price <= emergency_price
             if is_long
             else current_price >= emergency_price
