@@ -39,8 +39,8 @@ from __future__ import annotations
 
 import math
 import time
-from datetime import datetime, timezone
 from collections.abc import AsyncIterator, Mapping, Sequence
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
 from aitos.config.tuning import TuningSettings, load_tuning_settings
