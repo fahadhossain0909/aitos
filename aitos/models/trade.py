@@ -129,6 +129,9 @@ class Trade:
     # Stored on the trade record so restart recovery does not rebuild the
     # thesis from a later, potentially adverse market state.
     entry_thesis: dict[str, Any] | None = None
+    # Exchange-side catastrophic protection when EIE is the normal exit
+    # authority. The ordinary sl_price remains the soft strategy boundary.
+    emergency_sl_price: float | None = None
     updated_at: str = field(default_factory=_utc_now_iso)
 
     def __post_init__(self) -> None:
@@ -197,4 +200,5 @@ class Trade:
             "mae_r": self.mae_r,
             "mfe_r": self.mfe_r,
             "entry_thesis": self.entry_thesis,
+            "emergency_sl_price": self.emergency_sl_price,
         }
