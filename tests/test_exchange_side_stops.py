@@ -164,6 +164,8 @@ async def test_eie_uses_exchange_side_emergency_stop_not_soft_stop(
     assert trade.sl_price == pytest.approx(98.0)
     assert trade.emergency_sl_price == pytest.approx(96.0)
     assert placed_stop == pytest.approx(trade.emergency_sl_price)
+    # A resting TP must not bypass an EIE HOLD decision.
+    assert trade.tp_order_ids == []
 
 
 @pytest.mark.asyncio
