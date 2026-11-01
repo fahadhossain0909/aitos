@@ -193,8 +193,25 @@ class ExitIntelligenceEngine:
         streak = self._exit_pressure_streak[state_key]
         features["exit_pressure_streak"] = float(streak)
 
+        reason_codes = {reason.code for reason in reasons}
+        # MANAGE requires independent evidence, not a single noisy tick or a
+        # momentum wobble. Evidence is grouped by source to avoid double-counting
+        # several symptoms from the same underlying signal.
+        confirmation_groups = (
+            bool(reason_codes & {"structure_against", "structure_broken", "near_structural_stop"}),
+            bool(reason_codes & {"of_reversal"}),
+            bool(reason_codes & {"path_upside_collapsed", "negative_ere"}),
+            bool(reason_codes & {"thesis_degraded"}),
+            bool(reason_codes & {"elevated_reversal_risk"}),
+        )
+        manage_confirmed = sum(confirmation_groups) >= 2
+        features["manage_confirmation_groups"] = float(sum(confirmation_groups))
         action, reduce_frac = self._decide(
-            exit_score, ere, hard_invalidation=hard_invalidation, streak=streak
+            exit_score,
+            ere,
+            hard_invalidation=hard_invalidation,
+            streak=streak,
+            manage_confirmed=manage_confirmed,
         )
         notes.append(
             f"action={action.value} score={exit_score:.3f} ere={ere:.4f} "
@@ -374,6 +391,7 @@ class ExitIntelligenceEngine:
         *,
         hard_invalidation: bool,
         streak: int,
+        manage_confirmed: bool = False,
     ) -> tuple[ExitAction, float]:
         if hard_invalidation and exit_score >= EXIT_SCORE_MANAGE:
             return ExitAction.EXIT, 1.0
@@ -383,7 +401,10 @@ class ExitIntelligenceEngine:
             and streak >= self._exit_confirm_ticks
         ):
             return ExitAction.EXIT, 1.0
-        if exit_score >= EXIT_SCORE_MANAGE or (ere <= 0.0 and exit_score >= 0.30):
+        if manage_confirmed and (
+            exit_score >= EXIT_SCORE_MANAGE
+            or (ere <= 0.0 and exit_score >= 0.30)
+        ):
             frac = _clamp01((exit_score - 0.25) / 0.5)
             return ExitAction.MANAGE, round(max(0.25, min(0.75, frac)), 2)
         return ExitAction.HOLD, 0.0
