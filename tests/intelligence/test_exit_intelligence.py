@@ -152,7 +152,6 @@ def test_manage_on_moderate_warning():
         assert 0.0 < decision.suggested_reduce_fraction <= 1.0
 
 
-
 def test_exit_confirmation_history_is_isolated_per_trade():
     eng = ExitIntelligenceEngine()
     state = _state(
@@ -176,7 +175,6 @@ def test_exit_confirmation_history_is_isolated_per_trade():
     eng.reset_trade("trade-a")
     assert "trade-a" not in eng._exit_pressure_streak
     assert eng._exit_pressure_streak["trade-b"] == 1
-
 
 
 def test_manage_requires_independent_structure_and_orderflow_confirmation():
