@@ -966,10 +966,26 @@ class TradeLifecycle(AITOSModule):
         existing_sector_notional = sum(
             p.notional_usd for p in portfolio.positions if p.sector == candidate_sector
         )
+        # Size against the actual catastrophic boundary when EIE is enabled,
+        # not the closer soft thesis stop. This preserves the configured account
+        # risk even though a valid thesis may be held beyond the soft stop.
+        sizing_stop_price = opportunity.stop_loss_price
+        if self._position_manager is not None:
+            initial_distance = abs(
+                opportunity.entry_price - opportunity.stop_loss_price
+            )
+            emergency_multiple = float(
+                self._tuning.positions.emergency_stop_r_multiple
+            )
+            sizing_stop_price = (
+                opportunity.entry_price - initial_distance * emergency_multiple
+                if opportunity.side == TradeSide.LONG
+                else opportunity.entry_price + initial_distance * emergency_multiple
+            )
         sizing = calculate_position_size(
             equity_usd=portfolio.equity_usd,
             entry_price=opportunity.entry_price,
-            stop_loss_price=opportunity.stop_loss_price,
+            stop_loss_price=sizing_stop_price,
             risk_limits=self._risk_engine.limits,
             risk_score=risk_score,
             volatility_percentile=portfolio.volatility_percentile,
