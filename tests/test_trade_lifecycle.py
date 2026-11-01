@@ -188,6 +188,41 @@ async def test_exit_intelligence_can_hold_through_soft_stop_but_not_emergency_li
 
 
 @pytest.mark.asyncio
+async def test_static_final_tp_does_not_override_eie_manage(
+    event_bus, risk_engine
+):
+    from aitos.intelligence.exit_intelligence import ExitAction
+    from aitos.trading.position_manager import PositionAction
+
+    class ManagingManager:
+        def evaluate(self, **kwargs):
+            return PositionAction(
+                action=ExitAction.MANAGE,
+                reason="thesis remains valid; reduce exposure",
+                reduce_fraction=0.25,
+            )
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=ManagingManager(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+
+    managed = await lifecycle.update_price(trade.trade_id, 105.0)
+    assert managed.state == TradeLifecycleState.POSITION_OPENED
+    assert len(managed.partial_exits) == 1
+    assert managed.exit_reason is None
+    assert managed._last_eie_action == "MANAGE"
+
+
+@pytest.mark.asyncio
 async def test_short_position_can_hold_through_soft_stop_until_emergency_limit(
     event_bus, risk_engine
 ):
