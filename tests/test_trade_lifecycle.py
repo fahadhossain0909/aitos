@@ -183,6 +183,71 @@ async def test_exit_intelligence_can_hold_through_soft_stop_but_not_emergency_li
 
 
 @pytest.mark.asyncio
+async def test_short_position_can_hold_through_soft_stop_until_emergency_limit(
+    event_bus, risk_engine
+):
+    from aitos.intelligence.exit_intelligence import ExitAction
+    from aitos.trading.position_manager import PositionAction
+
+    class HoldingManager:
+        def evaluate(self, **kwargs):
+            return PositionAction(action=ExitAction.HOLD, reason="short thesis intact")
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=HoldingManager(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            side=TradeSide.SHORT,
+            entry_price=100.0,
+            stop_loss_price=102.0,
+            take_profit_levels=[96.0],
+            breakeven_at_r_multiple=None,
+        ),
+        make_portfolio(),
+    )
+
+    held = await lifecycle.update_price(trade.trade_id, 102.5)
+    assert held.state == TradeLifecycleState.POSITION_OPENED
+    assert held.emergency_sl_price == pytest.approx(104.0)
+
+    closed = await lifecycle.update_price(trade.trade_id, 104.0)
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    assert closed.exit_reason == "emergency_risk_limit"
+
+
+@pytest.mark.asyncio
+async def test_soft_stop_fails_closed_when_exit_intelligence_is_unavailable(
+    event_bus, risk_engine
+):
+    class FailingManager:
+        def evaluate(self, **kwargs):
+            raise RuntimeError("EIE unavailable")
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=FailingManager(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+    closed = await lifecycle.update_price(trade.trade_id, 97.5)
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    assert closed.exit_reason == "sl_triggered_eie_unavailable"
+
+
+@pytest.mark.asyncio
 async def test_exit_intelligence_exit_closes_at_soft_stop_boundary(
     event_bus, risk_engine
 ):
