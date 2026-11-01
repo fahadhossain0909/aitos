@@ -253,6 +253,21 @@ def _env_overrides() -> dict[str, Any]:
             "emergency_stop_r_multiple",
             float,
         ),
+        "AITOS_TUNING_POSITIONS_MAX_PARTIAL_EXIT_COUNT": (
+            "positions",
+            "max_partial_exit_count",
+            int,
+        ),
+        "AITOS_TUNING_POSITIONS_PARTIAL_EXIT_COOLDOWN_SECONDS": (
+            "positions",
+            "partial_exit_cooldown_seconds",
+            float,
+        ),
+        "AITOS_TUNING_POSITIONS_MIN_REMAINING_POSITION_USD": (
+            "positions",
+            "min_remaining_position_usd",
+            float,
+        ),
         "AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT": (
             "risk",
             "max_risk_per_trade_pct",
