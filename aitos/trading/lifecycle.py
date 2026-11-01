@@ -131,8 +131,6 @@ class TradeLifecycle(AITOSModule):
         self._position_manager = position_manager
         self._market_context_provider = market_context_provider
         self._tuning = load_tuning_settings()
-        self._intensive_window_started_at = time.monotonic()
-        self._intensive_analyses_used = 0
         # Fair, per-position cadence: one busy symbol must not consume another
         # position's exit-analysis allowance.
         self._last_intensive_analysis_at: dict[str, float] = {}
@@ -146,8 +144,6 @@ class TradeLifecycle(AITOSModule):
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
         """Apply an explicitly reloaded tuning snapshot to position monitoring."""
         self._tuning = settings
-        self._intensive_window_started_at = time.monotonic()
-        self._intensive_analyses_used = 0
         self._last_intensive_analysis_at.clear()
         self._soft_stop_breached.clear()
         self._tp_boundary_breached.clear()
