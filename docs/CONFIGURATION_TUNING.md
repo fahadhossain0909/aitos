@@ -32,8 +32,9 @@ The paper entrypoint requires `AITOS_MODE=paper`; the live entrypoint requires `
 | `AITOS_TUNING_EVENT_BUS_CONSUMER_BATCH_SIZE` | Redis Stream read batch size |
 | `AITOS_TUNING_POSITIONS_MAX_OPEN_POSITIONS` | Profile hard cap for open positions |
 | `AITOS_TUNING_POSITIONS_MAX_POSITIONS_PER_SYMBOL` | Per-symbol position cap |
-| `AITOS_TUNING_POSITIONS_MONITORING_INTERVAL_SECONDS` | Window used by intensive-analysis budget |
-| `AITOS_TUNING_POSITIONS_INTENSIVE_ANALYSIS_BUDGET` | Deep exit-intelligence evaluations allowed per window |
+| `AITOS_TUNING_POSITIONS_MONITORING_INTERVAL_SECONDS` | Minimum regular full-EIE cadence per open position |
+| `AITOS_TUNING_POSITIONS_EMERGENCY_STOP_R_MULTIPLE` | Catastrophic stop distance in initial soft-stop R multiples (default `2.0`; valid range `>1` to `10`) |
+| `AITOS_TUNING_POSITIONS_INTENSIVE_ANALYSIS_BUDGET` | Legacy compatibility field; no longer a shared global EIE gate |
 | `AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED` | Opt in to safe reload attempts between scan cycles |
 
 Allowlist mode requires a non-empty allowlist. Boolean overrides accept
@@ -67,9 +68,14 @@ AITOS_TUNING_SCANNER_UNIVERSE_MODE=allowlist AITOS_TUNING_SCANNER_SYMBOL_ALLOWLI
   order-flow/liquidity/funding/open-interest analysis only for the top
   `expensive_analysis_limit` symbols. The full scanner remains authoritative
   for direction and trade eligibility.
-- Intensive exit-intelligence work is budgeted per monitoring window. Valid
-  price observations, hard stop-loss checks, and existing take-profit paths are
-  not throttled by this budget.
+- Full Exit Intelligence runs on an independent cadence for each open position;
+  one active symbol cannot consume another position's evaluation allowance.
+- A soft-stop breach or TP boundary forces an immediate EIE evaluation. With
+  EIE enabled, the emergency stop is separate from the initial soft stop and
+  position sizing uses the emergency distance so the configured risk amount is
+  preserved. Without EIE, the original SL behavior remains unchanged.
+- If EIE fails while a soft stop is breached, the lifecycle fails closed at
+  that boundary. The emergency stop is never overridden by HOLD.
 - Startup logs contain a stable `config_version` hash and the effective
   non-secret tuning values for auditability.
 - `reload_tuning_settings()` refreshes the profile file and validates a new

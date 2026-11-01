@@ -255,6 +255,12 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
         state=TradeLifecycleState(str(data.get("state", "position_opened"))),
         entry_time=str(data["entry_time"]),
         trailing_sl_enabled=bool(data.get("trailing_sl_enabled", False)),
+        breakeven_triggered=bool(data.get("breakeven_triggered", False)),
+        breakeven_at_r_multiple=(
+            float(data["breakeven_at_r_multiple"])
+            if data.get("breakeven_at_r_multiple") is not None
+            else None
+        ),
         take_profit_levels=[float(x) for x in data.get("take_profit_levels", [])],
         partial_exits=partial_exits,
         sl_order_id=data.get("sl_order_id"),
@@ -266,6 +272,25 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
         pnl=data.get("pnl"),
         pnl_percent=data.get("pnl_percent"),
         rejection_reason=data.get("rejection_reason"),
+        entry_thesis=(
+            dict(data["entry_thesis"])
+            if isinstance(data.get("entry_thesis"), dict)
+            else None
+        ),
+        emergency_sl_price=(
+            float(data["emergency_sl_price"])
+            if data.get("emergency_sl_price") is not None
+            else None
+        ),
+        initial_r_distance=(
+            float(data["initial_r_distance"])
+            if data.get("initial_r_distance") is not None
+            else None
+        ),
+        mae_price=(float(data["mae_price"]) if data.get("mae_price") is not None else None),
+        mfe_price=(float(data["mfe_price"]) if data.get("mfe_price") is not None else None),
+        mae_r=(float(data["mae_r"]) if data.get("mae_r") is not None else None),
+        mfe_r=(float(data["mfe_r"]) if data.get("mfe_r") is not None else None),
         updated_at=str(data.get("updated_at") or data["entry_time"]),
     )
 

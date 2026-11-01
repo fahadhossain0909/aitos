@@ -1,7 +1,7 @@
 # Market Path + Exit Intelligence + Trade Journey Architecture
 
 > **Status:** Phases A–G complete; Trade Journey management integrated into PR #116.  
-> **Principle:** Existing production code is never removed unless strictly necessary. Static TP/SL remain emergency hard stops.
+> **Principle:** Existing production code is preserved where possible. With EIE enabled, the scanner SL is a soft thesis/risk boundary; a separately sized emergency stop remains the non-overridable account-protection boundary. Without EIE, legacy SL behavior is unchanged.
 
 ## Modules
 
@@ -38,13 +38,14 @@ The Journey layer does **not** replace EIE. EIE remains the authoritative exit/t
 
 ## Live decision order
 
-1. **Hard SL** — always first and exchange-side where supported.
-2. **Market/Trade Journey + PositionManager** — evaluate thesis, path, health, risk and management state.
-3. **Exit Intelligence Engine** — retain the existing thesis/path exit logic and hysteresis.
-4. **Protection** — structural stop tightening, trailing SL and optional dynamic spike-capture TP.
-5. **Hedge** — only as a cost-aware uncertainty response; a hedge is not a substitute for thesis invalidation.
+1. **Emergency risk boundary** — independent, non-overridable catastrophic stop. When EIE is enabled, its default distance is 2× the initial soft-stop R distance and the position is sized against this wider boundary, so the configured account-risk amount is not silently doubled. The value is configurable through `positions.emergency_stop_r_multiple` / `AITOS_TUNING_POSITIONS_EMERGENCY_STOP_R_MULTIPLE`.
+2. **Urgent EIE evaluation on soft-stop/TP contact** — a touch or breach of the scanner's initial `sl_price` forces an immediate thesis/path evaluation. HOLD or MANAGE may retain the position beyond this soft boundary; EXIT closes it. If EIE fails while the soft stop is breached, lifecycle fails closed and exits.
+3. **Regular per-position EIE evaluation** — each open position has its own monitoring cadence. A busy symbol/position cannot consume a shared global allowance and starve other positions.
+4. **Market/Trade Journey + PositionManager** — evaluate the original entry thesis, path, health, risk and management state on every scheduled full evaluation. The tiered monitor remains useful for priority/telemetry but never suppresses the authoritative evaluation.
+5. **Protection** — approved structural stop tightening, break-even and trailing protection can tighten the emergency exchange stop; HOLD does not move it to the soft-stop boundary.
+6. **Hedge intent** — cost-aware hedge analysis remains an advisory decision until a venue/account-mode-aware hedge execution contract is implemented. A generic opposite-side market order is deliberately not treated as safe hedge execution.
 
-Static TP/SL remain emergency protection. The main exit remains decision-based.
+Without EIE, the original static SL and exchange-side TP behavior remain authoritative. With EIE, the soft stop is a decision checkpoint and the emergency stop is the final safety boundary. Resting exchange TP orders are not placed for EIE-managed positions because they could bypass HOLD; TP destinations are monitored locally, and a final TP may be deferred after an explicit EIE HOLD or MANAGE.
 
 ## Dynamic spike-capture TP
 
@@ -86,9 +87,13 @@ UNCERTAIN
 
 The existing hedge engine continues to enforce benefit/cost and ratio limits.
 
+## Entry thesis and recovery
+
+The entry thesis is captured immediately after the position opens using the best market context available at that moment. It records entry-time components, confirmations, invalidation conditions, expected path and structural invalidation level. The serialized thesis is stored on the trade payload and restored from ClickHouse, so a process restart does not rebuild the thesis from a later market state. Legacy trades without a serialized thesis use a clearly degraded first-evaluation fallback.
+
 ## Telemetry and replay
 
-Every journey evaluation is serialisable through `PositionAction.to_dict()` and includes state, health, path adherence, time efficiency, reasons, hedge decision and protection outputs. Existing MAE/MFE telemetry is updated on each evaluation.
+Every journey evaluation is serialisable through `PositionAction.to_dict()` and includes state, health, path adherence, time efficiency, reasons, hedge decision and protection outputs. Existing MAE/MFE telemetry is updated on each evaluation. Soft-stop contact, EIE action, emergency boundary and fail-closed behavior should be measured separately.
 
 The next replay/learning layer should consume these journey snapshots to measure:
 
@@ -105,5 +110,6 @@ The next replay/learning layer should consume these journey snapshots to measure
 1. Statistical probability calibration and empirical expected-value estimation.
 2. Full path graph/destination state machine with historical calibration.
 3. Full L2/footprint-synchronised replay.
-4. Production fail-closed behavior if required PositionManager/market context is missing.
-5. ML/RL learning loop over the recorded journey telemetry.
+4. Implement and validate venue/account-mode-aware hedge order lifecycle (open, resize, unwind, restart reconciliation, idempotency and governance); until then hedge output is advisory only.
+5. Calibrate the emergency-stop multiple and exit cadence against paper/replay results before enabling any live deployment.
+6. ML/RL learning loop over the recorded journey telemetry.

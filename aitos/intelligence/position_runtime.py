@@ -321,55 +321,11 @@ def _install_position_monitor() -> None:
             if health is not None
             else {}
         )
-        symbol = str(getattr(trade, "symbol", "")).upper()
-        if decision.tier == PositionMonitorTier.NORMAL:
-            _DEEP_PRIORITY_SYMBOLS.pop(symbol, None)
-            try:
-                trade.record_excursion(current_price)
-            except Exception:
-                pass
-            action = _cheap_position_action(
-                decision.tier, decision.score, decision.reasons
-            )
-            emit_position_event(
-                "position.evaluation.completed",
-                trade,
-                current_price=current_price,
-                monitor_tier=decision.tier.value,
-                score=decision.score,
-                priority_score=decision.priority_score,
-                reasons=decision.reasons,
-                action=action.action.value,
-                decision_reason=action.reason,
-                market_context_available=bool(extra_features),
-                health=health_snapshot,
-            )
-            return action
-        _DEEP_PRIORITY_SYMBOLS[symbol] = (decision.tier, decision.priority_score)
-        if decision.tier == PositionMonitorTier.WARNING:
-            market_state = _warning_market_state(
-                self,
-                trade=trade,
-                current_price=current_price,
-                kwargs={**kwargs, "extra_features": extra_features},
-            )
-            action = _cheap_position_action(
-                decision.tier, decision.score, decision.reasons, market_state
-            )
-            emit_position_event(
-                "position.evaluation.completed",
-                trade,
-                current_price=current_price,
-                monitor_tier=decision.tier.value,
-                score=decision.score,
-                priority_score=decision.priority_score,
-                reasons=decision.reasons,
-                action=action.action.value,
-                decision_reason=action.reason,
-                market_context_available=market_state is not None,
-                health=health_snapshot,
-            )
-            return action
+
+        # Tiering is an observability/priority signal, never a gate that
+        # suppresses the thesis/path Exit Intelligence evaluation. Every
+        # scheduled position evaluation reaches the authoritative manager.
+        started = datetime.now(timezone.utc)
         action = original_evaluate(
             self,
             trade=trade,
@@ -379,7 +335,11 @@ def _install_position_monitor() -> None:
         )
         result = PositionAction(
             action=action.action,
-            reason=f"POSITION_MONITOR:{decision.tier.value} priority={decision.priority_score:.2f} score={decision.score:.2f}; {action.reason}",
+            reason=(
+                f"POSITION_MONITOR:{decision.tier.value} "
+                f"priority={decision.priority_score:.2f} "
+                f"score={decision.score:.2f}; {action.reason}"
+            ),
             reduce_fraction=action.reduce_fraction,
             new_stop_price=action.new_stop_price,
             spike_tp_price=action.spike_tp_price,
@@ -408,6 +368,10 @@ def _install_position_monitor() -> None:
             reasons=decision.reasons,
             action=result.action.value,
             decision_reason=result.reason,
+            evaluation_duration_ms=(
+                datetime.now(timezone.utc) - started
+            ).total_seconds()
+            * 1000.0,
             market_context_available=result.market_state is not None,
             health=health_snapshot,
             exit_decision=str(getattr(result.exit_decision, "action", "") or ""),

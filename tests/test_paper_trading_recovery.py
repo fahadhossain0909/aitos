@@ -60,6 +60,49 @@ async def test_paper_trade_survives_process_restart(event_bus, paper_trade):
     assert restored.state == TradeLifecycleState.POSITION_OPENED
 
 
+def test_trade_payload_round_trip_preserves_entry_thesis_and_emergency_stop(
+    paper_trade,
+):
+    from aitos.trading.persistent_state import _trade_from_dict
+
+    paper_trade.entry_thesis = {
+        "trade_id": paper_trade.trade_id,
+        "symbol": paper_trade.symbol,
+        "side": "LONG",
+        "entry_price": 100.0,
+        "components": [{"code": "bullish_structure", "description": "entry", "weight": 1.2}],
+        "invalidations": [{"code": "structure_break", "description": "break", "level": 94.0}],
+        "confirmations": [{"code": "structure_supportive", "description": "holds"}],
+        "expected_path_prices": [105.0, 110.0],
+        "invalidation_price": 94.0,
+        "created_at": "2026-08-24T00:00:00+00:00",
+        "notes": ["entry snapshot"],
+        "features": {"trend_strength": 0.8},
+    }
+    paper_trade.emergency_sl_price = 90.0
+    paper_trade.breakeven_triggered = True
+    paper_trade.breakeven_at_r_multiple = 1.0
+    paper_trade.initial_r_distance = 4.0
+    paper_trade.mae_r = 0.5
+    paper_trade.mfe_r = 1.25
+
+    restored = _trade_from_dict(paper_trade.to_dict())
+    assert restored.entry_thesis == paper_trade.entry_thesis
+    assert restored.emergency_sl_price == 90.0
+    assert restored.breakeven_triggered is True
+    assert restored.breakeven_at_r_multiple == 1.0
+    assert restored.initial_r_distance == 4.0
+    assert restored.mae_r == 0.5
+    assert restored.mfe_r == 1.25
+
+    from aitos.trading.position_manager import PositionManager
+
+    recovered_thesis = PositionManager._restore_entry_thesis(restored)
+    assert recovered_thesis is not None
+    assert recovered_thesis.trade_id == paper_trade.trade_id
+    assert recovered_thesis.expected_path_prices == (105.0, 110.0)
+
+
 @pytest.mark.asyncio
 async def test_restart_does_not_create_duplicate_open_trade(event_bus, paper_trade):
     lifecycle = FakeLifecycle()

@@ -56,6 +56,35 @@ def test_position_runtime_is_installed_before_lifecycle_and_manager_instances():
     assert getattr(PositionManager, "_aitos_tiered_monitor_installed", False)
 
 
+def test_normal_monitor_tier_still_runs_full_exit_intelligence():
+    from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
+
+    manager = PositionManager()
+    manager._aitos_tiered_monitoring_enabled = True
+    trade = Trade(
+        trade_id="normal-tier-full-eie",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=1.0,
+        position_size_usd=100.0,
+        risk_amount_usd=5.0,
+        strategy_id="test",
+        agent_consensus={},
+        explanation="entry thesis",
+        sl_price=95.0,
+        tp_price=120.0,
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-08-24T00:00:00+00:00",
+    )
+
+    action = manager.evaluate(trade=trade, current_price=101.0)
+    assert action.exit_decision is not None
+    assert action.market_state is not None
+    assert "monitor_tier=normal" in action.notes
+
+
 def test_monitor_does_not_make_stop_breach_an_exit_decision():
     action = _cheap_position_action(
         PositionMonitorTier.EXIT_CANDIDATE,

@@ -19,9 +19,12 @@ sizing, order submission, and exit monitoring — wiring the Risk Engine and
 AI Kernel into an actual trade, end to end.
 
 Phase E (Market-Path architecture): an optional PositionManager may be
-injected. Hard SL remains authoritative. When the manager is present, static
-TP full-exit can be deferred on HOLD; MANAGE may partial-reduce or tighten
-stop. No existing emergency or exchange-side path is removed.
+injected. With EIE enabled, the initial strategy SL is a soft decision
+boundary; a separately sized emergency stop remains authoritative. A soft
+stop breach forces EIE evaluation, and HOLD may retain the position until
+thesis invalidation or the emergency boundary. Without EIE, legacy SL behavior
+is unchanged. Static TP full-exit can be deferred on HOLD; MANAGE may
+partial-reduce or tighten protection.
 """
 
 # NOTE: this file previously shipped as a zlib+base64-packed blob that was
@@ -128,8 +131,11 @@ class TradeLifecycle(AITOSModule):
         self._position_manager = position_manager
         self._market_context_provider = market_context_provider
         self._tuning = load_tuning_settings()
-        self._intensive_window_started_at = time.monotonic()
-        self._intensive_analyses_used = 0
+        # Fair, per-position cadence: one busy symbol must not consume another
+        # position's exit-analysis allowance.
+        self._last_intensive_analysis_at: dict[str, float] = {}
+        self._soft_stop_breached: set[str] = set()
+        self._tp_boundary_breached: set[str] = set()
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
         self._closed_trades: list[Trade] = []
@@ -138,21 +144,25 @@ class TradeLifecycle(AITOSModule):
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
         """Apply an explicitly reloaded tuning snapshot to position monitoring."""
         self._tuning = settings
-        self._intensive_window_started_at = time.monotonic()
-        self._intensive_analyses_used = 0
+        self._last_intensive_analysis_at.clear()
+        self._soft_stop_breached.clear()
+        self._tp_boundary_breached.clear()
 
-    def _allow_intensive_analysis(self) -> bool:
-        """Budget deep exit analysis without ever throttling hard-stop checks."""
+    def _allow_intensive_analysis(
+        self, trade_id: str, *, force: bool = False
+    ) -> bool:
+        """Throttle per position, never globally across unrelated open trades.
+
+        A soft-stop or TP boundary forces an immediate evaluation. Ordinary
+        observations are evaluated at the configured per-position cadence.
+        """
         now = time.monotonic()
         interval = self._tuning.positions.monitoring_interval_seconds
-        if now - self._intensive_window_started_at >= interval:
-            self._intensive_window_started_at = now
-            self._intensive_analyses_used = 0
-        budget = self._tuning.positions.intensive_analysis_budget
-        if budget <= 0 or self._intensive_analyses_used >= budget:
-            return False
-        self._intensive_analyses_used += 1
-        return True
+        last = self._last_intensive_analysis_at.get(trade_id)
+        if force or last is None or now - last >= interval:
+            self._last_intensive_analysis_at[trade_id] = now
+            return True
+        return False
 
     @property
     def module_id(self) -> str:
@@ -358,6 +368,23 @@ class TradeLifecycle(AITOSModule):
                 )
         return await self._validate_and_open(opportunity, portfolio)
 
+    def _emergency_stop_price(self, trade: Trade) -> float:
+        """Return the independent catastrophic stop used while EIE is active."""
+        configured = getattr(trade, "emergency_sl_price", None)
+        if configured is not None and _valid_market_price(configured):
+            return float(configured)
+        multiple = float(
+            getattr(self._tuning.positions, "emergency_stop_r_multiple", 2.0)
+        )
+        distance = trade.r_distance * multiple
+        if distance <= 0:
+            return trade.sl_price
+        return (
+            trade.entry_price - distance
+            if trade.side == TradeSide.LONG
+            else trade.entry_price + distance
+        )
+
     async def update_price(
         self,
         trade_id: str,
@@ -390,25 +417,80 @@ class TradeLifecycle(AITOSModule):
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
         trade.record_excursion(float(current_price))
         trade.last_marked_price = current_price
+        partial_exit_count_before = len(trade.partial_exits)
         is_long = trade.side == TradeSide.LONG
 
-        # ---- 1. Hard / structural SL (authoritative — never skipped) ---------
+        # The scanner's initial SL is a soft risk boundary while EIE is active.
+        # It triggers an urgent thesis evaluation; it is not allowed to bypass
+        # HOLD/MANAGE. A separate, wider emergency-loss boundary remains
+        # authoritative. Without EIE, preserve the legacy protective SL.
         sl_hit = (
             current_price <= trade.sl_price
             if is_long
             else current_price >= trade.sl_price
         )
-        if sl_hit:
+        emergency_r = float(
+            getattr(self._tuning.positions, "emergency_stop_r_multiple", 2.0)
+        )
+        emergency_price = self._emergency_stop_price(trade)
+        emergency_stop_hit = self._position_manager is not None and (
+            current_price <= emergency_price
+            if is_long
+            else current_price >= emergency_price
+        )
+        adverse_r = max(0.0, -trade.unrealized_r_multiple(current_price))
+        if emergency_stop_hit:
+            logger.warning(
+                "position emergency loss boundary reached",
+                extra={"aitos_extra": {
+                    "trade_id": trade.trade_id,
+                    "symbol": trade.symbol,
+                    "adverse_r": adverse_r,
+                    "emergency_stop_r_multiple": emergency_r,
+                }},
+            )
+            return await self._trigger_exit(
+                trade, current_price, "emergency_risk_limit", TOPIC_SL_TRIGGERED
+            )
+        if sl_hit and self._position_manager is None:
             return await self._trigger_exit(
                 trade, current_price, "sl_triggered", TOPIC_SL_TRIGGERED
             )
 
-        # ---- 2. Optional Exit Intelligence (Phase E) -------------------------
+        # A breached soft stop and a reached TP are urgent decision points.
+        # Otherwise each position receives its own regular EIE evaluation slot.
+        tp_boundary_hit = False
+        if trade.take_profit_levels:
+            next_tp = trade.take_profit_levels[0]
+            tp_boundary_hit = (
+                current_price >= next_tp if is_long else current_price <= next_tp
+            )
+
+        # Force one immediate evaluation on each boundary crossing, then return
+        # to the per-position cadence while price remains beyond that boundary.
+        soft_stop_newly_breached = (
+            sl_hit and trade.trade_id not in self._soft_stop_breached
+        )
+        if sl_hit:
+            self._soft_stop_breached.add(trade.trade_id)
+        else:
+            self._soft_stop_breached.discard(trade.trade_id)
+        tp_newly_breached = (
+            tp_boundary_hit and trade.trade_id not in self._tp_boundary_breached
+        )
+        if tp_boundary_hit:
+            self._tp_boundary_breached.add(trade.trade_id)
+        else:
+            self._tp_boundary_breached.discard(trade.trade_id)
+
         eie_action = None
         eie_evaluated_this_update = False
-        if self._position_manager is not None:
-            if self._allow_intensive_analysis():
-                eie_evaluated_this_update = True
+        if self._position_manager is not None and self._allow_intensive_analysis(
+            trade.trade_id,
+            force=soft_stop_newly_breached or tp_newly_breached,
+        ):
+            eie_evaluated_this_update = True
+            try:
                 eie_action = await self._apply_exit_intelligence(
                     trade,
                     current_price,
@@ -424,40 +506,65 @@ class TradeLifecycle(AITOSModule):
                     trend_strength=trend_strength,
                     extra_features=extra_features,
                 )
-                if eie_action is not None:
-                    # Full EXIT already performed inside _apply_exit_intelligence
-                    return eie_action
-            else:
-                logger.debug(
-                    "intensive exit analysis budget exhausted; hard exits remain active",
-                    extra={
-                        "aitos_extra": {
-                            "trade_id": trade.trade_id,
-                            "symbol": trade.symbol,
-                            "budget": self._tuning.positions.intensive_analysis_budget,
-                            "interval_seconds": self._tuning.positions.monitoring_interval_seconds,
-                        }
-                    },
+            except Exception:
+                logger.exception(
+                    "exit intelligence evaluation failed",
+                    extra={"aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "soft_stop_breached": sl_hit,
+                    }},
                 )
+                # If the soft stop is already breached and the decision system
+                # is unavailable, fail closed at the protective boundary.
+                if sl_hit:
+                    return await self._trigger_exit(
+                        trade, current_price, "sl_triggered_eie_unavailable",
+                        TOPIC_SL_TRIGGERED
+                    )
+                raise
+            if eie_action is not None:
+                return eie_action
 
-        # ---- 3. Static TP path (preserved; HOLD may defer full exit) ---------
+        if sl_hit:
+            # EIE has explicitly chosen HOLD or MANAGE. Continue monitoring,
+            # but never loosen the existing protective stop here.
+            logger.info(
+                "soft stop breached; position retained by exit intelligence",
+                extra={"aitos_extra": {
+                    "trade_id": trade.trade_id,
+                    "symbol": trade.symbol,
+                    "price": current_price,
+                    "stop_price": trade.sl_price,
+                    "last_eie_action": getattr(trade, "_last_eie_action", None),
+                    "adverse_r": adverse_r,
+                }},
+            )
+
+        # ---- Static TP path: HOLD can defer full exit; partial targets remain
+        # available as controlled scale-out destinations. ---------------------
         if trade.take_profit_levels:
             next_tp = trade.take_profit_levels[0]
             tp_hit = current_price >= next_tp if is_long else current_price <= next_tp
             if tp_hit:
-                # When Exit Intelligence is active and last decision was HOLD,
-                # treat TP as a soft destination: partial reduce only if multiple
-                # levels remain; otherwise defer full exit (winner may continue).
                 defer_full_tp = (
                     self._position_manager is not None
-                    and eie_evaluated_this_update
-                    and getattr(trade, "_last_eie_action", None) == "HOLD"
+                    and getattr(trade, "_last_eie_action", None) in {"HOLD", "MANAGE"}
                 )
                 if len(trade.take_profit_levels) > 1:
-                    await self._partial_close(
-                        trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
+                    # Avoid double-reducing when EIE already returned MANAGE
+                    # with a partial reduction on this same price observation.
+                    eie_already_reduced = (
+                        eie_evaluated_this_update
+                        and len(trade.partial_exits) > partial_exit_count_before
                     )
+                    if not eie_already_reduced:
+                        await self._partial_close(
+                            trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
+                        )
                     trade.take_profit_levels.pop(0)
+                    # The next TP level is a new decision boundary.
+                    self._tp_boundary_breached.discard(trade.trade_id)
                     if self._use_exchange_side_stops and trade.tp_order_ids:
                         consumed_order_id = trade.tp_order_ids.pop(0)
                         await self._order_executor.cancel_resting_order(
@@ -466,14 +573,12 @@ class TradeLifecycle(AITOSModule):
                     return trade
                 if defer_full_tp:
                     logger.info(
-                        "TP level reached but EIE=HOLD — deferring full exit",
-                        extra={
-                            "aitos_extra": {
-                                "trade_id": trade.trade_id,
-                                "tp": next_tp,
-                                "price": current_price,
-                            }
-                        },
+                        "TP level reached but EIE continues to manage — deferring full exit",
+                        extra={"aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "tp": next_tp,
+                            "price": current_price,
+                        }},
                     )
                     return trade
                 return await self._trigger_exit(
@@ -488,6 +593,16 @@ class TradeLifecycle(AITOSModule):
             >= trade.breakeven_at_r_multiple
         ):
             trade.sl_price = trade.entry_price
+            if self._position_manager is not None:
+                current_emergency = self._emergency_stop_price(trade)
+                if (
+                    trade.side == TradeSide.LONG
+                    and trade.entry_price > current_emergency
+                ) or (
+                    trade.side == TradeSide.SHORT
+                    and trade.entry_price < current_emergency
+                ):
+                    trade.emergency_sl_price = trade.entry_price
             trade.breakeven_triggered = True
             trade.updated_at = utc_now_iso()
             if self._use_exchange_side_stops:
@@ -512,6 +627,16 @@ class TradeLifecycle(AITOSModule):
             )
             if improved:
                 trade.sl_price = candidate_sl
+                if self._position_manager is not None:
+                    current_emergency = self._emergency_stop_price(trade)
+                    if (
+                        trade.side == TradeSide.LONG
+                        and candidate_sl > current_emergency
+                    ) or (
+                        trade.side == TradeSide.SHORT
+                        and candidate_sl < current_emergency
+                    ):
+                        trade.emergency_sl_price = candidate_sl
                 trade.updated_at = utc_now_iso()
                 if self._use_exchange_side_stops:
                     await self._replace_exchange_side_stop_loss(trade)
@@ -570,6 +695,16 @@ class TradeLifecycle(AITOSModule):
             if pos_action.new_stop_price is not None:
                 # Only tighten (never loosen) — already enforced in PositionManager
                 trade.sl_price = pos_action.new_stop_price
+                if self._position_manager is not None:
+                    current_emergency = self._emergency_stop_price(trade)
+                    if (
+                        trade.side == TradeSide.LONG
+                        and pos_action.new_stop_price > current_emergency
+                    ) or (
+                        trade.side == TradeSide.SHORT
+                        and pos_action.new_stop_price < current_emergency
+                    ):
+                        trade.emergency_sl_price = pos_action.new_stop_price
                 trade.updated_at = utc_now_iso()
                 if self._use_exchange_side_stops:
                     await self._replace_exchange_side_stop_loss(trade)
@@ -669,6 +804,9 @@ class TradeLifecycle(AITOSModule):
         self._closed_trades.append(trade)
         if self._position_manager is not None:
             self._position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
+        self._last_intensive_analysis_at.pop(trade.trade_id, None)
+        self._soft_stop_breached.discard(trade.trade_id)
+        self._tp_boundary_breached.discard(trade.trade_id)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_POSITION_CLOSED,
@@ -702,8 +840,13 @@ class TradeLifecycle(AITOSModule):
                 )
                 filled_ids.add(trade.sl_order_id)
                 trade._aitos_filled_resting_order_ids = filled_ids
+                exchange_exit_price = (
+                    self._emergency_stop_price(trade)
+                    if self._position_manager is not None
+                    else trade.sl_price
+                )
                 return await self.close_trade(
-                    trade.trade_id, trade.sl_price, "sl_triggered_exchange"
+                    trade.trade_id, exchange_exit_price, "sl_triggered_exchange"
                 )
         if trade.tp_order_ids:
             status = await self._order_executor.get_resting_order_status(
@@ -735,8 +878,13 @@ class TradeLifecycle(AITOSModule):
         return trade
 
     async def _place_exchange_side_stops(self, trade: Trade) -> None:
+        exchange_stop_price = (
+            self._emergency_stop_price(trade)
+            if self._position_manager is not None
+            else trade.sl_price
+        )
         sl_result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, trade.sl_price
+            trade.symbol, trade.side, trade.quantity, exchange_stop_price
         )
         if sl_result.success:
             trade.sl_order_id = sl_result.order_id
@@ -751,7 +899,14 @@ class TradeLifecycle(AITOSModule):
                 },
             )
         remaining_qty = trade.quantity
-        levels = trade.take_profit_levels
+        # A resting exchange TP would bypass an EIE HOLD decision. EIE-managed
+        # positions therefore monitor TP destinations locally and let EIE
+        # arbitrate full exits; legacy positions retain their exchange TPs.
+        levels = (
+            []
+            if self._position_manager is not None
+            else trade.take_profit_levels
+        )
         for i, level_price in enumerate(levels):
             leg_qty = (
                 remaining_qty
@@ -787,8 +942,13 @@ class TradeLifecycle(AITOSModule):
             await self._order_executor.cancel_resting_order(
                 trade.symbol, trade.sl_order_id
             )
+        exchange_stop_price = (
+            self._emergency_stop_price(trade)
+            if self._position_manager is not None
+            else trade.sl_price
+        )
         result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, trade.sl_price
+            trade.symbol, trade.side, trade.quantity, exchange_stop_price
         )
         trade.sl_order_id = result.order_id if result.success else None
 
@@ -852,10 +1012,31 @@ class TradeLifecycle(AITOSModule):
         existing_sector_notional = sum(
             p.notional_usd for p in portfolio.positions if p.sector == candidate_sector
         )
+        # Size against the actual catastrophic boundary when EIE is enabled,
+        # not the closer soft thesis stop. This preserves the configured account
+        # risk even though a valid thesis may be held beyond the soft stop.
+        sizing_stop_price = opportunity.stop_loss_price
+        if self._position_manager is not None:
+            initial_distance = abs(
+                opportunity.entry_price - opportunity.stop_loss_price
+            )
+            emergency_multiple = float(
+                self._tuning.positions.emergency_stop_r_multiple
+            )
+            sizing_stop_price = (
+                opportunity.entry_price - initial_distance * emergency_multiple
+                if opportunity.side == TradeSide.LONG
+                else opportunity.entry_price + initial_distance * emergency_multiple
+            )
+            if not _valid_market_price(sizing_stop_price):
+                return await self._reject(
+                    opportunity,
+                    "invalid emergency stop price for EIE-managed position",
+                )
         sizing = calculate_position_size(
             equity_usd=portfolio.equity_usd,
             entry_price=opportunity.entry_price,
-            stop_loss_price=opportunity.stop_loss_price,
+            stop_loss_price=sizing_stop_price,
             risk_limits=self._risk_engine.limits,
             risk_score=risk_score,
             volatility_percentile=portfolio.volatility_percentile,
@@ -947,8 +1128,52 @@ class TradeLifecycle(AITOSModule):
             trailing_sl_enabled=opportunity.trailing_sl_enabled,
             breakeven_at_r_multiple=opportunity.breakeven_at_r_multiple,
             regime=opportunity.regime,
+            emergency_sl_price=(
+                (
+                    order_result.fill_price
+                    - abs(order_result.fill_price - opportunity.stop_loss_price)
+                    * float(self._tuning.positions.emergency_stop_r_multiple)
+                )
+                if opportunity.side == TradeSide.LONG
+                else (
+                    order_result.fill_price
+                    + abs(order_result.fill_price - opportunity.stop_loss_price)
+                    * float(self._tuning.positions.emergency_stop_r_multiple)
+                )
+            ) if self._position_manager is not None else None,
         )
         self._open_trades[trade.trade_id] = trade
+        if self._position_manager is not None:
+            register_entry_thesis = getattr(
+                self._position_manager, "register_entry_thesis", None
+            )
+            if callable(register_entry_thesis):
+                try:
+                    entry_context = (
+                        self._market_context_provider.get_context(trade.symbol).as_kwargs()
+                        if self._market_context_provider is not None
+                        else {}
+                    )
+                    register_entry_thesis(trade, **entry_context)
+                    logger.info(
+                        "entry thesis captured",
+                        extra={"aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                            "has_entry_market_context": bool(entry_context),
+                            "entry_thesis_captured": trade.entry_thesis is not None,
+                        }},
+                    )
+                except Exception:
+                    # Keep the position open but make the degraded entry snapshot
+                    # visible; PositionManager has a deterministic fallback path.
+                    logger.exception(
+                        "entry thesis capture failed",
+                        extra={"aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                        }},
+                    )
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_POSITION_OPENED,

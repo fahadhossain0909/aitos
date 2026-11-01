@@ -21,7 +21,12 @@ from aitos.intelligence.path_planner import MarketPathPlanner, PathPlan
 from aitos.intelligence.structural_risk import StructuralRiskEngine, StructuralStop
 from aitos.intelligence.trade_journey import TradeJourneyEngine, TradeJourneySnapshot
 from aitos.intelligence.trade_thesis import TradeThesis, TradeThesisEngine
-from aitos.intelligence.trade_thesis.models import ThesisEvaluation
+from aitos.intelligence.trade_thesis.models import (
+    ConfirmationSignal,
+    InvalidationCondition,
+    ThesisComponent,
+    ThesisEvaluation,
+)
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Trade, TradeSide
 
@@ -116,6 +121,149 @@ class PositionManager:
 
     def register_thesis(self, thesis: TradeThesis) -> None:
         self._theses[thesis.trade_id] = thesis
+
+    @staticmethod
+    def _restore_entry_thesis(trade: Trade) -> TradeThesis | None:
+        payload = getattr(trade, "entry_thesis", None)
+        if not isinstance(payload, Mapping):
+            return None
+        if (
+            str(payload.get("trade_id", "")) != trade.trade_id
+            or str(payload.get("symbol", "")).upper() != trade.symbol.upper()
+        ):
+            logger.warning(
+                "stored entry thesis identity does not match trade; ignoring snapshot",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
+            return None
+        try:
+            created_at = payload.get("created_at")
+            timestamp = (
+                datetime.fromisoformat(str(created_at))
+                if created_at
+                else None
+            )
+            thesis = TradeThesis(
+                trade_id=str(payload["trade_id"]),
+                symbol=str(payload["symbol"]),
+                side=str(payload["side"]),
+                entry_price=float(payload["entry_price"]),
+                components=tuple(
+                    ThesisComponent(
+                        code=str(item["code"]),
+                        description=str(item.get("description", "")),
+                        weight=float(item.get("weight", 1.0)),
+                    )
+                    for item in payload.get("components", ())
+                ),
+                invalidations=tuple(
+                    InvalidationCondition(
+                        code=str(item["code"]),
+                        description=str(item.get("description", "")),
+                        level=(
+                            float(item["level"])
+                            if item.get("level") is not None
+                            else None
+                        ),
+                    )
+                    for item in payload.get("invalidations", ())
+                ),
+                confirmations=tuple(
+                    ConfirmationSignal(
+                        code=str(item["code"]),
+                        description=str(item.get("description", "")),
+                    )
+                    for item in payload.get("confirmations", ())
+                ),
+                expected_path_prices=tuple(
+                    float(value) for value in payload.get("expected_path_prices", ())
+                ),
+                invalidation_price=(
+                    float(payload["invalidation_price"])
+                    if payload.get("invalidation_price") is not None
+                    else None
+                ),
+                created_at=timestamp,
+                notes=tuple(str(value) for value in payload.get("notes", ())),
+                features={
+                    str(key): float(value)
+                    for key, value in (payload.get("features") or {}).items()
+                },
+            )
+        except (KeyError, TypeError, ValueError):
+            logger.warning(
+                "stored entry thesis is malformed; rebuilding a conservative fallback",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
+            return None
+        return thesis
+
+    def register_entry_thesis(self, trade: Trade, **market_kwargs: Any) -> TradeThesis:
+        """Capture the entry-time market thesis and persist it on the trade."""
+        existing = self._theses.get(trade.trade_id) or self._restore_entry_thesis(trade)
+        if existing is not None:
+            self.register_thesis(existing)
+            trade.entry_thesis = existing.to_dict()
+            return existing
+
+        timestamp = datetime.now(timezone.utc)
+        atr = market_kwargs.get("atr")
+        volume_profile = market_kwargs.get("volume_profile")
+        market_state = self._mse.compute(
+            symbol=trade.symbol,
+            mid_price=trade.entry_price,
+            order_flow=market_kwargs.get("order_flow"),
+            trend_strength=market_kwargs.get("trend_strength"),
+            atr_pct=(atr / trade.entry_price * 100.0 if atr and trade.entry_price > 0 else None),
+            volume_profile_poc=volume_profile.poc if volume_profile else None,
+            value_area_high=volume_profile.vah if volume_profile else None,
+            value_area_low=volume_profile.val if volume_profile else None,
+            structure_bias_hint=None,
+            timestamp=timestamp,
+            extra_features=market_kwargs.get("extra_features"),
+        )
+        path_plan = self._mpp.plan(
+            market_state=market_state,
+            volume_profile=volume_profile,
+            liquidity_events=market_kwargs.get("liquidity_events", ()),
+            prior_highs=market_kwargs.get("prior_highs", ()),
+            prior_lows=market_kwargs.get("prior_lows", ()),
+            swing_highs=market_kwargs.get("swing_highs", ()),
+            swing_lows=market_kwargs.get("swing_lows", ()),
+        )
+        structural_stop = self._sre.compute(
+            symbol=trade.symbol,
+            side=trade.side.value,
+            entry_price=trade.entry_price,
+            market_state=market_state,
+            volume_profile=volume_profile,
+            swing_lows=market_kwargs.get("swing_lows", ()),
+            swing_highs=market_kwargs.get("swing_highs", ()),
+            structure_break_level=market_kwargs.get("structure_break_level"),
+            liquidity_events=market_kwargs.get("liquidity_events", ()),
+            atr=atr,
+            timestamp=timestamp,
+        )
+        side = trade.side.value
+        destinations = path_plan.upside if side == "LONG" else path_plan.downside
+        thesis = self._thesis_engine.build_from_entry(
+            trade_id=trade.trade_id,
+            symbol=trade.symbol,
+            side=side,
+            entry_price=trade.entry_price,
+            market_state=market_state,
+            structural_invalidation_price=(
+                structural_stop.stop_price if structural_stop is not None else None
+            ),
+            expected_path_prices=tuple(item.price for item in destinations[:3]),
+            strategy_id=trade.strategy_id,
+            rationale=trade.explanation or "",
+            agent_consensus=trade.agent_consensus,
+            timestamp=timestamp,
+        )
+        self.register_thesis(thesis)
+        trade.entry_thesis = thesis.to_dict()
+        return thesis
 
     def clear_trade(self, trade_id: str, symbol: str | None = None) -> None:
         self._theses.pop(trade_id, None)
@@ -220,6 +368,10 @@ class PositionManager:
         )
         thesis = self._theses.get(trade.trade_id)
         if thesis is None:
+            thesis = self._restore_entry_thesis(trade)
+            if thesis is not None:
+                self.register_thesis(thesis)
+        if thesis is None:
             expected = tuple(
                 d.price
                 for d in (path_plan.upside if side == "LONG" else path_plan.downside)[
@@ -239,6 +391,7 @@ class PositionManager:
                 timestamp=ts,
             )
             self._theses[trade.trade_id] = thesis
+            trade.entry_thesis = thesis.to_dict()
         thesis_eval = self._thesis_engine.evaluate(
             thesis, market_state, current_price=current_price
         )

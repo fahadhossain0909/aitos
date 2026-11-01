@@ -143,6 +143,210 @@ async def test_stop_loss_hit_closes_trade_at_loss(event_bus, risk_engine):
 
 
 @pytest.mark.asyncio
+async def test_exit_intelligence_can_hold_through_soft_stop_but_not_emergency_limit(
+    event_bus, risk_engine
+):
+    from aitos.intelligence.exit_intelligence import ExitAction
+    from aitos.trading.position_manager import PositionAction
+
+    class HoldingManager:
+        calls = 0
+
+        def evaluate(self, **kwargs):
+            self.calls += 1
+            return PositionAction(action=ExitAction.HOLD, reason="entry thesis intact")
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    manager = HoldingManager()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=manager,
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+
+    held = await lifecycle.update_price(trade.trade_id, 97.5)
+    assert held.state == TradeLifecycleState.POSITION_OPENED
+    assert held.exit_reason is None
+    assert manager.calls == 1
+
+    # Remaining below the soft stop does not force deep analysis on every tick.
+    still_held = await lifecycle.update_price(trade.trade_id, 97.4)
+    assert still_held.state == TradeLifecycleState.POSITION_OPENED
+    assert manager.calls == 1
+
+    emergency = await lifecycle.update_price(trade.trade_id, 96.0)
+    assert emergency.state == TradeLifecycleState.POSITION_CLOSED
+    assert emergency.exit_reason == "emergency_risk_limit"
+    # Emergency risk protection is independent of the HOLD decision.
+    assert manager.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_static_final_tp_does_not_override_eie_manage(
+    event_bus, risk_engine
+):
+    from aitos.intelligence.exit_intelligence import ExitAction
+    from aitos.trading.position_manager import PositionAction
+
+    class ManagingManager:
+        def evaluate(self, **kwargs):
+            return PositionAction(
+                action=ExitAction.MANAGE,
+                reason="thesis remains valid; reduce exposure",
+                reduce_fraction=0.25,
+            )
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=ManagingManager(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+
+    managed = await lifecycle.update_price(trade.trade_id, 105.0)
+    assert managed.state == TradeLifecycleState.POSITION_OPENED
+    assert len(managed.partial_exits) == 1
+    assert managed.exit_reason is None
+    assert managed._last_eie_action == "MANAGE"
+
+
+@pytest.mark.asyncio
+async def test_short_position_can_hold_through_soft_stop_until_emergency_limit(
+    event_bus, risk_engine
+):
+    from aitos.intelligence.exit_intelligence import ExitAction
+    from aitos.trading.position_manager import PositionAction
+
+    class HoldingManager:
+        def evaluate(self, **kwargs):
+            return PositionAction(action=ExitAction.HOLD, reason="short thesis intact")
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=HoldingManager(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            side=TradeSide.SHORT,
+            entry_price=100.0,
+            stop_loss_price=102.0,
+            take_profit_levels=[96.0],
+            breakeven_at_r_multiple=None,
+        ),
+        make_portfolio(),
+    )
+
+    held = await lifecycle.update_price(trade.trade_id, 102.5)
+    assert held.state == TradeLifecycleState.POSITION_OPENED
+    assert held.emergency_sl_price == pytest.approx(104.0)
+
+    closed = await lifecycle.update_price(trade.trade_id, 104.0)
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    assert closed.exit_reason == "emergency_risk_limit"
+
+
+@pytest.mark.asyncio
+async def test_soft_stop_fails_closed_when_exit_intelligence_is_unavailable(
+    event_bus, risk_engine
+):
+    class FailingManager:
+        def evaluate(self, **kwargs):
+            raise RuntimeError("EIE unavailable")
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=FailingManager(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+    closed = await lifecycle.update_price(trade.trade_id, 97.5)
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    assert closed.exit_reason == "sl_triggered_eie_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_exit_intelligence_exit_closes_at_soft_stop_boundary(
+    event_bus, risk_engine
+):
+    from aitos.intelligence.exit_intelligence import ExitAction
+    from aitos.trading.position_manager import PositionAction
+
+    class ExitingManager:
+        def evaluate(self, **kwargs):
+            return PositionAction(action=ExitAction.EXIT, reason="entry thesis invalidated")
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=ExitingManager(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+    closed = await lifecycle.update_price(trade.trade_id, 97.5)
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    assert closed.exit_reason == "entry thesis invalidated"
+
+
+@pytest.mark.asyncio
+async def test_intensive_exit_analysis_cadence_is_per_position(
+    event_bus, risk_engine
+):
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    assert lifecycle._allow_intensive_analysis("trade-a") is True
+    assert lifecycle._allow_intensive_analysis("trade-a") is False
+    # A busy position cannot consume another position's evaluation slot.
+    assert lifecycle._allow_intensive_analysis("trade-b") is True
+
+
+@pytest.mark.asyncio
+async def test_entry_thesis_is_captured_at_position_open(event_bus, risk_engine):
+    from aitos.trading.position_manager import PositionManager
+
+    manager = PositionManager()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=manager,
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    assert trade.entry_thesis is not None
+    assert trade.entry_thesis["trade_id"] == trade.trade_id
+    assert trade.entry_thesis["entry_price"] == trade.entry_price
+    assert trade.entry_thesis["created_at"] is not None
+    assert manager._theses[trade.trade_id].entry_price == trade.entry_price
+
+
+@pytest.mark.asyncio
 async def test_take_profit_hit_closes_trade_at_profit(event_bus, risk_engine):
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})

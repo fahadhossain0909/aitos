@@ -51,7 +51,10 @@ class PositionTuning(BaseModel):
     max_open_positions: int = Field(default=3, ge=1, le=100)
     max_positions_per_symbol: int = Field(default=1, ge=1, le=10)
     monitoring_interval_seconds: float = Field(default=1.0, gt=0, le=60)
+    # Legacy compatibility field; EIE cadence is now enforced independently
+    # for each open position rather than by a global shared budget.
     intensive_analysis_budget: int = Field(default=2, ge=0, le=100)
+    emergency_stop_r_multiple: float = Field(default=2.0, gt=1.0, le=10.0)
 
 
 class RiskTuning(BaseModel):
@@ -241,6 +244,11 @@ def _env_overrides() -> dict[str, Any]:
             "positions",
             "intensive_analysis_budget",
             int,
+        ),
+        "AITOS_TUNING_POSITIONS_EMERGENCY_STOP_R_MULTIPLE": (
+            "positions",
+            "emergency_stop_r_multiple",
+            float,
         ),
         "AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT": (
             "risk",

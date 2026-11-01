@@ -125,6 +125,13 @@ class Trade:
     mfe_price: float | None = None
     mae_r: float | None = None
     mfe_r: float | None = None
+    # Immutable entry-time rationale/invalidations used by Exit Intelligence.
+    # Stored on the trade record so restart recovery does not rebuild the
+    # thesis from a later, potentially adverse market state.
+    entry_thesis: dict[str, Any] | None = None
+    # Exchange-side catastrophic protection when EIE is the normal exit
+    # authority. The ordinary sl_price remains the soft strategy boundary.
+    emergency_sl_price: float | None = None
     updated_at: str = field(default_factory=_utc_now_iso)
 
     def __post_init__(self) -> None:
@@ -183,6 +190,8 @@ class Trade:
             "pnl_percent": self.pnl_percent,
             "rejection_reason": self.rejection_reason,
             "trailing_sl_enabled": self.trailing_sl_enabled,
+            "breakeven_triggered": self.breakeven_triggered,
+            "breakeven_at_r_multiple": self.breakeven_at_r_multiple,
             "sl_order_id": self.sl_order_id,
             "tp_order_ids": list(self.tp_order_ids),
             "regime": self.regime,
@@ -192,4 +201,6 @@ class Trade:
             "mfe_price": self.mfe_price,
             "mae_r": self.mae_r,
             "mfe_r": self.mfe_r,
+            "entry_thesis": self.entry_thesis,
+            "emergency_sl_price": self.emergency_sl_price,
         }
