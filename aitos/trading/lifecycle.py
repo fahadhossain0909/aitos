@@ -1005,6 +1005,11 @@ class TradeLifecycle(AITOSModule):
                 if opportunity.side == TradeSide.LONG
                 else opportunity.entry_price + initial_distance * emergency_multiple
             )
+            if not _valid_market_price(sizing_stop_price):
+                return await self._reject(
+                    opportunity,
+                    "invalid emergency stop price for EIE-managed position",
+                )
         sizing = calculate_position_size(
             equity_usd=portfolio.equity_usd,
             entry_price=opportunity.entry_price,
