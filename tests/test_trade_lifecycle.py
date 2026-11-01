@@ -220,11 +220,8 @@ async def test_static_final_tp_does_not_override_eie_manage(event_bus, risk_engi
     assert managed._last_eie_action == "MANAGE"
 
 
-
 @pytest.mark.asyncio
-async def test_eie_tp_checkpoints_never_auto_exit_or_scale_out(
-    event_bus, risk_engine
-):
+async def test_eie_tp_checkpoints_never_auto_exit_or_scale_out(event_bus, risk_engine):
     from aitos.intelligence.exit_intelligence import ExitAction
     from aitos.trading.position_manager import PositionAction
 
@@ -233,7 +230,9 @@ async def test_eie_tp_checkpoints_never_auto_exit_or_scale_out(
 
         def evaluate(self, **kwargs):
             self.calls += 1
-            return PositionAction(action=ExitAction.HOLD, reason="thesis still extending")
+            return PositionAction(
+                action=ExitAction.HOLD, reason="thesis still extending"
+            )
 
         def clear_trade(self, trade_id, symbol=None):
             return None
