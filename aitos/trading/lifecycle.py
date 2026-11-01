@@ -164,14 +164,14 @@ class TradeLifecycle(AITOSModule):
             return True
         return False
 
-    def _partial_exit_allowed(self, trade: Trade, close_fraction: float) -> tuple[bool, str]:
+    def _partial_exit_allowed(
+        self, trade: Trade, close_fraction: float
+    ) -> tuple[bool, str]:
         """Guard repeated reductions and prevent economically meaningless dust."""
         positions = self._tuning.positions
         max_count = int(getattr(positions, "max_partial_exit_count", 3))
         cooldown = float(getattr(positions, "partial_exit_cooldown_seconds", 60.0))
-        minimum_remaining = float(
-            getattr(positions, "min_remaining_position_usd", 1.0)
-        )
+        minimum_remaining = float(getattr(positions, "min_remaining_position_usd", 1.0))
         if max_count <= 0 or len(trade.partial_exits) >= max_count:
             return False, "partial_exit_count_limit"
         now = time.monotonic()
@@ -749,13 +749,15 @@ class TradeLifecycle(AITOSModule):
                 else:
                     logger.info(
                         "partial exit suppressed by execution guard",
-                        extra={"aitos_extra": {
-                            "trade_id": trade.trade_id,
-                            "symbol": trade.symbol,
-                            "reason": guard_reason,
-                            "partial_exit_count": len(trade.partial_exits),
-                            "remaining_position_usd": trade.position_size_usd,
-                        }},
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                                "reason": guard_reason,
+                                "partial_exit_count": len(trade.partial_exits),
+                                "remaining_position_usd": trade.position_size_usd,
+                            }
+                        },
                     )
             if pos_action.new_stop_price is not None:
                 # Only tighten (never loosen) — already enforced in PositionManager
