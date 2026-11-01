@@ -561,6 +561,16 @@ class TradeLifecycle(AITOSModule):
             >= trade.breakeven_at_r_multiple
         ):
             trade.sl_price = trade.entry_price
+            if self._position_manager is not None:
+                current_emergency = self._emergency_stop_price(trade)
+                if (
+                    trade.side == TradeSide.LONG
+                    and trade.entry_price > current_emergency
+                ) or (
+                    trade.side == TradeSide.SHORT
+                    and trade.entry_price < current_emergency
+                ):
+                    trade.emergency_sl_price = trade.entry_price
             trade.breakeven_triggered = True
             trade.updated_at = utc_now_iso()
             if self._use_exchange_side_stops:
@@ -585,6 +595,16 @@ class TradeLifecycle(AITOSModule):
             )
             if improved:
                 trade.sl_price = candidate_sl
+                if self._position_manager is not None:
+                    current_emergency = self._emergency_stop_price(trade)
+                    if (
+                        trade.side == TradeSide.LONG
+                        and candidate_sl > current_emergency
+                    ) or (
+                        trade.side == TradeSide.SHORT
+                        and candidate_sl < current_emergency
+                    ):
+                        trade.emergency_sl_price = candidate_sl
                 trade.updated_at = utc_now_iso()
                 if self._use_exchange_side_stops:
                     await self._replace_exchange_side_stop_loss(trade)
@@ -643,6 +663,16 @@ class TradeLifecycle(AITOSModule):
             if pos_action.new_stop_price is not None:
                 # Only tighten (never loosen) — already enforced in PositionManager
                 trade.sl_price = pos_action.new_stop_price
+                if self._position_manager is not None:
+                    current_emergency = self._emergency_stop_price(trade)
+                    if (
+                        trade.side == TradeSide.LONG
+                        and pos_action.new_stop_price > current_emergency
+                    ) or (
+                        trade.side == TradeSide.SHORT
+                        and pos_action.new_stop_price < current_emergency
+                    ):
+                        trade.emergency_sl_price = pos_action.new_stop_price
                 trade.updated_at = utc_now_iso()
                 if self._use_exchange_side_stops:
                     await self._replace_exchange_side_stop_loss(trade)
