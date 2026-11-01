@@ -45,7 +45,7 @@ The Journey layer does **not** replace EIE. EIE remains the authoritative exit/t
 5. **Protection** — approved structural stop tightening, break-even and trailing protection can tighten the emergency exchange stop; HOLD does not move it to the soft-stop boundary.
 6. **Hedge intent** — cost-aware hedge analysis remains an advisory decision until a venue/account-mode-aware hedge execution contract is implemented. A generic opposite-side market order is deliberately not treated as safe hedge execution.
 
-Without EIE, the original static SL remains authoritative. With EIE, the soft stop is a decision checkpoint and the emergency stop is the final safety boundary. Static TP remains a destination; a final TP may be deferred after an explicit EIE HOLD.
+Without EIE, the original static SL and exchange-side TP behavior remain authoritative. With EIE, the soft stop is a decision checkpoint and the emergency stop is the final safety boundary. Resting exchange TP orders are not placed for EIE-managed positions because they could bypass HOLD; TP destinations are monitored locally, and a final TP may be deferred after an explicit EIE HOLD.
 
 ## Dynamic spike-capture TP
 
