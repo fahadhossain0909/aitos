@@ -127,6 +127,15 @@ class PositionManager:
         payload = getattr(trade, "entry_thesis", None)
         if not isinstance(payload, Mapping):
             return None
+        if (
+            str(payload.get("trade_id", "")) != trade.trade_id
+            or str(payload.get("symbol", "")).upper() != trade.symbol.upper()
+        ):
+            logger.warning(
+                "stored entry thesis identity does not match trade; ignoring snapshot",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
+            return None
         try:
             created_at = payload.get("created_at")
             timestamp = (
