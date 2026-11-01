@@ -250,6 +250,7 @@ class PositionManager:
             trade_id=trade.trade_id,
             symbol=trade.symbol,
             side=side,
+            trade_id=trade.trade_id,
             entry_price=trade.entry_price,
             market_state=market_state,
             structural_invalidation_price=(
@@ -269,6 +270,7 @@ class PositionManager:
         self._theses.pop(trade_id, None)
         self._journeys.pop(trade_id, None)
         self._hedge_engine.reset(trade_id)
+        self._eie.reset_trade(trade_id)
         if symbol:
             self._eie.reset_symbol(symbol)
 
@@ -453,11 +455,9 @@ class PositionManager:
         if effective_action != ExitAction.EXIT:
             if journey.action.value == "EXIT":
                 effective_action = ExitAction.EXIT
-            elif journey.action.value == "REDUCE":
-                effective_action = ExitAction.MANAGE
-                reduce_fraction = max(
-                    reduce_fraction, min(0.50, self._journey_engine.max_reduce_fraction)
-                )
+            # Journey health decay alone is not a fresh, structure-confirmed
+            # reduction signal. It may inform protection, but EIE must authorize
+            # MANAGE before a partial close can be requested.
             elif journey.action.value in {"PROTECT", "TRAIL"}:
                 effective_action = ExitAction.MANAGE
         new_stop = None
