@@ -1,44 +1,37 @@
-# GitHub Codespaces test workflow
+# GitHub Codespaces test workflow (no Docker-in-Docker)
 
-This environment is for tests and paper-mode development only. Do not configure exchange keys, do not run live trading, and do not reuse production data.
+This Codespaces profile intentionally does not install or require Docker-in-Docker. It provides a Python test environment only. Use it for unit tests, static checks, and paper-mode code inspection. Do not configure exchange keys, use production data, or run live trading.
 
-## 1. Create the Codespace
+## 1. Create or rebuild the Codespace
 
-Open the repository's `audit/verify-main-runtime-reliability` branch in GitHub and choose **Code → Codespaces → Create codespace on branch**. The `.devcontainer/devcontainer.json` installs the Python dependencies and Docker-in-Docker feature.
+Use the `infra/codespaces-no-dind` branch. The `.devcontainer/devcontainer.json` uses the Python 3.11 devcontainer image and installs project/test dependencies. It deliberately has no Docker feature.
 
-## 2. Run the unit suite
+## 2. Run local tests
+
+Run the unit suite first:
 
     python -m pytest -q
 
-The normal test fixtures use fakeredis and should not need real credentials.
+The normal unit-test fixtures use fakeredis/mocks and should not require exchange credentials or local service containers.
 
-## 3. Start isolated integration services (only if needed)
+Useful additional checks:
 
-These services use disposable test credentials and are defined separately from the project's regular runtime compose stack:
+    python -m compileall -q aitos run_live_trading.py run_paper_trading.py
+    black --check --diff aitos tests run_live_trading.py run_paper_trading.py
+    flake8 aitos run_live_trading.py run_paper_trading.py --count --select=E9,F63,F7,F82 --show-source --statistics
 
-    docker compose -f .devcontainer/compose.test.yml up -d
-    docker compose -f .devcontainer/compose.test.yml ps
+## 3. Integration tests without a local Docker daemon
 
-Set test-only connection settings in the current terminal before running integration tests:
+Do not run `docker compose` from this Codespace: the no-DinD profile intentionally has no container daemon.
 
-    export TESTING=true
-    export REDIS_HOST=127.0.0.1
-    export REDIS_PORT=6379
-    export REDIS_PASSWORD=codespaces-test-only
-    export CLICKHOUSE_HOST=127.0.0.1
-    export CLICKHOUSE_PORT=8123
-    export CLICKHOUSE_USER=aitos_test
-    export CLICKHOUSE_PASSWORD=aitos_test_password
-    export CLICKHOUSE_DATABASE=aitos
-    export NEO4J_URI=bolt://127.0.0.1:7687
-    export NEO4J_USER=neo4j
-    export NEO4J_PASSWORD=codespaces-test-password
-    python -m pytest -q
+For Redis, ClickHouse, and Neo4j integration coverage, use the repository's GitHub Actions workflows. The CI jobs provision disposable service containers on the GitHub-hosted runner, initialize a test-only ClickHouse database, and run the integration suite. This keeps service lifecycle and test credentials outside the Codespace and avoids a privileged nested Docker daemon.
 
-Do not run `run_live_trading.py` in Codespaces. The isolated service containers are for test data only. Tear them down when finished:
+The existing `.devcontainer/compose.test.yml` remains available for developers who already have a separate Docker-capable environment; it is not part of this no-DinD Codespaces path.
 
-    docker compose -f .devcontainer/compose.test.yml down -v
+## 4. Paper-mode safety boundary
 
-## 4. What this setup does not prove
+Do not run `run_live_trading.py` in Codespaces. Do not add Binance API keys or other exchange credentials. Any future paper-runtime check must use public market data and isolated test services, and must be explicitly started as a paper process only after its dependencies and safety configuration have been verified.
 
-A green unit/integration suite does not prove exchange execution correctness, live-market freshness under load, or production risk behavior. Those require controlled testnet/replay tests and explicit human approval. No exchange API keys are required for this test workflow.
+## 5. What this setup does not prove
+
+A green unit suite or GitHub Actions integration suite does not prove exchange execution correctness, live-market freshness under load, restart recovery, or production risk behavior. Those require separate controlled testnet/replay validation and explicit human approval. No live orders are permitted as part of this workflow.
