@@ -365,6 +365,23 @@ class TradeLifecycle(AITOSModule):
                 )
         return await self._validate_and_open(opportunity, portfolio)
 
+    def _emergency_stop_price(self, trade: Trade) -> float:
+        """Return the independent catastrophic stop used while EIE is active."""
+        configured = getattr(trade, "emergency_sl_price", None)
+        if configured is not None and _valid_market_price(configured):
+            return float(configured)
+        multiple = float(
+            getattr(self._tuning.positions, "emergency_stop_r_multiple", 2.0)
+        )
+        distance = trade.r_distance * multiple
+        if distance <= 0:
+            return trade.sl_price
+        return (
+            trade.entry_price - distance
+            if trade.side == TradeSide.LONG
+            else trade.entry_price + distance
+        )
+
     async def update_price(
         self,
         trade_id: str,
@@ -411,8 +428,13 @@ class TradeLifecycle(AITOSModule):
         emergency_r = float(
             getattr(self._tuning.positions, "emergency_stop_r_multiple", 2.0)
         )
+        emergency_price = self._emergency_stop_price(trade)
+        emergency_stop_hit = (
+            current_price <= emergency_price
+            if is_long
+            else current_price >= emergency_price
+        )
         adverse_r = max(0.0, -trade.unrealized_r_multiple(current_price))
-        emergency_stop_hit = emergency_r > 0 and adverse_r >= emergency_r
         if emergency_stop_hit:
             logger.warning(
                 "position emergency loss boundary reached",
@@ -787,8 +809,13 @@ class TradeLifecycle(AITOSModule):
         return trade
 
     async def _place_exchange_side_stops(self, trade: Trade) -> None:
+        exchange_stop_price = (
+            self._emergency_stop_price(trade)
+            if self._position_manager is not None
+            else trade.sl_price
+        )
         sl_result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, trade.sl_price
+            trade.symbol, trade.side, trade.quantity, exchange_stop_price
         )
         if sl_result.success:
             trade.sl_order_id = sl_result.order_id
@@ -839,8 +866,13 @@ class TradeLifecycle(AITOSModule):
             await self._order_executor.cancel_resting_order(
                 trade.symbol, trade.sl_order_id
             )
+        exchange_stop_price = (
+            self._emergency_stop_price(trade)
+            if self._position_manager is not None
+            else trade.sl_price
+        )
         result = await self._order_executor.place_stop_loss_order(
-            trade.symbol, trade.side, trade.quantity, trade.sl_price
+            trade.symbol, trade.side, trade.quantity, exchange_stop_price
         )
         trade.sl_order_id = result.order_id if result.success else None
 
@@ -999,6 +1031,19 @@ class TradeLifecycle(AITOSModule):
             trailing_sl_enabled=opportunity.trailing_sl_enabled,
             breakeven_at_r_multiple=opportunity.breakeven_at_r_multiple,
             regime=opportunity.regime,
+            emergency_sl_price=(
+                (
+                    order_result.fill_price
+                    - abs(order_result.fill_price - opportunity.stop_loss_price)
+                    * float(self._tuning.positions.emergency_stop_r_multiple)
+                )
+                if opportunity.side == TradeSide.LONG
+                else (
+                    order_result.fill_price
+                    + abs(order_result.fill_price - opportunity.stop_loss_price)
+                    * float(self._tuning.positions.emergency_stop_r_multiple)
+                )
+            ) if self._position_manager is not None else None,
         )
         self._open_trades[trade.trade_id] = trade
         if self._position_manager is not None:
