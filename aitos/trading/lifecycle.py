@@ -417,6 +417,7 @@ class TradeLifecycle(AITOSModule):
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
         trade.record_excursion(float(current_price))
         trade.last_marked_price = current_price
+        partial_exit_count_before = len(trade.partial_exits)
         is_long = trade.side == TradeSide.LONG
 
         # The scanner's initial SL is a soft risk boundary while EIE is active.
@@ -536,7 +537,7 @@ class TradeLifecycle(AITOSModule):
                     # with a partial reduction on this same price observation.
                     eie_already_reduced = (
                         eie_evaluated_this_update
-                        and getattr(trade, "_last_eie_action", None) == "MANAGE"
+                        and len(trade.partial_exits) > partial_exit_count_before
                     )
                     if not eie_already_reduced:
                         await self._partial_close(
