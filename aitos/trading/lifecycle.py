@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import math
 import time
+from datetime import datetime, timezone
 from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -175,6 +176,22 @@ class TradeLifecycle(AITOSModule):
             return False, "partial_exit_count_limit"
         now = time.monotonic()
         last = self._last_partial_exit_at.get(trade.trade_id)
+        # PartialExit.at is persisted with the trade, so cooldown survives a
+        # process restart even when the in-memory monotonic clock is reset.
+        if trade.partial_exits:
+            try:
+                persisted_at = datetime.fromisoformat(
+                    trade.partial_exits[-1].at.replace("Z", "+00:00")
+                )
+                if persisted_at.tzinfo is None:
+                    persisted_at = persisted_at.replace(tzinfo=timezone.utc)
+                elapsed = (datetime.now(timezone.utc) - persisted_at).total_seconds()
+                if elapsed < cooldown:
+                    return False, "partial_exit_cooldown"
+            except (TypeError, ValueError):
+                # Fall back to this-process monotonic timestamp for malformed
+                # legacy records; the count limit still protects the trade.
+                pass
         if last is not None and now - last < cooldown:
             return False, "partial_exit_cooldown"
         remaining = trade.position_size_usd * (1.0 - close_fraction)
@@ -853,6 +870,7 @@ class TradeLifecycle(AITOSModule):
         if self._position_manager is not None:
             self._position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
         self._last_intensive_analysis_at.pop(trade.trade_id, None)
+        self._last_partial_exit_at.pop(trade.trade_id, None)
         self._soft_stop_breached.discard(trade.trade_id)
         self._tp_boundary_breached.discard(trade.trade_id)
         await self._event_bus.publish(
