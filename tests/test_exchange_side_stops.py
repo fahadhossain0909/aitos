@@ -142,6 +142,31 @@ async def test_opening_position_places_resting_sl_and_tp_orders(event_bus, risk_
 
 
 @pytest.mark.asyncio
+async def test_eie_uses_exchange_side_emergency_stop_not_soft_stop(
+    event_bus, risk_engine
+):
+    from aitos.trading.position_manager import PositionManager
+
+    executor = FakeExchangeCapableExecutor()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+        position_manager=PositionManager(),
+    )
+    await lifecycle.initialize({})
+
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+    placed_stop = executor.placed_orders[trade.sl_order_id]["price"]
+    assert trade.sl_price == pytest.approx(98.0)
+    assert trade.emergency_sl_price == pytest.approx(96.0)
+    assert placed_stop == pytest.approx(trade.emergency_sl_price)
+
+
+@pytest.mark.asyncio
 async def test_multi_tp_places_split_quantity_resting_orders(event_bus, risk_engine):
     executor = FakeExchangeCapableExecutor()
     lifecycle = TradeLifecycle(
