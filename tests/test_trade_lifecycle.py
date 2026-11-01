@@ -188,9 +188,7 @@ async def test_exit_intelligence_can_hold_through_soft_stop_but_not_emergency_li
 
 
 @pytest.mark.asyncio
-async def test_static_final_tp_does_not_override_eie_manage(
-    event_bus, risk_engine
-):
+async def test_static_final_tp_does_not_override_eie_manage(event_bus, risk_engine):
     from aitos.intelligence.exit_intelligence import ExitAction
     from aitos.trading.position_manager import PositionAction
 
@@ -376,7 +374,9 @@ async def test_exit_intelligence_exit_closes_at_soft_stop_boundary(
 
     class ExitingManager:
         def evaluate(self, **kwargs):
-            return PositionAction(action=ExitAction.EXIT, reason="entry thesis invalidated")
+            return PositionAction(
+                action=ExitAction.EXIT, reason="entry thesis invalidated"
+            )
 
         def clear_trade(self, trade_id, symbol=None):
             return None
@@ -396,9 +396,7 @@ async def test_exit_intelligence_exit_closes_at_soft_stop_boundary(
 
 
 @pytest.mark.asyncio
-async def test_intensive_exit_analysis_cadence_is_per_position(
-    event_bus, risk_engine
-):
+async def test_intensive_exit_analysis_cadence_is_per_position(event_bus, risk_engine):
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})
     assert lifecycle._allow_intensive_analysis("trade-a") is True
@@ -578,3 +576,20 @@ async def test_exit_event_publish_failure_does_not_stick_trade_in_exit_triggered
 ):
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+    original_publish = event_bus.publish
+
+    async def fail_stop_event(event):
+        if event.topic == "trade.sl_triggered":
+            raise RuntimeError("event bus unavailable")
+        return await original_publish(event)
+
+    monkeypatch.setattr(event_bus, "publish", fail_stop_event)
+
+    with pytest.raises(RuntimeError, match="event bus unavailable"):
+        await lifecycle.update_price(trade.trade_id, 97.0)
+
+    assert trade.trade_id in [t.trade_id for t in lifecycle.get_open_trades()]
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
