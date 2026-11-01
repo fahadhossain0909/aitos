@@ -595,7 +595,6 @@ async def test_exit_event_publish_failure_does_not_stick_trade_in_exit_triggered
     assert trade.state == TradeLifecycleState.POSITION_OPENED
 
 
-
 @pytest.mark.asyncio
 async def test_partial_close_preserves_full_precision_notional_and_quantity(
     event_bus, risk_engine
