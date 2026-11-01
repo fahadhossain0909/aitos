@@ -549,7 +549,7 @@ class TradeLifecycle(AITOSModule):
             if tp_hit:
                 defer_full_tp = (
                     self._position_manager is not None
-                    and getattr(trade, "_last_eie_action", None) == "HOLD"
+                    and getattr(trade, "_last_eie_action", None) in {"HOLD", "MANAGE"}
                 )
                 if len(trade.take_profit_levels) > 1:
                     # Avoid double-reducing when EIE already returned MANAGE
@@ -573,7 +573,7 @@ class TradeLifecycle(AITOSModule):
                     return trade
                 if defer_full_tp:
                     logger.info(
-                        "TP level reached but EIE=HOLD — deferring full exit",
+                        "TP level reached but EIE continues to manage — deferring full exit",
                         extra={"aitos_extra": {
                             "trade_id": trade.trade_id,
                             "tp": next_tp,
