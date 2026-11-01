@@ -105,9 +105,7 @@ def test_runtime_reload_environment_override_is_validated(monkeypatch):
         load_tuning_settings(profile="balanced", mode="paper")
 
 
-def test_intensive_exit_analysis_budget_is_bounded_per_window():
-    import time
-
+def test_intensive_exit_analysis_cadence_is_fair_per_position():
     from aitos.trading.lifecycle import TradeLifecycle
 
     base = load_tuning_settings(profile="balanced", mode="paper")
@@ -116,14 +114,14 @@ def test_intensive_exit_analysis_budget_is_bounded_per_window():
     )
     lifecycle = object.__new__(TradeLifecycle)
     lifecycle._tuning = base.model_copy(update={"positions": positions})
-    lifecycle._intensive_window_started_at = time.monotonic()
-    lifecycle._intensive_analyses_used = 0
+    lifecycle._last_intensive_analysis_at = {}
 
-    assert lifecycle._allow_intensive_analysis() is True
-    assert lifecycle._allow_intensive_analysis() is False
-
-    lifecycle._intensive_window_started_at -= 61
-    assert lifecycle._allow_intensive_analysis() is True
+    assert lifecycle._allow_intensive_analysis("trade-a") is True
+    assert lifecycle._allow_intensive_analysis("trade-a") is False
+    # The legacy global budget no longer starves a second open position.
+    assert lifecycle._allow_intensive_analysis("trade-b") is True
+    # Stop/TP boundary events bypass the regular per-position cadence.
+    assert lifecycle._allow_intensive_analysis("trade-a", force=True) is True
 
 
 def test_hardware_storage_and_telemetry_profiles_are_resolved():
