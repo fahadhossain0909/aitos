@@ -593,3 +593,67 @@ async def test_exit_event_publish_failure_does_not_stick_trade_in_exit_triggered
 
     assert trade.trade_id in [t.trade_id for t in lifecycle.get_open_trades()]
     assert trade.state == TradeLifecycleState.POSITION_OPENED
+
+
+@pytest.mark.asyncio
+async def test_partial_close_preserves_full_precision_notional_and_quantity(
+    event_bus, risk_engine
+):
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+    initial_notional = trade.position_size_usd
+    initial_quantity = trade.quantity
+
+    await lifecycle._partial_close(trade, 101.25, 0.333333)
+
+    closed_notional = trade.partial_exits[-1].size_usd
+    closed_quantity = initial_quantity * 0.333333
+    assert trade.position_size_usd + closed_notional == pytest.approx(
+        initial_notional, rel=1e-12
+    )
+    assert trade.quantity + closed_quantity == pytest.approx(
+        initial_quantity, rel=1e-12
+    )
+    assert trade.position_size_usd > 0
+    assert trade.quantity > 0
+
+
+@pytest.mark.asyncio
+async def test_partial_exit_guard_enforces_count_cooldown_and_dust(
+    event_bus, risk_engine
+):
+    import time
+
+    from aitos.models.trade import PartialExit
+
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+
+    allowed, reason = lifecycle._partial_exit_allowed(trade, 0.25)
+    assert allowed is True
+    assert reason == "confirmed_partial_exit"
+
+    lifecycle._last_partial_exit_at[trade.trade_id] = time.monotonic()
+    allowed, reason = lifecycle._partial_exit_allowed(trade, 0.25)
+    assert allowed is False
+    assert reason == "partial_exit_cooldown"
+
+    lifecycle._last_partial_exit_at.pop(trade.trade_id)
+    trade.partial_exits.extend(
+        PartialExit(price=101.0, size_usd=1.0, r_multiple=0.5) for _ in range(3)
+    )
+    allowed, reason = lifecycle._partial_exit_allowed(trade, 0.25)
+    assert allowed is False
+    assert reason == "partial_exit_count_limit"
+
+    trade.partial_exits.clear()
+    trade.position_size_usd = 1.1
+    allowed, reason = lifecycle._partial_exit_allowed(trade, 0.5)
+    assert allowed is False
+    assert reason == "partial_exit_would_create_dust"

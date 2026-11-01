@@ -55,6 +55,9 @@ class PositionTuning(BaseModel):
     # for each open position rather than by a global shared budget.
     intensive_analysis_budget: int = Field(default=2, ge=0, le=100)
     emergency_stop_r_multiple: float = Field(default=2.0, gt=1.0, le=10.0)
+    max_partial_exit_count: int = Field(default=3, ge=0, le=20)
+    partial_exit_cooldown_seconds: float = Field(default=60.0, ge=0, le=86400)
+    min_remaining_position_usd: float = Field(default=1.0, ge=0, le=1_000_000)
 
 
 class RiskTuning(BaseModel):
@@ -248,6 +251,21 @@ def _env_overrides() -> dict[str, Any]:
         "AITOS_TUNING_POSITIONS_EMERGENCY_STOP_R_MULTIPLE": (
             "positions",
             "emergency_stop_r_multiple",
+            float,
+        ),
+        "AITOS_TUNING_POSITIONS_MAX_PARTIAL_EXIT_COUNT": (
+            "positions",
+            "max_partial_exit_count",
+            int,
+        ),
+        "AITOS_TUNING_POSITIONS_PARTIAL_EXIT_COOLDOWN_SECONDS": (
+            "positions",
+            "partial_exit_cooldown_seconds",
+            float,
+        ),
+        "AITOS_TUNING_POSITIONS_MIN_REMAINING_POSITION_USD": (
+            "positions",
+            "min_remaining_position_usd",
             float,
         ),
         "AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT": (
