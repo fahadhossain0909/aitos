@@ -250,7 +250,6 @@ class PositionManager:
             trade_id=trade.trade_id,
             symbol=trade.symbol,
             side=side,
-            trade_id=trade.trade_id,
             entry_price=trade.entry_price,
             market_state=market_state,
             structural_invalidation_price=(
@@ -430,6 +429,7 @@ class PositionManager:
         exit_decision = self._eie.evaluate(
             symbol=trade.symbol,
             side=side,
+            trade_id=trade.trade_id,
             entry_price=trade.entry_price,
             current_price=current_price,
             market_state=market_state,
