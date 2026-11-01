@@ -124,6 +124,16 @@ def test_intensive_exit_analysis_cadence_is_fair_per_position():
     assert lifecycle._allow_intensive_analysis("trade-a", force=True) is True
 
 
+def test_emergency_stop_multiple_is_validated_and_configurable(monkeypatch):
+    monkeypatch.setenv("AITOS_TUNING_POSITIONS_EMERGENCY_STOP_R_MULTIPLE", "2.5")
+    settings = load_tuning_settings(profile="balanced", mode="paper")
+    assert settings.positions.emergency_stop_r_multiple == 2.5
+
+    monkeypatch.setenv("AITOS_TUNING_POSITIONS_EMERGENCY_STOP_R_MULTIPLE", "1.0")
+    with pytest.raises(ValidationError):
+        load_tuning_settings(profile="balanced", mode="paper")
+
+
 def test_hardware_storage_and_telemetry_profiles_are_resolved():
     low = load_tuning_settings(profile="low_resource", mode="paper")
     high = load_tuning_settings(profile="high_performance", mode="paper")
