@@ -125,6 +125,10 @@ class Trade:
     mfe_price: float | None = None
     mae_r: float | None = None
     mfe_r: float | None = None
+    # Immutable entry-time rationale/invalidations used by Exit Intelligence.
+    # Stored on the trade record so restart recovery does not rebuild the
+    # thesis from a later, potentially adverse market state.
+    entry_thesis: dict[str, Any] | None = None
     updated_at: str = field(default_factory=_utc_now_iso)
 
     def __post_init__(self) -> None:
@@ -192,4 +196,5 @@ class Trade:
             "mfe_price": self.mfe_price,
             "mae_r": self.mae_r,
             "mfe_r": self.mfe_r,
+            "entry_thesis": self.entry_thesis,
         }
