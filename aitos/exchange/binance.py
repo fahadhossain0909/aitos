@@ -284,15 +284,10 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             for i in range(0, len(unique), max_per_connection)
         ]
 
-    def _get_ws_base_urls(self, streams: list[str]) -> tuple[str, str]:
+    def _get_ws_base_url(self, streams: list[str] | None = None) -> tuple[str, str]:
         """Route all Binance USDⓈ-M public streams through the appropriate path."""
-        if self.testnet:
+        if isinstance(self, BinanceFuturesAdapter) and getattr(self, "testnet", False):
             return BINANCE_USDM_TESTNET_WS_COMBINED, BINANCE_USDM_TESTNET_WS_RAW
-        return WS_MARKET_BASE_URL, WS_MARKET_RAW_BASE_URL
-
-    @staticmethod
-    def _get_ws_base_url(streams: list[str]) -> tuple[str, str]:
-        """Route all Binance USDⓈ-M public streams through the market path."""
         return WS_MARKET_BASE_URL, WS_MARKET_RAW_BASE_URL
 
     async def _get(self, path: str, params: dict[str, Any], weight: int) -> Any:
@@ -300,9 +295,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         await self.connect()
         assert self._session is not None
         base_url = getattr(self, "_rest_base_url", REST_BASE_URL)
-        async with self._session.get(
-            f"{base_url}{path}", params=params
-        ) as response:
+        async with self._session.get(f"{base_url}{path}", params=params) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -317,7 +310,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             return
         shards = self._partition_streams(streams)
         if len(shards) == 1:
-            base_url, _ = self._get_ws_base_urls(shards[0])
+            base_url, _ = self._get_ws_base_url(shards[0])
             url = f"{base_url}?streams={'/'.join(shards[0])}"
             async for item in self._connect_raw(url, None, emit_reconnect, shards[0]):
                 yield item
@@ -325,7 +318,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
         iterators = []
         for shard in shards:
-            base_url, _ = self._get_ws_base_urls(shard)
+            base_url, _ = self._get_ws_base_url(shard)
             iterators.append(
                 self._connect_raw(
                     f"{base_url}?streams={'/'.join(shard)}",
