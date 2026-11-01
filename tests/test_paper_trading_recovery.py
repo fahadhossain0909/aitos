@@ -95,6 +95,13 @@ def test_trade_payload_round_trip_preserves_entry_thesis_and_emergency_stop(
     assert restored.mae_r == 0.5
     assert restored.mfe_r == 1.25
 
+    from aitos.trading.position_manager import PositionManager
+
+    recovered_thesis = PositionManager._restore_entry_thesis(restored)
+    assert recovered_thesis is not None
+    assert recovered_thesis.trade_id == paper_trade.trade_id
+    assert recovered_thesis.expected_path_prices == (105.0, 110.0)
+
 
 @pytest.mark.asyncio
 async def test_restart_does_not_create_duplicate_open_trade(event_bus, paper_trade):
