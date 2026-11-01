@@ -150,3 +150,29 @@ def test_manage_on_moderate_warning():
     assert decision.action in (ExitAction.HOLD, ExitAction.MANAGE)
     if decision.action == ExitAction.MANAGE:
         assert 0.0 < decision.suggested_reduce_fraction <= 1.0
+
+
+
+def test_exit_confirmation_history_is_isolated_per_trade():
+    eng = ExitIntelligenceEngine()
+    state = _state(
+        structure=StructureBias.BROKEN,
+        of=OrderFlowBias.SELLER_DOMINANT,
+        momentum=MomentumState.EXHAUSTED,
+        reversal_risk=0.75,
+    )
+    for trade_id in ("trade-a", "trade-b"):
+        eng.evaluate(
+            symbol="BTCUSDT",
+            side="LONG",
+            trade_id=trade_id,
+            entry_price=79000.0,
+            current_price=79200.0,
+            market_state=state,
+            path_plan=_plan_with_upside(0.15),
+        )
+    assert eng._exit_pressure_streak["trade-a"] == 1
+    assert eng._exit_pressure_streak["trade-b"] == 1
+    eng.reset_trade("trade-a")
+    assert "trade-a" not in eng._exit_pressure_streak
+    assert eng._exit_pressure_streak["trade-b"] == 1
