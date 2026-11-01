@@ -299,6 +299,7 @@ async def test_eie_can_exit_at_tp_checkpoint_only_when_it_decides_to(
     assert closed.exit_reason == "momentum and thesis invalidated"
     assert closed.pnl > 0
 
+
 @pytest.mark.asyncio
 async def test_short_position_can_hold_through_soft_stop_until_emergency_limit(
     event_bus, risk_engine
