@@ -135,6 +135,7 @@ class TradeLifecycle(AITOSModule):
         # Fair, per-position cadence: one busy symbol must not consume another
         # position's exit-analysis allowance.
         self._last_intensive_analysis_at: dict[str, float] = {}
+        self._last_partial_exit_at: dict[str, float] = {}
         self._soft_stop_breached: set[str] = set()
         self._tp_boundary_breached: set[str] = set()
         self._initialized = False
