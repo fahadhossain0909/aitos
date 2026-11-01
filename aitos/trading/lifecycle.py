@@ -555,6 +555,18 @@ class TradeLifecycle(AITOSModule):
         if self._position_manager is not None and tp_boundary_hit:
             reached_tp = trade.take_profit_levels.pop(0)
             self._tp_boundary_breached.discard(trade.trade_id)
+            trade.updated_at = utc_now_iso()
+            await self._event_bus.publish(
+                Event(
+                    topic=TOPIC_POSITION_UPDATED,
+                    payload={
+                        **trade.to_dict(),
+                        "reason": "eie_tp_checkpoint_consumed",
+                        "reached_tp": reached_tp,
+                    },
+                    source_module=self.module_id,
+                )
+            )
             logger.info(
                 "EIE TP checkpoint reached; target consumed without automatic exit",
                 extra={
