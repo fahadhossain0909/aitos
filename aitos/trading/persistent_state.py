@@ -287,8 +287,12 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
             if data.get("initial_r_distance") is not None
             else None
         ),
-        mae_price=(float(data["mae_price"]) if data.get("mae_price") is not None else None),
-        mfe_price=(float(data["mfe_price"]) if data.get("mfe_price") is not None else None),
+        mae_price=(
+            float(data["mae_price"]) if data.get("mae_price") is not None else None
+        ),
+        mfe_price=(
+            float(data["mfe_price"]) if data.get("mfe_price") is not None else None
+        ),
         mae_r=(float(data["mae_r"]) if data.get("mae_r") is not None else None),
         mfe_r=(float(data["mfe_r"]) if data.get("mfe_r") is not None else None),
         updated_at=str(data.get("updated_at") or data["entry_time"]),

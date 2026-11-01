@@ -148,9 +148,7 @@ class TradeLifecycle(AITOSModule):
         self._soft_stop_breached.clear()
         self._tp_boundary_breached.clear()
 
-    def _allow_intensive_analysis(
-        self, trade_id: str, *, force: bool = False
-    ) -> bool:
+    def _allow_intensive_analysis(self, trade_id: str, *, force: bool = False) -> bool:
         """Throttle per position, never globally across unrelated open trades.
 
         A soft-stop or TP boundary forces an immediate evaluation. Ordinary
@@ -442,12 +440,14 @@ class TradeLifecycle(AITOSModule):
         if emergency_stop_hit:
             logger.warning(
                 "position emergency loss boundary reached",
-                extra={"aitos_extra": {
-                    "trade_id": trade.trade_id,
-                    "symbol": trade.symbol,
-                    "adverse_r": adverse_r,
-                    "emergency_stop_r_multiple": emergency_r,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "adverse_r": adverse_r,
+                        "emergency_stop_r_multiple": emergency_r,
+                    }
+                },
             )
             return await self._trigger_exit(
                 trade, current_price, "emergency_risk_limit", TOPIC_SL_TRIGGERED
@@ -509,18 +509,22 @@ class TradeLifecycle(AITOSModule):
             except Exception:
                 logger.exception(
                     "exit intelligence evaluation failed",
-                    extra={"aitos_extra": {
-                        "trade_id": trade.trade_id,
-                        "symbol": trade.symbol,
-                        "soft_stop_breached": sl_hit,
-                    }},
+                    extra={
+                        "aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                            "soft_stop_breached": sl_hit,
+                        }
+                    },
                 )
                 # If the soft stop is already breached and the decision system
                 # is unavailable, fail closed at the protective boundary.
                 if sl_hit:
                     return await self._trigger_exit(
-                        trade, current_price, "sl_triggered_eie_unavailable",
-                        TOPIC_SL_TRIGGERED
+                        trade,
+                        current_price,
+                        "sl_triggered_eie_unavailable",
+                        TOPIC_SL_TRIGGERED,
                     )
                 raise
             if eie_action is not None:
@@ -531,14 +535,16 @@ class TradeLifecycle(AITOSModule):
             # but never loosen the existing protective stop here.
             logger.info(
                 "soft stop breached; position retained by exit intelligence",
-                extra={"aitos_extra": {
-                    "trade_id": trade.trade_id,
-                    "symbol": trade.symbol,
-                    "price": current_price,
-                    "stop_price": trade.sl_price,
-                    "last_eie_action": getattr(trade, "_last_eie_action", None),
-                    "adverse_r": adverse_r,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "price": current_price,
+                        "stop_price": trade.sl_price,
+                        "last_eie_action": getattr(trade, "_last_eie_action", None),
+                        "adverse_r": adverse_r,
+                    }
+                },
             )
 
         # ---- Static TP path: HOLD can defer full exit; partial targets remain
@@ -547,10 +553,9 @@ class TradeLifecycle(AITOSModule):
             next_tp = trade.take_profit_levels[0]
             tp_hit = current_price >= next_tp if is_long else current_price <= next_tp
             if tp_hit:
-                defer_full_tp = (
-                    self._position_manager is not None
-                    and getattr(trade, "_last_eie_action", None) in {"HOLD", "MANAGE"}
-                )
+                defer_full_tp = self._position_manager is not None and getattr(
+                    trade, "_last_eie_action", None
+                ) in {"HOLD", "MANAGE"}
                 if len(trade.take_profit_levels) > 1:
                     # Avoid double-reducing when EIE already returned MANAGE
                     # with a partial reduction on this same price observation.
@@ -574,11 +579,13 @@ class TradeLifecycle(AITOSModule):
                 if defer_full_tp:
                     logger.info(
                         "TP level reached but EIE continues to manage — deferring full exit",
-                        extra={"aitos_extra": {
-                            "trade_id": trade.trade_id,
-                            "tp": next_tp,
-                            "price": current_price,
-                        }},
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "tp": next_tp,
+                                "price": current_price,
+                            }
+                        },
                     )
                     return trade
                 return await self._trigger_exit(
@@ -902,11 +909,7 @@ class TradeLifecycle(AITOSModule):
         # A resting exchange TP would bypass an EIE HOLD decision. EIE-managed
         # positions therefore monitor TP destinations locally and let EIE
         # arbitrate full exits; legacy positions retain their exchange TPs.
-        levels = (
-            []
-            if self._position_manager is not None
-            else trade.take_profit_levels
-        )
+        levels = [] if self._position_manager is not None else trade.take_profit_levels
         for i, level_price in enumerate(levels):
             leg_qty = (
                 remaining_qty
@@ -1020,9 +1023,7 @@ class TradeLifecycle(AITOSModule):
             initial_distance = abs(
                 opportunity.entry_price - opportunity.stop_loss_price
             )
-            emergency_multiple = float(
-                self._tuning.positions.emergency_stop_r_multiple
-            )
+            emergency_multiple = float(self._tuning.positions.emergency_stop_r_multiple)
             sizing_stop_price = (
                 opportunity.entry_price - initial_distance * emergency_multiple
                 if opportunity.side == TradeSide.LONG
@@ -1130,17 +1131,21 @@ class TradeLifecycle(AITOSModule):
             regime=opportunity.regime,
             emergency_sl_price=(
                 (
-                    order_result.fill_price
-                    - abs(order_result.fill_price - opportunity.stop_loss_price)
-                    * float(self._tuning.positions.emergency_stop_r_multiple)
+                    (
+                        order_result.fill_price
+                        - abs(order_result.fill_price - opportunity.stop_loss_price)
+                        * float(self._tuning.positions.emergency_stop_r_multiple)
+                    )
+                    if opportunity.side == TradeSide.LONG
+                    else (
+                        order_result.fill_price
+                        + abs(order_result.fill_price - opportunity.stop_loss_price)
+                        * float(self._tuning.positions.emergency_stop_r_multiple)
+                    )
                 )
-                if opportunity.side == TradeSide.LONG
-                else (
-                    order_result.fill_price
-                    + abs(order_result.fill_price - opportunity.stop_loss_price)
-                    * float(self._tuning.positions.emergency_stop_r_multiple)
-                )
-            ) if self._position_manager is not None else None,
+                if self._position_manager is not None
+                else None
+            ),
         )
         self._open_trades[trade.trade_id] = trade
         if self._position_manager is not None:
@@ -1150,29 +1155,35 @@ class TradeLifecycle(AITOSModule):
             if callable(register_entry_thesis):
                 try:
                     entry_context = (
-                        self._market_context_provider.get_context(trade.symbol).as_kwargs()
+                        self._market_context_provider.get_context(
+                            trade.symbol
+                        ).as_kwargs()
                         if self._market_context_provider is not None
                         else {}
                     )
                     register_entry_thesis(trade, **entry_context)
                     logger.info(
                         "entry thesis captured",
-                        extra={"aitos_extra": {
-                            "trade_id": trade.trade_id,
-                            "symbol": trade.symbol,
-                            "has_entry_market_context": bool(entry_context),
-                            "entry_thesis_captured": trade.entry_thesis is not None,
-                        }},
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                                "has_entry_market_context": bool(entry_context),
+                                "entry_thesis_captured": trade.entry_thesis is not None,
+                            }
+                        },
                     )
                 except Exception:
                     # Keep the position open but make the degraded entry snapshot
                     # visible; PositionManager has a deterministic fallback path.
                     logger.exception(
                         "entry thesis capture failed",
-                        extra={"aitos_extra": {
-                            "trade_id": trade.trade_id,
-                            "symbol": trade.symbol,
-                        }},
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                            }
+                        },
                     )
         await self._event_bus.publish(
             Event(

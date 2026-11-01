@@ -70,8 +70,12 @@ def test_trade_payload_round_trip_preserves_entry_thesis_and_emergency_stop(
         "symbol": paper_trade.symbol,
         "side": "LONG",
         "entry_price": 100.0,
-        "components": [{"code": "bullish_structure", "description": "entry", "weight": 1.2}],
-        "invalidations": [{"code": "structure_break", "description": "break", "level": 94.0}],
+        "components": [
+            {"code": "bullish_structure", "description": "entry", "weight": 1.2}
+        ],
+        "invalidations": [
+            {"code": "structure_break", "description": "break", "level": 94.0}
+        ],
         "confirmations": [{"code": "structure_supportive", "description": "holds"}],
         "expected_path_prices": [105.0, 110.0],
         "invalidation_price": 94.0,

@@ -138,11 +138,7 @@ class PositionManager:
             return None
         try:
             created_at = payload.get("created_at")
-            timestamp = (
-                datetime.fromisoformat(str(created_at))
-                if created_at
-                else None
-            )
+            timestamp = datetime.fromisoformat(str(created_at)) if created_at else None
             thesis = TradeThesis(
                 trade_id=str(payload["trade_id"]),
                 symbol=str(payload["symbol"]),
@@ -214,7 +210,11 @@ class PositionManager:
             mid_price=trade.entry_price,
             order_flow=market_kwargs.get("order_flow"),
             trend_strength=market_kwargs.get("trend_strength"),
-            atr_pct=(atr / trade.entry_price * 100.0 if atr and trade.entry_price > 0 else None),
+            atr_pct=(
+                atr / trade.entry_price * 100.0
+                if atr and trade.entry_price > 0
+                else None
+            ),
             volume_profile_poc=volume_profile.poc if volume_profile else None,
             value_area_high=volume_profile.vah if volume_profile else None,
             value_area_low=volume_profile.val if volume_profile else None,

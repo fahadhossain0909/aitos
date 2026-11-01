@@ -188,9 +188,7 @@ async def test_exit_intelligence_can_hold_through_soft_stop_but_not_emergency_li
 
 
 @pytest.mark.asyncio
-async def test_static_final_tp_does_not_override_eie_manage(
-    event_bus, risk_engine
-):
+async def test_static_final_tp_does_not_override_eie_manage(event_bus, risk_engine):
     from aitos.intelligence.exit_intelligence import ExitAction
     from aitos.trading.position_manager import PositionAction
 
@@ -296,7 +294,9 @@ async def test_exit_intelligence_exit_closes_at_soft_stop_boundary(
 
     class ExitingManager:
         def evaluate(self, **kwargs):
-            return PositionAction(action=ExitAction.EXIT, reason="entry thesis invalidated")
+            return PositionAction(
+                action=ExitAction.EXIT, reason="entry thesis invalidated"
+            )
 
         def clear_trade(self, trade_id, symbol=None):
             return None
@@ -316,9 +316,7 @@ async def test_exit_intelligence_exit_closes_at_soft_stop_boundary(
 
 
 @pytest.mark.asyncio
-async def test_intensive_exit_analysis_cadence_is_per_position(
-    event_bus, risk_engine
-):
+async def test_intensive_exit_analysis_cadence_is_per_position(event_bus, risk_engine):
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})
     assert lifecycle._allow_intensive_analysis("trade-a") is True
