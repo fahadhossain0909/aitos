@@ -720,6 +720,7 @@ class TradeLifecycle(AITOSModule):
         self._closed_trades.append(trade)
         if self._position_manager is not None:
             self._position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
+        self._last_intensive_analysis_at.pop(trade.trade_id, None)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_POSITION_CLOSED,
@@ -1000,6 +1001,37 @@ class TradeLifecycle(AITOSModule):
             regime=opportunity.regime,
         )
         self._open_trades[trade.trade_id] = trade
+        if self._position_manager is not None:
+            register_entry_thesis = getattr(
+                self._position_manager, "register_entry_thesis", None
+            )
+            if callable(register_entry_thesis):
+                try:
+                    entry_context = (
+                        self._market_context_provider.get_context(trade.symbol).as_kwargs()
+                        if self._market_context_provider is not None
+                        else {}
+                    )
+                    register_entry_thesis(trade, **entry_context)
+                    logger.info(
+                        "entry thesis captured",
+                        extra={"aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                            "has_entry_market_context": bool(entry_context),
+                            "entry_thesis": trade.entry_thesis,
+                        }},
+                    )
+                except Exception:
+                    # Keep the position open but make the degraded entry snapshot
+                    # visible; PositionManager has a deterministic fallback path.
+                    logger.exception(
+                        "entry thesis capture failed",
+                        extra={"aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                        }},
+                    )
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_POSITION_OPENED,
