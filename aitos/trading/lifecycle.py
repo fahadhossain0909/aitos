@@ -19,9 +19,12 @@ sizing, order submission, and exit monitoring — wiring the Risk Engine and
 AI Kernel into an actual trade, end to end.
 
 Phase E (Market-Path architecture): an optional PositionManager may be
-injected. Hard SL remains authoritative. When the manager is present, static
-TP full-exit can be deferred on HOLD; MANAGE may partial-reduce or tighten
-stop. No existing emergency or exchange-side path is removed.
+injected. With EIE enabled, the initial strategy SL is a soft decision
+boundary; a separately sized emergency stop remains authoritative. A soft
+stop breach forces EIE evaluation, and HOLD may retain the position until
+thesis invalidation or the emergency boundary. Without EIE, legacy SL behavior
+is unchanged. Static TP full-exit can be deferred on HOLD; MANAGE may
+partial-reduce or tighten protection.
 """
 
 # NOTE: this file previously shipped as a zlib+base64-packed blob that was
@@ -806,8 +809,13 @@ class TradeLifecycle(AITOSModule):
                 )
                 filled_ids.add(trade.sl_order_id)
                 trade._aitos_filled_resting_order_ids = filled_ids
+                exchange_exit_price = (
+                    self._emergency_stop_price(trade)
+                    if self._position_manager is not None
+                    else trade.sl_price
+                )
                 return await self.close_trade(
-                    trade.trade_id, trade.sl_price, "sl_triggered_exchange"
+                    trade.trade_id, exchange_exit_price, "sl_triggered_exchange"
                 )
         if trade.tp_order_ids:
             status = await self._order_executor.get_resting_order_status(
@@ -1110,7 +1118,7 @@ class TradeLifecycle(AITOSModule):
                             "trade_id": trade.trade_id,
                             "symbol": trade.symbol,
                             "has_entry_market_context": bool(entry_context),
-                            "entry_thesis": trade.entry_thesis,
+                            "entry_thesis_captured": trade.entry_thesis is not None,
                         }},
                     )
                 except Exception:
