@@ -175,6 +175,11 @@ async def test_exit_intelligence_can_hold_through_soft_stop_but_not_emergency_li
     assert held.exit_reason is None
     assert manager.calls == 1
 
+    # Remaining below the soft stop does not force deep analysis on every tick.
+    still_held = await lifecycle.update_price(trade.trade_id, 97.4)
+    assert still_held.state == TradeLifecycleState.POSITION_OPENED
+    assert manager.calls == 1
+
     emergency = await lifecycle.update_price(trade.trade_id, 96.0)
     assert emergency.state == TradeLifecycleState.POSITION_CLOSED
     assert emergency.exit_reason == "emergency_risk_limit"
