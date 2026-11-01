@@ -198,7 +198,10 @@ class ExitIntelligenceEngine:
         # momentum wobble. Evidence is grouped by source to avoid double-counting
         # several symptoms from the same underlying signal.
         confirmation_groups = (
-            bool(reason_codes & {"structure_against", "structure_broken", "near_structural_stop"}),
+            bool(
+                reason_codes
+                & {"structure_against", "structure_broken", "near_structural_stop"}
+            ),
             bool(reason_codes & {"of_reversal"}),
             bool(reason_codes & {"path_upside_collapsed", "negative_ere"}),
             bool(reason_codes & {"thesis_degraded"}),
@@ -402,8 +405,7 @@ class ExitIntelligenceEngine:
         ):
             return ExitAction.EXIT, 1.0
         if manage_confirmed and (
-            exit_score >= EXIT_SCORE_MANAGE
-            or (ere <= 0.0 and exit_score >= 0.30)
+            exit_score >= EXIT_SCORE_MANAGE or (ere <= 0.0 and exit_score >= 0.30)
         ):
             frac = _clamp01((exit_score - 0.25) / 0.5)
             return ExitAction.MANAGE, round(max(0.25, min(0.75, frac)), 2)
