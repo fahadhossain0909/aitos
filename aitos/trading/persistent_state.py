@@ -266,6 +266,16 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
         pnl=data.get("pnl"),
         pnl_percent=data.get("pnl_percent"),
         rejection_reason=data.get("rejection_reason"),
+        entry_thesis=(
+            dict(data["entry_thesis"])
+            if isinstance(data.get("entry_thesis"), dict)
+            else None
+        ),
+        emergency_sl_price=(
+            float(data["emergency_sl_price"])
+            if data.get("emergency_sl_price") is not None
+            else None
+        ),
         updated_at=str(data.get("updated_at") or data["entry_time"]),
     )
 
