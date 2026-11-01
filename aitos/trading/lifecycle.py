@@ -415,7 +415,6 @@ class TradeLifecycle(AITOSModule):
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
         trade.record_excursion(float(current_price))
         trade.last_marked_price = current_price
-        partial_exit_count_before = len(trade.partial_exits)
         is_long = trade.side == TradeSide.LONG
 
         # The scanner's initial SL is a soft risk boundary while EIE is active.
@@ -484,12 +483,10 @@ class TradeLifecycle(AITOSModule):
             self._tp_boundary_breached.discard(trade.trade_id)
 
         eie_action = None
-        eie_evaluated_this_update = False
         if self._position_manager is not None and self._allow_intensive_analysis(
             trade.trade_id,
             force=soft_stop_newly_breached or tp_newly_breached,
         ):
-            eie_evaluated_this_update = True
             try:
                 eie_action = await self._apply_exit_intelligence(
                     trade,
