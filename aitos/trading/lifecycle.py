@@ -567,6 +567,8 @@ class TradeLifecycle(AITOSModule):
                             trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
                         )
                     trade.take_profit_levels.pop(0)
+                    # The next TP level is a new decision boundary.
+                    self._tp_boundary_breached.discard(trade.trade_id)
                     if self._use_exchange_side_stops and trade.tp_order_ids:
                         consumed_order_id = trade.tp_order_ids.pop(0)
                         await self._order_executor.cancel_resting_order(
