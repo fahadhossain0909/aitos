@@ -50,7 +50,8 @@ async def connect_raw_dynamic(
             changed.clear()
             await changed.wait()
             continue
-        base_url, _ = adapter._get_ws_base_url(streams)
+        get_ws_urls = getattr(adapter, "_get_ws_base_urls", adapter._get_ws_base_url)
+        base_url, _ = get_ws_urls(streams)
         url = f"{base_url}?streams={'/'.join(streams)}"
         subscribed = set(streams)
         ws = None

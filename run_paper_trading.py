@@ -125,7 +125,7 @@ async def main() -> None:
         settings, logger=logger
     )
     graph_driver = await try_connect_neo4j(settings, logger=logger)
-    exchange = BinanceFuturesAdapter()
+    exchange = BinanceFuturesAdapter(testnet=settings.binance.testnet)
     symbols = await resolve_live_universe(exchange)
     logger.info(
         "resolved dynamic paper-trading universe",
