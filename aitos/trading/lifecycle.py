@@ -876,7 +876,14 @@ class TradeLifecycle(AITOSModule):
                 },
             )
         remaining_qty = trade.quantity
-        levels = trade.take_profit_levels
+        # A resting exchange TP would bypass an EIE HOLD decision. EIE-managed
+        # positions therefore monitor TP destinations locally and let EIE
+        # arbitrate full exits; legacy positions retain their exchange TPs.
+        levels = (
+            []
+            if self._position_manager is not None
+            else trade.take_profit_levels
+        )
         for i, level_price in enumerate(levels):
             leg_qty = (
                 remaining_qty
