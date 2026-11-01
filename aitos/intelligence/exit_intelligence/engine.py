@@ -67,6 +67,7 @@ class ExitIntelligenceEngine:
         *,
         symbol: str,
         side: str,
+        trade_id: str | None = None,
         entry_price: float,
         current_price: float,
         market_state: MarketState,
@@ -89,8 +90,11 @@ class ExitIntelligenceEngine:
         }
         notes: list[str] = []
 
+        # Temporal confirmation belongs to one position, not every position
+        # sharing a symbol. The symbol fallback preserves older callers.
+        state_key = trade_id or symbol
         mom_score = self._momentum_numeric(market_state)
-        hist = self._momentum_history[symbol]
+        hist = self._momentum_history[state_key]
         hist.append(mom_score)
         features["momentum_numeric"] = mom_score
         if len(hist) >= 3:
@@ -183,10 +187,10 @@ class ExitIntelligenceEngine:
         features["exit_score"] = exit_score
 
         if hard_invalidation or exit_score >= EXIT_SCORE_EXIT:
-            self._exit_pressure_streak[symbol] += 1
+            self._exit_pressure_streak[state_key] += 1
         else:
-            self._exit_pressure_streak[symbol] = 0
-        streak = self._exit_pressure_streak[symbol]
+            self._exit_pressure_streak[state_key] = 0
+        streak = self._exit_pressure_streak[state_key]
         features["exit_pressure_streak"] = float(streak)
 
         action, reduce_frac = self._decide(
@@ -210,9 +214,13 @@ class ExitIntelligenceEngine:
             notes=tuple(notes),
         )
 
+    def reset_trade(self, trade_id: str) -> None:
+        self._momentum_history.pop(trade_id, None)
+        self._exit_pressure_streak.pop(trade_id, None)
+
     def reset_symbol(self, symbol: str) -> None:
-        self._momentum_history.pop(symbol, None)
-        self._exit_pressure_streak.pop(symbol, None)
+        # Backward-compatible cleanup for callers that evaluate by symbol.
+        self.reset_trade(symbol)
 
     @staticmethod
     def _momentum_numeric(state: MarketState) -> float:
