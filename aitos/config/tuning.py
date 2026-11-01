@@ -55,6 +55,9 @@ class PositionTuning(BaseModel):
     # for each open position rather than by a global shared budget.
     intensive_analysis_budget: int = Field(default=2, ge=0, le=100)
     emergency_stop_r_multiple: float = Field(default=2.0, gt=1.0, le=10.0)
+    max_partial_exit_count: int = Field(default=3, ge=0, le=20)
+    partial_exit_cooldown_seconds: float = Field(default=60.0, ge=0, le=86400)
+    min_remaining_position_usd: float = Field(default=1.0, ge=0, le=1_000_000)
 
 
 class RiskTuning(BaseModel):
