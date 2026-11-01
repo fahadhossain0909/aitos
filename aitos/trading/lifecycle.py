@@ -136,6 +136,8 @@ class TradeLifecycle(AITOSModule):
         # Fair, per-position cadence: one busy symbol must not consume another
         # position's exit-analysis allowance.
         self._last_intensive_analysis_at: dict[str, float] = {}
+        self._soft_stop_breached: set[str] = set()
+        self._tp_boundary_breached: set[str] = set()
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
         self._closed_trades: list[Trade] = []
@@ -147,6 +149,8 @@ class TradeLifecycle(AITOSModule):
         self._intensive_window_started_at = time.monotonic()
         self._intensive_analyses_used = 0
         self._last_intensive_analysis_at.clear()
+        self._soft_stop_breached.clear()
+        self._tp_boundary_breached.clear()
 
     def _allow_intensive_analysis(
         self, trade_id: str, *, force: bool = False
@@ -465,10 +469,29 @@ class TradeLifecycle(AITOSModule):
             tp_boundary_hit = (
                 current_price >= next_tp if is_long else current_price <= next_tp
             )
+
+        # Force one immediate evaluation on each boundary crossing, then return
+        # to the per-position cadence while price remains beyond that boundary.
+        soft_stop_newly_breached = (
+            sl_hit and trade.trade_id not in self._soft_stop_breached
+        )
+        if sl_hit:
+            self._soft_stop_breached.add(trade.trade_id)
+        else:
+            self._soft_stop_breached.discard(trade.trade_id)
+        tp_newly_breached = (
+            tp_boundary_hit and trade.trade_id not in self._tp_boundary_breached
+        )
+        if tp_boundary_hit:
+            self._tp_boundary_breached.add(trade.trade_id)
+        else:
+            self._tp_boundary_breached.discard(trade.trade_id)
+
         eie_action = None
         eie_evaluated_this_update = False
         if self._position_manager is not None and self._allow_intensive_analysis(
-            trade.trade_id, force=sl_hit or tp_boundary_hit
+            trade.trade_id,
+            force=soft_stop_newly_breached or tp_newly_breached,
         ):
             eie_evaluated_this_update = True
             try:
@@ -784,6 +807,8 @@ class TradeLifecycle(AITOSModule):
         if self._position_manager is not None:
             self._position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
         self._last_intensive_analysis_at.pop(trade.trade_id, None)
+        self._soft_stop_breached.discard(trade.trade_id)
+        self._tp_boundary_breached.discard(trade.trade_id)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_POSITION_CLOSED,
