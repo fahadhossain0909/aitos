@@ -221,6 +221,86 @@ async def test_static_final_tp_does_not_override_eie_manage(event_bus, risk_engi
 
 
 @pytest.mark.asyncio
+async def test_eie_tp_checkpoints_never_auto_exit_or_scale_out(event_bus, risk_engine):
+    from aitos.intelligence.exit_intelligence import ExitAction
+    from aitos.trading.position_manager import PositionAction
+
+    class HoldingManager:
+        calls = 0
+
+        def evaluate(self, **kwargs):
+            self.calls += 1
+            return PositionAction(
+                action=ExitAction.HOLD, reason="thesis still extending"
+            )
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    manager = HoldingManager()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus, risk_engine=risk_engine, position_manager=manager
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            take_profit_levels=[102.0, 106.0, 112.0],
+            breakeven_at_r_multiple=None,
+        ),
+        make_portfolio(),
+    )
+    original_quantity = trade.quantity
+    original_size = trade.position_size_usd
+
+    first = await lifecycle.update_price(trade.trade_id, 103.0)
+    assert first.state == TradeLifecycleState.POSITION_OPENED
+    assert first.take_profit_levels == [106.0, 112.0]
+    assert first.quantity == pytest.approx(original_quantity)
+    assert first.position_size_usd == pytest.approx(original_size)
+    assert first.partial_exits == []
+    assert manager.calls == 1
+
+    second = await lifecycle.update_price(trade.trade_id, 107.0)
+    assert second.state == TradeLifecycleState.POSITION_OPENED
+    assert second.take_profit_levels == [112.0]
+    assert second.quantity == pytest.approx(original_quantity)
+    assert second.partial_exits == []
+    assert manager.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_eie_can_exit_at_tp_checkpoint_only_when_it_decides_to(
+    event_bus, risk_engine
+):
+    from aitos.intelligence.exit_intelligence import ExitAction
+    from aitos.trading.position_manager import PositionAction
+
+    class ExitingManager:
+        def evaluate(self, **kwargs):
+            return PositionAction(
+                action=ExitAction.EXIT, reason="momentum and thesis invalidated"
+            )
+
+        def clear_trade(self, trade_id, symbol=None):
+            return None
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        position_manager=ExitingManager(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+
+    closed = await lifecycle.update_price(trade.trade_id, 105.0)
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    assert closed.exit_reason == "momentum and thesis invalidated"
+    assert closed.pnl > 0
+
+
+@pytest.mark.asyncio
 async def test_short_position_can_hold_through_soft_stop_until_emergency_limit(
     event_bus, risk_engine
 ):
