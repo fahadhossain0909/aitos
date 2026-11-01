@@ -532,9 +532,16 @@ class TradeLifecycle(AITOSModule):
                     and getattr(trade, "_last_eie_action", None) == "HOLD"
                 )
                 if len(trade.take_profit_levels) > 1:
-                    await self._partial_close(
-                        trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
+                    # Avoid double-reducing when EIE already returned MANAGE
+                    # with a partial reduction on this same price observation.
+                    eie_already_reduced = (
+                        eie_evaluated_this_update
+                        and getattr(trade, "_last_eie_action", None) == "MANAGE"
                     )
+                    if not eie_already_reduced:
+                        await self._partial_close(
+                            trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
+                        )
                     trade.take_profit_levels.pop(0)
                     if self._use_exchange_side_stops and trade.tp_order_ids:
                         consumed_order_id = trade.tp_order_ids.pop(0)
