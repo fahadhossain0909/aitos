@@ -145,6 +145,7 @@ class TradeLifecycle(AITOSModule):
         """Apply an explicitly reloaded tuning snapshot to position monitoring."""
         self._tuning = settings
         self._last_intensive_analysis_at.clear()
+        self._last_partial_exit_at.clear()
         self._soft_stop_breached.clear()
         self._tp_boundary_breached.clear()
 
@@ -161,6 +162,25 @@ class TradeLifecycle(AITOSModule):
             self._last_intensive_analysis_at[trade_id] = now
             return True
         return False
+
+    def _partial_exit_allowed(self, trade: Trade, close_fraction: float) -> tuple[bool, str]:
+        """Guard repeated reductions and prevent economically meaningless dust."""
+        positions = self._tuning.positions
+        max_count = int(getattr(positions, "max_partial_exit_count", 3))
+        cooldown = float(getattr(positions, "partial_exit_cooldown_seconds", 60.0))
+        minimum_remaining = float(
+            getattr(positions, "min_remaining_position_usd", 1.0)
+        )
+        if max_count <= 0 or len(trade.partial_exits) >= max_count:
+            return False, "partial_exit_count_limit"
+        now = time.monotonic()
+        last = self._last_partial_exit_at.get(trade.trade_id)
+        if last is not None and now - last < cooldown:
+            return False, "partial_exit_cooldown"
+        remaining = trade.position_size_usd * (1.0 - close_fraction)
+        if remaining < minimum_remaining:
+            return False, "partial_exit_would_create_dust"
+        return True, "confirmed_partial_exit"
 
     @property
     def module_id(self) -> str:
@@ -701,9 +721,25 @@ class TradeLifecycle(AITOSModule):
 
         if pos_action.action == ExitAction.MANAGE:
             if pos_action.reduce_fraction > 0:
-                await self._partial_close(
-                    trade, current_price, pos_action.reduce_fraction
+                allowed, guard_reason = self._partial_exit_allowed(
+                    trade, pos_action.reduce_fraction
                 )
+                if allowed:
+                    await self._partial_close(
+                        trade, current_price, pos_action.reduce_fraction
+                    )
+                    self._last_partial_exit_at[trade.trade_id] = time.monotonic()
+                else:
+                    logger.info(
+                        "partial exit suppressed by execution guard",
+                        extra={"aitos_extra": {
+                            "trade_id": trade.trade_id,
+                            "symbol": trade.symbol,
+                            "reason": guard_reason,
+                            "partial_exit_count": len(trade.partial_exits),
+                            "remaining_position_usd": trade.position_size_usd,
+                        }},
+                    )
             if pos_action.new_stop_price is not None:
                 # Only tighten (never loosen) — already enforced in PositionManager
                 trade.sl_price = pos_action.new_stop_price
@@ -1277,18 +1313,23 @@ class TradeLifecycle(AITOSModule):
             )
         direction = 1 if trade.side == TradeSide.LONG else -1
         pnl_pct = ((price - trade.entry_price) / trade.entry_price) * direction
+        # Keep full precision internally. Rounding the USD ledger to cents while
+        # reducing quantity at full precision causes quantity/notional drift,
+        # especially when the remaining position is only a few cents.
         closed_notional = trade.position_size_usd * close_fraction
         closed_quantity = trade.quantity * close_fraction
+        remaining_notional = trade.position_size_usd - closed_notional
+        remaining_quantity = trade.quantity - closed_quantity
         realized = closed_notional * pnl_pct
         trade.partial_exits.append(
             PartialExit(
                 price=price,
-                size_usd=round(closed_notional, 2),
+                size_usd=closed_notional,
                 r_multiple=round(trade.unrealized_r_multiple(price), 4),
             )
         )
-        trade.position_size_usd = round(trade.position_size_usd - closed_notional, 2)
-        trade.quantity = max(0.0, trade.quantity - closed_quantity)
+        trade.position_size_usd = max(0.0, remaining_notional)
+        trade.quantity = max(0.0, remaining_quantity)
         trade.pnl = round((trade.pnl or 0.0) + realized, 4)
         trade.updated_at = utc_now_iso()
         await self._event_bus.publish(
