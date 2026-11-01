@@ -80,10 +80,20 @@ def test_trade_payload_round_trip_preserves_entry_thesis_and_emergency_stop(
         "features": {"trend_strength": 0.8},
     }
     paper_trade.emergency_sl_price = 90.0
+    paper_trade.breakeven_triggered = True
+    paper_trade.breakeven_at_r_multiple = 1.0
+    paper_trade.initial_r_distance = 4.0
+    paper_trade.mae_r = 0.5
+    paper_trade.mfe_r = 1.25
 
     restored = _trade_from_dict(paper_trade.to_dict())
     assert restored.entry_thesis == paper_trade.entry_thesis
     assert restored.emergency_sl_price == 90.0
+    assert restored.breakeven_triggered is True
+    assert restored.breakeven_at_r_multiple == 1.0
+    assert restored.initial_r_distance == 4.0
+    assert restored.mae_r == 0.5
+    assert restored.mfe_r == 1.25
 
 
 @pytest.mark.asyncio
