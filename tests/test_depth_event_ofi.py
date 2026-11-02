@@ -89,7 +89,6 @@ def test_order_book_depth_event_round_trips_through_wire_model():
     assert restored.depth_event == event
 
 
-
 def test_depth_event_metrics_survive_canonical_market_data_bridge():
     event_metrics = {
         "ofi_raw": 2.0,
