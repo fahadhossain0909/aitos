@@ -31,9 +31,7 @@ def _trade(
 
 
 def _depth_event(*, side="bid", price=100.0, quantity=5.0, offset_ms=0):
-    timestamp_ms = int(
-        (BASE + timedelta(milliseconds=offset_ms)).timestamp() * 1000
-    )
+    timestamp_ms = int((BASE + timedelta(milliseconds=offset_ms)).timestamp() * 1000)
     return {
         "event_time_ms": timestamp_ms,
         "reduction_qty": quantity,
@@ -111,9 +109,7 @@ def test_finalized_unmatched_quantity_is_reported_as_cancellation_proxy():
 
 def test_aggressive_buy_matches_ask_reduction():
     matcher = TradeDepthMatcher()
-    event = matcher.add_depth_event(
-        _depth_event(side="ask", price=100.5, quantity=2.0)
-    )
+    event = matcher.add_depth_event(_depth_event(side="ask", price=100.5, quantity=2.0))
     matcher.add_trade(
         _trade(
             1,
@@ -129,7 +125,6 @@ def test_aggressive_buy_matches_ask_reduction():
     assert event["matched_trade_ids"] == [1]
     assert event["matched_trade_count"] == 1.0
     assert event["unmatched_reduction_qty"] == 0.0
-
 
 
 @pytest.mark.asyncio
