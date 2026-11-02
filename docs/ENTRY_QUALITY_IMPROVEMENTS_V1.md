@@ -16,7 +16,7 @@ This change improves entry evidence without adding conventional lagging indicato
 - Replaced momentum/range-chasing in the lightweight scanner shortlist with median quote-activity proxy discounted by range instability.
 - Live trading now refuses to authorize a candidate if live WebSocket trade/book state is stale or unavailable. Paper mode retains REST fallback for research/diagnostics, and the source is recorded in the rationale.
 - Fixed rolling CVD accounting so evicted trades are removed from the bounded rolling CVD window.
-- Existing lifecycle MAE/MFE fields and entry-thesis persistence are reused; this patch does not duplicate those systems.
+- Existing lifecycle MAE/MFE fields and entry-thesis persistence are reused. The journal outcome event now carries the original entry component snapshot plus P&L, exit reason and MAE/MFE, and the learning recorder persists those fields together so entry evidence can be joined to realized outcomes.
 
 ## Community-practice evidence considered
 
