@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 from aitos.config.tuning import DEFAULT_CORE_FUTURES_SYMBOLS
 from aitos.exchange.base import ExchangeAdapter
 
@@ -10,7 +12,13 @@ from aitos.exchange.base import ExchangeAdapter
 CORE_USDT_PERPETUALS = DEFAULT_CORE_FUTURES_SYMBOLS
 
 
-def _contract_is_eligible(symbol: str, metadata: object) -> bool:
+def _contract_is_eligible(
+    symbol: str,
+    metadata: object,
+    *,
+    core_symbols: tuple[str, ...],
+    min_contract_age_days: int,
+) -> bool:
     if not symbol.endswith("USDT"):
         return False
     status = str(getattr(metadata, "status", "UNKNOWN")).upper()
@@ -19,10 +27,19 @@ def _contract_is_eligible(symbol: str, metadata: object) -> bool:
     # Older adapter doubles may expose only SymbolFilters. For these, only
     # the explicit core allowlist is trusted; real Binance metadata is strict.
     if status == "UNKNOWN" and contract_type == "UNKNOWN" and not quote_asset:
-        return symbol in CORE_USDT_PERPETUALS
-    return (
+        return symbol in core_symbols
+    if not (
         status == "TRADING" and contract_type == "PERPETUAL" and quote_asset == "USDT"
-    )
+    ):
+        return False
+    if symbol not in core_symbols and min_contract_age_days > 0:
+        onboard_date = getattr(metadata, "onboard_date", None)
+        if onboard_date is None:
+            return False
+        minimum_onboard_date = int(time.time() * 1000) - min_contract_age_days * 86_400_000
+        if int(onboard_date) > minimum_onboard_date:
+            return False
+    return True
 
 
 async def resolve_live_universe(
@@ -31,6 +48,7 @@ async def resolve_live_universe(
     core_symbols: tuple[str, ...] = CORE_USDT_PERPETUALS,
     min_quote_volume_usd: float = 10_000_000.0,
     min_trade_count: int = 10_000,
+    min_contract_age_days: int = 30,
     dynamic_limit: int = 35,
     universe_limit: int = 100,
 ) -> list[str]:
@@ -44,7 +62,12 @@ async def resolve_live_universe(
     eligible = {
         str(symbol).upper(): metadata
         for symbol, metadata in filters.items()
-        if _contract_is_eligible(str(symbol).upper(), metadata)
+        if _contract_is_eligible(
+            str(symbol).upper(),
+            metadata,
+            core_symbols=core_symbols,
+            min_contract_age_days=min_contract_age_days,
+        )
     }
     core_candidates = [s for s in core_symbols if s in eligible]
     core = list(core_candidates)
