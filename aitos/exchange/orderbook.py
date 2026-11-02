@@ -215,7 +215,7 @@ class LocalOrderBook:
         mid = (best_bid + best_ask) / 2.0 if best_bid and best_ask else 0.0
         weighted_ofi = 0.0
         bid_add = bid_reduce = ask_add = ask_reduce = replenished = 0.0
-        reductions: list[dict[str, Any]] = []
+        reduction_levels: list[dict[str, Any]] = []
         now_ms = update.event_time_ms or int(time.time() * 1000)
         horizon_ms = 5000
         for key, (ts, _) in tuple(self._recent_reductions.items()):
@@ -250,7 +250,7 @@ class LocalOrderBook:
                             self._recent_reductions.pop(key, None)
                 else:
                     reduced = -change
-                    reductions.append(
+                    reduction_levels.append(
                         {
                             "side": side,
                             "price": float(price),
@@ -294,7 +294,7 @@ class LocalOrderBook:
             "final_update_id": float(update.final_update_id),
             "previous_update_id": float(update.previous_update_id),
             "changed_level_count": float(len(update.bids) + len(update.asks)),
-            "reductions": reductions,
+            "reductions": reduction_levels,
             "matched_execution_qty": 0.0,
             "unmatched_reduction_qty": reductions,
             "attribution_pending_qty": reductions,
