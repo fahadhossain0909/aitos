@@ -175,7 +175,8 @@ def depth_event_flow_analysis(events: Sequence[dict[str, float]]) -> dict[str, f
         return {
             "ofi_score": 5.0, "bid_add_qty": 0.0, "bid_reduce_qty": 0.0,
             "ask_add_qty": 0.0, "ask_reduce_qty": 0.0, "inferred_cancel_qty": 0.0,
-            "replenishment_qty": 0.0, "replenishment_ratio": 0.0, "event_count": 0.0,
+            "replenishment_qty": 0.0, "replenishment_ratio": 0.0,
+            "inferred_cancel_pressure": 0.0, "addition_qty": 0.0, "event_count": 0.0,
         }
     raw_ofi = sum(e.get("ofi_raw", 0.0) for e in events)
     depth_scale = sum(e.get("ofi_scale", 0.0) for e in events)
@@ -184,13 +185,17 @@ def depth_event_flow_analysis(events: Sequence[dict[str, float]]) -> dict[str, f
         key: sum(max(0.0, e.get(key, 0.0)) for e in events)
         for key in (
             "bid_add_qty", "bid_reduce_qty", "ask_add_qty", "ask_reduce_qty",
-            "inferred_cancel_qty", "replenishment_qty",
+            "inferred_cancel_qty", "replenishment_qty", "addition_qty",
         )
     }
     totals.update({
         "ofi_score": round(max(0.0, min(10.0, 5.0 + 50.0 * normalized)), 2),
         "replenishment_ratio": round(
             totals["replenishment_qty"] / max(totals["inferred_cancel_qty"], 1e-12), 4
+        ),
+        "inferred_cancel_pressure": round(
+            totals["inferred_cancel_qty"]
+            / max(totals["inferred_cancel_qty"] + totals["addition_qty"], 1e-12), 4
         ),
         "event_count": float(len(events)),
     })
