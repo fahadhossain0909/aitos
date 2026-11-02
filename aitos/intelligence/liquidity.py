@@ -184,7 +184,8 @@ def adverse_flow_without_progress(
     if len(trades) < min_trades:
         return False
     buy_qty = sum(
-        abs(t.quantity) for t in trades
+        abs(t.quantity)
+        for t in trades
         if not t.is_buyer_maker and t.side != TradeSide.SELL
     )
     sell_qty = sum(
