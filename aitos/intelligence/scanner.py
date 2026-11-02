@@ -536,9 +536,11 @@ class OpportunityScanner(AITOSModule):
         self._last_order_books[symbol] = order_book
         self._last_order_book_sources[symbol] = market_source
         ofi_directional_score = (
-            ofi_score if direction == TradeSide.LONG else 10.0 - ofi_score
+            ofi_score if direction == TradeSide.LONG
+            else 10.0 - ofi_score if direction == TradeSide.SHORT
+            else 5.0
         )
-        if adverse_flow_without_progress(trades, direction.value):
+        if direction is not None and adverse_flow_without_progress(trades, direction.value):
             logger.info(
                 "entry rejected: aggressive flow failed to produce price progress",
                 extra={"aitos_extra": {"symbol": symbol, "direction": direction.value, "market_source": market_source}},
