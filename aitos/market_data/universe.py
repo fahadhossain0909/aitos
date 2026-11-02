@@ -7,9 +7,21 @@ from aitos.exchange.base import ExchangeAdapter
 # High-liquidity, widely established contracts form the stable baseline.
 # Other contracts must earn inclusion through exchange metadata and 24h activity.
 CORE_USDT_PERPETUALS = (
-    "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT",
-    "DOGEUSDT", "ADAUSDT", "LINKUSDT", "LTCUSDT", "BCHUSDT",
-    "AVAXUSDT", "DOTUSDT", "TRXUSDT", "SUIUSDT", "TONUSDT",
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "LINKUSDT",
+    "LTCUSDT",
+    "BCHUSDT",
+    "AVAXUSDT",
+    "DOTUSDT",
+    "TRXUSDT",
+    "SUIUSDT",
+    "TONUSDT",
 )
 
 
@@ -23,7 +35,9 @@ def _contract_is_eligible(symbol: str, metadata: object) -> bool:
     # the explicit core allowlist is trusted; real Binance metadata is strict.
     if status == "UNKNOWN" and contract_type == "UNKNOWN" and not quote_asset:
         return symbol in CORE_USDT_PERPETUALS
-    return status == "TRADING" and contract_type == "PERPETUAL" and quote_asset == "USDT"
+    return (
+        status == "TRADING" and contract_type == "PERPETUAL" and quote_asset == "USDT"
+    )
 
 
 async def resolve_live_universe(
@@ -54,15 +68,16 @@ async def resolve_live_universe(
     if callable(ticker_method):
         try:
             tickers = await ticker_method()
-            ticker_by_symbol = {
-                str(t.get("symbol", "")).upper(): t for t in tickers
-            }
+            ticker_by_symbol = {str(t.get("symbol", "")).upper(): t for t in tickers}
             core = []
             for symbol in core_candidates:
                 ticker = ticker_by_symbol.get(symbol, {})
                 quote_volume = float(ticker.get("quoteVolume", 0.0) or 0.0)
                 trade_count = int(ticker.get("count", 0) or 0)
-                if quote_volume >= min_quote_volume_usd and trade_count >= min_trade_count:
+                if (
+                    quote_volume >= min_quote_volume_usd
+                    and trade_count >= min_trade_count
+                ):
                     core.append(symbol)
             for symbol, ticker in ticker_by_symbol.items():
                 if symbol not in eligible or symbol in core_candidates:
@@ -78,8 +93,10 @@ async def resolve_live_universe(
             # Do not widen the universe on a failed liquidity lookup.
             core, dynamic = core_candidates, []
     dynamic.sort(key=lambda item: (-item[1], item[0]))
-    selected = core + [s for s, _ in dynamic[:max(0, dynamic_limit)]]
-    selected = list(dict.fromkeys(selected))[:max(1, universe_limit)]
+    selected = core + [s for s, _ in dynamic[: max(0, dynamic_limit)]]
+    selected = list(dict.fromkeys(selected))[: max(1, universe_limit)]
     if not selected:
-        raise RuntimeError("exchange returned no eligible, trusted USDT perpetual symbols")
+        raise RuntimeError(
+            "exchange returned no eligible, trusted USDT perpetual symbols"
+        )
     return selected
