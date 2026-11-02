@@ -11,6 +11,7 @@ from aitos.eventbus.redis_bus import EventBus, Subscription
 from aitos.logging_setup import get_logger
 from aitos.market_data.bus import MarketDataBus, market_event_from_wire
 from aitos.market_data.contracts import MarketEventType, MarketSource
+from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")
@@ -35,6 +36,7 @@ class LiveSymbolCache:
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
     depth_event_history: deque = field(default_factory=lambda: deque(maxlen=200))
+    trade_depth_matcher: TradeDepthMatcher = field(default_factory=TradeDepthMatcher)
     stale_trade_rejections: int = 0
     stale_book_rejections: int = 0
     duplicate_trade_rejections: int = 0
@@ -181,6 +183,7 @@ class LiveScannerCache:
                 pass
             return
         state.trades.append(trade)
+        state.trade_depth_matcher.add_trade(trade)
         state.last_trade_at = received_at
         state.last_trade_source_at = trade.timestamp
         state.last_trade_received_at = received_at
@@ -229,7 +232,10 @@ class LiveScannerCache:
             state.depth_event_history.clear()
         state.order_book = book
         if book.depth_event:
-            state.depth_event_history.append(dict(book.depth_event))
+            depth_event = state.trade_depth_matcher.add_depth_event(
+                dict(book.depth_event)
+            )
+            state.depth_event_history.append(depth_event)
         state.last_book_at = received_at
         state.last_book_source_at = book.timestamp
         state.last_book_received_at = received_at
@@ -263,6 +269,7 @@ class LiveScannerCache:
             state.duplicate_trade_rejections += 1
             return
         state.trades.append(trade)
+        state.trade_depth_matcher.add_trade(trade)
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
@@ -319,7 +326,10 @@ class LiveScannerCache:
             return
         state.order_book = book
         if book.depth_event:
-            state.depth_event_history.append(dict(book.depth_event))
+            depth_event = state.trade_depth_matcher.add_depth_event(
+                dict(book.depth_event)
+            )
+            state.depth_event_history.append(depth_event)
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time
         state.last_book_received_at = received_at
