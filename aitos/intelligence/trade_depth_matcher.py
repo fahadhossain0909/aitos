@@ -94,13 +94,8 @@ class TradeDepthMatcher:
         return event
 
     def _reconcile(self) -> None:
-        cutoff = self._watermark_ms - self.match_window_ms
-        # Expired trades cannot explain future book reductions.
-        self._trades = deque(
-            item
-            for item in self._trades
-            if item["timestamp_ms"] >= cutoff and item["remaining_qty"] > 1e-12
-        )
+        # Reconcile before pruning so a delayed/out-of-order depth event can
+        # still match a trade already buffered within its exchange-time window.
         # Keep reduction records until their event has been finalized. The event
         # object itself is also retained by the scanner's bounded history.
         for reduction in self._reductions:
