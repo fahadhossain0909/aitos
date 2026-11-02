@@ -164,6 +164,12 @@ class TradeDepthMatcher:
                 bool(x.get("attribution_complete", False)) for x in levels
             ) if levels else True
 
+        cutoff = self._watermark_ms - self.match_window_ms
+        self._trades = deque(
+            item
+            for item in self._trades
+            if item["timestamp_ms"] >= cutoff and item["remaining_qty"] > 1e-12
+        )
         self._reductions = deque(
             item
             for item in self._reductions
