@@ -2,27 +2,12 @@
 
 from __future__ import annotations
 
+from aitos.config.tuning import DEFAULT_CORE_FUTURES_SYMBOLS
 from aitos.exchange.base import ExchangeAdapter
 
 # High-liquidity, widely established contracts form the stable baseline.
 # Other contracts must earn inclusion through exchange metadata and 24h activity.
-CORE_USDT_PERPETUALS = (
-    "BTCUSDT",
-    "ETHUSDT",
-    "BNBUSDT",
-    "SOLUSDT",
-    "XRPUSDT",
-    "DOGEUSDT",
-    "ADAUSDT",
-    "LINKUSDT",
-    "LTCUSDT",
-    "BCHUSDT",
-    "AVAXUSDT",
-    "DOTUSDT",
-    "TRXUSDT",
-    "SUIUSDT",
-    "TONUSDT",
-)
+CORE_USDT_PERPETUALS = DEFAULT_CORE_FUTURES_SYMBOLS
 
 
 def _contract_is_eligible(symbol: str, metadata: object) -> bool:
