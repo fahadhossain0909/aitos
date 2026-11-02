@@ -26,6 +26,10 @@ from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
+from aitos.intelligence.entry_quality import (
+    breakout_acceptance_score,
+    relative_strength_score,
+)
 from aitos.intelligence.funding import funding_rate_score
 from aitos.intelligence.liquidity import (
     absorption_proxy_score,
@@ -66,6 +70,8 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "a_stat": 0.08,
     "order_book_flow_imbalance": 0.08,
     "entry_timing": 0.07,
+    "breakout_acceptance": 0.07,
+    "relative_strength": 0.08,
 }
 REGIME_FIT_SCORE = {
     "trending": 9.0,
@@ -610,6 +616,15 @@ class OpportunityScanner(AITOSModule):
             if lead_lag_available
             else 5.0
         )
+        relative_strength = (
+            relative_strength_score(klines, reference_klines, direction.value)
+            if lead_lag_available else 5.0
+        )
+        breakout_acceptance = (
+            breakout_acceptance_score(klines, direction.value, atr=atr)
+            if structure_direction in {"bullish_bos", "bearish_bos"}
+            else 5.0
+        )
         funding_score = funding_rate_score(funding, direction)
         price_moved_up = klines[-1].close > klines[0].close
         oi_score = oi_trend_score(oi_current, oi_previous, direction, price_moved_up)
@@ -713,6 +728,8 @@ class OpportunityScanner(AITOSModule):
             "footprint_interaction": interaction_score,
             "order_book_flow_imbalance": ofi_score,
             "entry_timing": entry_timing_score,
+            "breakout_acceptance": breakout_acceptance,
+            "relative_strength": relative_strength,
         }
         if amt_context is not None:
             rl_context.update(
@@ -781,6 +798,8 @@ class OpportunityScanner(AITOSModule):
             "a_stat": a_stat_score is not None,
             "order_book_flow_imbalance": previous_book is not None,
             "entry_timing": atr > 0,
+            "breakout_acceptance": structure_direction in {"bullish_bos", "bearish_bos"},
+            "relative_strength": lead_lag_available,
         }
         weight_total = sum(
             self._weights.get(k, 0.0)
@@ -822,6 +841,7 @@ class OpportunityScanner(AITOSModule):
                 f"liquidity=orderbook+tradeflow, structure_strength={structure_strength:.1f}",
                 f"structure_bias={market_structure.bias}, structure_event={market_structure.event}, last_swing={market_structure.last_swing_type}",
                 f"regime={regime}",
+                f"breakout_acceptance={breakout_acceptance:.1f}, relative_strength={relative_strength:.1f}",
                 f"unavailable_features={[k for k, ok in component_availability.items() if not ok]}",
             ]
         )
