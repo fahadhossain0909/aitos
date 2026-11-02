@@ -62,7 +62,11 @@ async def test_resolve_live_universe_adds_only_liquid_dynamic_perpetuals():
 
     class Exchange:
         async def fetch_exchange_info(self, symbols=None):
-            return {"BTCUSDT": Metadata(), "ALPHAUSDT": Metadata(), "BETAUSDT": Metadata()}
+            return {
+                "BTCUSDT": Metadata(),
+                "ALPHAUSDT": Metadata(),
+                "BETAUSDT": Metadata(),
+            }
 
         async def fetch_24h_tickers(self):
             return [
