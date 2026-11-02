@@ -188,6 +188,11 @@ def depth_event_flow_analysis(
             "inferred_cancel_qty": 0.0,
             "cancellation_proxy_qty": 0.0,
             "matched_execution_qty": 0.0,
+            "matched_bid_execution_qty": 0.0,
+            "matched_ask_execution_qty": 0.0,
+            "bid_cancellation_proxy_qty": 0.0,
+            "ask_cancellation_proxy_qty": 0.0,
+            "matched_trade_count": 0.0,
             "attribution_pending_qty": 0.0,
             "execution_attributed_ratio": 0.0,
             "replenishment_qty": 0.0,
@@ -209,6 +214,11 @@ def depth_event_flow_analysis(
             "replenishment_qty",
             "addition_qty",
             "matched_execution_qty",
+            "matched_bid_execution_qty",
+            "matched_ask_execution_qty",
+            "bid_cancellation_proxy_qty",
+            "ask_cancellation_proxy_qty",
+            "matched_trade_count",
             "attribution_pending_qty",
         )
     }
