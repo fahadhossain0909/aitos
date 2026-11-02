@@ -50,15 +50,16 @@ def test_depth_event_aggregation_is_depth_weighted_and_bounded():
     result = depth_event_flow_analysis([
         {"ofi_raw": 2.0, "ofi_scale": 100.0, "bid_add_qty": 2.0,
          "bid_reduce_qty": 0.0, "ask_add_qty": 0.0, "ask_reduce_qty": 0.0,
-         "inferred_cancel_qty": 0.0, "replenishment_qty": 0.0},
+         "inferred_cancel_qty": 0.0, "replenishment_qty": 0.0, "addition_qty": 2.0},
         {"ofi_raw": 0.0, "ofi_scale": 100.0, "bid_add_qty": 0.0,
          "bid_reduce_qty": 1.0, "ask_add_qty": 0.0, "ask_reduce_qty": 0.0,
-         "inferred_cancel_qty": 1.0, "replenishment_qty": 0.5},
+         "inferred_cancel_qty": 1.0, "replenishment_qty": 0.5, "addition_qty": 2.0},
     ])
     assert result["ofi_score"] == 5.5
     assert result["inferred_cancel_qty"] == 1.0
     assert result["replenishment_qty"] == 0.5
     assert result["replenishment_ratio"] == 0.5
+    assert result["inferred_cancel_pressure"] == 0.2
 
 
 def test_order_book_depth_event_round_trips_through_wire_model():
