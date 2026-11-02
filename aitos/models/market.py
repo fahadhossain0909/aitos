@@ -112,7 +112,7 @@ class OrderBookSnapshot:
         return bid_depth / ask_depth if ask_depth else float("inf")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "symbol": self.symbol,
             "bid_levels": [{"price": p, "qty": q} for p, q in self.bids],
             "ask_levels": [{"price": p, "qty": q} for p, q in self.asks],
@@ -120,8 +120,10 @@ class OrderBookSnapshot:
             "depth_ratio": self.depth_ratio,
             "last_update_id": self.last_update_id,
             "timestamp": _iso(self.timestamp),
-            "depth_event": self.depth_event,
         }
+        if self.depth_event is not None:
+            payload["depth_event"] = self.depth_event
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OrderBookSnapshot:
