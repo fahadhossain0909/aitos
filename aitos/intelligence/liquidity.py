@@ -14,7 +14,7 @@ import math
 from collections.abc import Sequence
 
 from aitos.intelligence.order_flow import delta
-from aitos.models.market import OrderBookSnapshot, TradeTick
+from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
 
 def _near_depth(book: OrderBookSnapshot, levels: int = 5) -> tuple[float, float]:
@@ -173,8 +173,14 @@ def adverse_flow_without_progress(
     """
     if len(trades) < min_trades:
         return False
-    buy_qty = sum(abs(t.quantity) for t in trades if not t.is_buyer_maker)
-    sell_qty = sum(abs(t.quantity) for t in trades if t.is_buyer_maker)
+    buy_qty = sum(
+        abs(t.quantity) for t in trades
+        if not t.is_buyer_maker and t.side != TradeSide.SELL
+    )
+    sell_qty = sum(
+        abs(t.quantity) for t in trades
+        if t.is_buyer_maker or t.side == TradeSide.SELL
+    )
     total = buy_qty + sell_qty
     if total <= 0:
         return False
