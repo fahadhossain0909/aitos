@@ -149,7 +149,11 @@ class LearningExperienceRecorder(AITOSModule):
             decision=str(p.get("side", "outcome")),
             outcome="closed",
             reward=float(pnl),
-            price=(float(p["entry_price"]) if p.get("entry_price") is not None else None),
+            price=(
+                float(p["entry_price"])
+                if p.get("entry_price") is not None
+                else None
+            ),
             features=dict(p.get("agent_consensus") or {}),
             market_state={"regime": p.get("regime")},
             metadata={
