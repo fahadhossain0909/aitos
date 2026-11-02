@@ -83,7 +83,8 @@ def sweep_potential_score(book: OrderBookSnapshot, levels: int = 5) -> float:
     mid = (book.best_bid + book.best_ask) / 2
     if mid <= 0 or bid + ask <= 0:
         return 10.0
-    depth_per_price = (bid + ask) / (2 * mid)
+    # Depth is reported in native quantity units; without contract-specific
+    # notional normalization it is not comparable across symbols.
     # Relative quantity is not comparable across symbols, so use the
     # coefficient of variation of level quantities as a stability proxy.
     levels_qty = [q for _, q in book.bids[:levels]] + [q for _, q in book.asks[:levels]]
@@ -126,12 +127,64 @@ def absorption_proxy_score(
 def liquidity_intelligence_score(
     book: OrderBookSnapshot, trades: Sequence[TradeTick] = ()
 ) -> float:
-    """Composite liquidity score used by the scanner."""
-    scores = (
-        liquidity_quality_score(book),
-        depth_imbalance_score(book),
-        liquidity_wall_score(book),
-        sweep_potential_score(book),
-        absorption_proxy_score(book, trades),
-    )
-    return round(sum(scores) / len(scores), 2)
+    """Execution-quality score only; directional/risk metrics stay separate.
+
+    Sweep potential and absorption are adverse-selection diagnostics, not
+    positive liquidity quality. Directional depth imbalance is also excluded
+    because averaging it into quality biases LONG and SHORT symmetrically.
+    """
+    return liquidity_quality_score(book)
+
+
+def order_book_flow_imbalance(
+    previous: OrderBookSnapshot | None,
+    current: OrderBookSnapshot,
+    *,
+    levels: int = 5,
+) -> float:
+    """Return a normalized 0-10 best-quote OFI score (5 = neutral).
+
+    This is a consecutive-snapshot event measure, not a static depth ratio.
+    Positive values indicate bid-side pressure; negative values ask-side.
+    """
+    if previous is None or not previous.bids or not previous.asks or not current.bids or not current.asks:
+        return 5.0
+    pb, pq = previous.bids[0]
+    pa, aq = previous.asks[0]
+    cb, cq = current.bids[0]
+    ca, cqa = current.asks[0]
+    bid_flow = cq if cb > pb else (cq - pq if cb == pb else -pq)
+    ask_flow = -cqa if ca < pa else (-(cqa - aq) if ca == pa else aq)
+    raw = bid_flow + ask_flow
+    scale = sum(q for _, q in previous.bids[:levels] + previous.asks[:levels])
+    scale += sum(q for _, q in current.bids[:levels] + current.asks[:levels])
+    normalized = raw / max(scale, 1e-12)
+    return round(max(0.0, min(10.0, 5.0 + 5.0 * normalized * levels)), 2)
+
+
+def adverse_flow_without_progress(
+    trades: Sequence[TradeTick], direction: str, *, min_trades: int = 20,
+    min_dominance: float = 0.65, max_progress_bps: float = 1.0,
+) -> bool:
+    """Detect aggressive flow that fails to make directional price progress.
+
+    This conservative veto requires enough executions and a clear dominant
+    aggressor; it is a warning, not proof of a hidden institutional order.
+    """
+    if len(trades) < min_trades:
+        return False
+    buy_qty = sum(abs(t.quantity) for t in trades if not t.is_buyer_maker)
+    sell_qty = sum(abs(t.quantity) for t in trades if t.is_buyer_maker)
+    total = buy_qty + sell_qty
+    if total <= 0:
+        return False
+    first, last = float(trades[0].price), float(trades[-1].price)
+    if first <= 0:
+        return False
+    progress_bps = (last - first) / first * 10_000
+    side = direction.lower()
+    if side == "long":
+        return buy_qty / total >= min_dominance and progress_bps <= max_progress_bps
+    if side == "short":
+        return sell_qty / total >= min_dominance and progress_bps >= -max_progress_bps
+    return False
