@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from typing import Any
 
 from aitos.intelligence.order_flow import delta
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
