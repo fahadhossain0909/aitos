@@ -200,6 +200,7 @@ class OpportunityScanner(AITOSModule):
         self._initialized = False
         self._last_oi = {}
         self._last_order_books = {}
+        self._last_order_book_sources = {}
         self._last_amt_profile = {}
         self._last_amt_context = {}
         self._liquidity_trackers = {}
@@ -526,12 +527,17 @@ class OpportunityScanner(AITOSModule):
         )
         self._last_oi[symbol] = oi_current
 
-        previous_book = self._last_order_books.get(symbol)
+        previous_book = (
+            self._last_order_books.get(symbol)
+            if self._last_order_book_sources.get(symbol) == market_source
+            else None
+        )
         ofi_score = order_book_flow_imbalance(previous_book, order_book)
+        self._last_order_books[symbol] = order_book
+        self._last_order_book_sources[symbol] = market_source
         ofi_directional_score = (
             ofi_score if direction == TradeSide.LONG else 10.0 - ofi_score
         )
-        self._last_order_books[symbol] = order_book
         if adverse_flow_without_progress(trades, direction.value):
             logger.info(
                 "entry rejected: aggressive flow failed to produce price progress",
