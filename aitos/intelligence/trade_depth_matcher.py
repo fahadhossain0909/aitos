@@ -99,13 +99,17 @@ class TradeDepthMatcher:
         # still match a trade already buffered within its exchange-time window.
         # Keep reduction records until their event has been finalized. The event
         # object itself is also retained by the scanner's bounded history.
+        trades_by_level: dict[tuple[str, float], list[dict[str, Any]]] = {}
+        for trade in self._trades:
+            key = (trade["side"], trade["price"])
+            trades_by_level.setdefault(key, []).append(trade)
+
         for reduction in self._reductions:
             if reduction["remaining_qty"] <= 1e-12:
                 continue
-            for trade in self._trades:
+            key = (reduction["side"], reduction["price"])
+            for trade in trades_by_level.get(key, ()):
                 if trade["remaining_qty"] <= 1e-12:
-                    continue
-                if reduction["side"] != trade["side"]:
                     continue
                 if (
                     abs(reduction["timestamp_ms"] - trade["timestamp_ms"])
