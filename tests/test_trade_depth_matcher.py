@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from aitos.intelligence.liquidity import depth_event_flow_analysis
 from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
 from aitos.models.market import TradeSide, TradeTick
 
@@ -80,3 +81,26 @@ def test_trade_quantity_cannot_be_double_counted_across_depth_reductions():
     matcher.add_trade(_trade(1, quantity=5.0, offset_ms=50))
 
     assert first["matched_execution_qty"] + second["matched_execution_qty"] == 5.0
+
+
+
+def test_execution_matched_reduction_is_not_reported_as_cancellation():
+    matcher = TradeDepthMatcher()
+    event = matcher.add_depth_event(_depth_event(quantity=5.0))
+    matcher.add_trade(_trade(1, quantity=3.0, offset_ms=200))
+    result = depth_event_flow_analysis([event])
+
+    assert result["matched_execution_qty"] == 3.0
+    assert result["cancellation_proxy_qty"] == 0.0
+    assert result["attribution_pending_qty"] == 2.0
+
+
+def test_finalized_unmatched_quantity_is_reported_as_cancellation_proxy():
+    matcher = TradeDepthMatcher()
+    event = matcher.add_depth_event(_depth_event(quantity=5.0))
+    matcher.add_trade(_trade(1, price=101.0, offset_ms=1_001))
+    result = depth_event_flow_analysis([event])
+
+    assert result["matched_execution_qty"] == 0.0
+    assert result["cancellation_proxy_qty"] == 5.0
+    assert result["inferred_cancel_qty"] == 5.0
