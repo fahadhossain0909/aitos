@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import pytest
 
 from aitos.core.contracts import Event
@@ -17,7 +15,9 @@ class FakeRepository:
 @pytest.mark.asyncio
 async def test_outcome_record_retains_entry_features_and_mae_mfe():
     repository = FakeRepository()
-    recorder = LearningExperienceRecorder(event_bus=None, repository=repository, source="paper")
+    recorder = LearningExperienceRecorder(
+        event_bus=None, repository=repository, source="paper"
+    )
     event = Event(
         topic="journal.outcome_attributed",
         payload={
