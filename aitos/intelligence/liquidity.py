@@ -218,9 +218,11 @@ def depth_event_flow_analysis(
             "matched_ask_execution_qty",
             "bid_cancellation_proxy_qty",
             "ask_cancellation_proxy_qty",
-            "matched_trade_count",
             "attribution_pending_qty",
         )
+    }
+    matched_trade_ids = {
+        trade_id for event in events for trade_id in event.get("matched_trade_ids", ())
     }
     cancellation_proxy = sum(
         max(
@@ -243,6 +245,7 @@ def depth_event_flow_analysis(
         {
             "cancellation_proxy_qty": cancellation_proxy,
             "inferred_cancel_qty": cancellation_proxy,
+            "matched_trade_count": float(len(matched_trade_ids)),
             "ofi_score": round(max(0.0, min(10.0, 5.0 + 50.0 * normalized)), 2),
             "replenishment_ratio": round(
                 totals["replenishment_qty"] / max(reduction_total, 1e-12), 4
