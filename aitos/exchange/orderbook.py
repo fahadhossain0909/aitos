@@ -40,7 +40,6 @@ class LocalOrderBook:
         self.last_update_id: int | None = None
         self.initialized = False
         self._awaiting_first_update = False
-        self._recent_reductions.clear()
         self._recent_reductions: dict[tuple[str, float], tuple[int, float]] = {}
         self._forensics: dict[str, Any] = {
             "apply_count": 0,
