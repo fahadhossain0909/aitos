@@ -53,7 +53,11 @@ def book_snapshot_event(
             "bids": [{"price": p, "quantity": q} for p, q in book.bids],
             "asks": [{"price": p, "quantity": q} for p, q in book.asks],
             "last_update_id": book.last_update_id,
-            **({"depth_event": book.depth_event} if book.depth_event is not None else {}),
+            **(
+                {"depth_event": book.depth_event}
+                if book.depth_event is not None
+                else {}
+            ),
         },
         source=source,
         ingest_time=received,
