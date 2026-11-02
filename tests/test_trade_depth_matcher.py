@@ -104,3 +104,23 @@ def test_finalized_unmatched_quantity_is_reported_as_cancellation_proxy():
     assert result["matched_execution_qty"] == 0.0
     assert result["cancellation_proxy_qty"] == 5.0
     assert result["inferred_cancel_qty"] == 5.0
+
+
+
+def test_aggressive_buy_matches_ask_reduction():
+    matcher = TradeDepthMatcher()
+    event = matcher.add_depth_event(
+        _depth_event(side="ask", price=100.5, quantity=2.0)
+    )
+    matcher.add_trade(
+        _trade(
+            1,
+            side=TradeSide.BUY,
+            price=100.5,
+            quantity=2.0,
+            offset_ms=100,
+        )
+    )
+
+    assert event["matched_execution_qty"] == 2.0
+    assert event["unmatched_reduction_qty"] == 0.0
