@@ -312,6 +312,8 @@ class LiveScannerCache:
             state.duplicate_book_rejections += 1
             return
         state.order_book = book
+        if book.depth_event:
+            state.depth_event_history.append(dict(book.depth_event))
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time
         state.last_book_received_at = received_at
