@@ -74,6 +74,7 @@ class TradeDepthMatcher:
             reduction.update(
                 {
                     "matched_execution_qty": 0.0,
+                    "matched_trade_ids": [],
                     "unmatched_reduction_qty": quantity,
                     "attribution_pending_qty": quantity,
                     "cancellation_proxy_qty": 0.0,
@@ -124,6 +125,8 @@ class TradeDepthMatcher:
                 level["matched_execution_qty"] = round(
                     level["matched_execution_qty"] + matched, 12
                 )
+                if trade["trade_id"] not in level["matched_trade_ids"]:
+                    level["matched_trade_ids"].append(trade["trade_id"])
                 level["unmatched_reduction_qty"] = round(
                     max(0.0, level["quantity"] - level["matched_execution_qty"]), 12
                 )
@@ -148,6 +151,31 @@ class TradeDepthMatcher:
             event["matched_execution_qty"] = round(
                 sum(float(x.get("matched_execution_qty", 0.0)) for x in levels), 12
             )
+            event["matched_trade_ids"] = sorted(
+                {
+                    trade_id
+                    for level in levels
+                    for trade_id in level.get("matched_trade_ids", ())
+                }
+            )
+            event["matched_trade_count"] = float(len(event["matched_trade_ids"]))
+            for side in ("bid", "ask"):
+                event[f"matched_{side}_execution_qty"] = round(
+                    sum(
+                        float(level.get("matched_execution_qty", 0.0))
+                        for level in levels
+                        if level.get("side") == side
+                    ),
+                    12,
+                )
+                event[f"{side}_cancellation_proxy_qty"] = round(
+                    sum(
+                        float(level.get("cancellation_proxy_qty", 0.0))
+                        for level in levels
+                        if level.get("side") == side
+                    ),
+                    12,
+                )
             event["unmatched_reduction_qty"] = round(
                 sum(float(x.get("unmatched_reduction_qty", 0.0)) for x in levels), 12
             )
