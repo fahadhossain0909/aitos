@@ -68,6 +68,7 @@ async def main() -> None:
         core_symbols=settings.tuning.scanner.core_symbols,
         min_quote_volume_usd=settings.tuning.scanner.min_quote_volume_usd,
         min_trade_count=settings.tuning.scanner.min_trade_count,
+        min_contract_age_days=settings.tuning.scanner.min_contract_age_days,
         dynamic_limit=settings.tuning.scanner.dynamic_universe_limit,
         universe_limit=settings.tuning.scanner.universe_limit,
     )
