@@ -50,6 +50,7 @@ class ScannerTuning(BaseModel):
     core_symbols: tuple[str, ...] = DEFAULT_CORE_FUTURES_SYMBOLS
     min_quote_volume_usd: float = Field(default=10_000_000.0, ge=0)
     min_trade_count: int = Field(default=10_000, ge=0)
+    min_contract_age_days: int = Field(default=30, ge=0, le=3650)
     dynamic_universe_limit: int = Field(default=35, ge=0, le=5000)
 
 
@@ -218,6 +219,9 @@ def _env_overrides() -> dict[str, Any]:
             float,
         ),
         "AITOS_TUNING_SCANNER_MIN_TRADE_COUNT": ("scanner", "min_trade_count", int),
+        "AITOS_TUNING_SCANNER_MIN_CONTRACT_AGE_DAYS": (
+            "scanner", "min_contract_age_days", int
+        ),
         "AITOS_TUNING_SCANNER_DYNAMIC_UNIVERSE_LIMIT": (
             "scanner",
             "dynamic_universe_limit",
