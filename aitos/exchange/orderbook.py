@@ -265,6 +265,7 @@ class LocalOrderBook:
         return {
             "ofi_raw": weighted_ofi,
             "ofi_normalized": normalized,
+            "ofi_scale": scale,
             "ofi_score": max(0.0, min(10.0, 5.0 + 50.0 * normalized)),
             "bid_add_qty": bid_add,
             "bid_reduce_qty": bid_reduce,
