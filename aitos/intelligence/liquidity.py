@@ -250,6 +250,7 @@ def depth_event_flow_analysis(
     )
     return totals
 
+
 def adverse_flow_without_progress(
     trades: Sequence[TradeTick],
     direction: str,
