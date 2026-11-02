@@ -79,6 +79,10 @@ def parse_exchange_info(raw: dict) -> dict[str, SymbolFilters]:
             contract_type=str(symbol_info.get("contractType", "UNKNOWN")).upper(),
             quote_asset=str(symbol_info.get("quoteAsset", "")).upper(),
             base_asset=str(symbol_info.get("baseAsset", "")).upper(),
-            onboard_date=(int(symbol_info["onboardDate"]) if symbol_info.get("onboardDate") is not None else None),
+            onboard_date=(
+                int(symbol_info["onboardDate"])
+                if symbol_info.get("onboardDate") is not None
+                else None
+            ),
         )
     return result
