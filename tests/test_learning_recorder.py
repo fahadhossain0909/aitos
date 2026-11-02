@@ -1,0 +1,48 @@
+from datetime import datetime, timezone
+
+import pytest
+
+from aitos.core.contracts import Event
+from aitos.learning.recorder import LearningExperienceRecorder
+
+
+class FakeRepository:
+    def __init__(self):
+        self.records = []
+
+    async def save_learning_experience(self, record):
+        self.records.append(record)
+
+
+@pytest.mark.asyncio
+async def test_outcome_record_retains_entry_features_and_mae_mfe():
+    repository = FakeRepository()
+    recorder = LearningExperienceRecorder(event_bus=None, repository=repository, source="paper")
+    event = Event(
+        topic="journal.outcome_attributed",
+        payload={
+            "decision_id": "decision-1",
+            "trade_id": "trade-1",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "pnl": 12.5,
+            "pnl_percent": 1.25,
+            "entry_price": 100.0,
+            "exit_price": 102.0,
+            "exit_reason": "take_profit",
+            "regime": "trending",
+            "mae_r": 0.2,
+            "mfe_r": 1.5,
+            "agent_consensus": {"order_flow_bias": 8.0, "entry_timing": 7.0},
+        },
+        source_module="journal-system",
+    )
+
+    await recorder._on_outcome(event)
+
+    record = repository.records[0]
+    assert record.features == {"order_flow_bias": 8.0, "entry_timing": 7.0}
+    assert record.metadata["mae_r"] == 0.2
+    assert record.metadata["mfe_r"] == 1.5
+    assert record.price == 100.0
+    assert record.reward == 12.5
