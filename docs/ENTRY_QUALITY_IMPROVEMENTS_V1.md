@@ -34,6 +34,7 @@ Anecdotes and working papers are not proof of profitability. The implementation 
 - `AITOS_TUNING_SCANNER_CORE_SYMBOLS`: comma-separated trusted core contracts.
 - `AITOS_TUNING_SCANNER_MIN_QUOTE_VOLUME_USD`: default 10,000,000 USDT 24h quote volume.
 - `AITOS_TUNING_SCANNER_MIN_TRADE_COUNT`: default 10,000 24h trades.
+- `AITOS_TUNING_SCANNER_MIN_CONTRACT_AGE_DAYS`: default 30 days for non-core listings; core contracts are exempt from the age floor but still pass live 24h liquidity checks.
 - `AITOS_TUNING_SCANNER_DYNAMIC_UNIVERSE_LIMIT`: default 35 additional contracts.
 - `AITOS_TUNING_SCANNER_UNIVERSE_LIMIT`: existing overall scanner subscription cap.
 
