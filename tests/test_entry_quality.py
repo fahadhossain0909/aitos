@@ -21,8 +21,12 @@ def _book(bid_price, bid_qty, ask_price, ask_qty):
 
 def _trade(i, price, side):
     return TradeTick(
-        symbol="BTCUSDT", trade_id=i, price=price, quantity=1.0,
-        side=side, is_buyer_maker=(side == TradeSide.SELL),
+        symbol="BTCUSDT",
+        trade_id=i,
+        price=price,
+        quantity=1.0,
+        side=side,
+        is_buyer_maker=(side == TradeSide.SELL),
     )
 
 
