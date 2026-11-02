@@ -62,6 +62,11 @@ class OrderFlowEngine:
         self._cvd = 0.0
 
     def ingest(self, trade: TradeTick) -> OrderFlowFeatures:
+        # Keep cumulative delta consistent with the bounded rolling window.
+        # Without subtracting an evicted trade, CVD silently becomes an
+        # unbounded lifetime accumulator while all other features are rolling.
+        if len(self._trades) == self._max_trades:
+            self._cvd -= self._signed(self._trades[0])
         self._trades.append(trade)
         self._cvd += self._signed(trade)
         return self.features()
