@@ -36,7 +36,9 @@ def _contract_is_eligible(
         onboard_date = getattr(metadata, "onboard_date", None)
         if onboard_date is None:
             return False
-        minimum_onboard_date = int(time.time() * 1000) - min_contract_age_days * 86_400_000
+        minimum_onboard_date = (
+            int(time.time() * 1000) - min_contract_age_days * 86_400_000
+        )
         if int(onboard_date) > minimum_onboard_date:
             return False
     return True
