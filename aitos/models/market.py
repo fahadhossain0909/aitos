@@ -91,6 +91,7 @@ class OrderBookSnapshot:
     asks: tuple[tuple[float, float], ...]
     last_update_id: int
     timestamp: datetime
+    depth_event: dict[str, float] | None = None
 
     @property
     def best_bid(self) -> float:
@@ -119,6 +120,7 @@ class OrderBookSnapshot:
             "depth_ratio": self.depth_ratio,
             "last_update_id": self.last_update_id,
             "timestamp": _iso(self.timestamp),
+            "depth_event": self.depth_event,
         }
 
     @classmethod
@@ -145,6 +147,11 @@ class OrderBookSnapshot:
             asks=asks,
             last_update_id=int(data["last_update_id"]),
             timestamp=_dt(data["timestamp"]),
+            depth_event=(
+                {str(k): float(v) for k, v in data["depth_event"].items()}
+                if isinstance(data.get("depth_event"), dict)
+                else None
+            ),
         )
 
 
