@@ -177,7 +177,9 @@ def depth_event_flow_analysis(events: Sequence[dict[str, float]]) -> dict[str, f
             "ask_add_qty": 0.0, "ask_reduce_qty": 0.0, "inferred_cancel_qty": 0.0,
             "replenishment_qty": 0.0, "replenishment_ratio": 0.0, "event_count": 0.0,
         }
-    normalized = sum(e.get("ofi_normalized", 0.0) for e in events)
+    raw_ofi = sum(e.get("ofi_raw", 0.0) for e in events)
+    depth_scale = sum(e.get("ofi_scale", 0.0) for e in events)
+    normalized = raw_ofi / max(depth_scale, 1e-12)
     totals = {
         key: sum(max(0.0, e.get(key, 0.0)) for e in events)
         for key in (
