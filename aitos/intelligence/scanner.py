@@ -617,6 +617,18 @@ class OpportunityScanner(AITOSModule):
                     "order_book_flow_imbalance": ofi_directional_score,
                     "depth_event_count": depth_analysis["event_count"],
                     "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
+                    "depth_matched_execution_qty": depth_analysis[
+                        "matched_execution_qty"
+                    ],
+                    "depth_attribution_pending_qty": depth_analysis[
+                        "attribution_pending_qty"
+                    ],
+                    "depth_execution_attributed_ratio": depth_analysis[
+                        "execution_attributed_ratio"
+                    ],
+                    "depth_cancellation_proxy_qty": depth_analysis[
+                        "cancellation_proxy_qty"
+                    ],
                     "depth_replenishment_qty": depth_analysis["replenishment_qty"],
                     "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
                     "depth_inferred_cancel_pressure": depth_analysis[
@@ -768,6 +780,18 @@ class OpportunityScanner(AITOSModule):
             "order_book_flow_imbalance": ofi_directional_score,
             "depth_inferred_cancel_pressure": depth_analysis[
                 "inferred_cancel_pressure"
+            ],
+            "depth_matched_execution_qty": depth_analysis[
+                "matched_execution_qty"
+            ],
+            "depth_attribution_pending_qty": depth_analysis[
+                "attribution_pending_qty"
+            ],
+            "depth_execution_attributed_ratio": depth_analysis[
+                "execution_attributed_ratio"
+            ],
+            "depth_cancellation_proxy_qty": depth_analysis[
+                "cancellation_proxy_qty"
             ],
             "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
             "entry_timing": entry_timing_score,
