@@ -8,10 +8,10 @@ from datetime import datetime, timezone
 
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
 from aitos.logging_setup import get_logger
 from aitos.market_data.bus import MarketDataBus, market_event_from_wire
 from aitos.market_data.contracts import MarketEventType, MarketSource
-from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")

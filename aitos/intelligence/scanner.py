@@ -24,18 +24,18 @@ from aitos.intelligence import indicators
 from aitos.intelligence.a_stat_bridge import AStatBridge
 from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.auction import auction_context_score
-from aitos.intelligence.footprint import FootprintEngine
-from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.entry_quality import (
     breakout_acceptance_score,
     relative_strength_score,
 )
+from aitos.intelligence.footprint import FootprintEngine
+from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.funding import funding_rate_score
 from aitos.intelligence.liquidity import (
     absorption_proxy_score,
     adverse_flow_without_progress,
-    depth_imbalance_score,
     depth_event_flow_analysis,
+    depth_imbalance_score,
     liquidity_intelligence_score,
     liquidity_quality_score,
     liquidity_wall_score,

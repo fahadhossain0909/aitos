@@ -1,10 +1,10 @@
-from datetime import datetime, timezone
 from dataclasses import replace
+from datetime import datetime, timezone
 
 from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.intelligence.liquidity import depth_event_flow_analysis
-from aitos.models.market import OrderBookSnapshot
 from aitos.market_data.legacy_bridge import book_snapshot_event
+from aitos.models.market import OrderBookSnapshot
 
 
 def _seed_book():
