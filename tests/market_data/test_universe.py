@@ -26,7 +26,7 @@ async def test_resolve_live_universe_fails_when_empty():
         async def fetch_exchange_info(self, symbols=None):
             return {}
 
-    with pytest.raises(RuntimeError, match="no USDT trading symbols"):
+    with pytest.raises(RuntimeError, match="no eligible, trusted USDT perpetual symbols"):
         await resolve_live_universe(EmptyExchange())
 
 
@@ -48,7 +48,9 @@ async def test_resolve_live_universe_requires_valid_contract_metadata_for_non_co
             }
 
         async def fetch_24h_tickers(self):
-            return []
+            return [
+                {"symbol": "BTCUSDT", "quoteVolume": "30000000000", "count": 500000}
+            ]
 
     assert await resolve_live_universe(Exchange()) == ["BTCUSDT"]
 
