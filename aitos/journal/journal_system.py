@@ -378,7 +378,9 @@ class JournalSystem(AITOSModule):
                             "mfe_price": trade_dict.get("mfe_price"),
                             "mae_r": trade_dict.get("mae_r"),
                             "mfe_r": trade_dict.get("mfe_r"),
-                            "agent_consensus": dict(trade_dict.get("agent_consensus") or {}),
+                            "agent_consensus": dict(
+                                trade_dict.get("agent_consensus") or {}
+                            ),
                         },
                         source_module=self.module_id,
                     )
