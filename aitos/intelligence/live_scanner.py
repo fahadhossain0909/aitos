@@ -34,6 +34,7 @@ class LiveSymbolCache:
     last_book_event_id: str | None = None
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
+    depth_event_history: deque = field(default_factory=lambda: deque(maxlen=200)))
     stale_trade_rejections: int = 0
     stale_book_rejections: int = 0
     duplicate_trade_rejections: int = 0
@@ -221,6 +222,8 @@ class LiveScannerCache:
                 pass
             return
         state.order_book = book
+        if book.depth_event:
+            state.depth_event_history.append(dict(book.depth_event))
         state.last_book_at = received_at
         state.last_book_source_at = book.timestamp
         state.last_book_received_at = received_at
