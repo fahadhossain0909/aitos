@@ -29,6 +29,16 @@ Trader discussions repeatedly raise the risk of reading static depth as genuine 
 
 Anecdotes and working papers are not proof of profitability. The implementation therefore exposes evidence and conservative vetoes, while performance must be evaluated with paper trading and out-of-sample replay.
 
+## Configuration defaults
+
+- `AITOS_TUNING_SCANNER_CORE_SYMBOLS`: comma-separated trusted core contracts.
+- `AITOS_TUNING_SCANNER_MIN_QUOTE_VOLUME_USD`: default 10,000,000 USDT 24h quote volume.
+- `AITOS_TUNING_SCANNER_MIN_TRADE_COUNT`: default 10,000 24h trades.
+- `AITOS_TUNING_SCANNER_DYNAMIC_UNIVERSE_LIMIT`: default 35 additional contracts.
+- `AITOS_TUNING_SCANNER_UNIVERSE_LIMIT`: existing overall scanner subscription cap.
+
+These defaults should be reviewed against the observed AITOS paper-trading universe and order sizes before production use.
+
 ## Important limitations / next validation
 
 - Best-quote OFI uses successive scanner snapshots. It is not full-depth, event-by-event OFI. A dedicated depth-delta accumulator with persistence/cancel-replenishment metrics is a future enhancement.
