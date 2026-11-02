@@ -36,5 +36,5 @@ def test_breakout_acceptance_rewards_two_closes_beyond_boundary():
 
 
 def test_breakout_acceptance_penalizes_close_back_inside_range():
-    rows = _klines([100, 100, 100, 100, 100, 100, 102, 100.5], high_offset=0.2, low_offset=0.2)
+    rows = _klines([100, 100, 100, 100, 100, 100, 102, 99.5], high_offset=0.2, low_offset=0.2)
     assert breakout_acceptance_score(rows, "LONG", atr=1.0) == 2.0
