@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
+from dataclasses import replace
 
 from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.intelligence.liquidity import depth_event_flow_analysis
 from aitos.models.market import OrderBookSnapshot
+from aitos.market_data.legacy_bridge import book_snapshot_event
 
 
 def _seed_book():
@@ -67,3 +69,10 @@ def test_order_book_depth_event_round_trips_through_wire_model():
     event = {"ofi_raw": 1.25, "ofi_scale": 50.0, "ofi_normalized": 0.025}
     restored = OrderBookSnapshot.from_dict({**book.to_dict(), "depth_event": event})
     assert restored.depth_event == event
+
+
+
+def test_depth_event_metrics_survive_canonical_market_data_bridge():
+    event_metrics = {"ofi_raw": 2.0, "ofi_scale": 100.0, "ofi_normalized": 0.02}
+    event = book_snapshot_event(replace(_seed_book(), depth_event=event_metrics))
+    assert event.payload["depth_event"] == event_metrics
