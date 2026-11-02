@@ -220,7 +220,9 @@ def _env_overrides() -> dict[str, Any]:
         ),
         "AITOS_TUNING_SCANNER_MIN_TRADE_COUNT": ("scanner", "min_trade_count", int),
         "AITOS_TUNING_SCANNER_MIN_CONTRACT_AGE_DAYS": (
-            "scanner", "min_contract_age_days", int
+            "scanner",
+            "min_contract_age_days",
+            int,
         ),
         "AITOS_TUNING_SCANNER_DYNAMIC_UNIVERSE_LIMIT": (
             "scanner",
