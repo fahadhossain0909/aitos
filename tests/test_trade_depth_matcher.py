@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
 from aitos.intelligence.liquidity import depth_event_flow_analysis
+from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
-from aitos.models.market import TradeSide, TradeTick
+from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
+import pytest
 
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -124,3 +126,33 @@ def test_aggressive_buy_matches_ask_reduction():
     assert event["matched_trade_ids"] == [1]
     assert event["matched_trade_count"] == 1.0
     assert event["unmatched_reduction_qty"] == 0.0
+
+
+
+@pytest.mark.asyncio
+async def test_live_scanner_cache_matches_trade_events_to_depth_reductions():
+    cache = LiveScannerCache(None, ["BTCUSDT"])
+    timestamp = BASE
+    event_time_ms = int(timestamp.timestamp() * 1000)
+    book = OrderBookSnapshot(
+        symbol="BTCUSDT",
+        bids=((100.0, 5.0),),
+        asks=((100.5, 5.0),),
+        last_update_id=11,
+        timestamp=timestamp,
+        depth_event={
+            "event_time_ms": event_time_ms,
+            "reduction_qty": 2.0,
+            "inferred_cancel_qty": 2.0,
+            "reductions": [
+                {"side": "bid", "price": 100.0, "quantity": 2.0}
+            ],
+        },
+    )
+
+    await cache.accept_live_order_book(book)
+    await cache.accept_live_trade(_trade(1, quantity=2.0, offset_ms=100))
+
+    state = cache.snapshot("BTCUSDT")
+    assert state is not None
+    assert state.depth_event_history[0]["matched_execution_qty"] == 2.0
