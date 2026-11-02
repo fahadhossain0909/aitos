@@ -26,7 +26,9 @@ async def test_resolve_live_universe_fails_when_empty():
         async def fetch_exchange_info(self, symbols=None):
             return {}
 
-    with pytest.raises(RuntimeError, match="no eligible, trusted USDT perpetual symbols"):
+    with pytest.raises(
+        RuntimeError, match="no eligible, trusted USDT perpetual symbols"
+    ):
         await resolve_live_universe(EmptyExchange())
 
 
