@@ -786,6 +786,19 @@ class OpportunityScanner(AITOSModule):
             "depth_execution_attributed_ratio": depth_analysis[
                 "execution_attributed_ratio"
             ],
+            "depth_matched_bid_execution_qty": depth_analysis[
+                "matched_bid_execution_qty"
+            ],
+            "depth_matched_ask_execution_qty": depth_analysis[
+                "matched_ask_execution_qty"
+            ],
+            "depth_bid_cancellation_proxy_qty": depth_analysis[
+                "bid_cancellation_proxy_qty"
+            ],
+            "depth_ask_cancellation_proxy_qty": depth_analysis[
+                "ask_cancellation_proxy_qty"
+            ],
+            "depth_matched_trade_count": depth_analysis["matched_trade_count"],
             "depth_cancellation_proxy_qty": depth_analysis["cancellation_proxy_qty"],
             "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
             "entry_timing": entry_timing_score,
