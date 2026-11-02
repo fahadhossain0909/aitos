@@ -619,6 +619,7 @@ class OpportunityScanner(AITOSModule):
                     "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
                     "depth_replenishment_qty": depth_analysis["replenishment_qty"],
                     "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+                    "depth_inferred_cancel_pressure": depth_analysis["inferred_cancel_pressure"],
                     "entry_extension_atr": round(extension_atr, 3),
                     "entry_timing_score": entry_timing_score,
                     "direction": direction.value if direction else "none",
@@ -763,6 +764,8 @@ class OpportunityScanner(AITOSModule):
             "open_interest_trend": oi_score,
             "footprint_interaction": interaction_score,
             "order_book_flow_imbalance": ofi_directional_score,
+            "depth_inferred_cancel_pressure": depth_analysis["inferred_cancel_pressure"],
+            "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
             "entry_timing": entry_timing_score,
             "breakout_acceptance": breakout_acceptance,
             "relative_strength": relative_strength,
@@ -860,7 +863,7 @@ class OpportunityScanner(AITOSModule):
             f"{k.replace('_',' ')}={v:.1f}/10" for k, v in component_scores.items()
         ]
         rationale.append(
-            f"executed_trades={len(trades)}, candle_cvd={candle_cvd:.1f}, live_auction={live_auction:.1f}, candle_auction={candle_auction:.1f}, amt_score={amt_score:.1f}, regime={regime}, structure={structure_direction}, direction={direction.value}, market_source={market_source}, ofi={ofi_score:.2f}, entry_extension_atr={extension_atr:.3f}"
+            f"executed_trades={len(trades)}, candle_cvd={candle_cvd:.1f}, live_auction={live_auction:.1f}, candle_auction={candle_auction:.1f}, amt_score={amt_score:.1f}, regime={regime}, structure={structure_direction}, direction={direction.value}, market_source={market_source}, ofi={ofi_score:.2f}, inferred_cancel_pressure={depth_analysis['inferred_cancel_pressure']:.3f}, replenishment_ratio={depth_analysis['replenishment_ratio']:.3f}, entry_extension_atr={extension_atr:.3f}"
         )
         if amt_context is not None:
             rationale.extend(
