@@ -256,7 +256,12 @@ class LocalOrderBook:
                     prior = self._recent_reductions.get(key)
                     self._recent_reductions[key] = (
                         now_ms,
-                        reduced + (prior[1] if prior and now_ms - prior[0] <= horizon_ms else 0.0),
+                        reduced
+                        + (
+                            prior[1]
+                            if prior and now_ms - prior[0] <= horizon_ms
+                            else 0.0
+                        ),
                     )
         scale = sum(sorted(self._bids.values(), reverse=True)[:20])
         scale += sum(sorted(self._asks.values())[:20])
