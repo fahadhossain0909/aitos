@@ -168,6 +168,33 @@ def order_book_flow_imbalance(
     return round(max(0.0, min(10.0, 5.0 + 5.0 * normalized * levels)), 2)
 
 
+
+def depth_event_flow_analysis(events: Sequence[dict[str, float]]) -> dict[str, float]:
+    """Aggregate recent full-depth events; L2 reductions remain cancellation proxies."""
+    if not events:
+        return {
+            "ofi_score": 5.0, "bid_add_qty": 0.0, "bid_reduce_qty": 0.0,
+            "ask_add_qty": 0.0, "ask_reduce_qty": 0.0, "inferred_cancel_qty": 0.0,
+            "replenishment_qty": 0.0, "replenishment_ratio": 0.0, "event_count": 0.0,
+        }
+    normalized = sum(e.get("ofi_normalized", 0.0) for e in events)
+    totals = {
+        key: sum(max(0.0, e.get(key, 0.0)) for e in events)
+        for key in (
+            "bid_add_qty", "bid_reduce_qty", "ask_add_qty", "ask_reduce_qty",
+            "inferred_cancel_qty", "replenishment_qty",
+        )
+    }
+    totals.update({
+        "ofi_score": round(max(0.0, min(10.0, 5.0 + 5.0 * normalized)), 2),
+        "replenishment_ratio": round(
+            totals["replenishment_qty"] / max(totals["inferred_cancel_qty"], 1e-12), 4
+        ),
+        "event_count": float(len(events)),
+    })
+    return totals
+
+
 def adverse_flow_without_progress(
     trades: Sequence[TradeTick],
     direction: str,
