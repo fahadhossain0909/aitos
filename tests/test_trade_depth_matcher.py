@@ -1,10 +1,11 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from aitos.intelligence.liquidity import depth_event_flow_analysis
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
-import pytest
 
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -144,9 +145,7 @@ async def test_live_scanner_cache_matches_trade_events_to_depth_reductions():
             "event_time_ms": event_time_ms,
             "reduction_qty": 2.0,
             "inferred_cancel_qty": 2.0,
-            "reductions": [
-                {"side": "bid", "price": 100.0, "quantity": 2.0}
-            ],
+            "reductions": [{"side": "bid", "price": 100.0, "quantity": 2.0}],
         },
     )
 
