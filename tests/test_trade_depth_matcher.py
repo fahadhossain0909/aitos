@@ -90,6 +90,7 @@ def test_execution_matched_reduction_is_not_reported_as_cancellation():
     result = depth_event_flow_analysis([event])
 
     assert result["matched_execution_qty"] == 3.0
+    assert result["matched_bid_execution_qty"] == 3.0
     assert result["cancellation_proxy_qty"] == 0.0
     assert result["attribution_pending_qty"] == 2.0
 
@@ -121,4 +122,7 @@ def test_aggressive_buy_matches_ask_reduction():
     )
 
     assert event["matched_execution_qty"] == 2.0
+    assert event["matched_ask_execution_qty"] == 2.0
+    assert event["matched_trade_ids"] == [1]
+    assert event["matched_trade_count"] == 1.0
     assert event["unmatched_reduction_qty"] == 0.0
