@@ -58,8 +58,8 @@ def test_window_is_bounded():
 
 def test_cvd_is_bounded_to_the_same_window_as_rolling_trades():
     engine = OrderFlowEngine(max_trades=2)
-    engine.ingest(_trade(1, TradeSide.BUY))
-    engine.ingest(_trade(2, TradeSide.BUY))
-    engine.ingest(_trade(3, TradeSide.SELL))
+    engine.ingest(trade(1, 100.0, 1.0, TradeSide.BUY))
+    engine.ingest(trade(2, 100.0, 1.0, TradeSide.BUY))
+    engine.ingest(trade(3, 100.0, 1.0, TradeSide.SELL, maker=True))
     assert len(engine.trades) == 2
     assert engine.snapshot().cvd == 0.0
