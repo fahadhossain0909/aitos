@@ -103,13 +103,6 @@ class TradeDepthMatcher:
         )
         # Keep reduction records until their event has been finalized. The event
         # object itself is also retained by the scanner's bounded history.
-        self._reductions = deque(
-            item
-            for item in self._reductions
-            if item["timestamp_ms"] + self.match_window_ms >= self._watermark_ms
-            and item["remaining_qty"] > 1e-12
-        )
-
         for reduction in self._reductions:
             if reduction["remaining_qty"] <= 1e-12:
                 continue
@@ -171,6 +164,11 @@ class TradeDepthMatcher:
                 bool(x.get("attribution_complete", False)) for x in levels
             ) if levels else True
 
+        self._reductions = deque(
+            item
+            for item in self._reductions
+            if item["timestamp_ms"] + self.match_window_ms >= self._watermark_ms
+        )
         while len(self._trades) > self.max_pending_items:
             self._trades.popleft()
         while len(self._reductions) > self.max_pending_items:
