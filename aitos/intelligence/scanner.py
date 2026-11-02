@@ -619,7 +619,9 @@ class OpportunityScanner(AITOSModule):
                     "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
                     "depth_replenishment_qty": depth_analysis["replenishment_qty"],
                     "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
-                    "depth_inferred_cancel_pressure": depth_analysis["inferred_cancel_pressure"],
+                    "depth_inferred_cancel_pressure": depth_analysis[
+                        "inferred_cancel_pressure"
+                    ],
                     "entry_extension_atr": round(extension_atr, 3),
                     "entry_timing_score": entry_timing_score,
                     "direction": direction.value if direction else "none",
@@ -764,7 +766,9 @@ class OpportunityScanner(AITOSModule):
             "open_interest_trend": oi_score,
             "footprint_interaction": interaction_score,
             "order_book_flow_imbalance": ofi_directional_score,
-            "depth_inferred_cancel_pressure": depth_analysis["inferred_cancel_pressure"],
+            "depth_inferred_cancel_pressure": depth_analysis[
+                "inferred_cancel_pressure"
+            ],
             "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
             "entry_timing": entry_timing_score,
             "breakout_acceptance": breakout_acceptance,
