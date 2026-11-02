@@ -84,7 +84,10 @@ async def resolve_live_universe(
                     continue
                 quote_volume = float(ticker.get("quoteVolume", 0.0) or 0.0)
                 trade_count = int(ticker.get("count", 0) or 0)
-                if quote_volume >= min_quote_volume_usd and trade_count >= min_trade_count:
+                if (
+                    quote_volume >= min_quote_volume_usd
+                    and trade_count >= min_trade_count
+                ):
                     dynamic.append((symbol, quote_volume))
         except (NotImplementedError, AttributeError):
             # Adapter without ticker support: retain core only.
