@@ -91,6 +91,7 @@ class OrderBookSnapshot:
     asks: tuple[tuple[float, float], ...]
     last_update_id: int
     timestamp: datetime
+    depth_event: dict[str, Any] | None = None
 
     @property
     def best_bid(self) -> float:
@@ -111,7 +112,7 @@ class OrderBookSnapshot:
         return bid_depth / ask_depth if ask_depth else float("inf")
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "symbol": self.symbol,
             "bid_levels": [{"price": p, "qty": q} for p, q in self.bids],
             "ask_levels": [{"price": p, "qty": q} for p, q in self.asks],
@@ -120,6 +121,9 @@ class OrderBookSnapshot:
             "last_update_id": self.last_update_id,
             "timestamp": _iso(self.timestamp),
         }
+        if self.depth_event is not None:
+            payload["depth_event"] = self.depth_event
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OrderBookSnapshot:
@@ -145,6 +149,11 @@ class OrderBookSnapshot:
             asks=asks,
             last_update_id=int(data["last_update_id"]),
             timestamp=_dt(data["timestamp"]),
+            depth_event=(
+                {str(k): v for k, v in data["depth_event"].items()}
+                if isinstance(data.get("depth_event"), dict)
+                else None
+            ),
         )
 
 

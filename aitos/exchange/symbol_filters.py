@@ -33,6 +33,11 @@ class SymbolFilters:
     min_notional: float  # MIN_NOTIONAL
     quantity_precision: int
     price_precision: int
+    status: str = "UNKNOWN"
+    contract_type: str = "UNKNOWN"
+    quote_asset: str = ""
+    base_asset: str = ""
+    onboard_date: int | None = None
 
     def round_quantity(self, quantity: float) -> float:
         """Round down to the nearest valid step — never rounds up, so this
@@ -70,5 +75,14 @@ def parse_exchange_info(raw: dict) -> dict[str, SymbolFilters]:
             min_notional=min_notional,
             quantity_precision=int(symbol_info.get("quantityPrecision", 0)),
             price_precision=int(symbol_info.get("pricePrecision", 0)),
+            status=str(symbol_info.get("status", "UNKNOWN")).upper(),
+            contract_type=str(symbol_info.get("contractType", "UNKNOWN")).upper(),
+            quote_asset=str(symbol_info.get("quoteAsset", "")).upper(),
+            base_asset=str(symbol_info.get("baseAsset", "")).upper(),
+            onboard_date=(
+                int(symbol_info["onboardDate"])
+                if symbol_info.get("onboardDate") is not None
+                else None
+            ),
         )
     return result

@@ -1,9 +1,11 @@
 import asyncio
 from collections.abc import AsyncIterator
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
 
+from aitos.config.tuning import TuningSettings
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence.scanner import OpportunityScanner, determine_direction
 from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot
@@ -257,3 +259,39 @@ async def test_scanner_to_lifecycle_end_to_end(event_bus, risk_engine):
     assert trade.state.value == "position_opened"
     assert trade.symbol == "BTCUSDT"
     assert len(trade.take_profit_levels) == 3
+
+
+@pytest.mark.asyncio
+async def test_scanner_ignores_in_progress_rest_candle(event_bus):
+    class FormingCandleExchange(FakeScannerExchange):
+        async def fetch_klines(self, symbol, timeframe, limit=500):
+            candles = await super().fetch_klines(symbol, timeframe, limit)
+            candles[-1] = replace(candles[-1], is_closed=False)
+            return candles
+
+    exchange = FormingCandleExchange()
+    scanner = OpportunityScanner(
+        event_bus=event_bus, exchange=exchange, symbols=["BTCUSDT"], reference_symbol=""
+    )
+    await scanner.initialize({})
+    expected = (await exchange.fetch_klines("BTCUSDT", "15m", 40))[-2].close
+    candidate = await scanner.scan_symbol("BTCUSDT")
+    assert candidate is not None
+    assert candidate.entry_price == expected
+    assert "entry_timing" in candidate.component_scores
+    assert "breakout_acceptance" in candidate.component_scores
+
+
+@pytest.mark.asyncio
+async def test_live_scanner_blocks_when_websocket_market_state_is_stale(event_bus):
+    exchange = FakeScannerExchange()
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=exchange,
+        symbols=["BTCUSDT"],
+        reference_symbol="",
+        tuning=TuningSettings(mode="live"),
+    )
+    await scanner.initialize({})
+    assert await scanner.scan_symbol("BTCUSDT") is None
+    await scanner.shutdown()

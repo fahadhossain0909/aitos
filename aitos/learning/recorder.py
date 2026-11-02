@@ -149,10 +149,23 @@ class LearningExperienceRecorder(AITOSModule):
             decision=str(p.get("side", "outcome")),
             outcome="closed",
             reward=float(pnl),
+            price=(
+                float(p["entry_price"]) if p.get("entry_price") is not None else None
+            ),
+            features=dict(p.get("agent_consensus") or {}),
+            market_state={"regime": p.get("regime")},
             metadata={
                 "decision_id": str(p.get("decision_id", "")),
                 "trade_id": str(p.get("trade_id", "")),
                 "event_type": "outcome",
+                "entry_price": p.get("entry_price"),
+                "exit_price": p.get("exit_price"),
+                "exit_reason": p.get("exit_reason"),
+                "pnl_percent": p.get("pnl_percent"),
+                "mae_price": p.get("mae_price"),
+                "mfe_price": p.get("mfe_price"),
+                "mae_r": p.get("mae_r"),
+                "mfe_r": p.get("mfe_r"),
             },
         )
         await self._write(record)

@@ -25,11 +25,16 @@ def _levels(raw_levels: list[list[str]]) -> tuple[tuple[float, float], ...]:
 
 
 def parse_kline_rest(raw: list[Any], symbol: str, timeframe: str) -> Kline:
+    open_time = _ms_to_dt(int(raw[0]))
+    close_time = _ms_to_dt(int(raw[6]))
+    # Binance REST includes the currently-forming candle. Do not label it
+    # closed merely because it was returned by the endpoint.
+    is_closed = close_time <= datetime.now(timezone.utc)
     return Kline(
         symbol=symbol,
         timeframe=timeframe,
-        open_time=_ms_to_dt(int(raw[0])),
-        close_time=_ms_to_dt(int(raw[6])),
+        open_time=open_time,
+        close_time=close_time,
         open=float(raw[1]),
         high=float(raw[2]),
         low=float(raw[3]),
@@ -39,7 +44,7 @@ def parse_kline_rest(raw: list[Any], symbol: str, timeframe: str) -> Kline:
         trades_count=int(raw[8]),
         taker_buy_volume=float(raw[9]),
         taker_buy_quote_volume=float(raw[10]),
-        is_closed=True,
+        is_closed=is_closed,
     )
 
 

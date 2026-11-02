@@ -40,6 +40,7 @@ class LocalOrderBook:
         self.last_update_id: int | None = None
         self.initialized = False
         self._awaiting_first_update = False
+        self._recent_reductions: dict[tuple[str, float], tuple[int, float]] = {}
         self._forensics: dict[str, Any] = {
             "apply_count": 0,
             "snapshot_count": 0,
@@ -166,10 +167,11 @@ class LocalOrderBook:
                 f"depth chain break for {self.symbol}: pu={update.previous_update_id}, local={self.last_update_id}"
             )
 
+        depth_event = self._calculate_depth_event(update)
         self._apply_levels(self._bids, update.bids)
         self._apply_levels(self._asks, update.asks)
         self.last_update_id = update.final_update_id
-        result = self.snapshot(update.event_time_ms)
+        result = self.snapshot(update.event_time_ms, depth_event=depth_event)
         self._record_apply_duration(started, update)
         return result
 
@@ -202,6 +204,105 @@ class LocalOrderBook:
                 },
             )
 
+    def _calculate_depth_event(self, update: DepthUpdate) -> dict[str, Any]:
+        """Measure full-depth liquidity changes for this sequenced diff event.
+
+        Reductions are cancellation proxies: Binance L2 does not reveal whether
+        resting quantity was cancelled or executed. Do not label them as facts.
+        """
+        best_bid = max(self._bids, default=0.0)
+        best_ask = min(self._asks, default=0.0)
+        mid = (best_bid + best_ask) / 2.0 if best_bid and best_ask else 0.0
+        weighted_ofi = 0.0
+        bid_add = bid_reduce = ask_add = ask_reduce = replenished = 0.0
+        reduction_levels: list[dict[str, Any]] = []
+        now_ms = update.event_time_ms or int(time.time() * 1000)
+        horizon_ms = 5000
+        for key, (ts, _) in tuple(self._recent_reductions.items()):
+            if now_ms - ts > horizon_ms:
+                self._recent_reductions.pop(key, None)
+        for side, levels, book, sign in (
+            ("bid", update.bids, self._bids, 1.0),
+            ("ask", update.asks, self._asks, -1.0),
+        ):
+            for price, new_qty in levels:
+                old_qty = book.get(price, 0.0)
+                change = float(new_qty) - old_qty
+                if abs(change) <= 1e-12:
+                    continue
+                distance_bps = abs(price - mid) / mid * 10000.0 if mid > 0 else 0.0
+                weight = max(0.05, min(1.0, 2.718281828 ** (-distance_bps / 20.0)))
+                weighted_ofi += sign * change * weight
+                key = (side, price)
+                if change > 0:
+                    if side == "bid":
+                        bid_add += change
+                    else:
+                        ask_add += change
+                    prior = self._recent_reductions.get(key)
+                    if prior is not None and now_ms - prior[0] <= horizon_ms:
+                        restored = min(change, prior[1])
+                        replenished += restored
+                        remaining = prior[1] - restored
+                        if remaining > 1e-12:
+                            self._recent_reductions[key] = (prior[0], remaining)
+                        else:
+                            self._recent_reductions.pop(key, None)
+                else:
+                    reduced = -change
+                    reduction_levels.append(
+                        {
+                            "side": side,
+                            "price": float(price),
+                            "quantity": float(reduced),
+                        }
+                    )
+                    if side == "bid":
+                        bid_reduce += reduced
+                    else:
+                        ask_reduce += reduced
+                    prior = self._recent_reductions.get(key)
+                    self._recent_reductions[key] = (
+                        now_ms,
+                        reduced
+                        + (
+                            prior[1]
+                            if prior and now_ms - prior[0] <= horizon_ms
+                            else 0.0
+                        ),
+                    )
+        scale = sum(sorted(self._bids.values(), reverse=True)[:20])
+        scale += sum(sorted(self._asks.values())[:20])
+        normalized = weighted_ofi / max(scale, 1e-12)
+        reductions = bid_reduce + ask_reduce
+        return {
+            "ofi_raw": weighted_ofi,
+            "ofi_normalized": normalized,
+            "ofi_scale": scale,
+            "ofi_score": max(0.0, min(10.0, 5.0 + 50.0 * normalized)),
+            "bid_add_qty": bid_add,
+            "bid_reduce_qty": bid_reduce,
+            "ask_add_qty": ask_add,
+            "ask_reduce_qty": ask_reduce,
+            "inferred_cancel_qty": reductions,
+            "replenishment_qty": replenished,
+            "addition_qty": bid_add + ask_add,
+            "reduction_qty": reductions,
+            "replenishment_ratio": replenished / max(reductions, 1e-12),
+            "event_time_ms": float(now_ms),
+            "first_update_id": float(update.first_update_id),
+            "final_update_id": float(update.final_update_id),
+            "previous_update_id": float(update.previous_update_id),
+            "changed_level_count": float(len(update.bids) + len(update.asks)),
+            "reductions": reduction_levels,
+            "matched_execution_qty": 0.0,
+            "unmatched_reduction_qty": reductions,
+            "attribution_pending_qty": reductions,
+            "cancellation_proxy_qty": 0.0,
+            "execution_attributed_ratio": 0.0,
+            "attribution_complete": not reductions,
+        }
+
     @staticmethod
     def _apply_levels(
         book: dict[float, float], levels: Iterable[tuple[float, float]]
@@ -212,7 +313,9 @@ class LocalOrderBook:
             else:
                 book[price] = quantity
 
-    def snapshot(self, event_time_ms: int = 0) -> OrderBookSnapshot:
+    def snapshot(
+        self, event_time_ms: int = 0, *, depth_event: dict[str, Any] | None = None
+    ) -> OrderBookSnapshot:
         started = time.perf_counter()
         sort_started = time.perf_counter()
         # Keep the complete book for correctness, but only select the requested
@@ -269,6 +372,7 @@ class LocalOrderBook:
             asks=asks,
             last_update_id=self.last_update_id or 0,
             timestamp=timestamp,
+            depth_event=depth_event,
         )
 
     def reset(self) -> None:
@@ -277,3 +381,4 @@ class LocalOrderBook:
         self.last_update_id = None
         self.initialized = False
         self._awaiting_first_update = False
+        self._recent_reductions.clear()

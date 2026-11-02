@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from aitos.core.contracts import Event
 from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
 from aitos.logging_setup import get_logger
 from aitos.market_data.bus import MarketDataBus, market_event_from_wire
 from aitos.market_data.contracts import MarketEventType, MarketSource
@@ -34,6 +35,8 @@ class LiveSymbolCache:
     last_book_event_id: str | None = None
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
+    depth_event_history: deque = field(default_factory=lambda: deque(maxlen=200))
+    trade_depth_matcher: TradeDepthMatcher = field(default_factory=TradeDepthMatcher)
     stale_trade_rejections: int = 0
     stale_book_rejections: int = 0
     duplicate_trade_rejections: int = 0
@@ -180,6 +183,7 @@ class LiveScannerCache:
                 pass
             return
         state.trades.append(trade)
+        state.trade_depth_matcher.add_trade(trade)
         state.last_trade_at = received_at
         state.last_trade_source_at = trade.timestamp
         state.last_trade_received_at = received_at
@@ -220,7 +224,19 @@ class LiveScannerCache:
             except Exception:
                 pass
             return
+        if state.order_book is not None and (
+            book.depth_event is None
+            or int(book.depth_event.get("previous_update_id", -1))
+            != state.order_book.last_update_id
+        ):
+            state.depth_event_history.clear()
+            state.trade_depth_matcher.reset()
         state.order_book = book
+        if book.depth_event:
+            depth_event = state.trade_depth_matcher.add_depth_event(
+                dict(book.depth_event)
+            )
+            state.depth_event_history.append(depth_event)
         state.last_book_at = received_at
         state.last_book_source_at = book.timestamp
         state.last_book_received_at = received_at
@@ -254,6 +270,7 @@ class LiveScannerCache:
             state.duplicate_trade_rejections += 1
             return
         state.trades.append(trade)
+        state.trade_depth_matcher.add_trade(trade)
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
@@ -308,7 +325,19 @@ class LiveScannerCache:
         ):
             state.duplicate_book_rejections += 1
             return
+        if state.order_book is not None and (
+            book.depth_event is None
+            or int(book.depth_event.get("previous_update_id", -1))
+            != state.order_book.last_update_id
+        ):
+            state.depth_event_history.clear()
+            state.trade_depth_matcher.reset()
         state.order_book = book
+        if book.depth_event:
+            depth_event = state.trade_depth_matcher.add_depth_event(
+                dict(book.depth_event)
+            )
+            state.depth_event_history.append(depth_event)
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time
         state.last_book_received_at = received_at

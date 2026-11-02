@@ -21,6 +21,24 @@ ProfileName = Literal["low_resource", "balanced", "high_performance"]
 TradingMode = Literal["paper", "live"]
 UniverseMode = Literal["all_eligible", "allowlist"]
 
+DEFAULT_CORE_FUTURES_SYMBOLS = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "LINKUSDT",
+    "LTCUSDT",
+    "BCHUSDT",
+    "AVAXUSDT",
+    "DOTUSDT",
+    "TRXUSDT",
+    "SUIUSDT",
+    "TONUSDT",
+)
+
 
 class ScannerTuning(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -29,6 +47,11 @@ class ScannerTuning(BaseModel):
     universe_limit: int = Field(default=100, ge=1, le=5000)
     refresh_interval_seconds: float = Field(default=10.0, gt=0, le=3600)
     symbol_allowlist: tuple[str, ...] = ()
+    core_symbols: tuple[str, ...] = DEFAULT_CORE_FUTURES_SYMBOLS
+    min_quote_volume_usd: float = Field(default=10_000_000.0, ge=0)
+    min_trade_count: int = Field(default=10_000, ge=0)
+    min_contract_age_days: int = Field(default=30, ge=0, le=3650)
+    dynamic_universe_limit: int = Field(default=35, ge=0, le=5000)
 
 
 class AnalysisTuning(BaseModel):
@@ -189,6 +212,29 @@ def _env_overrides() -> dict[str, Any]:
             "scanner",
             "refresh_interval_seconds",
             float,
+        ),
+        "AITOS_TUNING_SCANNER_MIN_QUOTE_VOLUME_USD": (
+            "scanner",
+            "min_quote_volume_usd",
+            float,
+        ),
+        "AITOS_TUNING_SCANNER_MIN_TRADE_COUNT": ("scanner", "min_trade_count", int),
+        "AITOS_TUNING_SCANNER_MIN_CONTRACT_AGE_DAYS": (
+            "scanner",
+            "min_contract_age_days",
+            int,
+        ),
+        "AITOS_TUNING_SCANNER_DYNAMIC_UNIVERSE_LIMIT": (
+            "scanner",
+            "dynamic_universe_limit",
+            int,
+        ),
+        "AITOS_TUNING_SCANNER_CORE_SYMBOLS": (
+            "scanner",
+            "core_symbols",
+            lambda v: tuple(
+                symbol.strip().upper() for symbol in v.split(",") if symbol.strip()
+            ),
         ),
         "AITOS_TUNING_SCANNER_SYMBOL_ALLOWLIST": (
             "scanner",

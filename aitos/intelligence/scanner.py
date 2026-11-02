@@ -24,11 +24,17 @@ from aitos.intelligence import indicators
 from aitos.intelligence.a_stat_bridge import AStatBridge
 from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.auction import auction_context_score
+from aitos.intelligence.entry_quality import (
+    breakout_acceptance_score,
+    relative_strength_score,
+)
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.funding import funding_rate_score
 from aitos.intelligence.liquidity import (
     absorption_proxy_score,
+    adverse_flow_without_progress,
+    depth_event_flow_analysis,
     depth_imbalance_score,
     liquidity_intelligence_score,
     liquidity_quality_score,
@@ -62,6 +68,10 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "rl_confidence": 0.04,
     "footprint_interaction": 0.10,
     "a_stat": 0.08,
+    "order_book_flow_imbalance": 0.08,
+    "entry_timing": 0.07,
+    "breakout_acceptance": 0.07,
+    "relative_strength": 0.08,
 }
 REGIME_FIT_SCORE = {
     "trending": 9.0,
@@ -189,6 +199,8 @@ class OpportunityScanner(AITOSModule):
         self._amt_ib_minutes = amt_ib_minutes
         self._initialized = False
         self._last_oi = {}
+        self._last_order_books = {}
+        self._last_order_book_sources = {}
         self._last_amt_profile = {}
         self._last_amt_context = {}
         self._liquidity_trackers = {}
@@ -418,6 +430,9 @@ class OpportunityScanner(AITOSModule):
         klines = await self._exchange.fetch_klines(
             symbol, self._timeframe, limit=self._kline_lookback
         )
+        # REST may return the currently-forming candle. Structural signals
+        # must be evaluated only on completed bars, irrespective of source.
+        klines = [k for k in klines if getattr(k, "is_closed", True)]
         if len(klines) < 20:
             logger.info(
                 "paper signal diagnostics",
@@ -431,6 +446,14 @@ class OpportunityScanner(AITOSModule):
             )
             return None
         live_trades, live_book, live_fresh = self._live_market_data(symbol)
+        if self._tuning.mode == "live" and not live_fresh:
+            logger.warning(
+                "entry blocked: live market data is stale or unavailable",
+                extra={
+                    "aitos_extra": {"symbol": symbol, "market_source": "rest_fallback"}
+                },
+            )
+            return None
         if live_fresh and live_trades and live_book is not None:
             trades, order_book, market_source = (
                 live_trades[-self._trade_lookback :],
@@ -506,6 +529,34 @@ class OpportunityScanner(AITOSModule):
         )
         self._last_oi[symbol] = oi_current
 
+        live_state = self._live_cache.snapshot(symbol)
+        depth_events = (
+            list(live_state.depth_event_history)
+            if live_state is not None and market_source == "websocket_live_state"
+            else []
+        )
+        depth_analysis = depth_event_flow_analysis(depth_events)
+        ofi_score = depth_analysis["ofi_score"]
+        ofi_directional_score = (
+            ofi_score
+            if direction == TradeSide.LONG
+            else 10.0 - ofi_score if direction == TradeSide.SHORT else 5.0
+        )
+        if direction is not None and adverse_flow_without_progress(
+            trades, direction.value
+        ):
+            logger.info(
+                "entry rejected: aggressive flow failed to produce price progress",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "direction": direction.value,
+                        "market_source": market_source,
+                    }
+                },
+            )
+            return None
+
         liquidity_quality = liquidity_quality_score(order_book)
         depth_imbalance = depth_imbalance_score(order_book)
         liquidity_wall = liquidity_wall_score(order_book)
@@ -517,6 +568,26 @@ class OpportunityScanner(AITOSModule):
         orderflow_buy_ratio = flow_features.buy_ratio if flow_features else 0.5
         orderflow_aggression = flow_features.aggression if flow_features else 0.0
         orderflow_vwap = flow_features.vwap if flow_features else 0.0
+        # Avoid chasing an already-extended impulse: compare the close with
+        # the recent structural boundary in ATR units, not a fixed percentage.
+        recent = klines[-7:-1]
+        if recent and atr > 0:
+            boundary = (
+                max(float(k.high) for k in recent)
+                if direction == TradeSide.LONG
+                else min(float(k.low) for k in recent)
+            )
+            extension_atr = (
+                ((float(klines[-1].close) - boundary) / atr)
+                if direction == TradeSide.LONG
+                else ((boundary - float(klines[-1].close)) / atr)
+            )
+            entry_timing_score = round(
+                max(0.0, min(10.0, 8.0 - max(0.0, extension_atr) * 4.0)), 2
+            )
+        else:
+            extension_atr = 0.0
+            entry_timing_score = 5.0
 
         logger.info(
             "paper signal diagnostics",
@@ -543,6 +614,28 @@ class OpportunityScanner(AITOSModule):
                     "sweep_potential": sweep_potential,
                     "absorption_proxy": absorption,
                     "liquidity_score": liquidity_score,
+                    "order_book_flow_imbalance": ofi_directional_score,
+                    "depth_event_count": depth_analysis["event_count"],
+                    "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
+                    "depth_matched_execution_qty": depth_analysis[
+                        "matched_execution_qty"
+                    ],
+                    "depth_attribution_pending_qty": depth_analysis[
+                        "attribution_pending_qty"
+                    ],
+                    "depth_execution_attributed_ratio": depth_analysis[
+                        "execution_attributed_ratio"
+                    ],
+                    "depth_cancellation_proxy_qty": depth_analysis[
+                        "cancellation_proxy_qty"
+                    ],
+                    "depth_replenishment_qty": depth_analysis["replenishment_qty"],
+                    "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+                    "depth_inferred_cancel_pressure": depth_analysis[
+                        "inferred_cancel_pressure"
+                    ],
+                    "entry_extension_atr": round(extension_atr, 3),
+                    "entry_timing_score": entry_timing_score,
                     "direction": direction.value if direction else "none",
                     "scanner_threshold": self._min_score_threshold,
                 }
@@ -571,6 +664,16 @@ class OpportunityScanner(AITOSModule):
         lead_lag = (
             indicators.lead_lag_score(klines, reference_klines)
             if lead_lag_available
+            else 5.0
+        )
+        relative_strength = (
+            relative_strength_score(klines, reference_klines, direction.value)
+            if lead_lag_available
+            else 5.0
+        )
+        breakout_acceptance = (
+            breakout_acceptance_score(klines, direction.value, atr=atr)
+            if structure_direction in {"bullish_bos", "bearish_bos"}
             else 5.0
         )
         funding_score = funding_rate_score(funding, direction)
@@ -674,6 +777,33 @@ class OpportunityScanner(AITOSModule):
             "funding_rate": funding_score,
             "open_interest_trend": oi_score,
             "footprint_interaction": interaction_score,
+            "order_book_flow_imbalance": ofi_directional_score,
+            "depth_inferred_cancel_pressure": depth_analysis[
+                "inferred_cancel_pressure"
+            ],
+            "depth_matched_execution_qty": depth_analysis["matched_execution_qty"],
+            "depth_attribution_pending_qty": depth_analysis["attribution_pending_qty"],
+            "depth_execution_attributed_ratio": depth_analysis[
+                "execution_attributed_ratio"
+            ],
+            "depth_matched_bid_execution_qty": depth_analysis[
+                "matched_bid_execution_qty"
+            ],
+            "depth_matched_ask_execution_qty": depth_analysis[
+                "matched_ask_execution_qty"
+            ],
+            "depth_bid_cancellation_proxy_qty": depth_analysis[
+                "bid_cancellation_proxy_qty"
+            ],
+            "depth_ask_cancellation_proxy_qty": depth_analysis[
+                "ask_cancellation_proxy_qty"
+            ],
+            "depth_matched_trade_count": depth_analysis["matched_trade_count"],
+            "depth_cancellation_proxy_qty": depth_analysis["cancellation_proxy_qty"],
+            "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+            "entry_timing": entry_timing_score,
+            "breakout_acceptance": breakout_acceptance,
+            "relative_strength": relative_strength,
         }
         if amt_context is not None:
             rl_context.update(
@@ -724,6 +854,10 @@ class OpportunityScanner(AITOSModule):
             "rl_confidence": round(rl_score, 2),
             "footprint_interaction": interaction_score,
             "a_stat": a_stat_component,
+            "order_book_flow_imbalance": ofi_directional_score,
+            "entry_timing": entry_timing_score,
+            "breakout_acceptance": breakout_acceptance,
+            "relative_strength": relative_strength,
         }
         component_availability = {
             "trend_strength": True,
@@ -738,6 +872,11 @@ class OpportunityScanner(AITOSModule):
             "rl_confidence": rl_available,
             "footprint_interaction": footprint_available,
             "a_stat": a_stat_score is not None,
+            "order_book_flow_imbalance": depth_analysis["event_count"] > 0,
+            "entry_timing": atr > 0,
+            "breakout_acceptance": structure_direction
+            in {"bullish_bos", "bearish_bos"},
+            "relative_strength": lead_lag_available,
         }
         weight_total = sum(
             self._weights.get(k, 0.0)
@@ -759,7 +898,7 @@ class OpportunityScanner(AITOSModule):
             f"{k.replace('_',' ')}={v:.1f}/10" for k, v in component_scores.items()
         ]
         rationale.append(
-            f"executed_trades={len(trades)}, candle_cvd={candle_cvd:.1f}, live_auction={live_auction:.1f}, candle_auction={candle_auction:.1f}, amt_score={amt_score:.1f}, regime={regime}, structure={structure_direction}, direction={direction.value}, market_source={market_source}"
+            f"executed_trades={len(trades)}, candle_cvd={candle_cvd:.1f}, live_auction={live_auction:.1f}, candle_auction={candle_auction:.1f}, amt_score={amt_score:.1f}, regime={regime}, structure={structure_direction}, direction={direction.value}, market_source={market_source}, ofi={ofi_score:.2f}, inferred_cancel_pressure={depth_analysis['inferred_cancel_pressure']:.3f}, replenishment_ratio={depth_analysis['replenishment_ratio']:.3f}, entry_extension_atr={extension_atr:.3f}"
         )
         if amt_context is not None:
             rationale.extend(
@@ -779,6 +918,7 @@ class OpportunityScanner(AITOSModule):
                 f"liquidity=orderbook+tradeflow, structure_strength={structure_strength:.1f}",
                 f"structure_bias={market_structure.bias}, structure_event={market_structure.event}, last_swing={market_structure.last_swing_type}",
                 f"regime={regime}",
+                f"breakout_acceptance={breakout_acceptance:.1f}, relative_strength={relative_strength:.1f}",
                 f"unavailable_features={[k for k, ok in component_availability.items() if not ok]}",
             ]
         )
@@ -831,13 +971,22 @@ class OpportunityScanner(AITOSModule):
                     last_close = float(candles[-1].close)
                     if first_close <= 0 or last_close <= 0:
                         return symbol, -1.0, index
-                    momentum_pct = abs(last_close - first_close) / first_close * 100.0
-                    high = max(float(c.high) for c in candles)
-                    low = min(float(c.low) for c in candles)
-                    range_pct = max(0.0, high - low) / last_close * 100.0
-                    # A simple, explainable activity score; the full scanner
-                    # remains authoritative for trade direction and eligibility.
-                    return symbol, momentum_pct + 0.5 * range_pct, index
+                    # Rank by executable activity rather than chasing the
+                    # largest recent price move. Quote-volume proxy is close *
+                    # base volume; median volume dampens one-candle spikes.
+                    volumes = sorted(
+                        float(c.volume) * float(c.close)
+                        for c in candles
+                        if float(c.volume) > 0 and float(c.close) > 0
+                    )
+                    if not volumes:
+                        return symbol, -1.0, index
+                    median_quote_activity = volumes[len(volumes) // 2]
+                    spread_range = (
+                        max(float(c.high) - float(c.low) for c in candles) / last_close
+                    )
+                    stability = 1.0 / (1.0 + max(0.0, spread_range) * 100.0)
+                    return symbol, median_quote_activity * stability, index
                 except Exception as exc:
                     logger.debug(
                         "lightweight scanner screen failed; preserving fallback rank",
