@@ -13,7 +13,7 @@ from typing import Any
 
 from aitos.models.market import TradeSide, TradeTick
 
-MATCH_WINDOW_MS = 1_000
+MATCH_WINDOW_MS = 500
 PRICE_EPSILON = 1e-8
 MAX_PENDING_ITEMS = 2_000
 
