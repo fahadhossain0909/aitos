@@ -169,9 +169,14 @@ def order_book_flow_imbalance(
 
 
 def depth_event_flow_analysis(
-    events: Sequence[dict[str, float]],
+    events: Sequence[dict[str, Any]],
 ) -> dict[str, float]:
-    """Aggregate recent full-depth events; L2 reductions remain cancellation proxies."""
+    """Aggregate depth OFI and execution-attributed liquidity reductions.
+
+    When trade matching fields are present, only finalized unmatched reductions
+    contribute to the cancellation proxy. Older event payloads retain the
+    previous inferred-reduction behavior for backward compatibility.
+    """
     if not events:
         return {
             "ofi_score": 5.0,
@@ -180,6 +185,10 @@ def depth_event_flow_analysis(
             "ask_add_qty": 0.0,
             "ask_reduce_qty": 0.0,
             "inferred_cancel_qty": 0.0,
+            "cancellation_proxy_qty": 0.0,
+            "matched_execution_qty": 0.0,
+            "attribution_pending_qty": 0.0,
+            "execution_attributed_ratio": 0.0,
             "replenishment_qty": 0.0,
             "replenishment_ratio": 0.0,
             "inferred_cancel_pressure": 0.0,
@@ -196,28 +205,43 @@ def depth_event_flow_analysis(
             "bid_reduce_qty",
             "ask_add_qty",
             "ask_reduce_qty",
-            "inferred_cancel_qty",
             "replenishment_qty",
             "addition_qty",
+            "matched_execution_qty",
+            "attribution_pending_qty",
         )
     }
+    cancellation_proxy = sum(
+        max(
+            0.0,
+            event.get(
+                "cancellation_proxy_qty",
+                event.get("inferred_cancel_qty", 0.0),
+            ),
+        )
+        for event in events
+    )
+    reduction_total = sum(max(0.0, e.get("reduction_qty", 0.0)) for e in events)
     totals.update(
         {
+            "cancellation_proxy_qty": cancellation_proxy,
+            "inferred_cancel_qty": cancellation_proxy,
             "ofi_score": round(max(0.0, min(10.0, 5.0 + 50.0 * normalized)), 2),
             "replenishment_ratio": round(
-                totals["replenishment_qty"] / max(totals["inferred_cancel_qty"], 1e-12),
-                4,
+                totals["replenishment_qty"] / max(reduction_total, 1e-12), 4
             ),
             "inferred_cancel_pressure": round(
-                totals["inferred_cancel_qty"]
-                / max(totals["inferred_cancel_qty"] + totals["addition_qty"], 1e-12),
+                cancellation_proxy
+                / max(cancellation_proxy + totals["addition_qty"], 1e-12),
                 4,
+            ),
+            "execution_attributed_ratio": round(
+                totals["matched_execution_qty"] / max(reduction_total, 1e-12), 4
             ),
             "event_count": float(len(events)),
         }
     )
     return totals
-
 
 def adverse_flow_without_progress(
     trades: Sequence[TradeTick],
