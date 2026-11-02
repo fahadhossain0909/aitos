@@ -33,9 +33,7 @@ def _depth_event(*, side="bid", price=100.0, quantity=5.0, offset_ms=0):
         "event_time_ms": timestamp_ms,
         "reduction_qty": quantity,
         "inferred_cancel_qty": quantity,
-        "reductions": [
-            {"side": side, "price": price, "quantity": quantity}
-        ],
+        "reductions": [{"side": side, "price": price, "quantity": quantity}],
     }
 
 
