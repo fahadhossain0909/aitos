@@ -26,12 +26,12 @@ def breakout_acceptance_score(
     if side == "long":
         boundary = max(float(c.high) for c in prior)
         beyond = float(current.close) > boundary
-        held = float(previous.close) > boundary
+        held = float(previous.close) > boundary and beyond
         retested = float(current.low) <= boundary + 0.25 * atr and beyond
     else:
         boundary = min(float(c.low) for c in prior)
         beyond = float(current.close) < boundary
-        held = float(previous.close) < boundary
+        held = float(previous.close) < boundary and beyond
         retested = float(current.high) >= boundary - 0.25 * atr and beyond
     if held:
         return 9.0
