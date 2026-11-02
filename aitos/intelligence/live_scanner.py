@@ -221,6 +221,12 @@ class LiveScannerCache:
             except Exception:
                 pass
             return
+        if state.order_book is not None and (
+            book.depth_event is None
+            or int(book.depth_event.get("previous_update_id", -1))
+            != state.order_book.last_update_id
+        ):
+            state.depth_event_history.clear()
         state.order_book = book
         if book.depth_event:
             state.depth_event_history.append(dict(book.depth_event))
