@@ -39,7 +39,6 @@ from aitos.intelligence.liquidity import (
     liquidity_intelligence_score,
     liquidity_quality_score,
     liquidity_wall_score,
-    order_book_flow_imbalance,
     sweep_potential_score,
 )
 from aitos.intelligence.liquidity_tracker import LiquidityTracker
@@ -620,6 +619,10 @@ class OpportunityScanner(AITOSModule):
                     "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
                     "depth_replenishment_qty": depth_analysis["replenishment_qty"],
                     "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+                    "depth_event_count": depth_analysis["event_count"],
+                    "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
+                    "depth_replenishment_qty": depth_analysis["replenishment_qty"],
+                    "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
                     "entry_extension_atr": round(extension_atr, 3),
                     "entry_timing_score": entry_timing_score,
                     "direction": direction.value if direction else "none",
@@ -835,7 +838,7 @@ class OpportunityScanner(AITOSModule):
             "rl_confidence": rl_available,
             "footprint_interaction": footprint_available,
             "a_stat": a_stat_score is not None,
-            "order_book_flow_imbalance": previous_book is not None,
+            "order_book_flow_imbalance": depth_analysis["event_count"] > 0,
             "entry_timing": atr > 0,
             "breakout_acceptance": structure_direction
             in {"bullish_bos", "bearish_bos"},
