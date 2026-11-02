@@ -147,7 +147,13 @@ def order_book_flow_imbalance(
     This is a consecutive-snapshot event measure, not a static depth ratio.
     Positive values indicate bid-side pressure; negative values ask-side.
     """
-    if previous is None or not previous.bids or not previous.asks or not current.bids or not current.asks:
+    if (
+        previous is None
+        or not previous.bids
+        or not previous.asks
+        or not current.bids
+        or not current.asks
+    ):
         return 5.0
     pb, pq = previous.bids[0]
     pa, aq = previous.asks[0]
@@ -163,8 +169,12 @@ def order_book_flow_imbalance(
 
 
 def adverse_flow_without_progress(
-    trades: Sequence[TradeTick], direction: str, *, min_trades: int = 20,
-    min_dominance: float = 0.65, max_progress_bps: float = 1.0,
+    trades: Sequence[TradeTick],
+    direction: str,
+    *,
+    min_trades: int = 20,
+    min_dominance: float = 0.65,
+    max_progress_bps: float = 1.0,
 ) -> bool:
     """Detect aggressive flow that fails to make directional price progress.
 
@@ -178,8 +188,7 @@ def adverse_flow_without_progress(
         if not t.is_buyer_maker and t.side != TradeSide.SELL
     )
     sell_qty = sum(
-        abs(t.quantity) for t in trades
-        if t.is_buyer_maker or t.side == TradeSide.SELL
+        abs(t.quantity) for t in trades if t.is_buyer_maker or t.side == TradeSide.SELL
     )
     total = buy_qty + sell_qty
     if total <= 0:
