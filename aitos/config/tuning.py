@@ -21,6 +21,24 @@ ProfileName = Literal["low_resource", "balanced", "high_performance"]
 TradingMode = Literal["paper", "live"]
 UniverseMode = Literal["all_eligible", "allowlist"]
 
+DEFAULT_CORE_FUTURES_SYMBOLS = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "LINKUSDT",
+    "LTCUSDT",
+    "BCHUSDT",
+    "AVAXUSDT",
+    "DOTUSDT",
+    "TRXUSDT",
+    "SUIUSDT",
+    "TONUSDT",
+)
+
 
 class ScannerTuning(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -29,23 +47,7 @@ class ScannerTuning(BaseModel):
     universe_limit: int = Field(default=100, ge=1, le=5000)
     refresh_interval_seconds: float = Field(default=10.0, gt=0, le=3600)
     symbol_allowlist: tuple[str, ...] = ()
-    core_symbols: tuple[str, ...] = (
-        "BTCUSDT",
-        "ETHUSDT",
-        "BNBUSDT",
-        "SOLUSDT",
-        "XRPUSDT",
-        "DOGEUSDT",
-        "ADAUSDT",
-        "LINKUSDT",
-        "LTCUSDT",
-        "BCHUSDT",
-        "AVAXUSDT",
-        "DOTUSDT",
-        "TRXUSDT",
-        "SUIUSDT",
-        "TONUSDT",
-    )
+    core_symbols: tuple[str, ...] = DEFAULT_CORE_FUTURES_SYMBOLS
     min_quote_volume_usd: float = Field(default=10_000_000.0, ge=0)
     min_trade_count: int = Field(default=10_000, ge=0)
     dynamic_universe_limit: int = Field(default=35, ge=0, le=5000)
