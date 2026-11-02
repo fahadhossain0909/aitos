@@ -35,6 +35,9 @@ def test_full_depth_event_ofi_uses_non_top_price_levels():
     assert snapshot.depth_event["bid_add_qty"] == 4.0
     assert snapshot.depth_event["ask_reduce_qty"] == 2.0
     assert snapshot.depth_event["ofi_raw"] > 0
+    assert snapshot.depth_event["reductions"] == [
+        {"side": "ask", "price": 101.0, "quantity": 2.0}
+    ]
 
 
 def test_same_price_liquidity_reappearing_is_counted_as_replenishment():
@@ -84,7 +87,19 @@ def test_depth_event_aggregation_is_depth_weighted_and_bounded():
 
 def test_order_book_depth_event_round_trips_through_wire_model():
     book = _seed_book()
-    event = {"ofi_raw": 1.25, "ofi_scale": 50.0, "ofi_normalized": 0.025}
+    event = {
+        "ofi_raw": 1.25,
+        "ofi_scale": 50.0,
+        "ofi_normalized": 0.025,
+        "reductions": [
+            {
+                "side": "bid",
+                "price": 100.0,
+                "quantity": 2.0,
+                "matched_execution_qty": 1.0,
+            }
+        ],
+    }
     restored = OrderBookSnapshot.from_dict({**book.to_dict(), "depth_event": event})
     assert restored.depth_event == event
 
