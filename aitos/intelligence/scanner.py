@@ -35,6 +35,7 @@ from aitos.intelligence.liquidity import (
     absorption_proxy_score,
     adverse_flow_without_progress,
     depth_imbalance_score,
+    depth_event_flow_analysis,
     liquidity_intelligence_score,
     liquidity_quality_score,
     liquidity_wall_score,
@@ -529,14 +530,14 @@ class OpportunityScanner(AITOSModule):
         )
         self._last_oi[symbol] = oi_current
 
-        previous_book = (
-            self._last_order_books.get(symbol)
-            if self._last_order_book_sources.get(symbol) == market_source
-            else None
+        live_state = self._live_cache.snapshot(symbol)
+        depth_events = (
+            list(live_state.depth_event_history)
+            if live_state is not None and market_source == "websocket_live_state"
+            else []
         )
-        ofi_score = order_book_flow_imbalance(previous_book, order_book)
-        self._last_order_books[symbol] = order_book
-        self._last_order_book_sources[symbol] = market_source
+        depth_analysis = depth_event_flow_analysis(depth_events)
+        ofi_score = depth_analysis["ofi_score"]
         ofi_directional_score = (
             ofi_score
             if direction == TradeSide.LONG
@@ -615,6 +616,10 @@ class OpportunityScanner(AITOSModule):
                     "absorption_proxy": absorption,
                     "liquidity_score": liquidity_score,
                     "order_book_flow_imbalance": ofi_directional_score,
+                    "depth_event_count": depth_analysis["event_count"],
+                    "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
+                    "depth_replenishment_qty": depth_analysis["replenishment_qty"],
+                    "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
                     "entry_extension_atr": round(extension_atr, 3),
                     "entry_timing_score": entry_timing_score,
                     "direction": direction.value if direction else "none",
