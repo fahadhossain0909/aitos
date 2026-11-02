@@ -66,6 +66,7 @@ async def test_resolve_live_universe_adds_only_liquid_dynamic_perpetuals():
 
         async def fetch_24h_tickers(self):
             return [
+                {"symbol": "BTCUSDT", "quoteVolume": "30000000000", "count": 500000},
                 {"symbol": "ALPHAUSDT", "quoteVolume": "25000000", "count": 30000},
                 {"symbol": "BETAUSDT", "quoteVolume": "1000000", "count": 5000},
             ]
