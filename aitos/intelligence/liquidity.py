@@ -188,7 +188,7 @@ def depth_event_flow_analysis(events: Sequence[dict[str, float]]) -> dict[str, f
         )
     }
     totals.update({
-        "ofi_score": round(max(0.0, min(10.0, 5.0 + 5.0 * normalized)), 2),
+        "ofi_score": round(max(0.0, min(10.0, 5.0 + 50.0 * normalized)), 2),
         "replenishment_ratio": round(
             totals["replenishment_qty"] / max(totals["inferred_cancel_qty"], 1e-12), 4
         ),
