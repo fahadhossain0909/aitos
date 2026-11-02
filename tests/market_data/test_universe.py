@@ -59,6 +59,7 @@ async def test_resolve_live_universe_adds_only_liquid_dynamic_perpetuals():
         status = "TRADING"
         contract_type = "PERPETUAL"
         quote_asset = "USDT"
+        onboard_date = 0
 
     class Exchange:
         async def fetch_exchange_info(self, symbols=None):
