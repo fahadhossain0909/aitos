@@ -31,7 +31,9 @@ def _trade(
 
 
 def _depth_event(*, side="bid", price=100.0, quantity=5.0, offset_ms=0):
-    timestamp_ms = int((BASE + timedelta(milliseconds=offset_ms)).timestamp() * 1000)
+    timestamp_ms = int(
+        (BASE + timedelta(milliseconds=offset_ms)).timestamp() * 1000
+    )
     return {
         "event_time_ms": timestamp_ms,
         "reduction_qty": quantity,
