@@ -134,7 +134,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         return [
             candle
             for row in raw
-            if (candle := parse_kline_rest(row, symbol=symbol, timeframe=timeframe)).is_closed
+            if (
+                candle := parse_kline_rest(row, symbol=symbol, timeframe=timeframe)
+            ).is_closed
         ]
 
     async def fetch_order_book(self, symbol: str, limit: int = 50) -> OrderBookSnapshot:
