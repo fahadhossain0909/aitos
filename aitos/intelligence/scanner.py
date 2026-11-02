@@ -449,7 +449,9 @@ class OpportunityScanner(AITOSModule):
         if self._tuning.mode == "live" and not live_fresh:
             logger.warning(
                 "entry blocked: live market data is stale or unavailable",
-                extra={"aitos_extra": {"symbol": symbol, "market_source": "rest_fallback"}},
+                extra={
+                    "aitos_extra": {"symbol": symbol, "market_source": "rest_fallback"}
+                },
             )
             return None
         if live_fresh and live_trades and live_book is not None:
@@ -536,14 +538,22 @@ class OpportunityScanner(AITOSModule):
         self._last_order_books[symbol] = order_book
         self._last_order_book_sources[symbol] = market_source
         ofi_directional_score = (
-            ofi_score if direction == TradeSide.LONG
-            else 10.0 - ofi_score if direction == TradeSide.SHORT
-            else 5.0
+            ofi_score
+            if direction == TradeSide.LONG
+            else 10.0 - ofi_score if direction == TradeSide.SHORT else 5.0
         )
-        if direction is not None and adverse_flow_without_progress(trades, direction.value):
+        if direction is not None and adverse_flow_without_progress(
+            trades, direction.value
+        ):
             logger.info(
                 "entry rejected: aggressive flow failed to produce price progress",
-                extra={"aitos_extra": {"symbol": symbol, "direction": direction.value, "market_source": market_source}},
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "direction": direction.value,
+                        "market_source": market_source,
+                    }
+                },
             )
             return None
 
@@ -562,9 +572,19 @@ class OpportunityScanner(AITOSModule):
         # the recent structural boundary in ATR units, not a fixed percentage.
         recent = klines[-7:-1]
         if recent and atr > 0:
-            boundary = max(float(k.high) for k in recent) if direction == TradeSide.LONG else min(float(k.low) for k in recent)
-            extension_atr = ((float(klines[-1].close) - boundary) / atr) if direction == TradeSide.LONG else ((boundary - float(klines[-1].close)) / atr)
-            entry_timing_score = round(max(0.0, min(10.0, 8.0 - max(0.0, extension_atr) * 4.0)), 2)
+            boundary = (
+                max(float(k.high) for k in recent)
+                if direction == TradeSide.LONG
+                else min(float(k.low) for k in recent)
+            )
+            extension_atr = (
+                ((float(klines[-1].close) - boundary) / atr)
+                if direction == TradeSide.LONG
+                else ((boundary - float(klines[-1].close)) / atr)
+            )
+            entry_timing_score = round(
+                max(0.0, min(10.0, 8.0 - max(0.0, extension_atr) * 4.0)), 2
+            )
         else:
             extension_atr = 0.0
             entry_timing_score = 5.0
@@ -629,7 +649,8 @@ class OpportunityScanner(AITOSModule):
         )
         relative_strength = (
             relative_strength_score(klines, reference_klines, direction.value)
-            if lead_lag_available else 5.0
+            if lead_lag_available
+            else 5.0
         )
         breakout_acceptance = (
             breakout_acceptance_score(klines, direction.value, atr=atr)
@@ -811,7 +832,8 @@ class OpportunityScanner(AITOSModule):
             "a_stat": a_stat_score is not None,
             "order_book_flow_imbalance": previous_book is not None,
             "entry_timing": atr > 0,
-            "breakout_acceptance": structure_direction in {"bullish_bos", "bearish_bos"},
+            "breakout_acceptance": structure_direction
+            in {"bullish_bos", "bearish_bos"},
             "relative_strength": lead_lag_available,
         }
         weight_total = sum(
@@ -910,11 +932,17 @@ class OpportunityScanner(AITOSModule):
                     # Rank by executable activity rather than chasing the
                     # largest recent price move. Quote-volume proxy is close *
                     # base volume; median volume dampens one-candle spikes.
-                    volumes = sorted(float(c.volume) * float(c.close) for c in candles if float(c.volume) > 0 and float(c.close) > 0)
+                    volumes = sorted(
+                        float(c.volume) * float(c.close)
+                        for c in candles
+                        if float(c.volume) > 0 and float(c.close) > 0
+                    )
                     if not volumes:
                         return symbol, -1.0, index
                     median_quote_activity = volumes[len(volumes) // 2]
-                    spread_range = max(float(c.high) - float(c.low) for c in candles) / last_close
+                    spread_range = (
+                        max(float(c.high) - float(c.low) for c in candles) / last_close
+                    )
                     stability = 1.0 / (1.0 + max(0.0, spread_range) * 100.0)
                     return symbol, median_quote_activity * stability, index
                 except Exception as exc:
