@@ -19,7 +19,7 @@ def breakout_acceptance_score(
     side = direction.lower()
     if len(klines) < max(lookback + 2, 4) or atr <= 0 or side not in {"long", "short"}:
         return 5.0
-    prior = klines[-(lookback + 2):-2]
+    prior = klines[-(lookback + 2) : -2]
     if not prior:
         return 5.0
     previous, current = klines[-2], klines[-1]
