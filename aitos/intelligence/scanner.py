@@ -528,6 +528,9 @@ class OpportunityScanner(AITOSModule):
 
         previous_book = self._last_order_books.get(symbol)
         ofi_score = order_book_flow_imbalance(previous_book, order_book)
+        ofi_directional_score = (
+            ofi_score if direction == TradeSide.LONG else 10.0 - ofi_score
+        )
         self._last_order_books[symbol] = order_book
         if adverse_flow_without_progress(trades, direction.value):
             logger.info(
@@ -583,7 +586,7 @@ class OpportunityScanner(AITOSModule):
                     "sweep_potential": sweep_potential,
                     "absorption_proxy": absorption,
                     "liquidity_score": liquidity_score,
-                    "order_book_flow_imbalance": ofi_score,
+                    "order_book_flow_imbalance": ofi_directional_score,
                     "entry_extension_atr": round(extension_atr, 3),
                     "entry_timing_score": entry_timing_score,
                     "direction": direction.value if direction else "none",
@@ -726,7 +729,7 @@ class OpportunityScanner(AITOSModule):
             "funding_rate": funding_score,
             "open_interest_trend": oi_score,
             "footprint_interaction": interaction_score,
-            "order_book_flow_imbalance": ofi_score,
+            "order_book_flow_imbalance": ofi_directional_score,
             "entry_timing": entry_timing_score,
             "breakout_acceptance": breakout_acceptance,
             "relative_strength": relative_strength,
