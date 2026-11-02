@@ -34,7 +34,7 @@ class LiveSymbolCache:
     last_book_event_id: str | None = None
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
-    depth_event_history: deque = field(default_factory=lambda: deque(maxlen=200)))
+    depth_event_history: deque = field(default_factory=lambda: deque(maxlen=200))
     stale_trade_rejections: int = 0
     stale_book_rejections: int = 0
     duplicate_trade_rejections: int = 0
