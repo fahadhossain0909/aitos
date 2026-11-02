@@ -129,8 +129,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             {"symbol": symbol, "interval": timeframe, "limit": limit},
             weight,
         )
+        # REST klines include the in-progress candle; the adapter contract
+        # promises closed candles only, so remove it at the source boundary.
         return [
-            parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw
+            candle
+            for row in raw
+            if (candle := parse_kline_rest(row, symbol=symbol, timeframe=timeframe)).is_closed
         ]
 
     async def fetch_order_book(self, symbol: str, limit: int = 50) -> OrderBookSnapshot:
