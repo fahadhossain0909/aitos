@@ -782,6 +782,8 @@ class OpportunityScanner(AITOSModule):
             "a_stat": a_stat_component,
             "order_book_flow_imbalance": ofi_score,
             "entry_timing": entry_timing_score,
+            "breakout_acceptance": breakout_acceptance,
+            "relative_strength": relative_strength,
         }
         component_availability = {
             "trend_strength": True,
