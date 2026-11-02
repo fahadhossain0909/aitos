@@ -10,7 +10,8 @@ This change improves entry evidence without adding conventional lagging indicato
 - Futures universe selection now requires eligible USDT perpetual metadata (TRADING / PERPETUAL / USDT). A fixed core list is used as a baseline; other contracts must pass configurable 24h quote-volume and trade-count floors and are ranked by quote volume. If the ticker endpoint is unavailable, the resolver falls back to core contracts only rather than widening to every USDT suffix.
 - Scanner universe controls are centralized under `ScannerTuning`: `core_symbols`, `min_quote_volume_usd`, `min_trade_count`, `dynamic_universe_limit`, and existing `universe_limit`. Environment overrides use the `AITOS_TUNING_SCANNER_*` prefix.
 - Liquidity execution quality no longer averages in directional depth imbalance, sweep risk, or absorption risk. These are different concepts and must not improve a generic execution-quality score merely because a book is fragile or one-sided.
-- Added consecutive-snapshot best-quote OFI, oriented to the proposed trade direction.
+- Added sequenced full-depth event OFI across every changed price level, distance-weighted from the mid, and aggregated over a rolling live event window.
+- Added same-price liquidity reduction/re-add tracking over a 5-second horizon to expose inferred cancellation pressure and replenishment. Binance L2 cannot prove whether removed quantity was cancelled or executed, so reductions are explicitly labelled as inferred cancellation proxies.
 - Added an adverse-flow/no-price-progress veto when there are enough executions and a clear aggressive-side imbalance. This is a conservative warning, not proof of a hidden participant.
 - Added breakout acceptance and direction-aware BTC-relative-strength features to the candidate score.
 - Replaced momentum/range-chasing in the lightweight scanner shortlist with median quote-activity proxy discounted by range instability.
@@ -42,7 +43,8 @@ These defaults should be reviewed against the observed AITOS paper-trading unive
 
 ## Important limitations / next validation
 
-- Best-quote OFI uses successive scanner snapshots. It is not full-depth, event-by-event OFI. A dedicated depth-delta accumulator with persistence/cancel-replenishment metrics is a future enhancement.
+- Full-depth OFI now consumes each sequenced Binance diff-depth event and every changed price level. The score is depth-normalized and distance-weighted, then aggregated over the latest 200 live events. REST-only fallback has no event history and therefore marks this component unavailable.
+- Binance diff-depth is L2 data: it does not identify the reason for a level reduction. The implementation reports reductions as inferred cancellation proxies and only calls same-price additions within five seconds replenishment; neither is proof of participant intent. Trade-matched depletion attribution and spoofing classification require additional synchronized execution evidence and are not claimed here.
 - Breakout acceptance is a ranking feature, not a mandatory retest gate. This avoids suppressing all early trend entries before sufficient replay evidence exists.
 - Absorption veto uses recent executed trades and endpoint price progress; it cannot identify iceberg orders or prove institutional intent.
 - Universe volume floors are configurable defaults, not universal constants. Validate thresholds against actual AITOS order size, spread, slippage and funding costs.
