@@ -83,7 +83,6 @@ def test_trade_quantity_cannot_be_double_counted_across_depth_reductions():
     assert first["matched_execution_qty"] + second["matched_execution_qty"] == 5.0
 
 
-
 def test_execution_matched_reduction_is_not_reported_as_cancellation():
     matcher = TradeDepthMatcher()
     event = matcher.add_depth_event(_depth_event(quantity=5.0))
@@ -104,7 +103,6 @@ def test_finalized_unmatched_quantity_is_reported_as_cancellation_proxy():
     assert result["matched_execution_qty"] == 0.0
     assert result["cancellation_proxy_qty"] == 5.0
     assert result["inferred_cancel_qty"] == 5.0
-
 
 
 def test_aggressive_buy_matches_ask_reduction():
