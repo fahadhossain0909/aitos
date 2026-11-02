@@ -129,8 +129,14 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             {"symbol": symbol, "interval": timeframe, "limit": limit},
             weight,
         )
+        # REST klines include the in-progress candle; the adapter contract
+        # promises closed candles only, so remove it at the source boundary.
         return [
-            parse_kline_rest(row, symbol=symbol, timeframe=timeframe) for row in raw
+            candle
+            for row in raw
+            if (
+                candle := parse_kline_rest(row, symbol=symbol, timeframe=timeframe)
+            ).is_closed
         ]
 
     async def fetch_order_book(self, symbol: str, limit: int = 50) -> OrderBookSnapshot:
@@ -157,6 +163,10 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         return parse_open_interest_rest(
             await self._get("/fapi/v1/openInterest", {"symbol": symbol}, 1)
         )
+
+    async def fetch_24h_tickers(self) -> list[dict[str, Any]]:
+        """Fetch USDⓈ-M 24h ticker statistics for liquidity-aware universe ranking."""
+        return await self._get("/fapi/v1/ticker/24hr", {}, 40)
 
     async def fetch_exchange_info(
         self, symbols: list[str] | None = None

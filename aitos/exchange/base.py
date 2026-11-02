@@ -72,6 +72,12 @@ class ExchangeAdapter(ABC):
             f"{type(self).__name__} does not support fetch_exchange_info"
         )
 
+    async def fetch_24h_tickers(self) -> list[dict]:
+        """Return 24h ticker statistics when supported by the venue adapter."""
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support fetch_24h_tickers"
+        )
+
     # -- Streaming (live) -------------------------------------------------------
 
     @abstractmethod

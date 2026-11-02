@@ -367,6 +367,20 @@ class JournalSystem(AITOSModule):
                             "decision_id": str(decision_id),
                             "trade_id": trade_id,
                             "pnl": trade_dict.get("pnl"),
+                            "pnl_percent": trade_dict.get("pnl_percent"),
+                            "symbol": trade_dict.get("symbol"),
+                            "side": trade_dict.get("side"),
+                            "entry_price": trade_dict.get("entry_price"),
+                            "exit_price": trade_dict.get("exit_price"),
+                            "exit_reason": trade_dict.get("exit_reason"),
+                            "regime": trade_dict.get("regime"),
+                            "mae_price": trade_dict.get("mae_price"),
+                            "mfe_price": trade_dict.get("mfe_price"),
+                            "mae_r": trade_dict.get("mae_r"),
+                            "mfe_r": trade_dict.get("mfe_r"),
+                            "agent_consensus": dict(
+                                trade_dict.get("agent_consensus") or {}
+                            ),
                         },
                         source_module=self.module_id,
                     )

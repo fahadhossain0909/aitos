@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from aitos.exchange.parsing import (
     parse_agg_trade_ws,
     parse_depth_ws,
@@ -192,3 +194,11 @@ def test_parse_depth_ws():
     assert book.symbol == "BTCUSDT"
     assert book.bids == ((65000.00, 1.5),)
     assert book.asks == ((65000.50, 1.0),)
+
+
+def test_parse_kline_rest_marks_future_close_time_as_incomplete():
+    row = list(SAMPLE_KLINE_ROW)
+    future_close = datetime.now(timezone.utc) + timedelta(minutes=2)
+    row[6] = int(future_close.timestamp() * 1000)
+    kline = parse_kline_rest(row, symbol="BTCUSDT", timeframe="1m")
+    assert kline.is_closed is False
