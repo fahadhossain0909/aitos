@@ -85,9 +85,7 @@ def test_depth_event_aggregation_is_depth_weighted_and_bounded():
 def test_order_book_depth_event_round_trips_through_wire_model():
     book = _seed_book()
     event = {"ofi_raw": 1.25, "ofi_scale": 50.0, "ofi_normalized": 0.025}
-    restored = OrderBookSnapshot.from_dict(
-        {**book.to_dict(), "depth_event": event}
-    )
+    restored = OrderBookSnapshot.from_dict({**book.to_dict(), "depth_event": event})
     assert restored.depth_event == event
 
 
