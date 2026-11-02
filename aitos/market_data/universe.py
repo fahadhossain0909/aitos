@@ -47,15 +47,25 @@ async def resolve_live_universe(
         for symbol, metadata in filters.items()
         if _contract_is_eligible(str(symbol).upper(), metadata)
     }
-    core = [s for s in core_symbols if s in eligible]
+    core_candidates = [s for s in core_symbols if s in eligible]
+    core = list(core_candidates)
     ticker_method = getattr(exchange, "fetch_24h_tickers", None)
     dynamic: list[tuple[str, float]] = []
     if callable(ticker_method):
         try:
             tickers = await ticker_method()
-            for ticker in tickers:
-                symbol = str(ticker.get("symbol", "")).upper()
-                if symbol not in eligible or symbol in core:
+            ticker_by_symbol = {
+                str(t.get("symbol", "")).upper(): t for t in tickers
+            }
+            core = []
+            for symbol in core_candidates:
+                ticker = ticker_by_symbol.get(symbol, {})
+                quote_volume = float(ticker.get("quoteVolume", 0.0) or 0.0)
+                trade_count = int(ticker.get("count", 0) or 0)
+                if quote_volume >= min_quote_volume_usd and trade_count >= min_trade_count:
+                    core.append(symbol)
+            for symbol, ticker in ticker_by_symbol.items():
+                if symbol not in eligible or symbol in core_candidates:
                     continue
                 quote_volume = float(ticker.get("quoteVolume", 0.0) or 0.0)
                 trade_count = int(ticker.get("count", 0) or 0)
@@ -66,7 +76,7 @@ async def resolve_live_universe(
             dynamic = []
         except Exception:
             # Do not widen the universe on a failed liquidity lookup.
-            dynamic = []
+            core, dynamic = core_candidates, []
     dynamic.sort(key=lambda item: (-item[1], item[0]))
     selected = core + [s for s, _ in dynamic[:max(0, dynamic_limit)]]
     selected = list(dict.fromkeys(selected))[:max(1, universe_limit)]
