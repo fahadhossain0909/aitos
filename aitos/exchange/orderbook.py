@@ -282,6 +282,9 @@ class LocalOrderBook:
             "reduction_qty": reductions,
             "replenishment_ratio": replenished / max(reductions, 1e-12),
             "event_time_ms": float(now_ms),
+            "first_update_id": float(update.first_update_id),
+            "final_update_id": float(update.final_update_id),
+            "previous_update_id": float(update.previous_update_id),
             "changed_level_count": float(len(update.bids) + len(update.asks)),
         }
 
