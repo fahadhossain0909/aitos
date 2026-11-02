@@ -168,7 +168,6 @@ def order_book_flow_imbalance(
     return round(max(0.0, min(10.0, 5.0 + 5.0 * normalized * levels)), 2)
 
 
-
 def depth_event_flow_analysis(
     events: Sequence[dict[str, float]],
 ) -> dict[str, float]:
