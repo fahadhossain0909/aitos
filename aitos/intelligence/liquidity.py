@@ -222,7 +222,13 @@ def depth_event_flow_analysis(
         )
         for event in events
     )
-    reduction_total = sum(max(0.0, e.get("reduction_qty", 0.0)) for e in events)
+    reduction_total = sum(
+        max(
+            0.0,
+            e.get("reduction_qty", e.get("inferred_cancel_qty", 0.0)),
+        )
+        for e in events
+    )
     totals.update(
         {
             "cancellation_proxy_qty": cancellation_proxy,
