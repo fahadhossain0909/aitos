@@ -158,6 +158,10 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             await self._get("/fapi/v1/openInterest", {"symbol": symbol}, 1)
         )
 
+    async def fetch_24h_tickers(self) -> list[dict[str, Any]]:
+        """Fetch USDⓈ-M 24h ticker statistics for liquidity-aware universe ranking."""
+        return await self._get("/fapi/v1/ticker/24hr", {}, 40)
+
     async def fetch_exchange_info(
         self, symbols: list[str] | None = None
     ) -> dict[str, SymbolFilters]:
