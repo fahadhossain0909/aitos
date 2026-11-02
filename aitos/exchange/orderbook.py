@@ -204,7 +204,7 @@ class LocalOrderBook:
                 },
             )
 
-    def _calculate_depth_event(self, update: DepthUpdate) -> dict[str, float]:
+    def _calculate_depth_event(self, update: DepthUpdate) -> dict[str, Any]:
         """Measure full-depth liquidity changes for this sequenced diff event.
 
         Reductions are cancellation proxies: Binance L2 does not reveal whether
@@ -314,7 +314,7 @@ class LocalOrderBook:
                 book[price] = quantity
 
     def snapshot(
-        self, event_time_ms: int = 0, *, depth_event: dict[str, float] | None = None
+        self, event_time_ms: int = 0, *, depth_event: dict[str, Any] | None = None
     ) -> OrderBookSnapshot:
         started = time.perf_counter()
         sort_started = time.perf_counter()
