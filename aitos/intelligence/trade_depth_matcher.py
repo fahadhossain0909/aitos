@@ -106,9 +106,15 @@ class TradeDepthMatcher:
                     continue
                 if reduction["side"] != trade["side"]:
                     continue
-                if abs(reduction["timestamp_ms"] - trade["timestamp_ms"]) > self.match_window_ms:
+                if (
+                    abs(reduction["timestamp_ms"] - trade["timestamp_ms"])
+                    > self.match_window_ms
+                ):
                     continue
-                tolerance = max(abs(reduction["price"]), abs(trade["price"]), 1.0) * PRICE_EPSILON
+                tolerance = (
+                    max(abs(reduction["price"]), abs(trade["price"]), 1.0)
+                    * PRICE_EPSILON
+                )
                 if abs(reduction["price"] - trade["price"]) > tolerance:
                     continue
                 matched = min(reduction["remaining_qty"], trade["remaining_qty"])
@@ -155,9 +161,11 @@ class TradeDepthMatcher:
             event["execution_attributed_ratio"] = round(
                 event["matched_execution_qty"] / max(total, 1e-12), 4
             )
-            event["attribution_complete"] = all(
-                bool(x.get("attribution_complete", False)) for x in levels
-            ) if levels else True
+            event["attribution_complete"] = (
+                all(bool(x.get("attribution_complete", False)) for x in levels)
+                if levels
+                else True
+            )
 
         cutoff = self._watermark_ms - self.match_window_ms
         self._trades = deque(
