@@ -971,6 +971,7 @@ class OpportunityScanner(AITOSModule):
                         self._exchange.fetch_klines(symbol, self._timeframe, limit=20),
                         timeout=self._tuning.analysis.timeout_seconds,
                     )
+                    candles = [c for c in candles if getattr(c, "is_closed", True)]
                     if len(candles) < 5:
                         return symbol, -1.0, index
                     first_close = float(candles[0].close)
