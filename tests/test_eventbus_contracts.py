@@ -11,18 +11,14 @@ def test_redis_streams_bus_satisfies_transport_protocol() -> None:
 
 
 def test_redis_subscription_satisfies_subscription_protocol() -> None:
-    # The task is only inspected by the Redis adapter; callers depend on cancel.
-    import asyncio
+    class FakeTask:
+        def cancel(self) -> None:
+            pass
 
-    async def _noop() -> None:
-        return None
-
-    task = asyncio.create_task(_noop())
     subscription = Subscription(
         topic_pattern="market.trade",
         group="contract-test",
         consumer="contract-test-1",
-        _task=task,
+        _task=FakeTask(),  # type: ignore[arg-type]
     )
     assert isinstance(subscription, SubscriptionProtocol)
-    subscription.cancel()
