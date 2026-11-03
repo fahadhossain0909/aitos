@@ -84,6 +84,7 @@ class PortfolioState:
     positions: tuple[PositionExposure, ...] = ()
     daily_pnl_pct: float = 0.0
     weekly_pnl_pct: float = 0.0
+    consecutive_losses: int = 0
     volatility_percentile: float = 50.0
     regime: str = "normal"
     max_pairwise_correlation: float = 0.0
