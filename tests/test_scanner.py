@@ -7,7 +7,12 @@ import pytest
 
 from aitos.config.tuning import TuningSettings
 from aitos.exchange.base import ExchangeAdapter
-from aitos.intelligence.scanner import OpportunityScanner, determine_direction
+from aitos.intelligence.scanner import (
+    OpportunityScanner,
+    determine_direction,
+    higher_timeframe_alignment,
+    resolve_higher_timeframe,
+)
 from aitos.models.market import FundingRate, Kline, OpenInterest, OrderBookSnapshot
 from aitos.models.trade import TradeSide
 from aitos.risk.models import PortfolioState
@@ -291,6 +296,66 @@ async def test_live_scanner_blocks_when_websocket_market_state_is_stale(event_bu
         symbols=["BTCUSDT"],
         reference_symbol="",
         tuning=TuningSettings(mode="live"),
+    )
+    await scanner.initialize({})
+    assert await scanner.scan_symbol("BTCUSDT") is None
+    await scanner.shutdown()
+
+
+def test_resolve_higher_timeframe_uses_conservative_auto_mapping():
+    assert resolve_higher_timeframe("15m") == "1h"
+    assert resolve_higher_timeframe("5m") == "15m"
+    assert resolve_higher_timeframe("15m", "4h") == "4h"
+
+
+def test_htf_alignment_accepts_matching_directional_trend():
+    aligned, details = higher_timeframe_alignment(
+        make_trending_up_klines(n=80, step=2.0), TradeSide.LONG
+    )
+    assert aligned is True
+    assert details["trend"] == "bullish"
+    assert details["adx"] >= 25.0
+
+
+def test_htf_alignment_rejects_countertrend_ltf_signal():
+    aligned, details = higher_timeframe_alignment(
+        make_trending_up_klines(n=80, step=2.0), TradeSide.SHORT
+    )
+    assert aligned is False
+    assert details["reason"] == "ltf_signal_opposes_htf_trend"
+
+
+def test_htf_alignment_fails_closed_for_choppy_or_insufficient_data():
+    choppy = make_klines(
+        [100.0 + (0.3 if i % 2 == 0 else -0.3) for i in range(80)],
+        taker_buy_ratio=0.5,
+    )
+    aligned, details = higher_timeframe_alignment(choppy, TradeSide.LONG)
+    assert aligned is False
+    assert details["reason"] == "htf_trend_weak_or_choppy"
+
+    aligned, details = higher_timeframe_alignment(
+        make_trending_up_klines(n=20), TradeSide.LONG
+    )
+    assert aligned is False
+    assert details["reason"] == "insufficient_htf_history"
+
+
+@pytest.mark.asyncio
+async def test_scanner_blocks_ltf_long_when_htf_is_bearish(event_bus):
+    class CountertrendHTFExchange(FakeScannerExchange):
+        async def fetch_klines(self, symbol, timeframe, limit=500):
+            if timeframe == "1h":
+                closes = [200.0 - i * 2.0 for i in range(80)]
+                return make_klines(closes, taker_buy_ratio=0.35)
+            return make_trending_up_klines(n=80, step=2.0)
+
+    exchange = CountertrendHTFExchange()
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=exchange,
+        symbols=["BTCUSDT"],
+        reference_symbol="",
     )
     await scanner.initialize({})
     assert await scanner.scan_symbol("BTCUSDT") is None
