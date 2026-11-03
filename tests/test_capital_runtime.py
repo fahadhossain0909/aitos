@@ -79,6 +79,29 @@ async def test_runtime_guard_halts_after_daily_loss(event_bus, risk_engine):
 
 
 @pytest.mark.asyncio
+async def test_two_consecutive_losses_halves_next_risk_budget(event_bus, risk_engine):
+    install_capital_guard()
+    normal_lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    reduced_lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await normal_lifecycle.initialize({})
+    await reduced_lifecycle.initialize({})
+    normal = await normal_lifecycle.submit_opportunity(
+        make_opportunity(), make_portfolio(consecutive_losses=0)
+    )
+    reduced = await reduced_lifecycle.submit_opportunity(
+        make_opportunity(), make_portfolio(consecutive_losses=2)
+    )
+    assert normal.state == TradeLifecycleState.POSITION_OPENED
+    assert reduced.state == TradeLifecycleState.POSITION_OPENED
+    normal_risk = normal.agent_consensus["capital_objective"]["risk_budget_usd"]
+    reduced_risk = reduced.agent_consensus["capital_objective"]["risk_budget_usd"]
+    assert reduced_risk == pytest.approx(normal_risk * 0.5)
+    # The approved budget must cap the real sized position, not just metadata.
+    assert reduced.risk_amount_usd <= reduced_risk + 1e-8
+    assert reduced.risk_amount_usd == pytest.approx(normal.risk_amount_usd * 0.5)
+
+
+@pytest.mark.asyncio
 async def test_runtime_guard_allows_eligible_trade(event_bus, risk_engine):
     install_capital_guard()
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)

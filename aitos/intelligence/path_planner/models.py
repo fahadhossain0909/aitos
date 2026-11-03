@@ -63,3 +63,29 @@ class PathPlan:
     @property
     def nearest_downside(self) -> PathDestination | None:
         return self.downside[0] if self.downside else None
+
+
+@dataclass(frozen=True)
+class TargetExtensionDecision:
+    """Explainable approval/veto for extending a position's runner target."""
+
+    approved: bool
+    target_price: float
+    proposed_price: float
+    base_price: float
+    reason: str
+    barrier_price: float | None = None
+    supporting_destination: float | None = None
+    vetoes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "approved": self.approved,
+            "target_price": self.target_price,
+            "proposed_price": self.proposed_price,
+            "base_price": self.base_price,
+            "reason": self.reason,
+            "barrier_price": self.barrier_price,
+            "supporting_destination": self.supporting_destination,
+            "vetoes": list(self.vetoes),
+        }

@@ -17,7 +17,11 @@ from aitos.intelligence.hedge_intelligence import HedgeDecision, HedgeIntelligen
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
 from aitos.intelligence.market_state import MarketState, MarketStateEngine
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
-from aitos.intelligence.path_planner import MarketPathPlanner, PathPlan
+from aitos.intelligence.path_planner import (
+    MarketPathPlanner,
+    PathPlan,
+    TargetExtensionDecision,
+)
 from aitos.intelligence.structural_risk import StructuralRiskEngine, StructuralStop
 from aitos.intelligence.trade_journey import TradeJourneyEngine, TradeJourneySnapshot
 from aitos.intelligence.trade_thesis import TradeThesis, TradeThesisEngine
@@ -43,6 +47,7 @@ class PositionAction:
     exit_decision: ExitDecision | None = None
     hedge_decision: HedgeDecision | None = None
     path_plan: PathPlan | None = None
+    target_extension: TargetExtensionDecision | None = None
     structural_stop: StructuralStop | None = None
     market_state: MarketState | None = None
     thesis: TradeThesis | None = None
@@ -67,6 +72,9 @@ class PositionAction:
                 self.thesis_eval.health.value if self.thesis_eval else None
             ),
             "journey": self.journey.to_dict() if self.journey else None,
+            "target_extension": (
+                self.target_extension.to_dict() if self.target_extension else None
+            ),
             "notes": list(self.notes),
         }
 
@@ -118,6 +126,12 @@ class PositionManager:
         self._spike_tp_atr_multiple = max(
             0.0, float(cfg.get("spike_tp_atr_multiple", 10.0))
         )
+        from aitos.trading.adaptive_exit_policy import AdaptiveExitPolicy
+
+        self._adaptive_exit_policy = AdaptiveExitPolicy(
+            cfg.get("adaptive_exit_policy", {})
+        )
+        self._adaptive_exit_enabled = bool(cfg.get("adaptive_exit_enabled", True))
 
     def register_thesis(self, thesis: TradeThesis) -> None:
         self._theses[thesis.trade_id] = thesis
@@ -270,6 +284,7 @@ class PositionManager:
         self._journeys.pop(trade_id, None)
         self._hedge_engine.reset(trade_id)
         self._eie.reset_trade(trade_id)
+        self._adaptive_exit_policy.reset_trade(trade_id)
         if symbol:
             self._eie.reset_symbol(symbol)
 
@@ -461,6 +476,28 @@ class PositionManager:
             elif journey.action.value in {"PROTECT", "TRAIL"}:
                 effective_action = ExitAction.MANAGE
         new_stop = None
+        adaptive_result = None
+        if self._adaptive_exit_enabled:
+            adaptive_result = self._adaptive_exit_policy.evaluate(
+                trade=trade, current_price=current_price
+            )
+            # Stagnation is a time-efficiency exit only while the original
+            # thesis has not already hard-invalidated (handled by EIE above).
+            if (
+                adaptive_result.stagnation_exit
+                and effective_action != ExitAction.EXIT
+                and getattr(thesis_eval.health, "value", thesis_eval.health)
+                != "INVALIDATED"
+            ):
+                effective_action = ExitAction.EXIT
+                reason = (
+                    f"adaptive_exit:stagnation bars={adaptive_result.bars_observed} "
+                    f"progress_r={adaptive_result.progress_r:.3f}"
+                )
+            if adaptive_result.stop_price is not None:
+                new_stop = adaptive_result.stop_price
+                if effective_action == ExitAction.HOLD:
+                    effective_action = ExitAction.MANAGE
         if (
             self._allow_stop_tighten
             and effective_action == ExitAction.MANAGE
@@ -473,7 +510,36 @@ class PositionManager:
                 trade.side == TradeSide.SHORT
                 and structural_stop.stop_price < trade.sl_price
             ):
-                new_stop = structural_stop.stop_price
+                if new_stop is None:
+                    new_stop = structural_stop.stop_price
+                elif trade.side == TradeSide.LONG:
+                    new_stop = max(new_stop, structural_stop.stop_price)
+                else:
+                    new_stop = min(new_stop, structural_stop.stop_price)
+        target_extension = None
+        if effective_action != ExitAction.EXIT and trade.take_profit_levels:
+            base_target = trade.entry_price + (
+                3.0 * trade.r_distance if side == "LONG" else -3.0 * trade.r_distance
+            )
+            proposed_target = float(trade.take_profit_levels[-1])
+            extends_base = (
+                proposed_target > base_target
+                if side == "LONG"
+                else proposed_target < base_target
+            )
+            if extends_base and trade.r_distance > 0:
+                target_extension = self._mpp.assess_target_extension(
+                    plan=path_plan,
+                    market_state=market_state,
+                    side=side,
+                    entry_price=trade.entry_price,
+                    stop_distance=trade.r_distance,
+                    base_target_price=base_target,
+                    proposed_target_price=proposed_target,
+                    thesis_health=thesis_eval.health.value,
+                    exit_action=effective_action.value,
+                )
+
         spike_tp_price = self._spike_tp(side=side, current_price=current_price, atr=atr)
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
         reason = (
@@ -484,7 +550,23 @@ class PositionManager:
             f" hedge={hedge_decision.action if hedge_decision else 'none'}"
             f" [{', '.join(reason_codes + list(journey.reasons))}]"
         )
-        notes = tuple(dict.fromkeys((*exit_decision.notes, *journey.reasons)))
+        if target_extension is not None:
+            reason += f" target_extension={target_extension.reason}"
+        if adaptive_result is not None:
+            reason += (
+                f" adaptive={adaptive_result.reason}"
+                f" bars={adaptive_result.bars_observed}"
+                f" progress_r={adaptive_result.progress_r:.3f}"
+            )
+        notes = tuple(
+            dict.fromkeys(
+                (
+                    *exit_decision.notes,
+                    *journey.reasons,
+                    *((adaptive_result.reason,) if adaptive_result is not None else ()),
+                )
+            )
+        )
         return PositionAction(
             action=effective_action,
             reason=reason,
@@ -494,6 +576,7 @@ class PositionManager:
             exit_decision=exit_decision,
             hedge_decision=hedge_decision,
             path_plan=path_plan,
+            target_extension=target_extension,
             structural_stop=structural_stop,
             market_state=market_state,
             thesis=thesis,

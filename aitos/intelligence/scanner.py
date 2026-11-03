@@ -197,6 +197,7 @@ class ScanCandidate:
     atr: float
     regime: str
     scanned_at: str = field(default_factory=_utc_now_iso)
+    htf_adx: float = 0.0
 
 
 def _volatility_fitness(
@@ -1134,6 +1135,7 @@ class OpportunityScanner(AITOSModule):
             entry_price=klines[-1].close,
             atr=atr,
             regime=regime,
+            htf_adx=float(htf_diagnostics.get("adx", 0.0)),
         )
 
     async def _lightweight_rank_symbols(self, limit: int | None = None) -> list[str]:
@@ -1387,13 +1389,23 @@ class OpportunityScanner(AITOSModule):
     def to_opportunity(
         self,
         candidate: ScanCandidate,
-        risk_reward_multiples: tuple[float, ...] = (1.0, 2.0, 3.0),
+        risk_reward_multiples: tuple[float, ...] | None = None,
         atr_stop_multiplier: float = 1.5,
         strategy_id: str = "opportunity-scanner",
         is_production: bool = False,
         approved_by: str | None = None,
     ) -> Opportunity:
         entry = candidate.entry_price
+        # Keep the first two partial targets conservative while allowing the
+        # final runner target to expand with a confirmed HTF trend. Explicit
+        # caller-supplied multiples always take precedence.
+        if risk_reward_multiples is None:
+            if candidate.htf_adx > 35.0:
+                risk_reward_multiples = (1.0, 2.0, 3.3)
+            elif candidate.htf_adx >= 25.0:
+                risk_reward_multiples = (1.0, 2.0, 2.5)
+            else:
+                risk_reward_multiples = (1.0, 2.0, 3.0)
         stop_distance = (
             candidate.atr * atr_stop_multiplier if candidate.atr > 0 else entry * 0.01
         )

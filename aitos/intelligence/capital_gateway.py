@@ -199,7 +199,15 @@ class CapitalGateway:
             estimate = by_symbol[allocation.symbol]
             snapshot = self._snapshot(equity_usd, estimate)
             metadata = estimate.metadata
-            requested_pct = allocation.risk_budget_usd / equity_usd * 100.0
+            loss_streak = max(0, int(metadata.get("consecutive_losses", 0)))
+            streak_multiplier = (
+                self.controls.risk_reduction_multiplier
+                if loss_streak >= self.controls.risk_reduction_after_losses
+                else 1.0
+            )
+            requested_pct = (
+                allocation.risk_budget_usd * streak_multiplier / equity_usd * 100.0
+            )
             protection = self.protection.evaluate(
                 symbol=allocation.symbol,
                 requested_risk_pct=requested_pct,
