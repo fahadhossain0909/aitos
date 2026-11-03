@@ -116,7 +116,6 @@ def test_adaptive_stagnation_bar_identity_uses_only_completed_buckets():
     assert manager._completed_bar_identity(next_bucket) == "900:1800"
 
 
-
 def test_adaptive_completed_bar_identity_survives_trade_recovery():
     trade = _open_trade()
     trade.adaptive_exit_observations = 12
@@ -126,7 +125,6 @@ def test_adaptive_completed_bar_identity_survives_trade_recovery():
 
     assert restored.adaptive_exit_observations == 12
     assert restored.adaptive_exit_last_bar_id == "900:1710000000"
-
 
 
 def test_adaptive_stagnation_does_not_count_bars_closed_before_entry():
