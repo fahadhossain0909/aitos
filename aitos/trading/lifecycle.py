@@ -787,6 +787,29 @@ class TradeLifecycle(AITOSModule):
                         source_module=self.module_id,
                     )
                 )
+        if pos_action.target_extension is not None and trade.take_profit_levels:
+            decision = pos_action.target_extension
+            current_runner_target = float(trade.take_profit_levels[-1])
+            safer_target = (
+                decision.target_price < current_runner_target
+                if trade.side == TradeSide.LONG
+                else decision.target_price > current_runner_target
+            )
+            if safer_target and decision.target_price > 0:
+                trade.take_profit_levels[-1] = decision.target_price
+                trade.updated_at = utc_now_iso()
+                await self._event_bus.publish(
+                    Event(
+                        topic=TOPIC_POSITION_UPDATED,
+                        payload={
+                            **trade.to_dict(),
+                            "reason": "path_planner_runner_target_guard",
+                            "target_extension": decision.to_dict(),
+                        },
+                        source_module=self.module_id,
+                    )
+                )
+
         # HOLD → retain the position; only independent protection logic follows
         return None
 
