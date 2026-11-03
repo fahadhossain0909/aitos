@@ -138,7 +138,9 @@ class PositionManager:
         if self._adaptive_exit_bar_seconds <= 0:
             raise ValueError("adaptive_exit_bar_seconds must be positive")
 
-    def _completed_bar_identity(self, timestamp: datetime) -> str:
+    def _completed_bar_identity(
+        self, timestamp: datetime, trade: Trade | None = None
+    ) -> str | None:
         """Return the prior fully closed time bucket for stagnation accounting.
 
         The strategy's default execution timeframe is 15m. The current bucket
@@ -146,7 +148,20 @@ class PositionManager:
         in the same bucket therefore cannot advance the stagnation clock.
         """
         interval = self._adaptive_exit_bar_seconds
-        completed_epoch = (int(timestamp.timestamp()) // interval) * interval - interval
+        current_bucket_start = (int(timestamp.timestamp()) // interval) * interval
+        completed_epoch = current_bucket_start - interval
+        if trade is not None:
+            try:
+                entry_time = datetime.fromisoformat(
+                    trade.entry_time.replace("Z", "+00:00")
+                )
+                if entry_time.tzinfo is None:
+                    entry_time = entry_time.replace(tzinfo=timezone.utc)
+                # Do not count a candle that closed before this position existed.
+                if current_bucket_start <= entry_time.timestamp():
+                    return None
+            except (TypeError, ValueError):
+                return None
         return f"{interval}:{completed_epoch}"
 
     def register_thesis(self, thesis: TradeThesis) -> None:
@@ -499,7 +514,7 @@ class PositionManager:
                 trade=trade,
                 current_price=current_price,
                 completed_bar_id=(
-                    completed_bar_id or self._completed_bar_identity(ts)
+                    completed_bar_id or self._completed_bar_identity(ts, trade)
                 ),
             )
             # Stagnation is a time-efficiency exit only while the original
