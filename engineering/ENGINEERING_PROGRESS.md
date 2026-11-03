@@ -30,7 +30,7 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 | Module inventory | PARTIAL | README and paper-runner/health source-level inventory; remaining modules not yet inspected |
 | Telemetry specification and targeted fix | IMPLEMENTED — NOT VERIFIED | Missing latency sample semantics fixed in code, regression test and Grafana panel; tests pending |
 | Latency baseline | NOT MEASURED | No runtime session or histogram export inspected |
-| Root-cause register | PARTIAL | 8 source/documentation findings recorded; runtime root causes remain unverified |
+| Root-cause register | PARTIAL | 9 source/documentation findings recorded; runtime root causes remain unverified |
 | Runtime audit | BLOCKED / NOT STARTED | No connected local runtime or authorized isolated test environment in this session |
 | Automated tests / CI | NOT RUN / NOT OBSERVED | Code changed; no execution environment; GitHub Actions run/status lookup returned none |
 | Independent review | NOT STARTED | Must review final diff and CI |
@@ -49,7 +49,7 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 - Confirmed and implemented a telemetry semantics fix (AITOS-ENG-004): omit percentiles when no observations exist; expose sample count; retain genuine observed zero; added regression test and Grafana panel. CI/runtime verification pending.
 - Existing data-flow registry is process-local and retains a bounded 2,048 latency samples per stage/symbol bucket.
 - Prometheus scrape interval is configured to 15 seconds for paper/live targets; actual scrape status remains NOT TESTED.
-- Paper runner source audit found startup cleanup coverage begins only after a long initialization sequence (AITOS-ENG-005); auxiliary-module self-heal coverage differs from health-report coverage (AITOS-ENG-006); degraded health returns HTTP 200 intentionally (AITOS-ENG-007); position event API is bounded process-local memory (AITOS-ENG-008).
+- Paper runner source audit found startup cleanup coverage begins only after a long initialization sequence (AITOS-ENG-005); auxiliary-module self-heal coverage differs from health-report coverage (AITOS-ENG-006); degraded health returns HTTP 200 intentionally (AITOS-ENG-007); position event API is bounded process-local memory (AITOS-ENG-008); per-symbol data-flow buckets have no source-level TTL/eviction (AITOS-ENG-009; memory impact NOT MEASURED).
 
 ## Next actions
 1. Run `python -m pytest -q tests/forensics/test_data_flow_observability.py` and `black --check` in the repository environment.
