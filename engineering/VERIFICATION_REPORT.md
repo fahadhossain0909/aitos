@@ -35,6 +35,13 @@ Documentation and agent operating-model foundation only.
 | CI | PENDING | Run after PR creation |
 | Independent review | PENDING | Not yet performed |
 
+## Additional static-source verification
+- `aitos/health_server.py` contains health, metrics, data-flow and position-lifecycle routes.
+- `aitos/forensics/data_flow_registry.py` uses an in-process bounded latency deque (maxlen 2048) and returns `None` for percentiles with no samples.
+- `aitos/health_server.py::_append_data_flow_metrics()` exports missing latency percentiles as 0. This is a source-confirmed semantic mismatch; runtime effect is NOT TESTED and is tracked as AITOS-ENG-004.
+- `monitoring/prometheus.yml` configures 15-second scrapes for paper/live endpoints. Scrape execution was NOT TESTED.
+- The current data-flow test verifies metric-name presence but does not validate no-sample semantics.
+
 ## Limitations
 This change establishes instructions and durable reporting templates. It does not itself install or run a 24/7 agent, launch specialist agents, instrument missing telemetry, verify the trading runtime, or establish a measured latency baseline.
 
