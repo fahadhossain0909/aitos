@@ -7,8 +7,8 @@
 - Stagnation guard requests an exit after 35 position-manager observations when best recorded progress (MFE) remains below +0.4R. The observation count is stored on the Trade record and included in `to_dict()` serialization; it is not guaranteed to represent unique market bars.
 - Scanner final runner target now adapts to confirmed HTF ADX when callers do not supply explicit R multiples: 2.5R for ADX 25–35 and 3.3R above 35; weak/unknown ADX retains 3R. The first two partial targets remain 1R/2R, and explicit caller settings take precedence.
 - Capital Gateway halves the requested risk budget after two consecutive losses, using portfolio `consecutive_losses`; the existing five-loss hard circuit breaker remains authoritative.
-- The policy is opt-in (adaptive_exit_enabled, default false) so existing paper/live behavior is unchanged until replay validation.
-- The adaptive policy is opt-in (adaptive_exit_enabled, default false). Its observation counter is part of the Trade record rather than process-local policy memory.
+- Adaptive break-even/stagnation safeguards are enabled by default; deployments can explicitly disable them with adaptive_exit_enabled: false.
+- The adaptive policy defaults to enabled (adaptive_exit_enabled: true). Its observation counter is part of the Trade record rather than process-local policy memory.
 - Unit tests cover LONG/SHORT ratchets, monotonicity, stagnation threshold and invalid input handling.
 
 ## Integration sequence
@@ -37,4 +37,4 @@ The following requested work remains gated on dedicated implementation and valid
 
 ## Activation
 
-Keep disabled by default. Pass adaptive_exit_enabled: true only in isolated paper/replay configuration after persisted stagnation state and remaining validation gates above are complete.
+Adaptive exit is enabled by default. Set adaptive_exit_enabled: false to roll back. Because unique-bar counting, production loss-streak provenance, and full cost-aware replay remain outstanding, keep this activation limited to paper trading; do not enable live execution until those validation gates pass.
