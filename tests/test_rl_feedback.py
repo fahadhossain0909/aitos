@@ -191,32 +191,37 @@ async def test_rl_feedback_loop_health_check(event_bus):
 
 
 @pytest.mark.asyncio
-async def test_rl_feedback_uses_neutral_model_score_as_training_feature(event_bus):
-    scorer = TabularBanditRLScorer(min_samples_for_confidence=1)
-    loop = RLFeedbackLoop(event_bus=event_bus, scorer=scorer)
-    await loop.initialize({})
+async def test_rl_feedback_uses_neutral_model_score_as_training_feature():
+    from types import SimpleNamespace
 
-    await event_bus.publish(
-        Event(
-            topic="trade.position_closed",
-            payload={
-                "trade_id": "neutral-score",
-                "symbol": "BTCUSDT",
-                "side": "LONG",
-                "regime": "trending",
-                "pnl": 50.0,
-                "risk_amount_usd": 25.0,
-                "agent_consensus": {"rl_confidence": 9.8},
-            },
-            source_module="test",
-        )
+    class RecordingScorer:
+        def __init__(self):
+            self.updates = []
+
+        def update(self, symbol, context, reward_r_multiple):
+            self.updates.append((symbol, context, reward_r_multiple))
+
+    scorer = RecordingScorer()
+    loop = RLFeedbackLoop(event_bus=None, scorer=scorer)
+    event = SimpleNamespace(
+        payload={
+            "trade_id": "neutral-score",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "regime": "trending",
+            "pnl": 50.0,
+            "risk_amount_usd": 25.0,
+            "agent_consensus": {"rl_confidence": 9.8},
+        },
+        created_at="2026-01-01T00:00:00+00:00",
     )
 
-    assert await _wait_for(lambda: loop.updates_applied == 1)
-    # The scorer bucket ignores model confidence today, but the event contract
-    # is checked by the separate deep-scorer test suite.
-    assert loop.updates_applied == 1
-    await loop.shutdown()
+    await loop._on_position_closed(event)
+
+    assert len(scorer.updates) == 1
+    _, context, reward = scorer.updates[0]
+    assert reward == 2.0
+    assert context["rl_confidence"] == 5.0
 
 
 @pytest.mark.asyncio
