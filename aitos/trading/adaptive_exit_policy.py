@@ -64,7 +64,7 @@ class AdaptiveExitPolicy:
 
         candidate_stop = None
         reason = "no_change"
-        if progress_r >= self._be_trigger_r:
+        if progress_r + 1e-9 >= self._be_trigger_r:
             cost_distance = trade.entry_price * (self._fee_rate + self._slippage_rate)
             lock_distance = max(self._be_lock_r * risk, cost_distance)
             candidate_stop = trade.entry_price + sign * lock_distance
