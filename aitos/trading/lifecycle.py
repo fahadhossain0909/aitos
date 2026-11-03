@@ -1143,17 +1143,15 @@ class TradeLifecycle(AITOSModule):
         # Apply the streak multiplier after leverage/sector caps so the
         # realized executable risk is actually reduced by the configured
         # percentage, even when a portfolio exposure cap was already binding.
-        risk_multiplier = float(
-            capital_objective.get("risk_reduction_multiplier", 1.0)
-        )
+        risk_multiplier = float(capital_objective.get("risk_reduction_multiplier", 1.0))
         if not math.isfinite(risk_multiplier) or not 0.0 < risk_multiplier <= 1.0:
             return await self._reject(
                 opportunity, "capital_objective: invalid risk reduction multiplier"
             )
         if risk_multiplier < 1.0:
-            scaled_notional = math.floor(
-                sizing.position_size_usd * risk_multiplier * 100.0
-            ) / 100.0
+            scaled_notional = (
+                math.floor(sizing.position_size_usd * risk_multiplier * 100.0) / 100.0
+            )
             stop_risk_rate = (
                 abs(opportunity.entry_price - sizing_stop_price)
                 / opportunity.entry_price
@@ -1173,9 +1171,9 @@ class TradeLifecycle(AITOSModule):
                 abs(opportunity.entry_price - sizing_stop_price)
                 / opportunity.entry_price
             )
-            max_notional = math.floor(
-                (approved_risk_budget / stop_risk_rate) * 100.0
-            ) / 100.0
+            max_notional = (
+                math.floor((approved_risk_budget / stop_risk_rate) * 100.0) / 100.0
+            )
             if sizing.position_size_usd > max_notional:
                 capped_notional = max(0.0, max_notional)
                 sizing = PositionSizeResult(
