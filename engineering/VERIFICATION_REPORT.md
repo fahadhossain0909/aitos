@@ -19,8 +19,8 @@ Engineering operating-model documentation, a targeted telemetry exporter correct
 
 ## Pull request
 - Draft PR: https://github.com/fahadhossain0909/aitos/pull/216
-- Head commit before this status update: `95b74923d360ed1073c99a966ff65cbf78a45a72`
-- Changed files reported by GitHub: 10.
+- Current head at last status check: `b36ae68db55554312a845520870a2da049285327`.
+- Changed files reported by GitHub compare: 15.
 - Initial PR workflow lookup returned no runs; combined status returned no checks. CI status: PENDING / NOT OBSERVED.
 
 ## Verification matrix
@@ -32,7 +32,7 @@ Engineering operating-model documentation, a targeted telemetry exporter correct
 | Root AGENTS.md existed before change | NO | GitHub contents API returned 404 |
 | Runtime health | NOT TESTED | No runtime environment accessed |
 | Unit/integration tests | NOT RUN | No code execution environment available in this session |
-| CI | PENDING | Run after PR creation |
+| CI | NOT OBSERVED | No PR workflow runs or combined commit statuses returned by GitHub lookup |
 | Independent review | PENDING | Not yet performed |
 
 ## Additional static-source verification and branch remediation
@@ -40,6 +40,7 @@ Engineering operating-model documentation, a targeted telemetry exporter correct
 - `aitos/forensics/data_flow_registry.py` uses an in-process bounded latency deque (maxlen 2048) and returns `None` for percentiles with no samples.
 - Remediated on the engineering branch: `_append_data_flow_metrics()` now omits unobserved percentile series, exposes a per-stage latency sample count, and preserves a genuine observed 0.0 ms. Added regression coverage and Grafana sample-count panel. Tests/CI/runtime have NOT yet been executed.
 - `monitoring/prometheus.yml` configures 15-second scrapes for paper/live endpoints. Scrape execution was NOT TESTED.
+- `run_paper_trading.py` startup/teardown order, `aitos/app.py::initialize_all()/shutdown_all()`, and position lifecycle event retention were inspected. Findings AITOS-ENG-005 through AITOS-ENG-008 are recorded; no runtime failure is claimed.
 - Added a regression test for empty samples and a genuine observed 0.0 ms; execution remains NOT RUN.
 
 ## Limitations
