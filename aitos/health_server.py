@@ -207,11 +207,6 @@ class HealthServer:
             )
             lines.append("# TYPE aitos_data_flow_latency_p95_ms gauge")
             lines.append(
-                "# HELP aitos_data_flow_latency_sample_count "
-                "Number of observed latency samples"
-            )
-            lines.append("# TYPE aitos_data_flow_latency_sample_count gauge")
-            lines.append(
                 "# HELP aitos_data_flow_oldest_event_age_ms Oldest queued event age"
             )
             lines.append("# TYPE aitos_data_flow_oldest_event_age_ms gauge")
@@ -227,8 +222,7 @@ class HealthServer:
                 "# HELP aitos_data_flow_pressure Whether stage is under pressure (1/0)"
             )
             lines.append("# TYPE aitos_data_flow_pressure gauge")
-            # Export percentiles only after observations exist. Zero is a valid
-            # measured value and must not stand in for missing telemetry.
+            # Keep missing samples numeric so Prometheus/Grafana queries stay stable.
             for stage in PIPELINE_ORDER:
                 snap = reg.snapshot_stage(stage, "")
                 stage_label = snap.stage
@@ -240,29 +234,22 @@ class HealthServer:
                     f'aitos_data_flow_output_rate{{stage="{stage_label}"}} '
                     f"{snap.output_rate}"
                 )
+                p99 = snap.latency_p99_ms if snap.latency_p99_ms is not None else 0
                 lines.append(
-                    f'aitos_data_flow_latency_sample_count{{stage="{stage_label}"}} '
-                    f"{snap.latency_sample_count}"
+                    f'aitos_data_flow_latency_p99_ms{{stage="{stage_label}"}} {p99}'
                 )
-                if snap.latency_p99_ms is not None:
-                    lines.append(
-                        f'aitos_data_flow_latency_p99_ms{{stage="{stage_label}"}} '
-                        f"{snap.latency_p99_ms}"
-                    )
                 lines.append(
                     f'aitos_data_flow_queue_depth{{stage="{stage_label}"}} '
                     f"{snap.queue_depth}"
                 )
-                if snap.latency_p50_ms is not None:
-                    lines.append(
-                        f'aitos_data_flow_latency_p50_ms{{stage="{stage_label}"}} '
-                        f"{snap.latency_p50_ms}"
-                    )
-                if snap.latency_p95_ms is not None:
-                    lines.append(
-                        f'aitos_data_flow_latency_p95_ms{{stage="{stage_label}"}} '
-                        f"{snap.latency_p95_ms}"
-                    )
+                lines.append(
+                    f'aitos_data_flow_latency_p50_ms{{stage="{stage_label}"}} '
+                    f"{snap.latency_p50_ms or 0}"
+                )
+                lines.append(
+                    f'aitos_data_flow_latency_p95_ms{{stage="{stage_label}"}} '
+                    f"{snap.latency_p95_ms or 0}"
+                )
                 lines.append(
                     f'aitos_data_flow_oldest_event_age_ms{{stage="{stage_label}"}} '
                     f"{snap.oldest_event_age_ms or 0}"
