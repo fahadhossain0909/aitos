@@ -96,3 +96,13 @@ The learning worker starts with the normal stack and is resource-limited so it d
 ## Production safety boundary
 
 Continual learning is allowed to collect experience, train candidate models, and propose strategy/weight changes. Production deployment remains a separate governance step. A model must pass the configured validation pipeline before it can become a champion; this foundation does not silently replace a live strategy.
+
+
+## Durable worker ownership and replay semantics
+
+- Historical backtest learning is owned by the dedicated `aitos-learning` process. The paper-trading process records paper experiences and publishes outcomes; it does not start a second historical worker.
+- Worker ownership is protected by a process-level lock adjacent to the durable cursor. Starting a second worker against the same state directory fails closed.
+- Historical scans use a stable keyset cursor (`timestamp, experience_id`) and do not apply a rolling seven-day cutoff. The configured batch size bounds memory, not the total learnable history.
+- The Deep RL checkpoint records applied experience IDs in the same atomic checkpoint replacement as the model update. If a process crashes after the model write but before cursor persistence, replay is a no-op rather than a duplicate gradient update.
+- Invalid feature payloads are counted and skipped while the cursor advances, preventing one malformed row from starving all later experiences. The neutral `rl_confidence=5.0` input is enforced in both training and inference to prevent self-referential target leakage.
+- Keep the worker state file and model checkpoint on the same persistent model volume. Back up both together; do not run multiple independent model writers against separate copies of either file.

@@ -107,6 +107,9 @@ class RLFeedbackLoop(AITOSModule):
         direction = trade_dict.get("side", "unknown")
         agent_consensus = trade_dict.get("agent_consensus") or {}
         context = {"regime": regime, "direction": direction, **agent_consensus}
+        # The model prediction is not an input feature: using its own prior score
+        # during training creates a self-referential train/inference mismatch.
+        context["rl_confidence"] = 5.0
 
         persist = getattr(self._scorer, "update_and_persist", None)
         if callable(persist):

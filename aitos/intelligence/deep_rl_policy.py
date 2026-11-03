@@ -56,6 +56,7 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._reward_scale = reward_scale_r_multiples
         self._n_samples_seen = 0
         self._recent_rewards: list[float] = []
+        self._applied_experience_ids: set[str] = set()
         model_data_dir = get_model_data_dir()
         self._state_path = (
             Path(state_path)
@@ -106,6 +107,36 @@ class DeepValueRLScorer(RLPolicyScorer):
                 except ImportError:
                     pass
 
+    def update_experience_and_persist(
+        self, experience_id: str, symbol: str, context: dict[str, Any], reward_r_multiple: float
+    ) -> bool:
+        """Apply a historical experience at most once across crashes/restarts."""
+        if not experience_id:
+            raise ValueError("experience_id is required for idempotent learning")
+        target = self._state_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = target.with_suffix(target.suffix + ".lock")
+        with lock_path.open("a+b") as lock_handle:
+            try:
+                import fcntl
+                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            except ImportError:
+                pass
+            try:
+                self.load_state(str(target))
+                if experience_id in self._applied_experience_ids:
+                    return False
+                self.update(symbol, context, reward_r_multiple)
+                self._applied_experience_ids.add(experience_id)
+                self.save_state(str(target))
+                return True
+            finally:
+                try:
+                    import fcntl
+                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+                except ImportError:
+                    pass
+
     async def score(self, symbol: str, context: dict[str, Any]) -> float:
         if not self.is_fitted:
             return 5.0
@@ -126,6 +157,7 @@ class DeepValueRLScorer(RLPolicyScorer):
                     "model": self._model,
                     "n_samples_seen": self._n_samples_seen,
                     "recent_rewards": self._recent_rewards,
+                    "applied_experience_ids": sorted(self._applied_experience_ids),
                 },
                 handle,
                 protocol=pickle.HIGHEST_PROTOCOL,
@@ -143,4 +175,5 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._model = state["model"]
         self._n_samples_seen = int(state.get("n_samples_seen", 0))
         self._recent_rewards = list(state.get("recent_rewards", []))
+        self._applied_experience_ids = set(state.get("applied_experience_ids", []))
         return True

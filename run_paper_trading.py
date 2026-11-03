@@ -26,7 +26,6 @@ from aitos.execution.order_executor import SimulatedOrderExecutor
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.learning.recorder import LearningExperienceRecorder
-from aitos.learning.worker import ContinualLearningWorker
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
 from aitos.runtime_connections import (
@@ -198,18 +197,9 @@ async def main() -> None:
     # Reconcile subscriptions afterwards and verify the effective symbol sets.
     await trade_state_persistence.resubscribe_restored_positions()
 
-    # Start continual-learning worker to incrementally train on historical
-    # backtest experiences stored in ClickHouse. Runs in a background thread
-    # because its run_forever() loop is synchronous/blocking.
-    learning_worker = ContinualLearningWorker(
-        host=settings.clickhouse.host,
-        port=settings.clickhouse.port,
-        user=settings.clickhouse.user,
-        password=settings.clickhouse.password,
-        database=settings.clickhouse.database,
-    )
-    learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
-    learning_task.set_name("continual-learning-worker")
+    # Historical backtest learning has one owner: the dedicated aitos-learning
+    # service (or run_continual_learning.py in a native deployment). The paper
+    # process only records paper experiences and publishes closed-trade feedback.
 
     # Register AI Kernel agents for multi-agent consensus
     market_agent = MarketAgent(event_bus=event_bus)
@@ -358,13 +348,6 @@ async def main() -> None:
             await heal_task
         except asyncio.CancelledError:
             pass
-        # Gracefully stop the continual-learning worker
-        learning_task.cancel()
-        try:
-            await learning_task
-        except asyncio.CancelledError:
-            pass
-        await asyncio.to_thread(learning_worker.shutdown)
         await price_safety_net.stop()
         await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)
