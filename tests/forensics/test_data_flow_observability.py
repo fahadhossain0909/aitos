@@ -72,7 +72,6 @@ def test_debugger_report_shape() -> None:
     assert "decode" in text
 
 
-
 def test_health_metrics_omit_unobserved_latency_and_export_sample_count(
     monkeypatch,
 ) -> None:
