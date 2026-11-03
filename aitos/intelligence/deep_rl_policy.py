@@ -25,6 +25,7 @@ def _exclusive_model_lock(handle):
     """Cross-platform exclusive lock for shared model checkpoint writers."""
     if os.name == "nt":
         import msvcrt
+
         if os.fstat(handle.fileno()).st_size == 0:
             handle.write(b"0")
             handle.flush()
@@ -37,6 +38,7 @@ def _exclusive_model_lock(handle):
             msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
     else:
         import fcntl
+
         fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield
@@ -122,7 +124,11 @@ class DeepValueRLScorer(RLPolicyScorer):
                 self._save_state_unlocked(str(target))
 
     def update_experience_and_persist(
-        self, experience_id: str, symbol: str, context: dict[str, Any], reward_r_multiple: float
+        self,
+        experience_id: str,
+        symbol: str,
+        context: dict[str, Any],
+        reward_r_multiple: float,
     ) -> bool:
         """Apply a historical experience at most once across crashes/restarts."""
         if not experience_id:
@@ -145,7 +151,11 @@ class DeepValueRLScorer(RLPolicyScorer):
                 return True
 
     def update_trade_and_persist(
-        self, trade_id: str, symbol: str, context: dict[str, Any], reward_r_multiple: float
+        self,
+        trade_id: str,
+        symbol: str,
+        context: dict[str, Any],
+        reward_r_multiple: float,
     ) -> bool:
         """Apply a finalized trade outcome once, even if its event is redelivered."""
         if not trade_id:
@@ -214,7 +224,9 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._model = state["model"]
         self._n_samples_seen = int(state.get("n_samples_seen", 0))
         self._recent_rewards = list(state.get("recent_rewards", []))
-        self._applied_experience_order = list(state.get("applied_experience_ids", []))[-10000:]
+        self._applied_experience_order = list(state.get("applied_experience_ids", []))[
+            -10000:
+        ]
         self._applied_experience_ids = set(self._applied_experience_order)
         if target == self._state_path:
             self._last_loaded_mtime_ns = target.stat().st_mtime_ns

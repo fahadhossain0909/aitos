@@ -196,7 +196,7 @@ def _persist_summary(args, result) -> None:
             k: v
             for k, v in fields.items()
             if isinstance(v, (int, float, bool))
-                       and k not in {"risk_amount_usd", "initial_risk_usd"}
+            and k not in {"risk_amount_usd", "initial_risk_usd"}
         }
         records.append(
             ExperienceRecord(
@@ -207,7 +207,11 @@ def _persist_summary(args, result) -> None:
                 # Only R-normalized outcomes are eligible for RL training.
                 # Unscaled quote-currency PnL remains persisted for analytics.
                 outcome="closed" if normalized else "closed_unscaled",
-                reward=float(trade.reward) / risk_amount if normalized else float(trade.reward),
+                reward=(
+                    float(trade.reward) / risk_amount
+                    if normalized
+                    else float(trade.reward)
+                ),
                 confidence=1.0,
                 price=trade.price,
                 features=numeric_features,

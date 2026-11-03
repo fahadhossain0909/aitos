@@ -50,8 +50,16 @@ class ContinualLearningWorker:
         self._closed = False
         self._lock_handle = None
         model_root = get_model_data_dir() / "online_rl"
-        state_file = resolve_project_path(state_path) if state_path else model_root / "worker_state.json"
-        model_file = resolve_project_path(model_path) if model_path else model_root / "deep_value.pkl"
+        state_file = (
+            resolve_project_path(state_path)
+            if state_path
+            else model_root / "worker_state.json"
+        )
+        model_file = (
+            resolve_project_path(model_path)
+            if model_path
+            else model_root / "deep_value.pkl"
+        )
         for path in (state_file, model_file):
             Path(path).parent.mkdir(parents=True, exist_ok=True)
         self.state_path = Path(state_file)
@@ -84,6 +92,7 @@ class ContinualLearningWorker:
         try:
             if os.name == "nt":
                 import msvcrt
+
                 handle.seek(0)
                 if handle.tell() == 0:
                     handle.write(b"0")
@@ -92,6 +101,7 @@ class ContinualLearningWorker:
                 msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
+
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (OSError, BlockingIOError) as exc:
             handle.close()
@@ -131,7 +141,9 @@ class ContinualLearningWorker:
             )
             self._processed = int(state.get("processed_count", 0))
             if "cursor_timestamp" not in state:
-                self._legacy_processed = set(str(value) for value in state.get("processed_experiences", []))
+                self._legacy_processed = set(
+                    str(value) for value in state.get("processed_experiences", [])
+                )
         except (OSError, ValueError, TypeError):
             logger.exception("learning cursor state is invalid; refusing unsafe reset")
             raise RuntimeError(f"cannot safely load learning state: {self.state_path}")
@@ -146,7 +158,9 @@ class ContinualLearningWorker:
             "processed_experiences": sorted(self._legacy_processed),
             "n_samples_seen": self.scorer.n_samples_seen,
         }
-        tmp = self.state_path.with_suffix(self.state_path.suffix + f".{os.getpid()}.tmp")
+        tmp = self.state_path.with_suffix(
+            self.state_path.suffix + f".{os.getpid()}.tmp"
+        )
         tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         tmp.replace(self.state_path)
 
@@ -177,15 +191,24 @@ class ContinualLearningWorker:
     @staticmethod
     def _numeric_features(features: Any) -> dict[str, float]:
         try:
-            value = json.loads(features or "{}") if not isinstance(features, dict) else features
+            value = (
+                json.loads(features or "{}")
+                if not isinstance(features, dict)
+                else features
+            )
         except (TypeError, ValueError):
             return {}
         if not isinstance(value, dict):
             return {}
         result: dict[str, float] = {}
         excluded = {
-            "risk_amount_usd", "initial_risk_usd", "position_size_usd",
-            "pnl", "realized_pnl", "reward", "exit_price",
+            "risk_amount_usd",
+            "initial_risk_usd",
+            "position_size_usd",
+            "pnl",
+            "realized_pnl",
+            "reward",
+            "exit_price",
         }
         for key, raw in value.items():
             if str(key) not in excluded and isinstance(raw, (int, float, bool)):
@@ -245,14 +268,16 @@ class ContinualLearningWorker:
             self._save_state()
         logger.info(
             "learning batch completed",
-            extra={"aitos_extra": {
-                "fetched": len(rows),
-                "processed_now": processed_now,
-                "cursor_timestamp": self._cursor_timestamp,
-                "cursor_experience_id": self._cursor_experience_id,
-                "processed_count": self._processed,
-                "samples_seen": self.scorer.n_samples_seen,
-            }},
+            extra={
+                "aitos_extra": {
+                    "fetched": len(rows),
+                    "processed_now": processed_now,
+                    "cursor_timestamp": self._cursor_timestamp,
+                    "cursor_experience_id": self._cursor_experience_id,
+                    "processed_count": self._processed,
+                    "samples_seen": self.scorer.n_samples_seen,
+                }
+            },
         )
         return self._processed
 

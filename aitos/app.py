@@ -453,12 +453,18 @@ class PaperPortfolioTracker:
             day_ago = datetime.now(timezone.utc) - timedelta(days=1)
             week_ago = datetime.now(timezone.utc) - timedelta(days=7)
             daily_pnl = sum(
-                t.pnl for t in closed
-                if t.pnl is not None and t.exit_time and _parse_iso(t.exit_time) >= day_ago
+                t.pnl
+                for t in closed
+                if t.pnl is not None
+                and t.exit_time
+                and _parse_iso(t.exit_time) >= day_ago
             )
             weekly_pnl = sum(
-                t.pnl for t in closed
-                if t.pnl is not None and t.exit_time and _parse_iso(t.exit_time) >= week_ago
+                t.pnl
+                for t in closed
+                if t.pnl is not None
+                and t.exit_time
+                and _parse_iso(t.exit_time) >= week_ago
             )
         else:
             realized_pnl = self._persisted_realized_pnl

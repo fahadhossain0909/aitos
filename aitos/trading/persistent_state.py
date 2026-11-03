@@ -182,7 +182,9 @@ class DurableTradingStateStore:
                 )
         return trades
 
-    async def save_paper_outcome(self, payload: dict[str, Any], asset: str = "USDT") -> None:
+    async def save_paper_outcome(
+        self, payload: dict[str, Any], asset: str = "USDT"
+    ) -> None:
         """Persist a finalized paper outcome; trade_id is the idempotency key."""
         trade_id = str(payload.get("trade_id") or "")
         pnl = payload.get("pnl")
@@ -201,7 +203,9 @@ class DurableTradingStateStore:
             column_names=["trade_id", "asset", "pnl", "exit_time", "updated_at"],
         )
 
-    async def load_paper_portfolio_summary(self, asset: str = "USDT") -> dict[str, float]:
+    async def load_paper_portfolio_summary(
+        self, asset: str = "USDT"
+    ) -> dict[str, float]:
         """Return deduplicated realized PnL windows and durable peak equity."""
         now = datetime.now(timezone.utc)
         result = await self._client().query(

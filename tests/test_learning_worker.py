@@ -10,7 +10,10 @@ def test_numeric_features_filters_non_numeric_values():
         '{"trend_strength": 7, "volatility": 3.5, "direction": "LONG", "ok": true}'
     )
     assert result == {
-        "trend_strength": 7.0, "volatility": 3.5, "ok": 1.0, "rl_confidence": 5.0
+        "trend_strength": 7.0,
+        "volatility": 3.5,
+        "ok": 1.0,
+        "rl_confidence": 5.0,
     }
 
 
@@ -59,7 +62,9 @@ def test_worker_advances_keyset_cursor_and_skips_poison_rows(tmp_path):
         n_samples_seen = 0
         seen = set()
 
-        def update_experience_and_persist(self, experience_id, symbol, features, reward):
+        def update_experience_and_persist(
+            self, experience_id, symbol, features, reward
+        ):
             if experience_id in self.seen:
                 return False
             self.seen.add(experience_id)
@@ -73,6 +78,8 @@ def test_worker_advances_keyset_cursor_and_skips_poison_rows(tmp_path):
             "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
             "symbol": "BTCUSDT",
             "features_json": '{"trend_strength": 8}',
+            "risk_state_json": "{}",
+            "metadata_json": '{"reward_unit": "r_multiple"}',
             "reward": 1.25,
         },
         {
@@ -80,6 +87,8 @@ def test_worker_advances_keyset_cursor_and_skips_poison_rows(tmp_path):
             "timestamp": datetime(2026, 1, 2, tzinfo=timezone.utc),
             "symbol": "ETHUSDT",
             "features_json": "invalid",
+            "risk_state_json": "{}",
+            "metadata_json": "{}",
             "reward": 0,
         },
     ]
@@ -91,44 +100,59 @@ def test_worker_advances_keyset_cursor_and_skips_poison_rows(tmp_path):
 def test_deep_rl_experience_update_is_idempotent_after_reload(tmp_path):
     path = str(tmp_path / "deep_value.pkl")
     first = DeepValueRLScorer(state_path=path)
-    assert first.update_experience_and_persist(
-        "exp-1", "BTCUSDT", {"trend_strength": 8.0}, 1.0
-    ) is True
+    assert (
+        first.update_experience_and_persist(
+            "exp-1", "BTCUSDT", {"trend_strength": 8.0}, 1.0
+        )
+        is True
+    )
     assert first.n_samples_seen == 1
 
     second = DeepValueRLScorer(state_path=path)
     assert second.load_state() is True
-    assert second.update_experience_and_persist(
-        "exp-1", "BTCUSDT", {"trend_strength": 8.0}, 1.0
-    ) is False
+    assert (
+        second.update_experience_and_persist(
+            "exp-1", "BTCUSDT", {"trend_strength": 8.0}, 1.0
+        )
+        is False
+    )
     assert second.n_samples_seen == 1
 
 
 def test_backtest_rewards_are_normalized_to_r_multiples():
-    assert ContinualLearningWorker._reward_r_multiple(
-        {
-            "reward": 50.0,
-            "features_json": "{}",
-            "risk_state_json": '{"risk_amount_usd": 25.0}',
-            "metadata_json": '{"reward_unit": "quote_pnl"}',
-        }
-    ) == 2.0
-    assert ContinualLearningWorker._reward_r_multiple(
-        {
-            "reward": -0.75,
-            "features_json": "{}",
-            "risk_state_json": "{}",
-            "metadata_json": '{"reward_unit": "r_multiple"}',
-        }
-    ) == -0.75
-    assert ContinualLearningWorker._reward_r_multiple(
-        {
-            "reward": 50.0,
-            "features_json": "{}",
-            "risk_state_json": "{}",
-            "metadata_json": "{}",
-        }
-    ) is None
+    assert (
+        ContinualLearningWorker._reward_r_multiple(
+            {
+                "reward": 50.0,
+                "features_json": "{}",
+                "risk_state_json": '{"risk_amount_usd": 25.0}',
+                "metadata_json": '{"reward_unit": "quote_pnl"}',
+            }
+        )
+        == 2.0
+    )
+    assert (
+        ContinualLearningWorker._reward_r_multiple(
+            {
+                "reward": -0.75,
+                "features_json": "{}",
+                "risk_state_json": "{}",
+                "metadata_json": '{"reward_unit": "r_multiple"}',
+            }
+        )
+        == -0.75
+    )
+    assert (
+        ContinualLearningWorker._reward_r_multiple(
+            {
+                "reward": 50.0,
+                "features_json": "{}",
+                "risk_state_json": "{}",
+                "metadata_json": "{}",
+            }
+        )
+        is None
+    )
 
 
 def test_outcome_and_risk_fields_are_not_training_features():
