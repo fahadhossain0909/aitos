@@ -72,6 +72,35 @@ def test_debugger_report_shape() -> None:
     assert "decode" in text
 
 
+
+def test_health_metrics_omit_unobserved_latency_and_export_sample_count(
+    monkeypatch,
+) -> None:
+    from aitos.forensics import data_flow_registry
+    from aitos.health_server import HealthServer
+
+    reg = DataFlowRegistry()
+    monkeypatch.setattr(data_flow_registry, "get_data_flow_registry", lambda: reg)
+    server = HealthServer([])
+
+    empty_lines: list[str] = []
+    server._append_data_flow_metrics(empty_lines)
+    empty_metrics = "\\n".join(empty_lines)
+    assert 'aitos_data_flow_latency_sample_count{stage="receive"} 0' in empty_metrics
+    assert 'aitos_data_flow_latency_p50_ms{stage="receive"}' not in empty_metrics
+    assert 'aitos_data_flow_latency_p95_ms{stage="receive"}' not in empty_metrics
+    assert 'aitos_data_flow_latency_p99_ms{stage="receive"}' not in empty_metrics
+
+    reg.record_output(PipelineStage.RECEIVE, symbol="BTCUSDT", latency_ms=0.0)
+    observed_lines: list[str] = []
+    server._append_data_flow_metrics(observed_lines)
+    observed_metrics = "\\n".join(observed_lines)
+    assert 'aitos_data_flow_latency_sample_count{stage="receive"} 1' in observed_metrics
+    assert 'aitos_data_flow_latency_p50_ms{stage="receive"} 0.0' in observed_metrics
+    assert 'aitos_data_flow_latency_p95_ms{stage="receive"} 0.0' in observed_metrics
+    assert 'aitos_data_flow_latency_p99_ms{stage="receive"} 0.0' in observed_metrics
+
+
 def test_trade_contract_valid_and_stale() -> None:
     now = time.time() * 1000
     ok = check_trade_payload(
