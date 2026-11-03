@@ -302,7 +302,6 @@ async def test_live_scanner_blocks_when_websocket_market_state_is_stale(event_bu
     await scanner.shutdown()
 
 
-
 def test_resolve_higher_timeframe_uses_conservative_auto_mapping():
     assert resolve_higher_timeframe("15m") == "1h"
     assert resolve_higher_timeframe("5m") == "15m"
