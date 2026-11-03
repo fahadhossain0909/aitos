@@ -32,3 +32,4 @@ monitoring_report.json
 /init_missing.sql
 /tmp/
 .zwork/
+paper_trading.log
