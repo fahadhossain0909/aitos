@@ -314,7 +314,7 @@ def test_htf_alignment_accepts_matching_directional_trend():
     )
     assert aligned is True
     assert details["trend"] == "bullish"
-    assert details["adx"] >= 20.0
+    assert details["adx"] >= 25.0
 
 
 def test_htf_alignment_rejects_countertrend_ltf_signal():
