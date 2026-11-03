@@ -30,7 +30,7 @@
 - `aitos/forensics/data_flow_registry.py` and `data_flow_schema.py`: SOURCE-VERIFIED. In-process stage registry retains up to 2,048 latency observations per bucket, reports p50/p95/p99/max, input/output rates, queue depth/age, source age, drops/errors, and recent trace records. This bounded in-memory sample is not durable history.
 - `monitoring/prometheus.yml`: SOURCE-VERIFIED. Scrape interval is 15 seconds for paper and live targets. Actual Prometheus scrape success is NOT TESTED.
 - `deploy/grafana/aitos_data_flow.json`: SOURCE-VERIFIED dashboard queries exist for p50/p95/p99 data-flow metrics. Dashboard provisioning and rendered panel correctness are NOT TESTED.
-- AITOS-ENG-004 remediation is implemented on this branch: missing percentile series are omitted and a per-stage sample-count metric is exported. CI/runtime verification pending.
+- AITOS-ENG-004 remediation is proposed in PR #217: missing percentile series are omitted and a per-stage sample-count metric is exported. CI/runtime verification pending.
 
 ## Paper-runtime and health source audit (2026-11-03)
 - `run_paper_trading.py`: SOURCE-VERIFIED startup sequence is Redis -> EventBus -> ClickHouse repositories -> optional Neo4j -> exchange/universe -> system build -> trade-state persistence initialize/restore -> module initialization -> restored-position resubscription -> learning worker/agents/recorders -> health server -> scan loop. No runtime execution was performed.
