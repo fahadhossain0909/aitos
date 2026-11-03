@@ -177,8 +177,6 @@ async def test_dynamic_exit_protects_a_trailing_stop(event_bus, risk_engine):
     assert protected_sl > original_sl
     assert trade.sl_price >= protected_sl
 
-
-
 def test_adaptive_exit_observation_counter_survives_trade_recovery():
     trade = Trade(
         trade_id="trade-adaptive-restart",
