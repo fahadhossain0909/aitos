@@ -58,4 +58,4 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 4. Run the documented local paper-runtime audit with Redis/ClickHouse and verify restored-position subscriptions.
 5. Capture real stage latency distributions and fill the baseline with sample counts/window/mode.
 6. Verify decision-to-outcome lifecycle telemetry and Prometheus/Grafana rendering.
-7. Obtain independent review before marking PR ready; do not merge without explicit approval.
+7. Obtain independent review before marking PR #216 ready; do not merge without explicit approval. Track telemetry code verification in PR #217.
