@@ -106,6 +106,8 @@ class RLFeedbackLoop(AITOSModule):
             return None
 
         reward_r_multiple = pnl / risk_amount
+        if not isfinite(reward_r_multiple):
+            return None
         symbol = trade_dict.get("symbol", "unknown")
         regime = trade_dict.get("regime", "unknown")
         direction = trade_dict.get("side", "unknown")
