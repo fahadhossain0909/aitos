@@ -1,0 +1,1232 @@
+"""OpportunityScanner — multi-source market intelligence."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from collections.abc import AsyncIterator
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any
+
+from aitos.config.tuning import TuningSettings, load_tuning_settings
+from aitos.intelligence.candidate_rotation import CandidateRotationManager
+from aitos.core.contracts import (
+    AITOSModule,
+    Event,
+    EventResponse,
+    HealthStatus,
+    ModuleStatus,
+)
+from aitos.core.exceptions import ModuleNotInitializedError
+from aitos.eventbus.redis_bus import EventBus
+from aitos.exchange.base import ExchangeAdapter
+from aitos.intelligence import indicators
+from aitos.intelligence.a_stat_bridge import AStatBridge
+from aitos.intelligence.amt.engine import AMTContext, AMTEngine
+from aitos.intelligence.auction import auction_context_score
+from aitos.intelligence.entry_quality import (
+    breakout_acceptance_score,
+    relative_strength_score,
+)
+from aitos.intelligence.footprint import FootprintEngine
+from aitos.intelligence.footprint_signals import FootprintSignalEngine
+from aitos.intelligence.funding import funding_rate_score
+from aitos.intelligence.liquidity import (
+    absorption_proxy_score,
+    adverse_flow_without_progress,
+    depth_event_flow_analysis,
+    depth_imbalance_score,
+    liquidity_intelligence_score,
+    liquidity_quality_score,
+    liquidity_wall_score,
+    sweep_potential_score,
+)
+from aitos.intelligence.liquidity_tracker import LiquidityTracker
+from aitos.intelligence.live_auction import live_auction_score
+from aitos.intelligence.live_scanner import LiveScannerCache
+from aitos.intelligence.open_interest import oi_trend_score
+from aitos.intelligence.order_flow_engine import OrderFlowEngine
+from aitos.intelligence.orderflow_liquidity_interaction import (
+    FlowLiquidityInteractionEngine,
+)
+from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
+from aitos.logging_setup import get_logger
+from aitos.models.trade import Opportunity, TradeSide
+
+logger = get_logger("aitos.intelligence.scanner")
+TOPIC_SCAN_COMPLETE = "market.opportunity_scanned"
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "trend_strength": 0.10,
+    "liquidity_quality": 0.10,
+    "order_flow_bias": 0.15,
+    "auction_context": 0.10,
+    "volatility": 0.05,
+    "market_regime": 0.10,
+    "lead_lag": 0.10,
+    "funding_rate": 0.08,
+    "open_interest_trend": 0.08,
+    "rl_confidence": 0.04,
+    "footprint_interaction": 0.10,
+    "a_stat": 0.08,
+    "order_book_flow_imbalance": 0.08,
+    "entry_timing": 0.07,
+    "breakout_acceptance": 0.07,
+    "relative_strength": 0.08,
+}
+REGIME_FIT_SCORE = {
+    "trending": 9.0,
+    "ranging": 4.0,
+    "volatile": 3.0,
+    "compression": 5.5,
+    "expansion": 6.5,
+    "unknown": 5.0,
+}
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class ScanCandidate:
+    symbol: str
+    direction: TradeSide
+    composite_score: float
+    component_scores: dict[str, float]
+    component_availability: dict[str, bool]
+    rationale: list[str]
+    entry_price: float
+    atr: float
+    regime: str
+    scanned_at: str = field(default_factory=_utc_now_iso)
+
+
+def _volatility_fitness(
+    atr_percentile: float, sweet_spot: float = 60.0, tolerance: float = 6.0
+) -> float:
+    return round(
+        max(0.0, min(10.0, 10.0 - abs(atr_percentile - sweet_spot) / tolerance)), 2
+    )
+
+
+def determine_direction(
+    structure_direction: str,
+    cvd_score: float,
+    *,
+    structure_bias: str | None = None,
+    structure_event: str | None = None,
+) -> TradeSide | None:
+    """Map structure + CVD into a trade side.
+
+    Optional ``structure_bias`` / ``structure_event`` refine the decision:
+    - CVD-only (structure_direction=="none") is blocked when it fights bias.
+    - CHOCH may flip with confirming flow even against prior bias.
+    """
+    bias = (structure_bias or "").lower() or None
+    event = (structure_event or "").lower() or None
+
+    # CHOCH: allow structural flip when flow confirms
+    if event == "choch":
+        if structure_direction == "bullish_bos" and cvd_score >= 6.5:
+            return TradeSide.LONG
+        if structure_direction == "bearish_bos" and cvd_score <= 3.5:
+            return TradeSide.SHORT
+        return None
+
+    if structure_direction == "bullish_bos" and cvd_score >= 6.5:
+        return TradeSide.LONG
+    if structure_direction == "bearish_bos" and cvd_score <= 3.5:
+        return TradeSide.SHORT
+    if structure_direction == "none":
+        if cvd_score >= 6.5:
+            if bias == "bearish":
+                return None
+            return TradeSide.LONG
+        if cvd_score <= 3.5:
+            if bias == "bullish":
+                return None
+            return TradeSide.SHORT
+    return None
+
+
+class OpportunityScanner(AITOSModule):
+    def __init__(
+        self,
+        event_bus: EventBus,
+        exchange: ExchangeAdapter,
+        symbols: list[str],
+        timeframe: str = "15m",
+        reference_symbol: str = "BTCUSDT",
+        rl_scorer: RLPolicyScorer | None = None,
+        weights: dict[str, float] | None = None,
+        min_score_threshold: float = 60.0,
+        top_n: int | None = None,
+        kline_lookback: int = 100,
+        trade_lookback: int = 500,
+        footprint_tick_sizes: dict[str, float] | None = None,
+        live_state_stale_seconds: float = 5.0,
+        amt_value_area_pct: float = 0.70,
+        amt_ib_minutes: int = 60,
+        tuning: TuningSettings | None = None,
+    ) -> None:
+        self._event_bus = event_bus
+        self._exchange = exchange
+        self._tuning = tuning or load_tuning_settings()
+        scanner_tuning = self._tuning.scanner
+        configured_symbols = list(symbols)
+        if scanner_tuning.universe_mode == "allowlist":
+            allowed = set(scanner_tuning.symbol_allowlist)
+            configured_symbols = [
+                symbol for symbol in configured_symbols if symbol.upper() in allowed
+            ]
+        self._symbols = configured_symbols[: scanner_tuning.universe_limit]
+        self._timeframe = timeframe
+        self._reference_symbol = reference_symbol
+        self._rl_scorer = rl_scorer or NeutralRLScorer()
+        self._weights = weights or DEFAULT_WEIGHTS
+        self._min_score_threshold = min_score_threshold
+        self._top_n = top_n if top_n is not None else scanner_tuning.top_n
+        self._scan_semaphore = asyncio.Semaphore(
+            min(
+                self._tuning.analysis.expensive_analysis_concurrency,
+                self._tuning.hardware.cpu_worker_budget,
+            )
+        )
+        self._kline_lookback, self._trade_lookback = kline_lookback, trade_lookback
+        self._footprint_tick_sizes = footprint_tick_sizes or {}
+        self._live_state_stale_seconds = max(0.5, live_state_stale_seconds)
+        self._amt_value_area_pct = amt_value_area_pct
+        self._amt_ib_minutes = amt_ib_minutes
+        self._initialized = False
+        self._last_oi = {}
+        self._last_order_books = {}
+        self._last_order_book_sources = {}
+        self._last_amt_profile = {}
+        self._last_amt_context = {}
+        self._liquidity_trackers = {}
+        self._footprint_engines = {}
+        self._amt_engines = {}
+        self._footprint_signal_engine = FootprintSignalEngine()
+        self._interaction_engine = FlowLiquidityInteractionEngine()
+        self._a_stat_bridge = AStatBridge()
+        self._live_cache = LiveScannerCache(
+            event_bus, self._symbols, max_trades=max(5000, trade_lookback)
+        )
+        self._last_scan_at = None
+        self._last_candidate_count = 0
+        self._candidate_rotation = CandidateRotationManager(
+            default_cooldown_seconds=self._tuning.analysis.rejection_cooldown_seconds,
+            kernel_cooldown_seconds=self._tuning.analysis.kernel_rejection_cooldown_seconds,
+            market_change_recheck_pct=self._tuning.analysis.market_change_recheck_pct,
+        )
+        self._lightweight_fingerprints: dict[str, str] = {}
+
+    def apply_tuning_settings(self, settings: TuningSettings) -> None:
+        """Apply runtime-safe scanner budgets; universe changes require restart."""
+        previous = self._tuning.scanner
+        incoming = settings.scanner
+        if (
+            previous.universe_mode != incoming.universe_mode
+            or previous.universe_limit != incoming.universe_limit
+            or previous.symbol_allowlist != incoming.symbol_allowlist
+        ):
+            raise ValueError(
+                "Runtime reload changed scanner universe settings; restart AITOS "
+                "to rebuild market-data subscriptions safely"
+            )
+        self._tuning = settings
+        self._top_n = incoming.top_n
+        self._scan_semaphore = asyncio.Semaphore(
+            min(
+                settings.analysis.expensive_analysis_concurrency,
+                settings.hardware.cpu_worker_budget,
+            )
+        )
+
+    @property
+    def module_id(self) -> str:
+        return "opportunity-scanner"
+
+    @property
+    def version(self) -> str:
+        return "1.10.1"
+
+    async def initialize(self, config: dict[str, Any]) -> None:
+        if self._initialized:
+            return
+        await self._exchange.connect()
+        await self._live_cache.initialize(direct_market_data=True)
+        missing = [s for s in self._symbols if s not in self._footprint_tick_sizes]
+        if missing:
+            try:
+                filters = await self._exchange.fetch_exchange_info(missing)
+                for symbol, symbol_filter in filters.items():
+                    if symbol_filter.tick_size > 0:
+                        self._footprint_tick_sizes[symbol] = symbol_filter.tick_size
+                logger.info(
+                    "loaded footprint tick sizes",
+                    extra={
+                        "aitos_extra": {
+                            "symbols": list(filters),
+                            "missing": [
+                                s
+                                for s in missing
+                                if s not in self._footprint_tick_sizes
+                            ],
+                        }
+                    },
+                )
+            except Exception as exc:
+                logger.warning(
+                    "could not auto-load footprint tick sizes",
+                    extra={"aitos_extra": {"error": str(exc), "symbols": missing}},
+                )
+        self._initialized = True
+
+    async def health_check(self) -> HealthStatus:
+        return HealthStatus(
+            module_id=self.module_id,
+            status=(
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+            ),
+            latency_ms=0.0,
+            last_event_time=self._last_scan_at,
+            details={
+                "last_candidate_count": self._last_candidate_count,
+                "symbols_tracked": len(self._symbols),
+                "footprint_tick_sizes_loaded": len(self._footprint_tick_sizes),
+                "amt_symbols": len(self._amt_engines),
+                "live_state_symbols": sum(
+                    1 for s in self._symbols if self._live_cache.snapshot(s) is not None
+                ),
+                "candidate_rotation": self._candidate_rotation.snapshot(),
+            },
+        )
+
+    async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        await self._live_cache.shutdown()
+        await self._exchange.close()
+
+    async def emit_events(self) -> AsyncIterator[Event]:
+        return
+        yield  # pragma: no cover
+
+    async def handle_event(self, event: Event) -> EventResponse | None:
+        return None
+
+    async def accept_live_trade(self, trade):
+        await self._live_cache.accept_live_trade(trade)
+
+    async def accept_live_order_book(self, book):
+        await self._live_cache.accept_live_order_book(book)
+
+    def _footprint_tick_size(self, symbol: str) -> float | None:
+        tick = self._footprint_tick_sizes.get(symbol)
+        return tick if tick is not None and tick > 0 else None
+
+    def _live_market_data(self, symbol: str) -> tuple[list, Any, bool]:
+        state = self._live_cache.snapshot(symbol)
+        if state is None or state.last_trade_at is None or state.last_book_at is None:
+            return [], None, False
+        now = datetime.now(timezone.utc)
+        return (
+            list(state.trades),
+            state.order_book,
+            (now - state.last_trade_at).total_seconds()
+            <= self._live_state_stale_seconds
+            and (now - state.last_book_at).total_seconds()
+            <= self._live_state_stale_seconds,
+        )
+
+    def _analyze_amt(
+        self, symbol: str, trades: list, klines: list, order_book: Any
+    ) -> AMTContext | None:
+        tick_size = self._footprint_tick_size(symbol)
+        if tick_size is None or not trades:
+            return None
+        engine = self._amt_engines.setdefault(
+            symbol, AMTEngine(tick_size, self._amt_value_area_pct, self._amt_ib_minutes)
+        )
+        context = engine.analyze(
+            trades,
+            klines=klines,
+            book=order_book,
+            previous_profile=self._last_amt_profile.get(symbol),
+        )
+        self._last_amt_profile[symbol] = context.profile
+        self._last_amt_context[symbol] = context
+        return context
+
+    async def scan_symbol(
+        self, symbol: str, reference_klines: list | None = None
+    ) -> ScanCandidate | None:
+        """Measure scanner stage execution without changing signal decisions."""
+        import time
+
+        started = time.perf_counter()
+        try:
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_error,
+                record_input,
+                record_output,
+            )
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            record_input(PipelineStage.SCANNER.value, symbol=symbol)
+            state = self._live_cache.snapshot(symbol)
+            trace_id = (
+                (state.last_trade_trace_id or state.last_book_trace_id)
+                if state is not None
+                else None
+            )
+            trace_event_id = (
+                (state.last_trade_event_id or state.last_book_event_id)
+                if state is not None
+                else None
+            )
+            if not trace_id:
+                trace_id = f"scan:{symbol.upper()}:{time.time_ns()}"
+            note_trace(
+                trace_id=trace_id,
+                stage=PipelineStage.SCANNER.value,
+                symbol=symbol,
+                event_id=trace_event_id,
+                extra={"phase": "scan_started"},
+            )
+        except Exception:
+            pass
+        try:
+            result = await self._scan_symbol_impl(symbol, reference_klines)
+        except Exception:
+            try:
+                record_error(
+                    PipelineStage.SCANNER.value,
+                    symbol=symbol,
+                    issue="processing_error",
+                )
+            except Exception:
+                pass
+            raise
+        try:
+            latency_ms = (time.perf_counter() - started) * 1000.0
+            record_output(
+                PipelineStage.SCANNER.value,
+                symbol=symbol,
+                latency_ms=latency_ms,
+            )
+            note_trace(
+                trace_id=trace_id,
+                stage=PipelineStage.SCANNER.value,
+                symbol=symbol,
+                latency_ms=latency_ms,
+                event_id=trace_event_id,
+                extra={
+                    "phase": "scan_completed",
+                    "candidate_found": result is not None,
+                },
+            )
+        except Exception:
+            pass
+        return result
+
+    async def _scan_symbol_impl(
+        self, symbol: str, reference_klines: list | None = None
+    ) -> ScanCandidate | None:
+        self._require_initialized()
+        klines = await self._exchange.fetch_klines(
+            symbol, self._timeframe, limit=self._kline_lookback
+        )
+        # REST may return the currently-forming candle. Structural signals
+        # must be evaluated only on completed bars, irrespective of source.
+        klines = [k for k in klines if getattr(k, "is_closed", True)]
+        if len(klines) < 20:
+            logger.info(
+                "paper signal diagnostics",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "reason": "insufficient_klines",
+                        "kline_count": len(klines),
+                    }
+                },
+            )
+            return None
+        live_trades, live_book, live_fresh = self._live_market_data(symbol)
+        if self._tuning.mode == "live" and not live_fresh:
+            logger.warning(
+                "entry blocked: live market data is stale or unavailable",
+                extra={
+                    "aitos_extra": {"symbol": symbol, "market_source": "rest_fallback"}
+                },
+            )
+            return None
+        if live_fresh and live_trades and live_book is not None:
+            trades, order_book, market_source = (
+                live_trades[-self._trade_lookback :],
+                live_book,
+                "websocket_live_state",
+            )
+        else:
+            order_book, trades, market_source = (
+                await self._exchange.fetch_order_book(symbol, limit=20),
+                await self._exchange.fetch_recent_trades(
+                    symbol, limit=self._trade_lookback
+                ),
+                "rest_fallback",
+            )
+        funding = await self._exchange.fetch_funding_rate(symbol)
+        oi_current = await self._exchange.fetch_open_interest(symbol)
+        oi_previous = self._last_oi.get(symbol)
+        atr = indicators.average_true_range(klines)
+        vol_percentile = indicators.atr_percentile(klines)
+        regime = indicators.classify_regime(klines)
+        market_structure = indicators.analyze_market_structure(klines)
+        structure_direction, structure_strength = (
+            market_structure.bos_direction,
+            market_structure.bos_strength,
+        )
+        flow_features = (
+            OrderFlowEngine(max_trades=max(100, self._trade_lookback)).ingest_many(
+                trades
+            )
+            if trades
+            else None
+        )
+        try:
+            from aitos.forensics.data_flow_hooks import (
+                note_trace,
+                record_input,
+                record_output,
+            )
+            from aitos.forensics.data_flow_schema import PipelineStage
+
+            state = self._live_cache.snapshot(symbol)
+            trace_id = (
+                (state.last_trade_trace_id or state.last_book_trace_id)
+                if state is not None
+                else None
+            ) or f"feature:{symbol.upper()}:{time.time_ns()}"
+            trace_event_id = (
+                (state.last_trade_event_id or state.last_book_event_id)
+                if state is not None
+                else None
+            )
+            record_input(PipelineStage.FEATURE.value, symbol=symbol)
+            record_output(PipelineStage.FEATURE.value, symbol=symbol)
+            note_trace(
+                trace_id=trace_id,
+                stage=PipelineStage.FEATURE.value,
+                symbol=symbol,
+                event_id=trace_event_id,
+                extra={
+                    "phase": "features_ready",
+                    "market_source": market_source,
+                },
+            )
+        except Exception:
+            pass
+        candle_cvd = indicators.cvd_trend_score(klines)
+        flow_score = flow_features.bias_score if flow_features else candle_cvd
+        direction = determine_direction(
+            structure_direction,
+            flow_score,
+            structure_bias=market_structure.bias,
+            structure_event=market_structure.event,
+        )
+        self._last_oi[symbol] = oi_current
+
+        live_state = self._live_cache.snapshot(symbol)
+        depth_events = (
+            list(live_state.depth_event_history)
+            if live_state is not None and market_source == "websocket_live_state"
+            else []
+        )
+        depth_analysis = depth_event_flow_analysis(depth_events)
+        ofi_score = depth_analysis["ofi_score"]
+        ofi_directional_score = (
+            ofi_score
+            if direction == TradeSide.LONG
+            else 10.0 - ofi_score if direction == TradeSide.SHORT else 5.0
+        )
+        if direction is not None and adverse_flow_without_progress(
+            trades, direction.value
+        ):
+            logger.info(
+                "entry rejected: aggressive flow failed to produce price progress",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "direction": direction.value,
+                        "market_source": market_source,
+                    }
+                },
+            )
+            return None
+
+        liquidity_quality = liquidity_quality_score(order_book)
+        depth_imbalance = depth_imbalance_score(order_book)
+        liquidity_wall = liquidity_wall_score(order_book)
+        sweep_potential = sweep_potential_score(order_book)
+        absorption = absorption_proxy_score(order_book, trades)
+        liquidity_score = liquidity_intelligence_score(order_book, trades)
+        orderflow_delta = flow_features.delta if flow_features else 0.0
+        orderflow_cvd = flow_features.cvd if flow_features else 0.0
+        orderflow_buy_ratio = flow_features.buy_ratio if flow_features else 0.5
+        orderflow_aggression = flow_features.aggression if flow_features else 0.0
+        orderflow_vwap = flow_features.vwap if flow_features else 0.0
+        # Avoid chasing an already-extended impulse: compare the close with
+        # the recent structural boundary in ATR units, not a fixed percentage.
+        recent = klines[-7:-1]
+        if recent and atr > 0:
+            boundary = (
+                max(float(k.high) for k in recent)
+                if direction == TradeSide.LONG
+                else min(float(k.low) for k in recent)
+            )
+            extension_atr = (
+                ((float(klines[-1].close) - boundary) / atr)
+                if direction == TradeSide.LONG
+                else ((boundary - float(klines[-1].close)) / atr)
+            )
+            entry_timing_score = round(
+                max(0.0, min(10.0, 8.0 - max(0.0, extension_atr) * 4.0)), 2
+            )
+        else:
+            extension_atr = 0.0
+            entry_timing_score = 5.0
+
+        logger.info(
+            "paper signal diagnostics",
+            extra={
+                "aitos_extra": {
+                    "symbol": symbol,
+                    "market_source": market_source,
+                    "live_fresh": live_fresh,
+                    "executed_trades": len(trades),
+                    "structure": structure_direction,
+                    "structure_strength": round(structure_strength, 2),
+                    "structure_bias": market_structure.bias,
+                    "structure_event": market_structure.event,
+                    "candle_cvd": round(candle_cvd, 3),
+                    "orderflow_bias": round(flow_score, 3),
+                    "orderflow_delta": round(orderflow_delta, 6),
+                    "orderflow_cvd": round(orderflow_cvd, 6),
+                    "orderflow_buy_ratio": round(orderflow_buy_ratio, 4),
+                    "orderflow_aggression": round(orderflow_aggression, 4),
+                    "orderflow_vwap": round(orderflow_vwap, 6),
+                    "liquidity_quality": liquidity_quality,
+                    "depth_imbalance": depth_imbalance,
+                    "liquidity_wall": liquidity_wall,
+                    "sweep_potential": sweep_potential,
+                    "absorption_proxy": absorption,
+                    "liquidity_score": liquidity_score,
+                    "order_book_flow_imbalance": ofi_directional_score,
+                    "depth_event_count": depth_analysis["event_count"],
+                    "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
+                    "depth_matched_execution_qty": depth_analysis[
+                        "matched_execution_qty"
+                    ],
+                    "depth_attribution_pending_qty": depth_analysis[
+                        "attribution_pending_qty"
+                    ],
+                    "depth_execution_attributed_ratio": depth_analysis[
+                        "execution_attributed_ratio"
+                    ],
+                    "depth_cancellation_proxy_qty": depth_analysis[
+                        "cancellation_proxy_qty"
+                    ],
+                    "depth_replenishment_qty": depth_analysis["replenishment_qty"],
+                    "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+                    "depth_inferred_cancel_pressure": depth_analysis[
+                        "inferred_cancel_pressure"
+                    ],
+                    "entry_extension_atr": round(extension_atr, 3),
+                    "entry_timing_score": entry_timing_score,
+                    "direction": direction.value if direction else "none",
+                    "scanner_threshold": self._min_score_threshold,
+                }
+            },
+        )
+        if direction is None:
+            return None
+        adx_score = min(10.0, indicators.adx(klines) / 10.0)
+        structure_boost = min(2.0, structure_strength * 0.2)
+        if (
+            market_structure.bias == "bullish"
+            and direction == TradeSide.LONG
+            or market_structure.bias == "bearish"
+            and direction == TradeSide.SHORT
+        ):
+            trend_score = min(10.0, adx_score + structure_boost)
+        elif market_structure.event == "choch":
+            trend_score = max(0.0, adx_score - 0.5)
+        else:
+            trend_score = adx_score
+        momentum = indicators.momentum_score(klines)
+        trend_score = round(min(10.0, 0.85 * trend_score + 0.15 * momentum), 2)
+        volatility_score = _volatility_fitness(vol_percentile)
+        regime_score = REGIME_FIT_SCORE.get(regime, 5.0)
+        lead_lag_available = bool(reference_klines) and symbol != self._reference_symbol
+        lead_lag = (
+            indicators.lead_lag_score(klines, reference_klines)
+            if lead_lag_available
+            else 5.0
+        )
+        relative_strength = (
+            relative_strength_score(klines, reference_klines, direction.value)
+            if lead_lag_available
+            else 5.0
+        )
+        breakout_acceptance = (
+            breakout_acceptance_score(klines, direction.value, atr=atr)
+            if structure_direction in {"bullish_bos", "bearish_bos"}
+            else 5.0
+        )
+        funding_score = funding_rate_score(funding, direction)
+        price_moved_up = klines[-1].close > klines[0].close
+        oi_score = oi_trend_score(oi_current, oi_previous, direction, price_moved_up)
+        candle_auction = auction_context_score(klines, direction.value)
+        live_auction = (
+            live_auction_score(trades, order_book, direction.value)
+            if live_fresh
+            else 5.0
+        )
+        amt_context = self._analyze_amt(symbol, trades, klines, order_book)
+        if amt_context is not None:
+            location_score = (
+                5.0 + (amt_context.price_location - 0.5) * 4.0
+                if direction == TradeSide.LONG
+                else 5.0 - (amt_context.price_location - 0.5) * 4.0
+            )
+            state_bias = {
+                "trend": 1.0,
+                "discovery_up": 0.8,
+                "discovery_down": -0.8,
+                "acceptance": 0.5,
+                "rejection": -0.5,
+                "balance": 0.0,
+                "rotation": 0.0,
+                "unknown": 0.0,
+            }.get(amt_context.state.value, 0.0)
+            state_bias = -state_bias if direction == TradeSide.SHORT else state_bias
+            amt_score = round(
+                max(
+                    0.0,
+                    min(
+                        10.0,
+                        location_score
+                        + state_bias
+                        + (amt_context.acceptance - amt_context.rejection),
+                    ),
+                ),
+                2,
+            )
+        else:
+            amt_score = live_auction if live_fresh else candle_auction
+        tracker = self._liquidity_trackers.setdefault(symbol, LiquidityTracker())
+        liquidity_events = tracker.update(order_book, trades)
+        tick_size = self._footprint_tick_size(symbol)
+        footprint_available = False
+        if tick_size is not None and trades:
+            footprint = self._footprint_engines.setdefault(
+                symbol, FootprintEngine(tick_size)
+            ).build(trades)
+            footprint_signals = self._footprint_signal_engine.evaluate(footprint)
+            interaction = self._interaction_engine.evaluate(
+                footprint_signals, liquidity_events
+            )
+            footprint_available = True
+            if interaction.direction != "neutral" and interaction.score > 0:
+                interaction_score = (
+                    5.0 + interaction.score * 0.5
+                    if interaction.direction == direction.value
+                    else max(0.0, 5.0 - interaction.score * 0.5)
+                )
+            elif footprint_signals.bias == "bullish":
+                interaction_score = (
+                    footprint_signals.delta_score + footprint_signals.imbalance_score
+                ) / 2.0
+                if direction == TradeSide.SHORT:
+                    interaction_score = 10.0 - interaction_score
+            elif footprint_signals.bias == "bearish":
+                interaction_score = (
+                    footprint_signals.delta_score + footprint_signals.imbalance_score
+                ) / 2.0
+                if direction == TradeSide.LONG:
+                    interaction_score = 10.0 - interaction_score
+            else:
+                interaction_score = 5.0
+                footprint_available = False
+            interaction_score = round(min(10.0, max(0.0, interaction_score)), 2)
+            interaction_rationale = (
+                f"footprint={footprint_signals.bias}, interaction={interaction.kind}, "
+                f"interaction_dir={interaction.direction}, "
+                f"interaction_score={interaction_score:.1f}, tick_size={tick_size:g}, "
+                f"available={footprint_available}"
+            )
+        else:
+            interaction_score, interaction_rationale = (
+                5.0,
+                "footprint=not_configured; interaction=unavailable",
+            )
+            footprint_available = False
+        rl_context = {
+            "regime": regime,
+            "direction": direction.value,
+            "trend_strength": trend_score,
+            "liquidity_quality": liquidity_score,
+            "order_flow_bias": flow_score,
+            "auction_context": amt_score,
+            "volatility": volatility_score,
+            "market_regime": regime_score,
+            "lead_lag": lead_lag,
+            "funding_rate": funding_score,
+            "open_interest_trend": oi_score,
+            "footprint_interaction": interaction_score,
+            "order_book_flow_imbalance": ofi_directional_score,
+            "depth_inferred_cancel_pressure": depth_analysis[
+                "inferred_cancel_pressure"
+            ],
+            "depth_matched_execution_qty": depth_analysis["matched_execution_qty"],
+            "depth_attribution_pending_qty": depth_analysis["attribution_pending_qty"],
+            "depth_execution_attributed_ratio": depth_analysis[
+                "execution_attributed_ratio"
+            ],
+            "depth_matched_bid_execution_qty": depth_analysis[
+                "matched_bid_execution_qty"
+            ],
+            "depth_matched_ask_execution_qty": depth_analysis[
+                "matched_ask_execution_qty"
+            ],
+            "depth_bid_cancellation_proxy_qty": depth_analysis[
+                "bid_cancellation_proxy_qty"
+            ],
+            "depth_ask_cancellation_proxy_qty": depth_analysis[
+                "ask_cancellation_proxy_qty"
+            ],
+            "depth_matched_trade_count": depth_analysis["matched_trade_count"],
+            "depth_cancellation_proxy_qty": depth_analysis["cancellation_proxy_qty"],
+            "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+            "entry_timing": entry_timing_score,
+            "breakout_acceptance": breakout_acceptance,
+            "relative_strength": relative_strength,
+        }
+        if amt_context is not None:
+            rl_context.update(
+                {
+                    "amt_acceptance": amt_context.acceptance,
+                    "amt_rejection": amt_context.rejection,
+                    "amt_price_location": amt_context.price_location,
+                    "amt_confidence": amt_context.confidence,
+                }
+            )
+        rl_score = await self._rl_scorer.score(symbol, rl_context)
+        rl_available = abs(float(rl_score) - 5.0) > 1e-9 or not isinstance(
+            self._rl_scorer, NeutralRLScorer
+        )
+        if rl_available and abs(float(rl_score) - 5.0) < 1e-9:
+            sample_count = getattr(self._rl_scorer, "sample_count", None)
+            if callable(sample_count):
+                try:
+                    if sample_count(symbol, regime, direction.value) == 0:
+                        rl_available = False
+                except Exception:
+                    pass
+        a_stat_score, a_stat_result = await asyncio.to_thread(
+            self._a_stat_bridge.evaluate,
+            symbol=symbol,
+            direction=direction,
+            klines=klines,
+            flow_score=flow_score,
+            candle_cvd=candle_cvd,
+            orderflow_vwap=orderflow_vwap,
+            depth_imbalance=depth_imbalance,
+            funding_score=funding_score,
+            oi_score=oi_score,
+            lead_lag=lead_lag,
+            last_close=float(klines[-1].close),
+        )
+        a_stat_component = a_stat_score if a_stat_score is not None else 5.0
+        component_scores = {
+            "trend_strength": round(trend_score, 2),
+            "liquidity_quality": liquidity_score,
+            "order_flow_bias": flow_score,
+            "auction_context": amt_score,
+            "volatility": volatility_score,
+            "market_regime": regime_score,
+            "lead_lag": lead_lag,
+            "funding_rate": funding_score,
+            "open_interest_trend": oi_score,
+            "rl_confidence": round(rl_score, 2),
+            "footprint_interaction": interaction_score,
+            "a_stat": a_stat_component,
+            "order_book_flow_imbalance": ofi_directional_score,
+            "entry_timing": entry_timing_score,
+            "breakout_acceptance": breakout_acceptance,
+            "relative_strength": relative_strength,
+        }
+        component_availability = {
+            "trend_strength": True,
+            "liquidity_quality": True,
+            "order_flow_bias": True,
+            "auction_context": True,
+            "volatility": True,
+            "market_regime": regime != "unknown",
+            "lead_lag": lead_lag_available,
+            "funding_rate": True,
+            "open_interest_trend": oi_previous is not None,
+            "rl_confidence": rl_available,
+            "footprint_interaction": footprint_available,
+            "a_stat": a_stat_score is not None,
+            "order_book_flow_imbalance": depth_analysis["event_count"] > 0,
+            "entry_timing": atr > 0,
+            "breakout_acceptance": structure_direction
+            in {"bullish_bos", "bearish_bos"},
+            "relative_strength": lead_lag_available,
+        }
+        weight_total = sum(
+            self._weights.get(k, 0.0)
+            for k, available in component_availability.items()
+            if available and k in component_scores
+        )
+        composite = (
+            sum(
+                component_scores[k] * self._weights.get(k, 0.0)
+                for k, available in component_availability.items()
+                if available and k in component_scores
+            )
+            / weight_total
+            * 10
+            if weight_total
+            else 0.0
+        )
+        rationale = [
+            f"{k.replace('_',' ')}={v:.1f}/10" for k, v in component_scores.items()
+        ]
+        rationale.append(
+            f"executed_trades={len(trades)}, candle_cvd={candle_cvd:.1f}, live_auction={live_auction:.1f}, candle_auction={candle_auction:.1f}, amt_score={amt_score:.1f}, regime={regime}, structure={structure_direction}, direction={direction.value}, market_source={market_source}, ofi={ofi_score:.2f}, inferred_cancel_pressure={depth_analysis['inferred_cancel_pressure']:.3f}, replenishment_ratio={depth_analysis['replenishment_ratio']:.3f}, entry_extension_atr={extension_atr:.3f}"
+        )
+        if amt_context is not None:
+            rationale.extend(
+                [
+                    f"amt_state={amt_context.state.value}, day_type={amt_context.day_type.value}, confidence={amt_context.confidence:.3f}",
+                    f"amt_poc={amt_context.poc:g}, vah={amt_context.vah:g}, val={amt_context.val:g}, ib={amt_context.ib_low:g}-{amt_context.ib_high:g}",
+                    f"amt_migration={amt_context.value_migration.value}, acceptance={amt_context.acceptance:.3f}, rejection={amt_context.rejection:.3f}",
+                ]
+            )
+        if flow_features:
+            rationale.append(
+                f"orderflow delta={flow_features.delta:.4f}, cvd={flow_features.cvd:.4f}, buy_ratio={flow_features.buy_ratio:.3f}, aggression={flow_features.aggression:.3f}, vwap={flow_features.vwap:.4f}"
+            )
+        rationale.extend(
+            [
+                interaction_rationale,
+                f"liquidity=orderbook+tradeflow, structure_strength={structure_strength:.1f}",
+                f"structure_bias={market_structure.bias}, structure_event={market_structure.event}, last_swing={market_structure.last_swing_type}",
+                f"regime={regime}",
+                f"breakout_acceptance={breakout_acceptance:.1f}, relative_strength={relative_strength:.1f}",
+                f"unavailable_features={[k for k, ok in component_availability.items() if not ok]}",
+            ]
+        )
+        if a_stat_result is not None:
+            rationale.append(
+                f"a_stat p_up={a_stat_result.direction.up:.3f}, "
+                f"p_down={a_stat_result.direction.down:.3f}, "
+                f"ev={a_stat_result.expected_value:.6f}, "
+                f"vol={a_stat_result.expected_volatility:.6f}, "
+                f"tail={a_stat_result.tail_loss_probability:.3f}, "
+                f"confidence={a_stat_result.probability_confidence:.3f}, "
+                f"advanced_stack={a_stat_result.advanced is not None}"
+            )
+        return ScanCandidate(
+            symbol=symbol,
+            direction=direction,
+            composite_score=round(composite, 2),
+            component_scores=component_scores,
+            component_availability=component_availability,
+            rationale=rationale,
+            entry_price=klines[-1].close,
+            atr=atr,
+            regime=regime,
+        )
+
+    async def _lightweight_rank_symbols(self, limit: int | None = None) -> list[str]:
+        """Rank the configured universe cheaply before invoking full intelligence.
+
+        This stage only requests a short candle window. It intentionally does not
+        fetch order books, recent trades, funding, or open interest. Failed
+        lightweight requests retain a deterministic fallback rank so temporary
+        data-source issues do not crash the scan cycle.
+        """
+        limit = self._tuning.analysis.expensive_analysis_limit if limit is None else limit
+        if limit >= len(self._symbols):
+            self._lightweight_fingerprints = {symbol: "unscored" for symbol in self._symbols}
+            return [symbol for symbol in self._symbols
+                    if not self._candidate_rotation.should_skip(symbol, "unscored")]
+
+        semaphore = asyncio.Semaphore(self._tuning.analysis.lightweight_concurrency)
+
+        async def _score(symbol: str, index: int) -> tuple[str, float, int]:
+            async with semaphore:
+                try:
+                    candles = await asyncio.wait_for(
+                        self._exchange.fetch_klines(symbol, self._timeframe, limit=20),
+                        timeout=self._tuning.analysis.timeout_seconds,
+                    )
+                    if len(candles) < 5:
+                        return symbol, -1.0, index
+                    first_close = float(candles[0].close)
+                    last_close = float(candles[-1].close)
+                    if first_close <= 0 or last_close <= 0:
+                        return symbol, -1.0, index
+                    # Rank by executable activity rather than chasing the
+                    # largest recent price move. Quote-volume proxy is close *
+                    # base volume; median volume dampens one-candle spikes.
+                    volumes = sorted(
+                        float(c.volume) * float(c.close)
+                        for c in candles
+                        if float(c.volume) > 0 and float(c.close) > 0
+                    )
+                    if not volumes:
+                        return symbol, -1.0, index
+                    median_quote_activity = volumes[len(volumes) // 2]
+                    closes = [float(c.close) for c in candles[-6:]]
+                    previous_close = closes[-2] if len(closes) >= 2 else closes[-1]
+                    short_return = closes[-1] / previous_close - 1.0 if previous_close > 0 else 0.0
+                    self._lightweight_fingerprints[symbol] = (
+                        f"{round(closes[-1], 10)}:{round(short_return, 5)}:"
+                        f"{round(median_quote_activity, 2)}"
+                    )
+                    spread_range = (
+                        max(float(c.high) - float(c.low) for c in candles) / last_close
+                    )
+                    stability = 1.0 / (1.0 + max(0.0, spread_range) * 100.0)
+                    return symbol, median_quote_activity * stability, index
+                except Exception as exc:
+                    logger.debug(
+                        "lightweight scanner screen failed; preserving fallback rank",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "error": str(exc),
+                            }
+                        },
+                    )
+                    return symbol, -1.0, index
+
+        scores = await asyncio.gather(
+            *(_score(symbol, index) for index, symbol in enumerate(self._symbols))
+        )
+        ranked = sorted(scores, key=lambda item: (-item[1], item[2]))
+        selected = []
+        cooldown_skipped = 0
+        for symbol, _, _ in ranked:
+            fingerprint = self._lightweight_fingerprints.get(symbol, "unavailable")
+            if self._candidate_rotation.should_skip(symbol, fingerprint):
+                cooldown_skipped += 1
+                continue
+            selected.append(symbol)
+            if len(selected) >= limit:
+                break
+        logger.info(
+            "lightweight scanner screening complete",
+            extra={
+                "aitos_extra": {
+                    "universe_size": len(self._symbols),
+                    "deep_analysis_budget": limit,
+                    "selected_symbols": selected,
+                    "screened_symbols": len(scores),
+                    "cooldown_skipped": cooldown_skipped,
+                    "candidate_rotation": self._candidate_rotation.snapshot(),
+                }
+            },
+        )
+        return selected
+
+    async def scan_all(self) -> list[ScanCandidate]:
+        self._require_initialized()
+        reference_klines = None
+        if self._reference_symbol:
+            try:
+                reference_klines = await self._exchange.fetch_klines(
+                    self._reference_symbol, self._timeframe, limit=self._kline_lookback
+                )
+            except Exception as exc:
+                logger.error("failed to fetch reference symbol klines: %s", exc)
+
+        selected_symbols = await self._lightweight_rank_symbols()
+
+        async def _scan_one(symbol: str) -> ScanCandidate | None:
+            async with self._scan_semaphore:
+                try:
+                    return await asyncio.wait_for(
+                        self.scan_symbol(symbol, reference_klines),
+                        timeout=self._tuning.analysis.timeout_seconds,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "scan failed for symbol",
+                        extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                    )
+                    return None
+
+        results = await asyncio.gather(
+            *(_scan_one(symbol) for symbol in selected_symbols)
+        )
+        candidates = [candidate for candidate in results if candidate is not None]
+        self._last_scan_at, self._last_candidate_count = _utc_now_iso(), len(candidates)
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_SCAN_COMPLETE,
+                payload={
+                    "universe_symbols": len(self._symbols),
+                    "symbols_screened": len(self._symbols),
+                    "symbols_scanned": len(selected_symbols),
+                    "deep_analysis_budget": self._tuning.analysis.expensive_analysis_limit,
+                    "candidates_found": len(candidates),
+                },
+                source_module=self.module_id,
+            )
+        )
+        return candidates
+
+    @property
+    def target_opportunities(self) -> int:
+        return self._top_n
+
+    def record_candidate_rejection(self, candidate: ScanCandidate, reason: str) -> None:
+        self._candidate_rotation.record_rejection(
+            candidate.symbol, reason,
+            self._lightweight_fingerprints.get(
+                candidate.symbol,
+                f"{candidate.direction.value}:{candidate.regime}:{candidate.composite_score:.2f}",
+            ),
+        )
+
+    def clear_candidate_cooldown(self, symbol: str) -> None:
+        self._candidate_rotation.force_recheck(symbol)
+
+    async def iter_candidate_batches(self):
+        """Analyse bounded batches, yielding each to downstream gates before refill."""
+        self._require_initialized()
+        reference_klines = None
+        if self._reference_symbol:
+            try:
+                reference_klines = await self._exchange.fetch_klines(
+                    self._reference_symbol, self._timeframe, limit=self._kline_lookback
+                )
+            except Exception as exc:
+                logger.error("failed to fetch reference symbol klines: %s", exc)
+        cfg = self._tuning.analysis
+        selected = await self._lightweight_rank_symbols(limit=cfg.candidate_pool_limit)
+        budget = min(cfg.max_candidate_analyses_per_cycle, cfg.candidate_pool_limit)
+        selected = selected[:budget]
+        scanned = found = 0
+        batch_size = max(1, cfg.candidate_batch_size)
+        for offset in range(0, len(selected), batch_size):
+            batch = selected[offset:offset + batch_size]
+
+            async def scan_one(symbol: str) -> ScanCandidate | None:
+                async with self._scan_semaphore:
+                    try:
+                        return await asyncio.wait_for(
+                            self.scan_symbol(symbol, reference_klines),
+                            timeout=cfg.timeout_seconds,
+                        )
+                    except Exception as exc:
+                        logger.error("candidate batch scan failed",
+                                     extra={"aitos_extra":{"symbol":symbol,"error":str(exc)}})
+                        return None
+
+            results = await asyncio.gather(*(scan_one(symbol) for symbol in batch))
+            scanned += len(batch)
+            candidates = [item for item in results if item is not None]
+            ranked = await self.rank(candidates, top_n=len(candidates))
+            found += len(ranked)
+            self._last_scan_at, self._last_candidate_count = _utc_now_iso(), found
+            payload = {
+                "phase": "batch_completed",
+                "batch_index": offset // batch_size + 1,
+                "batch_size": len(batch),
+                "symbols_scanned": scanned,
+                "analysis_budget": budget,
+                "candidates_found": found,
+                "ranked_symbols": [item.symbol for item in ranked],
+                "rotation": self._candidate_rotation.snapshot(),
+            }
+            logger.info("candidate analysis batch completed", extra={"aitos_extra":payload})
+            await self._event_bus.publish(Event(
+                topic="market.candidate_rotation", payload=payload, source_module=self.module_id
+            ))
+            yield ranked
+
+    async def rank(
+        self, candidates: list[ScanCandidate], top_n: int | None = None
+    ) -> list[ScanCandidate]:
+        n = top_n if top_n is not None else self._top_n
+        return sorted(
+            [c for c in candidates if c.composite_score >= self._min_score_threshold],
+            key=lambda c: c.composite_score,
+            reverse=True,
+        )[:n]
+
+    async def decide_with_kernel(self, candidate: ScanCandidate, kernel: Any) -> Any:
+        from aitos.kernel.ai_kernel import DecisionContext
+
+        return await kernel.request_decision(
+            DecisionContext(
+                symbol=candidate.symbol,
+                context={
+                    "direction": candidate.direction.value,
+                    "component_scores": candidate.component_scores,
+                    "component_availability": dict(candidate.component_availability),
+                    "regime": candidate.regime,
+                    "entry_price": candidate.entry_price,
+                },
+            )
+        )
+
+    def to_opportunity(
+        self,
+        candidate: ScanCandidate,
+        risk_reward_multiples: tuple[float, ...] = (1.0, 2.0, 3.0),
+        atr_stop_multiplier: float = 1.5,
+        strategy_id: str = "opportunity-scanner",
+        is_production: bool = False,
+        approved_by: str | None = None,
+    ) -> Opportunity:
+        entry = candidate.entry_price
+        stop_distance = (
+            candidate.atr * atr_stop_multiplier if candidate.atr > 0 else entry * 0.01
+        )
+        if candidate.direction == TradeSide.LONG:
+            stop_loss_price, take_profit_levels = entry - stop_distance, [
+                entry + stop_distance * r for r in risk_reward_multiples
+            ]
+        else:
+            stop_loss_price, take_profit_levels = entry + stop_distance, [
+                entry - stop_distance * r for r in risk_reward_multiples
+            ]
+        return Opportunity(
+            symbol=candidate.symbol,
+            side=candidate.direction,
+            entry_price=entry,
+            stop_loss_price=stop_loss_price,
+            take_profit_levels=take_profit_levels,
+            confidence=round(candidate.composite_score / 100.0, 4),
+            strategy_id=strategy_id,
+            rationale="; ".join(candidate.rationale),
+            agent_consensus=dict(candidate.component_scores),
+            is_production=is_production,
+            approved_by=approved_by,
+            trailing_sl_enabled=True,
+            regime=candidate.regime,
+        )
+
+    def _require_initialized(self) -> None:
+        if not self._initialized:
+            raise ModuleNotInitializedError(
+                "OpportunityScanner.initialize() must be called first"
+            )
