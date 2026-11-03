@@ -96,4 +96,7 @@ def test_target_extension_decision_is_returned_for_lifecycle_guard():
 
 def test_adaptive_exit_is_enabled_by_default_and_can_be_disabled():
     assert PositionManager()._adaptive_exit_enabled is True
-    assert PositionManager(config={"adaptive_exit_enabled": False})._adaptive_exit_enabled is False
+    assert (
+        PositionManager(config={"adaptive_exit_enabled": False})._adaptive_exit_enabled
+        is False
+    )
