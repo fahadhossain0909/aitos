@@ -93,7 +93,7 @@ def test_health_metrics_omit_unobserved_latency_and_export_sample_count(
     reg.record_output(PipelineStage.RECEIVE, symbol="BTCUSDT", latency_ms=0.0)
     observed_lines: list[str] = []
     server._append_data_flow_metrics(observed_lines)
-    observed_metrics = "\\n".join(observed_lines)
+    observed_metrics = "\n".join(observed_lines)
     assert 'aitos_data_flow_latency_sample_count{stage="receive"} 1' in observed_metrics
     assert 'aitos_data_flow_latency_p50_ms{stage="receive"} 0.0' in observed_metrics
     assert 'aitos_data_flow_latency_p95_ms{stage="receive"} 0.0' in observed_metrics
