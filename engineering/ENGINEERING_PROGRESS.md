@@ -28,7 +28,7 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 | Engineering operating model | DONE | Added on this branch |
 | Architecture/data-flow documents | DONE (initial map; runtime confirmation pending) | Initial logical map; source/runtime confirmation remains |
 | Module inventory | PARTIAL | README and paper-runner/health source-level inventory; remaining modules not yet inspected |
-| Telemetry specification and targeted fix | IMPLEMENTED — NOT VERIFIED | Missing latency sample semantics fixed in code, regression test and Grafana panel; tests pending |
+| Telemetry specification | DONE | Specification and source audit documented; targeted code fix split into PR #217 for fix-branch policy |
 | Latency baseline | NOT MEASURED | No runtime session or histogram export inspected |
 | Root-cause register | PARTIAL | 9 source/documentation findings recorded; runtime root causes remain unverified |
 | Runtime audit | BLOCKED / NOT STARTED | No connected local runtime or authorized isolated test environment in this session |
@@ -46,7 +46,7 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 
 ## Source-level audit findings
 - Inspected `aitos/health_server.py`, core Event/Health contracts, data-flow registry/schema, Prometheus scrape config, data-flow tests, and Grafana dashboard query references.
-- Confirmed and implemented a telemetry semantics fix (AITOS-ENG-004): omit percentiles when no observations exist; expose sample count; retain genuine observed zero; added regression test and Grafana panel. CI/runtime verification pending.
+- Confirmed AITOS-ENG-004 and moved its code remediation to dedicated `fix/telemetry-missing-sample` / PR #217 to comply with the operations skill's fix-branch rule. CI/runtime verification pending.
 - Existing data-flow registry is process-local and retains a bounded 2,048 latency samples per stage/symbol bucket.
 - Prometheus scrape interval is configured to 15 seconds for paper/live targets; actual scrape status remains NOT TESTED.
 - Paper runner source audit found startup cleanup coverage begins only after a long initialization sequence (AITOS-ENG-005); auxiliary-module self-heal coverage differs from health-report coverage (AITOS-ENG-006); degraded health returns HTTP 200 intentionally (AITOS-ENG-007); position event API is bounded process-local memory (AITOS-ENG-008); per-symbol data-flow buckets have no source-level TTL/eviction (AITOS-ENG-009; memory impact NOT MEASURED).
