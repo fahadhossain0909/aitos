@@ -90,3 +90,65 @@ def test_backtest_reward_rejects_invalid_risk_and_non_finite_values():
     }
     assert ContinualLearningWorker._reward_r_multiple(invalid_risk) is None
     assert ContinualLearningWorker._reward_r_multiple(invalid_reward) is None
+
+
+
+def test_worker_trains_only_valid_r_normalized_backtest_trades():
+    worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
+    worker._processed = set()
+    worker._rows = lambda: [
+        {
+            "experience_id": "summary-1",
+            "symbol": "BTCUSDT",
+            "decision": "backtest_summary",
+            "outcome": "completed",
+            "reward": 0.25,
+            "features_json": '{"trend_strength": 8}',
+            "risk_state_json": "{}",
+            "metadata_json": "{}",
+        },
+        {
+            "experience_id": "unscaled-1",
+            "symbol": "BTCUSDT",
+            "decision": "backtest_trade",
+            "outcome": "closed",
+            "reward": 50.0,
+            "features_json": '{"trend_strength": 8}',
+            "risk_state_json": "{}",
+            "metadata_json": '{"reward_unit": "quote_pnl"}',
+        },
+        {
+            "experience_id": "valid-1",
+            "symbol": "BTCUSDT",
+            "decision": "backtest_trade",
+            "outcome": "closed",
+            "reward": 50.0,
+            "features_json": '{"trend_strength": 8, "risk_amount_usd": 25}',
+            "risk_state_json": '{"risk_amount_usd": 25}',
+            "metadata_json": '{"reward_unit": "quote_pnl"}',
+        },
+    ]
+
+    class Scorer:
+        def __init__(self):
+            self.updates = []
+
+        def update_and_persist(self, symbol, features, reward):
+            self.updates.append((symbol, features, reward))
+
+        @property
+        def n_samples_seen(self):
+            return len(self.updates)
+
+    worker.scorer = Scorer()
+    worker._save_state = lambda: None
+
+    processed = worker.run_once()
+
+    assert processed == 3
+    assert len(worker.scorer.updates) == 1
+    symbol, features, reward = worker.scorer.updates[0]
+    assert symbol == "BTCUSDT"
+    assert reward == 2.0
+    assert features == {"trend_strength": 8.0, "rl_confidence": 5.0}
+    assert worker._processed == {"summary-1", "unscaled-1", "valid-1"}
