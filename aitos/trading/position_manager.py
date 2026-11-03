@@ -131,7 +131,7 @@ class PositionManager:
         self._adaptive_exit_policy = AdaptiveExitPolicy(
             cfg.get("adaptive_exit_policy", {})
         )
-        self._adaptive_exit_enabled = bool(cfg.get("adaptive_exit_enabled", False))
+        self._adaptive_exit_enabled = bool(cfg.get("adaptive_exit_enabled", True))
 
     def register_thesis(self, thesis: TradeThesis) -> None:
         self._theses[thesis.trade_id] = thesis
