@@ -21,7 +21,11 @@ from typing import Any
 from aitos.intelligence.amt.volume_profile import VolumeProfile
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
 from aitos.intelligence.market_state.models import MarketState, OrderFlowBias, Regime
-from aitos.intelligence.path_planner.models import PathDestination, PathPlan
+from aitos.intelligence.path_planner.models import (
+    PathDestination,
+    PathPlan,
+    TargetExtensionDecision,
+)
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.intelligence.path_planner")
@@ -140,6 +144,115 @@ class MarketPathPlanner:
             },
         )
         return plan
+
+    def assess_target_extension(
+        self,
+        *,
+        plan: PathPlan,
+        market_state: MarketState,
+        side: str,
+        entry_price: float,
+        stop_distance: float,
+        base_target_price: float,
+        proposed_target_price: float,
+    ) -> TargetExtensionDecision:
+        """Approve an ADX runner extension only when path and reversal checks agree.
+
+        The base target is never reduced. Structural/liquidity destinations
+        between base and proposed targets cap the extension before the level.
+        """
+        side = side.upper()
+        if side not in {"LONG", "SHORT"} or min(
+            entry_price, stop_distance, base_target_price, proposed_target_price
+        ) <= 0:
+            return TargetExtensionDecision(
+                False, base_target_price, proposed_target_price, base_target_price,
+                "invalid target-extension inputs", vetoes=("invalid_inputs",)
+            )
+        is_long = side == "LONG"
+        extends = proposed_target_price > base_target_price if is_long else proposed_target_price < base_target_price
+        if not extends:
+            return TargetExtensionDecision(
+                False, base_target_price, proposed_target_price, base_target_price,
+                "proposed target does not extend the base target",
+                vetoes=("no_extension",),
+            )
+
+        vetoes: list[str] = []
+        if market_state.reversal_risk >= float(self._cfg.get("max_reversal_risk_for_extension", 0.55)):
+            vetoes.append("reversal_risk_high")
+        if (is_long and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT) or (
+            not is_long and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT
+        ):
+            vetoes.append("opposing_order_flow")
+        if market_state.structure in {StructureBias.BROKEN} or (
+            is_long and market_state.structure == StructureBias.BEARISH
+        ) or (not is_long and market_state.structure == StructureBias.BULLISH):
+            vetoes.append("structure_against_position")
+        if market_state.momentum == MomentumState.EXHAUSTED:
+            vetoes.append("momentum_exhausted")
+        if (is_long and market_state.auction_state == AuctionState.REJECTION_OF_HIGHS) or (
+            not is_long and market_state.auction_state == AuctionState.REJECTION_OF_LOWS
+        ):
+            vetoes.append("auction_rejection_against_position")
+        if vetoes:
+            return TargetExtensionDecision(
+                False, base_target_price, proposed_target_price, base_target_price,
+                "reversal/structure veto: " + ",".join(vetoes), vetoes=tuple(vetoes)
+            )
+
+        destinations = plan.upside if is_long else plan.downside
+        min_probability = float(self._cfg.get("target_min_path_probability", 0.40))
+        min_confidence = float(self._cfg.get("target_min_path_confidence", 0.50))
+        directional = [
+            d for d in destinations
+            if (d.price > plan.current_price if is_long else d.price < plan.current_price)
+            and d.probability >= min_probability
+            and d.confidence >= min_confidence
+        ]
+        runway = [
+            d for d in directional
+            if (d.price >= proposed_target_price if is_long else d.price <= proposed_target_price)
+        ]
+        if not runway:
+            return TargetExtensionDecision(
+                False, base_target_price, proposed_target_price, base_target_price,
+                "no sufficiently probable path destination beyond proposed target",
+                vetoes=("insufficient_path_runway",),
+            )
+
+        barriers = [
+            d for d in directional
+            if (base_target_price < d.price < proposed_target_price if is_long
+                else proposed_target_price < d.price < base_target_price)
+        ]
+        if barriers:
+            barrier = min(barriers, key=lambda d: d.price) if is_long else max(
+                barriers, key=lambda d: d.price
+            )
+            buffer = max(
+                stop_distance * float(self._cfg.get("target_barrier_buffer_r", 0.10)),
+                barrier.price * float(self._cfg.get("target_barrier_buffer_pct", 0.0005)),
+            )
+            capped = barrier.price - buffer if is_long else barrier.price + buffer
+            if (capped <= base_target_price if is_long else capped >= base_target_price):
+                return TargetExtensionDecision(
+                    False, base_target_price, proposed_target_price, base_target_price,
+                    "structural/liquidity barrier leaves no safe extension",
+                    barrier_price=barrier.price, vetoes=("barrier_inside_base_target",),
+                )
+            return TargetExtensionDecision(
+                True, capped, proposed_target_price, base_target_price,
+                "extension capped before nearest structural/liquidity barrier",
+                barrier_price=barrier.price,
+                supporting_destination=runway[0].price,
+            )
+
+        return TargetExtensionDecision(
+            True, proposed_target_price, proposed_target_price, base_target_price,
+            "path runway confirmed; no qualifying barrier before target",
+            supporting_destination=runway[0].price,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers
