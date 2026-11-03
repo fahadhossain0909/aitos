@@ -22,7 +22,10 @@ from aitos.core.contracts import (
     HealthStatus,
     ModuleStatus,
 )
-from aitos.core.exceptions import (\n    EventSchemaValidationError,\n    ModuleNotInitializedError,\n)
+from aitos.core.exceptions import (
+    EventSchemaValidationError,
+    ModuleNotInitializedError,
+)
 
 from .contracts import EventHandler
 
@@ -83,7 +86,11 @@ class InProcessBus(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=(\n                ModuleStatus.HEALTHY\n                if self._initialized\n                else ModuleStatus.UNHEALTHY\n            ),
+            status=(
+                ModuleStatus.HEALTHY
+                if self._initialized
+                else ModuleStatus.UNHEALTHY
+            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={
