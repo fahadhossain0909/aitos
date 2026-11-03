@@ -173,9 +173,9 @@ def higher_timeframe_alignment(
         diagnostics["reason"] = "htf_structure_conflicts_with_directional_movement"
         return False, diagnostics
 
-    aligned = (
-        trend == "bullish" and direction == TradeSide.LONG
-    ) or (trend == "bearish" and direction == TradeSide.SHORT)
+    aligned = (trend == "bullish" and direction == TradeSide.LONG) or (
+        trend == "bearish" and direction == TradeSide.SHORT
+    )
     if not aligned:
         diagnostics["reason"] = "ltf_signal_opposes_htf_trend"
     return aligned, diagnostics
@@ -677,9 +677,7 @@ class OpportunityScanner(AITOSModule):
                     htf_timeframe,
                     limit=self._tuning.scanner.htf_lookback,
                 )
-                htf_klines = [
-                    k for k in htf_klines if getattr(k, "is_closed", True)
-                ]
+                htf_klines = [k for k in htf_klines if getattr(k, "is_closed", True)]
                 htf_aligned, htf_diagnostics = higher_timeframe_alignment(
                     htf_klines,
                     direction,
