@@ -488,9 +488,11 @@ class PositionManager:
                 )
             if adaptive_result.stop_price is not None:
                 new_stop = adaptive_result.stop_price
+                if effective_action == ExitAction.HOLD:
+                    effective_action = ExitAction.MANAGE
         if (
             self._allow_stop_tighten
-            and effective_action != ExitAction.EXIT
+            and effective_action == ExitAction.MANAGE
             and structural_stop is not None
         ):
             if (
