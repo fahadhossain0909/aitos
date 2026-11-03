@@ -14,7 +14,8 @@ from aitos.config.tuning import effective_tuning_report, reload_tuning_settings
 from aitos.core.contracts import AITOSModule, Event
 from aitos.data.ingestion import DataIngestionService
 from aitos.data.repository import MarketDataRepository
-from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.eventbus.contracts import EventBusProtocol
+from aitos.eventbus.redis_bus import Subscription
 from aitos.exchange.base import ExchangeAdapter
 from aitos.execution.order_executor import OrderExecutor
 from aitos.intelligence.rl_feedback import RLFeedbackLoop
@@ -53,7 +54,7 @@ logger = get_logger("aitos.app")
 
 @dataclass
 class SystemComponents:
-    event_bus: EventBus
+    event_bus: EventBusProtocol
     kernel: AIKernel
     risk_engine: RiskEngine
     data_ingestion: DataIngestionService
