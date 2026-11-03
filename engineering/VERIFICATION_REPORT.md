@@ -1,7 +1,7 @@
 # AITOS Engineering Verification Report
 
 ## Scope
-Engineering operating-model documentation, a targeted telemetry exporter correction, regression-test additions, and static source audit. Runtime behavior remains NOT TESTED.
+Engineering operating-model documentation and static source audit. The telemetry exporter correction and regression tests are isolated in PR #217. Runtime behavior remains NOT TESTED.
 
 ## Change verification
 - Branch: `feat/engineering-agent-operating-system`
