@@ -44,6 +44,12 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 - Preserve main; do not force-push or force-merge.
 - Require CI and appropriate runtime evidence before merge.
 
+## Source-level audit findings
+- Inspected `aitos/health_server.py`, core Event/Health contracts, data-flow registry/schema, Prometheus scrape config, data-flow tests, and Grafana dashboard query references.
+- Confirmed a telemetry semantics defect: missing latency observations are exported as 0 (AITOS-ENG-004). No runtime effect claimed.
+- Existing data-flow registry is process-local and retains a bounded 2,048 latency samples per stage/symbol bucket.
+- Prometheus scrape interval is configured to 15 seconds for paper/live targets; actual scrape status remains NOT TESTED.
+
 ## Next actions
 1. Finish documentation commits and open a draft PR.
 2. Review the complete diff and validate Markdown/links.
