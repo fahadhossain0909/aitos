@@ -82,3 +82,14 @@ Low-resource, balanced and high-performance profiles use progressively larger po
 - Ranking hysteresis provides a configurable, bounded ordering advantage to incumbents within the current top-N. It never changes raw component scores, composite score, confidence, eligibility threshold or risk checks. A sufficiently stronger challenger displaces an incumbent.
 - Hysteresis is an ordering-stability control, not a predictive edge. Compare churn, missed-opportunity rate, rejection precision, markout distribution and paper expectancy with hysteresis enabled/disabled before live use.
 - SQLite uses WAL and a bounded retention count. It is a local operational journal; export/centralize it before multi-process or multi-host deployments. Each process must not independently write the same SQLite file over a network filesystem.
+
+
+
+## Higher-Timeframe Trend Confirmation (HTF)
+
+- Directional LTF entries from CVD / order flow now require a completed-bar HTF trend confirmation by default. The default mapping is 1m→5m, 3m/5m→15m, 15m→1h, 30m→2h, 1h→4h, 2h/4h/6h/8h/12h→1d and 1d→1w.
+- HTF trend strength is measured with ADX (default minimum 20); direction is derived from +DI/-DI with a minimum separation of 5 points. Conflicting HTF market structure vetoes the setup. A ranging, weak, ambiguous, unavailable or insufficient HTF dataset fails closed.
+- An HTF-aligned setup receives a 10/10 confirmation component in the opportunity and RL context. The filter does not modify the established LTF CHoCH CVD thresholds.
+- HTF bars marked incomplete by the exchange adapter are removed before analysis. If HTF retrieval fails, the scanner rejects the entry rather than silently falling back to LTF-only confirmation.
+- Settings are centralized in ScannerTuning: `htf_filter_enabled`, `htf_timeframe` (`auto` or explicit exchange timeframe), `htf_lookback`, `htf_min_adx`, and `htf_min_di_gap`. Environment overrides use `AITOS_TUNING_SCANNER_HTF_*`.
+- This is a conservative entry-quality gate, not proof of profitability. Validate trade count, countertrend rejection rate, immediate adverse markout, missed-trend entries, expectancy and profit factor through historical replay and paper trading before any live activation.
