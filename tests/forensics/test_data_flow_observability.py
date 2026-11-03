@@ -70,7 +70,9 @@ def test_debugger_report_shape() -> None:
     text = render_text_report(report)
     assert "BTCUSDT DATA FLOW" in text
     assert "decode" in text
-    decode_stage = next(stage for stage in report["stages"] if stage["stage"] == "decode")
+    decode_stage = next(
+        stage for stage in report["stages"] if stage["stage"] == "decode"
+    )
     assert decode_stage["latency_sample_count"] == 1
 
 
