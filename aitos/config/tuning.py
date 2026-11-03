@@ -52,6 +52,11 @@ class ScannerTuning(BaseModel):
     min_trade_count: int = Field(default=10_000, ge=0)
     min_contract_age_days: int = Field(default=30, ge=0, le=3650)
     dynamic_universe_limit: int = Field(default=35, ge=0, le=5000)
+    htf_filter_enabled: bool = True
+    htf_timeframe: str = "auto"
+    htf_lookback: int = Field(default=80, ge=30, le=1000)
+    htf_min_adx: float = Field(default=20.0, ge=0, le=100)
+    htf_min_di_gap: float = Field(default=5.0, ge=0, le=100)
 
 
 class AnalysisTuning(BaseModel):
@@ -235,6 +240,31 @@ def _env_overrides() -> dict[str, Any]:
             "scanner",
             "dynamic_universe_limit",
             int,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_FILTER_ENABLED": (
+            "scanner",
+            "htf_filter_enabled",
+            _parse_bool,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_TIMEFRAME": (
+            "scanner",
+            "htf_timeframe",
+            str,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_LOOKBACK": (
+            "scanner",
+            "htf_lookback",
+            int,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_MIN_ADX": (
+            "scanner",
+            "htf_min_adx",
+            float,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_MIN_DI_GAP": (
+            "scanner",
+            "htf_min_di_gap",
+            float,
         ),
         "AITOS_TUNING_SCANNER_CORE_SYMBOLS": (
             "scanner",
