@@ -125,7 +125,7 @@ def higher_timeframe_alignment(
     klines: list,
     direction: TradeSide,
     *,
-    min_adx: float = 20.0,
+    min_adx: float = 25.0,
     min_di_gap: float = 5.0,
 ) -> tuple[bool, dict[str, Any]]:
     """Require a directional, non-choppy HTF trend aligned with the LTF entry.
