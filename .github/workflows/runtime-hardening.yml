@@ -1,0 +1,79 @@
+name: Production Runtime Hardening
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: runtime-hardening-manual
+  cancel-in-progress: true
+
+jobs:
+  harden:
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    environment: papertrade
+    timeout-minutes: 10
+    steps:
+      - name: Check deployment secrets
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+        run: |
+          set -euo pipefail
+          for name in DEPLOY_HOST DEPLOY_USER DEPLOY_SSH_KEY AITOS_DATA_DISK_UUID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required deployment secret: $name"
+              exit 1
+            fi
+          done
+
+      - name: Prepare SSH key
+        shell: bash
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/aitos_runtime_key
+          chmod 600 /tmp/aitos_runtime_key
+
+      - name: Reconcile production runtime
+        uses: appleboy/ssh-action@v1.2.5
+        env:
+          AITOS_DATA_DISK_UUID: ${{ secrets.AITOS_DATA_DISK_UUID }}
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key_path: /tmp/aitos_runtime_key
+          command_timeout: 8m
+          envs: AITOS_DATA_DISK_UUID
+          script: |
+            set -euo pipefail
+            APP_DIR="$HOME/aitos"
+            cd "$APP_DIR"
+
+            exec 9>"$HOME/.aitos-deploy.lock"
+            echo "=== ACQUIRING RUNTIME-HARDENING LOCK ==="
+            if ! flock -w 30 9; then
+              echo "::error::Runtime hardening could not acquire deployment lock within 30 seconds."
+              ps -eo pid,ppid,etime,user,cmd --sort=etime | grep -E '[a]itos|[f]lock' || true
+              exit 75
+            fi
+            echo "=== RUNTIME-HARDENING LOCK ACQUIRED ==="
+
+            test -x scripts/runtime_hardening.sh || chmod +x scripts/runtime_hardening.sh
+            AITOS_DEPLOY_LOCK_HELD=1 \
+              AITOS_DATA_ROOT=/mnt/aitos-data \
+              AITOS_DATA_DISK_UUID="$AITOS_DATA_DISK_UUID" \
+              scripts/runtime_hardening.sh
+
+      - name: Cleanup
+        if: always()
+        shell: bash
+        run: rm -f /tmp/aitos_runtime_key

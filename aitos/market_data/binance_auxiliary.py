@@ -1,0 +1,206 @@
+"""Bounded Binance producers for canonical auxiliary market-data channels."""
+
+from __future__ import annotations
+
+import asyncio
+from collections.abc import AsyncIterator
+from datetime import datetime, timezone
+from typing import Any
+
+from aitos.logging_setup import get_logger
+
+from .binance_adapter import BinanceCanonicalMarketDataAdapter
+from .contracts import MarketEvent, MarketEventType, MarketSource
+
+TICKER_TIMEFRAME = "1s"
+OPEN_INTEREST_POLL_SECONDS = 15.0
+OPEN_INTEREST_FETCH_TIMEOUT_SECONDS = 5.0
+OPEN_INTEREST_RETRY_DELAY_SECONDS = 0.5
+INSTRUMENT_POLL_SECONDS = 300.0
+TOP_SYMBOL_LIMIT = 50
+
+logger = get_logger("aitos.market_data.binance_auxiliary")
+
+
+def _dt(ms: float | str | None) -> datetime:
+    if ms is None:
+        return datetime.now(timezone.utc)
+    return datetime.fromtimestamp(float(ms) / 1000.0, tz=timezone.utc)
+
+
+def _event(
+    event_type: MarketEventType,
+    symbol: str,
+    payload: dict[str, Any],
+    event_time: datetime,
+) -> MarketEvent:
+    return MarketEvent(
+        event_type=event_type,
+        exchange="binance",
+        market="usd_m_futures",
+        symbol=symbol,
+        event_time=event_time,
+        payload=payload,
+        source=(
+            MarketSource.WEBSOCKET
+            if event_type
+            not in {MarketEventType.OPEN_INTEREST, MarketEventType.INSTRUMENT}
+            else MarketSource.REST
+        ),
+        correlation_id=f"binance:usd_m_futures:{symbol}:{event_type.value}:{event_time.timestamp()}",
+    )
+
+
+class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
+    """Real producers for ticker/funding/liquidation and REST-polled OI/instruments."""
+
+    async def stream_tickers(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
+        bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
+        if not bounded:
+            return
+        streams = [f"{s.lower()}@ticker" for s in bounded]
+        async for data, stream_name in self.exchange._raw_stream(
+            streams, emit_reconnect=True
+        ):
+            symbol = stream_name.split("@", 1)[0].upper()
+            yield _event(MarketEventType.TICKER, symbol, dict(data), _dt(data.get("E")))
+
+    async def stream_funding(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
+        bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
+        if not bounded:
+            return
+        streams = [f"{s.lower()}@markPrice@1s" for s in bounded]
+        async for data, stream_name in self.exchange._raw_stream(
+            streams, emit_reconnect=True
+        ):
+            symbol = stream_name.split("@", 1)[0].upper()
+            payload = {
+                "symbol": symbol,
+                "funding_rate": float(data.get("r", 0.0)),
+                "mark_price": float(data.get("p", 0.0)),
+                "index_price": float(data.get("i", 0.0)),
+                "next_funding_time": data.get("T"),
+                "event_time": data.get("E"),
+            }
+            yield _event(MarketEventType.FUNDING, symbol, payload, _dt(data.get("E")))
+
+    async def stream_liquidations(
+        self, symbols: list[str] | None = None
+    ) -> AsyncIterator[MarketEvent]:
+        allowed = {s.upper() for s in (symbols or [])}
+        async for data, _ in self.exchange._raw_stream(
+            ["!forceOrder@arr"], emit_reconnect=True
+        ):
+            orders = data if isinstance(data, list) else [data]
+            for item in orders:
+                order = item.get("o", item)
+                symbol = str(order.get("s", "")).upper()
+                if allowed and symbol not in allowed:
+                    continue
+                event_time = _dt(item.get("E", order.get("T")))
+                payload = {
+                    "symbol": symbol,
+                    "side": order.get("S"),
+                    "order_type": order.get("o"),
+                    "time_in_force": order.get("f"),
+                    "quantity": float(order.get("q", 0.0)),
+                    "price": float(order.get("p", 0.0)),
+                    "average_price": float(order.get("ap", 0.0)),
+                    "status": order.get("X"),
+                    "event_time": order.get("T"),
+                }
+                yield _event(MarketEventType.LIQUIDATION, symbol, payload, event_time)
+
+    async def _fetch_oi_with_timeout(
+        self, symbol: str
+    ) -> tuple[str, MarketEvent | None]:
+        """Fetch a single symbol's OI with a timeout so one slow symbol
+        doesn't stall the entire poll cycle for every other symbol.
+
+        One bounded retry absorbs transient throttling: this poll fires
+        ~50 concurrent REST calls every 15s and a small fraction time out
+        under burst rate limits; retrying once after a short delay recovers
+        most misses without meaningfully delaying the cycle.
+        """
+        for attempt in (1, 2):
+            try:
+                oi = await asyncio.wait_for(
+                    self.exchange.fetch_open_interest(symbol),
+                    timeout=OPEN_INTEREST_FETCH_TIMEOUT_SECONDS,
+                )
+                return symbol, _event(
+                    MarketEventType.OPEN_INTEREST,
+                    oi.symbol,
+                    {
+                        "symbol": oi.symbol,
+                        "open_interest": oi.open_interest,
+                        "timestamp": oi.timestamp.isoformat(),
+                    },
+                    oi.timestamp,
+                )
+            except asyncio.TimeoutError:
+                if attempt == 1:
+                    await asyncio.sleep(OPEN_INTEREST_RETRY_DELAY_SECONDS)
+                    continue
+                logger.warning(
+                    "open_interest fetch timed out",
+                    extra={"aitos_extra": {"symbol": symbol}},
+                )
+                return symbol, None
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug(
+                    "open_interest fetch failed",
+                    extra={"aitos_extra": {"symbol": symbol}},
+                )
+                return symbol, None
+        return symbol, None
+
+    async def stream_open_interest(
+        self, symbols: list[str]
+    ) -> AsyncIterator[MarketEvent]:
+        bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
+        if not bounded:
+            return
+        while True:
+            # Fetch all symbols concurrently with per-symbol timeouts so a
+            # single slow/unresponsive REST call doesn't stall the entire
+            # poll cycle for every other symbol (BTCUSDT was seeing 15s
+            # receive gaps because the sequential loop blocked on other
+            # symbols first).
+            results = await asyncio.gather(
+                *(self._fetch_oi_with_timeout(s) for s in bounded),
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    continue
+                _symbol, event = result
+                if event is not None:
+                    yield event
+            await asyncio.sleep(OPEN_INTEREST_POLL_SECONDS)
+
+    async def stream_instruments(
+        self, symbols: list[str]
+    ) -> AsyncIterator[MarketEvent]:
+        requested = await self._valid_symbols(symbols)
+        while True:
+            try:
+                filters = await self.exchange.fetch_exchange_info(requested or None)
+                now = datetime.now(timezone.utc)
+                for symbol, value in filters.items():
+                    payload = {
+                        "symbol": symbol,
+                        "tick_size": value.tick_size,
+                        "step_size": value.step_size,
+                        "min_notional": value.min_notional,
+                        "quantity_precision": value.quantity_precision,
+                        "price_precision": value.price_precision,
+                    }
+                    yield _event(MarketEventType.INSTRUMENT, symbol, payload, now)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            await asyncio.sleep(INSTRUMENT_POLL_SECONDS)

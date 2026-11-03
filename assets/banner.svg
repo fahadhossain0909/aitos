@@ -1,0 +1,130 @@
+<svg width="1400" height="300" viewBox="0 0 1400 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AITOS — AI Trading Operating System">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A0D12"/>
+      <stop offset="100%" stop-color="#0E141B"/>
+    </linearGradient>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#0A0D12" stop-opacity="1"/>
+      <stop offset="22%" stop-color="#0A0D12" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1400" height="300" fill="url(#bg)"/>
+
+  <line x1="0" y1="112" x2="1400" y2="112" stroke="#151B22" stroke-width="1"/>
+  <line x1="0" y1="195" x2="1400" y2="195" stroke="#151B22" stroke-width="1"/>
+  <line x1="0" y1="272" x2="1400" y2="272" stroke="#151B22" stroke-width="1"/>
+
+  <line x1="120" y1="70" x2="1260" y2="70" stroke="#233039" stroke-width="1.5"/>
+  <circle cx="120" cy="70" r="4" fill="#3ECF8E" opacity="0.9"/>
+  <circle cx="260" cy="70" r="3" fill="#3ECF8E" opacity="0.45"/>
+  <circle cx="420" cy="70" r="3" fill="#3ECF8E" opacity="0.45"/>
+  <circle cx="620" cy="70" r="3" fill="#3ECF8E" opacity="0.45"/>
+  <circle cx="840" cy="70" r="3" fill="#3ECF8E" opacity="0.45"/>
+  <circle cx="1060" cy="70" r="3" fill="#3ECF8E" opacity="0.45"/>
+  <circle cx="1260" cy="70" r="4" fill="#3ECF8E" opacity="0.9"/>
+
+  <g>
+    <line x1="470.2" y1="222.4" x2="470.2" y2="226.6" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="463.9" y="225.2" width="12.7" height="1.6" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="490.7" y1="220.0" x2="490.7" y2="227.1" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="484.3" y="225.2" width="12.7" height="1.6" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="511.1" y1="204.3" x2="511.1" y2="231.7" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="504.8" y="206.6" width="12.7" height="19.2" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="531.6" y1="197.2" x2="531.6" y2="207.7" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="525.2" y="199.4" width="12.7" height="7.2" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="552.0" y1="194.7" x2="552.0" y2="221.8" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="545.7" y="199.4" width="12.7" height="19.5" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="572.5" y1="198.8" x2="572.5" y2="228.7" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="566.2" y="208.3" width="12.7" height="10.7" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="593.0" y1="205.7" x2="593.0" y2="218.7" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="586.6" y="208.3" width="12.7" height="8.7" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="613.4" y1="211.0" x2="613.4" y2="220.6" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="607.1" y="213.9" width="12.7" height="3.1" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="633.9" y1="203.7" x2="633.9" y2="217.6" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="627.5" y="205.9" width="12.7" height="8.0" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="654.3" y1="175.1" x2="654.3" y2="212.6" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="648.0" y="178.2" width="12.7" height="27.7" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="674.8" y1="174.0" x2="674.8" y2="185.0" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="668.4" y="178.2" width="12.7" height="4.9" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="695.2" y1="177.3" x2="695.2" y2="184.5" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="688.9" y="180.9" width="12.7" height="2.2" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="715.7" y1="175.5" x2="715.7" y2="186.3" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="709.3" y="180.9" width="12.7" height="2.5" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="736.1" y1="158.1" x2="736.1" y2="184.8" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="729.8" y="162.6" width="12.7" height="20.8" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="756.6" y1="154.3" x2="756.6" y2="168.7" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="750.2" y="162.6" width="12.7" height="5.8" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="777.0" y1="150.8" x2="777.0" y2="170.3" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="770.7" y="162.0" width="12.7" height="6.4" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="797.5" y1="157.5" x2="797.5" y2="178.1" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="791.2" y="162.0" width="12.7" height="13.3" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="818.0" y1="167.1" x2="818.0" y2="192.6" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="811.6" y="175.3" width="12.7" height="12.7" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="838.4" y1="182.7" x2="838.4" y2="198.4" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="832.1" y="187.9" width="12.7" height="2.4" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="858.9" y1="180.9" x2="858.9" y2="197.6" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="852.5" y="181.6" width="12.7" height="8.8" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="879.3" y1="165.9" x2="879.3" y2="184.1" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="873.0" y="169.3" width="12.7" height="12.3" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="899.8" y1="163.9" x2="899.8" y2="186.2" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="893.4" y="169.3" width="12.7" height="13.9" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="920.2" y1="150.2" x2="920.2" y2="191.4" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="913.9" y="161.5" width="12.7" height="21.7" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="940.7" y1="146.4" x2="940.7" y2="164.7" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="934.3" y="154.4" width="12.7" height="7.1" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="961.1" y1="140.4" x2="961.1" y2="179.2" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="954.8" y="154.4" width="12.7" height="22.8" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="981.6" y1="171.0" x2="981.6" y2="189.3" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="975.2" y="177.3" width="12.7" height="6.6" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1002.0" y1="163.8" x2="1002.0" y2="185.2" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="995.7" y="164.7" width="12.7" height="19.1" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="1022.5" y1="146.0" x2="1022.5" y2="168.2" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1016.2" y="154.9" width="12.7" height="9.8" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="1043.0" y1="140.9" x2="1043.0" y2="163.7" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1036.6" y="144.0" width="12.7" height="11.0" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="1063.4" y1="117.0" x2="1063.4" y2="146.9" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1057.1" y="122.3" width="12.7" height="21.6" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="1083.9" y1="118.8" x2="1083.9" y2="166.4" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1077.5" y="122.3" width="12.7" height="39.3" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1104.3" y1="160.7" x2="1104.3" y2="204.5" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1098.0" y="161.7" width="12.7" height="37.1" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1124.8" y1="189.8" x2="1124.8" y2="231.9" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1118.4" y="198.8" width="12.7" height="30.1" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1145.2" y1="227.0" x2="1145.2" y2="246.4" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1138.9" y="228.9" width="12.7" height="13.9" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1165.7" y1="230.9" x2="1165.7" y2="246.4" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1159.3" y="237.3" width="12.7" height="5.4" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="1186.1" y1="231.5" x2="1186.1" y2="239.6" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1179.8" y="237.3" width="12.7" height="2.1" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1206.6" y1="234.1" x2="1206.6" y2="256.2" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1200.2" y="239.4" width="12.7" height="8.6" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1227.0" y1="240.3" x2="1227.0" y2="251.2" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1220.7" y="248.0" width="12.7" height="2.5" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1247.5" y1="247.2" x2="1247.5" y2="258.3" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1241.2" y="248.8" width="12.7" height="1.6" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="1268.0" y1="241.8" x2="1268.0" y2="266.5" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1261.6" y="248.8" width="12.7" height="10.6" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1288.4" y1="255.9" x2="1288.4" y2="273.0" stroke="#E5636B" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1282.1" y="259.4" width="12.7" height="7.3" fill="#E5636B" opacity="0.75" rx="0.6"/>
+    <line x1="1308.9" y1="249.1" x2="1308.9" y2="267.5" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1302.5" y="251.0" width="12.7" height="15.7" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="1329.3" y1="241.9" x2="1329.3" y2="252.0" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1323.0" y="245.1" width="12.7" height="5.9" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+    <line x1="1349.8" y1="234.3" x2="1349.8" y2="245.1" stroke="#3ECF8E" stroke-width="1.8" opacity="0.75"/>
+    <rect x="1343.4" y="237.5" width="12.7" height="7.6" fill="#3ECF8E" opacity="0.75" rx="0.6"/>
+  </g>
+
+  <rect x="0" y="0" width="600" height="300" fill="url(#fade)"/>
+
+  <text x="60" y="136" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'DejaVu Sans Mono', monospace" font-size="72" font-weight="700" fill="#F2F4F1" letter-spacing="1">AITOS</text>
+
+  <rect x="62" y="156" width="220" height="3" fill="#3ECF8E"/>
+
+  <text x="62" y="190" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="19" fill="#8C9AA5" letter-spacing="0.3">AI Trading Operating System</text>
+
+  <text x="62" y="222" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'DejaVu Sans Mono', monospace" font-size="13.5" fill="#59676F" letter-spacing="0.4">event-driven · risk-gated · self-training</text>
+
+  <text x="62" y="244" font-family="'JetBrains Mono', 'SFMono-Regular', Consolas, 'DejaVu Sans Mono', monospace" font-size="13.5" fill="#59676F" letter-spacing="0.4">Binance USDT-M Futures</text>
+</svg>

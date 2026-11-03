@@ -1,0 +1,41 @@
+[Unit]
+Description=AITOS LIVE trading (real orders, real money)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=aitos
+WorkingDirectory=/opt/aitos
+EnvironmentFile=/opt/aitos/.env
+ExecStart=/opt/aitos/.venv/bin/python3 /opt/aitos/run_live_trading.py
+
+# IMPORTANT: run_live_trading.py's startup confirmation
+# (aitos/live_trading.py confirm_live_trading) reads from stdin
+# interactively. A systemd service normally has no attached terminal, so
+# this unit as written will hang waiting for input that never comes.
+# Two real options if you deploy this as a service:
+#   1. Run the script manually in a terminal (screen/tmux) instead of via
+#      systemd for the interactive session, or
+#   2. Replace confirm_live_trading's interactive gate with a
+#      non-interactive pre-approval mechanism (e.g. a signed approval
+#      token file checked at startup) suited to your deployment's actual
+#      human-approval process -- this file is a starting point, not a
+#      drop-in solution to that design decision.
+#
+# Also deliberately NOT auto-restarting on crash: a live-money process
+# crash-looping is something a human should look at, not something
+# systemd should paper over silently.
+Restart=no
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aitos-live
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/aitos
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,97 @@
+# AITOS Capital Growth & Protection Objective
+
+## Policy
+
+AITOS optimizes for **maximum sustainable capital growth subject to strict capital-protection constraints**.
+
+The system must not select an asset merely because its directional return estimate is high. Asset selection is a capital-allocation decision: every opportunity is evaluated for expected net edge, loss probability, loss severity, execution cost, liquidity and confidence.
+
+## Decision hierarchy
+
+1. **Capital survival/protection is a hard constraint.** A high-return estimate cannot override a protection violation.
+2. **Trading must have positive net edge.** Fees, slippage and funding are deducted before ranking.
+3. **No-trade is a valid decision.** If no opportunity clears the objective, capital remains undeployed.
+4. **Among eligible opportunities, maximize sustainable growth.** Growth is weighted 60% and protection 40% by default.
+5. **Capital allocation is risk-budget based.** Position notional is derived from an approved risk budget, not from leverage appetite.
+6. **Portfolio protection is applied after opportunity ranking.** Correlation/concentration, regime/volatility and drawdown can reduce or veto an otherwise eligible allocation.
+7. **Capital is reserved before execution.** The reservation ledger prevents simultaneous opportunities from oversubscribing capital or the portfolio risk budget.
+8. **Freshness and execution conditions remain hard gates.** An old opportunity or one whose realistic execution friction destroys its edge is not tradable.
+9. **Loss circuit breakers are independent hard stops.** Daily loss and repeated losses can veto new entries even when a strategy has positive expected edge.
+10. **TradeLifecycle is the final capital boundary.** An opportunity that is not capital-authorized is returned as `REJECTED` and never reaches order submission.
+
+## Economic model
+
+For an opportunity estimate:
+
+`expected_net_edge = expected_gross_return - total_cost - (loss_probability × expected_loss)`
+
+where `total_cost` includes trading fee, expected slippage and funding/financing cost.
+
+The default hard gates are:
+
+- minimum net edge: 0.05%
+- minimum expected return after costs: 0.10%
+- maximum loss probability: 35%
+- maximum expected loss severity: 1.50%
+- maximum total cost: 0.50%
+- minimum liquidity score: 4/10
+
+These are configuration defaults, not claims about future market performance. They should be calibrated from AITOS backtests and paper-trading telemetry before any production policy change.
+
+## Portfolio protection
+
+`aitos/intelligence/capital_protection.py` adds four P0 controls:
+
+- **Correlation/concentration gate:** existing position risk is multiplied by pairwise correlation. Missing correlation is conservatively treated as 0.75 rather than zero, preventing a whole-market crypto portfolio from falsely appearing diversified.
+- **Dynamic risk budget:** high-volatility conditions reduce the requested risk to 50%; extreme volatility reduces it to 25%. `risk_off` and `high_volatility` regimes also default to 50%, while `transition` defaults to 75%.
+- **Drawdown-aware sizing:** risk is reduced at 3%, 5% and 8% drawdown levels (75%, 50%, 25% multipliers respectively), and new risk is stopped at 10% drawdown.
+- **Capital reservation:** a thread-safe, idempotent reservation ledger blocks simultaneous allocations that exceed available capital or the portfolio risk budget. Reservations are released on cancellation/close through `CapitalGateway.release()`.
+
+## Secondary deployment controls
+
+`aitos/intelligence/capital_controls.py` adds the remaining P1 controls at the same final boundary:
+
+- **Opportunity expiry:** default maximum age is 30 seconds. Invalid timestamps are treated as infinitely old. The intent is to prevent scanner signals from becoming stale while waiting for execution.
+- **Execution-aware edge:** expected slippage increases with poor liquidity and volatility before the net-edge calculation. The default runtime assumption remains 10 bps fee, while the slippage component is stress-adjusted.
+- **Daily-loss circuit breaker:** new entries stop at a 3% daily loss by default. This complements, rather than replaces, the existing Risk Engine daily/weekly hard limits.
+- **Consecutive-loss circuit breaker:** five consecutive losses stop new entries by default. If live streak telemetry is unavailable, this control does not invent a streak; the existing Risk Engine remains independently authoritative.
+- **Probability calibration:** model probability-like outputs can be calibrated against realized outcomes after a minimum sample count. Before sufficient observations, the raw probability is retained; calibration cannot manufacture an optimistic edge.
+
+These are conservative policy defaults and must be calibrated against AITOS paper-trading/backtest telemetry. They are not performance guarantees.
+
+## P2 closed-loop learning and feedback
+
+`aitos/intelligence/capital_feedback.py` completes the capital layer with a bounded post-trade outcome ledger. Each closed trade can retain realized return/cost, decision-time loss probability and net edge, regime and model identity. The feedback window is bounded so it cannot grow without limit.
+
+The feedback layer exposes:
+
+- realized win/loss rate and return statistics;
+- realized cost and predicted-edge diagnostics;
+- Brier-score probability quality;
+- empirical probability-bin outcomes;
+- outcome counts by regime and model;
+- a minimum-sample readiness signal before feedback is treated as statistically useful.
+
+**P2 is intentionally model-agnostic. It is not a prerequisite for Deep Learning.** Deep Learning/RL may consume the feedback as training evidence, but it cannot use feedback to bypass the capital objective, portfolio protection, circuit breakers or the final lifecycle gate. Existing `RLFeedbackLoop`/`DeepValueRLScorer` remains the model-learning path; P2 supplies a broader capital-level outcome contract that can also be consumed by future statistical or DL models.
+
+Most importantly, P2 does **not** automatically relax hard limits after good performance and does not manufacture optimistic probabilities. Adaptive learning can improve estimates, but capital-protection constraints remain authoritative.
+
+## Runtime enforcement
+
+`aitos/intelligence/capital_gateway.py` converts an executable `Opportunity` into the venue-neutral economic estimate. The nearest take-profit is used as the conservative gross-return target. The stop distance supplies loss severity. A supplied `loss_probability` takes precedence; otherwise the kernel/scanner confidence is converted to a conservative probability-like signal.
+
+The gateway applies opportunity freshness, execution-cost stress, loss circuit breakers, the capital objective, portfolio protection and capital reservation in that order. `aitos/intelligence/capital_runtime.py` installs the guard on `TradeLifecycle.submit_opportunity`. It is fail-closed: invalid/unavailable equity, malformed economic inputs, stale opportunities, circuit-breaker failures, failed objective gates, protection failures, reservation failures and missing allocations cannot reach the original lifecycle submission path.
+
+The guard records the approved risk budget and objective score in `agent_consensus["capital_objective"]` so authorization is auditable by journal/telemetry layers.
+
+## Execution-cost defaults
+
+Until venue-specific fee/slippage/funding models are supplied, the runtime boundary uses conservative defaults of **10 bps fee + 5 bps base slippage + 0 bps funding**, with base slippage stress-adjusted for liquidity and volatility. These are policy assumptions, not exchange guarantees. They should be replaced with live venue/account-specific estimates before production deployment.
+
+## Architecture placement
+
+`aitos/intelligence/capital_objective.py` is venue-neutral and asset-class-neutral. Strategy/market intelligence supplies an `OpportunityEstimate`; the objective evaluates it; the allocator converts eligible decisions into bounded risk budgets; portfolio protection then applies portfolio-aware constraints before reservation and execution.
+
+This keeps indicators, order flow, auction-market analysis, lead/lag, AI/RL and market-regime models as evidence sources rather than allowing any single feature to define the portfolio objective.
+
+The same contract can therefore rank crypto, equities, FX, futures, commodities, rates, bonds, options or indices once the corresponding market/execution adapters provide the required estimates.

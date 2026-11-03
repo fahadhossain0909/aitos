@@ -1,0 +1,37 @@
+[Unit]
+Description=AITOS paper trading
+After=network-online.target docker.service
+Wants=network-online.target
+# If Redis/ClickHouse/Neo4j run via docker-compose on the same host,
+# uncomment and point at that compose project's generated unit (or your
+# own compose systemd integration):
+# Requires=docker-compose@aitos.service
+# After=docker-compose@aitos.service
+
+[Service]
+Type=simple
+User=aitos
+WorkingDirectory=/opt/aitos
+EnvironmentFile=/opt/aitos/.env
+ExecStart=/opt/aitos/.venv/bin/python3 /opt/aitos/run_paper_trading.py
+
+# Restart on crash, but not in a tight loop if it's crash-looping.
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# journald captures stdout/stderr automatically -- view with:
+#   journalctl -u aitos-paper.service -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aitos-paper
+
+# Basic hardening -- adjust if your deployment needs broader filesystem access.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/aitos
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,21 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="AITOS icon">
+  <defs>
+    <linearGradient id="icon-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0D1219"/>
+      <stop offset="100%" stop-color="#0A0D12"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="46" fill="url(#icon-bg)"/>
+  <rect x="18" y="18" width="220" height="220" rx="32" fill="none" stroke="#1A222B" stroke-width="1.5"/>
+
+  <!-- single decisive candle: the whole system distilled to one signal -->
+  <line x1="128" y1="52" x2="128" y2="204" stroke="#3ECF8E" stroke-width="4" opacity="0.9"/>
+  <rect x="98" y="92" width="60" height="88" rx="4" fill="#3ECF8E"/>
+
+  <!-- two faint companion candles for rhythm, not competing with the mark -->
+  <line x1="72" y1="120" x2="72" y2="168" stroke="#3ECF8E" stroke-width="3" opacity="0.35"/>
+  <rect x="60" y="134" width="24" height="26" rx="3" fill="#3ECF8E" opacity="0.35"/>
+
+  <line x1="184" y1="96" x2="184" y2="150" stroke="#E5636B" stroke-width="3" opacity="0.35"/>
+  <rect x="172" y="104" width="24" height="30" rx="3" fill="#E5636B" opacity="0.35"/>
+</svg>

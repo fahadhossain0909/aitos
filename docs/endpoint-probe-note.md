@@ -1,0 +1,1 @@
+Temporary diagnostic probe for validating current Binance Futures WebSocket endpoint variants. This file is intentionally minimal and should be removed after endpoint selection is confirmed.
