@@ -1,1 +1,0 @@
-"""AITOS test package."""

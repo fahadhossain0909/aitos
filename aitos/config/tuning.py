@@ -57,6 +57,12 @@ class ScannerTuning(BaseModel):
 class AnalysisTuning(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     expensive_analysis_limit: int = Field(default=5, ge=1, le=5000)
+    candidate_pool_limit: int = Field(default=20, ge=1, le=5000)
+    candidate_batch_size: int = Field(default=5, ge=1, le=500)
+    max_candidate_analyses_per_cycle: int = Field(default=20, ge=1, le=5000)
+    rejection_cooldown_seconds: float = Field(default=15.0, ge=0, le=3600)
+    kernel_rejection_cooldown_seconds: float = Field(default=20.0, ge=0, le=3600)
+    market_change_recheck_pct: float = Field(default=0.15, ge=0, le=100)
     expensive_analysis_concurrency: int = Field(default=2, ge=1, le=256)
     lightweight_concurrency: int = Field(default=8, ge=1, le=512)
     timeout_seconds: float = Field(default=5.0, gt=0, le=300)
@@ -248,6 +254,12 @@ def _env_overrides() -> dict[str, Any]:
             "expensive_analysis_limit",
             int,
         ),
+        "AITOS_TUNING_ANALYSIS_CANDIDATE_POOL_LIMIT": ("analysis", "candidate_pool_limit", int),
+        "AITOS_TUNING_ANALYSIS_CANDIDATE_BATCH_SIZE": ("analysis", "candidate_batch_size", int),
+        "AITOS_TUNING_ANALYSIS_MAX_CANDIDATE_ANALYSES_PER_CYCLE": ("analysis", "max_candidate_analyses_per_cycle", int),
+        "AITOS_TUNING_ANALYSIS_REJECTION_COOLDOWN_SECONDS": ("analysis", "rejection_cooldown_seconds", float),
+        "AITOS_TUNING_ANALYSIS_KERNEL_REJECTION_COOLDOWN_SECONDS": ("analysis", "kernel_rejection_cooldown_seconds", float),
+        "AITOS_TUNING_ANALYSIS_MARKET_CHANGE_RECHECK_PCT": ("analysis", "market_change_recheck_pct", float),
         "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY": (
             "analysis",
             "expensive_analysis_concurrency",

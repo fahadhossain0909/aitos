@@ -1,1 +1,0 @@
-Watchdog regression test was added in tests/test_trade_watchdog_first_message.py.
