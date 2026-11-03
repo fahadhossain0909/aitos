@@ -132,6 +132,9 @@ class Trade:
     # Exchange-side catastrophic protection when EIE is the normal exit
     # authority. The ordinary sl_price remains the soft strategy boundary.
     emergency_sl_price: float | None = None
+    # Persisted count of position-manager observations used by stagnation policy.
+    # It is an observation count, not a guaranteed unique candle/bar count.
+    adaptive_exit_observations: int = 0
     updated_at: str = field(default_factory=_utc_now_iso)
 
     def __post_init__(self) -> None:
@@ -203,4 +206,5 @@ class Trade:
             "mfe_r": self.mfe_r,
             "entry_thesis": self.entry_thesis,
             "emergency_sl_price": self.emergency_sl_price,
+            "adaptive_exit_observations": self.adaptive_exit_observations,
         }
