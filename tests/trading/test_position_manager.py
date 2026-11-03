@@ -100,3 +100,17 @@ def test_adaptive_exit_is_enabled_by_default_and_can_be_disabled():
         PositionManager(config={"adaptive_exit_enabled": False})._adaptive_exit_enabled
         is False
     )
+
+
+
+def test_adaptive_stagnation_bar_identity_uses_only_completed_buckets():
+    from datetime import datetime, timezone
+
+    manager = PositionManager(config={"adaptive_exit_bar_seconds": 900})
+    first_tick = datetime.fromtimestamp(1800, tz=timezone.utc)
+    repeated_tick = datetime.fromtimestamp(1850, tz=timezone.utc)
+    next_bucket = datetime.fromtimestamp(2700, tz=timezone.utc)
+
+    assert manager._completed_bar_identity(first_tick) == "900:900"
+    assert manager._completed_bar_identity(repeated_tick) == "900:900"
+    assert manager._completed_bar_identity(next_bucket) == "900:1800"
