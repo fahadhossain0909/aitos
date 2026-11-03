@@ -1130,6 +1130,28 @@ class TradeLifecycle(AITOSModule):
             existing_sector_notional_usd=existing_sector_notional,
             sector_limit_pct=self._risk_engine.limits.max_sector_exposure_pct,
         )
+        # The capital gateway is the final risk-budget authority. Apply its
+        # approved USD risk cap to the actual notional before quantity/order
+        # construction; carrying the budget only in metadata is not protection.
+        capital_objective = opportunity.agent_consensus.get("capital_objective", {})
+        approved_risk_budget = capital_objective.get("risk_budget_usd")
+        if approved_risk_budget is not None:
+            approved_risk_budget = float(approved_risk_budget)
+            if not math.isfinite(approved_risk_budget) or approved_risk_budget <= 0:
+                return await self._reject(
+                    opportunity, "capital_objective: invalid approved risk budget"
+                )
+            if sizing.risk_amount_usd > approved_risk_budget:
+                scale = approved_risk_budget / sizing.risk_amount_usd
+                sizing = PositionSizeResult(
+                    position_size_usd=sizing.position_size_usd * scale,
+                    leverage=sizing.leverage,
+                    risk_amount_usd=approved_risk_budget,
+                    rationale=(
+                        f"{sizing.rationale}; capital risk cap applied "
+                        f"({approved_risk_budget:.8f} USD)"
+                    ),
+                )
         if sizing.position_size_usd <= 0.0:
             return await self._reject(
                 opportunity, f"sector exposure cap exhausted for {candidate_sector}"
