@@ -121,7 +121,7 @@ async def main() -> None:
     from aitos.eventbus.factory import create_event_bus
 
     event_bus = create_event_bus(
-        {"backend": os.getenv("AITOS_EVENTBUS_BACKEND", "redis"), "runtime_mode": "paper"},
+        {\n            "backend": os.getenv("AITOS_EVENTBUS_BACKEND", "redis"),\n            "runtime_mode": "paper",\n        },
         redis_client=redis_client,
     )
     await event_bus.initialize({})
