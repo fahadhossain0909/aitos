@@ -78,6 +78,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "entry_timing": 0.07,
     "breakout_acceptance": 0.07,
     "relative_strength": 0.08,
+    "htf_trend_alignment": 0.10,
 }
 REGIME_FIT_SCORE = {
     "trending": 9.0,
@@ -87,6 +88,97 @@ REGIME_FIT_SCORE = {
     "expansion": 6.5,
     "unknown": 5.0,
 }
+
+# The HTF is deliberately slower than the entry timeframe. Explicit overrides
+# remain available through ScannerTuning for instruments with different cadence.
+HTF_TIMEFRAME_MAP = {
+    "1m": "5m",
+    "3m": "15m",
+    "5m": "15m",
+    "15m": "1h",
+    "30m": "2h",
+    "1h": "4h",
+    "2h": "1d",
+    "4h": "1d",
+    "6h": "1d",
+    "8h": "1d",
+    "12h": "1d",
+    "1d": "1w",
+    "1w": "1M",
+}
+
+
+def resolve_higher_timeframe(entry_timeframe: str, configured: str = "auto") -> str:
+    """Resolve an explicitly configured HTF or the conservative default mapping."""
+    if configured != "auto":
+        return configured
+    try:
+        return HTF_TIMEFRAME_MAP[entry_timeframe]
+    except KeyError as exc:
+        raise ValueError(
+            f"No automatic higher timeframe mapping for {entry_timeframe!r}; "
+            "configure scanner.htf_timeframe explicitly"
+        ) from exc
+
+
+def higher_timeframe_alignment(
+    klines: list,
+    direction: TradeSide,
+    *,
+    min_adx: float = 20.0,
+    min_di_gap: float = 5.0,
+) -> tuple[bool, dict[str, Any]]:
+    """Require a directional, non-choppy HTF trend aligned with the LTF entry.
+
+    Uses only completed HTF bars. ADX measures trend strength while +DI/-DI
+    supplies direction; market structure is an additional conflict veto.
+    Insufficient/neutral data fails closed rather than treating missing data
+    as confirmation.
+    """
+    diagnostics: dict[str, Any] = {
+        "trend": "unknown",
+        "adx": 0.0,
+        "plus_di": 0.0,
+        "minus_di": 0.0,
+        "di_gap": 0.0,
+        "structure_bias": "neutral",
+        "reason": "insufficient_htf_history",
+    }
+    if len(klines) < 30:
+        return False, diagnostics
+
+    trend_adx = indicators.adx(klines)
+    plus_di, minus_di = indicators.di_plus_minus(klines)
+    di_gap = abs(plus_di - minus_di)
+    structure = indicators.analyze_market_structure(klines)
+    trend = "neutral"
+    if trend_adx >= min_adx and di_gap >= min_di_gap:
+        trend = "bullish" if plus_di > minus_di else "bearish"
+
+    diagnostics.update(
+        {
+            "trend": trend,
+            "adx": trend_adx,
+            "plus_di": plus_di,
+            "minus_di": minus_di,
+            "di_gap": di_gap,
+            "structure_bias": structure.bias,
+            "reason": "htf_trend_aligned",
+        }
+    )
+    if trend == "neutral":
+        diagnostics["reason"] = "htf_trend_weak_or_choppy"
+        return False, diagnostics
+    if structure.bias in {"bullish", "bearish"} and structure.bias != trend:
+        diagnostics["reason"] = "htf_structure_conflicts_with_directional_movement"
+        return False, diagnostics
+
+    aligned = (
+        trend == "bullish" and direction == TradeSide.LONG
+    ) or (trend == "bearish" and direction == TradeSide.SHORT)
+    if not aligned:
+        diagnostics["reason"] = "ltf_signal_opposes_htf_trend"
+    return aligned, diagnostics
 
 
 def _utc_now_iso() -> str:
@@ -567,6 +659,59 @@ class OpportunityScanner(AITOSModule):
             structure_bias=market_structure.bias,
             structure_event=market_structure.event,
         )
+        htf_alignment_score = 5.0
+        htf_available = False
+        htf_diagnostics: dict[str, Any] = {
+            "trend": "disabled",
+            "reason": "htf_filter_disabled",
+        }
+        if direction is not None and self._tuning.scanner.htf_filter_enabled:
+            try:
+                htf_timeframe = resolve_higher_timeframe(
+                    self._timeframe, self._tuning.scanner.htf_timeframe
+                )
+                htf_klines = await self._exchange.fetch_klines(
+                    symbol,
+                    htf_timeframe,
+                    limit=self._tuning.scanner.htf_lookback,
+                )
+                htf_klines = [
+                    k for k in htf_klines if getattr(k, "is_closed", True)
+                ]
+                htf_aligned, htf_diagnostics = higher_timeframe_alignment(
+                    htf_klines,
+                    direction,
+                    min_adx=self._tuning.scanner.htf_min_adx,
+                    min_di_gap=self._tuning.scanner.htf_min_di_gap,
+                )
+                htf_diagnostics["timeframe"] = htf_timeframe
+                htf_available = len(htf_klines) >= 30
+                if not htf_aligned:
+                    logger.info(
+                        "entry rejected: lower-timeframe signal lacks HTF trend confirmation",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "direction": direction.value,
+                                "entry_timeframe": self._timeframe,
+                                "htf": htf_diagnostics,
+                            }
+                        },
+                    )
+                    return None
+                htf_alignment_score = 10.0
+            except Exception as exc:
+                logger.warning(
+                    "entry blocked: higher-timeframe confirmation unavailable",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": symbol,
+                            "entry_timeframe": self._timeframe,
+                            "error": str(exc),
+                        }
+                    },
+                )
+                return None
         self._last_oi[symbol] = oi_current
 
         live_state = self._live_cache.snapshot(symbol)
@@ -807,6 +952,8 @@ class OpportunityScanner(AITOSModule):
         rl_context = {
             "regime": regime,
             "direction": direction.value,
+            "htf_trend_alignment": htf_alignment_score,
+            "htf_trend": htf_diagnostics.get("trend", "disabled"),
             "trend_strength": trend_score,
             "liquidity_quality": liquidity_score,
             "order_flow_bias": flow_score,
@@ -898,6 +1045,7 @@ class OpportunityScanner(AITOSModule):
             "entry_timing": entry_timing_score,
             "breakout_acceptance": breakout_acceptance,
             "relative_strength": relative_strength,
+            "htf_trend_alignment": htf_alignment_score,
         }
         component_availability = {
             "trend_strength": True,
@@ -917,6 +1065,7 @@ class OpportunityScanner(AITOSModule):
             "breakout_acceptance": structure_direction
             in {"bullish_bos", "bearish_bos"},
             "relative_strength": lead_lag_available,
+            "htf_trend_alignment": htf_available,
         }
         weight_total = sum(
             self._weights.get(k, 0.0)
@@ -958,6 +1107,10 @@ class OpportunityScanner(AITOSModule):
                 f"liquidity=orderbook+tradeflow, structure_strength={structure_strength:.1f}",
                 f"structure_bias={market_structure.bias}, structure_event={market_structure.event}, last_swing={market_structure.last_swing_type}",
                 f"regime={regime}",
+                f"htf={htf_diagnostics.get('timeframe', 'disabled')}:{htf_diagnostics.get('trend', 'disabled')} "
+                f"adx={float(htf_diagnostics.get('adx', 0.0)):.1f} "
+                f"di_gap={float(htf_diagnostics.get('di_gap', 0.0)):.1f} "
+                f"reason={htf_diagnostics.get('reason', 'not_evaluated')}",
                 f"breakout_acceptance={breakout_acceptance:.1f}, relative_strength={relative_strength:.1f}",
                 f"unavailable_features={[k for k, ok in component_availability.items() if not ok]}",
             ]
