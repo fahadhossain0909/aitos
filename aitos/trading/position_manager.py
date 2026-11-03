@@ -524,7 +524,8 @@ class PositionManager:
             )
             proposed_target = float(trade.take_profit_levels[-1])
             extends_base = (
-                proposed_target > base_target if side == "LONG"
+                proposed_target > base_target
+                if side == "LONG"
                 else proposed_target < base_target
             )
             if extends_base and trade.r_distance > 0:
@@ -536,9 +537,9 @@ class PositionManager:
                     stop_distance=trade.r_distance,
                     base_target_price=base_target,
                     proposed_target_price=proposed_target,
+                    thesis_health=thesis_eval.health.value,
+                    exit_action=exit_decision.action.value,
                 )
-            else:
-        else:
 
         spike_tp_price = self._spike_tp(side=side, current_price=current_price, atr=atr)
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
