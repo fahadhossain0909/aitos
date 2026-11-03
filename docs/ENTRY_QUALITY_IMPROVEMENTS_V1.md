@@ -88,7 +88,7 @@ Low-resource, balanced and high-performance profiles use progressively larger po
 ## Higher-Timeframe Trend Confirmation (HTF)
 
 - Directional LTF entries from CVD / order flow now require a completed-bar HTF trend confirmation by default. The default mapping is 1m→5m, 3m/5m→15m, 15m→1h, 30m→2h, 1h→4h, 2h/4h/6h/8h/12h→1d and 1d→1w.
-- HTF trend strength is measured with ADX (default minimum 20); direction is derived from +DI/-DI with a minimum separation of 5 points. Conflicting HTF market structure vetoes the setup. A ranging, weak, ambiguous, unavailable or insufficient HTF dataset fails closed.
+- HTF trend strength is measured with ADX (default minimum 25); direction is derived from +DI/-DI with a minimum separation of 5 points. Conflicting HTF market structure vetoes the setup. A ranging, weak, ambiguous, unavailable or insufficient HTF dataset fails closed.
 - An HTF-aligned setup receives a 10/10 confirmation component in the opportunity and RL context. The filter does not modify the established LTF CHoCH CVD thresholds.
 - HTF bars marked incomplete by the exchange adapter are removed before analysis. If HTF retrieval fails, the scanner rejects the entry rather than silently falling back to LTF-only confirmation.
 - Settings are centralized in ScannerTuning: `htf_filter_enabled`, `htf_timeframe` (`auto` or explicit exchange timeframe), `htf_lookback`, `htf_min_adx`, and `htf_min_di_gap`. Environment overrides use `AITOS_TUNING_SCANNER_HTF_*`.
