@@ -175,8 +175,12 @@ class MarketPathPlanner:
             entry_price, stop_distance, base_target_price, proposed_target_price
         ) <= 0:
             return TargetExtensionDecision(
-                False, base_target_price, proposed_target_price, base_target_price,
-                "invalid target-extension inputs", vetoes=("invalid_inputs",)
+                False,
+                base_target_price,
+                proposed_target_price,
+                base_target_price,
+                "invalid target-extension inputs",
+                vetoes=("invalid_inputs",),
             )
         is_long = side == "LONG"
         extends = (
@@ -186,7 +190,10 @@ class MarketPathPlanner:
         )
         if not extends:
             return TargetExtensionDecision(
-                False, base_target_price, proposed_target_price, base_target_price,
+                False,
+                base_target_price,
+                proposed_target_price,
+                base_target_price,
                 "proposed target does not extend the base target",
                 vetoes=("no_extension",),
             )
@@ -200,7 +207,9 @@ class MarketPathPlanner:
             self._cfg.get("max_reversal_risk_for_extension", 0.55)
         ):
             vetoes.append("reversal_risk_high")
-        if (is_long and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT) or (
+        if (
+            is_long and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT
+        ) or (
             not is_long and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT
         ):
             vetoes.append("opposing_order_flow")
@@ -220,8 +229,12 @@ class MarketPathPlanner:
             vetoes.append("auction_rejection_against_position")
         if vetoes:
             return TargetExtensionDecision(
-                False, base_target_price, proposed_target_price, base_target_price,
-                "reversal/structure veto: " + ",".join(vetoes), vetoes=tuple(vetoes)
+                False,
+                base_target_price,
+                proposed_target_price,
+                base_target_price,
+                "reversal/structure veto: " + ",".join(vetoes),
+                vetoes=tuple(vetoes),
             )
 
         destinations = plan.upside if is_long else plan.downside
@@ -249,7 +262,10 @@ class MarketPathPlanner:
         ]
         if not runway:
             return TargetExtensionDecision(
-                False, base_target_price, proposed_target_price, base_target_price,
+                False,
+                base_target_price,
+                proposed_target_price,
+                base_target_price,
                 "no sufficiently probable path destination beyond proposed target",
                 vetoes=("insufficient_path_runway",),
             )
@@ -271,24 +287,35 @@ class MarketPathPlanner:
             )
             buffer = max(
                 stop_distance * float(self._cfg.get("target_barrier_buffer_r", 0.10)),
-                barrier.price * float(self._cfg.get("target_barrier_buffer_pct", 0.0005)),
+                barrier.price
+                * float(self._cfg.get("target_barrier_buffer_pct", 0.0005)),
             )
             capped = barrier.price - buffer if is_long else barrier.price + buffer
-            if (capped <= base_target_price if is_long else capped >= base_target_price):
+            if capped <= base_target_price if is_long else capped >= base_target_price:
                 return TargetExtensionDecision(
-                    False, base_target_price, proposed_target_price, base_target_price,
+                    False,
+                    base_target_price,
+                    proposed_target_price,
+                    base_target_price,
                     "structural/liquidity barrier leaves no safe extension",
-                    barrier_price=barrier.price, vetoes=("barrier_inside_base_target",),
+                    barrier_price=barrier.price,
+                    vetoes=("barrier_inside_base_target",),
                 )
             return TargetExtensionDecision(
-                True, capped, proposed_target_price, base_target_price,
+                True,
+                capped,
+                proposed_target_price,
+                base_target_price,
                 "extension capped before nearest structural/liquidity barrier",
                 barrier_price=barrier.price,
                 supporting_destination=runway[0].price,
             )
 
         return TargetExtensionDecision(
-            True, proposed_target_price, proposed_target_price, base_target_price,
+            True,
+            proposed_target_price,
+            proposed_target_price,
+            base_target_price,
             "path runway confirmed; no qualifying barrier before target",
             supporting_destination=runway[0].price,
         )
