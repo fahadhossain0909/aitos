@@ -55,6 +55,12 @@ Do not introduce a new envelope or break event compatibility without an approved
 | Position -> exit | monitoring heartbeat, HOLD/exit reason | unmonitored position |
 | Exit -> reconciliation | close attempt, fill/confirmation, final quantity | partial close mismatch, false closure |
 
+## Source-verified instrumentation notes (2026-11-03)
+- `OpportunityScanner.scan_symbol()` records scanner-stage input/output latency, processing errors and trace completion using a monotonic timer.
+- `run_scan_and_trade_cycle()` logs candidate ranks/component scores, kernel decisions/rejections, risk/lifecycle rejection reasons and publishes a `decision.snapshot` event.
+- Position evaluation/monitor/close lifecycle events are emitted by `aitos/intelligence/position_runtime.py`; the structured event contract is documented in `docs/POSITION_LIFECYCLE_TELEMETRY.md`.
+- These are source facts only. Verify event delivery, persistence, trace continuity and stage latency at runtime before declaring the complete chain healthy.
+
 ## Freshness and ordering
 - Preserve source timestamps and local receive timestamps separately.
 - Detect clock skew; do not treat a future timestamp as fresh without validation.
