@@ -56,6 +56,19 @@ Report p50/p95/p99/max, sample count, window, mode, workload and missing data. H
 ## Trading attribution
 Every decision should be reconstructable from logs/traces using stable decision, event, order, and position IDs (not metric labels). Record feature snapshot/version, candidate rank, decision action, accepted/rejected/HOLD/exit reason, risk verdict, execution result, and eventual outcome where available.
 
+## Existing source-verified telemetry surfaces (2026-11-03)
+- Scanner: `OpportunityScanner.scan_symbol()` records `PipelineStage.SCANNER` input/output latency with a monotonic clock, trace start/completion, candidate-found flag and processing errors.
+- Decision funnel: `run_scan_and_trade_cycle()` logs candidate component scores/weights/threshold, kernel direction/confidence rejections, position-cap skips, decision snapshots, lifecycle/risk rejection and accepted/submitted state.
+- Position lifecycle: `position_runtime.py` emits evaluation duration, monitor tier/priority, health snapshot, action/reason, monitor heartbeat/staleness and close attempt/completed/failed events. These are structured log events, not all Prometheus histograms.
+- `position_lifecycle_telemetry_report.py` reconstructs per-position evaluation freshness and close evidence from JSON-lines logs.
+- The source contains meaningful event coverage, but event completeness, actual log delivery/retention, cross-stage trace correlation and real latency distributions remain NOT RUNTIME-VERIFIED.
+
+## Outstanding telemetry verification gaps
+- No runtime evidence yet confirms the complete exchange -> Redis -> consumer -> scanner -> decision -> execution -> fill -> persisted position -> close -> reconciliation chain.
+- Verify whether order submit/ack/fill and close-confirmation durations can be reconstructed from current lifecycle events and logs before adding new metrics; avoid duplicate telemetry.
+- Prometheus currently exposes data-flow stage percentiles and module health, while detailed per-position reasons/identities belong in structured logs. Validate dashboard/alert consumers and cardinality in the actual deployment.
+- The in-memory data-flow bucket dictionary has no TTL/eviction in the inspected source (AITOS-ENG-009); measure symbol churn and RSS before proposing a cap.
+
 ## Initial source-audit finding and remediation (2026-11-03)
 - `aitos/forensics/data_flow_registry.py` represents an empty latency sample set as `None` in `StageSnapshot`.
 - `aitos/health_server.py::_append_data_flow_metrics()` currently exports missing p50/p95/p99 values as numeric zero.
