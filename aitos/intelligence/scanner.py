@@ -961,10 +961,6 @@ class OpportunityScanner(AITOSModule):
         data-source issues do not crash the scan cycle.
         """
         limit = self._tuning.analysis.expensive_analysis_limit if limit is None else limit
-        if limit >= len(self._symbols):
-            self._lightweight_fingerprints = {symbol: "unscored" for symbol in self._symbols}
-            return [symbol for symbol in self._symbols
-                    if not self._candidate_rotation.should_skip(symbol, "unscored")]
 
         semaphore = asyncio.Semaphore(self._tuning.analysis.lightweight_concurrency)
 
