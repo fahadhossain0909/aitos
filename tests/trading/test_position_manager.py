@@ -68,8 +68,6 @@ def test_to_dict_serializable():
     assert "action" in d
     assert "exit_decision" in d
 
-
-
 def test_target_extension_decision_is_returned_for_lifecycle_guard():
     pm = PositionManager(config={"hedge_enabled": False})
     trade = _open_trade()
