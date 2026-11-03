@@ -84,7 +84,7 @@ def test_health_metrics_omit_unobserved_latency_and_export_sample_count(
 
     empty_lines: list[str] = []
     server._append_data_flow_metrics(empty_lines)
-    empty_metrics = "\\n".join(empty_lines)
+    empty_metrics = "\n".join(empty_lines)
     assert 'aitos_data_flow_latency_sample_count{stage="receive"} 0' in empty_metrics
     assert 'aitos_data_flow_latency_p50_ms{stage="receive"}' not in empty_metrics
     assert 'aitos_data_flow_latency_p95_ms{stage="receive"}' not in empty_metrics
