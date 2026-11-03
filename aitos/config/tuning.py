@@ -254,12 +254,36 @@ def _env_overrides() -> dict[str, Any]:
             "expensive_analysis_limit",
             int,
         ),
-        "AITOS_TUNING_ANALYSIS_CANDIDATE_POOL_LIMIT": ("analysis", "candidate_pool_limit", int),
-        "AITOS_TUNING_ANALYSIS_CANDIDATE_BATCH_SIZE": ("analysis", "candidate_batch_size", int),
-        "AITOS_TUNING_ANALYSIS_MAX_CANDIDATE_ANALYSES_PER_CYCLE": ("analysis", "max_candidate_analyses_per_cycle", int),
-        "AITOS_TUNING_ANALYSIS_REJECTION_COOLDOWN_SECONDS": ("analysis", "rejection_cooldown_seconds", float),
-        "AITOS_TUNING_ANALYSIS_KERNEL_REJECTION_COOLDOWN_SECONDS": ("analysis", "kernel_rejection_cooldown_seconds", float),
-        "AITOS_TUNING_ANALYSIS_MARKET_CHANGE_RECHECK_PCT": ("analysis", "market_change_recheck_pct", float),
+        "AITOS_TUNING_ANALYSIS_CANDIDATE_POOL_LIMIT": (
+            "analysis",
+            "candidate_pool_limit",
+            int,
+        ),
+        "AITOS_TUNING_ANALYSIS_CANDIDATE_BATCH_SIZE": (
+            "analysis",
+            "candidate_batch_size",
+            int,
+        ),
+        "AITOS_TUNING_ANALYSIS_MAX_CANDIDATE_ANALYSES_PER_CYCLE": (
+            "analysis",
+            "max_candidate_analyses_per_cycle",
+            int,
+        ),
+        "AITOS_TUNING_ANALYSIS_REJECTION_COOLDOWN_SECONDS": (
+            "analysis",
+            "rejection_cooldown_seconds",
+            float,
+        ),
+        "AITOS_TUNING_ANALYSIS_KERNEL_REJECTION_COOLDOWN_SECONDS": (
+            "analysis",
+            "kernel_rejection_cooldown_seconds",
+            float,
+        ),
+        "AITOS_TUNING_ANALYSIS_MARKET_CHANGE_RECHECK_PCT": (
+            "analysis",
+            "market_change_recheck_pct",
+            float,
+        ),
         "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY": (
             "analysis",
             "expensive_analysis_concurrency",
