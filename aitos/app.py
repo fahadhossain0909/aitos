@@ -531,7 +531,9 @@ async def run_scan_and_trade_cycle(
     await components.risk_engine.assess(portfolio)
     open_symbol_counts: dict[str, int] = {}
     for open_trade in components.trade_lifecycle.get_open_trades():
-        open_symbol_counts[open_trade.symbol] = open_symbol_counts.get(open_trade.symbol, 0) + 1
+        open_symbol_counts[open_trade.symbol] = (
+            open_symbol_counts.get(open_trade.symbol, 0) + 1
+        )
     max_per_symbol = get_settings().tuning.positions.max_positions_per_symbol
     submitted = 0
     accepted_opportunities = 0
@@ -542,39 +544,62 @@ async def run_scan_and_trade_cycle(
         for candidate in ranked_batch:
             logger.info(
                 "scanner candidate ranked",
-                extra={"aitos_extra": {
-                    "symbol": candidate.symbol,
-                    "direction": candidate.direction.value,
-                    "score": candidate.composite_score,
-                    "component_scores": dict(candidate.component_scores),
-                    "weights": dict(components.scanner._weights),
-                    "threshold": components.scanner._min_score_threshold,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "symbol": candidate.symbol,
+                        "direction": candidate.direction.value,
+                        "score": candidate.composite_score,
+                        "component_scores": dict(candidate.component_scores),
+                        "weights": dict(components.scanner._weights),
+                        "threshold": components.scanner._min_score_threshold,
+                    }
+                },
             )
             if open_symbol_counts.get(candidate.symbol, 0) >= max_per_symbol:
-                logger.info("trade candidate skipped", extra={"aitos_extra": {
-                    "symbol": candidate.symbol,
-                    "reason": "max_positions_per_symbol_reached",
-                    "max_positions_per_symbol": max_per_symbol,
-                    "score": candidate.composite_score,
-                }})
+                logger.info(
+                    "trade candidate skipped",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": candidate.symbol,
+                            "reason": "max_positions_per_symbol_reached",
+                            "max_positions_per_symbol": max_per_symbol,
+                            "score": candidate.composite_score,
+                        }
+                    },
+                )
                 continue
 
-            decision = await components.scanner.decide_with_kernel(candidate, components.kernel)
-            if (decision.direction != candidate.direction.value.lower()
-                    or decision.confidence < components.kernel.fusion_min_confidence):
-                components.scanner.record_candidate_rejection(candidate, "kernel_rejection")
-                logger.info("trade candidate rejected by kernel", extra={"aitos_extra": {
-                    "symbol": candidate.symbol,
-                    "score": candidate.composite_score,
-                    "candidate_direction": candidate.direction.value.lower(),
-                    "kernel_direction": decision.direction,
-                    "kernel_confidence": decision.confidence,
-                    "kernel_min_confidence": components.kernel.fusion_min_confidence,
-                    "direction_match": decision.direction == candidate.direction.value.lower(),
-                    "confidence_pass": decision.confidence >= components.kernel.fusion_min_confidence,
-                    "cooldown_recorded": True,
-                }})
+            decision = await components.scanner.decide_with_kernel(
+                candidate, components.kernel
+            )
+            if (
+                decision.direction != candidate.direction.value.lower()
+                or decision.confidence < components.kernel.fusion_min_confidence
+            ):
+                components.scanner.record_candidate_rejection(
+                    candidate, "kernel_rejection"
+                )
+                logger.info(
+                    "trade candidate rejected by kernel",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": candidate.symbol,
+                            "score": candidate.composite_score,
+                            "candidate_direction": candidate.direction.value.lower(),
+                            "kernel_direction": decision.direction,
+                            "kernel_confidence": decision.confidence,
+                            "kernel_min_confidence": components.kernel.fusion_min_confidence,
+                            "direction_match": (
+                                decision.direction == candidate.direction.value.lower()
+                            ),
+                            "confidence_pass": (
+                                decision.confidence
+                                >= components.kernel.fusion_min_confidence
+                            ),
+                            "cooldown_recorded": True,
+                        }
+                    },
+                )
                 continue
 
             opportunity = components.scanner.to_opportunity(
@@ -584,35 +609,38 @@ async def run_scan_and_trade_cycle(
             opportunity = replace(
                 opportunity,
                 confidence=min(opportunity.confidence, decision.confidence),
-                rationale=f"kernel_confidence={decision.confidence:.4f}; " + opportunity.rationale,
+                rationale=f"kernel_confidence={decision.confidence:.4f}; "
+                + opportunity.rationale,
                 agent_consensus={
                     **opportunity.agent_consensus,
                     "kernel_fusion_confidence": decision.confidence,
                     "decision_id": decision_id,
                 },
             )
-            await components.event_bus.publish(Event(
-                topic="decision.snapshot",
-                payload={
-                    "decision_id": decision_id,
-                    "symbol": opportunity.symbol,
-                    "side": opportunity.side.value,
-                    "entry_price": opportunity.entry_price,
-                    "stop_loss_price": opportunity.stop_loss_price,
-                    "take_profit_levels": list(opportunity.take_profit_levels),
-                    "confidence": opportunity.confidence,
-                    "strategy_id": opportunity.strategy_id,
-                    "rationale": opportunity.rationale,
-                    "agent_consensus": dict(opportunity.agent_consensus),
-                    "regime": opportunity.regime,
-                    "detected_at": opportunity.detected_at,
-                    "is_production": opportunity.is_production,
-                    "approved_by": opportunity.approved_by,
-                    "kernel_direction": decision.direction,
-                    "kernel_confidence": decision.confidence,
-                },
-                source_module="aitos.app",
-            ))
+            await components.event_bus.publish(
+                Event(
+                    topic="decision.snapshot",
+                    payload={
+                        "decision_id": decision_id,
+                        "symbol": opportunity.symbol,
+                        "side": opportunity.side.value,
+                        "entry_price": opportunity.entry_price,
+                        "stop_loss_price": opportunity.stop_loss_price,
+                        "take_profit_levels": list(opportunity.take_profit_levels),
+                        "confidence": opportunity.confidence,
+                        "strategy_id": opportunity.strategy_id,
+                        "rationale": opportunity.rationale,
+                        "agent_consensus": dict(opportunity.agent_consensus),
+                        "regime": opportunity.regime,
+                        "detected_at": opportunity.detected_at,
+                        "is_production": opportunity.is_production,
+                        "approved_by": opportunity.approved_by,
+                        "kernel_direction": decision.direction,
+                        "kernel_confidence": decision.confidence,
+                    },
+                    source_module="aitos.app",
+                )
+            )
             trade = await components.trade_lifecycle.submit_opportunity(
                 opportunity,
                 portfolio_tracker.build_portfolio_state(components.trade_lifecycle),
@@ -625,25 +653,46 @@ async def run_scan_and_trade_cycle(
                 accepted_opportunities += 1
                 components.scanner.clear_candidate_cooldown(candidate.symbol)
             else:
-                components.scanner.record_candidate_rejection(candidate, "lifecycle_rejection")
-            logger.info("candidate lifecycle decision", extra={"aitos_extra": {
-                "symbol": candidate.symbol,
-                "score": candidate.composite_score,
-                "kernel_confidence": decision.confidence,
-                "trade_state": trade.state.value,
-                "accepted_opportunities": accepted_opportunities,
-                "target_opportunities": target_opportunities,
-            }})
+                components.scanner.record_candidate_rejection(
+                    candidate, "lifecycle_rejection"
+                )
+            logger.info(
+                "candidate lifecycle decision",
+                extra={
+                    "aitos_extra": {
+                        "symbol": candidate.symbol,
+                        "score": candidate.composite_score,
+                        "kernel_confidence": decision.confidence,
+                        "trade_state": trade.state.value,
+                        "accepted_opportunities": accepted_opportunities,
+                        "target_opportunities": target_opportunities,
+                    }
+                },
+            )
             if trade.state == TradeLifecycleState.POSITION_OPENED:
-                open_symbol_counts[candidate.symbol] = open_symbol_counts.get(candidate.symbol, 0) + 1
+                open_symbol_counts[candidate.symbol] = (
+                    open_symbol_counts.get(candidate.symbol, 0) + 1
+                )
             rejection_reason = str(getattr(trade, "rejection_reason", "") or "").lower()
             if trade.state == TradeLifecycleState.REJECTED and any(
                 marker in rejection_reason
-                for marker in ("circuit breaker", "drawdown limit", "daily loss", "hard limit breach", "risk limit")
+                for marker in (
+                    "circuit breaker",
+                    "drawdown limit",
+                    "daily loss",
+                    "hard limit breach",
+                    "risk limit",
+                )
             ):
-                logger.warning("candidate refill halted by portfolio risk rejection",
-                               extra={"aitos_extra":{"symbol":candidate.symbol,
-                                                     "rejection_reason":rejection_reason}})
+                logger.warning(
+                    "candidate refill halted by portfolio risk rejection",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": candidate.symbol,
+                            "rejection_reason": rejection_reason,
+                        }
+                    },
+                )
                 stop_cycle = True
                 break
             if accepted_opportunities >= target_opportunities:
@@ -651,11 +700,16 @@ async def run_scan_and_trade_cycle(
         if stop_cycle or accepted_opportunities >= target_opportunities:
             break
 
-    logger.info("candidate rotation cycle completed", extra={"aitos_extra": {
-        "submitted_attempts": submitted,
-        "accepted_opportunities": accepted_opportunities,
-        "target_opportunities": target_opportunities,
-        "rotation": components.scanner._candidate_rotation.snapshot(),
-        "portfolio_risk_halt": stop_cycle,
-    }})
+    logger.info(
+        "candidate rotation cycle completed",
+        extra={
+            "aitos_extra": {
+                "submitted_attempts": submitted,
+                "accepted_opportunities": accepted_opportunities,
+                "target_opportunities": target_opportunities,
+                "rotation": components.scanner._candidate_rotation.snapshot(),
+                "portfolio_risk_halt": stop_cycle,
+            }
+        },
+    )
     return submitted
