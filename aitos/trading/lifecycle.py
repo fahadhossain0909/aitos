@@ -1145,7 +1145,10 @@ class TradeLifecycle(AITOSModule):
             existing_sector_notional_usd=existing_sector_notional,
             sector_limit_pct=self._risk_engine.limits.max_sector_exposure_pct,
         )
-        if approved_risk_budget is not None and sizing.risk_amount_usd > approved_risk_budget:
+        if (
+            approved_risk_budget is not None
+            and sizing.risk_amount_usd > approved_risk_budget
+        ):
             scale = approved_risk_budget / sizing.risk_amount_usd
             sizing = PositionSizeResult(
                 position_size_usd=sizing.position_size_usd * scale,
