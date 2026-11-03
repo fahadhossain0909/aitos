@@ -2,7 +2,7 @@
 
 This policy supplements (never replaces) thesis/structure Exit Intelligence.
 Initial R is immutable and stops are monotonic: this module can only tighten
-protection. Tick-based stagnation counts evaluations, not wall-clock time.
+protection. Stagnation counts persisted position-manager observations, not wall-clock time.
 """
 from __future__ import annotations
 
@@ -35,7 +35,6 @@ class AdaptiveExitPolicy:
         self._stagnation_min_progress_r = float(
             cfg.get("stagnation_min_progress_r", 0.4)
         )
-        self._observations: dict[str, int] = {}
         if not (0 < self._be_trigger_r <= 10 and 0 <= self._be_lock_r <= 5):
             raise ValueError("invalid break-even R thresholds")
         if not (0 <= self._fee_rate <= 0.1 and 0 <= self._slippage_rate <= 0.1):
@@ -46,7 +45,8 @@ class AdaptiveExitPolicy:
             raise ValueError("invalid stagnation progress threshold")
 
     def reset_trade(self, trade_id: str) -> None:
-        self._observations.pop(trade_id, None)
+        # Observation state lives on the Trade record and survives serialization.
+        return None
 
     def evaluate(self, trade: Trade, current_price: float) -> AdaptiveExitResult:
         if not isfinite(current_price) or current_price <= 0:
@@ -57,8 +57,8 @@ class AdaptiveExitPolicy:
 
         sign = 1.0 if trade.side == TradeSide.LONG else -1.0
         progress_r = ((current_price - trade.entry_price) * sign) / risk
-        count = self._observations.get(trade.trade_id, 0) + 1
-        self._observations[trade.trade_id] = count
+        count = max(0, int(getattr(trade, "adaptive_exit_observations", 0))) + 1
+        trade.adaptive_exit_observations = count
 
         candidate_stop = None
         reason = "no_change"
