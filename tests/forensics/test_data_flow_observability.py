@@ -140,6 +140,7 @@ def test_health_metrics_match_dashboard_contract() -> None:
         "aitos_data_flow_latency_p50_ms",
         "aitos_data_flow_latency_p95_ms",
         "aitos_data_flow_latency_p99_ms",
+        "aitos_data_flow_latency_sample_count",
         "aitos_data_flow_queue_depth",
         "aitos_data_flow_oldest_event_age_ms",
         "aitos_data_flow_source_age_ms",
