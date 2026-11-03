@@ -10,3 +10,83 @@ def test_numeric_features_filters_non_numeric_values():
 
 def test_numeric_features_handles_invalid_json():
     assert ContinualLearningWorker._numeric_features("not-json") == {}
+
+
+
+def test_numeric_features_excludes_outcome_leakage_and_sets_neutral_rl_confidence():
+    result = ContinualLearningWorker._numeric_features(
+        '{"trend_strength": 7, "risk_amount_usd": 100, "pnl": 20, "reward": 2}'
+    )
+    assert result == {"trend_strength": 7.0, "rl_confidence": 5.0}
+
+
+def test_backtest_reward_is_normalized_to_r_multiple():
+    assert (
+        ContinualLearningWorker._reward_r_multiple(
+            {
+                "decision": "backtest_trade",
+                "outcome": "closed",
+                "reward": 50.0,
+                "features_json": "{}",
+                "risk_state_json": '{"risk_amount_usd": 25.0}',
+                "metadata_json": '{"reward_unit": "quote_pnl"}',
+            }
+        )
+        == 2.0
+    )
+
+
+def test_backtest_r_multiple_reward_is_not_normalized_twice():
+    assert (
+        ContinualLearningWorker._reward_r_multiple(
+            {
+                "decision": "backtest_trade",
+                "outcome": "closed",
+                "reward": -0.75,
+                "features_json": "{}",
+                "risk_state_json": "{}",
+                "metadata_json": '{"reward_unit": "r_multiple"}',
+            }
+        )
+        == -0.75
+    )
+
+
+def test_backtest_summary_and_unscaled_trade_rewards_are_rejected():
+    summary = {
+        "decision": "backtest_summary",
+        "outcome": "completed",
+        "reward": 0.25,
+        "metadata_json": "{}",
+    }
+    unscaled = {
+        "decision": "backtest_trade",
+        "outcome": "closed",
+        "reward": 50.0,
+        "features_json": "{}",
+        "risk_state_json": "{}",
+        "metadata_json": '{"reward_unit": "quote_pnl"}',
+    }
+    assert ContinualLearningWorker._reward_r_multiple(summary) is None
+    assert ContinualLearningWorker._reward_r_multiple(unscaled) is None
+
+
+def test_backtest_reward_rejects_invalid_risk_and_non_finite_values():
+    invalid_risk = {
+        "decision": "backtest_trade",
+        "outcome": "closed",
+        "reward": 1.0,
+        "features_json": "{}",
+        "risk_state_json": '{"risk_amount_usd": 0}',
+        "metadata_json": "{}",
+    }
+    invalid_reward = {
+        "decision": "backtest_trade",
+        "outcome": "closed",
+        "reward": float("nan"),
+        "features_json": "{}",
+        "risk_state_json": '{"risk_amount_usd": 10}',
+        "metadata_json": "{}",
+    }
+    assert ContinualLearningWorker._reward_r_multiple(invalid_risk) is None
+    assert ContinualLearningWorker._reward_r_multiple(invalid_reward) is None
