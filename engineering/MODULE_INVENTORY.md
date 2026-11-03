@@ -32,6 +32,16 @@
 - `deploy/grafana/aitos_data_flow.json`: SOURCE-VERIFIED dashboard queries exist for p50/p95/p99 data-flow metrics. Dashboard provisioning and rendered panel correctness are NOT TESTED.
 - Known issue AITOS-ENG-004: exporter maps missing latency observations to zero.
 
+## Paper-runtime and health source audit (2026-11-03)
+- `run_paper_trading.py`: SOURCE-VERIFIED startup sequence is Redis -> EventBus -> ClickHouse repositories -> optional Neo4j -> exchange/universe -> system build -> trade-state persistence initialize/restore -> module initialization -> restored-position resubscription -> learning worker/agents/recorders -> health server -> scan loop. No runtime execution was performed.
+- `aitos/app.py::initialize_all()`: initializes core modules sequentially, subscribes trade-lifecycle price handlers, then polls health for up to 5 seconds. It accepts both HEALTHY and DEGRADED as initialized.
+- `aitos/app.py::shutdown_all()`: cancels price-feed subscriptions and shuts down core modules in reverse order.
+- `run_paper_trading.py`: its main loop `try/finally` starts after substantial startup work. An exception during earlier startup can bypass the normal finalizer (AITOS-ENG-005).
+- HealthServer monitors core modules plus auxiliary recorder/MarketOS/agent modules, while the periodic self-heal loop iterates only core `components.all_modules()` (AITOS-ENG-006).
+- `/health` returns HTTP 200 for DEGRADED modules by design; consumers must parse the JSON status (AITOS-ENG-007).
+- `aitos/telemetry/position_lifecycle.py` stores only the latest 2,000 events in process memory. It is not a durable audit log (AITOS-ENG-008).
+- `aitos/forensics/data_flow_registry.py` stores latency samples in process memory (deque maxlen 2,048 per stage/symbol bucket); restart clears the percentile window.
+
 ## Inventory update template
 For each concrete module add:
 - Import path and owning package.
