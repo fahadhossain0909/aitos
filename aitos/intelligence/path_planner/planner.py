@@ -179,7 +179,11 @@ class MarketPathPlanner:
                 "invalid target-extension inputs", vetoes=("invalid_inputs",)
             )
         is_long = side == "LONG"
-        extends = proposed_target_price > base_target_price if is_long else proposed_target_price < base_target_price
+        extends = (
+            proposed_target_price > base_target_price
+            if is_long
+            else proposed_target_price < base_target_price
+        )
         if not extends:
             return TargetExtensionDecision(
                 False, base_target_price, proposed_target_price, base_target_price,
@@ -192,19 +196,25 @@ class MarketPathPlanner:
             vetoes.append("thesis_not_intact")
         if str(exit_action).upper() != "HOLD":
             vetoes.append("exit_engine_not_holding")
-        if market_state.reversal_risk >= float(self._cfg.get("max_reversal_risk_for_extension", 0.55)):
+        if market_state.reversal_risk >= float(
+            self._cfg.get("max_reversal_risk_for_extension", 0.55)
+        ):
             vetoes.append("reversal_risk_high")
         if (is_long and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT) or (
             not is_long and market_state.order_flow_bias == OrderFlowBias.BUYER_DOMINANT
         ):
             vetoes.append("opposing_order_flow")
-        if market_state.structure in {StructureBias.BROKEN} or (
-            is_long and market_state.structure == StructureBias.BEARISH
-        ) or (not is_long and market_state.structure == StructureBias.BULLISH):
+        if (
+            market_state.structure == StructureBias.BROKEN
+            or (is_long and market_state.structure == StructureBias.BEARISH)
+            or (not is_long and market_state.structure == StructureBias.BULLISH)
+        ):
             vetoes.append("structure_against_position")
         if market_state.momentum == MomentumState.EXHAUSTED:
             vetoes.append("momentum_exhausted")
-        if (is_long and market_state.auction_state == AuctionState.REJECTION_OF_HIGHS) or (
+        if (
+            is_long and market_state.auction_state == AuctionState.REJECTION_OF_HIGHS
+        ) or (
             not is_long and market_state.auction_state == AuctionState.REJECTION_OF_LOWS
         ):
             vetoes.append("auction_rejection_against_position")
@@ -218,14 +228,24 @@ class MarketPathPlanner:
         min_probability = float(self._cfg.get("target_min_path_probability", 0.40))
         min_confidence = float(self._cfg.get("target_min_path_confidence", 0.50))
         directional = [
-            d for d in destinations
-            if (d.price > plan.current_price if is_long else d.price < plan.current_price)
+            d
+            for d in destinations
+            if (
+                d.price > plan.current_price
+                if is_long
+                else d.price < plan.current_price
+            )
             and d.probability >= min_probability
             and d.confidence >= min_confidence
         ]
         runway = [
-            d for d in directional
-            if (d.price >= proposed_target_price if is_long else d.price <= proposed_target_price)
+            d
+            for d in directional
+            if (
+                d.price >= proposed_target_price
+                if is_long
+                else d.price <= proposed_target_price
+            )
         ]
         if not runway:
             return TargetExtensionDecision(
@@ -235,13 +255,19 @@ class MarketPathPlanner:
             )
 
         barriers = [
-            d for d in directional
-            if (base_target_price < d.price < proposed_target_price if is_long
-                else proposed_target_price < d.price < base_target_price)
+            d
+            for d in directional
+            if (
+                base_target_price < d.price < proposed_target_price
+                if is_long
+                else proposed_target_price < d.price < base_target_price
+            )
         ]
         if barriers:
-            barrier = min(barriers, key=lambda d: d.price) if is_long else max(
-                barriers, key=lambda d: d.price
+            barrier = (
+                min(barriers, key=lambda d: d.price)
+                if is_long
+                else max(barriers, key=lambda d: d.price)
             )
             buffer = max(
                 stop_distance * float(self._cfg.get("target_barrier_buffer_r", 0.10)),
