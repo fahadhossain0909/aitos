@@ -31,10 +31,12 @@ from .contracts import EventHandler
 class InProcessSubscription:
     topic_pattern: str
     group: str
-    _task: asyncio.Task
+    _queue: asyncio.Queue[Event]
+    _task: asyncio.Task | None = None
 
     def cancel(self) -> None:
-        self._task.cancel()
+        if self._task is not None:
+            self._task.cancel()
 
 
 class InProcessBus(AITOSModule):
@@ -148,8 +150,7 @@ class InProcessBus(AITOSModule):
         if start_id not in {"0", "$"}:
             raise ValueError("InProcessBus supports start_id='0' or '$' only")
         queue: asyncio.Queue[Event] = asyncio.Queue()
-        sub = InProcessSubscription(topic_pattern=topic, group=group, _task=None)  # type: ignore[arg-type]
-        sub._queue = queue  # type: ignore[attr-defined]
+        sub = InProcessSubscription(topic_pattern=topic, group=group, _queue=queue)
         if start_id == "0":
             for stored_topic, events in self._history.items():
                 if fnmatch.fnmatch(stored_topic, topic):
