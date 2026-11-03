@@ -960,7 +960,9 @@ class OpportunityScanner(AITOSModule):
         lightweight requests retain a deterministic fallback rank so temporary
         data-source issues do not crash the scan cycle.
         """
-        limit = self._tuning.analysis.expensive_analysis_limit if limit is None else limit
+        limit = (
+            self._tuning.analysis.expensive_analysis_limit if limit is None else limit
+        )
 
         semaphore = asyncio.Semaphore(self._tuning.analysis.lightweight_concurrency)
 
@@ -991,7 +993,9 @@ class OpportunityScanner(AITOSModule):
                     median_quote_activity = volumes[len(volumes) // 2]
                     closes = [float(c.close) for c in candles[-6:]]
                     previous_close = closes[-2] if len(closes) >= 2 else closes[-1]
-                    short_return = closes[-1] / previous_close - 1.0 if previous_close > 0 else 0.0
+                    short_return = (
+                        closes[-1] / previous_close - 1.0 if previous_close > 0 else 0.0
+                    )
                     self._lightweight_fingerprints[symbol] = (
                         f"{round(closes[-1], 10)}:{round(short_return, 5)}:"
                         f"{round(median_quote_activity, 2)}"
@@ -1095,7 +1099,8 @@ class OpportunityScanner(AITOSModule):
 
     def record_candidate_rejection(self, candidate: ScanCandidate, reason: str) -> None:
         self._candidate_rotation.record_rejection(
-            candidate.symbol, reason,
+            candidate.symbol,
+            reason,
             self._lightweight_fingerprints.get(
                 candidate.symbol,
                 f"{candidate.direction.value}:{candidate.regime}:{candidate.composite_score:.2f}",
@@ -1123,7 +1128,7 @@ class OpportunityScanner(AITOSModule):
         scanned = found = 0
         batch_size = max(1, cfg.candidate_batch_size)
         for offset in range(0, len(selected), batch_size):
-            batch = selected[offset:offset + batch_size]
+            batch = selected[offset : offset + batch_size]
 
             async def scan_one(symbol: str) -> ScanCandidate | None:
                 async with self._scan_semaphore:
@@ -1133,8 +1138,12 @@ class OpportunityScanner(AITOSModule):
                             timeout=cfg.timeout_seconds,
                         )
                     except Exception as exc:
-                        logger.error("candidate batch scan failed",
-                                     extra={"aitos_extra":{"symbol":symbol,"error":str(exc)}})
+                        logger.error(
+                            "candidate batch scan failed",
+                            extra={
+                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                            },
+                        )
                         return None
 
             results = await asyncio.gather(*(scan_one(symbol) for symbol in batch))
@@ -1153,10 +1162,16 @@ class OpportunityScanner(AITOSModule):
                 "ranked_symbols": [item.symbol for item in ranked],
                 "rotation": self._candidate_rotation.snapshot(),
             }
-            logger.info("candidate analysis batch completed", extra={"aitos_extra":payload})
-            await self._event_bus.publish(Event(
-                topic="market.candidate_rotation", payload=payload, source_module=self.module_id
-            ))
+            logger.info(
+                "candidate analysis batch completed", extra={"aitos_extra": payload}
+            )
+            await self._event_bus.publish(
+                Event(
+                    topic="market.candidate_rotation",
+                    payload=payload,
+                    source_module=self.module_id,
+                )
+            )
             yield ranked
 
     async def rank(
