@@ -199,7 +199,9 @@ class CandidateOutcomeStore:
                 ),
                 "mean_mae_pct": round(float(row["mean_mae_pct"] or 0), 6),
                 "mean_mfe_pct": round(float(row["mean_mfe_pct"] or 0), 6),
-                "missed_opportunity_rate": round(float(row["missed"] or 0) / samples, 4),
+                "missed_opportunity_rate": round(
+                    float(row["missed"] or 0) / samples, 4
+                ),
                 "correct_rejection_rate": round(
                     float(row["correctly_rejected"] or 0) / samples, 4
                 ),
