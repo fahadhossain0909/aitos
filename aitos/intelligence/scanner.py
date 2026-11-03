@@ -659,6 +659,8 @@ class OpportunityScanner(AITOSModule):
             structure_bias=market_structure.bias,
             structure_event=market_structure.event,
         )
+        # Keep the OI baseline fresh even when the HTF gate rejects this entry.
+        self._last_oi[symbol] = oi_current
         htf_alignment_score = 5.0
         htf_available = False
         htf_diagnostics: dict[str, Any] = {
@@ -712,7 +714,6 @@ class OpportunityScanner(AITOSModule):
                     },
                 )
                 return None
-        self._last_oi[symbol] = oi_current
 
         live_state = self._live_cache.snapshot(symbol)
         depth_events = (
