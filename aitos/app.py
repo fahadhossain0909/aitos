@@ -646,12 +646,33 @@ async def run_scan_and_trade_cycle(
                 portfolio_tracker.build_portfolio_state(components.trade_lifecycle),
             )
             submitted += 1
+            rejection_reason = str(
+                getattr(trade, "rejection_reason", "") or ""
+            ).lower()
+            portfolio_rejection = any(
+                marker in rejection_reason
+                for marker in (
+                    "circuit breaker",
+                    "drawdown",
+                    "daily loss",
+                    "hard limit",
+                    "risk limit",
+                    "max open positions",
+                    "correlated exposure",
+                    "sector exposure",
+                    "insufficient capital",
+                )
+            )
             if trade.state in {
                 TradeLifecycleState.ORDER_SUBMITTED,
                 TradeLifecycleState.POSITION_OPENED,
             }:
                 accepted_opportunities += 1
                 components.scanner.clear_candidate_cooldown(candidate.symbol)
+            elif portfolio_rejection:
+                components.scanner.record_candidate_rejection(
+                    candidate, "portfolio_risk_rejection"
+                )
             else:
                 components.scanner.record_candidate_rejection(
                     candidate, "lifecycle_rejection"
@@ -673,17 +694,7 @@ async def run_scan_and_trade_cycle(
                 open_symbol_counts[candidate.symbol] = (
                     open_symbol_counts.get(candidate.symbol, 0) + 1
                 )
-            rejection_reason = str(getattr(trade, "rejection_reason", "") or "").lower()
-            if trade.state == TradeLifecycleState.REJECTED and any(
-                marker in rejection_reason
-                for marker in (
-                    "circuit breaker",
-                    "drawdown limit",
-                    "daily loss",
-                    "hard limit breach",
-                    "risk limit",
-                )
-            ):
+            if trade.state == TradeLifecycleState.REJECTED and portfolio_rejection:
                 logger.warning(
                     "candidate refill halted by portfolio risk rejection",
                     extra={
