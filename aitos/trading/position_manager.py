@@ -537,11 +537,8 @@ class PositionManager:
                     base_target_price=base_target,
                     proposed_target_price=proposed_target,
                 )
-                notes_target = target_extension.reason
             else:
-                notes_target = ""
         else:
-            notes_target = ""
 
         spike_tp_price = self._spike_tp(side=side, current_price=current_price, atr=atr)
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
