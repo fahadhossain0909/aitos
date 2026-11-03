@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
@@ -135,3 +136,15 @@ def test_outcome_and_risk_fields_are_not_training_features():
         '{"trend_strength": 7, "risk_amount_usd": 100, "pnl": 20, "reward": 2}'
     )
     assert result == {"trend_strength": 7.0, "rl_confidence": 5.0}
+
+
+def test_scorer_refreshes_checkpoint_written_by_another_process(tmp_path):
+    path = str(tmp_path / "shared_model.pkl")
+    writer = DeepValueRLScorer(state_path=path)
+    reader = DeepValueRLScorer(state_path=path)
+    assert reader.n_samples_seen == 0
+    writer.update_experience_and_persist(
+        "external-exp", "BTCUSDT", {"trend_strength": 8.0}, 1.0
+    )
+    asyncio.run(reader.score("BTCUSDT", {"trend_strength": 8.0}))
+    assert reader.n_samples_seen == 1

@@ -83,6 +83,7 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._recent_rewards: list[float] = []
         self._applied_experience_ids: set[str] = set()
         self._applied_experience_order: list[str] = []
+        self._last_loaded_mtime_ns: int | None = None
         model_data_dir = get_model_data_dir()
         self._state_path = (
             Path(state_path)
@@ -140,7 +141,7 @@ class DeepValueRLScorer(RLPolicyScorer):
                 if len(self._applied_experience_order) > 10000:
                     expired = self._applied_experience_order.pop(0)
                     self._applied_experience_ids.discard(expired)
-                self.save_state(str(target))
+                self._save_state_unlocked(str(target))
                 return True
 
     def update_trade_and_persist(
@@ -153,7 +154,20 @@ class DeepValueRLScorer(RLPolicyScorer):
             f"trade:{trade_id}", symbol, context, reward_r_multiple
         )
 
+    def _refresh_if_checkpoint_changed(self) -> None:
+        try:
+            current_mtime = self._state_path.stat().st_mtime_ns
+        except OSError:
+            return
+        if current_mtime == self._last_loaded_mtime_ns:
+            return
+        lock_path = self._state_path.with_suffix(self._state_path.suffix + ".lock")
+        with lock_path.open("a+b") as lock_handle:
+            with _exclusive_model_lock(lock_handle):
+                self.load_state(str(self._state_path))
+
     async def score(self, symbol: str, context: dict[str, Any]) -> float:
+        self._refresh_if_checkpoint_changed()
         if not self.is_fitted:
             return 5.0
         predicted_reward = float(self._model.predict(_vectorize(context))[0])
@@ -186,6 +200,8 @@ class DeepValueRLScorer(RLPolicyScorer):
                 protocol=pickle.HIGHEST_PROTOCOL,
             )
         tmp.replace(target)
+        if target == self._state_path:
+            self._last_loaded_mtime_ns = target.stat().st_mtime_ns
 
     def load_state(self, path: str | None = None) -> bool:
         target = Path(path or self._state_path)
@@ -200,4 +216,6 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._recent_rewards = list(state.get("recent_rewards", []))
         self._applied_experience_order = list(state.get("applied_experience_ids", []))[-10000:]
         self._applied_experience_ids = set(self._applied_experience_order)
+        if target == self._state_path:
+            self._last_loaded_mtime_ns = target.stat().st_mtime_ns
         return True
