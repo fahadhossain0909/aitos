@@ -118,6 +118,12 @@ class PositionManager:
         self._spike_tp_atr_multiple = max(
             0.0, float(cfg.get("spike_tp_atr_multiple", 10.0))
         )
+        from aitos.trading.adaptive_exit_policy import AdaptiveExitPolicy
+
+        self._adaptive_exit_policy = AdaptiveExitPolicy(
+            cfg.get("adaptive_exit_policy", {})
+        )
+        self._adaptive_exit_enabled = bool(cfg.get("adaptive_exit_enabled", False))
 
     def register_thesis(self, thesis: TradeThesis) -> None:
         self._theses[thesis.trade_id] = thesis
@@ -270,6 +276,7 @@ class PositionManager:
         self._journeys.pop(trade_id, None)
         self._hedge_engine.reset(trade_id)
         self._eie.reset_trade(trade_id)
+        self._adaptive_exit_policy.reset_trade(trade_id)
         if symbol:
             self._eie.reset_symbol(symbol)
 
@@ -461,9 +468,29 @@ class PositionManager:
             elif journey.action.value in {"PROTECT", "TRAIL"}:
                 effective_action = ExitAction.MANAGE
         new_stop = None
+        adaptive_result = None
+        if self._adaptive_exit_enabled:
+            adaptive_result = self._adaptive_exit_policy.evaluate(
+                trade=trade, current_price=current_price
+            )
+            # Stagnation is a time-efficiency exit only while the original
+            # thesis has not already hard-invalidated (handled by EIE above).
+            if (
+                adaptive_result.stagnation_exit
+                and effective_action != ExitAction.EXIT
+                and getattr(thesis_eval.health, "value", thesis_eval.health)
+                != "INVALIDATED"
+            ):
+                effective_action = ExitAction.EXIT
+                reason = (
+                    f"adaptive_exit:stagnation bars={adaptive_result.bars_observed} "
+                    f"progress_r={adaptive_result.progress_r:.3f}"
+                )
+            if adaptive_result.stop_price is not None:
+                new_stop = adaptive_result.stop_price
         if (
             self._allow_stop_tighten
-            and effective_action == ExitAction.MANAGE
+            and effective_action != ExitAction.EXIT
             and structural_stop is not None
         ):
             if (
@@ -473,7 +500,12 @@ class PositionManager:
                 trade.side == TradeSide.SHORT
                 and structural_stop.stop_price < trade.sl_price
             ):
-                new_stop = structural_stop.stop_price
+                if new_stop is None:
+                    new_stop = structural_stop.stop_price
+                elif trade.side == TradeSide.LONG:
+                    new_stop = max(new_stop, structural_stop.stop_price)
+                else:
+                    new_stop = min(new_stop, structural_stop.stop_price)
         spike_tp_price = self._spike_tp(side=side, current_price=current_price, atr=atr)
         reason_codes = [r.code for r in exit_decision.reasons[:5]]
         reason = (
@@ -484,7 +516,17 @@ class PositionManager:
             f" hedge={hedge_decision.action if hedge_decision else 'none'}"
             f" [{', '.join(reason_codes + list(journey.reasons))}]"
         )
-        notes = tuple(dict.fromkeys((*exit_decision.notes, *journey.reasons)))
+        if adaptive_result is not None:
+            reason += (
+                f" adaptive={adaptive_result.reason}"
+                f" bars={adaptive_result.bars_observed}"
+                f" progress_r={adaptive_result.progress_r:.3f}"
+            )
+        notes = tuple(dict.fromkeys((
+            *exit_decision.notes,
+            *journey.reasons,
+            *((adaptive_result.reason,) if adaptive_result is not None else ()),
+        )))
         return PositionAction(
             action=effective_action,
             reason=reason,
