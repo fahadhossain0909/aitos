@@ -15,8 +15,8 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 
 ## Pull request
 - Draft PR: https://github.com/fahadhossain0909/aitos/pull/216
-- Head commit before this status update: `95b74923d360ed1073c99a966ff65cbf78a45a72`
-- Changed files: 10 (564 additions, 0 deletions at PR creation)
+- Current head at last status check: `b36ae68db55554312a845520870a2da049285327`
+- Changed files at last comparison: 15 (documentation + telemetry source/test/dashboard changes)
 - GitHub Actions PR workflow runs observed at initial check: none; combined status checks: none. CI is PENDING, not passed.
 
 ## Progress
@@ -27,12 +27,12 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 | Root agent contract | DONE | Added on this branch |
 | Engineering operating model | DONE | Added on this branch |
 | Architecture/data-flow documents | DONE (initial map; runtime confirmation pending) | Initial logical map; source/runtime confirmation remains |
-| Module inventory | DONE (initial inventory; source-level expansion pending) | Initial README-backed inventory |
-| Telemetry specification | DONE (specification only; implementation audit pending) | Proposed coverage; existing metrics must be audited |
+| Module inventory | PARTIAL | README and paper-runner/health source-level inventory; remaining modules not yet inspected |
+| Telemetry specification and targeted fix | IMPLEMENTED — NOT VERIFIED | Missing latency sample semantics fixed in code, regression test and Grafana panel; tests pending |
 | Latency baseline | NOT MEASURED | No runtime session or histogram export inspected |
-| Root-cause register | DONE (initial documentation findings only) | Documentation findings only; no runtime defect asserted |
-| Runtime audit | NOT STARTED | Requires safe local/isolated environment |
-| Automated tests / CI | NOT RUN | Documentation-only changes; branch CI pending |
+| Root-cause register | PARTIAL | 8 source/documentation findings recorded; runtime root causes remain unverified |
+| Runtime audit | BLOCKED / NOT STARTED | No connected local runtime or authorized isolated test environment in this session |
+| Automated tests / CI | NOT RUN / NOT OBSERVED | Code changed; no execution environment; GitHub Actions run/status lookup returned none |
 | Independent review | NOT STARTED | Must review final diff and CI |
 | Merge to main | NOT AUTHORIZED | Keep branch/PR isolated until explicit approval |
 
@@ -52,10 +52,10 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 - Paper runner source audit found startup cleanup coverage begins only after a long initialization sequence (AITOS-ENG-005); auxiliary-module self-heal coverage differs from health-report coverage (AITOS-ENG-006); degraded health returns HTTP 200 intentionally (AITOS-ENG-007); position event API is bounded process-local memory (AITOS-ENG-008).
 
 ## Next actions
-1. Finish documentation commits and open a draft PR.
-2. Review the complete diff and validate Markdown/links.
-3. Run repository CI on the branch.
-4. Perform read-only source discovery for module inventory and actual telemetry names.
-5. Run safe local paper-runtime diagnostics only when an execution environment is available.
-6. Populate latency baseline from measured histograms; never estimate.
-7. Have an independent reviewer inspect docs, code references, CI and safety boundaries.
+1. Run `python -m pytest -q tests/forensics/test_data_flow_observability.py` and `black --check` in the repository environment.
+2. Run repository CI and resolve any failures.
+3. Complete source inventory for exchange, Redis, ClickHouse, scanner, execution, risk and lifecycle modules.
+4. Run the documented local paper-runtime audit with Redis/ClickHouse and verify restored-position subscriptions.
+5. Capture real stage latency distributions and fill the baseline with sample counts/window/mode.
+6. Verify decision-to-outcome lifecycle telemetry and Prometheus/Grafana rendering.
+7. Obtain independent review before marking PR ready; do not merge without explicit approval.
