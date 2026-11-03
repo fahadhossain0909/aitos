@@ -4,9 +4,9 @@
 
 - A position-local adaptive exit policy supplements the existing Market State, Trade Thesis, Trade Journey and Exit Intelligence stack.
 - Break-even ratchet triggers at +0.8R and proposes Entry +/- max(0.15R, estimated round-trip fees + slippage buffer), using immutable initial risk. It never loosens an existing stop.
-- Stagnation guard counts position-manager evaluations and requests an exit after 35 evaluations when current progress remains below +0.4R.
+- Stagnation guard requests an exit after 35 position-manager observations when best recorded progress (MFE) remains below +0.4R. The observation count is stored on the Trade record and included in `to_dict()` serialization; it is not guaranteed to represent unique market bars.
 - The policy is opt-in (adaptive_exit_enabled, default false) so existing paper/live behavior is unchanged until replay validation.
-- Per-trade policy state is cleared with PositionManager.clear_trade.
+- The adaptive policy is opt-in (adaptive_exit_enabled, default false). Its observation counter is part of the Trade record rather than process-local policy memory.
 - Unit tests cover LONG/SHORT ratchets, monotonicity, stagnation threshold and invalid input handling.
 
 ## Integration sequence
@@ -21,14 +21,14 @@
 
 ## Important limitations before enabling
 
-This branch is a safe, opt-in first integration slice, not a reproduction of the claimed 5,000-tick backtest. The repository's actual multi-regime dataset and reproducible baseline/optimized replay result were not supplied or available to this implementation. No performance improvement is claimed.
+This branch is a safe, opt-in integration slice, not a reproduction of the claimed 5,000-tick backtest. The repository's actual multi-regime dataset and reproducible baseline/optimized replay result were not supplied or available to this implementation. No performance improvement is claimed.
 
 The following requested work remains gated on dedicated implementation and validation:
 
 - ATR-derived initial stop must be calculated before sizing, with emergency-stop quantity recalculated against final initial risk. A post-entry stop adjustment is not a substitute.
 - ADX 2.5R / 3.2–3.5R target expansion needs explicit target-zone, liquidity, structure and reversal vetoes in the existing Path Planner/Position Manager.
-- Loss-streak sizing reduction belongs in centralized Risk Engine and must use persisted, finalized net trade outcomes, not a process-local counter.
-- Stagnation currently counts PositionManager evaluations in process memory; production enablement requires persisted observation/bar identity so a restart cannot reset the timer or double-count repeated updates.
+- Capital Gateway now halves the requested risk budget after two consecutive losses, using the portfolio's `consecutive_losses` field; the existing five-loss hard circuit breaker remains. The portfolio producer must populate that field from persisted, finalized net outcomes and reset it after a net-profitable close. This branch does not fabricate a new streak counter.
+- Stagnation observations now serialize with the Trade record, but the persistence/recovery adapter must be verified to restore the new field. The counter increments on PositionManager evaluations, not unique candle IDs; exact bar-based semantics still require event/bar identity.
 - Fee/funding/slippage estimation must be venue- and position-specific.
 - Replay must include fees, funding, spread, latency, partial fills, stop gaps, exchange filters and out-of-sample/walk-forward partitions across all five regimes. Report PF, MDD, Sharpe, Calmar, expectancy, trade count and confidence intervals; compare against PR #218 merged main baseline.
 - Run focused unit tests, full CI, historical replay and paper trading before enabling the feature. Do not activate live trading from unit tests alone.
