@@ -15,7 +15,8 @@
         "timeout_seconds": 8,
         "candidate_pool_limit": 10,
         "candidate_batch_size": 2,
-        "max_candidate_analyses_per_cycle": 10
+        "max_candidate_analyses_per_cycle": 10,
+        "ranking_hysteresis_points": 1.0
       },
       "event_bus": {
         "consumer_concurrency": 2,
@@ -72,7 +73,8 @@
         "timeout_seconds": 5,
         "candidate_pool_limit": 20,
         "candidate_batch_size": 5,
-        "max_candidate_analyses_per_cycle": 20
+        "max_candidate_analyses_per_cycle": 20,
+        "ranking_hysteresis_points": 1.0
       },
       "event_bus": {
         "consumer_concurrency": 8,
@@ -129,7 +131,8 @@
         "timeout_seconds": 5,
         "candidate_pool_limit": 40,
         "candidate_batch_size": 10,
-        "max_candidate_analyses_per_cycle": 40
+        "max_candidate_analyses_per_cycle": 40,
+        "ranking_hysteresis_points": 1.0
       },
       "event_bus": {
         "consumer_concurrency": 16,

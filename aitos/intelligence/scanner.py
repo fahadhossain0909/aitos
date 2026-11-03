@@ -330,10 +330,22 @@ class OpportunityScanner(AITOSModule):
         return None
 
     async def accept_live_trade(self, trade):
-        await self._live_cache.accept_live_trade(trade)
-        self._candidate_outcomes.update_price(
-            trade.symbol, trade.price, getattr(trade, "timestamp", None)
+        state = self._live_cache.snapshot(trade.symbol)
+        previous_trade_id = (
+            state.trades[-1].trade_id if state is not None and state.trades else None
         )
+        await self._live_cache.accept_live_trade(trade)
+        updated = self._live_cache.snapshot(trade.symbol)
+        accepted = (
+            updated is not None
+            and bool(updated.trades)
+            and updated.trades[-1].trade_id == trade.trade_id
+            and trade.trade_id != previous_trade_id
+        )
+        if accepted:
+            self._candidate_outcomes.update_price(
+                trade.symbol, trade.price, getattr(trade, "timestamp", None)
+            )
 
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
