@@ -8,7 +8,7 @@ as a transient cache.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 
 from aitos.logging_setup import get_logger
 
@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS {database}.learning_experiences
 (
     experience_id UUID,
     timestamp DateTime64(3, 'UTC'),
+    ingested_at DateTime64(3, 'UTC') DEFAULT timestamp,
     source LowCardinality(String),
     symbol LowCardinality(String),
     decision LowCardinality(String),
@@ -52,6 +53,10 @@ class ClickHouseExperienceStore:
     def ensure_schema(self) -> None:
         try:
             self.client.command(CREATE_EXPERIENCES_SQL.format(database=self.database))
+            self.client.command(
+                f"ALTER TABLE {self.database}.learning_experiences "
+                "ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT timestamp"
+            )
             logger.info(
                 "learning experience schema ensured",
                 extra={"aitos_extra": {"database": self.database}},
@@ -70,6 +75,7 @@ class ClickHouseExperienceStore:
                 (
                     record.experience_id,
                     record.timestamp,
+                    datetime.now(timezone.utc),
                     record.source,
                     record.symbol,
                     record.decision,
@@ -95,6 +101,7 @@ class ClickHouseExperienceStore:
                 column_names=[
                     "experience_id",
                     "timestamp",
+                    "ingested_at",
                     "source",
                     "symbol",
                     "decision",

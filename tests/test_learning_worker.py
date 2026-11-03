@@ -101,3 +101,37 @@ def test_deep_rl_experience_update_is_idempotent_after_reload(tmp_path):
         "exp-1", "BTCUSDT", {"trend_strength": 8.0}, 1.0
     ) is False
     assert second.n_samples_seen == 1
+
+
+def test_backtest_rewards_are_normalized_to_r_multiples():
+    assert ContinualLearningWorker._reward_r_multiple(
+        {
+            "reward": 50.0,
+            "features_json": "{}",
+            "risk_state_json": '{"risk_amount_usd": 25.0}',
+            "metadata_json": '{"reward_unit": "quote_pnl"}',
+        }
+    ) == 2.0
+    assert ContinualLearningWorker._reward_r_multiple(
+        {
+            "reward": -0.75,
+            "features_json": "{}",
+            "risk_state_json": "{}",
+            "metadata_json": '{"reward_unit": "r_multiple"}',
+        }
+    ) == -0.75
+    assert ContinualLearningWorker._reward_r_multiple(
+        {
+            "reward": 50.0,
+            "features_json": "{}",
+            "risk_state_json": "{}",
+            "metadata_json": "{}",
+        }
+    ) is None
+
+
+def test_outcome_and_risk_fields_are_not_training_features():
+    result = ContinualLearningWorker._numeric_features(
+        '{"trend_strength": 7, "risk_amount_usd": 100, "pnl": 20, "reward": 2}'
+    )
+    assert result == {"trend_strength": 7.0, "rl_confidence": 5.0}

@@ -184,23 +184,40 @@ def _persist_summary(args, result) -> None:
         )
     ]
     for trade in result.trades:
+        fields = dict(trade.fields or {})
+        risk_amount = fields.get("risk_amount_usd", fields.get("initial_risk_usd"))
+        risk_amount = (
+            float(risk_amount)
+            if isinstance(risk_amount, (int, float)) and float(risk_amount) > 0
+            else None
+        )
+        normalized = risk_amount is not None
+        numeric_features = {
+            k: v
+            for k, v in fields.items()
+            if isinstance(v, (int, float, bool))
+                       and k not in {"risk_amount_usd", "initial_risk_usd"}
+        }
         records.append(
             ExperienceRecord(
                 timestamp=trade.timestamp,
                 source="backtest",
-                symbol=args.symbol or str(trade.fields.get("symbol", "unknown")),
+                symbol=args.symbol or str(fields.get("symbol", "unknown")),
                 decision="backtest_trade",
-                outcome="closed",
-                reward=float(trade.reward),
+                # Only R-normalized outcomes are eligible for RL training.
+                # Unscaled quote-currency PnL remains persisted for analytics.
+                outcome="closed" if normalized else "closed_unscaled",
+                reward=float(trade.reward) / risk_amount if normalized else float(trade.reward),
                 confidence=1.0,
                 price=trade.price,
-                features={
-                    k: v
-                    for k, v in trade.fields.items()
-                    if isinstance(v, (int, float, bool))
-                },
+                features=numeric_features,
+                risk_state={"risk_amount_usd": risk_amount} if normalized else {},
                 strategy_version=args.strategy,
-                metadata={"event_type": "backtest_trade"},
+                metadata={
+                    "event_type": "backtest_trade",
+                    "reward_unit": "r_multiple" if normalized else "quote_pnl",
+                    "raw_pnl": float(trade.reward),
+                },
             )
         )
     store.append(records)

@@ -108,3 +108,6 @@ Continual learning is allowed to collect experience, train candidate models, and
 - Keep the worker state file and model checkpoint on the same persistent model volume. Back up both together; do not run multiple independent model writers against separate copies of either file.
 
 - `learning_experiences.ingested_at` is written at repository insertion time (with a migration default for existing rows), so newly imported old-dated backtests are still discovered after the worker cursor has advanced.
+
+- Backtest summaries are excluded from trade-level RL training. Only `decision=backtest_trade`, `outcome=closed` rows are eligible. The backtest CLI marks trades without a positive risk amount as `closed_unscaled`; they remain available for analytics but are not trained as if quote-currency PnL were an R-multiple.
+- Backtest rewards are normalized to R-multiples when a positive `risk_amount_usd` / `initial_risk_usd` is supplied in the replay event fields. Legacy rows are normalized from their persisted risk metadata when possible; otherwise they are skipped. Leakage fields such as realized PnL and risk amount are excluded from the model feature vector.

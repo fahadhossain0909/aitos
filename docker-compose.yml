@@ -142,7 +142,7 @@ services:
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
     command: ["python3", "run_continual_learning.py"]
     env_file: [.env]
-    environment: {MODEL_DATA_DIR: /models, CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/online_rl/worker_state.json, LEARNING_POLL_SECONDS: "60", LEARNING_LOOKBACK_HOURS: "168"}
+    environment: {MODEL_DATA_DIR: /models, CLICKHOUSE_HOST: clickhouse, CLICKHOUSE_PORT: "8123", CLICKHOUSE_DB: aitos, LEARNING_MODEL_PATH: /models/online_rl/deep_value.pkl, LEARNING_STATE_PATH: /models/online_rl/worker_state.json, LEARNING_POLL_SECONDS: "60"}
     volumes: ["${MODEL_DATA_DIR:-${AITOS_DATA_ROOT:-./data}/runtime/models}:/models"]
     depends_on: {clickhouse-init: {condition: service_completed_successfully}}
     cpus: "${LEARNING_CPUS:-0.10}"

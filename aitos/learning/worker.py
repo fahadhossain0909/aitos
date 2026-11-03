@@ -183,8 +183,12 @@ class ContinualLearningWorker:
         if not isinstance(value, dict):
             return {}
         result: dict[str, float] = {}
+        excluded = {
+            "risk_amount_usd", "initial_risk_usd", "position_size_usd",
+            "pnl", "realized_pnl", "reward", "exit_price",
+        }
         for key, raw in value.items():
-            if isinstance(raw, (int, float, bool)):
+            if str(key) not in excluded and isinstance(raw, (int, float, bool)):
                 number = float(raw)
                 if number == number and abs(number) != float("inf"):
                     result[str(key)] = number
