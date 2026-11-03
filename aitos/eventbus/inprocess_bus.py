@@ -36,13 +36,10 @@ class InProcessSubscription:
     group: str
     _queue: asyncio.Queue[Event]
     _task: asyncio.Task | None = None
-    _on_cancel: Callable[[], None] | None = None
 
     def cancel(self) -> None:
         if self._task is not None:
             self._task.cancel()
-        if self._on_cancel is not None:
-            self._on_cancel()
 
 
 class InProcessBus(AITOSModule):
@@ -210,8 +207,8 @@ class InProcessBus(AITOSModule):
 
         task = asyncio.create_task(_consume(), name=f"inprocess-{group}-{topic}")
         sub._task = task
-        sub._on_cancel = lambda: self._remove_subscription(sub)
         self._subscriptions.append(sub)
+        task.add_done_callback(lambda _: self._remove_subscription(sub))
         return sub
 
     async def request_reply(
