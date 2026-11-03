@@ -14,6 +14,7 @@ from aitos.forensics.scanner_performance_telemetry import (
 
 from .consumer_concurrency import install_eventbus_consumer_concurrency
 from .contracts import EventBusProtocol, SubscriptionProtocol
+from .inprocess_bus import InProcessBus, InProcessSubscription
 from .redis_bus import DLQ_STREAM, EventBus, Subscription, validate_event_schema
 
 install_eventbus_consumer_concurrency(EventBus)
@@ -62,6 +63,8 @@ __all__ = [
     "DLQ_STREAM",
     "EventBus",
     "EventBusProtocol",
+    "InProcessBus",
+    "InProcessSubscription",
     "Subscription",
     "SubscriptionProtocol",
     "validate_event_schema",
