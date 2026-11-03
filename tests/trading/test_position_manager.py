@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from aitos.intelligence.exit_intelligence import ExitAction
+from aitos.intelligence.path_planner import TargetExtensionDecision
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.position_manager import PositionManager
 
@@ -66,3 +67,29 @@ def test_to_dict_serializable():
     d = action.to_dict()
     assert "action" in d
     assert "exit_decision" in d
+
+
+
+def test_target_extension_decision_is_returned_for_lifecycle_guard():
+    pm = PositionManager(config={"hedge_enabled": False})
+    trade = _open_trade()
+    trade.take_profit_levels = [80000.0, 81000.0]
+    expected = TargetExtensionDecision(
+        approved=False,
+        target_price=80500.0,
+        proposed_price=81000.0,
+        base_price=80500.0,
+        reason="test veto",
+        vetoes=("test_veto",),
+    )
+    pm._mpp.assess_target_extension = lambda **kwargs: expected
+
+    action = pm.evaluate(
+        trade=trade,
+        current_price=79400.0,
+        trend_strength=0.85,
+        prior_highs=[81200.0],
+    )
+
+    assert action.target_extension is expected
+    assert action.to_dict()["target_extension"]["vetoes"] == ["test_veto"]
