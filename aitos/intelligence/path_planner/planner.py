@@ -20,7 +20,14 @@ from typing import Any
 
 from aitos.intelligence.amt.volume_profile import VolumeProfile
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
-from aitos.intelligence.market_state.models import MarketState, OrderFlowBias, Regime
+from aitos.intelligence.market_state.models import (
+    AuctionState,
+    MarketState,
+    MomentumState,
+    OrderFlowBias,
+    Regime,
+    StructureBias,
+)
 from aitos.intelligence.path_planner.models import (
     PathDestination,
     PathPlan,
@@ -155,6 +162,8 @@ class MarketPathPlanner:
         stop_distance: float,
         base_target_price: float,
         proposed_target_price: float,
+        thesis_health: str = "INTACT",
+        exit_action: str = "HOLD",
     ) -> TargetExtensionDecision:
         """Approve an ADX runner extension only when path and reversal checks agree.
 
@@ -179,6 +188,10 @@ class MarketPathPlanner:
             )
 
         vetoes: list[str] = []
+        if str(thesis_health).upper() != "INTACT":
+            vetoes.append("thesis_not_intact")
+        if str(exit_action).upper() != "HOLD":
+            vetoes.append("exit_engine_not_holding")
         if market_state.reversal_risk >= float(self._cfg.get("max_reversal_risk_for_extension", 0.55)):
             vetoes.append("reversal_risk_high")
         if (is_long and market_state.order_flow_bias == OrderFlowBias.SELLER_DOMINANT) or (
