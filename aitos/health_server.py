@@ -206,7 +206,10 @@ class HealthServer:
                 "# HELP aitos_data_flow_latency_p95_ms Stage processing latency p95"
             )
             lines.append("# TYPE aitos_data_flow_latency_p95_ms gauge")
-            lines.append("# HELP aitos_data_flow_latency_sample_count Number of observed latency samples")
+            lines.append(
+                "# HELP aitos_data_flow_latency_sample_count "
+                "Number of observed latency samples"
+            )
             lines.append("# TYPE aitos_data_flow_latency_sample_count gauge")
             lines.append(
                 "# HELP aitos_data_flow_oldest_event_age_ms Oldest queued event age"
