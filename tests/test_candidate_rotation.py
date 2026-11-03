@@ -112,7 +112,9 @@ def test_candidate_outcome_store_persists_horizon_markouts(tmp_path):
     store.update_price("BTCUSDT", 101.0, start.timestamp() + 60)
     store.update_price("BTCUSDT", 99.0, start.timestamp() + 300)
     store.update_price("BTCUSDT", 102.0, start.timestamp() + 900)
-    assert store.snapshot()["markouts_recorded"] == 3
+    snapshot = store.snapshot()
+    assert snapshot["markouts_recorded"] == 3
+    assert snapshot["horizon_summary"]["60"]["missed_opportunity_rate"] == 1.0
     store.close()
 
 

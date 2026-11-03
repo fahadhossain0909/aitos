@@ -169,7 +169,7 @@ class CandidateOutcomeStore:
             self._conn.commit()
         return updated
 
-    def snapshot(self) -> dict[str, int]:
+    def snapshot(self) -> dict[str, Any]:
         with self._lock:
             pending = self._conn.execute(
                 "SELECT COUNT(*) FROM candidate_rejections WHERE horizon_mask < 7"
@@ -180,10 +180,35 @@ class CandidateOutcomeStore:
             markouts = self._conn.execute(
                 "SELECT COUNT(*) FROM candidate_markouts"
             ).fetchone()[0]
+            rows = self._conn.execute(
+                """SELECT m.horizon_seconds, COUNT(*) AS samples,
+                AVG(m.signed_return_pct) AS mean_signed_return_pct,
+                AVG(m.mae_pct) AS mean_mae_pct, AVG(m.mfe_pct) AS mean_mfe_pct,
+                SUM(CASE WHEN m.signed_return_pct > 0.1 THEN 1 ELSE 0 END) AS missed,
+                SUM(CASE WHEN m.signed_return_pct < -0.1 THEN 1 ELSE 0 END) AS correctly_rejected
+                FROM candidate_markouts m GROUP BY m.horizon_seconds
+                ORDER BY m.horizon_seconds"""
+            ).fetchall()
+        horizon_summary = {}
+        for row in rows:
+            samples = int(row["samples"])
+            horizon_summary[str(row["horizon_seconds"])] = {
+                "samples": samples,
+                "mean_signed_return_pct": round(
+                    float(row["mean_signed_return_pct"] or 0), 6
+                ),
+                "mean_mae_pct": round(float(row["mean_mae_pct"] or 0), 6),
+                "mean_mfe_pct": round(float(row["mean_mfe_pct"] or 0), 6),
+                "missed_opportunity_rate": round(float(row["missed"] or 0) / samples, 4),
+                "correct_rejection_rate": round(
+                    float(row["correctly_rejected"] or 0) / samples, 4
+                ),
+            }
         return {
             "rejections_persisted": rejected,
             "pending_markouts": pending,
             "markouts_recorded": markouts,
+            "horizon_summary": horizon_summary,
         }
 
     def close(self) -> None:
