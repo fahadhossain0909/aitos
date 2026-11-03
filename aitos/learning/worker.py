@@ -120,10 +120,12 @@ class ContinualLearningWorker:
         try:
             if os.name == "nt":
                 import msvcrt
+
                 handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 import fcntl
+
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
         finally:
             handle.close()
