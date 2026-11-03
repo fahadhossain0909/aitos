@@ -2,8 +2,10 @@
 
 This policy supplements (never replaces) thesis/structure Exit Intelligence.
 Initial R is immutable and stops are monotonic: this module can only tighten
-protection. Stagnation counts persisted position-manager observations, not wall-clock time.
+protection. Stagnation counts persisted position-manager observations,
+not wall-clock time.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
