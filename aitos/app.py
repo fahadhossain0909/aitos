@@ -140,7 +140,7 @@ class SystemComponents:
 
 
 async def build_system(
-    event_bus: EventBus,
+    event_bus: EventBusProtocol,
     exchange: ExchangeAdapter,
     order_executor: OrderExecutor,
     symbols: list[str],
