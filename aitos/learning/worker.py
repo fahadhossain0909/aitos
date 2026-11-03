@@ -71,7 +71,12 @@ class ContinualLearningWorker:
         self._processed = 0
         self._legacy_processed: set[str] = set()
         self._acquire_singleton_lock()
-        self._load_state()
+        try:
+            self._load_state()
+        except Exception:
+            self.client.close()
+            self._release_singleton_lock()
+            raise
 
     def _acquire_singleton_lock(self) -> None:
         lock_path = self.state_path.with_suffix(self.state_path.suffix + ".owner.lock")
@@ -90,6 +95,9 @@ class ContinualLearningWorker:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (OSError, BlockingIOError) as exc:
             handle.close()
+            client = getattr(self, "client", None)
+            if client is not None:
+                client.close()
             raise RuntimeError(
                 f"another continual-learning worker owns state file {self.state_path}"
             ) from exc
@@ -145,13 +153,13 @@ class ContinualLearningWorker:
     def _rows(self) -> list[dict[str, Any]]:
         sql = """
         SELECT toString(experience_id) AS experience_id,
-               timestamp, source, symbol, outcome, reward, features_json
+               ingested_at AS timestamp, source, symbol, outcome, reward, features_json
         FROM learning_experiences
         WHERE source = 'backtest' AND outcome IS NOT NULL
-          AND (timestamp > {cursor_timestamp:DateTime64(3)}
-               OR (timestamp = {cursor_timestamp:DateTime64(3)}
+          AND (ingested_at > {cursor_timestamp:DateTime64(3)}
+               OR (ingested_at = {cursor_timestamp:DateTime64(3)}
                    AND experience_id > toUUID({cursor_experience_id:String})))
-        ORDER BY timestamp ASC, experience_id ASC
+        ORDER BY ingested_at ASC, experience_id ASC
         LIMIT {limit:UInt32}
         """
         result = self.client.query(

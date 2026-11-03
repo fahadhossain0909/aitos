@@ -118,7 +118,7 @@ class DeepValueRLScorer(RLPolicyScorer):
             with _exclusive_model_lock(lock_handle):
                 self.load_state(str(target))
                 self.update(symbol, context, reward_r_multiple)
-                self.save_state(str(target))
+                self._save_state_unlocked(str(target))
 
     def update_experience_and_persist(
         self, experience_id: str, symbol: str, context: dict[str, Any], reward_r_multiple: float
@@ -164,6 +164,13 @@ class DeepValueRLScorer(RLPolicyScorer):
         return round(max(0.0, min(10.0, 5.0 + (raw_score - 5.0) * confidence)), 2)
 
     def save_state(self, path: str | None = None) -> None:
+        target = Path(path or self._state_path)
+        lock_path = target.with_suffix(target.suffix + ".lock")
+        with lock_path.open("a+b") as lock_handle:
+            with _exclusive_model_lock(lock_handle):
+                self._save_state_unlocked(str(target))
+
+    def _save_state_unlocked(self, path: str | None = None) -> None:
         target = Path(path or self._state_path)
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp = target.with_suffix(target.suffix + f".{os.getpid()}.tmp")

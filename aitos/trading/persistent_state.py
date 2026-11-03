@@ -187,8 +187,7 @@ class DurableTradingStateStore:
         trade_id = str(payload.get("trade_id") or "")
         pnl = payload.get("pnl")
         if not trade_id or pnl is None:
-            logger.warning("paper outcome missing trade_id or pnl; skip ledger write")
-            return
+            raise ValueError("paper outcome requires both trade_id and finalized pnl")
         raw_exit = payload.get("exit_time")
         if raw_exit:
             exit_time = datetime.fromisoformat(str(raw_exit).replace("Z", "+00:00"))

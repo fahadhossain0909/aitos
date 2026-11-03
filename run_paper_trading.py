@@ -310,7 +310,8 @@ async def main() -> None:
                 # event-bus consumption) for however long the disk write
                 # took, and a stall past WS_PING_TIMEOUT_SECONDS could drop
                 # the market-data connection entirely.
-                await asyncio.to_thread(rl_scorer.save_state)
+                # DeepValueRLScorer persists each closed-trade update under the shared model lock.
+                # Do not write this process's potentially stale in-memory copy over the learning worker.
                 await asyncio.to_thread(outcome_classifier.save_state)
                 await asyncio.to_thread(
                     save_attention_model, attention_explainer, attention_path
@@ -351,7 +352,6 @@ async def main() -> None:
         except asyncio.CancelledError:
             pass
         await price_safety_net.stop()
-        await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)
         await asyncio.to_thread(
             save_attention_model, attention_explainer, attention_path

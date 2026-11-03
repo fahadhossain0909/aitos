@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import clickhouse_connect
@@ -85,8 +86,10 @@ ORDER BY (category, symbol, event_time, event_id)
 """
 CREATE_LEARNING_EXPERIENCES = """
 CREATE TABLE IF NOT EXISTS learning_experiences (
-    experience_id UUID, timestamp DateTime64(3, 'UTC'), source LowCardinality(String),
-    symbol LowCardinality(String), decision LowCardinality(String), outcome Nullable(String),
+    experience_id UUID, timestamp DateTime64(3, 'UTC'),
+    ingested_at DateTime64(3, 'UTC') DEFAULT timestamp,
+    source LowCardinality(String), symbol LowCardinality(String),
+    decision LowCardinality(String), outcome Nullable(String),
     reward Float64, confidence Float64, quantity Float64, price Nullable(Float64),
     features_json String, market_state_json String, risk_state_json String,
     strategy_version String, model_version String, metadata_json String
@@ -115,6 +118,7 @@ ALL_DDL = [
     CREATE_MARKET_EVENTS,
     CREATE_LIVE_ANALYTICS_EVENTS,
     CREATE_LEARNING_EXPERIENCES,
+    "ALTER TABLE learning_experiences ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT timestamp",
     CREATE_TRADE_RUNTIME_STATE,
     CREATE_PORTFOLIO_DRAWDOWN_STATE,
 ]
@@ -425,6 +429,7 @@ class MarketDataRepository(AITOSModule):
                 [
                     record.experience_id,
                     record.timestamp,
+                    datetime.now(timezone.utc),
                     record.source,
                     record.symbol,
                     record.decision,
@@ -444,6 +449,7 @@ class MarketDataRepository(AITOSModule):
             column_names=[
                 "experience_id",
                 "timestamp",
+                "ingested_at",
                 "source",
                 "symbol",
                 "decision",

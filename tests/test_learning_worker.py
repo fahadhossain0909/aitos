@@ -14,7 +14,7 @@ def test_numeric_features_filters_non_numeric_values():
 
 
 def test_numeric_features_handles_invalid_json():
-    assert ContinualLearningWorker._numeric_features("not-json") == {"rl_confidence": 5.0}
+    assert ContinualLearningWorker._numeric_features("not-json") == {}
 
 
 def test_numeric_features_rejects_non_finite_values():

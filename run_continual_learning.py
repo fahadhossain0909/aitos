@@ -22,6 +22,7 @@ def main() -> int:
         "--lookback-hours",
         type=int,
         default=int(os.getenv("LEARNING_LOOKBACK_HOURS", "168")),
+        help="deprecated compatibility option; historical learning no longer has a rolling lookback cutoff",
     )
     args = parser.parse_args()
 
@@ -37,8 +38,10 @@ def main() -> int:
         poll_seconds=args.poll_seconds,
     )
     if args.once:
-        worker.run_once()
-        worker.close()
+        try:
+            worker.run_once()
+        finally:
+            worker.close()
     else:
         worker.run_forever()
     return 0
