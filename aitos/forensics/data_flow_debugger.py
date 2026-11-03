@@ -26,6 +26,7 @@ def _format_stage(snap: StageSnapshot) -> dict[str, Any]:
         "queue_depth": snap.queue_depth,
         "oldest_event_age_ms": snap.oldest_event_age_ms,
         "source_age_ms": snap.source_age_ms,
+        "latency_sample_count": snap.latency_sample_count,
         "input_rate": snap.input_rate,
         "output_rate": snap.output_rate,
         "latency_ms": {
