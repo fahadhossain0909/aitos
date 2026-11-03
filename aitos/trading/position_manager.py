@@ -132,6 +132,22 @@ class PositionManager:
             cfg.get("adaptive_exit_policy", {})
         )
         self._adaptive_exit_enabled = bool(cfg.get("adaptive_exit_enabled", True))
+        self._adaptive_exit_bar_seconds = int(
+            cfg.get("adaptive_exit_bar_seconds", 900)
+        )
+        if self._adaptive_exit_bar_seconds <= 0:
+            raise ValueError("adaptive_exit_bar_seconds must be positive")
+
+    def _completed_bar_identity(self, timestamp: datetime) -> str:
+        """Return the prior fully closed time bucket for stagnation accounting.
+
+        The strategy's default execution timeframe is 15m. The current bucket
+        is deliberately excluded because it is still forming; repeated ticks
+        in the same bucket therefore cannot advance the stagnation clock.
+        """
+        interval = self._adaptive_exit_bar_seconds
+        completed_epoch = (int(timestamp.timestamp()) // interval) * interval - interval
+        return f"{interval}:{completed_epoch}"
 
     def register_thesis(self, thesis: TradeThesis) -> None:
         self._theses[thesis.trade_id] = thesis
@@ -482,7 +498,9 @@ class PositionManager:
             adaptive_result = self._adaptive_exit_policy.evaluate(
                 trade=trade,
                 current_price=current_price,
-                completed_bar_id=completed_bar_id,
+                completed_bar_id=(
+                    completed_bar_id or self._completed_bar_identity(ts)
+                ),
             )
             # Stagnation is a time-efficiency exit only while the original
             # thesis has not already hard-invalidated (handled by EIE above).
