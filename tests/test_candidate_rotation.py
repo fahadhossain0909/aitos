@@ -114,3 +114,16 @@ def test_candidate_outcome_store_persists_horizon_markouts(tmp_path):
     store.update_price("BTCUSDT", 102.0, start.timestamp() + 900)
     assert store.snapshot()["markouts_recorded"] == 3
     store.close()
+
+
+def test_ranking_hysteresis_retains_history_across_separate_batches():
+    from types import SimpleNamespace
+    from aitos.intelligence.opportunity_outcomes import RankingHysteresis
+
+    ranker = RankingHysteresis(margin_points=1.0)
+    incumbent = SimpleNamespace(symbol="BTCUSDT", composite_score=70.0)
+    other_batch = SimpleNamespace(symbol="SOLUSDT", composite_score=60.0)
+    challenger = SimpleNamespace(symbol="ETHUSDT", composite_score=70.5)
+    assert ranker.rank([incumbent], 1)[0].symbol == "BTCUSDT"
+    ranker.rank([other_batch], 1)
+    assert ranker.rank([incumbent, challenger], 1)[0].symbol == "BTCUSDT"

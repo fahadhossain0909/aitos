@@ -198,15 +198,12 @@ class RankingHysteresis:
         self.margin_points = max(0.0, float(margin_points))
         self.max_symbols = max(100, int(max_symbols))
         self._previous_order: dict[str, int] = {}
-        self._previous_scores: dict[str, float] = {}
         self._cycles = 0
         self._retained = 0
         self._challengers = 0
 
     def rank(self, candidates: list[Any], top_n: int) -> list[Any]:
         if not candidates:
-            self._previous_order = {}
-            self._previous_scores = {}
             self._cycles += 1
             return []
         previous = self._previous_order
@@ -234,14 +231,10 @@ class RankingHysteresis:
         self._challengers += sum(
             1 for c in ordered[:top_n] if c.symbol.upper() not in previous
         )
-        self._previous_order = {
-            c.symbol.upper(): index
-            for index, c in enumerate(ordered[: self.max_symbols])
-        }
-        self._previous_scores = {
-            c.symbol.upper(): float(c.composite_score)
-            for c in ordered[: self.max_symbols]
-        }
+        for index, candidate in enumerate(ordered[: self.max_symbols]):
+            self._previous_order[candidate.symbol.upper()] = index
+        while len(self._previous_order) > self.max_symbols:
+            self._previous_order.pop(next(iter(self._previous_order)))
         self._cycles += 1
         return ordered[:top_n]
 
