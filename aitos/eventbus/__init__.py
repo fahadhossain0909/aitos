@@ -13,6 +13,7 @@ from aitos.forensics.scanner_performance_telemetry import (
 )
 
 from .consumer_concurrency import install_eventbus_consumer_concurrency
+from .contracts import EventBusProtocol, SubscriptionProtocol
 from .redis_bus import DLQ_STREAM, EventBus, Subscription, validate_event_schema
 
 install_eventbus_consumer_concurrency(EventBus)
@@ -57,4 +58,11 @@ async def _subscribe_with_live_only(self, *args, **kwargs):
 
 EventBus.subscribe = _subscribe_with_live_only
 
-__all__ = ["DLQ_STREAM", "EventBus", "Subscription", "validate_event_schema"]
+__all__ = [
+    "DLQ_STREAM",
+    "EventBus",
+    "EventBusProtocol",
+    "Subscription",
+    "SubscriptionProtocol",
+    "validate_event_schema",
+]
