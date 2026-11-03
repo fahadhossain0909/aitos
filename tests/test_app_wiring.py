@@ -363,3 +363,38 @@ async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
     # the real proof is simply that nothing opened despite a valid trending symbol being available.
 
     await shutdown_all(components)
+
+
+@pytest.mark.asyncio
+async def test_paper_portfolio_tracker_restores_durable_realized_pnl_and_peak():
+    class FakeStateStore:
+        def __init__(self):
+            self.saved = []
+
+        async def load_paper_portfolio_summary(self, asset):
+            assert asset == "USDT"
+            return {
+                "realized_pnl": 123.0,
+                "daily_pnl": 10.0,
+                "weekly_pnl": 20.0,
+                "peak_equity_usd": 1200.0,
+            }
+
+        async def save_drawdown(self, asset, equity, peak):
+            self.saved.append((asset, equity, peak))
+
+    class EmptyLifecycle:
+        def get_open_trades(self):
+            return []
+
+        def get_closed_trades(self):
+            return []
+
+    store = FakeStateStore()
+    tracker = PaperPortfolioTracker(starting_equity_usd=1000.0, state_store=store)
+    await tracker.refresh_equity()
+    portfolio = tracker.build_portfolio_state(EmptyLifecycle())
+    assert portfolio.equity_usd == 1123.0
+    assert portfolio.peak_equity_usd == 1200.0
+    assert portfolio.daily_pnl_pct == pytest.approx(10.0 / 1123.0 * 100.0)
+    assert store.saved == [("USDT", 1123.0, 1200.0)]

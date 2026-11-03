@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import Any, Protocol
 
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
@@ -418,32 +418,54 @@ class PortfolioTracker(Protocol):
 @dataclass
 class PaperPortfolioTracker:
     starting_equity_usd: float = 10_000.0
+    state_store: Any | None = None
+    asset: str = "USDT"
     _peak_equity_usd: float = field(init=False)
+    _persisted_realized_pnl: float | None = field(default=None, init=False)
+    _daily_pnl: float = field(default=0.0, init=False)
+    _weekly_pnl: float = field(default=0.0, init=False)
 
     def __post_init__(self) -> None:
         self._peak_equity_usd = self.starting_equity_usd
 
-    def build_portfolio_state(self, trade_lifecycle: TradeLifecycle) -> PortfolioState:
-        closed, open_trades = (
-            trade_lifecycle.get_closed_trades(),
-            trade_lifecycle.get_open_trades(),
+    async def refresh_equity(self) -> float:
+        """Refresh durable realized PnL and high-water mark before risk evaluation."""
+        if self.state_store is None:
+            return self.starting_equity_usd
+        summary = await self.state_store.load_paper_portfolio_summary(self.asset)
+        self._persisted_realized_pnl = float(summary["realized_pnl"])
+        self._daily_pnl = float(summary["daily_pnl"])
+        self._weekly_pnl = float(summary["weekly_pnl"])
+        equity = self.starting_equity_usd + self._persisted_realized_pnl
+        self._peak_equity_usd = max(
+            self.starting_equity_usd,
+            float(summary.get("peak_equity_usd") or self.starting_equity_usd),
+            equity,
         )
-        realized_pnl = sum(t.pnl for t in closed if t.pnl is not None)
+        await self.state_store.save_drawdown(self.asset, equity, self._peak_equity_usd)
+        return equity
+
+    def build_portfolio_state(self, trade_lifecycle: TradeLifecycle) -> PortfolioState:
+        open_trades = trade_lifecycle.get_open_trades()
+        if self._persisted_realized_pnl is None:
+            closed = trade_lifecycle.get_closed_trades()
+            realized_pnl = sum(t.pnl for t in closed if t.pnl is not None)
+            day_ago = datetime.now(timezone.utc) - timedelta(days=1)
+            week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+            daily_pnl = sum(
+                t.pnl for t in closed
+                if t.pnl is not None and t.exit_time and _parse_iso(t.exit_time) >= day_ago
+            )
+            weekly_pnl = sum(
+                t.pnl for t in closed
+                if t.pnl is not None and t.exit_time and _parse_iso(t.exit_time) >= week_ago
+            )
+        else:
+            realized_pnl = self._persisted_realized_pnl
+            daily_pnl = self._daily_pnl
+            weekly_pnl = self._weekly_pnl
         equity = self.starting_equity_usd + realized_pnl
         self._peak_equity_usd = max(self._peak_equity_usd, equity)
-        day_ago, week_ago = datetime.now(timezone.utc) - timedelta(
-            days=1
-        ), datetime.now(timezone.utc) - timedelta(days=7)
-        daily_pnl = sum(
-            t.pnl
-            for t in closed
-            if t.pnl is not None and t.exit_time and _parse_iso(t.exit_time) >= day_ago
-        )
-        weekly_pnl = sum(
-            t.pnl
-            for t in closed
-            if t.pnl is not None and t.exit_time and _parse_iso(t.exit_time) >= week_ago
-        )
         positions = tuple(
             PositionExposure(
                 symbol=t.symbol, notional_usd=t.position_size_usd, leverage=t.leverage
@@ -451,8 +473,8 @@ class PaperPortfolioTracker:
             for t in open_trades
         )
         regime_counts: dict[str, int] = {}
-        for t in open_trades:
-            regime_counts[t.regime] = regime_counts.get(t.regime, 0) + 1
+        for trade in open_trades:
+            regime_counts[trade.regime] = regime_counts.get(trade.regime, 0) + 1
         dominant_regime = (
             max(regime_counts, key=regime_counts.get) if regime_counts else "unknown"
         )

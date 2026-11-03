@@ -69,6 +69,7 @@ class ContinualLearningWorker:
         self._cursor_timestamp = "1970-01-01 00:00:00.000"
         self._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
         self._processed = 0
+        self._legacy_processed: set[str] = set()
         self._acquire_singleton_lock()
         self._load_state()
 
@@ -121,6 +122,8 @@ class ContinualLearningWorker:
                 state.get("cursor_experience_id", self._cursor_experience_id)
             )
             self._processed = int(state.get("processed_count", 0))
+            if "cursor_timestamp" not in state:
+                self._legacy_processed = set(str(value) for value in state.get("processed_experiences", []))
         except (OSError, ValueError, TypeError):
             logger.exception("learning cursor state is invalid; refusing unsafe reset")
             raise RuntimeError(f"cannot safely load learning state: {self.state_path}")
@@ -132,6 +135,7 @@ class ContinualLearningWorker:
             "cursor_timestamp": self._cursor_timestamp,
             "cursor_experience_id": self._cursor_experience_id,
             "processed_count": self._processed,
+            "processed_experiences": sorted(self._legacy_processed),
             "n_samples_seen": self.scorer.n_samples_seen,
         }
         tmp = self.state_path.with_suffix(self.state_path.suffix + f".{os.getpid()}.tmp")
@@ -178,6 +182,8 @@ class ContinualLearningWorker:
                     result[str(key)] = number
         # rl_confidence is deliberately a constant neutral input for both
         # training and inference; never train on the model's own prior output.
+        if not result:
+            return {}
         result["rl_confidence"] = 5.0
         return result
 
@@ -193,6 +199,13 @@ class ContinualLearningWorker:
                 )[:23]
             else:
                 cursor_timestamp = str(timestamp)
+            if experience_id in self._legacy_processed:
+                self._legacy_processed.discard(experience_id)
+                self._cursor_timestamp = cursor_timestamp
+                self._cursor_experience_id = experience_id
+                self._processed += 1
+                self._save_state()
+                continue
             features = self._numeric_features(row.get("features_json"))
             if features:
                 apply = getattr(self.scorer, "update_experience_and_persist", None)

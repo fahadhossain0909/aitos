@@ -30,6 +30,7 @@ def test_cursor_state_round_trip(tmp_path):
     worker._cursor_timestamp = "2026-01-01 00:00:00.000"
     worker._cursor_experience_id = "11111111-1111-1111-1111-111111111111"
     worker._processed = 17
+    worker._legacy_processed = set()
     worker.scorer = type("Scorer", (), {"n_samples_seen": 12})()
     worker._save_state()
 
@@ -38,6 +39,7 @@ def test_cursor_state_round_trip(tmp_path):
     restored._cursor_timestamp = "1970-01-01 00:00:00.000"
     restored._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
     restored._processed = 0
+    restored._legacy_processed = set()
     restored._load_state()
     assert restored._cursor_timestamp == worker._cursor_timestamp
     assert restored._cursor_experience_id == worker._cursor_experience_id
@@ -50,6 +52,7 @@ def test_worker_advances_keyset_cursor_and_skips_poison_rows(tmp_path):
     worker._cursor_timestamp = "1970-01-01 00:00:00.000"
     worker._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
     worker._processed = 0
+    worker._legacy_processed = set()
 
     class Scorer:
         n_samples_seen = 0

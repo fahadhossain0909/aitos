@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
 import pickle
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,30 @@ from aitos.xai.ml_explainer import FEATURE_ORDER
 DEFAULT_MIN_SAMPLES_FOR_CONFIDENCE = 30
 DEFAULT_REWARD_SCALE_R_MULTIPLES = 2.0
 DEFAULT_MODEL_DATA_DIR = str(get_model_data_dir())
+
+
+@contextmanager
+def _exclusive_model_lock(handle):
+    """Cross-platform exclusive lock for shared model checkpoint writers."""
+    if os.name == "nt":
+        import msvcrt
+        if os.fstat(handle.fileno()).st_size == 0:
+            handle.write(b"0")
+            handle.flush()
+        handle.seek(0)
+        msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            yield
+        finally:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _vectorize(context: dict[str, Any]) -> np.ndarray:
@@ -57,6 +82,7 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._n_samples_seen = 0
         self._recent_rewards: list[float] = []
         self._applied_experience_ids: set[str] = set()
+        self._applied_experience_order: list[str] = []
         model_data_dir = get_model_data_dir()
         self._state_path = (
             Path(state_path)
@@ -89,23 +115,10 @@ class DeepValueRLScorer(RLPolicyScorer):
         target.parent.mkdir(parents=True, exist_ok=True)
         lock_path = target.with_suffix(target.suffix + ".lock")
         with lock_path.open("a+b") as lock_handle:
-            try:
-                import fcntl
-
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-            except ImportError:
-                pass
-            try:
+            with _exclusive_model_lock(lock_handle):
                 self.load_state(str(target))
                 self.update(symbol, context, reward_r_multiple)
                 self.save_state(str(target))
-            finally:
-                try:
-                    import fcntl
-
-                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-                except ImportError:
-                    pass
 
     def update_experience_and_persist(
         self, experience_id: str, symbol: str, context: dict[str, Any], reward_r_multiple: float
@@ -117,25 +130,28 @@ class DeepValueRLScorer(RLPolicyScorer):
         target.parent.mkdir(parents=True, exist_ok=True)
         lock_path = target.with_suffix(target.suffix + ".lock")
         with lock_path.open("a+b") as lock_handle:
-            try:
-                import fcntl
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
-            except ImportError:
-                pass
-            try:
+            with _exclusive_model_lock(lock_handle):
                 self.load_state(str(target))
                 if experience_id in self._applied_experience_ids:
                     return False
                 self.update(symbol, context, reward_r_multiple)
                 self._applied_experience_ids.add(experience_id)
+                self._applied_experience_order.append(experience_id)
+                if len(self._applied_experience_order) > 10000:
+                    expired = self._applied_experience_order.pop(0)
+                    self._applied_experience_ids.discard(expired)
                 self.save_state(str(target))
                 return True
-            finally:
-                try:
-                    import fcntl
-                    fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-                except ImportError:
-                    pass
+
+    def update_trade_and_persist(
+        self, trade_id: str, symbol: str, context: dict[str, Any], reward_r_multiple: float
+    ) -> bool:
+        """Apply a finalized trade outcome once, even if its event is redelivered."""
+        if not trade_id:
+            raise ValueError("trade_id is required for idempotent trade learning")
+        return self.update_experience_and_persist(
+            f"trade:{trade_id}", symbol, context, reward_r_multiple
+        )
 
     async def score(self, symbol: str, context: dict[str, Any]) -> float:
         if not self.is_fitted:
@@ -157,7 +173,7 @@ class DeepValueRLScorer(RLPolicyScorer):
                     "model": self._model,
                     "n_samples_seen": self._n_samples_seen,
                     "recent_rewards": self._recent_rewards,
-                    "applied_experience_ids": sorted(self._applied_experience_ids),
+                    "applied_experience_ids": self._applied_experience_order[-10000:],
                 },
                 handle,
                 protocol=pickle.HIGHEST_PROTOCOL,
@@ -175,5 +191,6 @@ class DeepValueRLScorer(RLPolicyScorer):
         self._model = state["model"]
         self._n_samples_seen = int(state.get("n_samples_seen", 0))
         self._recent_rewards = list(state.get("recent_rewards", []))
-        self._applied_experience_ids = set(state.get("applied_experience_ids", []))
+        self._applied_experience_order = list(state.get("applied_experience_ids", []))[-10000:]
+        self._applied_experience_ids = set(self._applied_experience_order)
         return True

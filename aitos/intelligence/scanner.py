@@ -297,6 +297,9 @@ class OpportunityScanner(AITOSModule):
         self._amt_ib_minutes = amt_ib_minutes
         self._initialized = False
         self._last_oi = {}
+        self._htf_cache: dict[tuple[str, str], tuple[float, list]] = {}
+        self._htf_cache_locks: dict[tuple[str, str], asyncio.Lock] = {}
+        self._htf_cache_ttl_seconds = 30.0
         self._last_order_books = {}
         self._last_order_book_sources = {}
         self._last_amt_profile = {}
@@ -324,6 +327,31 @@ class OpportunityScanner(AITOSModule):
         self._ranking_hysteresis = RankingHysteresis(
             margin_points=self._tuning.analysis.ranking_hysteresis_points
         )
+
+    async def _fetch_htf_klines(self, symbol: str, timeframe: str, limit: int) -> list:
+        """Fetch completed HTF bars with a bounded short-lived per-symbol cache."""
+        key = (symbol.upper(), timeframe)
+        now = time.monotonic()
+        cached = self._htf_cache.get(key)
+        if cached is not None and cached[0] > now:
+            return list(cached[1])
+        lock = self._htf_cache_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            now = time.monotonic()
+            cached = self._htf_cache.get(key)
+            if cached is not None and cached[0] > now:
+                return list(cached[1])
+            rows = await self._exchange.fetch_klines(symbol, timeframe, limit=limit)
+            completed = [row for row in rows if getattr(row, "is_closed", True)]
+            self._htf_cache[key] = (now + self._htf_cache_ttl_seconds, completed)
+            # Bound cache cardinality for large/dynamic universes.
+            max_entries = max(100, len(self._symbols) * 2)
+            if len(self._htf_cache) > max_entries:
+                expired = [k for k, value in self._htf_cache.items() if value[0] <= now]
+                for expired_key in expired:
+                    self._htf_cache.pop(expired_key, None)
+                    self._htf_cache_locks.pop(expired_key, None)
+            return list(completed)
 
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
         """Apply runtime-safe scanner budgets; universe changes require restart."""
@@ -672,12 +700,9 @@ class OpportunityScanner(AITOSModule):
                 htf_timeframe = resolve_higher_timeframe(
                     self._timeframe, self._tuning.scanner.htf_timeframe
                 )
-                htf_klines = await self._exchange.fetch_klines(
-                    symbol,
-                    htf_timeframe,
-                    limit=self._tuning.scanner.htf_lookback,
+                htf_klines = await self._fetch_htf_klines(
+                    symbol, htf_timeframe, self._tuning.scanner.htf_lookback
                 )
-                htf_klines = [k for k in htf_klines if getattr(k, "is_closed", True)]
                 htf_aligned, htf_diagnostics = higher_timeframe_alignment(
                     htf_klines,
                     direction,

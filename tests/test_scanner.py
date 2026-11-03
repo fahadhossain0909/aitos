@@ -360,3 +360,28 @@ async def test_scanner_blocks_ltf_long_when_htf_is_bearish(event_bus):
     await scanner.initialize({})
     assert await scanner.scan_symbol("BTCUSDT") is None
     await scanner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_htf_klines_are_cached_per_symbol_and_timeframe(event_bus):
+    class CountingExchange(FakeScannerExchange):
+        def __init__(self):
+            super().__init__()
+            self.htf_fetches = 0
+
+        async def fetch_klines(self, symbol, timeframe, limit=500):
+            if timeframe == "1h":
+                self.htf_fetches += 1
+            return await super().fetch_klines(symbol, timeframe, limit=limit)
+
+    exchange = CountingExchange()
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=exchange,
+        symbols=["BTCUSDT"],
+        reference_symbol="",
+    )
+    first = await scanner._fetch_htf_klines("BTCUSDT", "1h", 80)
+    second = await scanner._fetch_htf_klines("BTCUSDT", "1h", 80)
+    assert first == second
+    assert exchange.htf_fetches == 1

@@ -7,7 +7,7 @@ import hashlib
 import json
 import weakref
 from dataclasses import replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from aitos.app import LivePortfolioTracker
@@ -39,6 +39,17 @@ CREATE TABLE IF NOT EXISTS portfolio_drawdown_state (
     drawdown_pct Float64
 ) ENGINE = ReplacingMergeTree(time)
 ORDER BY asset
+"""
+
+CREATE_PAPER_PORTFOLIO_LEDGER = """
+CREATE TABLE IF NOT EXISTS paper_portfolio_ledger (
+    trade_id String,
+    asset LowCardinality(String),
+    pnl Float64,
+    exit_time DateTime64(3, 'UTC'),
+    updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY (asset, trade_id)
 """
 
 
@@ -83,6 +94,7 @@ class DurableTradingStateStore:
         try:
             await self._repository._client.command(CREATE_RUNTIME_STATE)
             await self._repository._client.command(CREATE_DRAWDOWN_STATE)
+            await self._repository._client.command(CREATE_PAPER_PORTFOLIO_LEDGER)
             logger.info("durable trading state tables ensured")
         except Exception:
             logger.exception("durable trading state table ensure failed")
@@ -169,6 +181,58 @@ class DurableTradingStateStore:
                     },
                 )
         return trades
+
+    async def save_paper_outcome(self, payload: dict[str, Any], asset: str = "USDT") -> None:
+        """Persist a finalized paper outcome; trade_id is the idempotency key."""
+        trade_id = str(payload.get("trade_id") or "")
+        pnl = payload.get("pnl")
+        if not trade_id or pnl is None:
+            logger.warning("paper outcome missing trade_id or pnl; skip ledger write")
+            return
+        raw_exit = payload.get("exit_time")
+        if raw_exit:
+            exit_time = datetime.fromisoformat(str(raw_exit).replace("Z", "+00:00"))
+            if exit_time.tzinfo is None:
+                exit_time = exit_time.replace(tzinfo=timezone.utc)
+        else:
+            exit_time = datetime.now(timezone.utc)
+        await self._client().insert(
+            "paper_portfolio_ledger",
+            [[trade_id, asset, float(pnl), exit_time, datetime.now(timezone.utc)]],
+            column_names=["trade_id", "asset", "pnl", "exit_time", "updated_at"],
+        )
+
+    async def load_paper_portfolio_summary(self, asset: str = "USDT") -> dict[str, float]:
+        """Return deduplicated realized PnL windows and durable peak equity."""
+        now = datetime.now(timezone.utc)
+        result = await self._client().query(
+            """
+            SELECT
+                sum(pnl) AS realized_pnl,
+                sumIf(pnl, exit_time >= {day_start:DateTime64(3)}) AS daily_pnl,
+                sumIf(pnl, exit_time >= {week_start:DateTime64(3)}) AS weekly_pnl
+            FROM (
+                SELECT trade_id, argMax(pnl, updated_at) AS pnl,
+                       argMax(exit_time, updated_at) AS exit_time
+                FROM paper_portfolio_ledger
+                WHERE asset = {asset:String}
+                GROUP BY trade_id
+            )
+            """,
+            parameters={
+                "asset": asset,
+                "day_start": now - timedelta(days=1),
+                "week_start": now - timedelta(days=7),
+            },
+        )
+        row = result.result_rows[0] if result.result_rows else (0.0, 0.0, 0.0)
+        peak = await self.load_peak_equity(asset)
+        return {
+            "realized_pnl": float(row[0] or 0.0),
+            "daily_pnl": float(row[1] or 0.0),
+            "weekly_pnl": float(row[2] or 0.0),
+            "peak_equity_usd": float(peak or 0.0),
+        }
 
     async def save_drawdown(self, asset: str, equity: float, peak: float) -> None:
         client = self._client()
@@ -307,10 +371,13 @@ class TradeStatePersistence:
         event_bus: EventBus,
         lifecycle: Any,
         store: DurableTradingStateStore,
+        *,
+        paper_ledger_enabled: bool = False,
     ) -> None:
         self._event_bus = event_bus
         self._lifecycle = lifecycle
         self._store = store
+        self._paper_ledger_enabled = paper_ledger_enabled
         self._subscriptions: list[Subscription] = []
 
     async def restore(self) -> int:
@@ -480,6 +547,16 @@ class TradeStatePersistence:
             )
 
     async def _delete_event(self, event: Any) -> None:
+        if self._paper_ledger_enabled:
+            try:
+                await self._store.save_paper_outcome(dict(event.payload))
+            except Exception:
+                # Retain the open-trade row until realized PnL is committed.
+                logger.exception(
+                    "paper portfolio outcome persistence failed; retaining trade state",
+                    extra={"aitos_extra": {"trade_id": event.payload.get("trade_id")}},
+                )
+                return
         trade_id = event.payload.get("trade_id")
         if not trade_id:
             logger.warning(

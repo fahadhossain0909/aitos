@@ -173,7 +173,7 @@ async def main() -> None:
     )
     state_store = DurableTradingStateStore(market_repo)
     trade_state_persistence = TradeStatePersistence(
-        event_bus, components.trade_lifecycle, state_store
+        event_bus, components.trade_lifecycle, state_store, paper_ledger_enabled=True
     )
     # Ensure runtime-state tables and event subscriptions exist before recovery.
     # Restoring before initialization could query a table that has not yet been
@@ -285,7 +285,9 @@ async def main() -> None:
         stale_symbol_blacklist=_settings.stale_symbol_blacklist,
     )
     price_safety_net.start()
-    tracker = PaperPortfolioTracker(starting_equity_usd=STARTING_EQUITY_USD)
+    tracker = PaperPortfolioTracker(
+        starting_equity_usd=STARTING_EQUITY_USD, state_store=state_store
+    )
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
     try:
