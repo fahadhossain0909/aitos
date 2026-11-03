@@ -282,7 +282,6 @@ class DataFlowRegistry:
                 latency_p95_ms=_percentile(samples, 95),
                 latency_p99_ms=_percentile(samples, 99),
                 latency_max_ms=max(samples) if samples else None,
-                latency_sample_count=len(samples),
                 input_rate=round(in_rate, 3),
                 output_rate=round(out_rate, 3),
                 issues=dict(b.issues),
