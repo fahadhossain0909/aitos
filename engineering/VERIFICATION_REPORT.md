@@ -1,7 +1,7 @@
 # AITOS Engineering Verification Report
 
 ## Scope
-Documentation and agent operating-model foundation only.
+Engineering operating-model documentation, a targeted telemetry exporter correction, regression-test additions, and static source audit. Runtime behavior remains NOT TESTED.
 
 ## Change verification
 - Branch: `feat/engineering-agent-operating-system`
@@ -31,7 +31,7 @@ Documentation and agent operating-model foundation only.
 | Existing prompt inspected | PASS | `skills/aitos-prompt.md` fetched |
 | Root AGENTS.md existed before change | NO | GitHub contents API returned 404 |
 | Runtime health | NOT TESTED | No runtime environment accessed |
-| Unit/integration tests | NOT RUN | Documentation-only scope |
+| Unit/integration tests | NOT RUN | No code execution environment available in this session |
 | CI | PENDING | Run after PR creation |
 | Independent review | PENDING | Not yet performed |
 
@@ -40,10 +40,10 @@ Documentation and agent operating-model foundation only.
 - `aitos/forensics/data_flow_registry.py` uses an in-process bounded latency deque (maxlen 2048) and returns `None` for percentiles with no samples.
 - Remediated on the engineering branch: `_append_data_flow_metrics()` now omits unobserved percentile series, exposes a per-stage latency sample count, and preserves a genuine observed 0.0 ms. Added regression coverage and Grafana sample-count panel. Tests/CI/runtime have NOT yet been executed.
 - `monitoring/prometheus.yml` configures 15-second scrapes for paper/live endpoints. Scrape execution was NOT TESTED.
-- The current data-flow test verifies metric-name presence but does not validate no-sample semantics.
+- Added a regression test for empty samples and a genuine observed 0.0 ms; execution remains NOT RUN.
 
 ## Limitations
-This change establishes instructions and durable reporting templates. It does not itself install or run a 24/7 agent, launch specialist agents, instrument missing telemetry, verify the trading runtime, or establish a measured latency baseline.
+This change establishes instructions, a targeted telemetry fix and reporting templates. It does not install/run a 24/7 agent, launch specialist agents, verify the trading runtime, or establish a measured latency baseline.
 
 ## Acceptance criteria for the next runtime phase
 - Every critical module has source and runtime evidence.
