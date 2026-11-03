@@ -32,6 +32,13 @@
 - `deploy/grafana/aitos_data_flow.json`: SOURCE-VERIFIED dashboard queries exist for p50/p95/p99 data-flow metrics. Dashboard provisioning and rendered panel correctness are NOT TESTED.
 - AITOS-ENG-004 remediation is proposed in PR #217: missing percentile series are omitted and a per-stage sample-count metric is exported. CI/runtime verification pending.
 
+## Scanner and position lifecycle telemetry source audit (2026-11-03)
+- `aitos/intelligence/scanner.py::scan_symbol()`: SOURCE-VERIFIED. Uses monotonic `time.perf_counter()`, records scanner-stage input/output latency, emits trace start/completion, records processing errors, and notes whether a candidate was found.
+- `aitos/app.py::run_scan_and_trade_cycle()`: SOURCE-VERIFIED. Logs candidate rank, direction, composite/component scores, weights and threshold; logs per-symbol position-cap skips, kernel rejection reasons/confidence, publishes `decision.snapshot`, and records lifecycle/risk rejection vs accepted/submitted states. Candidate rotation snapshots are included in cycle diagnostics.
+- `aitos/intelligence/position_runtime.py`: SOURCE-VERIFIED. Emits per-position evaluation duration, monitor tier/priority, selected health fields (including CVD/delta, liquidity/volatility/regime/reference/thesis risk and data freshness), action and reason; lifecycle wrappers emit close attempt/completion/failure and monitor heartbeat/staleness events.
+- `aitos/telemetry/position_lifecycle.py` plus `docs/POSITION_LIFECYCLE_TELEMETRY.md`: structured JSON log events are durable via the configured log sink, while the HealthServer ring buffer is process-local and capped at 2,000. `scripts/position_lifecycle_telemetry_report.py` can summarize JSON-lines logs without querying or mutating trading state.
+- This confirms useful decision and lifecycle event coverage in source; actual event emission, log retention, completeness and latency distributions remain NOT RUNTIME-VERIFIED.
+
 ## Paper-runtime and health source audit (2026-11-03)
 - `run_paper_trading.py`: SOURCE-VERIFIED startup sequence is Redis -> EventBus -> ClickHouse repositories -> optional Neo4j -> exchange/universe -> system build -> trade-state persistence initialize/restore -> module initialization -> restored-position resubscription -> learning worker/agents/recorders -> health server -> scan loop. No runtime execution was performed.
 - `aitos/app.py::initialize_all()`: initializes core modules sequentially, subscribes trade-lifecycle price handlers, then polls health for up to 5 seconds. It accepts both HEALTHY and DEGRADED as initialized.
