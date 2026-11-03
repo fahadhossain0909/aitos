@@ -248,6 +248,9 @@ class OpportunityScanner(AITOSModule):
             )
         self._tuning = settings
         self._top_n = incoming.top_n
+        self._ranking_hysteresis.margin_points = (
+            settings.analysis.ranking_hysteresis_points
+        )
         self._scan_semaphore = asyncio.Semaphore(
             min(
                 settings.analysis.expensive_analysis_concurrency,

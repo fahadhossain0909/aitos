@@ -122,6 +122,8 @@ class CandidateOutcomeStore:
                 ORDER BY created_at DESC LIMIT ?""",
                 (symbol.upper(), now, self.max_pending),
             ).fetchall()
+            if not rows:
+                return 0
             for row in rows:
                 signed = (price / row["entry_price"] - 1.0) * (
                     1.0 if row["side"] == "LONG" else -1.0
