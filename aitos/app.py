@@ -14,8 +14,7 @@ from aitos.config.tuning import effective_tuning_report, reload_tuning_settings
 from aitos.core.contracts import AITOSModule, Event
 from aitos.data.ingestion import DataIngestionService
 from aitos.data.repository import MarketDataRepository
-from aitos.eventbus.contracts import EventBusProtocol
-from aitos.eventbus.redis_bus import Subscription
+from aitos.eventbus.contracts import EventBusProtocol, SubscriptionProtocol
 from aitos.exchange.base import ExchangeAdapter
 from aitos.execution.order_executor import OrderExecutor
 from aitos.intelligence.rl_feedback import RLFeedbackLoop
@@ -73,7 +72,7 @@ class SystemComponents:
     reconciliation: ReconciliationScheduler | None = None
     knowledge_graph: KnowledgeGraphWriter | None = None
     correlation_updater: SymbolCorrelationUpdater | None = None
-    _price_feed_subscriptions: list[Subscription] = field(default_factory=list)
+    _price_feed_subscriptions: list[SubscriptionProtocol] = field(default_factory=list)
 
     def reload_runtime_tuning(self) -> dict[str, object]:
         """Reload tunings that can be changed without rebuilding infrastructure.
