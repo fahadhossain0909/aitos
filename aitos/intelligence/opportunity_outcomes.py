@@ -234,6 +234,7 @@ class RankingHysteresis:
             self._cycles += 1
             return []
         previous = self._previous_order
+
         # The bonus is only an ordering tie-breaker. It never changes the
         # candidate's composite_score, confidence, threshold or risk inputs.
         def key(candidate: Any):
