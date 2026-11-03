@@ -72,6 +72,7 @@ def test_ranking_hysteresis_retains_incumbent_when_scores_are_close():
     ranker = RankingHysteresis(margin_points=1.0)
     incumbent = SimpleNamespace(symbol="BTCUSDT", composite_score=70.0)
     challenger = SimpleNamespace(symbol="ETHUSDT", composite_score=70.5)
+    ranker.rank([incumbent], 1)
     assert ranker.rank([incumbent, challenger], 1)[0].symbol == "BTCUSDT"
     assert ranker.rank([incumbent, challenger], 1)[0].symbol == "BTCUSDT"
 
@@ -83,6 +84,7 @@ def test_ranking_hysteresis_allows_clear_challenger():
     ranker = RankingHysteresis(margin_points=1.0)
     incumbent = SimpleNamespace(symbol="BTCUSDT", composite_score=70.0)
     challenger = SimpleNamespace(symbol="ETHUSDT", composite_score=70.5)
+    ranker.rank([incumbent], 1)
     ranker.rank([incumbent, challenger], 1)
     stronger = SimpleNamespace(symbol="ETHUSDT", composite_score=73.0)
     assert ranker.rank([incumbent, stronger], 1)[0].symbol == "ETHUSDT"
