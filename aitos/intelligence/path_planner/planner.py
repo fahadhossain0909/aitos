@@ -171,9 +171,11 @@ class MarketPathPlanner:
         between base and proposed targets cap the extension before the level.
         """
         side = side.upper()
-        if side not in {"LONG", "SHORT"} or min(
-            entry_price, stop_distance, base_target_price, proposed_target_price
-        ) <= 0:
+        if (
+            side not in {"LONG", "SHORT"}
+            or min(entry_price, stop_distance, base_target_price, proposed_target_price)
+            <= 0
+        ):
             return TargetExtensionDecision(
                 False,
                 base_target_price,
