@@ -189,7 +189,6 @@ async def test_rl_feedback_loop_health_check(event_bus):
     await loop.shutdown()
 
 
-
 @pytest.mark.asyncio
 async def test_rl_feedback_uses_neutral_model_score_as_training_feature():
     from types import SimpleNamespace
