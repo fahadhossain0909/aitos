@@ -89,8 +89,7 @@
         {"expr": "aitos_data_flow_input_rate{stage=\"redis_consumer\"}", "legendFormat": "consumer input"},
         {"expr": "aitos_data_flow_output_rate{stage=\"redis_consumer\"}", "legendFormat": "consumer output"}
       ]
-    }
-    ,
+    },
     {
       "type": "timeseries",
       "title": "Latency sample availability",
