@@ -56,6 +56,13 @@ Report p50/p95/p99/max, sample count, window, mode, workload and missing data. H
 ## Trading attribution
 Every decision should be reconstructable from logs/traces using stable decision, event, order, and position IDs (not metric labels). Record feature snapshot/version, candidate rank, decision action, accepted/rejected/HOLD/exit reason, risk verdict, execution result, and eventual outcome where available.
 
+## Initial source-audit finding (2026-11-03)
+- `aitos/forensics/data_flow_registry.py` represents an empty latency sample set as `None` in `StageSnapshot`.
+- `aitos/health_server.py::_append_data_flow_metrics()` currently exports missing p50/p95/p99 values as numeric zero.
+- This collapses “no observations” and “observed zero latency” into the same Prometheus value. Treat as a telemetry correctness defect (AITOS-ENG-004). Runtime/dashboard impact is NOT TESTED.
+- The current contract test checks metric-name presence but does not assert missing-sample semantics.
+- Safe remediation candidate: omit latency sample series until observations exist, or expose an explicit sample-count/availability signal; update Grafana queries and tests together. Do not silently change metric semantics without reviewing alert/dashboard consumers.
+
 ## Telemetry validation checklist
 - Endpoint reachable and expected content type.
 - Prometheus scrape succeeds.
