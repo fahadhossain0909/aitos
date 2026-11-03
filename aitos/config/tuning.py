@@ -55,7 +55,7 @@ class ScannerTuning(BaseModel):
     htf_filter_enabled: bool = True
     htf_timeframe: str = "auto"
     htf_lookback: int = Field(default=80, ge=30, le=1000)
-    htf_min_adx: float = Field(default=20.0, ge=0, le=100)
+    htf_min_adx: float = Field(default=25.0, ge=0, le=100)
     htf_min_di_gap: float = Field(default=5.0, ge=0, le=100)
 
 
