@@ -235,7 +235,9 @@ class InProcessBus(AITOSModule):
             await self.publish(request)
             reply = await asyncio.wait_for(future, timeout=timeout_ms / 1000)
         except asyncio.TimeoutError as exc:
-            raise TimeoutError(\n                f"request_reply timed out for topic {event.topic}"\n            ) from exc
+            raise TimeoutError(
+                f"request_reply timed out for topic {event.topic}"
+            ) from exc
         finally:
             self._pending_replies.pop(correlation_id, None)
         return EventResponse(
@@ -256,6 +258,10 @@ class InProcessBus(AITOSModule):
             if created >= since:
                 await handler(event)
 
-    def _remove_subscription(self, subscription: InProcessSubscription) -> None:\n        if subscription in self._subscriptions:\n            self._subscriptions.remove(subscription)\n\n    def _require_initialized(self) -> None:
+    def _remove_subscription(self, subscription: InProcessSubscription) -> None:
+        if subscription in self._subscriptions:
+            self._subscriptions.remove(subscription)
+
+    def _require_initialized(self) -> None:
         if not self._initialized:
             raise ModuleNotInitializedError(f"{self.module_id} is not initialized")
