@@ -22,7 +22,7 @@ from aitos.core.contracts import (
     HealthStatus,
     ModuleStatus,
 )
-from aitos.core.exceptions import EventSchemaValidationError, ModuleNotInitializedError
+from aitos.core.exceptions import (\n    EventSchemaValidationError,\n    ModuleNotInitializedError,\n)
 
 from .contracts import EventHandler
 
@@ -47,10 +47,17 @@ class InProcessBus(AITOSModule):
     and is suitable for deterministic unit tests, not production trading.
     """
 
-    def __init__(self, *, history_limit: int = 10_000, module_id: str = "event-bus-inprocess") -> None:
-        if history_limit < 1:
-            raise ValueError("history_limit must be >= 1")
+    def __init__(
+        self,
+        *,
+        history_limit: int = 10_000,
+        queue_limit: int = 10_000,
+        module_id: str = "event-bus-inprocess",
+    ) -> None:
+        if history_limit < 1 or queue_limit < 1:
+            raise ValueError("history_limit and queue_limit must be >= 1")
         self._history_limit = history_limit
+        self._queue_limit = queue_limit
         self._module_id = module_id
         self._initialized = False
         self._history: dict[str, deque[Event]] = defaultdict(
@@ -76,7 +83,7 @@ class InProcessBus(AITOSModule):
     async def health_check(self) -> HealthStatus:
         return HealthStatus(
             module_id=self.module_id,
-            status=ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY,
+            status=(\n                ModuleStatus.HEALTHY\n                if self._initialized\n                else ModuleStatus.UNHEALTHY\n            ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={
@@ -86,11 +93,12 @@ class InProcessBus(AITOSModule):
                 "consumed_events": self._consumed,
                 "subscriptions": len(self._subscriptions),
                 "history_limit_per_topic": self._history_limit,
+                "queue_limit_per_subscription": self._queue_limit,
             },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
-        tasks = [sub._task for sub in self._subscriptions]
+        tasks = [sub._task for sub in self._subscriptions if sub._task is not None]
         for task in tasks:
             task.cancel()
         if tasks:
@@ -149,7 +157,7 @@ class InProcessBus(AITOSModule):
         self._require_initialized()
         if start_id not in {"0", "$"}:
             raise ValueError("InProcessBus supports start_id='0' or '$' only")
-        queue: asyncio.Queue[Event] = asyncio.Queue()
+        queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=self._queue_limit)
         sub = InProcessSubscription(topic_pattern=topic, group=group, _queue=queue)
         if start_id == "0":
             for stored_topic, events in self._history.items():
