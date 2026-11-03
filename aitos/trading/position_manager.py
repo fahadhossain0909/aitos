@@ -341,6 +341,7 @@ class PositionManager:
         trend_strength: float | None = None,
         extra_features: Mapping[str, float] | None = None,
         timestamp: datetime | None = None,
+        completed_bar_id: str | None = None,
     ) -> PositionAction:
         ts = timestamp or datetime.now(timezone.utc)
         side = trade.side.value
@@ -479,7 +480,9 @@ class PositionManager:
         adaptive_result = None
         if self._adaptive_exit_enabled:
             adaptive_result = self._adaptive_exit_policy.evaluate(
-                trade=trade, current_price=current_price
+                trade=trade,
+                current_price=current_price,
+                completed_bar_id=completed_bar_id,
             )
             # Stagnation is a time-efficiency exit only while the original
             # thesis has not already hard-invalidated (handled by EIE above).
