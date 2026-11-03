@@ -132,8 +132,7 @@ class Trade:
     # Exchange-side catastrophic protection when EIE is the normal exit
     # authority. The ordinary sl_price remains the soft strategy boundary.
     emergency_sl_price: float | None = None
-    # Persisted count of position-manager observations used by stagnation policy.
-    # It is an observation count, not a guaranteed unique candle/bar count.
+    # Persisted count of unique completed bars used by stagnation policy.
     adaptive_exit_observations: int = 0
     # Last completed candle identity counted by adaptive stagnation logic.
     adaptive_exit_last_bar_id: str | None = None
