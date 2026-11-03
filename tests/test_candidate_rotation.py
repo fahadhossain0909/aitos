@@ -60,8 +60,6 @@ async def test_candidate_batches_are_yielded_sequentially(event_bus):
         batches.append(batch)
     assert len(batches) == 2
     assert any(
-        candidate.symbol == "BTCUSDT"
-        for batch in batches
-        for candidate in batch
+        candidate.symbol == "BTCUSDT" for batch in batches for candidate in batch
     )
     await scanner.shutdown()

@@ -646,9 +646,7 @@ async def run_scan_and_trade_cycle(
                 portfolio_tracker.build_portfolio_state(components.trade_lifecycle),
             )
             submitted += 1
-            rejection_reason = str(
-                getattr(trade, "rejection_reason", "") or ""
-            ).lower()
+            rejection_reason = str(getattr(trade, "rejection_reason", "") or "").lower()
             portfolio_rejection = any(
                 marker in rejection_reason
                 for marker in (

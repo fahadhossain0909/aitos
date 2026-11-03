@@ -65,9 +65,7 @@ class CandidateRotationManager:
             old_activity, new_activity = float(a[2]), float(b[2])
         except (ValueError, IndexError):
             return old != new
-        price_change = (
-            abs(new_price / old_price - 1) * 100 if old_price > 0 else 0
-        )
+        price_change = abs(new_price / old_price - 1) * 100 if old_price > 0 else 0
         return_change = abs(new_return - old_return) * 100
         activity_change = (
             abs(new_activity / old_activity - 1) * 100
