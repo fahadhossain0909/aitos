@@ -58,6 +58,14 @@ def test_stagnation_requires_configured_number_of_observations():
     assert result.bars_observed == 3
 
 
+def test_observation_counter_is_stored_on_trade_for_serialization():
+    policy = AdaptiveExitPolicy({"stagnation_bars": 10})
+    trade = _trade()
+    policy.evaluate(trade, 100.1)
+    assert trade.adaptive_exit_observations == 1
+    assert trade.to_dict()["adaptive_exit_observations"] == 1
+
+
 def test_invalid_risk_and_market_price_fail_safe():
     policy = AdaptiveExitPolicy()
     trade = _trade()
