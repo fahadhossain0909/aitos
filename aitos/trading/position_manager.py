@@ -559,11 +559,15 @@ class PositionManager:
                 f" bars={adaptive_result.bars_observed}"
                 f" progress_r={adaptive_result.progress_r:.3f}"
             )
-        notes = tuple(dict.fromkeys((
-            *exit_decision.notes,
-            *journey.reasons,
-            *((adaptive_result.reason,) if adaptive_result is not None else ()),
-        )))
+        notes = tuple(
+            dict.fromkeys(
+                (
+                    *exit_decision.notes,
+                    *journey.reasons,
+                    *((adaptive_result.reason,) if adaptive_result is not None else ()),
+                )
+            )
+        )
         return PositionAction(
             action=effective_action,
             reason=reason,
