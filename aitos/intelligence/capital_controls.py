@@ -14,6 +14,8 @@ class CapitalControlConfig:
     opportunity_max_age_seconds: float = 30.0
     max_daily_loss_pct: float = 3.0
     max_consecutive_losses: int = 5
+    risk_reduction_after_losses: int = 2
+    risk_reduction_multiplier: float = 0.5
     min_liquidity_for_execution: float = 4.0
     adverse_slippage_multiplier: float = 2.0
     calibration_min_samples: int = 50
