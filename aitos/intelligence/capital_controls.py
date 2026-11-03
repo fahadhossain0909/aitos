@@ -20,6 +20,14 @@ class CapitalControlConfig:
     adverse_slippage_multiplier: float = 2.0
     calibration_min_samples: int = 50
 
+    def __post_init__(self) -> None:
+        if self.risk_reduction_after_losses < 1:
+            raise ValueError("risk_reduction_after_losses must be >= 1")
+        if not isfinite(self.risk_reduction_multiplier) or not (
+            0.0 < self.risk_reduction_multiplier <= 1.0
+        ):
+            raise ValueError("risk_reduction_multiplier must be in (0, 1]")
+
 
 class CapitalCircuitBreaker:
     """Hard stop for loss streaks and daily loss, independent of strategy score."""
