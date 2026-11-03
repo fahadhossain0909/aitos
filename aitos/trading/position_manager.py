@@ -538,7 +538,7 @@ class PositionManager:
                     base_target_price=base_target,
                     proposed_target_price=proposed_target,
                     thesis_health=thesis_eval.health.value,
-                    exit_action=exit_decision.action.value,
+                    exit_action=effective_action.value,
                 )
 
         spike_tp_price = self._spike_tp(side=side, current_price=current_price, atr=atr)
