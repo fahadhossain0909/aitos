@@ -126,3 +126,20 @@ def test_adaptive_completed_bar_identity_survives_trade_recovery():
 
     assert restored.adaptive_exit_observations == 12
     assert restored.adaptive_exit_last_bar_id == "900:1710000000"
+
+
+
+def test_adaptive_stagnation_does_not_count_bars_closed_before_entry():
+    manager = PositionManager(config={"adaptive_exit_bar_seconds": 900})
+    trade = _open_trade()
+    trade.entry_time = datetime.fromtimestamp(1850, tz=timezone.utc).isoformat()
+
+    # At 31:00 the 15m candle ending at 30:00 closed before entry.
+    assert manager._completed_bar_identity(
+        datetime.fromtimestamp(1860, tz=timezone.utc), trade
+    ) is None
+
+    # At 45:00 the 15m candle ending at 45:00 closed after entry.
+    assert manager._completed_bar_identity(
+        datetime.fromtimestamp(2701, tz=timezone.utc), trade
+    ) == "900:1800"
