@@ -1119,19 +1119,14 @@ class TradeLifecycle(AITOSModule):
                     opportunity,
                     "invalid emergency stop price for EIE-managed position",
                 )
-        # Apply the gateway allocation as the requested risk percentage so
-        # volatility/correlation dampeners scale both normal and reduced risk
-        # consistently. A final dollar cap below remains as a hard safeguard.
         capital_objective = opportunity.agent_consensus.get("capital_objective", {})
         approved_risk_budget = capital_objective.get("risk_budget_usd")
-        requested_risk_pct = None
         if approved_risk_budget is not None:
             approved_risk_budget = float(approved_risk_budget)
             if not math.isfinite(approved_risk_budget) or approved_risk_budget <= 0:
                 return await self._reject(
                     opportunity, "capital_objective: invalid approved risk budget"
                 )
-            requested_risk_pct = approved_risk_budget / portfolio.equity_usd * 100.0
 
         sizing = calculate_position_size(
             equity_usd=portfolio.equity_usd,
@@ -1141,24 +1136,57 @@ class TradeLifecycle(AITOSModule):
             risk_score=risk_score,
             volatility_percentile=portfolio.volatility_percentile,
             correlation_penalty=portfolio.max_pairwise_correlation,
-            requested_risk_pct=requested_risk_pct,
             existing_sector_notional_usd=existing_sector_notional,
             sector_limit_pct=self._risk_engine.limits.max_sector_exposure_pct,
         )
-        if (
-            approved_risk_budget is not None
-            and sizing.risk_amount_usd > approved_risk_budget
-        ):
-            scale = approved_risk_budget / sizing.risk_amount_usd
+
+        # Apply the streak multiplier after leverage/sector caps so the
+        # realized executable risk is actually reduced by the configured
+        # percentage, even when a portfolio exposure cap was already binding.
+        risk_multiplier = float(
+            capital_objective.get("risk_reduction_multiplier", 1.0)
+        )
+        if not math.isfinite(risk_multiplier) or not 0.0 < risk_multiplier <= 1.0:
+            return await self._reject(
+                opportunity, "capital_objective: invalid risk reduction multiplier"
+            )
+        if risk_multiplier < 1.0:
+            scaled_notional = math.floor(
+                sizing.position_size_usd * risk_multiplier * 100.0
+            ) / 100.0
+            stop_risk_rate = (
+                abs(opportunity.entry_price - sizing_stop_price)
+                / opportunity.entry_price
+            )
             sizing = PositionSizeResult(
-                position_size_usd=sizing.position_size_usd * scale,
+                position_size_usd=scaled_notional,
                 leverage=sizing.leverage,
-                risk_amount_usd=approved_risk_budget,
+                risk_amount_usd=round(scaled_notional * stop_risk_rate, 2),
                 rationale=(
-                    f"{sizing.rationale}; capital risk cap applied "
-                    f"({approved_risk_budget:.8f} USD)"
+                    f"{sizing.rationale}; loss-streak multiplier={risk_multiplier:.3f}"
                 ),
             )
+
+        # Enforce the gateway's absolute USD risk budget after all sizing caps.
+        if approved_risk_budget is not None:
+            stop_risk_rate = (
+                abs(opportunity.entry_price - sizing_stop_price)
+                / opportunity.entry_price
+            )
+            max_notional = math.floor(
+                (approved_risk_budget / stop_risk_rate) * 100.0
+            ) / 100.0
+            if sizing.position_size_usd > max_notional:
+                capped_notional = max(0.0, max_notional)
+                sizing = PositionSizeResult(
+                    position_size_usd=capped_notional,
+                    leverage=sizing.leverage,
+                    risk_amount_usd=round(capped_notional * stop_risk_rate, 2),
+                    rationale=(
+                        f"{sizing.rationale}; capital risk cap applied "
+                        f"({approved_risk_budget:.8f} USD)"
+                    ),
+                )
         if sizing.position_size_usd <= 0.0:
             return await self._reject(
                 opportunity, f"sector exposure cap exhausted for {candidate_sector}"
