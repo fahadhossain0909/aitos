@@ -28,7 +28,7 @@ This branch is a safe, opt-in integration slice, not a reproduction of the claim
 The following requested work remains gated on dedicated implementation and validation:
 
 - ATR-derived initial stop must be calculated before sizing, with emergency-stop quantity recalculated against final initial risk. A post-entry stop adjustment is not a substitute.
-- The HTF-ADX runner target is now implemented, but the final target still needs explicit target-zone/liquidity/structure/reversal vetoes and a path-aware target selector in the existing Path Planner/Position Manager. ADX-only target expansion must not be treated as a guaranteed target.
+- Path Planner now provides explainable path-runway checks, barrier caps, and reversal/thesis vetoes for the runner target. Remaining work is calibrating path probability/confidence thresholds and validating the model against replayed fills; ADX-only target expansion must not be treated as a guaranteed target.
 - Capital Gateway now halves the requested risk budget after two consecutive losses, using the portfolio's `consecutive_losses` field; the existing five-loss hard circuit breaker remains. The portfolio producer must populate that field from persisted, finalized net outcomes and reset it after a net-profitable close. This branch does not fabricate a new streak counter.
 - Stagnation observations now serialize with the Trade record, but the persistence/recovery adapter must be verified to restore the new field. The counter increments on PositionManager evaluations, not unique candle IDs; exact bar-based semantics still require event/bar identity.
 - Fee/funding/slippage estimation must be venue- and position-specific.
