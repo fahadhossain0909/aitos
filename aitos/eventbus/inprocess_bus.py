@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 from collections import defaultdict, deque
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -36,10 +36,13 @@ class InProcessSubscription:
     group: str
     _queue: asyncio.Queue[Event]
     _task: asyncio.Task | None = None
+    _on_cancel: Callable[[], None] | None = None
 
     def cancel(self) -> None:
         if self._task is not None:
             self._task.cancel()
+        if self._on_cancel is not None:
+            self._on_cancel()
 
 
 class InProcessBus(AITOSModule):
@@ -70,6 +73,7 @@ class InProcessBus(AITOSModule):
         self._pending_replies: dict[str, asyncio.Future[Event]] = {}
         self._published = 0
         self._consumed = 0
+        self._handler_failures = 0
         self._last_event_time: str | None = None
 
     @property
@@ -98,6 +102,7 @@ class InProcessBus(AITOSModule):
                 "durable": False,
                 "published_events": self._published,
                 "consumed_events": self._consumed,
+                "handler_failures": self._handler_failures,
                 "subscriptions": len(self._subscriptions),
                 "history_limit_per_topic": self._history_limit,
                 "queue_limit_per_subscription": self._queue_limit,
@@ -151,6 +156,9 @@ class InProcessBus(AITOSModule):
             if future is not None and not future.done():
                 future.set_result(event)
         for sub in tuple(self._subscriptions):
+            if sub._task is None or sub._task.done():
+                self._remove_subscription(sub)
+                continue
             if fnmatch.fnmatch(event.topic, sub.topic_pattern):
                 await sub._queue.put(event)
 
@@ -166,32 +174,43 @@ class InProcessBus(AITOSModule):
             raise ValueError("InProcessBus supports start_id='0' or '$' only")
         queue: asyncio.Queue[Event] = asyncio.Queue(maxsize=self._queue_limit)
         sub = InProcessSubscription(topic_pattern=topic, group=group, _queue=queue)
+        initial_events: list[Event] = []
         if start_id == "0":
             for stored_topic, events in self._history.items():
                 if fnmatch.fnmatch(stored_topic, topic):
-                    for event in events:
-                        queue.put_nowait(event)
+                    initial_events.extend(events)
+
+        async def _dispatch(event: Event) -> None:
+            try:
+                response = await handler(event)
+                self._consumed += 1
+                if response is not None and response.success:
+                    await self.publish(
+                        Event(
+                            topic=event.topic + ".reply",
+                            payload=response.payload,
+                            source_module=response.responder_module,
+                            correlation_id=event.correlation_id or event.event_id,
+                        )
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._handler_failures += 1
 
         async def _consume() -> None:
+            for event in initial_events:
+                await _dispatch(event)
             while True:
                 event = await queue.get()
                 try:
-                    response = await handler(event)
-                    self._consumed += 1
-                    if response is not None and response.success:
-                        await self.publish(
-                            Event(
-                                topic=event.topic + ".reply",
-                                payload=response.payload,
-                                source_module=response.responder_module,
-                                correlation_id=event.correlation_id or event.event_id,
-                            )
-                        )
+                    await _dispatch(event)
                 finally:
                     queue.task_done()
 
         task = asyncio.create_task(_consume(), name=f"inprocess-{group}-{topic}")
         sub._task = task
+        sub._on_cancel = lambda: self._remove_subscription(sub)
         self._subscriptions.append(sub)
         return sub
 
@@ -216,7 +235,7 @@ class InProcessBus(AITOSModule):
             await self.publish(request)
             reply = await asyncio.wait_for(future, timeout=timeout_ms / 1000)
         except asyncio.TimeoutError as exc:
-            raise TimeoutError(f"request_reply timed out for topic {event.topic}") from exc
+            raise TimeoutError(\n                f"request_reply timed out for topic {event.topic}"\n            ) from exc
         finally:
             self._pending_replies.pop(correlation_id, None)
         return EventResponse(
@@ -237,6 +256,6 @@ class InProcessBus(AITOSModule):
             if created >= since:
                 await handler(event)
 
-    def _require_initialized(self) -> None:
+    def _remove_subscription(self, subscription: InProcessSubscription) -> None:\n        if subscription in self._subscriptions:\n            self._subscriptions.remove(subscription)\n\n    def _require_initialized(self) -> None:
         if not self._initialized:
             raise ModuleNotInitializedError(f"{self.module_id} is not initialized")
