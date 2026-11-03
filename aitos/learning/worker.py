@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from math import isfinite
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -255,10 +256,10 @@ class ContinualLearningWorker:
             risk_amount = float(raw_risk)
         except (TypeError, ValueError):
             return None
-        if not (risk_amount > 0 and risk_amount == risk_amount and abs(risk_amount) != float("inf")):
+        if not isfinite(risk_amount) or risk_amount <= 0:
             return None
         normalized = reward / risk_amount
-        return normalized if normalized == normalized and abs(normalized) != float("inf") else None
+        return normalized if isfinite(normalized) else None
 
     def run_once(self) -> int:
         rows = self._rows()
