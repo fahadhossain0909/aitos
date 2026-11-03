@@ -9,6 +9,7 @@ from aitos.config.tuning import TuningSettings
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence.scanner import (
     OpportunityScanner,
+    ScanCandidate,
     determine_direction,
     higher_timeframe_alignment,
     resolve_higher_timeframe,
@@ -234,6 +235,39 @@ async def test_to_opportunity_places_atr_based_sl_and_r_multiple_tps(event_bus):
     )
     assert opportunity.trailing_sl_enabled is True
     assert 0.0 <= opportunity.confidence <= 1.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("adx", "expected_last_r"),
+    [(20.0, 3.0), (30.0, 2.5), (40.0, 3.3)],
+)
+async def test_default_final_target_adapts_to_confirmed_htf_adx(
+    event_bus, adx, expected_last_r
+):
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=FakeScannerExchange(),
+        symbols=["BTCUSDT"],
+        reference_symbol="",
+    )
+    candidate = ScanCandidate(
+        symbol="BTCUSDT",
+        direction=TradeSide.LONG,
+        composite_score=80.0,
+        component_scores={},
+        component_availability={},
+        rationale=[],
+        entry_price=100.0,
+        atr=1.0,
+        regime="trending",
+        htf_adx=adx,
+    )
+    opportunity = scanner.to_opportunity(candidate)
+    stop_distance = candidate.atr * 1.5
+    assert opportunity.take_profit_levels[-1] == pytest.approx(
+        candidate.entry_price + stop_distance * expected_last_r
+    )
 
 
 @pytest.mark.asyncio
