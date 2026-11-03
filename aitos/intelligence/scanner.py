@@ -9,7 +9,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from aitos.config.paths import get_model_data_dir
 from aitos.config.tuning import TuningSettings, load_tuning_settings
+from aitos.intelligence.candidate_rotation import CandidateRotationManager
+from aitos.intelligence.opportunity_outcomes import (
+    CandidateOutcomeStore,
+    RankingHysteresis,
+)
 from aitos.core.contracts import (
     AITOSModule,
     Event,
@@ -214,6 +220,18 @@ class OpportunityScanner(AITOSModule):
         )
         self._last_scan_at = None
         self._last_candidate_count = 0
+        self._candidate_rotation = CandidateRotationManager(
+            default_cooldown_seconds=self._tuning.analysis.rejection_cooldown_seconds,
+            kernel_cooldown_seconds=self._tuning.analysis.kernel_rejection_cooldown_seconds,
+            market_change_recheck_pct=self._tuning.analysis.market_change_recheck_pct,
+        )
+        self._lightweight_fingerprints: dict[str, str] = {}
+        self._candidate_outcomes = CandidateOutcomeStore(
+            get_model_data_dir() / "candidate_outcomes.sqlite3"
+        )
+        self._ranking_hysteresis = RankingHysteresis(
+            margin_points=self._tuning.analysis.ranking_hysteresis_points
+        )
 
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
         """Apply runtime-safe scanner budgets; universe changes require restart."""
@@ -230,6 +248,9 @@ class OpportunityScanner(AITOSModule):
             )
         self._tuning = settings
         self._top_n = incoming.top_n
+        self._ranking_hysteresis.margin_points = (
+            settings.analysis.ranking_hysteresis_points
+        )
         self._scan_semaphore = asyncio.Semaphore(
             min(
                 settings.analysis.expensive_analysis_concurrency,
@@ -293,11 +314,15 @@ class OpportunityScanner(AITOSModule):
                 "live_state_symbols": sum(
                     1 for s in self._symbols if self._live_cache.snapshot(s) is not None
                 ),
+                "candidate_rotation": self._candidate_rotation.snapshot(),
+                "candidate_outcomes": self._candidate_outcomes.snapshot(),
+                "ranking_hysteresis": self._ranking_hysteresis.snapshot(),
             },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         await self._live_cache.shutdown()
+        self._candidate_outcomes.close()
         await self._exchange.close()
 
     async def emit_events(self) -> AsyncIterator[Event]:
@@ -308,7 +333,22 @@ class OpportunityScanner(AITOSModule):
         return None
 
     async def accept_live_trade(self, trade):
+        state = self._live_cache.snapshot(trade.symbol)
+        previous_trade_id = (
+            state.trades[-1].trade_id if state is not None and state.trades else None
+        )
         await self._live_cache.accept_live_trade(trade)
+        updated = self._live_cache.snapshot(trade.symbol)
+        accepted = (
+            updated is not None
+            and bool(updated.trades)
+            and updated.trades[-1].trade_id == trade.trade_id
+            and trade.trade_id != previous_trade_id
+        )
+        if accepted:
+            self._candidate_outcomes.update_price(
+                trade.symbol, trade.price, getattr(trade, "timestamp", None)
+            )
 
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
@@ -944,7 +984,7 @@ class OpportunityScanner(AITOSModule):
             regime=regime,
         )
 
-    async def _lightweight_rank_symbols(self) -> list[str]:
+    async def _lightweight_rank_symbols(self, limit: int | None = None) -> list[str]:
         """Rank the configured universe cheaply before invoking full intelligence.
 
         This stage only requests a short candle window. It intentionally does not
@@ -952,9 +992,9 @@ class OpportunityScanner(AITOSModule):
         lightweight requests retain a deterministic fallback rank so temporary
         data-source issues do not crash the scan cycle.
         """
-        limit = self._tuning.analysis.expensive_analysis_limit
-        if limit >= len(self._symbols):
-            return list(self._symbols)
+        limit = (
+            self._tuning.analysis.expensive_analysis_limit if limit is None else limit
+        )
 
         semaphore = asyncio.Semaphore(self._tuning.analysis.lightweight_concurrency)
 
@@ -965,6 +1005,7 @@ class OpportunityScanner(AITOSModule):
                         self._exchange.fetch_klines(symbol, self._timeframe, limit=20),
                         timeout=self._tuning.analysis.timeout_seconds,
                     )
+                    candles = [c for c in candles if getattr(c, "is_closed", True)]
                     if len(candles) < 5:
                         return symbol, -1.0, index
                     first_close = float(candles[0].close)
@@ -982,6 +1023,15 @@ class OpportunityScanner(AITOSModule):
                     if not volumes:
                         return symbol, -1.0, index
                     median_quote_activity = volumes[len(volumes) // 2]
+                    closes = [float(c.close) for c in candles[-6:]]
+                    previous_close = closes[-2] if len(closes) >= 2 else closes[-1]
+                    short_return = (
+                        closes[-1] / previous_close - 1.0 if previous_close > 0 else 0.0
+                    )
+                    self._lightweight_fingerprints[symbol] = (
+                        f"{round(closes[-1], 10)}:{round(short_return, 5)}:"
+                        f"{round(median_quote_activity, 2)}"
+                    )
                     spread_range = (
                         max(float(c.high) - float(c.low) for c in candles) / last_close
                     )
@@ -1003,7 +1053,16 @@ class OpportunityScanner(AITOSModule):
             *(_score(symbol, index) for index, symbol in enumerate(self._symbols))
         )
         ranked = sorted(scores, key=lambda item: (-item[1], item[2]))
-        selected = [symbol for symbol, _, _ in ranked[:limit]]
+        selected = []
+        cooldown_skipped = 0
+        for symbol, _, _ in ranked:
+            fingerprint = self._lightweight_fingerprints.get(symbol, "unavailable")
+            if self._candidate_rotation.should_skip(symbol, fingerprint):
+                cooldown_skipped += 1
+                continue
+            selected.append(symbol)
+            if len(selected) >= limit:
+                break
         logger.info(
             "lightweight scanner screening complete",
             extra={
@@ -1012,6 +1071,8 @@ class OpportunityScanner(AITOSModule):
                     "deep_analysis_budget": limit,
                     "selected_symbols": selected,
                     "screened_symbols": len(scores),
+                    "cooldown_skipped": cooldown_skipped,
+                    "candidate_rotation": self._candidate_rotation.snapshot(),
                 }
             },
         )
@@ -1064,15 +1125,96 @@ class OpportunityScanner(AITOSModule):
         )
         return candidates
 
+    @property
+    def target_opportunities(self) -> int:
+        return self._top_n
+
+    def record_candidate_rejection(self, candidate: ScanCandidate, reason: str) -> None:
+        self._candidate_outcomes.record_rejection(candidate, reason)
+        self._candidate_rotation.record_rejection(
+            candidate.symbol,
+            reason,
+            self._lightweight_fingerprints.get(
+                candidate.symbol,
+                f"{candidate.direction.value}:{candidate.regime}:{candidate.composite_score:.2f}",
+            ),
+        )
+
+    def clear_candidate_cooldown(self, symbol: str) -> None:
+        self._candidate_rotation.force_recheck(symbol)
+
+    async def iter_candidate_batches(self):
+        """Analyse bounded batches, yielding each to downstream gates before refill."""
+        self._require_initialized()
+        reference_klines = None
+        if self._reference_symbol:
+            try:
+                reference_klines = await self._exchange.fetch_klines(
+                    self._reference_symbol, self._timeframe, limit=self._kline_lookback
+                )
+            except Exception as exc:
+                logger.error("failed to fetch reference symbol klines: %s", exc)
+        cfg = self._tuning.analysis
+        selected = await self._lightweight_rank_symbols(limit=cfg.candidate_pool_limit)
+        budget = min(cfg.max_candidate_analyses_per_cycle, cfg.candidate_pool_limit)
+        selected = selected[:budget]
+        scanned = found = 0
+        batch_size = max(1, cfg.candidate_batch_size)
+        for offset in range(0, len(selected), batch_size):
+            batch = selected[offset : offset + batch_size]
+
+            async def scan_one(symbol: str) -> ScanCandidate | None:
+                async with self._scan_semaphore:
+                    try:
+                        return await asyncio.wait_for(
+                            self.scan_symbol(symbol, reference_klines),
+                            timeout=cfg.timeout_seconds,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "candidate batch scan failed",
+                            extra={
+                                "aitos_extra": {"symbol": symbol, "error": str(exc)}
+                            },
+                        )
+                        return None
+
+            results = await asyncio.gather(*(scan_one(symbol) for symbol in batch))
+            scanned += len(batch)
+            candidates = [item for item in results if item is not None]
+            ranked = await self.rank(candidates, top_n=len(candidates))
+            found += len(ranked)
+            self._last_scan_at, self._last_candidate_count = _utc_now_iso(), found
+            payload = {
+                "phase": "batch_completed",
+                "batch_index": offset // batch_size + 1,
+                "batch_size": len(batch),
+                "symbols_scanned": scanned,
+                "analysis_budget": budget,
+                "candidates_found": found,
+                "ranked_symbols": [item.symbol for item in ranked],
+                "rotation": self._candidate_rotation.snapshot(),
+            }
+            logger.info(
+                "candidate analysis batch completed", extra={"aitos_extra": payload}
+            )
+            await self._event_bus.publish(
+                Event(
+                    topic="market.candidate_rotation",
+                    payload=payload,
+                    source_module=self.module_id,
+                )
+            )
+            yield ranked
+
     async def rank(
         self, candidates: list[ScanCandidate], top_n: int | None = None
     ) -> list[ScanCandidate]:
         n = top_n if top_n is not None else self._top_n
-        return sorted(
-            [c for c in candidates if c.composite_score >= self._min_score_threshold],
-            key=lambda c: c.composite_score,
-            reverse=True,
-        )[:n]
+        eligible = [
+            c for c in candidates if c.composite_score >= self._min_score_threshold
+        ]
+        return self._ranking_hysteresis.rank(eligible, n)
 
     async def decide_with_kernel(self, candidate: ScanCandidate, kernel: Any) -> Any:
         from aitos.kernel.ai_kernel import DecisionContext

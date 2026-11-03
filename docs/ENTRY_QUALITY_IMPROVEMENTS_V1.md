@@ -51,3 +51,34 @@ These defaults should be reviewed against the observed AITOS paper-trading unive
 - Universe volume floors are configurable defaults, not universal constants. Validate thresholds against actual AITOS order size, spread, slippage and funding costs.
 - Existing MAE/MFE telemetry should be joined to entry-time component snapshots to compare immediate adverse markout, net expectancy, profit factor, MAE/MFE and missed-trade rate.
 - Run unit tests, then historical replay / paper trading. Do not enable live deployment based on unit tests alone.
+
+
+## Dynamic Candidate Rotation & Re-evaluation
+
+- Lightweight market screening feeds a larger candidate pool, independent of the legacy one-shot expensive-analysis limit.
+- Full analysis runs in bounded batches. Each batch passes through AI Kernel and trade-lifecycle gates before the next batch is analysed, allowing early stop after filling the target accepted-opportunity count.
+- Kernel and lifecycle-quality rejections receive temporary, reason-specific cooldowns. Original opportunity scores and universe membership are never modified.
+- Lightweight fingerprints combine latest close, short return and median quote activity. Material fingerprint changes allow early re-evaluation; `clear_candidate_cooldown(symbol)` supports explicit event-driven rechecks.
+- Portfolio/capital constraints do not create symbol-level market cooldowns. Circuit-breaker, drawdown and daily-loss rejections halt refill for the current cycle.
+- Cooldowns are bounded and process-local. Restarting clears this compute optimization state; it never persists as a trading restriction.
+- Scanner health and `market.candidate_rotation` events expose batch progress and cooldown counters.
+
+### Configuration
+
+- `candidate_pool_limit`: lightweight-ranked symbols eligible for deep analysis.
+- `candidate_batch_size`: symbols analysed before downstream gate evaluation/refill.
+- `max_candidate_analyses_per_cycle`: hard per-cycle deep-analysis budget.
+- `rejection_cooldown_seconds` / `kernel_rejection_cooldown_seconds`: temporary unchanged-state suppression.
+- `market_change_recheck_pct`: lightweight fingerprint change threshold that releases cooldown early.
+
+Low-resource, balanced and high-performance profiles use progressively larger pools and budgets. These are compute defaults, not trading-risk settings. Validate latency, missed-opportunity rate, false-rejection rate and paper-trading expectancy before live use.
+
+
+## Quantitative Opportunity Management (V2)
+
+- Every downstream candidate rejection is persisted in a bounded SQLite journal under the configured model-data directory. The journal records symbol, side, entry reference, raw composite score, rejection reason, regime and component evidence.
+- As live trade ticks arrive, the journal records directional markouts at 1m, 5m and 15m. Each horizon includes signed return, adverse excursion (MAE) and favorable excursion (MFE). The state and completed markouts survive process restarts; this is measurement only and does not train or alter a strategy automatically.
+- Markouts are based on the first observed tick at or after each horizon, not an interpolated candle close. If no tick arrives, that horizon remains pending rather than fabricating a value.
+- Ranking hysteresis provides a configurable, bounded ordering advantage to incumbents within the current top-N. It never changes raw component scores, composite score, confidence, eligibility threshold or risk checks. A sufficiently stronger challenger displaces an incumbent.
+- Hysteresis is an ordering-stability control, not a predictive edge. Compare churn, missed-opportunity rate, rejection precision, markout distribution and paper expectancy with hysteresis enabled/disabled before live use.
+- SQLite uses WAL and a bounded retention count. It is a local operational journal; export/centralize it before multi-process or multi-host deployments. Each process must not independently write the same SQLite file over a network filesystem.

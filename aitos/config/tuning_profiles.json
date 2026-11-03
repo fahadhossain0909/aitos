@@ -12,7 +12,11 @@
         "expensive_analysis_limit": 2,
         "expensive_analysis_concurrency": 1,
         "lightweight_concurrency": 2,
-        "timeout_seconds": 8
+        "timeout_seconds": 8,
+        "candidate_pool_limit": 10,
+        "candidate_batch_size": 2,
+        "max_candidate_analyses_per_cycle": 10,
+        "ranking_hysteresis_points": 1.0
       },
       "event_bus": {
         "consumer_concurrency": 2,
@@ -66,7 +70,11 @@
         "expensive_analysis_limit": 5,
         "expensive_analysis_concurrency": 2,
         "lightweight_concurrency": 8,
-        "timeout_seconds": 5
+        "timeout_seconds": 5,
+        "candidate_pool_limit": 20,
+        "candidate_batch_size": 5,
+        "max_candidate_analyses_per_cycle": 20,
+        "ranking_hysteresis_points": 1.0
       },
       "event_bus": {
         "consumer_concurrency": 8,
@@ -120,7 +128,11 @@
         "expensive_analysis_limit": 10,
         "expensive_analysis_concurrency": 4,
         "lightweight_concurrency": 16,
-        "timeout_seconds": 5
+        "timeout_seconds": 5,
+        "candidate_pool_limit": 40,
+        "candidate_batch_size": 10,
+        "max_candidate_analyses_per_cycle": 40,
+        "ranking_hysteresis_points": 1.0
       },
       "event_bus": {
         "consumer_concurrency": 16,
