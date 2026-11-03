@@ -76,9 +76,12 @@ class AdaptiveExitPolicy:
             else:
                 candidate_stop = None
 
+        # A trade that already made the required progress must not be
+        # classified as stagnant merely because it later retraced.
+        best_progress_r = max(progress_r, float(trade.mfe_r or 0.0))
         stagnation = (
             count >= self._stagnation_bars
-            and progress_r < self._stagnation_min_progress_r
+            and best_progress_r < self._stagnation_min_progress_r
         )
         if stagnation:
             reason = "stagnation_exit"
