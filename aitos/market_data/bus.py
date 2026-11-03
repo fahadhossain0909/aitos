@@ -1,4 +1,4 @@
-"""Canonical market-data bus over Redis Streams."""
+"""Canonical semantic market-data API over a pluggable event transport."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from typing import Any
 
 from aitos.core.contracts import Event
 from aitos.eventbus import redis_bus as redis_bus_module
-from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.eventbus.contracts import EventBusProtocol, SubscriptionProtocol
 
 from .channels import (
     CHANNEL_BOOK_DELTA,
@@ -116,9 +116,9 @@ MarketEventHandler = Callable[[MarketEvent], Awaitable[Any]]
 
 
 class MarketDataBus:
-    """Semantic market-data API backed by Redis Streams."""
+    """Semantic market-data API backed by the configured event transport."""
 
-    def __init__(self, event_bus: EventBus) -> None:
+    def __init__(self, event_bus: EventBusProtocol) -> None:
         self._event_bus = event_bus
 
     async def publish(self, event: MarketEvent) -> None:
@@ -244,7 +244,7 @@ class MarketDataBus:
         *,
         group: str,
         live_only: bool = True,
-    ) -> Subscription:
+    ) -> SubscriptionProtocol:
         channel = channel_for(event_type)
 
         async def _handle(event: Event) -> Any:
