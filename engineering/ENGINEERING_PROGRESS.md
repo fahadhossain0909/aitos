@@ -15,8 +15,9 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 
 ## Pull request
 - Draft PR: https://github.com/fahadhossain0909/aitos/pull/216
-- Current head at last status check: `b36ae68db55554312a845520870a2da049285327`
-- Changed files at last comparison: 15 (documentation + telemetry source/test/dashboard changes)
+- Current PR #216 head: `94dd1f7ece1ffc9119c85d8c8cad1c94181ee211`
+- PR #216 changed files: 10 (documentation-only).
+- Related implementation PR #217 head: `c1730d7730c42037bc804fe056f8c782e15744d0` (6 code/test/dashboard files).
 - GitHub Actions PR workflow runs observed at initial check: none; combined status checks: none. CI is PENDING, not passed.
 
 ## Progress
@@ -32,7 +33,7 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 | Latency baseline | NOT MEASURED | No runtime session or histogram export inspected |
 | Root-cause register | PARTIAL | 9 source/documentation findings recorded; runtime root causes remain unverified |
 | Runtime audit | BLOCKED / NOT STARTED | No connected local runtime or authorized isolated test environment in this session |
-| Automated tests / CI | NOT RUN / NOT OBSERVED | Code changed; no execution environment; GitHub Actions run/status lookup returned none |
+| Automated tests / CI | PASS (GitHub Actions) | PR #217: 984 tests pass on Python 3.10/3.11/3.12; market-data audit, backtest, formatting, lint, security and Docker/Compose checks pass. PR #216 CI passed on an earlier docs-only head; later changes were docs-only. Local runtime remains untested. |
 | Independent review | NOT STARTED | Must review final diff and CI |
 | Merge to main | NOT AUTHORIZED | Keep branch/PR isolated until explicit approval |
 
@@ -52,10 +53,9 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 - Paper runner source audit found startup cleanup coverage begins only after a long initialization sequence (AITOS-ENG-005); auxiliary-module self-heal coverage differs from health-report coverage (AITOS-ENG-006); degraded health returns HTTP 200 intentionally (AITOS-ENG-007); position event API is bounded process-local memory (AITOS-ENG-008); per-symbol data-flow buckets have no source-level TTL/eviction (AITOS-ENG-009; memory impact NOT MEASURED).
 
 ## Next actions
-1. Run `python -m pytest -q tests/forensics/test_data_flow_observability.py` and `black --check` in the repository environment.
-2. Run repository CI and resolve any failures.
-3. Complete source inventory for exchange, Redis, ClickHouse, scanner, execution, risk and lifecycle modules.
-4. Run the documented local paper-runtime audit with Redis/ClickHouse and verify restored-position subscriptions.
-5. Capture real stage latency distributions and fill the baseline with sample counts/window/mode.
-6. Verify decision-to-outcome lifecycle telemetry and Prometheus/Grafana rendering.
-7. Obtain independent review before marking PR #216 ready; do not merge without explicit approval. Track telemetry code verification in PR #217.
+1. Complete source inventory for exchange, Redis, ClickHouse, execution and risk modules.
+2. Run the documented local paper-runtime audit on the user's safe local paper stack; inspect restored-position subscriptions and current open positions.
+3. Capture real stage latency distributions and fill the baseline with sample counts/window/mode.
+4. Verify decision-to-outcome lifecycle telemetry and Prometheus/Grafana rendering in the local runtime.
+5. Investigate AITOS-ENG-005/006/009 with targeted failure-injection and symbol-churn tests before changing lifecycle or retention behavior.
+6. Obtain independent human review for PR #216 and PR #217; do not merge without explicit approval.
