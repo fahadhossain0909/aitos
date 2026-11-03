@@ -176,7 +176,7 @@ def install_capital_guard() -> None:
 
         consensus = dict(protected_opportunity.agent_consensus)
         consecutive_losses = max(
-            0, int(authorized.agent_consensus.get("consecutive_losses", 0))
+            0, int(protected_opportunity.agent_consensus.get("consecutive_losses", 0))
         )
         risk_reduction_multiplier = (
             gateway.controls.risk_reduction_multiplier
