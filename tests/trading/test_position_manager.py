@@ -8,6 +8,7 @@ from aitos.intelligence.exit_intelligence import ExitAction
 from aitos.intelligence.path_planner import TargetExtensionDecision
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.position_manager import PositionManager
+from aitos.trading.persistent_state import _trade_from_dict
 
 
 def _open_trade(
@@ -102,7 +103,6 @@ def test_adaptive_exit_is_enabled_by_default_and_can_be_disabled():
     )
 
 
-
 def test_adaptive_stagnation_bar_identity_uses_only_completed_buckets():
     from datetime import datetime, timezone
 
@@ -114,3 +114,15 @@ def test_adaptive_stagnation_bar_identity_uses_only_completed_buckets():
     assert manager._completed_bar_identity(first_tick) == "900:900"
     assert manager._completed_bar_identity(repeated_tick) == "900:900"
     assert manager._completed_bar_identity(next_bucket) == "900:1800"
+
+
+
+def test_adaptive_completed_bar_identity_survives_trade_recovery():
+    trade = _open_trade()
+    trade.adaptive_exit_observations = 12
+    trade.adaptive_exit_last_bar_id = "900:1710000000"
+
+    restored = _trade_from_dict(trade.to_dict())
+
+    assert restored.adaptive_exit_observations == 12
+    assert restored.adaptive_exit_last_bar_id == "900:1710000000"
