@@ -1,0 +1,43 @@
+# AITOS Engineering Verification Report
+
+## Scope
+Documentation and agent operating-model foundation only.
+
+## Change verification
+- Branch: `feat/engineering-agent-operating-system`
+- Base: `main` at `b9d4a60a5ac1989455837fec277e2977d520de5e`
+- Runtime application started: NO
+- Exchange connected: NOT TESTED
+- Redis / ClickHouse runtime: NOT TESTED
+- Paper trade executed: NO
+- Live order submitted: NO
+- Latency measured: NO — NOT MEASURED
+- Trading logic modified: NO
+- Risk settings modified: NO
+- Redis CPU/pool/concurrency modified: NO
+- VPS workflows changed or resumed: NO
+
+## Verification matrix
+| Check | Result | Evidence |
+|---|---|---|
+| Existing README inspected | PASS | GitHub main README fetch |
+| Existing agent skill inspected | PASS | `skills/aitos-skill.md` fetched |
+| Existing prompt inspected | PASS | `skills/aitos-prompt.md` fetched |
+| Root AGENTS.md existed before change | NO | GitHub contents API returned 404 |
+| Runtime health | NOT TESTED | No runtime environment accessed |
+| Unit/integration tests | NOT RUN | Documentation-only scope |
+| CI | PENDING | Run after PR creation |
+| Independent review | PENDING | Not yet performed |
+
+## Limitations
+This change establishes instructions and durable reporting templates. It does not itself install or run a 24/7 agent, launch specialist agents, instrument missing telemetry, verify the trading runtime, or establish a measured latency baseline.
+
+## Acceptance criteria for the next runtime phase
+- Every critical module has source and runtime evidence.
+- Health/readiness distinguishes liveness from data-plane progress.
+- Exchange data freshness and Redis consumer lag are measured.
+- Decision-to-outcome tracing covers order and position lifecycle.
+- p50/p95/p99 values have sample counts, window, mode and environment.
+- Paper positions recover and remain monitored after restart.
+- No live order or VPS deployment is used for validation.
+- Independent review and CI pass.
