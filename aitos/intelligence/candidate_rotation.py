@@ -38,7 +38,7 @@ class CandidateRotationManager:
         while len(self._cooldowns)>self.max_symbols: self._cooldowns.popitem(last=False)
 
     def _materially_changed(self, old, new):
-        if old==new: return False
+        if old==new or new in {"unavailable", "unscored"}: return False
         try:
             a,b=old.split(":"),new.split(":")
             op,np=float(a[0]),float(b[0])
