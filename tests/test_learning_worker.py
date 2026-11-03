@@ -12,7 +12,6 @@ def test_numeric_features_handles_invalid_json():
     assert ContinualLearningWorker._numeric_features("not-json") == {}
 
 
-
 def test_numeric_features_excludes_outcome_leakage_and_sets_neutral_rl_confidence():
     result = ContinualLearningWorker._numeric_features(
         '{"trend_strength": 7, "risk_amount_usd": 100, "pnl": 20, "reward": 2}'
@@ -90,7 +89,6 @@ def test_backtest_reward_rejects_invalid_risk_and_non_finite_values():
     }
     assert ContinualLearningWorker._reward_r_multiple(invalid_risk) is None
     assert ContinualLearningWorker._reward_r_multiple(invalid_reward) is None
-
 
 
 def test_worker_trains_only_valid_r_normalized_backtest_trades():
