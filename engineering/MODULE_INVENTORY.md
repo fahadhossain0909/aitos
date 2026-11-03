@@ -25,6 +25,13 @@
 | Monitoring utility | `monitor_aitos.py` | SOURCE SURFACE FOUND | Inspect all checks for assumptions, false positives, side effects |
 | Agent instructions | `skills/aitos-skill.md`, `skills/aitos-prompt.md` | SOURCE FOUND | Reconcile with AGENTS.md; skill is mandatory operational reference |
 
+## Source-level audit updates (2026-11-03)
+- `aitos/health_server.py`: SOURCE-VERIFIED. Exposes `/health`, `/metrics`, `/data-flow`, `/data-flow/{symbol}`, `/position-lifecycle`, and position-specific lifecycle diagnostics. Runtime reachability is NOT TESTED.
+- `aitos/forensics/data_flow_registry.py` and `data_flow_schema.py`: SOURCE-VERIFIED. In-process stage registry retains up to 2,048 latency observations per bucket, reports p50/p95/p99/max, input/output rates, queue depth/age, source age, drops/errors, and recent trace records. This bounded in-memory sample is not durable history.
+- `monitoring/prometheus.yml`: SOURCE-VERIFIED. Scrape interval is 15 seconds for paper and live targets. Actual Prometheus scrape success is NOT TESTED.
+- `deploy/grafana/aitos_data_flow.json`: SOURCE-VERIFIED dashboard queries exist for p50/p95/p99 data-flow metrics. Dashboard provisioning and rendered panel correctness are NOT TESTED.
+- Known issue AITOS-ENG-004: exporter maps missing latency observations to zero.
+
 ## Inventory update template
 For each concrete module add:
 - Import path and owning package.
