@@ -97,10 +97,14 @@ def test_candidate_outcome_store_persists_horizon_markouts(tmp_path):
 
     store = CandidateOutcomeStore(tmp_path / "outcomes.sqlite3")
     candidate = SimpleNamespace(
-        symbol="BTCUSDT", direction=SimpleNamespace(value="LONG"),
-        entry_price=100.0, composite_score=75.0,
-        component_scores={"flow": 8.0}, component_availability={"flow": True},
-        regime="trending", rationale=["test"],
+        symbol="BTCUSDT",
+        direction=SimpleNamespace(value="LONG"),
+        entry_price=100.0,
+        composite_score=75.0,
+        component_scores={"flow": 8.0},
+        component_availability={"flow": True},
+        regime="trending",
+        rationale=["test"],
     )
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     rejection_id = store.record_rejection(candidate, "kernel_rejection", start)

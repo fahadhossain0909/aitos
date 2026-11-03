@@ -71,7 +71,9 @@ class CandidateOutcomeStore:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return parsed.timestamp()
 
-    def record_rejection(self, candidate: Any, reason: str, timestamp: Any = None) -> str:
+    def record_rejection(
+        self, candidate: Any, reason: str, timestamp: Any = None
+    ) -> str:
         entry = float(candidate.entry_price)
         if entry <= 0:
             return ""
@@ -125,9 +127,11 @@ class CandidateOutcomeStore:
             if not rows:
                 return 0
             for row in rows:
-                signed = (price / row["entry_price"] - 1.0) * (
-                    1.0 if row["side"] == "LONG" else -1.0
-                ) * 100.0
+                signed = (
+                    (price / row["entry_price"] - 1.0)
+                    * (1.0 if row["side"] == "LONG" else -1.0)
+                    * 100.0
+                )
                 best = max(float(row["best_return_pct"]), signed)
                 worst = min(float(row["worst_return_pct"]), signed)
                 mask = int(row["horizon_mask"])
@@ -147,8 +151,13 @@ class CandidateOutcomeStore:
                             signed_return_pct, mae_pct, mfe_pct)
                             VALUES (?, ?, ?, ?, ?, ?, ?)""",
                             (
-                                row["rejection_id"], horizon, now, price, signed,
-                                max(0.0, -worst), max(0.0, best),
+                                row["rejection_id"],
+                                horizon,
+                                now,
+                                price,
+                                signed,
+                                max(0.0, -worst),
+                                max(0.0, best),
                             ),
                         )
                         mask |= flag
@@ -171,7 +180,11 @@ class CandidateOutcomeStore:
             markouts = self._conn.execute(
                 "SELECT COUNT(*) FROM candidate_markouts"
             ).fetchone()[0]
-        return {"rejections_persisted": rejected, "pending_markouts": pending, "markouts_recorded": markouts}
+        return {
+            "rejections_persisted": rejected,
+            "pending_markouts": pending,
+            "markouts_recorded": markouts,
+        }
 
     def close(self) -> None:
         with self._lock:
@@ -205,20 +218,29 @@ class RankingHysteresis:
             bonus = 0.0
             if rank is not None and rank < max(1, top_n):
                 bonus = self.margin_points * (1.0 - rank / max(1, top_n))
-            return (float(candidate.composite_score) + bonus, float(candidate.composite_score))
+            return (
+                float(candidate.composite_score) + bonus,
+                float(candidate.composite_score),
+            )
 
         ordered = sorted(
             (c for c in candidates if c.composite_score >= 0),
             key=key,
             reverse=True,
         )
-        self._retained += sum(1 for c in ordered[:top_n] if c.symbol.upper() in previous)
-        self._challengers += sum(1 for c in ordered[:top_n] if c.symbol.upper() not in previous)
+        self._retained += sum(
+            1 for c in ordered[:top_n] if c.symbol.upper() in previous
+        )
+        self._challengers += sum(
+            1 for c in ordered[:top_n] if c.symbol.upper() not in previous
+        )
         self._previous_order = {
-            c.symbol.upper(): index for index, c in enumerate(ordered[: self.max_symbols])
+            c.symbol.upper(): index
+            for index, c in enumerate(ordered[: self.max_symbols])
         }
         self._previous_scores = {
-            c.symbol.upper(): float(c.composite_score) for c in ordered[: self.max_symbols]
+            c.symbol.upper(): float(c.composite_score)
+            for c in ordered[: self.max_symbols]
         }
         self._cycles += 1
         return ordered[:top_n]
