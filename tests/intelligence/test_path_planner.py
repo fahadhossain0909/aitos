@@ -104,3 +104,75 @@ def test_dedupe_near_levels():
     )
     # Should collapse to a single upside destination around 79400-79420
     assert len(plan.upside) <= 2
+
+
+def test_runner_target_extension_requires_path_runway():
+    planner = MarketPathPlanner()
+    state = _state(price=101.0)
+    plan = planner.plan(market_state=state, prior_highs=[104.0])
+    decision = planner.assess_target_extension(
+        plan=plan,
+        market_state=state,
+        side="LONG",
+        entry_price=100.0,
+        stop_distance=1.0,
+        base_target_price=103.0,
+        proposed_target_price=103.3,
+    )
+    assert decision.approved is True
+    assert decision.target_price == 103.3
+    assert decision.supporting_destination == 104.0
+
+
+def test_runner_target_extension_is_vetoed_by_opposing_order_flow():
+    planner = MarketPathPlanner()
+    state = _state(price=101.0, of=OrderFlowBias.SELLER_DOMINANT)
+    plan = planner.plan(market_state=state, prior_highs=[104.0])
+    decision = planner.assess_target_extension(
+        plan=plan,
+        market_state=state,
+        side="LONG",
+        entry_price=100.0,
+        stop_distance=1.0,
+        base_target_price=103.0,
+        proposed_target_price=103.3,
+    )
+    assert decision.approved is False
+    assert decision.target_price == 103.0
+    assert "opposing_order_flow" in decision.vetoes
+
+
+def test_runner_target_is_capped_before_structural_barrier():
+    planner = MarketPathPlanner()
+    state = _state(price=101.0)
+    plan = planner.plan(market_state=state, prior_highs=[103.2, 104.0])
+    decision = planner.assess_target_extension(
+        plan=plan,
+        market_state=state,
+        side="LONG",
+        entry_price=100.0,
+        stop_distance=1.0,
+        base_target_price=103.0,
+        proposed_target_price=103.3,
+    )
+    assert decision.approved is True
+    assert decision.barrier_price == 103.2
+    assert 103.0 < decision.target_price < 103.2
+
+
+def test_runner_target_extension_vetoes_when_path_has_no_runway():
+    planner = MarketPathPlanner()
+    state = _state(price=101.0)
+    plan = planner.plan(market_state=state, prior_highs=[103.2])
+    decision = planner.assess_target_extension(
+        plan=plan,
+        market_state=state,
+        side="LONG",
+        entry_price=100.0,
+        stop_distance=1.0,
+        base_target_price=103.0,
+        proposed_target_price=103.3,
+    )
+    assert decision.approved is False
+    assert decision.target_price == 103.0
+    assert "insufficient_path_runway" in decision.vetoes
