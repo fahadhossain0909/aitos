@@ -9,8 +9,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from aitos.config.paths import get_model_data_dir
 from aitos.config.tuning import TuningSettings, load_tuning_settings
 from aitos.intelligence.candidate_rotation import CandidateRotationManager
+from aitos.intelligence.opportunity_outcomes import (
+    CandidateOutcomeStore,
+    RankingHysteresis,
+)
 from aitos.core.contracts import (
     AITOSModule,
     Event,
@@ -221,6 +226,12 @@ class OpportunityScanner(AITOSModule):
             market_change_recheck_pct=self._tuning.analysis.market_change_recheck_pct,
         )
         self._lightweight_fingerprints: dict[str, str] = {}
+        self._candidate_outcomes = CandidateOutcomeStore(
+            get_model_data_dir() / "candidate_outcomes.sqlite3"
+        )
+        self._ranking_hysteresis = RankingHysteresis(
+            margin_points=self._tuning.analysis.ranking_hysteresis_points
+        )
 
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
         """Apply runtime-safe scanner budgets; universe changes require restart."""
@@ -301,11 +312,14 @@ class OpportunityScanner(AITOSModule):
                     1 for s in self._symbols if self._live_cache.snapshot(s) is not None
                 ),
                 "candidate_rotation": self._candidate_rotation.snapshot(),
+                "candidate_outcomes": self._candidate_outcomes.snapshot(),
+                "ranking_hysteresis": self._ranking_hysteresis.snapshot(),
             },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         await self._live_cache.shutdown()
+        self._candidate_outcomes.close()
         await self._exchange.close()
 
     async def emit_events(self) -> AsyncIterator[Event]:
@@ -317,6 +331,9 @@ class OpportunityScanner(AITOSModule):
 
     async def accept_live_trade(self, trade):
         await self._live_cache.accept_live_trade(trade)
+        self._candidate_outcomes.update_price(
+            trade.symbol, trade.price, getattr(trade, "timestamp", None)
+        )
 
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
@@ -1098,6 +1115,7 @@ class OpportunityScanner(AITOSModule):
         return self._top_n
 
     def record_candidate_rejection(self, candidate: ScanCandidate, reason: str) -> None:
+        self._candidate_outcomes.record_rejection(candidate, reason)
         self._candidate_rotation.record_rejection(
             candidate.symbol,
             reason,
@@ -1178,11 +1196,10 @@ class OpportunityScanner(AITOSModule):
         self, candidates: list[ScanCandidate], top_n: int | None = None
     ) -> list[ScanCandidate]:
         n = top_n if top_n is not None else self._top_n
-        return sorted(
-            [c for c in candidates if c.composite_score >= self._min_score_threshold],
-            key=lambda c: c.composite_score,
-            reverse=True,
-        )[:n]
+        eligible = [
+            c for c in candidates if c.composite_score >= self._min_score_threshold
+        ]
+        return self._ranking_hysteresis.rank(eligible, n)
 
     async def decide_with_kernel(self, candidate: ScanCandidate, kernel: Any) -> Any:
         from aitos.kernel.ai_kernel import DecisionContext

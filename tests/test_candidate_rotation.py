@@ -63,3 +63,48 @@ async def test_candidate_batches_are_yielded_sequentially(event_bus):
         candidate.symbol == "BTCUSDT" for batch in batches for candidate in batch
     )
     await scanner.shutdown()
+
+
+def test_ranking_hysteresis_retains_incumbent_when_scores_are_close():
+    from types import SimpleNamespace
+    from aitos.intelligence.opportunity_outcomes import RankingHysteresis
+
+    ranker = RankingHysteresis(margin_points=1.0)
+    incumbent = SimpleNamespace(symbol="BTCUSDT", composite_score=70.0)
+    challenger = SimpleNamespace(symbol="ETHUSDT", composite_score=70.5)
+    assert ranker.rank([incumbent, challenger], 1)[0].symbol == "BTCUSDT"
+    assert ranker.rank([incumbent, challenger], 1)[0].symbol == "BTCUSDT"
+
+
+def test_ranking_hysteresis_allows_clear_challenger():
+    from types import SimpleNamespace
+    from aitos.intelligence.opportunity_outcomes import RankingHysteresis
+
+    ranker = RankingHysteresis(margin_points=1.0)
+    incumbent = SimpleNamespace(symbol="BTCUSDT", composite_score=70.0)
+    challenger = SimpleNamespace(symbol="ETHUSDT", composite_score=70.5)
+    ranker.rank([incumbent, challenger], 1)
+    stronger = SimpleNamespace(symbol="ETHUSDT", composite_score=73.0)
+    assert ranker.rank([incumbent, stronger], 1)[0].symbol == "ETHUSDT"
+
+
+def test_candidate_outcome_store_persists_horizon_markouts(tmp_path):
+    from types import SimpleNamespace
+    from datetime import datetime, timezone
+    from aitos.intelligence.opportunity_outcomes import CandidateOutcomeStore
+
+    store = CandidateOutcomeStore(tmp_path / "outcomes.sqlite3")
+    candidate = SimpleNamespace(
+        symbol="BTCUSDT", direction=SimpleNamespace(value="LONG"),
+        entry_price=100.0, composite_score=75.0,
+        component_scores={"flow": 8.0}, component_availability={"flow": True},
+        regime="trending", rationale=["test"],
+    )
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rejection_id = store.record_rejection(candidate, "kernel_rejection", start)
+    assert rejection_id
+    store.update_price("BTCUSDT", 101.0, start.timestamp() + 60)
+    store.update_price("BTCUSDT", 99.0, start.timestamp() + 300)
+    store.update_price("BTCUSDT", 102.0, start.timestamp() + 900)
+    assert store.snapshot()["markouts_recorded"] == 3
+    store.close()

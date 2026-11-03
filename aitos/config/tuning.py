@@ -63,6 +63,7 @@ class AnalysisTuning(BaseModel):
     rejection_cooldown_seconds: float = Field(default=15.0, ge=0, le=3600)
     kernel_rejection_cooldown_seconds: float = Field(default=20.0, ge=0, le=3600)
     market_change_recheck_pct: float = Field(default=0.15, ge=0, le=100)
+    ranking_hysteresis_points: float = Field(default=1.0, ge=0, le=10)
     expensive_analysis_concurrency: int = Field(default=2, ge=1, le=256)
     lightweight_concurrency: int = Field(default=8, ge=1, le=512)
     timeout_seconds: float = Field(default=5.0, gt=0, le=300)
@@ -282,6 +283,11 @@ def _env_overrides() -> dict[str, Any]:
         "AITOS_TUNING_ANALYSIS_MARKET_CHANGE_RECHECK_PCT": (
             "analysis",
             "market_change_recheck_pct",
+            float,
+        ),
+        "AITOS_TUNING_ANALYSIS_RANKING_HYSTERESIS_POINTS": (
+            "analysis",
+            "ranking_hysteresis_points",
             float,
         ),
         "AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY": (

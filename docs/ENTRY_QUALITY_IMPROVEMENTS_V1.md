@@ -72,3 +72,13 @@ These defaults should be reviewed against the observed AITOS paper-trading unive
 - `market_change_recheck_pct`: lightweight fingerprint change threshold that releases cooldown early.
 
 Low-resource, balanced and high-performance profiles use progressively larger pools and budgets. These are compute defaults, not trading-risk settings. Validate latency, missed-opportunity rate, false-rejection rate and paper-trading expectancy before live use.
+
+
+## Quantitative Opportunity Management (V2)
+
+- Every downstream candidate rejection is persisted in a bounded SQLite journal under the configured model-data directory. The journal records symbol, side, entry reference, raw composite score, rejection reason, regime and component evidence.
+- As live trade ticks arrive, the journal records directional markouts at 1m, 5m and 15m. Each horizon includes signed return, adverse excursion (MAE) and favorable excursion (MFE). The state and completed markouts survive process restarts; this is measurement only and does not train or alter a strategy automatically.
+- Markouts are based on the first observed tick at or after each horizon, not an interpolated candle close. If no tick arrives, that horizon remains pending rather than fabricating a value.
+- Ranking hysteresis provides a configurable, bounded ordering advantage to incumbents within the current top-N. It never changes raw component scores, composite score, confidence, eligibility threshold or risk checks. A sufficiently stronger challenger displaces an incumbent.
+- Hysteresis is an ordering-stability control, not a predictive edge. Compare churn, missed-opportunity rate, rejection precision, markout distribution and paper expectancy with hysteresis enabled/disabled before live use.
+- SQLite uses WAL and a bounded retention count. It is a local operational journal; export/centralize it before multi-process or multi-host deployments. Each process must not independently write the same SQLite file over a network filesystem.
