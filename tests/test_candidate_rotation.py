@@ -67,6 +67,7 @@ async def test_candidate_batches_are_yielded_sequentially(event_bus):
 
 def test_ranking_hysteresis_retains_incumbent_when_scores_are_close():
     from types import SimpleNamespace
+
     from aitos.intelligence.opportunity_outcomes import RankingHysteresis
 
     ranker = RankingHysteresis(margin_points=1.0)
@@ -79,6 +80,7 @@ def test_ranking_hysteresis_retains_incumbent_when_scores_are_close():
 
 def test_ranking_hysteresis_allows_clear_challenger():
     from types import SimpleNamespace
+
     from aitos.intelligence.opportunity_outcomes import RankingHysteresis
 
     ranker = RankingHysteresis(margin_points=1.0)
@@ -91,8 +93,9 @@ def test_ranking_hysteresis_allows_clear_challenger():
 
 
 def test_candidate_outcome_store_persists_horizon_markouts(tmp_path):
-    from types import SimpleNamespace
     from datetime import datetime, timezone
+    from types import SimpleNamespace
+
     from aitos.intelligence.opportunity_outcomes import CandidateOutcomeStore
 
     store = CandidateOutcomeStore(tmp_path / "outcomes.sqlite3")
@@ -120,6 +123,7 @@ def test_candidate_outcome_store_persists_horizon_markouts(tmp_path):
 
 def test_ranking_hysteresis_retains_history_across_separate_batches():
     from types import SimpleNamespace
+
     from aitos.intelligence.opportunity_outcomes import RankingHysteresis
 
     ranker = RankingHysteresis(margin_points=1.0)

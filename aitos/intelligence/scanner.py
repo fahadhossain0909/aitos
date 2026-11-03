@@ -11,11 +11,6 @@ from typing import Any
 
 from aitos.config.paths import get_model_data_dir
 from aitos.config.tuning import TuningSettings, load_tuning_settings
-from aitos.intelligence.candidate_rotation import CandidateRotationManager
-from aitos.intelligence.opportunity_outcomes import (
-    CandidateOutcomeStore,
-    RankingHysteresis,
-)
 from aitos.core.contracts import (
     AITOSModule,
     Event,
@@ -30,6 +25,7 @@ from aitos.intelligence import indicators
 from aitos.intelligence.a_stat_bridge import AStatBridge
 from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.auction import auction_context_score
+from aitos.intelligence.candidate_rotation import CandidateRotationManager
 from aitos.intelligence.entry_quality import (
     breakout_acceptance_score,
     relative_strength_score,
@@ -51,6 +47,10 @@ from aitos.intelligence.liquidity_tracker import LiquidityTracker
 from aitos.intelligence.live_auction import live_auction_score
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.open_interest import oi_trend_score
+from aitos.intelligence.opportunity_outcomes import (
+    CandidateOutcomeStore,
+    RankingHysteresis,
+)
 from aitos.intelligence.order_flow_engine import OrderFlowEngine
 from aitos.intelligence.orderflow_liquidity_interaction import (
     FlowLiquidityInteractionEngine,
