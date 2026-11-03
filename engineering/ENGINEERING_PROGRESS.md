@@ -13,18 +13,24 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 - Trading mode: NOT VERIFIED
 - Open overlapping testnet PRs observed: #210, #213, #215
 
+## Pull request
+- Draft PR: https://github.com/fahadhossain0909/aitos/pull/216
+- Head commit before this status update: `95b74923d360ed1073c99a966ff65cbf78a45a72`
+- Changed files: 10 (564 additions, 0 deletions at PR creation)
+- GitHub Actions PR workflow runs observed at initial check: none; combined status checks: none. CI is PENDING, not passed.
+
 ## Progress
 | Workstream | Status | Evidence / notes |
 |---|---|---|
 | Repository and open PR discovery | DONE | GitHub branch, commit and PR search |
 | Existing agent instructions review | DONE | `skills/aitos-skill.md` and `skills/aitos-prompt.md` exist; root AGENTS.md absent |
-| Root agent contract | IN PROGRESS | Added on this branch |
-| Engineering operating model | IN PROGRESS | Added on this branch |
-| Architecture/data-flow documents | IN PROGRESS | Initial logical map; source/runtime confirmation remains |
-| Module inventory | IN PROGRESS | Initial README-backed inventory |
-| Telemetry specification | IN PROGRESS | Proposed coverage; existing metrics must be audited |
+| Root agent contract | DONE | Added on this branch |
+| Engineering operating model | DONE | Added on this branch |
+| Architecture/data-flow documents | DONE (initial map; runtime confirmation pending) | Initial logical map; source/runtime confirmation remains |
+| Module inventory | DONE (initial inventory; source-level expansion pending) | Initial README-backed inventory |
+| Telemetry specification | DONE (specification only; implementation audit pending) | Proposed coverage; existing metrics must be audited |
 | Latency baseline | NOT MEASURED | No runtime session or histogram export inspected |
-| Root-cause register | IN PROGRESS | Documentation findings only; no runtime defect asserted |
+| Root-cause register | DONE (initial documentation findings only) | Documentation findings only; no runtime defect asserted |
 | Runtime audit | NOT STARTED | Requires safe local/isolated environment |
 | Automated tests / CI | NOT RUN | Documentation-only changes; branch CI pending |
 | Independent review | NOT STARTED | Must review final diff and CI |
