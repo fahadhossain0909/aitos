@@ -618,11 +618,14 @@ async def run_scan_and_trade_cycle(
                 portfolio_tracker.build_portfolio_state(components.trade_lifecycle),
             )
             submitted += 1
-            if trade.state == TradeLifecycleState.REJECTED:
-                components.scanner.record_candidate_rejection(candidate, "lifecycle_rejection")
-            else:
+            if trade.state in {
+                TradeLifecycleState.ORDER_SUBMITTED,
+                TradeLifecycleState.POSITION_OPENED,
+            }:
                 accepted_opportunities += 1
                 components.scanner.clear_candidate_cooldown(candidate.symbol)
+            else:
+                components.scanner.record_candidate_rejection(candidate, "lifecycle_rejection")
             logger.info("candidate lifecycle decision", extra={"aitos_extra": {
                 "symbol": candidate.symbol,
                 "score": candidate.composite_score,
@@ -636,7 +639,7 @@ async def run_scan_and_trade_cycle(
             rejection_reason = str(getattr(trade, "rejection_reason", "") or "").lower()
             if trade.state == TradeLifecycleState.REJECTED and any(
                 marker in rejection_reason
-                for marker in ("circuit breaker", "drawdown limit", "daily loss")
+                for marker in ("circuit breaker", "drawdown limit", "daily loss", "hard limit breach", "risk limit")
             ):
                 logger.warning("candidate refill halted by portfolio risk rejection",
                                extra={"aitos_extra":{"symbol":candidate.symbol,
