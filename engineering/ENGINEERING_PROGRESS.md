@@ -49,6 +49,7 @@ Establish a reusable, evidence-driven engineering operating model for any AI cod
 - Confirmed and implemented a telemetry semantics fix (AITOS-ENG-004): omit percentiles when no observations exist; expose sample count; retain genuine observed zero; added regression test and Grafana panel. CI/runtime verification pending.
 - Existing data-flow registry is process-local and retains a bounded 2,048 latency samples per stage/symbol bucket.
 - Prometheus scrape interval is configured to 15 seconds for paper/live targets; actual scrape status remains NOT TESTED.
+- Paper runner source audit found startup cleanup coverage begins only after a long initialization sequence (AITOS-ENG-005); auxiliary-module self-heal coverage differs from health-report coverage (AITOS-ENG-006); degraded health returns HTTP 200 intentionally (AITOS-ENG-007); position event API is bounded process-local memory (AITOS-ENG-008).
 
 ## Next actions
 1. Finish documentation commits and open a draft PR.
