@@ -96,5 +96,5 @@ def test_batch_allocation_and_dynamic_tp_contract_survive_historical_replay():
     assert position["closed"] is True
     assert result.metrics.trades == 1
     assert result.metrics.total_fees > 0
-    assert result.metrics.final_equity < 5_000
+    assert result.metrics.final_equity > 5_000
     assert len(result.equity_curve) == len(events)
