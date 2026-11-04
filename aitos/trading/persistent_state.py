@@ -187,8 +187,13 @@ class DurableTradingStateStore:
         client = self._client()
         await client.insert(
             "paper_closed_trade_ledger",
-            [[trade.trade_id, json.dumps(trade.to_dict(), sort_keys=True, default=str),
-              datetime.now(timezone.utc)]],
+            [
+                [
+                    trade.trade_id,
+                    json.dumps(trade.to_dict(), sort_keys=True, default=str),
+                    datetime.now(timezone.utc),
+                ]
+            ],
             column_names=["trade_id", "payload_json", "updated_at"],
         )
 
@@ -380,9 +385,7 @@ class TradeStatePersistence:
         load_closed = getattr(self._store, "load_closed_trades", None)
         closed_trades = await load_closed() if callable(load_closed) else []
         if closed_trades and hasattr(self._lifecycle, "_closed_trades"):
-            existing = {
-                trade.trade_id for trade in self._lifecycle._closed_trades
-            }
+            existing = {trade.trade_id for trade in self._lifecycle._closed_trades}
             self._lifecycle._closed_trades.extend(
                 trade for trade in closed_trades if trade.trade_id not in existing
             )

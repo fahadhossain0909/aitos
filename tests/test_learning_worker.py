@@ -288,7 +288,6 @@ def test_worker_trains_only_valid_normalized_trade_rewards():
     assert worker._cursor_experience_id.endswith("333333333333")
 
 
-
 def test_worker_recovers_crash_after_model_checkpoint_before_cursor_save(tmp_path):
     model_path = str(tmp_path / "deep_value.pkl")
     state_path = tmp_path / "worker_state.json"
@@ -364,7 +363,8 @@ def test_concurrent_scorers_merge_updates_without_lost_samples(tmp_path):
 
     # Re-delivery of an existing ID from a separate scorer is harmless.
     duplicate = DeepValueRLScorer(state_path=path)
-    assert duplicate.update_experience_and_persist(
+    duplicate_result = duplicate.update_experience_and_persist(
         "concurrent-exp-3", "BTCUSDT", {"trend_strength": 8.0}, 0.25
-    ) is False
+    )
+    assert duplicate_result is False
     assert duplicate.n_samples_seen == 12

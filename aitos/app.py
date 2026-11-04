@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import Any, Protocol
 
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings

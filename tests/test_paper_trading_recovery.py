@@ -213,7 +213,6 @@ async def test_resubscription_reports_missing_symbols_as_failure(
     assert result["failures"] == 1
 
 
-
 @pytest.mark.asyncio
 async def test_closed_trade_history_is_restored_for_equity_recovery(
     event_bus, paper_trade
