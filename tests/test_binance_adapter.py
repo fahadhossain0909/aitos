@@ -272,7 +272,7 @@ async def test_fetch_income_history_requires_credentials():
 @pytest.mark.asyncio
 async def test_fetch_income_history_signs_request_and_deduplicates_transactions():
     pattern = re.compile(
-        r"https://fapi\\.binance\\.com/fapi/v1/income\\?.*signature=[a-f0-9]{64}"
+        re.escape(f"{REST_BASE_URL}/fapi/v1/income") + r"\\?.*signature=[a-f0-9]{64}"
     )
     rows = [
         {
