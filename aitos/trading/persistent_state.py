@@ -386,11 +386,13 @@ class TradeStatePersistence:
         closed_trades = await load_closed() if callable(load_closed) else []
         closed_ids = {trade.trade_id for trade in closed_trades}
         trades = await self._store.load_open_trades()
+        restored_open_count = 0
         for trade in trades:
             # A close archive is authoritative if a crash occurred between
             # archiving the close and deleting the stale open-state row.
             if trade.trade_id not in closed_ids:
                 self._lifecycle._open_trades[trade.trade_id] = trade
+                restored_open_count += 1
         if closed_trades and hasattr(self._lifecycle, "_closed_trades"):
             existing = {trade.trade_id for trade in self._lifecycle._closed_trades}
             self._lifecycle._closed_trades.extend(
@@ -414,7 +416,7 @@ class TradeStatePersistence:
             )
         else:
             logger.info("no open trades to restore from durable state")
-        return len(trades)
+        return restored_open_count
 
     async def resubscribe_restored_positions(self) -> dict[str, Any]:
         """Reconcile restored position symbols with initialized live market feeds."""
