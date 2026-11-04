@@ -18,6 +18,12 @@ class FakeStateStore:
     async def load_closed_trades(self):
         return list(getattr(self, "closed_trades", []))
 
+    async def load_peak_equity(self, asset):
+        return getattr(self, "peak_equity", None)
+
+    async def save_drawdown(self, asset, equity, peak):
+        self.saved_drawdown = (asset, equity, peak)
+
 
 class FakeLifecycle:
     def __init__(self):
@@ -257,3 +263,28 @@ async def test_closed_trade_restore_is_idempotent(event_bus, paper_trade):
 
     assert len(lifecycle._closed_trades) == 1
     assert lifecycle._closed_trades[0].pnl == -7.0
+
+
+
+@pytest.mark.asyncio
+async def test_paper_portfolio_restores_peak_equity_and_persists_drawdown(
+    paper_trade,
+):
+    from aitos.app import PaperPortfolioTracker
+
+    paper_trade.state = TradeLifecycleState.POSITION_CLOSED
+    paper_trade.pnl = -20.0
+    store = FakeStateStore()
+    store.peak_equity = 1_050.0
+    tracker = PaperPortfolioTracker(starting_equity_usd=1_000.0, state_store=store)
+    lifecycle = FakeLifecycle()
+    lifecycle._closed_trades = [paper_trade]
+
+    await tracker.restore()
+    portfolio = tracker.build_portfolio_state(lifecycle)
+
+    assert portfolio.equity_usd == 980.0
+    assert portfolio.peak_equity_usd == 1_050.0
+
+    await tracker.persist_state(lifecycle)
+    assert store.saved_drawdown == ("PAPER", 980.0, 1_050.0)
