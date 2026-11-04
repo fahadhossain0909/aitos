@@ -93,14 +93,23 @@ class WalkForwardValidator:
             else None
         )
         positive = sum(1 for w in windows if w.result.metrics.total_return > 0)
+        # A locked holdout is mandatory: treating a missing holdout as a
+        # pass silently downgrades out-of-sample validation to in-sample/
+        # walk-forward-only evidence.
         passed = (
             bool(windows)
+            and holdout is not None
             and positive >= self.min_positive_windows
-            and (holdout is None or holdout.metrics.total_return > 0)
+            and holdout.metrics.total_return > 0
         )
-        reason = (
-            "walk-forward and locked holdout passed"
-            if passed
-            else "candidate failed walk-forward/holdout requirements"
-        )
+        if not windows:
+            reason = "no walk-forward test windows available"
+        elif holdout is None:
+            reason = "locked holdout has no events"
+        elif positive < self.min_positive_windows:
+            reason = "insufficient positive walk-forward windows"
+        elif holdout.metrics.total_return <= 0:
+            reason = "locked holdout return is not positive"
+        else:
+            reason = "walk-forward and locked holdout passed"
         return WalkForwardResult(tuple(windows), holdout, passed, reason)
