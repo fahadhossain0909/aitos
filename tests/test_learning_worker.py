@@ -1,6 +1,5 @@
 import asyncio
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -357,12 +356,16 @@ def test_worker_cooperative_stop_waits_for_loop_exit_and_closes_client():
     worker._lock_handle = None
     worker.poll_seconds = 60
     worker.client = Client()
-    worker.run_once = lambda: 0
+    started = threading.Event()
 
+    def run_once():
+        started.set()
+        return 0
+
+    worker.run_once = run_once
     with ThreadPoolExecutor(max_workers=1) as pool:
         task = pool.submit(worker.run_forever)
-        # Ensure the loop has entered its wait before requesting shutdown.
-        time.sleep(0.02)
+        assert started.wait(timeout=1)
         worker.request_stop()
         task.result(timeout=2)
 
