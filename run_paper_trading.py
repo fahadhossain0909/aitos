@@ -386,6 +386,10 @@ async def main() -> None:
         learning_worker.request_stop()
         try:
             await asyncio.shield(learning_task)
+        except asyncio.CancelledError:
+            logger.warning("continual-learning worker task was cancelled during shutdown")
+        except Exception:
+            logger.exception("continual-learning worker exited with an error")
         finally:
             await asyncio.to_thread(learning_worker.shutdown)
         await price_safety_net.stop()
