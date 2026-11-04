@@ -80,8 +80,13 @@ def test_correlation_aware_budget_scales_correlated_risk():
         risk_budget=100,
         correlation_matrix={"alpha": {"beta": 0.95}, "beta": {"alpha": 0.95}},
     )
-    assert sum(item.projected_loss for item in correlated) < sum(
-        item.projected_loss for item in independent
+    correlated_risk = CapitalAllocator._correlated_risk(
+        {item.strategy_id: item.projected_loss for item in correlated},
+        {"alpha": {"beta": 0.95}, "beta": {"alpha": 0.95}},
+    )
+    assert correlated_risk <= 100.000001
+    assert sum(item.notional for item in correlated) < sum(
+        item.notional for item in independent
     )
 
 
@@ -91,6 +96,7 @@ def test_correlation_matrix_rejects_asymmetric_values():
     try:
         allocator.allocate(
             requests,
+            risk_budget=100,
             correlation_matrix={"alpha": {"beta": 0.8}, "beta": {"alpha": 0.2}},
         )
         assert False, "asymmetric correlation must fail closed"
@@ -111,7 +117,7 @@ def test_correlation_matrix_must_be_positive_semidefinite():
         "gamma": {"alpha": -0.9, "beta": -0.9},
     }
     try:
-        allocator.allocate(requests, correlation_matrix=invalid)
+        allocator.allocate(requests, risk_budget=100, correlation_matrix=invalid)
         assert False, "indefinite correlation matrix must fail closed"
     except ValueError as exc:
         assert "positive semidefinite" in str(exc)
