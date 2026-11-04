@@ -9,6 +9,8 @@ from typing import Awaitable, Callable, Hashable
 
 
 def timeframe_delta(timeframe: str) -> timedelta:
+    if not timeframe or len(timeframe) < 2:
+        raise ValueError("timeframe must contain a positive amount and unit")
     unit = timeframe[-1]
     amount = int(timeframe[:-1])
     if amount < 1:
@@ -50,6 +52,8 @@ class HigherTimeframeCandleCache:
         limit: int,
         fetch: Callable[[], Awaitable[list]],
     ) -> tuple[list, dict]:
+        if limit < 1:
+            raise ValueError("limit must be positive")
         key = (symbol.upper(), timeframe, int(limit))
         now = self._clock().astimezone(timezone.utc)
         entry = self._entries.get(key)
@@ -76,8 +80,17 @@ class HigherTimeframeCandleCache:
             closed.sort(key=lambda candle: candle.close_time)
             if not closed:
                 if entry is not None:
+                    # A forming-only response is evidence that the endpoint
+                    # has not published the newly closed bar yet, not an empty
+                    # cache. Keep serving the last good snapshot with backoff.
+                    self._entries[key] = _Entry(
+                        entry.candles,
+                        entry.latest_close,
+                        now + timedelta(seconds=5),
+                    )
+                    status = "unchanged_fallback" if fetched else "stale_fallback"
                     return list(entry.candles), {
-                        "cache": "stale_fallback",
+                        "cache": status,
                         "stale": True,
                         "latest_closed_at": entry.latest_close.isoformat(),
                     }
