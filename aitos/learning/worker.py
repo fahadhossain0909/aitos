@@ -15,6 +15,7 @@ import clickhouse_connect
 
 from aitos.config.paths import get_model_data_dir, resolve_project_path
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
+from aitos.learning.regime_feedback import RegimeRewardCalibrator, normalize_regime
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ class ContinualLearningWorker:
         self._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
         self._processed = 0
         self._legacy_processed: set[str] = set()
+        self._regime_scorers: dict[str, DeepValueRLScorer] = {}
+        self._reward_calibrator = RegimeRewardCalibrator()
         self._acquire_singleton_lock()
         try:
             self._load_state()
@@ -142,6 +145,7 @@ class ContinualLearningWorker:
                 state.get("cursor_experience_id", self._cursor_experience_id)
             )
             self._processed = int(state.get("processed_count", 0))
+            self._reward_calibrator.restore(state.get("regime_reward_history", {}))
             if "cursor_timestamp" not in state:
                 self._legacy_processed = set(
                     str(value) for value in state.get("processed_experiences", [])
@@ -159,6 +163,7 @@ class ContinualLearningWorker:
             "processed_count": self._processed,
             "processed_experiences": sorted(self._legacy_processed),
             "n_samples_seen": self.scorer.n_samples_seen,
+            "regime_reward_history": self._reward_calibrator.snapshot(),
         }
         tmp = self.state_path.with_suffix(
             self.state_path.suffix + f".{os.getpid()}.tmp"
@@ -272,6 +277,33 @@ class ContinualLearningWorker:
         normalized = reward / risk_amount
         return normalized if isfinite(normalized) else None
 
+    def _scorer_for_regime(self, regime: str) -> DeepValueRLScorer:
+        """Use an independent durable checkpoint for each market regime."""
+        key = normalize_regime(regime)
+        base_path = getattr(self.scorer, "_state_path", None)
+        if base_path is None:
+            return self.scorer
+        cached = self._regime_scorers.get(key)
+        if cached is not None:
+            return cached
+        model_path = Path(base_path).parent / "regimes" / f"{key}.pkl"
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        scorer = DeepValueRLScorer(state_path=str(model_path))
+        scorer.load_state(str(model_path))
+        self._regime_scorers[key] = scorer
+        return scorer
+
+    @staticmethod
+    def _row_regime(row: dict[str, Any]) -> str:
+        metadata = ContinualLearningWorker._json_object(row.get("metadata_json"))
+        risk_state = ContinualLearningWorker._json_object(row.get("risk_state_json"))
+        features = ContinualLearningWorker._json_object(row.get("features_json"))
+        return normalize_regime(
+            metadata.get("market_regime") or metadata.get("regime")
+            or risk_state.get("market_regime") or risk_state.get("regime")
+            or features.get("market_regime") or features.get("regime")
+        )
+
     def run_once(self) -> int:
         rows = self._rows()
         processed_now = 0
@@ -296,11 +328,14 @@ class ContinualLearningWorker:
             if features and reward_r_multiple is not None:
                 apply = getattr(self.scorer, "update_experience_and_persist", None)
                 if callable(apply):
-                    applied = apply(
-                        experience_id,
-                        str(row["symbol"]),
-                        features,
-                        reward_r_multiple,
+                    regime = self._row_regime(row)
+                    calibrated_reward = self._reward_calibrator.calibrate(
+                        regime, reward_r_multiple
+                    )
+                    regime_scorer = self._scorer_for_regime(regime)
+                    regime_apply = getattr(regime_scorer, "update_experience_and_persist", apply)
+                    applied = regime_apply(
+                        experience_id, str(row["symbol"]), features, calibrated_reward
                     )
                     if applied:
                         processed_now += 1
@@ -326,7 +361,7 @@ class ContinualLearningWorker:
                     "cursor_timestamp": self._cursor_timestamp,
                     "cursor_experience_id": self._cursor_experience_id,
                     "processed_count": self._processed,
-                    "samples_seen": self.scorer.n_samples_seen,
+                    "samples_seen": self.scorer.n_samples_seen + sum(s.n_samples_seen for s in self._regime_scorers.values()),
                 }
             },
         )
