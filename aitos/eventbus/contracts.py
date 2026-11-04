@@ -29,9 +29,11 @@ class SubscriptionProtocol(Protocol):
 class EventBusProtocol(Protocol):
     """Structural contract consumed by AITOS modules.
 
-    Implementations must preserve per-topic ordering and at-least-once
-    delivery for durable subscriptions. start_id="0" means replay from
-    the beginning/oldest retained event; start_id="$" means live-only.
+    Ordering, acknowledgement, retry, and durability guarantees are transport-
+    specific: Redis Streams provides durable consumer-group delivery, while
+    InProcessBus is volatile broadcast delivery without durable ACK/retry.
+    start_id="0" means replay from the beginning/oldest retained event;
+    start_id="$" means live-only.
     """
 
     @property
