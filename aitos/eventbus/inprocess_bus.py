@@ -4,7 +4,7 @@ This transport intentionally does not provide persistence, cross-process
 delivery, durable ACKs, or crash recovery. Use Redis Streams for paper/live
 runtimes until a durable backend is explicitly configured.
 """
- 
+
 from __future__ import annotations
 
 import asyncio
