@@ -19,9 +19,9 @@ def test_factory_creates_inprocess_for_development() -> None:
     assert isinstance(bus, InProcessBus)
 
 
-@pytest.mark.parametrize("mode", ["paper", "live", "production", "prod"])
+@pytest.mark.parametrize("mode", ["paper", "live", "production", "prod", "paper-trading", "live-trading", "staging", "unknown", ""])
 def test_factory_rejects_volatile_backend_for_trading_modes(mode: str) -> None:
-    with pytest.raises(ValueError, match="forbidden"):
+    with pytest.raises(ValueError, match="only allowed"):
         create_event_bus({"backend": "inprocess", "runtime_mode": mode})
 
 
