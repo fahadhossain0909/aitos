@@ -98,3 +98,81 @@ async def test_replay_filters_by_event_timestamp() -> None:
 
 async def _append(result: list[Event], event: Event) -> None:
     result.append(event)
+
+
+
+async def test_history_limit_is_global_across_topics() -> None:
+    bus = InProcessBus(history_limit=2)
+    await bus.initialize({})
+    await bus.publish(Event(topic="market.trade", payload={"n": 1}))
+    await bus.publish(Event(topic="market.book", payload={"n": 2}))
+    await bus.publish(Event(topic="market.trade", payload={"n": 3}))
+
+    received: list[Event] = []
+    await bus.replay(
+        "market.trade",
+        datetime(2000, 1, 1, tzinfo=timezone.utc),
+        lambda event: _append(received, event),
+    )
+    assert [event.payload["n"] for event in received] == [3]
+    health = await bus.health_check()
+    assert health.details["history_limit_total"] == 2
+    await bus.shutdown()
+
+
+async def test_subscription_cancel_stops_future_delivery() -> None:
+    bus = await _new_bus()
+    received: list[Event] = []
+    first_event = asyncio.Event()
+
+    async def handler(event: Event) -> None:
+        received.append(event)
+        first_event.set()
+
+    subscription = await bus.subscribe("market.*", handler, start_id="$")
+    await bus.publish(Event(topic="market.trade", payload={"n": 1}))
+    await asyncio.wait_for(first_event.wait(), timeout=1)
+    subscription.cancel()
+    await asyncio.sleep(0)
+    await bus.publish(Event(topic="market.trade", payload={"n": 2}))
+    await asyncio.sleep(0)
+    assert [event.payload["n"] for event in received] == [1]
+    await bus.shutdown()
+
+
+async def test_handler_failure_is_counted_and_consumer_continues() -> None:
+    bus = await _new_bus()
+    received: list[int] = []
+    second_event = asyncio.Event()
+
+    async def handler(event: Event) -> None:
+        if event.payload["n"] == 1:
+            raise RuntimeError("expected test failure")
+        received.append(event.payload["n"])
+        second_event.set()
+
+    await bus.subscribe("market.trade", handler, start_id="$")
+    await bus.publish(Event(topic="market.trade", payload={"n": 1}))
+    await bus.publish(Event(topic="market.trade", payload={"n": 2}))
+    await asyncio.wait_for(second_event.wait(), timeout=1)
+    health = await bus.health_check()
+    assert received == [2]
+    assert health.details["handler_failures"] == 1
+    await bus.shutdown()
+
+
+async def test_request_reply_timeout_cleans_pending_future() -> None:
+    bus = await _new_bus()
+    try:
+        try:
+            await bus.request_reply(
+                Event(topic="risk.check", payload={}),
+                timeout_ms=1,
+            )
+        except TimeoutError:
+            pass
+        else:
+            raise AssertionError("request_reply should time out without a subscriber")
+        assert bus._pending_replies == {}
+    finally:
+        await bus.shutdown()
