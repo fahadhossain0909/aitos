@@ -272,7 +272,9 @@ async def test_fetch_income_history_requires_credentials():
 @pytest.mark.asyncio
 async def test_fetch_income_history_signs_request_and_deduplicates_transactions():
     adapter = BinanceFuturesAdapter(api_key="test-key", api_secret="test-secret")
-    pattern = re.compile(r"https://fapi\\.binance\\.com/fapi/v1/income\\?.*signature=[a-f0-9]{64}")
+    pattern = re.compile(
+        r"https://fapi\\.binance\\.com/fapi/v1/income\\?.*signature=[a-f0-9]{64}"
+    )
     rows = [
         {
             "incomeType": "COMMISSION",
