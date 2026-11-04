@@ -83,9 +83,7 @@ class CapitalAllocator:
             if not isfinite(available_capital) or available_capital < 0:
                 raise ValueError("available_capital must be finite and non-negative")
             budget = min(budget, available_capital)
-        if risk_budget is not None and (
-            not isfinite(risk_budget) or risk_budget < 0
-        ):
+        if risk_budget is not None and (not isfinite(risk_budget) or risk_budget < 0):
             raise ValueError("risk_budget must be finite and non-negative")
         if not requests or budget <= 0 or risk_budget == 0:
             return ()
