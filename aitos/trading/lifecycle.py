@@ -819,6 +819,64 @@ class TradeLifecycle(AITOSModule):
         # HOLD → retain the position; only independent protection logic follows
         return None
 
+    async def apply_cost_adjustment(
+        self,
+        trade_id: str,
+        *,
+        adjustment_id: str,
+        kind: str,
+        amount_usd: float,
+    ) -> Trade:
+        """Apply an idempotent realized fee or funding adjustment.
+
+        Fee amounts are positive costs; funding is signed (positive means
+        received, negative means paid). Producers must supply stable IDs.
+        """
+        if not adjustment_id or not adjustment_id.strip():
+            raise ValueError("adjustment_id must not be empty")
+        if kind not in {"fee", "funding"}:
+            raise ValueError("kind must be 'fee' or 'funding'")
+        if not math.isfinite(amount_usd) or (kind == "fee" and amount_usd < 0):
+            raise ValueError("cost adjustment must be finite; fees cannot be negative")
+        trade = self._open_trades.get(trade_id)
+        if trade is None:
+            trade = next(
+                (item for item in self._closed_trades if item.trade_id == trade_id),
+                None,
+            )
+        if trade is None:
+            raise TradeNotFoundError(f"No trade with id '{trade_id}'")
+        if adjustment_id in trade.cost_adjustments:
+            return trade
+
+        trade.cost_adjustments[adjustment_id] = {
+            "kind": kind,
+            "amount_usd": float(amount_usd),
+            "recorded_at": utc_now_iso(),
+        }
+        if kind == "fee":
+            trade.fees_paid_usd += float(amount_usd)
+        else:
+            trade.funding_pnl_usd += float(amount_usd)
+        if trade.gross_realized_pnl_usd != 0.0 or trade.state == TradeLifecycleState.POSITION_CLOSED:
+            trade.pnl = round(
+                trade.gross_realized_pnl_usd - trade.fees_paid_usd + trade.funding_pnl_usd,
+                8,
+            )
+        trade.updated_at = utc_now_iso()
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_POSITION_UPDATED,
+                payload={
+                    **trade.to_dict(),
+                    "reason": "trade_cost_adjustment",
+                    "adjustment_id": adjustment_id,
+                    "adjustment_kind": kind,
+                },
+                source_module=self.module_id,
+            )
+        )
+        return trade
     async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
         """Measure close transitions while leaving hard exit logic authoritative."""
         import time
@@ -880,10 +938,12 @@ class TradeLifecycle(AITOSModule):
         direction = 1 if trade.side == TradeSide.LONG else -1
         pnl_pct = ((exit_price - trade.entry_price) / trade.entry_price) * direction
         realized_on_remaining = trade.position_size_usd * pnl_pct
-        trade.pnl = (
-            round((trade.pnl or 0.0) + realized_on_remaining, 4)
-            if trade.partial_exits
-            else round(realized_on_remaining, 4)
+        trade.gross_realized_pnl_usd += realized_on_remaining
+        trade.pnl = round(
+            trade.gross_realized_pnl_usd
+            - trade.fees_paid_usd
+            + trade.funding_pnl_usd,
+            8,
         )
         initial_position_size_usd = trade.position_size_usd + sum(
             pe.size_usd for pe in trade.partial_exits
@@ -1435,7 +1495,13 @@ class TradeLifecycle(AITOSModule):
         )
         trade.position_size_usd = max(0.0, remaining_notional)
         trade.quantity = max(0.0, remaining_quantity)
-        trade.pnl = round((trade.pnl or 0.0) + realized, 4)
+        trade.gross_realized_pnl_usd += realized
+        trade.pnl = round(
+            trade.gross_realized_pnl_usd
+            - trade.fees_paid_usd
+            + trade.funding_pnl_usd,
+            8,
+        )
         trade.updated_at = utc_now_iso()
         await self._event_bus.publish(
             Event(
