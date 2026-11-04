@@ -76,7 +76,8 @@ def test_correlation_aware_budget_scales_correlated_risk():
     requests = [request("alpha", 5_000, 500, 8), request("beta", 5_000, 500, 6)]
     independent = allocator.allocate(requests, risk_budget=100)
     correlated = allocator.allocate(
-        requests, risk_budget=100,
+        requests,
+        risk_budget=100,
         correlation_matrix={"alpha": {"beta": 0.95}, "beta": {"alpha": 0.95}},
     )
     assert sum(item.projected_loss for item in correlated) < sum(
