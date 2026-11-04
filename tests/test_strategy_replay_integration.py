@@ -7,7 +7,6 @@ from aitos.models.trade import TradeSide
 from aitos.strategy import (
     CapitalAllocator,
     CapitalRequest,
-    Strategy,
     StrategyContext,
     StrategyEngine,
     StrategyFamily,
@@ -15,6 +14,7 @@ from aitos.strategy import (
     StrategyRegistry,
     StrategyResult,
 )
+from aitos.strategy.contracts import Strategy
 from aitos.trading.tp_contract import TakeProfitExecutionContract
 
 
