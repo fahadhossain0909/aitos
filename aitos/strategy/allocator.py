@@ -58,13 +58,13 @@ class CapitalAllocator:
                 else:
                     left_row = correlations.get(left, {})
                     right_row = correlations.get(right, {})
-                    if right in left_row and left not in right_row:
+                    if (right in left_row) != (left in right_row):
                         raise ValueError(
                             "correlation matrix must include both directions"
                         )
-                    raw = left_row.get(right, right_row.get(left, 0.0))
+                    raw = left_row.get(right, 0.0)
                     correlation = float(raw)
-                    reverse = right_row.get(left, left_row.get(right, 0.0))
+                    reverse = right_row.get(left, 0.0)
                     if (
                         not isfinite(float(reverse))
                         or abs(float(reverse) - correlation) > 1e-6
