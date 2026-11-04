@@ -64,7 +64,9 @@ class HigherTimeframeCandleCache:
         async with self._budget_lock:
             now = self._clock().astimezone(timezone.utc)
             cutoff = now - self._window
-            self._request_times = [stamp for stamp in self._request_times if stamp > cutoff]
+            self._request_times = [
+                stamp for stamp in self._request_times if stamp > cutoff
+            ]
             if len(self._request_times) >= self._max_requests:
                 return False
             self._request_times.append(now)
