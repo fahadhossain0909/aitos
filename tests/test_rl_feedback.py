@@ -225,4 +225,4 @@ async def test_rl_feedback_deduplicates_redelivered_closed_trade_for_deep_scorer
         await loop._on_position_closed(event)
         await loop._on_position_closed(event)
         assert scorer.n_samples_seen == 1
-        assert loop.updates_applied == 2  # both deliveries observed; model update applied once
+        assert loop.updates_applied == 1
