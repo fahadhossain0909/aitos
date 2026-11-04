@@ -96,3 +96,22 @@ def test_correlation_matrix_rejects_asymmetric_values():
         assert False, "asymmetric correlation must fail closed"
     except ValueError as exc:
         assert "symmetric" in str(exc)
+
+
+def test_correlation_matrix_must_be_positive_semidefinite():
+    allocator = CapitalAllocator(1_000, max_strategy_fraction=1.0)
+    requests = [
+        request("alpha", 100, 10, 2),
+        request("beta", 100, 10, 2),
+        request("gamma", 100, 10, 2),
+    ]
+    invalid = {
+        "alpha": {"beta": -0.9, "gamma": -0.9},
+        "beta": {"alpha": -0.9, "gamma": -0.9},
+        "gamma": {"alpha": -0.9, "beta": -0.9},
+    }
+    try:
+        allocator.allocate(requests, correlation_matrix=invalid)
+        assert False, "indefinite correlation matrix must fail closed"
+    except ValueError as exc:
+        assert "positive semidefinite" in str(exc)
