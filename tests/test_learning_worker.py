@@ -1,4 +1,6 @@
 import asyncio
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -340,6 +342,32 @@ def test_worker_recovers_crash_after_model_checkpoint_before_cursor_save(tmp_pat
     assert restarted.scorer.n_samples_seen == 1
     assert restarted._cursor_experience_id == "crash-window-exp"
 
+
+
+def test_worker_cooperative_stop_waits_for_loop_exit_and_closes_client():
+    class Client:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
+    worker._stop = threading.Event()
+    worker._closed = False
+    worker._lock_handle = None
+    worker.poll_seconds = 60
+    worker.client = Client()
+    worker.run_once = lambda: 0
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        task = pool.submit(worker.run_forever)
+        # Ensure the loop has entered its wait before requesting shutdown.
+        time.sleep(0.02)
+        worker.request_stop()
+        task.result(timeout=2)
+
+    assert worker._stop.is_set()
+    assert worker.client.closed is True
 
 def test_concurrent_scorers_merge_updates_without_lost_samples(tmp_path):
     path = str(tmp_path / "concurrent_model.pkl")
