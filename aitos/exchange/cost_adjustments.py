@@ -40,7 +40,9 @@ class BinanceCostAdjustmentPublisher:
                 amount = float(row["income"])
                 transaction_id = str(row["tranId"]).strip()
             except (KeyError, TypeError, ValueError) as exc:
-                raise ValueError("income row is missing a valid amount or tranId") from exc
+                raise ValueError(
+                    "income row is missing a valid amount or tranId"
+                ) from exc
             if not math.isfinite(amount) or not transaction_id:
                 raise ValueError("income amount and tranId must be finite/non-empty")
 
