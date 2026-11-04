@@ -101,3 +101,29 @@ def test_htf_cache_single_flight_for_concurrent_requests():
         assert len(calls) == 1
 
     asyncio.run(run())
+
+
+def test_htf_cache_enforces_shared_request_budget_and_fails_closed():
+    now = [datetime(2026, 11, 4, 13, 10, tzinfo=timezone.utc)]
+    cache = HigherTimeframeCandleCache(
+        clock=lambda: now[0], max_requests=1, window_seconds=60
+    )
+    closed = candle(datetime(2026, 11, 4, 12, 59, 59, tzinfo=timezone.utc))
+    calls = []
+
+    async def fetch():
+        calls.append(1)
+        return [closed]
+
+    async def run():
+        first, _ = await cache.get("BTCUSDT", "1h", 100, fetch)
+        assert first == [closed]
+        # Different symbol consumes a distinct exchange request; the global
+        # window is exhausted, so no second network request is issued.
+        second, meta = await cache.get("ETHUSDT", "1h", 100, fetch)
+        assert second == []
+        assert meta["cache"] == "budget_exhausted"
+        assert meta["stale"] is True
+        assert len(calls) == 1
+
+    asyncio.run(run())
