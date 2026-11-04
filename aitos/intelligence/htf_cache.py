@@ -40,10 +40,44 @@ class HigherTimeframeCandleCache:
     preserved and returned; callers can fail closed based on its age.
     """
 
-    def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        max_requests: int = 60,
+        window_seconds: float = 60.0,
+        max_concurrent_fetches: int = 4,
+    ) -> None:
+        if max_requests < 1 or window_seconds <= 0 or max_concurrent_fetches < 1:
+            raise ValueError("HTF request budgets and concurrency must be positive")
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._entries: dict[Hashable, _Entry] = {}
         self._locks: dict[Hashable, asyncio.Lock] = {}
+        self._budget_lock = asyncio.Lock()
+        self._request_times: list[datetime] = []
+        self._max_requests = int(max_requests)
+        self._window = timedelta(seconds=window_seconds)
+        self._fetch_semaphore = asyncio.Semaphore(max_concurrent_fetches)
+
+    async def _reserve_request(self) -> bool:
+        """Reserve one exchange request from the shared sliding-window budget."""
+        async with self._budget_lock:
+            now = self._clock().astimezone(timezone.utc)
+            cutoff = now - self._window
+            self._request_times = [stamp for stamp in self._request_times if stamp > cutoff]
+            if len(self._request_times) >= self._max_requests:
+                return False
+            self._request_times.append(now)
+            return True
+
+    def _budget_fallback(self, entry: _Entry | None) -> tuple[list, dict]:
+        if entry is None:
+            return [], {"cache": "budget_exhausted", "stale": True}
+        return list(entry.candles), {
+            "cache": "budget_exhausted_fallback",
+            "stale": True,
+            "latest_closed_at": entry.latest_close.isoformat(),
+        }
 
     async def get(
         self,
@@ -73,7 +107,10 @@ class HigherTimeframeCandleCache:
                     "latest_closed_at": entry.latest_close.isoformat(),
                 }
 
-            fetched = await fetch()
+            if not await self._reserve_request():
+                return self._budget_fallback(entry)
+            async with self._fetch_semaphore:
+                fetched = await fetch()
             closed = [
                 candle for candle in fetched if getattr(candle, "is_closed", True)
             ]
