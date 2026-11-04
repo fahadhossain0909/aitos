@@ -399,3 +399,19 @@ def test_concurrent_scorers_merge_updates_without_lost_samples(tmp_path):
     )
     assert duplicate_result is False
     assert duplicate.n_samples_seen == 12
+
+
+def test_worker_partitions_regime_models_and_normalizes_regime_labels(tmp_path):
+    worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
+    worker.scorer = DeepValueRLScorer(state_path=str(tmp_path / "deep_value.pkl"))
+    worker._regime_scorers = {}
+
+    trending = worker._scorer_for_regime("trending")
+    ranging = worker._scorer_for_regime("ranging")
+
+    assert trending is not ranging
+    assert trending._state_path != ranging._state_path
+    assert trending._state_path.parent.name == "regimes"
+    assert ContinualLearningWorker._row_regime(
+        {"metadata_json": '{"market_regime":"High Volatility"}'}
+    ) == "high_volatility"
