@@ -90,6 +90,7 @@ TOPIC_ORDER_SUBMITTED = "trade.order_submitted"
 TOPIC_ORDER_FILLED = "trade.order_filled"
 TOPIC_POSITION_OPENED = "trade.position_opened"
 TOPIC_POSITION_UPDATED = "trade.position_updated"
+TOPIC_COST_ADJUSTMENT = "trade.cost_adjustment"
 TOPIC_POSITION_CLOSED = "trade.position_closed"
 TOPIC_SL_TRIGGERED = "trade.sl_triggered"
 TOPIC_TP_TRIGGERED = "trade.tp_triggered"
@@ -262,6 +263,15 @@ class TradeLifecycle(AITOSModule):
 
     async def handle_event(self, event: Event) -> EventResponse | None:
         if not self._initialized:
+            return None
+        if event.topic == TOPIC_COST_ADJUSTMENT:
+            payload = event.payload
+            await self.apply_cost_adjustment(
+                str(payload.get("trade_id", "")),
+                adjustment_id=str(payload.get("adjustment_id", "")),
+                kind=str(payload.get("kind", "")),
+                amount_usd=float(payload.get("amount_usd", 0.0)),
+            )
             return None
         if event.topic.startswith("market.kline.") or event.topic.startswith(
             "market.trade."
