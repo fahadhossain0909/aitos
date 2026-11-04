@@ -690,11 +690,7 @@ async def test_fee_and_funding_adjustments_are_idempotently_included_in_net_pnl(
     )
 
     closed = await lifecycle.close_trade(trade.trade_id, 102.0, "test_close")
-    expected_net = (
-        closed.gross_realized_pnl_usd
-        - 0.12
-        - 0.03
-    )
+    expected_net = closed.gross_realized_pnl_usd - 0.12 - 0.03
     assert closed.fees_paid_usd == pytest.approx(0.12)
     assert closed.funding_pnl_usd == pytest.approx(-0.03)
     assert closed.pnl == pytest.approx(expected_net)
