@@ -342,7 +342,6 @@ def test_worker_recovers_crash_after_model_checkpoint_before_cursor_save(tmp_pat
     assert restarted._cursor_experience_id == "crash-window-exp"
 
 
-
 def test_worker_cooperative_stop_waits_for_loop_exit_and_closes_client():
     class Client:
         closed = False
@@ -371,6 +370,7 @@ def test_worker_cooperative_stop_waits_for_loop_exit_and_closes_client():
 
     assert worker._stop.is_set()
     assert worker.client.closed is True
+
 
 def test_concurrent_scorers_merge_updates_without_lost_samples(tmp_path):
     path = str(tmp_path / "concurrent_model.pkl")
