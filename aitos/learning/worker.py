@@ -341,8 +341,13 @@ class ContinualLearningWorker:
         finally:
             self._release_singleton_lock()
 
-    def shutdown(self) -> None:
+    def request_stop(self) -> None:
+        """Ask the background loop to stop after its current batch completes."""
         self._stop.set()
+
+    def shutdown(self) -> None:
+        """Persist final cursor state and release resources after the loop exits."""
+        self.request_stop()
         try:
             self._save_state()
         finally:
