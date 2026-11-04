@@ -77,6 +77,8 @@ def test_worker_advances_keyset_cursor_and_skips_poison_rows(tmp_path):
             "experience_id": "11111111-1111-1111-1111-111111111111",
             "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
             "symbol": "BTCUSDT",
+            "decision": "backtest_trade",
+            "outcome": "closed",
             "features_json": '{"trend_strength": 8}',
             "risk_state_json": "{}",
             "metadata_json": '{"reward_unit": "r_multiple"}',
@@ -123,6 +125,8 @@ def test_backtest_rewards_are_normalized_to_r_multiples():
     assert (
         ContinualLearningWorker._reward_r_multiple(
             {
+                "decision": "backtest_trade",
+                "outcome": "closed",
                 "reward": 50.0,
                 "features_json": "{}",
                 "risk_state_json": '{"risk_amount_usd": 25.0}',
@@ -134,6 +138,8 @@ def test_backtest_rewards_are_normalized_to_r_multiples():
     assert (
         ContinualLearningWorker._reward_r_multiple(
             {
+                "decision": "backtest_trade",
+                "outcome": "closed",
                 "reward": -0.75,
                 "features_json": "{}",
                 "risk_state_json": "{}",
@@ -145,6 +151,8 @@ def test_backtest_rewards_are_normalized_to_r_multiples():
     assert (
         ContinualLearningWorker._reward_r_multiple(
             {
+                "decision": "backtest_trade",
+                "outcome": "closed",
                 "reward": 50.0,
                 "features_json": "{}",
                 "risk_state_json": "{}",
