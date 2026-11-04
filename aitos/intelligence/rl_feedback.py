@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from math import isfinite
 from typing import Any, Union
 
 from aitos.core.contracts import (
@@ -96,26 +97,30 @@ class RLFeedbackLoop(AITOSModule):
 
     async def _on_position_closed(self, event: Event) -> EventResponse | None:
         trade_dict = event.payload
-        risk_amount = trade_dict.get("risk_amount_usd") or 0.0
-        pnl = trade_dict.get("pnl")
-        if not risk_amount or pnl is None:
+        try:
+            risk_amount = float(trade_dict.get("risk_amount_usd") or 0.0)
+            pnl = float(trade_dict.get("pnl"))
+        except (TypeError, ValueError):
+            return None
+        if not isfinite(risk_amount) or risk_amount <= 0 or not isfinite(pnl):
             return None
 
         reward_r_multiple = pnl / risk_amount
+        if not isfinite(reward_r_multiple):
+            return None
         symbol = trade_dict.get("symbol", "unknown")
         regime = trade_dict.get("regime", "unknown")
         direction = trade_dict.get("side", "unknown")
         agent_consensus = trade_dict.get("agent_consensus") or {}
-        context = {"regime": regime, "direction": direction, **agent_consensus}
+        context = {**agent_consensus, "regime": regime, "direction": direction}
+        context["rl_confidence"] = 5.0
 
+        persist_trade = getattr(self._scorer, "update_trade_and_persist", None)
         persist = getattr(self._scorer, "update_and_persist", None)
-        if callable(persist):
-            try:
-                persist(symbol, context, reward_r_multiple)
-            except OSError:
-                self._scorer.update(
-                    symbol=symbol, context=context, reward_r_multiple=reward_r_multiple
-                )
+        if callable(persist_trade) and trade_dict.get("trade_id"):
+            persist_trade(str(trade_dict["trade_id"]), symbol, context, reward_r_multiple)
+        elif callable(persist):
+            persist(symbol, context, reward_r_multiple)
         else:
             self._scorer.update(
                 symbol=symbol, context=context, reward_r_multiple=reward_r_multiple
