@@ -64,7 +64,7 @@ def test_strategy_engine_passes_only_fresh_correlation_matrix():
     assert allocator.kwargs["correlation_matrix"] == correlations
 
     stale = StrategyContext(
-        now_ns=20_000_000_000,
+        now_ns=7_200_000_000_001,
         mode=StrategyMode.PAPER,
         strategy_correlations=correlations,
         correlation_updated_at_ns=1,
