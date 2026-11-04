@@ -325,7 +325,9 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
         exit_reason=data.get("exit_reason"),
         pnl=data.get("pnl"),
         pnl_percent=data.get("pnl_percent"),
-        gross_realized_pnl_usd=float(data.get("gross_realized_pnl_usd", data.get("pnl") or 0.0)),
+        gross_realized_pnl_usd=float(
+            data.get("gross_realized_pnl_usd", data.get("pnl") or 0.0)
+        ),
         fees_paid_usd=float(data.get("fees_paid_usd", 0.0)),
         funding_pnl_usd=float(data.get("funding_pnl_usd", 0.0)),
         cost_adjustments=dict(data.get("cost_adjustments", {})),
