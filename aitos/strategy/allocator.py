@@ -59,7 +59,9 @@ class CapitalAllocator:
                     left_row = correlations.get(left, {})
                     right_row = correlations.get(right, {})
                     if right in left_row and left not in right_row:
-                        raise ValueError("correlation matrix must include both directions")
+                        raise ValueError(
+                            "correlation matrix must include both directions"
+                        )
                     raw = left_row.get(right, right_row.get(left, 0.0))
                     correlation = float(raw)
                     reverse = right_row.get(left, left_row.get(right, 0.0))
@@ -105,14 +107,10 @@ class CapitalAllocator:
                 eigen_matrix[k][p] = eigen_matrix[p][k] = cosine * akp - sine * akq
                 eigen_matrix[k][q] = eigen_matrix[q][k] = sine * akp + cosine * akq
             eigen_matrix[p][p] = (
-                cosine * cosine * app
-                - 2.0 * sine * cosine * apq
-                + sine * sine * aqq
+                cosine * cosine * app - 2.0 * sine * cosine * apq + sine * sine * aqq
             )
             eigen_matrix[q][q] = (
-                sine * sine * app
-                + 2.0 * sine * cosine * apq
-                + cosine * cosine * aqq
+                sine * sine * app + 2.0 * sine * cosine * apq + cosine * cosine * aqq
             )
             eigen_matrix[p][q] = eigen_matrix[q][p] = 0.0
         if any(eigen_matrix[i][i] < -1e-8 for i in range(size)):
