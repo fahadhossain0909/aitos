@@ -1,7 +1,7 @@
 from aitos.learning.regime_feedback import (
-    normalize_regime,
     RegimeRewardCalibrator,
     compare_champion_candidate,
+    normalize_regime,
     outcome_feedback,
 )
 

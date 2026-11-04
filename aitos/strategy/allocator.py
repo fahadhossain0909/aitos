@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from math import atan2, cos, isfinite, sin, sqrt
-from typing import Mapping
 
 from .contracts import CapitalRequest
 

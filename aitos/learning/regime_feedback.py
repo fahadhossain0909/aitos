@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict, deque
+from collections.abc import Iterable
 from dataclasses import dataclass
 from math import isfinite, sqrt
 from statistics import median
-from typing import Iterable
 
 
 def normalize_regime(value: object) -> str:

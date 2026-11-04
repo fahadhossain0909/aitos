@@ -9,8 +9,8 @@ import json
 import os
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
-from urllib.parse import urlencode
 from typing import Any
+from urllib.parse import urlencode
 
 import aiohttp
 

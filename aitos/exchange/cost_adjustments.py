@@ -8,7 +8,6 @@ from typing import Any
 
 from aitos.core.contracts import Event
 
-
 TradeResolver = Callable[[dict[str, Any]], Awaitable[str | None]]
 
 
