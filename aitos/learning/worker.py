@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
-from math import isfinite
 import os
 import threading
 import time
+from math import isfinite
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
