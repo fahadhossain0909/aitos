@@ -449,9 +449,7 @@ class PaperPortfolioTracker:
             trade_lifecycle.get_closed_trades(),
             trade_lifecycle.get_open_trades(),
         )
-        realized_pnl = sum(
-            t.pnl for t in (*closed, *open_trades) if t.pnl is not None
-        )
+        realized_pnl = sum(t.pnl for t in (*closed, *open_trades) if t.pnl is not None)
         equity = self.starting_equity_usd + realized_pnl
         self._peak_equity_usd = max(self._peak_equity_usd, equity)
         day_ago, week_ago = datetime.now(timezone.utc) - timedelta(
