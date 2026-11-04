@@ -132,9 +132,7 @@ class PositionManager:
             cfg.get("adaptive_exit_policy", {})
         )
         self._adaptive_exit_enabled = bool(cfg.get("adaptive_exit_enabled", True))
-        self._adaptive_exit_bar_seconds = int(
-            cfg.get("adaptive_exit_bar_seconds", 900)
-        )
+        self._adaptive_exit_bar_seconds = int(cfg.get("adaptive_exit_bar_seconds", 900))
         if self._adaptive_exit_bar_seconds <= 0:
             raise ValueError("adaptive_exit_bar_seconds must be positive")
 
