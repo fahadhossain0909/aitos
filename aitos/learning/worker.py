@@ -367,7 +367,7 @@ class ContinualLearningWorker:
                     "cursor_timestamp": self._cursor_timestamp,
                     "cursor_experience_id": self._cursor_experience_id,
                     "processed_count": self._processed,
-                    "samples_seen": self.scorer.n_samples_seen + sum(s.n_samples_seen for s in self._regime_scorers.values()),
+                    "samples_seen": self.scorer.n_samples_seen + sum(s.n_samples_seen for s in getattr(self, "_regime_scorers", {}).values()),
                 }
             },
         )
