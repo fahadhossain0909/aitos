@@ -1,3 +1,4 @@
+from aitos.learning.regime_feedback import normalize_regime
 from aitos.learning.regime_feedback import (
     RegimeRewardCalibrator,
     compare_champion_candidate,
@@ -35,3 +36,7 @@ def test_champion_challenger_gate_requires_sample_floor_and_significance():
 
     accepted = compare_champion_candidate([0.0] * 40, [1.0] * 40)
     assert accepted.accepted is True
+
+
+def test_regime_partition_key_cannot_escape_checkpoint_directory():
+    assert normalize_regime('../../outside/path') == 'outside_path'
