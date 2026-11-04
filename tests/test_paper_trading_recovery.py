@@ -327,3 +327,29 @@ async def test_close_event_archives_trade_before_deleting_open_runtime_state(
     assert store.trades == []
     assert len(store.closed_trades) == 1
     assert store.closed_trades[0].pnl == 4.25
+
+
+@pytest.mark.asyncio
+async def test_close_archive_failure_is_propagated_and_open_state_is_not_deleted(
+    event_bus, paper_trade
+):
+    from types import SimpleNamespace
+
+    class FailingArchiveStore(FakeStateStore):
+        async def save_closed_trade(self, trade):
+            raise RuntimeError("clickhouse unavailable")
+
+    store = FailingArchiveStore([paper_trade])
+    persistence = TradeStatePersistence(event_bus, FakeLifecycle(), store)
+
+    with pytest.raises(RuntimeError, match="clickhouse unavailable"):
+        await persistence._delete_event(
+            SimpleNamespace(
+                payload=paper_trade.to_dict(),
+                event_id="close-event-failed-archive",
+                topic="trade.position_closed",
+            )
+        )
+
+    assert store.trades == [paper_trade]
+    assert getattr(store, "closed_trades", []) == []
