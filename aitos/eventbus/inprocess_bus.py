@@ -113,7 +113,7 @@ class InProcessBus(AITOSModule):
                     asyncio.gather(*(sub._queue.join() for sub in subscriptions)),
                     timeout=grace_period_seconds,
                 )
-            except TimeoutError:
+            except asyncio.TimeoutError:
                 # A volatile adapter cannot guarantee draining beyond the
                 # caller's shutdown budget; remaining work is cancelled below.
                 pass
