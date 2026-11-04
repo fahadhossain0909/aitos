@@ -33,6 +33,7 @@ from aitos.intelligence.entry_quality import (
 from aitos.intelligence.footprint import FootprintEngine
 from aitos.intelligence.footprint_signals import FootprintSignalEngine
 from aitos.intelligence.funding import funding_rate_score
+from aitos.intelligence.htf_cache import HigherTimeframeCandleCache
 from aitos.intelligence.liquidity import (
     absorption_proxy_score,
     adverse_flow_without_progress,
@@ -298,6 +299,7 @@ class OpportunityScanner(AITOSModule):
         self._amt_ib_minutes = amt_ib_minutes
         self._initialized = False
         self._last_oi = {}
+        self._htf_cache = HigherTimeframeCandleCache()
         self._last_order_books = {}
         self._last_order_book_sources = {}
         self._last_amt_profile = {}
@@ -673,12 +675,28 @@ class OpportunityScanner(AITOSModule):
                 htf_timeframe = resolve_higher_timeframe(
                     self._timeframe, self._tuning.scanner.htf_timeframe
                 )
-                htf_klines = await self._exchange.fetch_klines(
+                htf_klines, htf_cache_diagnostics = await self._htf_cache.get(
                     symbol,
                     htf_timeframe,
-                    limit=self._tuning.scanner.htf_lookback,
+                    self._tuning.scanner.htf_lookback,
+                    lambda: self._exchange.fetch_klines(
+                        symbol,
+                        htf_timeframe,
+                        limit=self._tuning.scanner.htf_lookback,
+                    ),
                 )
-                htf_klines = [k for k in htf_klines if getattr(k, "is_closed", True)]
+                if htf_cache_diagnostics.get("stale"):
+                    logger.warning(
+                        "entry blocked: higher-timeframe cache has not advanced after candle close",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "timeframe": htf_timeframe,
+                                "cache": htf_cache_diagnostics,
+                            }
+                        },
+                    )
+                    return None
                 htf_aligned, htf_diagnostics = higher_timeframe_alignment(
                     htf_klines,
                     direction,
@@ -686,6 +704,7 @@ class OpportunityScanner(AITOSModule):
                     min_di_gap=self._tuning.scanner.htf_min_di_gap,
                 )
                 htf_diagnostics["timeframe"] = htf_timeframe
+                htf_diagnostics["cache"] = htf_cache_diagnostics
                 htf_available = len(htf_klines) >= 30
                 if not htf_aligned:
                     logger.info(

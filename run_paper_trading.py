@@ -205,19 +205,6 @@ async def main() -> None:
     # Reconcile subscriptions afterwards and verify the effective symbol sets.
     await trade_state_persistence.resubscribe_restored_positions()
 
-    # Start continual-learning worker to incrementally train on historical
-    # backtest experiences stored in ClickHouse. Runs in a background thread
-    # because its run_forever() loop is synchronous/blocking.
-    learning_worker = ContinualLearningWorker(
-        host=settings.clickhouse.host,
-        port=settings.clickhouse.port,
-        user=settings.clickhouse.user,
-        password=settings.clickhouse.password,
-        database=settings.clickhouse.database,
-    )
-    learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
-    learning_task.set_name("continual-learning-worker")
-
     # Register AI Kernel agents for multi-agent consensus
     market_agent = MarketAgent(event_bus=event_bus)
     risk_agent = RiskAgent(event_bus=event_bus)
@@ -302,9 +289,36 @@ async def main() -> None:
         stale_symbol_blacklist=_settings.stale_symbol_blacklist,
     )
     price_safety_net.start()
-    tracker = PaperPortfolioTracker(starting_equity_usd=STARTING_EQUITY_USD)
+    tracker = PaperPortfolioTracker(
+        starting_equity_usd=STARTING_EQUITY_USD, state_store=state_store
+    )
+    await tracker.restore()
+    logger.info(
+        "paper portfolio ledger restored",
+        extra={
+            "aitos_extra": {
+                "starting_equity_usd": STARTING_EQUITY_USD,
+                "peak_equity_usd": tracker._peak_equity_usd,
+                "closed_trades_restored": len(
+                    components.trade_lifecycle.get_closed_trades()
+                ),
+            }
+        },
+    )
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
+    # Construct and start the blocking worker only after all other startup
+    # wiring succeeds. This keeps its ClickHouse client and singleton lock
+    # inside the managed main try/finally lifetime as well as its thread.
+    learning_worker = ContinualLearningWorker(
+        host=settings.clickhouse.host,
+        port=settings.clickhouse.port,
+        user=settings.clickhouse.user,
+        password=settings.clickhouse.password,
+        database=settings.clickhouse.database,
+    )
+    learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
+    learning_task.set_name("continual-learning-worker")
     try:
         while not stop_event.is_set():
             try:
@@ -350,6 +364,7 @@ async def main() -> None:
 
                 # Close stale positions (holding > STALE_POSITION_MAX_HOURS)
                 await _close_stale_positions(components)
+                await tracker.persist_state(components.trade_lifecycle)
             except Exception as exc:
                 logger.error("scan cycle failed: %s", exc)
             try:
@@ -365,14 +380,22 @@ async def main() -> None:
             await heal_task
         except asyncio.CancelledError:
             pass
-        # Gracefully stop the continual-learning worker
-        learning_task.cancel()
+        # Let the worker finish its current ClickHouse batch and exit its
+        # own loop (which closes the client in run_forever's finally block).
+        # Cancelling asyncio.to_thread does not stop its underlying thread.
+        learning_worker.request_stop()
         try:
-            await learning_task
+            await asyncio.shield(learning_task)
         except asyncio.CancelledError:
-            pass
-        await asyncio.to_thread(learning_worker.shutdown)
+            logger.warning(
+                "continual-learning worker task was cancelled during shutdown"
+            )
+        except Exception:
+            logger.exception("continual-learning worker exited with an error")
+        finally:
+            await asyncio.to_thread(learning_worker.shutdown)
         await price_safety_net.stop()
+        await tracker.persist_state(components.trade_lifecycle)
         await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)
         await asyncio.to_thread(

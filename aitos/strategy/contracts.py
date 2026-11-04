@@ -95,6 +95,12 @@ class StrategyContext:
     risk_budget: float = 0.0
     global_regime: str = "unknown"
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    # Strategy-ID keyed measured correlations; only consumed while fresh.
+    strategy_correlations: Mapping[str, Mapping[str, float]] = field(
+        default_factory=dict
+    )
+    correlation_updated_at_ns: int | None = None
+    max_correlation_age_seconds: float = 7200.0
 
 
 @dataclass(frozen=True)

@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import Any, Protocol
 
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
@@ -418,17 +418,38 @@ class PortfolioTracker(Protocol):
 @dataclass
 class PaperPortfolioTracker:
     starting_equity_usd: float = 10_000.0
+    state_store: Any | None = None
+    asset: str = "PAPER"
     _peak_equity_usd: float = field(init=False)
 
     def __post_init__(self) -> None:
         self._peak_equity_usd = self.starting_equity_usd
+
+    async def restore(self) -> None:
+        """Restore the high-water mark before the first risk assessment."""
+        if self.state_store is None:
+            return
+        peak = await self.state_store.load_peak_equity(self.asset)
+        if peak is not None:
+            self._peak_equity_usd = max(self.starting_equity_usd, float(peak))
+
+    async def persist_state(self, trade_lifecycle: TradeLifecycle) -> None:
+        """Persist equity and its high-water mark after each completed cycle."""
+        if self.state_store is None:
+            return
+        closed = trade_lifecycle.get_closed_trades()
+        open_trades = trade_lifecycle.get_open_trades()
+        realized_pnl = sum(float(t.pnl or 0.0) for t in (*closed, *open_trades))
+        equity = self.starting_equity_usd + realized_pnl
+        self._peak_equity_usd = max(self._peak_equity_usd, equity)
+        await self.state_store.save_drawdown(self.asset, equity, self._peak_equity_usd)
 
     def build_portfolio_state(self, trade_lifecycle: TradeLifecycle) -> PortfolioState:
         closed, open_trades = (
             trade_lifecycle.get_closed_trades(),
             trade_lifecycle.get_open_trades(),
         )
-        realized_pnl = sum(t.pnl for t in closed if t.pnl is not None)
+        realized_pnl = sum(t.pnl for t in (*closed, *open_trades) if t.pnl is not None)
         equity = self.starting_equity_usd + realized_pnl
         self._peak_equity_usd = max(self._peak_equity_usd, equity)
         day_ago, week_ago = datetime.now(timezone.utc) - timedelta(

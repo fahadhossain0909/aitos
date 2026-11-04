@@ -60,6 +60,29 @@ def test_walk_forward_keeps_locked_holdout_out_of_windows():
     assert all(w.test_end <= end - timedelta(days=30) for w in result.windows)
 
 
+def test_walk_forward_fails_closed_when_locked_holdout_has_no_events():
+    # There is enough history for several test windows, but the final locked
+    # holdout interval contains no observations. It must not be treated as a
+    # successful validation simply because the holdout result is None.
+    events = _events(200)
+    start = events[0].timestamp
+    end = start + timedelta(days=250)
+    result = WalkForwardValidator(min_positive_windows=0).evaluate(
+        events,
+        _strategy,
+        lambda e: e.price,
+        start,
+        end,
+        train_days=30,
+        test_days=10,
+        holdout_days=30,
+    )
+    assert result.windows
+    assert result.locked_holdout is None
+    assert result.passed is False
+    assert result.reason == "locked holdout has no events"
+
+
 def test_model_registry_promotes_only_candidates(tmp_path):
     registry = ModelRegistry(str(tmp_path / "registry.json"))
     registry.register(

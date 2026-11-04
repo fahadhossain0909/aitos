@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import json
+import os
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 from typing import Any
 
 import aiohttp
@@ -68,8 +72,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         session_factory: Callable[[], aiohttp.ClientSession] = aiohttp.ClientSession,
         ws_connector: Callable[..., Any] | None = None,
         rate_limiter: TokenBucketRateLimiter | None = None,
+        api_key: str | None = None,
+        api_secret: str | None = None,
     ) -> None:
         self._session_factory = session_factory
+        self._api_key = api_key or os.getenv("BINANCE_API_KEY")
+        self._api_secret = api_secret or os.getenv("BINANCE_API_SECRET")
         self._session: aiohttp.ClientSession | None = None
         self._ws_transport: dict[str, Any] = {
             "state": "idle",
@@ -162,6 +170,93 @@ class BinanceFuturesAdapter(ExchangeAdapter):
     async def fetch_open_interest(self, symbol: str) -> OpenInterest:
         return parse_open_interest_rest(
             await self._get("/fapi/v1/openInterest", {"symbol": symbol}, 1)
+        )
+
+    async def fetch_income_history(
+        self,
+        *,
+        start_time_ms: int,
+        end_time_ms: int | None = None,
+        income_type: str | None = None,
+        limit: int = 1000,
+    ) -> list[dict[str, Any]]:
+        """Fetch signed USDⓈ-M account-income rows for fee/funding reconciliation.
+
+        Credentials are read from constructor injection or BINANCE_API_KEY /
+        BINANCE_API_SECRET. The method is read-only and never places orders.
+        Pagination advances by exchange timestamp and rejects non-progressing
+        pages to avoid silently skipping or looping over exchange history.
+        """
+        if not self._api_key or not self._api_secret:
+            raise RuntimeError(
+                "Binance account-income history requires API credentials"
+            )
+        if start_time_ms < 0 or (
+            end_time_ms is not None and end_time_ms < start_time_ms
+        ):
+            raise ValueError("invalid income-history time range")
+        if not 1 <= limit <= 1000:
+            raise ValueError("income-history limit must be between 1 and 1000")
+
+        rows: list[dict[str, Any]] = []
+        requested_end = (
+            int(end_time_ms)
+            if end_time_ms is not None
+            else int(datetime.now(timezone.utc).timestamp() * 1000)
+        )
+        # Binance income history limits each query window to seven days.
+        window_start = int(start_time_ms)
+        while window_start <= requested_end:
+            window_end = min(requested_end, window_start + 7 * 24 * 60 * 60 * 1000 - 1)
+            cursor = window_start
+            while cursor <= window_end:
+                params: dict[str, Any] = {
+                    "startTime": cursor,
+                    "endTime": window_end,
+                    "limit": limit,
+                    "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                    "recvWindow": 5000,
+                }
+                if income_type:
+                    params["incomeType"] = income_type
+                query = urlencode(params)
+                signature = hmac.new(
+                    self._api_secret.encode("utf-8"),
+                    query.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                await self._rate_limiter.acquire(30)
+                await self.connect()
+                assert self._session is not None
+                async with self._session.get(
+                    f"{REST_BASE_URL}/fapi/v1/income?{query}&signature={signature}",
+                    headers={"X-MBX-APIKEY": self._api_key},
+                ) as response:
+                    response.raise_for_status()
+                    page = await response.json()
+                if not isinstance(page, list):
+                    raise RuntimeError(
+                        "Binance income endpoint returned a non-list payload"
+                    )
+                rows.extend(page)
+                if len(page) < limit:
+                    break
+                timestamps = [int(item.get("time", -1)) for item in page]
+                next_cursor = max(timestamps, default=-1) + 1
+                if next_cursor <= cursor:
+                    raise RuntimeError(
+                        "Binance income pagination made no forward progress"
+                    )
+                cursor = next_cursor
+            window_start = window_end + 1
+        unique: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            transaction_id = str(row.get("tranId", "")).strip()
+            if transaction_id:
+                unique[transaction_id] = row
+        return sorted(
+            unique.values(),
+            key=lambda item: (int(item.get("time", 0)), str(item.get("tranId", ""))),
         )
 
     async def fetch_24h_tickers(self) -> list[dict[str, Any]]:

@@ -181,3 +181,30 @@ async def test_journal_health_check_reports_state(event_bus):
     assert health.details["entries_recorded"] == 1
 
     await journal.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_journal_publishes_learning_outcome_without_decision_id(
+    event_bus, risk_engine
+):
+    journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
+    await journal.initialize({})
+    received = []
+
+    async def capture(event):
+        received.append(event)
+
+    await event_bus.subscribe(
+        "journal.outcome_attributed", capture, group="outcome-test"
+    )
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(agent_consensus={}), make_portfolio()
+    )
+    await lifecycle.update_price(trade.trade_id, 105.0)
+
+    assert await _wait_for(lambda: len(received) == 1)
+    assert received[0].payload["trade_id"] == trade.trade_id
+    assert received[0].payload["decision_id"] == ""
+    assert received[0].payload["pnl"] > 0
