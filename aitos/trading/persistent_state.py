@@ -325,6 +325,10 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
         exit_reason=data.get("exit_reason"),
         pnl=data.get("pnl"),
         pnl_percent=data.get("pnl_percent"),
+        gross_realized_pnl_usd=float(data.get("gross_realized_pnl_usd", data.get("pnl") or 0.0)),
+        fees_paid_usd=float(data.get("fees_paid_usd", 0.0)),
+        funding_pnl_usd=float(data.get("funding_pnl_usd", 0.0)),
+        cost_adjustments=dict(data.get("cost_adjustments", {})),
         rejection_reason=data.get("rejection_reason"),
         entry_thesis=(
             dict(data["entry_thesis"])
@@ -537,7 +541,11 @@ class TradeStatePersistence:
         try:
             payload = dict(event.payload)
             trade = _trade_from_dict(payload)
-            if trade.state in (
+            if trade.state == TradeLifecycleState.POSITION_CLOSED:
+                archive = getattr(self._store, "save_closed_trade", None)
+                if callable(archive):
+                    await archive(trade)
+            elif trade.state in (
                 TradeLifecycleState.POSITION_OPENED,
                 TradeLifecycleState.EXIT_TRIGGERED,
             ):
