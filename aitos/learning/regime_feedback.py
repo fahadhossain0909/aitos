@@ -5,13 +5,15 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from math import isfinite, sqrt
+import re
 from statistics import median
 from typing import Iterable
 
 
 def normalize_regime(value: object) -> str:
-    key = str(value or "unknown").strip().lower().replace(" ", "_")
-    return key if key and len(key) <= 48 else "unknown"
+    raw = str(value or "unknown").strip().lower()
+    key = re.sub(r"[^a-z0-9_-]+", "_", raw).strip("_")
+    return key[:48] if key else "unknown"
 
 
 class RegimeRewardCalibrator:
@@ -43,7 +45,14 @@ class RegimeRewardCalibrator:
     def restore(self, values: dict[str, Iterable[float]]) -> None:
         for regime, rewards in values.items():
             key = normalize_regime(regime)
-            clean = [float(value) for value in rewards if isfinite(float(value))]
+            clean = []
+            for value in rewards:
+                try:
+                    number = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if isfinite(number):
+                    clean.append(number)
             self._history[key].extend(clean[-self._history[key].maxlen :])
 
 
