@@ -184,9 +184,7 @@ class InProcessBus(AITOSModule):
         initial_events: list[Event] = []
         if start_id == "0":
             initial_events.extend(
-                event
-                for event in self._history
-                if fnmatch.fnmatch(event.topic, topic)
+                event for event in self._history if fnmatch.fnmatch(event.topic, topic)
             )
 
         async def _dispatch(event: Event) -> None:
