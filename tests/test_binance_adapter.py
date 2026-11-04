@@ -271,9 +271,8 @@ async def test_fetch_income_history_requires_credentials():
 
 @pytest.mark.asyncio
 async def test_fetch_income_history_signs_request_and_deduplicates_transactions():
-    adapter = BinanceFuturesAdapter(api_key="test-key", api_secret="test-secret")
     pattern = re.compile(
-        r"https://fapi\.binance\.com/fapi/v1/income\?.*signature=[a-f0-9]{64}"
+        r"https://fapi\\.binance\\.com/fapi/v1/income\\?.*signature=[a-f0-9]{64}"
     )
     rows = [
         {
@@ -293,7 +292,12 @@ async def test_fetch_income_history_signs_request_and_deduplicates_transactions(
             "tranId": 11,
         },
     ]
-    with aioresponses() as mocked:
-        mocked.get(pattern, payload=rows)
-        result = await adapter.fetch_income_history(start_time_ms=1, limit=10)
+    async with BinanceFuturesAdapter(
+        api_key="test-key", api_secret="test-secret"
+    ) as adapter:
+        with aioresponses() as mocked:
+            mocked.get(pattern, payload=rows)
+            result = await adapter.fetch_income_history(
+                start_time_ms=1, end_time_ms=300, limit=10
+            )
     assert [row["tranId"] for row in result] == [10, 11]
