@@ -76,6 +76,7 @@ def test_htf_cache_filters_forming_candles_and_preserves_last_good_snapshot():
         )
         assert result == [closed]
         assert meta["cache"] == "unchanged_fallback"
+        assert meta["stale"] is True
 
     asyncio.run(run())
 
