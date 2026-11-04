@@ -145,6 +145,8 @@ class ContinualLearningWorker:
                 state.get("cursor_experience_id", self._cursor_experience_id)
             )
             self._processed = int(state.get("processed_count", 0))
+            if not hasattr(self, "_reward_calibrator"):
+                self._reward_calibrator = RegimeRewardCalibrator()
             self._reward_calibrator.restore(state.get("regime_reward_history", {}))
             if "cursor_timestamp" not in state:
                 self._legacy_processed = set(
@@ -281,7 +283,7 @@ class ContinualLearningWorker:
         """Use an independent durable checkpoint for each market regime."""
         key = normalize_regime(regime)
         base_path = getattr(self.scorer, "_state_path", None)
-        if base_path is None:
+        if key == "unknown" or base_path is None:
             return self.scorer
         if not hasattr(self, "_regime_scorers"):
             self._regime_scorers = {}
