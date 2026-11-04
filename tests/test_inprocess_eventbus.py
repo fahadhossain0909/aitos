@@ -88,7 +88,8 @@ async def test_replay_filters_by_event_timestamp() -> None:
     await bus.publish(Event(topic="market.trade", payload={"n": 1}))
     result: list[Event] = []
     await bus.replay(
-        "market.trade",\n        datetime(2000, 1, 1, tzinfo=timezone.utc),
+        "market.trade",
+        datetime(2000, 1, 1, tzinfo=timezone.utc),
         lambda event: _append(result, event),
     )
     assert len(result) == 1
