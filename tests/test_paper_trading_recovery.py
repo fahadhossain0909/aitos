@@ -15,6 +15,9 @@ class FakeStateStore:
     async def load_open_trades(self):
         return list(self.trades)
 
+    async def load_closed_trades(self):
+        return list(getattr(self, "closed_trades", []))
+
 
 class FakeLifecycle:
     def __init__(self):
@@ -202,3 +205,55 @@ async def test_resubscription_reports_missing_symbols_as_failure(
     assert result["ingestions"] == 1
     assert result["verified"] == 0
     assert result["failures"] == 1
+
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_history_is_restored_for_equity_recovery(
+    event_bus, paper_trade
+):
+    from aitos.models.trade import PartialExit
+
+    paper_trade.state = TradeLifecycleState.POSITION_CLOSED
+    paper_trade.pnl = 12.5
+    paper_trade.pnl_percent = 1.25
+    paper_trade.exit_price = 101.25
+    paper_trade.exit_time = "2026-08-24T01:00:00+00:00"
+    paper_trade.partial_exits = [
+        PartialExit(
+            price=101.0,
+            size_usd=0.5,
+            r_multiple=0.2,
+            at="2026-08-24T00:30:00+00:00",
+        )
+    ]
+
+    store = FakeStateStore()
+    store.closed_trades = [paper_trade]
+    lifecycle = FakeLifecycle()
+    lifecycle._closed_trades = []
+    persistence = TradeStatePersistence(event_bus, lifecycle, store)
+
+    assert await persistence.restore() == 0
+    assert len(lifecycle._closed_trades) == 1
+    restored = lifecycle._closed_trades[0]
+    assert restored.trade_id == paper_trade.trade_id
+    assert restored.pnl == 12.5
+    assert len(restored.partial_exits) == 1
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_restore_is_idempotent(event_bus, paper_trade):
+    paper_trade.state = TradeLifecycleState.POSITION_CLOSED
+    paper_trade.pnl = -7.0
+    store = FakeStateStore()
+    store.closed_trades = [paper_trade]
+    lifecycle = FakeLifecycle()
+    lifecycle._closed_trades = []
+    persistence = TradeStatePersistence(event_bus, lifecycle, store)
+
+    await persistence.restore()
+    await persistence.restore()
+
+    assert len(lifecycle._closed_trades) == 1
+    assert lifecycle._closed_trades[0].pnl == -7.0

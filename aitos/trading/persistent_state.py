@@ -41,6 +41,15 @@ CREATE TABLE IF NOT EXISTS portfolio_drawdown_state (
 ORDER BY asset
 """
 
+CREATE_PAPER_CLOSED_TRADE_LEDGER = """
+CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
+    trade_id String,
+    payload_json String,
+    updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY trade_id
+"""
+
 
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
 
@@ -83,6 +92,7 @@ class DurableTradingStateStore:
         try:
             await self._repository._client.command(CREATE_RUNTIME_STATE)
             await self._repository._client.command(CREATE_DRAWDOWN_STATE)
+            await self._repository._client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
             logger.info("durable trading state tables ensured")
         except Exception:
             logger.exception("durable trading state table ensure failed")
@@ -167,6 +177,42 @@ class DurableTradingStateStore:
                             "error": str(exc),
                         }
                     },
+                )
+        return trades
+
+    async def save_closed_trade(self, trade: Trade) -> None:
+        """Archive a terminal paper trade before removing its open-state row."""
+        if trade.state != TradeLifecycleState.POSITION_CLOSED:
+            raise ValueError("only closed trades can be archived")
+        client = self._client()
+        await client.insert(
+            "paper_closed_trade_ledger",
+            [[trade.trade_id, json.dumps(trade.to_dict(), sort_keys=True, default=str),
+              datetime.now(timezone.utc)]],
+            column_names=["trade_id", "payload_json", "updated_at"],
+        )
+
+    async def load_closed_trades(self) -> list[Trade]:
+        """Restore realized trade history used to rebuild paper equity and PnL."""
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT trade_id, argMax(payload_json, updated_at) AS payload_json
+            FROM paper_closed_trade_ledger
+            GROUP BY trade_id
+            ORDER BY trade_id
+            """
+        )
+        trades: list[Trade] = []
+        for row in result.result_rows:
+            try:
+                trade = _trade_from_dict(json.loads(row[1]))
+                if trade.state == TradeLifecycleState.POSITION_CLOSED:
+                    trades.append(trade)
+            except Exception as exc:
+                logger.error(
+                    "failed to restore closed paper trade",
+                    extra={"aitos_extra": {"trade_id": row[0], "error": str(exc)}},
                 )
         return trades
 
@@ -331,6 +377,15 @@ class TradeStatePersistence:
         trades = await self._store.load_open_trades()
         for trade in trades:
             self._lifecycle._open_trades[trade.trade_id] = trade
+        load_closed = getattr(self._store, "load_closed_trades", None)
+        closed_trades = await load_closed() if callable(load_closed) else []
+        if closed_trades and hasattr(self._lifecycle, "_closed_trades"):
+            existing = {
+                trade.trade_id for trade in self._lifecycle._closed_trades
+            }
+            self._lifecycle._closed_trades.extend(
+                trade for trade in closed_trades if trade.trade_id not in existing
+            )
         if trades:
             symbols = list(
                 dict.fromkeys(
@@ -500,6 +555,13 @@ class TradeStatePersistence:
             )
             return
         try:
+            load_trade = getattr(self._store, "load_trade", None)
+            # The close event carries the complete immutable trade snapshot.
+            payload = dict(event.payload)
+            closed_trade = _trade_from_dict(payload)
+            archive = getattr(self._store, "save_closed_trade", None)
+            if callable(archive):
+                await archive(closed_trade)
             await self._store.delete_trade(str(trade_id))
         except Exception as exc:
             logger.error(

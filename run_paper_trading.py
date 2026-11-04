@@ -302,7 +302,22 @@ async def main() -> None:
         stale_symbol_blacklist=_settings.stale_symbol_blacklist,
     )
     price_safety_net.start()
-    tracker = PaperPortfolioTracker(starting_equity_usd=STARTING_EQUITY_USD)
+    tracker = PaperPortfolioTracker(
+        starting_equity_usd=STARTING_EQUITY_USD, state_store=state_store
+    )
+    await tracker.restore()
+    logger.info(
+        "paper portfolio ledger restored",
+        extra={
+            "aitos_extra": {
+                "starting_equity_usd": STARTING_EQUITY_USD,
+                "peak_equity_usd": tracker._peak_equity_usd,
+                "closed_trades_restored": len(
+                    components.trade_lifecycle.get_closed_trades()
+                ),
+            }
+        },
+    )
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
     try:
@@ -350,6 +365,7 @@ async def main() -> None:
 
                 # Close stale positions (holding > STALE_POSITION_MAX_HOURS)
                 await _close_stale_positions(components)
+                await tracker.persist_state(components.trade_lifecycle)
             except Exception as exc:
                 logger.error("scan cycle failed: %s", exc)
             try:
@@ -373,6 +389,7 @@ async def main() -> None:
             pass
         await asyncio.to_thread(learning_worker.shutdown)
         await price_safety_net.stop()
+        await tracker.persist_state(components.trade_lifecycle)
         await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)
         await asyncio.to_thread(
