@@ -36,6 +36,7 @@ _CHANNEL_BY_TYPE = {
     MarketEventType.INSTRUMENT: CHANNEL_INSTRUMENT,
 }
 
+
 def channel_for(event_type: MarketEventType) -> str:
     try:
         return _CHANNEL_BY_TYPE[event_type]
