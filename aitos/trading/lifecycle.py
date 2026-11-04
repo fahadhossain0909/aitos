@@ -868,9 +868,14 @@ class TradeLifecycle(AITOSModule):
             trade.fees_paid_usd += float(amount_usd)
         else:
             trade.funding_pnl_usd += float(amount_usd)
-        if trade.gross_realized_pnl_usd != 0.0 or trade.state == TradeLifecycleState.POSITION_CLOSED:
+        if (
+            trade.gross_realized_pnl_usd != 0.0
+            or trade.state == TradeLifecycleState.POSITION_CLOSED
+        ):
             trade.pnl = round(
-                trade.gross_realized_pnl_usd - trade.fees_paid_usd + trade.funding_pnl_usd,
+                trade.gross_realized_pnl_usd
+                - trade.fees_paid_usd
+                + trade.funding_pnl_usd,
                 8,
             )
         trade.updated_at = utc_now_iso()
@@ -887,6 +892,7 @@ class TradeLifecycle(AITOSModule):
             )
         )
         return trade
+
     async def close_trade(self, trade_id: str, exit_price: float, reason: str) -> Trade:
         """Measure close transitions while leaving hard exit logic authoritative."""
         import time
@@ -950,9 +956,7 @@ class TradeLifecycle(AITOSModule):
         realized_on_remaining = trade.position_size_usd * pnl_pct
         trade.gross_realized_pnl_usd += realized_on_remaining
         trade.pnl = round(
-            trade.gross_realized_pnl_usd
-            - trade.fees_paid_usd
-            + trade.funding_pnl_usd,
+            trade.gross_realized_pnl_usd - trade.fees_paid_usd + trade.funding_pnl_usd,
             8,
         )
         initial_position_size_usd = trade.position_size_usd + sum(
