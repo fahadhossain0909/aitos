@@ -133,11 +133,17 @@ def test_adaptive_stagnation_does_not_count_bars_closed_before_entry():
     trade.entry_time = datetime.fromtimestamp(1850, tz=timezone.utc).isoformat()
 
     # At 31:00 the 15m candle ending at 30:00 closed before entry.
-    assert manager._completed_bar_identity(
-        datetime.fromtimestamp(1860, tz=timezone.utc), trade
-    ) is None
+    assert (
+        manager._completed_bar_identity(
+            datetime.fromtimestamp(1860, tz=timezone.utc), trade
+        )
+        is None
+    )
 
     # At 45:00 the 15m candle ending at 45:00 closed after entry.
-    assert manager._completed_bar_identity(
-        datetime.fromtimestamp(2701, tz=timezone.utc), trade
-    ) == "900:1800"
+    assert (
+        manager._completed_bar_identity(
+            datetime.fromtimestamp(2701, tz=timezone.utc), trade
+        )
+        == "900:1800"
+    )
