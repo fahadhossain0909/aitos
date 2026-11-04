@@ -188,8 +188,12 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         pages to avoid silently skipping or looping over exchange history.
         """
         if not self._api_key or not self._api_secret:
-            raise RuntimeError("Binance account-income history requires API credentials")
-        if start_time_ms < 0 or (end_time_ms is not None and end_time_ms < start_time_ms):
+            raise RuntimeError(
+                "Binance account-income history requires API credentials"
+            )
+        if start_time_ms < 0 or (
+            end_time_ms is not None and end_time_ms < start_time_ms
+        ):
             raise ValueError("invalid income-history time range")
         if not 1 <= limit <= 1000:
             raise ValueError("income-history limit must be between 1 and 1000")
@@ -203,9 +207,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         # Binance income history limits each query window to seven days.
         window_start = int(start_time_ms)
         while window_start <= requested_end:
-            window_end = min(
-                requested_end, window_start + 7 * 24 * 60 * 60 * 1000 - 1
-            )
+            window_end = min(requested_end, window_start + 7 * 24 * 60 * 60 * 1000 - 1)
             cursor = window_start
             while cursor <= window_end:
                 params: dict[str, Any] = {
