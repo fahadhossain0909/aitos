@@ -367,7 +367,9 @@ async def test_close_archive_failure_is_propagated_and_open_state_is_not_deleted
 
 
 @pytest.mark.asyncio
-async def test_closed_trade_cost_update_refreshes_durable_ledger(event_bus, paper_trade):
+async def test_closed_trade_cost_update_refreshes_durable_ledger(
+    event_bus, paper_trade
+):
     from types import SimpleNamespace
 
     paper_trade.state = TradeLifecycleState.POSITION_CLOSED
