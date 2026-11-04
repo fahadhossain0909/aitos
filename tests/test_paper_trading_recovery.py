@@ -113,6 +113,13 @@ def test_trade_payload_round_trip_preserves_entry_thesis_and_emergency_stop(
     paper_trade.initial_r_distance = 4.0
     paper_trade.mae_r = 0.5
     paper_trade.mfe_r = 1.25
+    paper_trade.gross_realized_pnl_usd = 12.75
+    paper_trade.fees_paid_usd = 0.15
+    paper_trade.funding_pnl_usd = -0.05
+    paper_trade.cost_adjustments = {
+        "fee-1": {"kind": "fee", "amount_usd": 0.15},
+        "funding-1": {"kind": "funding", "amount_usd": -0.05},
+    }
 
     restored = _trade_from_dict(paper_trade.to_dict())
     assert restored.entry_thesis == paper_trade.entry_thesis
@@ -122,6 +129,10 @@ def test_trade_payload_round_trip_preserves_entry_thesis_and_emergency_stop(
     assert restored.initial_r_distance == 4.0
     assert restored.mae_r == 0.5
     assert restored.mfe_r == 1.25
+    assert restored.gross_realized_pnl_usd == 12.75
+    assert restored.fees_paid_usd == 0.15
+    assert restored.funding_pnl_usd == -0.05
+    assert restored.cost_adjustments == paper_trade.cost_adjustments
 
     from aitos.trading.position_manager import PositionManager
 
