@@ -72,6 +72,7 @@ from aitos.models.trade import (
 )
 from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResult
 from aitos.risk.risk_engine import RiskEngine
+from aitos.trading.tp_contract import TakeProfitExecutionContract
 
 if TYPE_CHECKING:
     from aitos.intelligence.amt.volume_profile import VolumeProfile
@@ -496,12 +497,15 @@ class TradeLifecycle(AITOSModule):
 
         # A breached soft stop and a reached TP are urgent decision points.
         # Otherwise each position receives its own regular EIE evaluation slot.
-        tp_boundary_hit = False
-        if trade.take_profit_levels:
-            next_tp = trade.take_profit_levels[0]
-            tp_boundary_hit = (
-                current_price >= next_tp if is_long else current_price <= next_tp
+        tp_contract = TakeProfitExecutionContract(
+            intelligent=self._position_manager is not None
+        )
+        tp_boundary_hit = bool(
+            trade.take_profit_levels
+            and tp_contract.reached(
+                trade.side, current_price, float(trade.take_profit_levels[0])
             )
+        )
 
         # Force one immediate evaluation on each boundary crossing, then return
         # to the per-position cadence while price remains beyond that boundary.
@@ -587,7 +591,7 @@ class TradeLifecycle(AITOSModule):
         # They never cause an automatic full exit or static partial reduction.
         # EIE may explicitly EXIT or MANAGE (including a partial reduction) after
         # evaluating the live thesis, path, order flow and structure.
-        if self._position_manager is not None and tp_boundary_hit:
+        if tp_contract.tp_is_checkpoint and tp_boundary_hit:
             reached_tp = trade.take_profit_levels.pop(0)
             self._tp_boundary_breached.discard(trade.trade_id)
             trade.updated_at = utc_now_iso()
@@ -614,10 +618,10 @@ class TradeLifecycle(AITOSModule):
                     }
                 },
             )
-        elif self._position_manager is None and trade.take_profit_levels:
+        elif tp_contract.static_tp_may_close and trade.take_profit_levels:
             # Preserve legacy static TP behavior when Exit Intelligence is off.
             next_tp = trade.take_profit_levels[0]
-            tp_hit = current_price >= next_tp if is_long else current_price <= next_tp
+            tp_hit = tp_contract.reached(trade.side, current_price, float(next_tp))
             if tp_hit:
                 if len(trade.take_profit_levels) > 1:
                     await self._partial_close(
@@ -790,12 +794,14 @@ class TradeLifecycle(AITOSModule):
         if pos_action.target_extension is not None and trade.take_profit_levels:
             decision = pos_action.target_extension
             current_runner_target = float(trade.take_profit_levels[-1])
-            safer_target = (
-                decision.target_price < current_runner_target
-                if trade.side == TradeSide.LONG
-                else decision.target_price > current_runner_target
+            contract = TakeProfitExecutionContract(intelligent=True)
+            approved_extension = bool(
+                getattr(decision, "allowed", False)
+                and contract.can_extend(
+                    trade.side, current_runner_target, float(decision.target_price)
+                )
             )
-            if safer_target and decision.target_price > 0:
+            if approved_extension:
                 trade.take_profit_levels[-1] = decision.target_price
                 trade.updated_at = utc_now_iso()
                 await self._event_bus.publish(
