@@ -6,10 +6,10 @@ import argparse
 import importlib
 import json
 import os
-from math import isfinite
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from math import isfinite
 from pathlib import Path
 from typing import Any
 

@@ -188,6 +188,7 @@ async def test_rl_feedback_loop_health_check(event_bus):
 
     await loop.shutdown()
 
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("risk_amount", "pnl"),
@@ -220,9 +221,10 @@ async def test_rl_feedback_rejects_non_finite_or_negative_values(
 
 @pytest.mark.asyncio
 async def test_rl_feedback_deduplicates_redelivered_closed_trade_for_deep_scorer():
-    from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
+
+    from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 
     with tempfile.TemporaryDirectory() as directory:
         scorer = DeepValueRLScorer(state_path=str(Path(directory) / "model.pkl"))

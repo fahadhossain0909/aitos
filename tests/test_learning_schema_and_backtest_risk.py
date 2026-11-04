@@ -6,9 +6,7 @@ from aitos.data.repository import CREATE_LEARNING_EXPERIENCES, MarketDataReposit
 
 
 def test_backtest_risk_requires_explicit_positive_finite_initial_risk():
-    assert _initial_risk_state({"initial_risk_usd": 12.5}) == {
-        "risk_amount_usd": 12.5
-    }
+    assert _initial_risk_state({"initial_risk_usd": 12.5}) == {"risk_amount_usd": 12.5}
     assert _initial_risk_state({"risk_amount_usd": 8}) == {"risk_amount_usd": 8.0}
     assert _initial_risk_state({"risk_amount_usd": 0, "initial_risk_usd": -1}) == {}
     assert _initial_risk_state({"initial_risk_usd": nan}) == {}

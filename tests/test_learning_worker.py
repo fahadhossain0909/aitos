@@ -181,6 +181,7 @@ def test_scorer_refreshes_checkpoint_written_by_another_process(tmp_path):
     asyncio.run(reader.score("BTCUSDT", {"trend_strength": 8.0}))
     assert reader.n_samples_seen == 1
 
+
 def test_backtest_summary_and_unscaled_trade_rewards_are_rejected():
     summary = {
         "decision": "backtest_summary",
@@ -226,10 +227,14 @@ def test_worker_trains_only_valid_normalized_trade_rewards():
 
     class Scorer:
         n_samples_seen = 0
+
         def __init__(self):
             self.updates = []
             self.applied = set()
-        def update_experience_and_persist(self, experience_id, symbol, features, reward):
+
+        def update_experience_and_persist(
+            self, experience_id, symbol, features, reward
+        ):
             if experience_id in self.applied:
                 return False
             self.applied.add(experience_id)
@@ -248,7 +253,8 @@ def test_worker_trains_only_valid_normalized_trade_rewards():
             "outcome": "completed",
             "reward": 0.25,
             "features_json": '{"trend_strength": 8}',
-            "risk_state_json": "{}", "metadata_json": "{}",
+            "risk_state_json": "{}",
+            "metadata_json": "{}",
         },
         {
             "experience_id": "22222222-2222-2222-2222-222222222222",
@@ -264,8 +270,10 @@ def test_worker_trains_only_valid_normalized_trade_rewards():
         {
             "experience_id": "33333333-3333-3333-3333-333333333333",
             "timestamp": datetime(2026, 1, 3, tzinfo=timezone.utc),
-            "symbol": "BTCUSDT", "decision": "backtest_trade",
-            "outcome": "closed", "reward": 50.0,
+            "symbol": "BTCUSDT",
+            "decision": "backtest_trade",
+            "outcome": "closed",
+            "reward": 50.0,
             "features_json": '{"trend_strength": 8}',
             "risk_state_json": '{"risk_amount_usd":25}',
             "metadata_json": '{"reward_unit":"quote_pnl"}',
@@ -277,5 +285,3 @@ def test_worker_trains_only_valid_normalized_trade_rewards():
     assert reward == 2.0
     assert features["rl_confidence"] == 5.0
     assert worker._cursor_experience_id.endswith("333333333333")
-
-
