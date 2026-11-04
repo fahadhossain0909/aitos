@@ -555,7 +555,6 @@ class TradeStatePersistence:
             )
             return
         try:
-            load_trade = getattr(self._store, "load_trade", None)
             # The close event carries the complete immutable trade snapshot.
             payload = dict(event.payload)
             closed_trade = _trade_from_dict(payload)
