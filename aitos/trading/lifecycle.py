@@ -1519,9 +1519,7 @@ class TradeLifecycle(AITOSModule):
         trade.quantity = max(0.0, remaining_quantity)
         trade.gross_realized_pnl_usd += realized
         trade.pnl = round(
-            trade.gross_realized_pnl_usd
-            - trade.fees_paid_usd
-            + trade.funding_pnl_usd,
+            trade.gross_realized_pnl_usd - trade.fees_paid_usd + trade.funding_pnl_usd,
             8,
         )
         trade.updated_at = utc_now_iso()
