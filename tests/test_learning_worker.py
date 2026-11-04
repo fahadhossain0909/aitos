@@ -412,6 +412,9 @@ def test_worker_partitions_regime_models_and_normalizes_regime_labels(tmp_path):
     assert trending is not ranging
     assert trending._state_path != ranging._state_path
     assert trending._state_path.parent.name == "regimes"
-    assert ContinualLearningWorker._row_regime(
-        {"metadata_json": '{"market_regime":"High Volatility"}'}
-    ) == "high_volatility"
+    assert (
+        ContinualLearningWorker._row_regime(
+            {"metadata_json": '{"market_regime":"High Volatility"}'}
+        )
+        == "high_volatility"
+    )
