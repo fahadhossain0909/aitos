@@ -4,6 +4,7 @@ This transport intentionally does not provide persistence, cross-process
 delivery, durable ACKs, or crash recovery. Use Redis Streams for paper/live
 runtimes until a durable backend is explicitly configured.
 """
+ 
 from __future__ import annotations
 
 import asyncio
@@ -88,9 +89,7 @@ class InProcessBus(AITOSModule):
         return HealthStatus(
             module_id=self.module_id,
             status=(
-                ModuleStatus.HEALTHY
-                if self._initialized
-                else ModuleStatus.UNHEALTHY
+                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
             ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
@@ -244,9 +243,7 @@ class InProcessBus(AITOSModule):
             success=True,
         )
 
-    async def replay(
-        self, topic: str, since: datetime, handler: EventHandler
-    ) -> None:
+    async def replay(self, topic: str, since: datetime, handler: EventHandler) -> None:
         self._require_initialized()
         for event in tuple(self._history.get(topic, ())):
             created = datetime.fromisoformat(event.created_at)
