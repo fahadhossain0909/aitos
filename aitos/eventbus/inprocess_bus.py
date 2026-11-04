@@ -106,7 +106,18 @@ class InProcessBus(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
-        tasks = [sub._task for sub in self._subscriptions if sub._task is not None]
+        subscriptions = tuple(self._subscriptions)
+        if subscriptions and grace_period_seconds > 0:
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*(sub._queue.join() for sub in subscriptions)),
+                    timeout=grace_period_seconds,
+                )
+            except TimeoutError:
+                # A volatile adapter cannot guarantee draining beyond the
+                # caller's shutdown budget; remaining work is cancelled below.
+                pass
+        tasks = [sub._task for sub in subscriptions if sub._task is not None]
         for task in tasks:
             task.cancel()
         if tasks:
