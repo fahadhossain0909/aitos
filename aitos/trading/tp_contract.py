@@ -30,7 +30,13 @@ class TakeProfitExecutionContract:
     def static_tp_may_close(self) -> bool:
         return not self.intelligent
 
-    def can_extend(self, side: TradeSide, current_target: float, proposed: float) -> bool:
+    def can_extend(
+        self, side: TradeSide, current_target: float, proposed: float
+    ) -> bool:
         if current_target <= 0 or proposed <= 0:
             return False
-        return proposed > current_target if side == TradeSide.LONG else proposed < current_target
+        return (
+            proposed > current_target
+            if side == TradeSide.LONG
+            else proposed < current_target
+        )
