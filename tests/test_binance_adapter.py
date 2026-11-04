@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 import time
 
 import pytest
@@ -259,3 +260,38 @@ async def test_stream_order_book_uses_public_stream_endpoint():
     finally:
         producer_task.cancel()
         await asyncio.gather(producer_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_fetch_income_history_requires_credentials():
+    adapter = BinanceFuturesAdapter(api_key=None, api_secret=None)
+    with pytest.raises(RuntimeError, match="requires API credentials"):
+        await adapter.fetch_income_history(start_time_ms=1)
+
+
+@pytest.mark.asyncio
+async def test_fetch_income_history_signs_request_and_deduplicates_transactions():
+    adapter = BinanceFuturesAdapter(api_key="test-key", api_secret="test-secret")
+    pattern = re.compile(r"https://fapi\\.binance\\.com/fapi/v1/income\\?.*signature=[a-f0-9]{64}")
+    rows = [
+        {
+            "incomeType": "COMMISSION",
+            "income": "-0.01",
+            "asset": "USDT",
+            "symbol": "BTCUSDT",
+            "time": 100,
+            "tranId": 10,
+        },
+        {
+            "incomeType": "FUNDING_FEE",
+            "income": "0.02",
+            "asset": "USDT",
+            "symbol": "BTCUSDT",
+            "time": 200,
+            "tranId": 11,
+        },
+    ]
+    with aioresponses() as mocked:
+        mocked.get(pattern, payload=rows)
+        result = await adapter.fetch_income_history(start_time_ms=1, limit=10)
+    assert [row["tranId"] for row in result] == [10, 11]
