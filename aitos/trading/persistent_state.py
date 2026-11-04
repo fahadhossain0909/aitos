@@ -157,6 +157,9 @@ class DurableTradingStateStore:
                 SELECT trade_id, argMax(payload_json, updated_at) AS payload_json
                 FROM trade_runtime_state
                 WHERE state IN ('position_opened', 'exit_triggered')
+                  AND trade_id NOT IN (
+                      SELECT trade_id FROM paper_closed_trade_ledger
+                  )
                 GROUP BY trade_id
                 """
             )
@@ -379,11 +382,15 @@ class TradeStatePersistence:
         but that alone does not prove the active feed is subscribed after startup.
         An explicit post-initialization reconciliation verifies effective symbols.
         """
-        trades = await self._store.load_open_trades()
-        for trade in trades:
-            self._lifecycle._open_trades[trade.trade_id] = trade
         load_closed = getattr(self._store, "load_closed_trades", None)
         closed_trades = await load_closed() if callable(load_closed) else []
+        closed_ids = {trade.trade_id for trade in closed_trades}
+        trades = await self._store.load_open_trades()
+        for trade in trades:
+            # A close archive is authoritative if a crash occurred between
+            # archiving the close and deleting the stale open-state row.
+            if trade.trade_id not in closed_ids:
+                self._lifecycle._open_trades[trade.trade_id] = trade
         if closed_trades and hasattr(self._lifecycle, "_closed_trades"):
             existing = {trade.trade_id for trade in self._lifecycle._closed_trades}
             self._lifecycle._closed_trades.extend(
