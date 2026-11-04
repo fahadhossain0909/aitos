@@ -18,7 +18,7 @@ def create_event_bus(
     """Create the configured transport; Redis remains the safe default.
 
     Supported backends: ``redis`` and ``inprocess``. The latter is rejected
-    for paper/live/production modes because it has no persistence or recovery.
+    only in development/test/local modes because it has no persistence or recovery.
     NATS is deliberately rejected until its JetStream adapter and contract
     tests are implemented; it is never silently substituted.
     """
@@ -37,7 +37,8 @@ def create_event_bus(
     if backend == "inprocess":
         if runtime_mode not in _INPROCESS_ALLOWED_MODES:
             raise ValueError(
-                "InProcessBus is volatile and only allowed in development/test/local modes"
+                "InProcessBus is volatile and only allowed in "
+                "development/test/local modes"
             )
         return InProcessBus(
             history_limit=int(options.get("history_limit", 10_000)),
