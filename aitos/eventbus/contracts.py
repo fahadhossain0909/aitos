@@ -4,6 +4,7 @@ Concrete transports (Redis Streams, in-process test transport, and future
 NATS JetStream adapters) implement these structural interfaces. Keep this
 module free of infrastructure imports.
 """
+
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
