@@ -118,7 +118,11 @@ class RLFeedbackLoop(AITOSModule):
         persist_trade = getattr(self._scorer, "update_trade_and_persist", None)
         persist = getattr(self._scorer, "update_and_persist", None)
         if callable(persist_trade) and trade_dict.get("trade_id"):
-            persist_trade(str(trade_dict["trade_id"]), symbol, context, reward_r_multiple)
+            applied = persist_trade(
+                str(trade_dict["trade_id"]), symbol, context, reward_r_multiple
+            )
+            if applied is False:
+                return None
         elif callable(persist):
             persist(symbol, context, reward_r_multiple)
         else:
