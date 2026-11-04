@@ -115,6 +115,7 @@ class StageSnapshot:
     latency_p95_ms: float | None = None
     latency_p99_ms: float | None = None
     latency_max_ms: float | None = None
+    latency_sample_count: int = 0
     input_rate: float = 0.0
     output_rate: float = 0.0
     issues: dict[str, int] = field(default_factory=dict)

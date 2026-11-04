@@ -12,6 +12,7 @@ from aitos.models.trade import (
 from aitos.trading.persistent_state import (
     IdempotentOrderExecutor,
     TradeStatePersistence,
+    _trade_from_dict,
 )
 
 
@@ -175,3 +176,28 @@ async def test_dynamic_exit_protects_a_trailing_stop(event_bus, risk_engine):
 
     assert protected_sl > original_sl
     assert trade.sl_price >= protected_sl
+
+
+def test_adaptive_exit_observation_counter_survives_trade_recovery():
+    trade = Trade(
+        trade_id="trade-adaptive-restart",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=2.0,
+        position_size_usd=100.0,
+        risk_amount_usd=5.0,
+        strategy_id="test",
+        agent_consensus={},
+        explanation="adaptive restart",
+        sl_price=95.0,
+        tp_price=110.0,
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-08-24T03:00:00+00:00",
+        adaptive_exit_observations=17,
+    )
+
+    restored = _trade_from_dict(trade.to_dict())
+
+    assert restored.adaptive_exit_observations == 17

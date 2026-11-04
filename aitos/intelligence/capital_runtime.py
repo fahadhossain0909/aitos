@@ -175,6 +175,14 @@ def install_capital_guard() -> None:
             return _rejected_trade(protected_opportunity, _capital_reason(decision))
 
         consensus = dict(protected_opportunity.agent_consensus)
+        consecutive_losses = max(
+            0, int(protected_opportunity.agent_consensus.get("consecutive_losses", 0))
+        )
+        risk_reduction_multiplier = (
+            gateway.controls.risk_reduction_multiplier
+            if consecutive_losses >= gateway.controls.risk_reduction_after_losses
+            else 1.0
+        )
         consensus["capital_objective"] = {
             "eligible": True,
             "composite_score": decision.composite_score,
@@ -182,6 +190,7 @@ def install_capital_guard() -> None:
             "risk_budget_usd": allocation.risk_budget_usd,
             "capital_usd": allocation.capital_usd,
             "risk_budget_pct": (allocation.risk_budget_usd / equity) * 100.0,
+            "risk_reduction_multiplier": risk_reduction_multiplier,
         }
         authorized = replace(protected_opportunity, agent_consensus=consensus)
         try:

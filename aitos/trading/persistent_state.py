@@ -282,6 +282,14 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
             if data.get("emergency_sl_price") is not None
             else None
         ),
+        adaptive_exit_observations=max(
+            0, int(data.get("adaptive_exit_observations", 0))
+        ),
+        adaptive_exit_last_bar_id=(
+            str(data["adaptive_exit_last_bar_id"])
+            if data.get("adaptive_exit_last_bar_id") is not None
+            else None
+        ),
         initial_r_distance=(
             float(data["initial_r_distance"])
             if data.get("initial_r_distance") is not None

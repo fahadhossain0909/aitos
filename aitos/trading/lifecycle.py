@@ -787,6 +787,29 @@ class TradeLifecycle(AITOSModule):
                         source_module=self.module_id,
                     )
                 )
+        if pos_action.target_extension is not None and trade.take_profit_levels:
+            decision = pos_action.target_extension
+            current_runner_target = float(trade.take_profit_levels[-1])
+            safer_target = (
+                decision.target_price < current_runner_target
+                if trade.side == TradeSide.LONG
+                else decision.target_price > current_runner_target
+            )
+            if safer_target and decision.target_price > 0:
+                trade.take_profit_levels[-1] = decision.target_price
+                trade.updated_at = utc_now_iso()
+                await self._event_bus.publish(
+                    Event(
+                        topic=TOPIC_POSITION_UPDATED,
+                        payload={
+                            **trade.to_dict(),
+                            "reason": "path_planner_runner_target_guard",
+                            "target_extension": decision.to_dict(),
+                        },
+                        source_module=self.module_id,
+                    )
+                )
+
         # HOLD → retain the position; only independent protection logic follows
         return None
 
@@ -1096,6 +1119,15 @@ class TradeLifecycle(AITOSModule):
                     opportunity,
                     "invalid emergency stop price for EIE-managed position",
                 )
+        capital_objective = opportunity.agent_consensus.get("capital_objective", {})
+        approved_risk_budget = capital_objective.get("risk_budget_usd")
+        if approved_risk_budget is not None:
+            approved_risk_budget = float(approved_risk_budget)
+            if not math.isfinite(approved_risk_budget) or approved_risk_budget <= 0:
+                return await self._reject(
+                    opportunity, "capital_objective: invalid approved risk budget"
+                )
+
         sizing = calculate_position_size(
             equity_usd=portfolio.equity_usd,
             entry_price=opportunity.entry_price,
@@ -1107,6 +1139,52 @@ class TradeLifecycle(AITOSModule):
             existing_sector_notional_usd=existing_sector_notional,
             sector_limit_pct=self._risk_engine.limits.max_sector_exposure_pct,
         )
+
+        # Apply the streak multiplier after leverage/sector caps so the
+        # realized executable risk is actually reduced by the configured
+        # percentage, even when a portfolio exposure cap was already binding.
+        risk_multiplier = float(capital_objective.get("risk_reduction_multiplier", 1.0))
+        if not math.isfinite(risk_multiplier) or not 0.0 < risk_multiplier <= 1.0:
+            return await self._reject(
+                opportunity, "capital_objective: invalid risk reduction multiplier"
+            )
+        if risk_multiplier < 1.0:
+            scaled_notional = (
+                math.floor(sizing.position_size_usd * risk_multiplier * 100.0) / 100.0
+            )
+            stop_risk_rate = (
+                abs(opportunity.entry_price - sizing_stop_price)
+                / opportunity.entry_price
+            )
+            sizing = PositionSizeResult(
+                position_size_usd=scaled_notional,
+                leverage=sizing.leverage,
+                risk_amount_usd=round(scaled_notional * stop_risk_rate, 2),
+                rationale=(
+                    f"{sizing.rationale}; loss-streak multiplier={risk_multiplier:.3f}"
+                ),
+            )
+
+        # Enforce the gateway's absolute USD risk budget after all sizing caps.
+        if approved_risk_budget is not None:
+            stop_risk_rate = (
+                abs(opportunity.entry_price - sizing_stop_price)
+                / opportunity.entry_price
+            )
+            max_notional = (
+                math.floor((approved_risk_budget / stop_risk_rate) * 100.0) / 100.0
+            )
+            if sizing.position_size_usd > max_notional:
+                capped_notional = max(0.0, max_notional)
+                sizing = PositionSizeResult(
+                    position_size_usd=capped_notional,
+                    leverage=sizing.leverage,
+                    risk_amount_usd=round(capped_notional * stop_risk_rate, 2),
+                    rationale=(
+                        f"{sizing.rationale}; capital risk cap applied "
+                        f"({approved_risk_budget:.8f} USD)"
+                    ),
+                )
         if sizing.position_size_usd <= 0.0:
             return await self._reject(
                 opportunity, f"sector exposure cap exhausted for {candidate_sector}"

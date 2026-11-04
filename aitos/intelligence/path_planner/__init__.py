@@ -4,7 +4,16 @@ Given a MarketState and optional volume-profile / liquidity / structure
 inputs, produces a ranked set of probable price destinations.
 """
 
-from aitos.intelligence.path_planner.models import PathDestination, PathPlan
+from aitos.intelligence.path_planner.models import (
+    PathDestination,
+    PathPlan,
+    TargetExtensionDecision,
+)
 from aitos.intelligence.path_planner.planner import MarketPathPlanner
 
-__all__ = ["MarketPathPlanner", "PathDestination", "PathPlan"]
+__all__ = [
+    "MarketPathPlanner",
+    "PathDestination",
+    "PathPlan",
+    "TargetExtensionDecision",
+]

@@ -1,4 +1,4 @@
-"""Canonical market-data bus over Redis Streams."""
+"""Canonical semantic market-data API over a pluggable event transport."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from datetime import datetime
 from typing import Any
 
 from aitos.core.contracts import Event
-from aitos.eventbus import redis_bus as redis_bus_module
-from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.eventbus.contracts import EventBusProtocol, SubscriptionProtocol
 
 from .channels import (
     CHANNEL_BOOK_DELTA,
@@ -23,7 +22,6 @@ from .channels import (
     CHANNEL_TRADE,
 )
 from .contracts import MarketEvent, MarketEventType, MarketSource
-from .retention import maxlen_for
 
 _CHANNEL_BY_TYPE = {
     MarketEventType.TRADE: CHANNEL_TRADE,
@@ -37,12 +35,6 @@ _CHANNEL_BY_TYPE = {
     MarketEventType.OPTIONS: CHANNEL_OPTIONS,
     MarketEventType.INSTRUMENT: CHANNEL_INSTRUMENT,
 }
-
-# The legacy EventBus is intentionally retained as the transport primitive during
-# migration. Register v1 semantic channels with its bounded-retention policy so
-# a canonical stream can never grow without limit.
-for _channel in set(_CHANNEL_BY_TYPE.values()):
-    redis_bus_module.STREAM_MAXLEN_DEFAULTS.setdefault(_channel, maxlen_for(_channel))
 
 
 def channel_for(event_type: MarketEventType) -> str:
@@ -116,9 +108,9 @@ MarketEventHandler = Callable[[MarketEvent], Awaitable[Any]]
 
 
 class MarketDataBus:
-    """Semantic market-data API backed by Redis Streams."""
+    """Semantic market-data API backed by the configured event transport."""
 
-    def __init__(self, event_bus: EventBus) -> None:
+    def __init__(self, event_bus: EventBusProtocol) -> None:
         self._event_bus = event_bus
 
     async def publish(self, event: MarketEvent) -> None:
@@ -192,7 +184,6 @@ class MarketDataBus:
         except Exception:
             # Telemetry and validation must never interrupt the trading path.
             pass
-        payload["retention_maxlen"] = maxlen_for(channel)
         symbol = str(event.symbol or "")
         started = time.perf_counter()
         try:
@@ -244,7 +235,7 @@ class MarketDataBus:
         *,
         group: str,
         live_only: bool = True,
-    ) -> Subscription:
+    ) -> SubscriptionProtocol:
         channel = channel_for(event_type)
 
         async def _handle(event: Event) -> Any:

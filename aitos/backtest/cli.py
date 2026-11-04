@@ -9,6 +9,7 @@ import os
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from math import isfinite
 from pathlib import Path
 from typing import Any
 
@@ -147,6 +148,22 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _initial_risk_state(fields: dict[str, Any]) -> dict[str, float]:
+    """Return only explicitly supplied, positive finite initial-risk values.
+
+    Backtest PnL is quote-currency PnL, not an R multiple. Never infer risk
+    from PnL, position notional, or account equity.
+    """
+    for key in ("initial_risk_usd", "risk_amount_usd"):
+        try:
+            risk = float(fields.get(key))
+        except (TypeError, ValueError):
+            continue
+        if isfinite(risk) and risk > 0:
+            return {"risk_amount_usd": risk}
+    return {}
+
+
 def _persist_summary(args, result) -> None:
     import clickhouse_connect
 
@@ -199,8 +216,18 @@ def _persist_summary(args, result) -> None:
                     for k, v in trade.fields.items()
                     if isinstance(v, (int, float, bool))
                 },
+                risk_state=_initial_risk_state(trade.fields),
                 strategy_version=args.strategy,
-                metadata={"event_type": "backtest_trade"},
+                metadata={
+                    "event_type": "backtest_trade",
+                    # A quote-PnL row is trainable only when its explicit
+                    # initial risk is present; the worker validates and scales it.
+                    "reward_unit": (
+                        "quote_pnl"
+                        if _initial_risk_state(trade.fields)
+                        else "unscaled_quote_pnl"
+                    ),
+                },
             )
         )
     store.append(records)

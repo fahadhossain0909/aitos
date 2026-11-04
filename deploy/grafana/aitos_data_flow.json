@@ -13,7 +13,7 @@
       "gridPos": {"h": 4, "w": 24, "x": 0, "y": 0},
       "options": {
         "mode": "markdown",
-        "content": "Inspect `GET /data-flow` for aggregate stage snapshots and `GET /data-flow/BTCUSDT` for symbol-specific snapshots. Trace entries carry the canonical `md:{SYMBOL}:{event_id}` identity where available. A pressure marker is a heuristic, not proof: correlate input/output rates, queue age, source age, drops, errors and trace timeline before assigning a root cause. Contract checkpoints currently classify data and report issues without discarding events."
+        "content": "Inspect `GET /data-flow` for aggregate stage snapshots and `GET /data-flow/BTCUSDT` for symbol-specific snapshots. Trace entries carry the canonical `md:{SYMBOL}:{event_id}` identity where available. A pressure marker is a heuristic, not proof: correlate input/output rates, queue age, source age, drops, errors and trace timeline before assigning a root cause. Contract checkpoints currently classify data and report issues without discarding events. Missing latency percentiles mean no samples were observed; consult the latency sample-count panel before interpreting gaps."
       }
     },
     {
@@ -88,6 +88,14 @@
         {"expr": "aitos_data_flow_output_rate{stage=\"redis_publish\"}", "legendFormat": "publish output"},
         {"expr": "aitos_data_flow_input_rate{stage=\"redis_consumer\"}", "legendFormat": "consumer input"},
         {"expr": "aitos_data_flow_output_rate{stage=\"redis_consumer\"}", "legendFormat": "consumer output"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency sample availability",
+      "gridPos": {"h": 6, "w": 12, "x": 0, "y": 36},
+      "targets": [
+        {"expr": "aitos_data_flow_latency_sample_count", "legendFormat": "{{stage}} samples"}
       ]
     }
   ]

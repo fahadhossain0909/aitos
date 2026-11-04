@@ -18,6 +18,13 @@ def test_daily_loss_and_loss_streak_are_hard_stops():
     assert breaker.check(daily_pnl_pct=-2.9, consecutive_losses=4)[0] is True
 
 
+def test_loss_streak_risk_throttle_config_is_bounded():
+    with pytest.raises(ValueError):
+        CapitalControlConfig(risk_reduction_multiplier=1.5)
+    with pytest.raises(ValueError):
+        CapitalControlConfig(risk_reduction_after_losses=0)
+
+
 def test_opportunity_expiry():
     now = datetime.now(timezone.utc)
     old = (now - timedelta(seconds=31)).isoformat()
