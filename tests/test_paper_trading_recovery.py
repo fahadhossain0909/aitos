@@ -39,9 +39,13 @@ class FakeStateStore:
 class FakeLifecycle:
     def __init__(self):
         self._open_trades = {}
+        self._closed_trades = []
 
     def get_open_trades(self):
         return list(self._open_trades.values())
+
+    def get_closed_trades(self):
+        return list(self._closed_trades)
 
 
 @pytest.fixture
