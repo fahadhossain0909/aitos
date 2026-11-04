@@ -380,13 +380,14 @@ async def main() -> None:
             await heal_task
         except asyncio.CancelledError:
             pass
-        # Gracefully stop the continual-learning worker
-        learning_task.cancel()
+        # Let the worker finish its current ClickHouse batch and exit its
+        # own loop (which closes the client in run_forever's finally block).
+        # Cancelling asyncio.to_thread does not stop its underlying thread.
+        learning_worker.request_stop()
         try:
-            await learning_task
-        except asyncio.CancelledError:
-            pass
-        await asyncio.to_thread(learning_worker.shutdown)
+            await asyncio.shield(learning_task)
+        finally:
+            await asyncio.to_thread(learning_worker.shutdown)
         await price_safety_net.stop()
         await tracker.persist_state(components.trade_lifecycle)
         await asyncio.to_thread(rl_scorer.save_state)
