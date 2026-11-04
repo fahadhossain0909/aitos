@@ -699,3 +699,28 @@ async def test_fee_and_funding_adjustments_are_idempotently_included_in_net_pnl(
     assert closed.funding_pnl_usd == pytest.approx(-0.03)
     assert closed.pnl == pytest.approx(expected_net)
     assert len(closed.cost_adjustments) == 2
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_routes_external_funding_adjustment_events(
+    event_bus, risk_engine
+):
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+
+    await lifecycle.handle_event(
+        Event(
+            topic="trade.cost_adjustment",
+            payload={
+                "trade_id": trade.trade_id,
+                "adjustment_id": "funding-event-42",
+                "kind": "funding",
+                "amount_usd": 0.08,
+            },
+            source_module="exchange-reconciliation",
+        )
+    )
+
+    assert trade.funding_pnl_usd == pytest.approx(0.08)
+    assert "funding-event-42" in trade.cost_adjustments
