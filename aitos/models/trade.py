@@ -115,6 +115,10 @@ class Trade:
     exit_reason: str | None = None
     pnl: float | None = None
     pnl_percent: float | None = None
+    gross_realized_pnl_usd: float = 0.0
+    fees_paid_usd: float = 0.0
+    funding_pnl_usd: float = 0.0
+    cost_adjustments: dict[str, dict[str, Any]] = field(default_factory=dict)
     rejection_reason: str | None = None
     # Immutable initial risk distance. MAE/MFE and R multiples must use the
     # original entry-to-initial-SL distance, not a later breakeven/trailing SL.
@@ -139,6 +143,12 @@ class Trade:
     updated_at: str = field(default_factory=_utc_now_iso)
 
     def __post_init__(self) -> None:
+        if self.pnl is not None and self.gross_realized_pnl_usd == 0.0:
+            # Backward compatibility: old persisted trades stored gross PnL
+            # directly in pnl and had no separate cost ledger.
+            self.gross_realized_pnl_usd = (
+                float(self.pnl) + self.fees_paid_usd - self.funding_pnl_usd
+            )
         if self.initial_r_distance is None:
             object.__setattr__(
                 self, "initial_r_distance", abs(self.entry_price - self.sl_price)
@@ -192,6 +202,10 @@ class Trade:
             "exit_reason": self.exit_reason,
             "pnl": self.pnl,
             "pnl_percent": self.pnl_percent,
+            "gross_realized_pnl_usd": self.gross_realized_pnl_usd,
+            "fees_paid_usd": self.fees_paid_usd,
+            "funding_pnl_usd": self.funding_pnl_usd,
+            "cost_adjustments": self.cost_adjustments,
             "rejection_reason": self.rejection_reason,
             "trailing_sl_enabled": self.trailing_sl_enabled,
             "breakeven_triggered": self.breakeven_triggered,
