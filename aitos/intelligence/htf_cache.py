@@ -78,6 +78,7 @@ class HigherTimeframeCandleCache:
                 if entry is not None:
                     return list(entry.candles), {
                         "cache": "stale_fallback",
+                        "stale": True,
                         "latest_closed_at": entry.latest_close.isoformat(),
                     }
                 return [], {"cache": "miss_empty", "latest_closed_at": None}
@@ -98,6 +99,7 @@ class HigherTimeframeCandleCache:
                 )
                 return list(entry.candles), {
                     "cache": "unchanged_fallback",
+                    "stale": True,
                     "latest_closed_at": entry.latest_close.isoformat(),
                 }
 
