@@ -9,7 +9,7 @@ from .inprocess_bus import InProcessBus
 from .redis_bus import EventBus as RedisEventBus
 
 
-_VOLATILE_FORBIDDEN_MODES = {"paper", "live", "production", "prod"}
+_INPROCESS_ALLOWED_MODES = {"development", "dev", "test", "testing", "local"}
 
 
 def create_event_bus(
@@ -35,9 +35,9 @@ def create_event_bus(
         )
 
     if backend == "inprocess":
-        if runtime_mode in _VOLATILE_FORBIDDEN_MODES:
+        if runtime_mode not in _INPROCESS_ALLOWED_MODES:
             raise ValueError(
-                "InProcessBus is volatile and forbidden in paper/live/production mode"
+                "InProcessBus is volatile and only allowed in development/test/local modes"
             )
         return InProcessBus(
             history_limit=int(options.get("history_limit", 10_000)),
