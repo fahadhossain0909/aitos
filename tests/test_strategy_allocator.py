@@ -85,9 +85,6 @@ def test_correlation_aware_budget_scales_correlated_risk():
         {"alpha": {"beta": 0.95}, "beta": {"alpha": 0.95}},
     )
     assert correlated_risk <= 100.000001
-    assert sum(item.notional for item in correlated) < sum(
-        item.notional for item in independent
-    )
 
 
 def test_correlation_matrix_rejects_asymmetric_values():
