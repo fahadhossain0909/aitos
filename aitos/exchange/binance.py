@@ -195,45 +195,58 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             raise ValueError("income-history limit must be between 1 and 1000")
 
         rows: list[dict[str, Any]] = []
-        cursor = int(start_time_ms)
-        while True:
-            params: dict[str, Any] = {
-                "startTime": cursor,
-                "limit": limit,
-                "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
-                "recvWindow": 5000,
-            }
-            if end_time_ms is not None:
-                params["endTime"] = int(end_time_ms)
-            if income_type:
-                params["incomeType"] = income_type
-            query = urlencode(params)
-            signature = hmac.new(
-                self._api_secret.encode("utf-8"),
-                query.encode("utf-8"),
-                hashlib.sha256,
-            ).hexdigest()
-            await self._rate_limiter.acquire(30)
-            await self.connect()
-            assert self._session is not None
-            async with self._session.get(
-                f"{REST_BASE_URL}/fapi/v1/income?{query}&signature={signature}",
-                headers={"X-MBX-APIKEY": self._api_key},
-            ) as response:
-                response.raise_for_status()
-                page = await response.json()
-            if not isinstance(page, list):
-                raise RuntimeError("Binance income endpoint returned a non-list payload")
-            rows.extend(page)
-            if len(page) < limit:
-                break
-            timestamps = [int(item.get("time", -1)) for item in page]
-            next_cursor = max(timestamps, default=-1) + 1
-            if next_cursor <= cursor:
-                raise RuntimeError("Binance income pagination made no forward progress")
-            cursor = next_cursor
-            if end_time_ms is not None and cursor > end_time_ms:
-                break
+        requested_end = (
+            int(end_time_ms)
+            if end_time_ms is not None
+            else int(datetime.now(timezone.utc).timestamp() * 1000)
+        )
+        # Binance income history limits each query window to seven days.
+        window_start = int(start_time_ms)
+        while window_start <= requested_end:
+            window_end = min(
+                requested_end, window_start + 7 * 24 * 60 * 60 * 1000 - 1
+            )
+            cursor = window_start
+            while cursor <= window_end:
+                params: dict[str, Any] = {
+                    "startTime": cursor,
+                    "endTime": window_end,
+                    "limit": limit,
+                    "timestamp": int(datetime.now(timezone.utc).timestamp() * 1000),
+                    "recvWindow": 5000,
+                }
+                if income_type:
+                    params["incomeType"] = income_type
+                query = urlencode(params)
+                signature = hmac.new(
+                    self._api_secret.encode("utf-8"),
+                    query.encode("utf-8"),
+                    hashlib.sha256,
+                ).hexdigest()
+                await self._rate_limiter.acquire(30)
+                await self.connect()
+                assert self._session is not None
+                async with self._session.get(
+                    f"{REST_BASE_URL}/fapi/v1/income?{query}&signature={signature}",
+                    headers={"X-MBX-APIKEY": self._api_key},
+                ) as response:
+                    response.raise_for_status()
+                    page = await response.json()
+                if not isinstance(page, list):
+                    raise RuntimeError(
+                        "Binance income endpoint returned a non-list payload"
+                    )
+                rows.extend(page)
+                if len(page) < limit:
+                    break
+                timestamps = [int(item.get("time", -1)) for item in page]
+                next_cursor = max(timestamps, default=-1) + 1
+                if next_cursor <= cursor:
+                    raise RuntimeError(
+                        "Binance income pagination made no forward progress"
+                    )
+                cursor = next_cursor
+            window_start = window_end + 1
         unique: dict[str, dict[str, Any]] = {}
         for row in rows:
             transaction_id = str(row.get("tranId", "")).strip()
