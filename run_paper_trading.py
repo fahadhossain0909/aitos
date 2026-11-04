@@ -215,9 +215,6 @@ async def main() -> None:
         password=settings.clickhouse.password,
         database=settings.clickhouse.database,
     )
-    learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
-    learning_task.set_name("continual-learning-worker")
-
     # Register AI Kernel agents for multi-agent consensus
     market_agent = MarketAgent(event_bus=event_bus)
     risk_agent = RiskAgent(event_bus=event_bus)
@@ -320,6 +317,12 @@ async def main() -> None:
     )
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
+    # Start the blocking worker only after all other startup wiring succeeds.
+    # This keeps failures during agent/telemetry/health-server setup outside
+    # the worker lifetime and guarantees every started worker is covered by
+    # the main try/finally shutdown path.
+    learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
+    learning_task.set_name("continual-learning-worker")
     try:
         while not stop_event.is_set():
             try:
