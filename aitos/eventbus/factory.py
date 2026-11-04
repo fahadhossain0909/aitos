@@ -1,4 +1,5 @@
 """Explicit EventBus backend selection with safe trading-mode guards."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -30,7 +31,7 @@ def create_event_bus(
             raise ValueError("redis_client is required when EventBus backend is redis")
         return RedisEventBus(
             redis_client=redis_client,
-            module_id=str(options.get("module_id", "event-bus"))
+            module_id=str(options.get("module_id", "event-bus")),
         )
 
     if backend == "inprocess":
