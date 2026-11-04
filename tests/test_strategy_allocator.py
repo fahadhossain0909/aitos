@@ -69,3 +69,29 @@ def test_batch_allocator_rejects_invalid_and_duplicate_strategy_requests():
         ]
     )
     assert [item.strategy_id for item in allocations] == ["valid"]
+
+
+def test_correlation_aware_budget_scales_correlated_risk():
+    allocator = CapitalAllocator(10_000, max_strategy_fraction=1.0)
+    requests = [request("alpha", 5_000, 500, 8), request("beta", 5_000, 500, 6)]
+    independent = allocator.allocate(requests, risk_budget=100)
+    correlated = allocator.allocate(
+        requests, risk_budget=100,
+        correlation_matrix={"alpha": {"beta": 0.95}, "beta": {"alpha": 0.95}},
+    )
+    assert sum(item.projected_loss for item in correlated) < sum(
+        item.projected_loss for item in independent
+    )
+
+
+def test_correlation_matrix_rejects_asymmetric_values():
+    allocator = CapitalAllocator(1_000, max_strategy_fraction=1.0)
+    requests = [request("alpha", 100, 10, 2), request("beta", 100, 10, 2)]
+    try:
+        allocator.allocate(
+            requests,
+            correlation_matrix={"alpha": {"beta": 0.8}, "beta": {"alpha": 0.2}},
+        )
+        assert False, "asymmetric correlation must fail closed"
+    except ValueError as exc:
+        assert "symmetric" in str(exc)
