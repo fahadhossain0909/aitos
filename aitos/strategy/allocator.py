@@ -88,9 +88,7 @@ class CapitalAllocator:
                 float(request.requested_notional),
                 self.total_capital * self.max_strategy_fraction,
             )
-            loss_rate = (
-                float(request.max_loss) / float(request.requested_notional)
-            )
+            loss_rate = float(request.max_loss) / float(request.requested_notional)
             eligible.append((request, cap, loss_rate, self._weight(request)))
 
         if not eligible:
