@@ -24,6 +24,17 @@ class FakeStateStore:
     async def save_drawdown(self, asset, equity, peak):
         self.saved_drawdown = (asset, equity, peak)
 
+    async def save_closed_trade(self, trade):
+        if not hasattr(self, "closed_trades"):
+            self.closed_trades = []
+        self.closed_trades = [
+            item for item in self.closed_trades if item.trade_id != trade.trade_id
+        ]
+        self.closed_trades.append(trade)
+
+    async def delete_trade(self, trade_id):
+        self.trades = [trade for trade in self.trades if trade.trade_id != trade_id]
+
 
 class FakeLifecycle:
     def __init__(self):
@@ -288,3 +299,29 @@ async def test_paper_portfolio_restores_peak_equity_and_persists_drawdown(
 
     await tracker.persist_state(lifecycle)
     assert store.saved_drawdown == ("PAPER", 980.0, 1_050.0)
+
+
+
+@pytest.mark.asyncio
+async def test_close_event_archives_trade_before_deleting_open_runtime_state(
+    event_bus, paper_trade
+):
+    from types import SimpleNamespace
+
+    paper_trade.state = TradeLifecycleState.POSITION_CLOSED
+    paper_trade.pnl = 4.25
+    store = FakeStateStore([paper_trade])
+    lifecycle = FakeLifecycle()
+    persistence = TradeStatePersistence(event_bus, lifecycle, store)
+
+    await persistence._delete_event(
+        SimpleNamespace(
+            payload=paper_trade.to_dict(),
+            event_id="close-event-1",
+            topic="trade.position_closed",
+        )
+    )
+
+    assert store.trades == []
+    assert len(store.closed_trades) == 1
+    assert store.closed_trades[0].pnl == 4.25
