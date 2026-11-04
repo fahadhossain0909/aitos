@@ -164,7 +164,11 @@ class ContinualLearningWorker:
             "cursor_experience_id": self._cursor_experience_id,
             "processed_count": self._processed,
             "processed_experiences": sorted(self._legacy_processed),
-            "n_samples_seen": self.scorer.n_samples_seen,
+            "n_samples_seen": self.scorer.n_samples_seen
+            + sum(
+                scorer.n_samples_seen
+                for scorer in getattr(self, "_regime_scorers", {}).values()
+            ),
             "regime_reward_history": getattr(
                 self, "_reward_calibrator", RegimeRewardCalibrator()
             ).snapshot(),
