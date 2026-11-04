@@ -52,12 +52,17 @@ class CapitalAllocator:
         variance = 0.0
         for left in names:
             for right in names:
-                raw = 1.0 if left == right else correlations.get(left, {}).get(right, 0.0)
+                raw = (
+                    1.0 if left == right else correlations.get(left, {}).get(right, 0.0)
+                )
                 correlation = float(raw)
                 if not isfinite(correlation) or not -1.0 <= correlation <= 1.0:
                     raise ValueError("correlations must be finite values in [-1, 1]")
                 reverse = correlations.get(right, {}).get(left, correlation)
-                if not isfinite(float(reverse)) or abs(float(reverse) - correlation) > 1e-6:
+                if (
+                    not isfinite(float(reverse))
+                    or abs(float(reverse) - correlation) > 1e-6
+                ):
                     raise ValueError("correlation matrix must be symmetric")
                 variance += losses[left] * losses[right] * correlation
         return sqrt(max(0.0, variance))
@@ -136,10 +141,14 @@ class CapitalAllocator:
             remaining -= distributed
             active = next_active
 
-        loss_rates = {request.strategy_id: loss_rate for request, _, loss_rate, _ in eligible}
+        loss_rates = {
+            request.strategy_id: loss_rate for request, _, loss_rate, _ in eligible
+        }
 
         def portfolio_risk(scale: float) -> float:
-            losses = {key: value * scale * loss_rates[key] for key, value in amounts.items()}
+            losses = {
+                key: value * scale * loss_rates[key] for key, value in amounts.items()
+            }
             if correlation_matrix is None:
                 # Preserve the existing conservative L1 risk budget when no
                 # measured correlation matrix is supplied.
