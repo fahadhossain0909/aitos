@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from math import isfinite, sqrt
-import re
 from statistics import median
 from typing import Iterable
 
