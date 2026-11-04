@@ -187,3 +187,42 @@ async def test_rl_feedback_loop_health_check(event_bus):
     assert health.details["updates_applied"] == 1
 
     await loop.shutdown()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("risk_amount", "pnl"),
+    [(-1.0, 10.0), (float("nan"), 10.0), (10.0, float("inf"))],
+)
+async def test_rl_feedback_rejects_non_finite_or_negative_values(event_bus, risk_amount, pnl):
+    scorer = TabularBanditRLScorer()
+    loop = RLFeedbackLoop(event_bus=event_bus, scorer=scorer)
+    await loop.initialize({})
+    await event_bus.publish(Event(
+        topic="trade.position_closed",
+        payload={"trade_id": "invalid", "symbol": "BTCUSDT", "side": "LONG",
+                 "regime": "trending", "pnl": pnl, "risk_amount_usd": risk_amount},
+        source_module="test",
+    ))
+    await asyncio.sleep(0.2)
+    assert loop.updates_applied == 0
+    await loop.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_rl_feedback_deduplicates_redelivered_closed_trade_for_deep_scorer():
+    from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
+    from pathlib import Path
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as directory:
+        scorer = DeepValueRLScorer(state_path=str(Path(directory) / "model.pkl"))
+        loop = RLFeedbackLoop(event_bus=None, scorer=scorer)
+        event = type("E", (), {
+            "payload": {"trade_id": "trade-unique", "symbol": "BTCUSDT", "side": "LONG",
+                        "regime": "trending", "pnl": 20.0, "risk_amount_usd": 10.0},
+            "created_at": "2026-01-01T00:00:00+00:00",
+        })()
+        await loop._on_position_closed(event)
+        await loop._on_position_closed(event)
+        assert scorer.n_samples_seen == 1
+        assert loop.updates_applied == 2  # both deliveries observed; model update applied once
