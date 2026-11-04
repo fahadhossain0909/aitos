@@ -685,6 +685,18 @@ class OpportunityScanner(AITOSModule):
                         limit=self._tuning.scanner.htf_lookback,
                     ),
                 )
+                if htf_cache_diagnostics.get("stale"):
+                    logger.warning(
+                        "entry blocked: higher-timeframe cache has not advanced after candle close",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "timeframe": htf_timeframe,
+                                "cache": htf_cache_diagnostics,
+                            }
+                        },
+                    )
+                    return None
                 htf_aligned, htf_diagnostics = higher_timeframe_alignment(
                     htf_klines,
                     direction,
