@@ -438,7 +438,8 @@ class PaperPortfolioTracker:
         if self.state_store is None:
             return
         closed = trade_lifecycle.get_closed_trades()
-        realized_pnl = sum(float(t.pnl or 0.0) for t in closed)
+        open_trades = trade_lifecycle.get_open_trades()
+        realized_pnl = sum(float(t.pnl or 0.0) for t in (*closed, *open_trades))
         equity = self.starting_equity_usd + realized_pnl
         self._peak_equity_usd = max(self._peak_equity_usd, equity)
         await self.state_store.save_drawdown(self.asset, equity, self._peak_equity_usd)
@@ -448,7 +449,9 @@ class PaperPortfolioTracker:
             trade_lifecycle.get_closed_trades(),
             trade_lifecycle.get_open_trades(),
         )
-        realized_pnl = sum(t.pnl for t in closed if t.pnl is not None)
+        realized_pnl = sum(
+            t.pnl for t in (*closed, *open_trades) if t.pnl is not None
+        )
         equity = self.starting_equity_usd + realized_pnl
         self._peak_equity_usd = max(self._peak_equity_usd, equity)
         day_ago, week_ago = datetime.now(timezone.utc) - timedelta(
