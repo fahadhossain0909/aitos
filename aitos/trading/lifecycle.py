@@ -806,7 +806,7 @@ class TradeLifecycle(AITOSModule):
             current_runner_target = float(trade.take_profit_levels[-1])
             contract = TakeProfitExecutionContract(intelligent=True)
             approved_extension = bool(
-                getattr(decision, "allowed", False)
+                getattr(decision, "approved", False)
                 and contract.can_extend(
                     trade.side, current_runner_target, float(decision.target_price)
                 )
