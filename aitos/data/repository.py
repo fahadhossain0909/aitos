@@ -85,7 +85,9 @@ ORDER BY (category, symbol, event_time, event_id)
 """
 CREATE_LEARNING_EXPERIENCES = """
 CREATE TABLE IF NOT EXISTS learning_experiences (
-    experience_id UUID, timestamp DateTime64(3, 'UTC'), source LowCardinality(String),
+    experience_id UUID, timestamp DateTime64(3, 'UTC'),
+    ingested_at DateTime64(3, 'UTC') DEFAULT timestamp,
+    source LowCardinality(String),
     symbol LowCardinality(String), decision LowCardinality(String), outcome Nullable(String),
     reward Float64, confidence Float64, quantity Float64, price Nullable(Float64),
     features_json String, market_state_json String, risk_state_json String,
@@ -164,6 +166,12 @@ class MarketDataRepository(AITOSModule):
         self._client = await clickhouse_connect.get_async_client(**self._conn_params)
         for ddl in ALL_DDL:
             await self._client.command(ddl)
+        # CREATE IF NOT EXISTS does not migrate an already-created table.
+        # Keep the runtime-created schema compatible with the durable learner.
+        await self._client.command(
+            "ALTER TABLE learning_experiences "
+            "ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT timestamp"
+        )
         self._initialized = True
         logger.info(
             "MarketDataRepository initialized with live market/analytics and durable trading tables"
@@ -199,6 +207,10 @@ class MarketDataRepository(AITOSModule):
     async def ensure_learning_experience_schema(self) -> None:
         self._require_initialized()
         await self._client.command(CREATE_LEARNING_EXPERIENCES)
+        await self._client.command(
+            "ALTER TABLE learning_experiences "
+            "ADD COLUMN IF NOT EXISTS ingested_at DateTime64(3, 'UTC') DEFAULT timestamp"
+        )
 
     async def save_market_event(self, event: Any) -> None:
         self._require_initialized()
