@@ -48,6 +48,7 @@ def test_htf_cache_reuses_snapshot_until_next_candle_close():
         async def fetch_next():
             calls.append(1)
             return [refreshed]
+
         third, meta = await cache.get("BTCUSDT", "1h", 100, fetch_next)
         assert third == [refreshed]
         assert meta["cache"] == "refreshed"
