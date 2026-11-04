@@ -53,7 +53,9 @@ def test_batch_allocation_and_dynamic_tp_contract_survive_historical_replay():
                 (100.0, {"phase": "entry"}),
                 (110.0, {"phase": "tp_checkpoint"}),
                 (108.0, {"phase": "hold"}),
-                (107.0, {"phase": "thesis_invalidated"}),
+                # The replay strategy consumes an explicit thesis-invalidated
+                # signal; the phase label alone is not a boolean signal.
+                (107.0, {"phase": "thesis_invalidated", "thesis_invalidated": True}),
             ]
         )
     ]
