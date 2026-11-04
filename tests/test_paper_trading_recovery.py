@@ -364,3 +364,36 @@ async def test_close_archive_failure_is_propagated_and_open_state_is_not_deleted
 
     assert store.trades == [paper_trade]
     assert getattr(store, "closed_trades", []) == []
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_cost_update_refreshes_durable_ledger(event_bus, paper_trade):
+    from types import SimpleNamespace
+
+    paper_trade.state = TradeLifecycleState.POSITION_CLOSED
+    paper_trade.pnl = 9.5
+    paper_trade.gross_realized_pnl_usd = 10.0
+    paper_trade.fees_paid_usd = 0.25
+    paper_trade.funding_pnl_usd = -0.25
+    paper_trade.cost_adjustments = {
+        "fee-1": {"kind": "fee", "amount_usd": 0.25},
+        "funding-1": {"kind": "funding", "amount_usd": -0.25},
+    }
+    store = FakeStateStore()
+    store.closed_trades = [paper_trade]
+    lifecycle = FakeLifecycle()
+    persistence = TradeStatePersistence(event_bus, lifecycle, store)
+
+    paper_trade.fees_paid_usd = 0.5
+    paper_trade.pnl = 9.25
+    await persistence._save_event(
+        SimpleNamespace(
+            payload=paper_trade.to_dict(),
+            event_id="closed-cost-update-1",
+            topic="trade.position_updated",
+        )
+    )
+
+    assert len(store.closed_trades) == 1
+    assert store.closed_trades[0].fees_paid_usd == 0.5
+    assert store.closed_trades[0].pnl == 9.25
