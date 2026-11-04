@@ -8,6 +8,7 @@ from aitos.intelligence.exit_intelligence import ExitAction
 from aitos.intelligence.path_planner import TargetExtensionDecision
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.position_manager import PositionManager
+from aitos.trading.persistent_state import _trade_from_dict
 
 
 def _open_trade(
@@ -99,4 +100,50 @@ def test_adaptive_exit_is_enabled_by_default_and_can_be_disabled():
     assert (
         PositionManager(config={"adaptive_exit_enabled": False})._adaptive_exit_enabled
         is False
+    )
+
+
+def test_adaptive_stagnation_bar_identity_uses_only_completed_buckets():
+    from datetime import datetime, timezone
+
+    manager = PositionManager(config={"adaptive_exit_bar_seconds": 900})
+    first_tick = datetime.fromtimestamp(1800, tz=timezone.utc)
+    repeated_tick = datetime.fromtimestamp(1850, tz=timezone.utc)
+    next_bucket = datetime.fromtimestamp(2700, tz=timezone.utc)
+
+    assert manager._completed_bar_identity(first_tick) == "900:900"
+    assert manager._completed_bar_identity(repeated_tick) == "900:900"
+    assert manager._completed_bar_identity(next_bucket) == "900:1800"
+
+
+def test_adaptive_completed_bar_identity_survives_trade_recovery():
+    trade = _open_trade()
+    trade.adaptive_exit_observations = 12
+    trade.adaptive_exit_last_bar_id = "900:1710000000"
+
+    restored = _trade_from_dict(trade.to_dict())
+
+    assert restored.adaptive_exit_observations == 12
+    assert restored.adaptive_exit_last_bar_id == "900:1710000000"
+
+
+def test_adaptive_stagnation_does_not_count_bars_closed_before_entry():
+    manager = PositionManager(config={"adaptive_exit_bar_seconds": 900})
+    trade = _open_trade()
+    trade.entry_time = datetime.fromtimestamp(1850, tz=timezone.utc).isoformat()
+
+    # At 31:00 the 15m candle ending at 30:00 closed before entry.
+    assert (
+        manager._completed_bar_identity(
+            datetime.fromtimestamp(1860, tz=timezone.utc), trade
+        )
+        is None
+    )
+
+    # At 45:00 the 15m candle ending at 45:00 closed after entry.
+    assert (
+        manager._completed_bar_identity(
+            datetime.fromtimestamp(2701, tz=timezone.utc), trade
+        )
+        == "900:1800"
     )

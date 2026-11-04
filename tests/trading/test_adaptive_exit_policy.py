@@ -51,9 +51,11 @@ def test_stop_is_not_loosened_after_price_reverses():
 def test_stagnation_requires_configured_number_of_observations():
     policy = AdaptiveExitPolicy({"stagnation_bars": 3})
     trade = _trade()
-    assert not policy.evaluate(trade, 100.1).stagnation_exit
-    assert not policy.evaluate(trade, 100.2).stagnation_exit
-    result = policy.evaluate(trade, 100.3)
+    # Repeated ticks within one completed candle count only once.
+    assert not policy.evaluate(trade, 100.1, completed_bar_id="bar-1").stagnation_exit
+    assert not policy.evaluate(trade, 100.2, completed_bar_id="bar-1").stagnation_exit
+    assert not policy.evaluate(trade, 100.2, completed_bar_id="bar-2").stagnation_exit
+    result = policy.evaluate(trade, 100.3, completed_bar_id="bar-3")
     assert result.stagnation_exit
     assert result.bars_observed == 3
 
@@ -61,9 +63,12 @@ def test_stagnation_requires_configured_number_of_observations():
 def test_observation_counter_is_stored_on_trade_for_serialization():
     policy = AdaptiveExitPolicy({"stagnation_bars": 10})
     trade = _trade()
-    policy.evaluate(trade, 100.1)
+    policy.evaluate(trade, 100.1, completed_bar_id="bar-1")
     assert trade.adaptive_exit_observations == 1
     assert trade.to_dict()["adaptive_exit_observations"] == 1
+    assert trade.to_dict()["adaptive_exit_last_bar_id"] == "bar-1"
+    policy.evaluate(trade, 100.2, completed_bar_id="bar-1")
+    assert trade.adaptive_exit_observations == 1
 
 
 def test_invalid_risk_and_market_price_fail_safe():

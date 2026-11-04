@@ -50,7 +50,13 @@ class AdaptiveExitPolicy:
         # Observation state lives on the Trade record and survives serialization.
         return None
 
-    def evaluate(self, trade: Trade, current_price: float) -> AdaptiveExitResult:
+    def evaluate(
+        self,
+        trade: Trade,
+        current_price: float,
+        *,
+        completed_bar_id: str | None = None,
+    ) -> AdaptiveExitResult:
         if not isfinite(current_price) or current_price <= 0:
             return AdaptiveExitResult(reason="invalid_market_price")
         risk = float(trade.r_distance or 0.0)
@@ -59,8 +65,14 @@ class AdaptiveExitPolicy:
 
         sign = 1.0 if trade.side == TradeSide.LONG else -1.0
         progress_r = ((current_price - trade.entry_price) * sign) / risk
-        count = max(0, int(getattr(trade, "adaptive_exit_observations", 0))) + 1
-        trade.adaptive_exit_observations = count
+        # Position evaluation may run on every tick. Only a caller-supplied,
+        # completed candle identity may advance the stagnation clock.
+        count = max(0, int(getattr(trade, "adaptive_exit_observations", 0)))
+        bar_id = str(completed_bar_id).strip() if completed_bar_id is not None else ""
+        if bar_id and bar_id != getattr(trade, "adaptive_exit_last_bar_id", None):
+            count += 1
+            trade.adaptive_exit_observations = count
+            trade.adaptive_exit_last_bar_id = bar_id
 
         candidate_stop = None
         reason = "no_change"
@@ -82,7 +94,8 @@ class AdaptiveExitPolicy:
         # classified as stagnant merely because it later retraced.
         best_progress_r = max(progress_r, float(trade.mfe_r or 0.0))
         stagnation = (
-            count >= self._stagnation_bars
+            bool(bar_id)
+            and count >= self._stagnation_bars
             and best_progress_r < self._stagnation_min_progress_r
         )
         if stagnation:
