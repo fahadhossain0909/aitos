@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from aitos.intelligence.exit_intelligence import ExitAction
 from aitos.intelligence.path_planner import TargetExtensionDecision
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
-from aitos.trading.position_manager import PositionManager
 from aitos.trading.persistent_state import _trade_from_dict
+from aitos.trading.position_manager import PositionManager
 
 
 def _open_trade(
