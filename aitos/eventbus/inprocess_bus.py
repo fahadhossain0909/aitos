@@ -64,9 +64,9 @@ class InProcessBus(AITOSModule):
         self._queue_limit = queue_limit
         self._module_id = module_id
         self._initialized = False
-        self._history: dict[str, deque[Event]] = defaultdict(
-            lambda: deque(maxlen=self._history_limit)
-        )
+        # One global cap prevents unbounded growth from arbitrary topic
+        # cardinality; each topic competes for the same bounded replay window.
+        self._history: deque[Event] = deque(maxlen=self._history_limit)
         self._subscriptions: list[InProcessSubscription] = []
         self._pending_replies: dict[str, asyncio.Future[Event]] = {}
         self._published = 0
@@ -100,7 +100,7 @@ class InProcessBus(AITOSModule):
                 "consumed_events": self._consumed,
                 "handler_failures": self._handler_failures,
                 "subscriptions": len(self._subscriptions),
-                "history_limit_per_topic": self._history_limit,
+                "history_limit_total": self._history_limit,
                 "queue_limit_per_subscription": self._queue_limit,
             },
         )
@@ -144,7 +144,7 @@ class InProcessBus(AITOSModule):
                 correlation_id=event.correlation_id,
                 schema_version=event.schema_version,
             )
-        self._history[event.topic].append(event)
+        self._history.append(event)
         self._published += 1
         self._last_event_time = datetime.now(timezone.utc).isoformat()
         if event.topic.endswith(".reply") and event.correlation_id:
@@ -172,9 +172,11 @@ class InProcessBus(AITOSModule):
         sub = InProcessSubscription(topic_pattern=topic, group=group, _queue=queue)
         initial_events: list[Event] = []
         if start_id == "0":
-            for stored_topic, events in self._history.items():
-                if fnmatch.fnmatch(stored_topic, topic):
-                    initial_events.extend(events)
+            initial_events.extend(
+                event
+                for event in self._history
+                if fnmatch.fnmatch(event.topic, topic)
+            )
 
         async def _dispatch(event: Event) -> None:
             try:
@@ -245,7 +247,9 @@ class InProcessBus(AITOSModule):
 
     async def replay(self, topic: str, since: datetime, handler: EventHandler) -> None:
         self._require_initialized()
-        for event in tuple(self._history.get(topic, ())):
+        for event in tuple(self._history):
+            if event.topic != topic:
+                continue
             created = datetime.fromisoformat(event.created_at)
             if created.tzinfo is None:
                 created = created.replace(tzinfo=timezone.utc)
