@@ -364,7 +364,7 @@ def test_concurrent_scorers_merge_updates_without_lost_samples(tmp_path):
 
     # Re-delivery of an existing ID from a separate scorer is harmless.
     duplicate = DeepValueRLScorer(state_path=path)
-    assert duplicate.update_experience_and_persist(
+    assert not duplicate.update_experience_and_persist(
         "concurrent-exp-3", "BTCUSDT", {"trend_strength": 8.0}, 0.25
-    ) is False
+    )
     assert duplicate.n_samples_seen == 12
