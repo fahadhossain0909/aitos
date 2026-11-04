@@ -38,7 +38,11 @@ class StrategyEngine:
                 if r.family in preferred or r.family is StrategyFamily.REGIME
             )
         requests = [r.capital_request for r in results if r.capital_request is not None]
-        allocations = self.allocator.allocate(requests)
+        allocations = self.allocator.allocate(
+            requests,
+            available_capital=context.available_capital,
+            risk_budget=context.risk_budget,
+        )
         return StrategyCycle(context.global_regime, results, allocations)
 
     @staticmethod
