@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
-from collections import defaultdict, deque
+from collections import deque
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
