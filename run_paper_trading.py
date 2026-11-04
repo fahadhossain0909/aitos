@@ -205,16 +205,6 @@ async def main() -> None:
     # Reconcile subscriptions afterwards and verify the effective symbol sets.
     await trade_state_persistence.resubscribe_restored_positions()
 
-    # Start continual-learning worker to incrementally train on historical
-    # backtest experiences stored in ClickHouse. Runs in a background thread
-    # because its run_forever() loop is synchronous/blocking.
-    learning_worker = ContinualLearningWorker(
-        host=settings.clickhouse.host,
-        port=settings.clickhouse.port,
-        user=settings.clickhouse.user,
-        password=settings.clickhouse.password,
-        database=settings.clickhouse.database,
-    )
     # Register AI Kernel agents for multi-agent consensus
     market_agent = MarketAgent(event_bus=event_bus)
     risk_agent = RiskAgent(event_bus=event_bus)
@@ -317,10 +307,16 @@ async def main() -> None:
     )
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
-    # Start the blocking worker only after all other startup wiring succeeds.
-    # This keeps failures during agent/telemetry/health-server setup outside
-    # the worker lifetime and guarantees every started worker is covered by
-    # the main try/finally shutdown path.
+    # Construct and start the blocking worker only after all other startup
+    # wiring succeeds. This keeps its ClickHouse client and singleton lock
+    # inside the managed main try/finally lifetime as well as its thread.
+    learning_worker = ContinualLearningWorker(
+        host=settings.clickhouse.host,
+        port=settings.clickhouse.port,
+        user=settings.clickhouse.user,
+        password=settings.clickhouse.password,
+        database=settings.clickhouse.database,
+    )
     learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
     learning_task.set_name("continual-learning-worker")
     try:
