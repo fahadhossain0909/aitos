@@ -399,3 +399,24 @@ async def test_closed_trade_cost_update_refreshes_durable_ledger(
     assert len(store.closed_trades) == 1
     assert store.closed_trades[0].fees_paid_usd == 0.5
     assert store.closed_trades[0].pnl == 9.25
+
+
+@pytest.mark.asyncio
+async def test_paper_equity_includes_realized_partial_pnl_on_open_positions(
+    paper_trade,
+):
+    from aitos.app import PaperPortfolioTracker
+
+    paper_trade.pnl = 6.75
+    paper_trade.gross_realized_pnl_usd = 7.0
+    paper_trade.fees_paid_usd = 0.25
+    store = FakeStateStore()
+    lifecycle = FakeLifecycle()
+    lifecycle._open_trades[paper_trade.trade_id] = paper_trade
+    tracker = PaperPortfolioTracker(starting_equity_usd=1_000.0, state_store=store)
+
+    portfolio = tracker.build_portfolio_state(lifecycle)
+    await tracker.persist_state(lifecycle)
+
+    assert portfolio.equity_usd == 1_006.75
+    assert store.saved_drawdown == ("PAPER", 1_006.75, 1_006.75)
