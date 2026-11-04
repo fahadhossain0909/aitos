@@ -13,7 +13,6 @@ from typing import Any, Protocol, runtime_checkable
 
 from aitos.core.contracts import Event, EventPriority, EventResponse, HealthStatus
 
-
 EventHandler = Callable[[Event], Awaitable[EventResponse | None]]
 
 

@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import math
+import os
 
 from aitos.agents import LearningAgent, MarketAgent, PortfolioAgent, RiskAgent
 from aitos.app import (

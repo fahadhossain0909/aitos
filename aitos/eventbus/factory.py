@@ -8,7 +8,6 @@ from .contracts import EventBusProtocol
 from .inprocess_bus import InProcessBus
 from .redis_bus import EventBus as RedisEventBus
 
-
 _INPROCESS_ALLOWED_MODES = {"development", "dev", "test", "testing", "local"}
 
 
