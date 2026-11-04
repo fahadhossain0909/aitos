@@ -165,7 +165,9 @@ class ContinualLearningWorker:
             "processed_count": self._processed,
             "processed_experiences": sorted(self._legacy_processed),
             "n_samples_seen": self.scorer.n_samples_seen,
-            "regime_reward_history": getattr(self, "_reward_calibrator", RegimeRewardCalibrator()).snapshot(),
+            "regime_reward_history": getattr(
+                self, "_reward_calibrator", RegimeRewardCalibrator()
+            ).snapshot(),
         }
         tmp = self.state_path.with_suffix(
             self.state_path.suffix + f".{os.getpid()}.tmp"
@@ -303,9 +305,12 @@ class ContinualLearningWorker:
         risk_state = ContinualLearningWorker._json_object(row.get("risk_state_json"))
         features = ContinualLearningWorker._json_object(row.get("features_json"))
         return normalize_regime(
-            metadata.get("market_regime") or metadata.get("regime")
-            or risk_state.get("market_regime") or risk_state.get("regime")
-            or features.get("market_regime") or features.get("regime")
+            metadata.get("market_regime")
+            or metadata.get("regime")
+            or risk_state.get("market_regime")
+            or risk_state.get("regime")
+            or features.get("market_regime")
+            or features.get("regime")
         )
 
     def run_once(self) -> int:
@@ -339,7 +344,9 @@ class ContinualLearningWorker:
                         regime, reward_r_multiple
                     )
                     regime_scorer = self._scorer_for_regime(regime)
-                    regime_apply = getattr(regime_scorer, "update_experience_and_persist", apply)
+                    regime_apply = getattr(
+                        regime_scorer, "update_experience_and_persist", apply
+                    )
                     applied = regime_apply(
                         experience_id, str(row["symbol"]), features, calibrated_reward
                     )
@@ -367,7 +374,11 @@ class ContinualLearningWorker:
                     "cursor_timestamp": self._cursor_timestamp,
                     "cursor_experience_id": self._cursor_experience_id,
                     "processed_count": self._processed,
-                    "samples_seen": self.scorer.n_samples_seen + sum(s.n_samples_seen for s in getattr(self, "_regime_scorers", {}).values()),
+                    "samples_seen": self.scorer.n_samples_seen
+                    + sum(
+                        s.n_samples_seen
+                        for s in getattr(self, "_regime_scorers", {}).values()
+                    ),
                 }
             },
         )
