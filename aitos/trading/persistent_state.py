@@ -544,7 +544,7 @@ class TradeStatePersistence:
                 await self._store.save_trade(trade)
         except Exception as exc:
             logger.error(
-                "trade state persistence failed",
+                "trade state persistence failed; propagating for delivery retry",
                 extra={
                     "aitos_extra": {
                         "error": str(exc),
@@ -553,6 +553,7 @@ class TradeStatePersistence:
                     }
                 },
             )
+            raise
 
     async def _delete_event(self, event: Any) -> None:
         trade_id = event.payload.get("trade_id")
@@ -576,7 +577,7 @@ class TradeStatePersistence:
             await self._store.delete_trade(str(trade_id))
         except Exception as exc:
             logger.error(
-                "trade state delete failed",
+                "trade state close archival/deletion failed; propagating for delivery retry",
                 extra={
                     "aitos_extra": {
                         "trade_id": trade_id,
@@ -584,6 +585,7 @@ class TradeStatePersistence:
                     }
                 },
             )
+            raise
 
 
 class PersistentLivePortfolioTracker(LivePortfolioTracker):
