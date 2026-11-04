@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import isfinite, sqrt
+from math import atan2, cos, isfinite, sin, sqrt
 from typing import Mapping
 
 from .contracts import CapitalRequest
@@ -49,22 +49,80 @@ class CapitalAllocator:
         correlations: Mapping[str, Mapping[str, float]],
     ) -> float:
         names = sorted(losses)
-        variance = 0.0
+        matrix = []
         for left in names:
+            row = []
             for right in names:
-                raw = (
-                    1.0 if left == right else correlations.get(left, {}).get(right, 0.0)
-                )
-                correlation = float(raw)
+                if left == right:
+                    correlation = 1.0
+                else:
+                    left_row = correlations.get(left, {})
+                    right_row = correlations.get(right, {})
+                    if right in left_row and left not in right_row:
+                        raise ValueError("correlation matrix must include both directions")
+                    raw = left_row.get(right, right_row.get(left, 0.0))
+                    correlation = float(raw)
+                    reverse = right_row.get(left, left_row.get(right, 0.0))
+                    if (
+                        not isfinite(float(reverse))
+                        or abs(float(reverse) - correlation) > 1e-6
+                    ):
+                        raise ValueError("correlation matrix must be symmetric")
                 if not isfinite(correlation) or not -1.0 <= correlation <= 1.0:
                     raise ValueError("correlations must be finite values in [-1, 1]")
-                reverse = correlations.get(right, {}).get(left, correlation)
-                if (
-                    not isfinite(float(reverse))
-                    or abs(float(reverse) - correlation) > 1e-6
-                ):
-                    raise ValueError("correlation matrix must be symmetric")
-                variance += losses[left] * losses[right] * correlation
+                row.append(correlation)
+            matrix.append(row)
+
+        # Reject impossible/indefinite correlation matrices: otherwise a
+        # negative quadratic variance could collapse risk to zero and bypass
+        # the portfolio budget. Jacobi rotations are stable for this small
+        # strategy-level matrix and avoid a runtime numerical dependency.
+        eigen_matrix = [row[:] for row in matrix]
+        size = len(names)
+        for _ in range(max(1, size * size * 20)):
+            pivot = max(
+                (
+                    (abs(eigen_matrix[i][j]), i, j)
+                    for i in range(size)
+                    for j in range(i + 1, size)
+                ),
+                default=(0.0, 0, 0),
+            )
+            magnitude, p, q = pivot
+            if magnitude < 1e-10:
+                break
+            app = eigen_matrix[p][p]
+            aqq = eigen_matrix[q][q]
+            apq = eigen_matrix[p][q]
+            angle = 0.5 * atan2(2.0 * apq, aqq - app)
+            cosine = cos(angle)
+            sine = sin(angle)
+            for k in range(size):
+                if k in (p, q):
+                    continue
+                akp = eigen_matrix[k][p]
+                akq = eigen_matrix[k][q]
+                eigen_matrix[k][p] = eigen_matrix[p][k] = cosine * akp - sine * akq
+                eigen_matrix[k][q] = eigen_matrix[q][k] = sine * akp + cosine * akq
+            eigen_matrix[p][p] = (
+                cosine * cosine * app
+                - 2.0 * sine * cosine * apq
+                + sine * sine * aqq
+            )
+            eigen_matrix[q][q] = (
+                sine * sine * app
+                + 2.0 * sine * cosine * apq
+                + cosine * cosine * aqq
+            )
+            eigen_matrix[p][q] = eigen_matrix[q][p] = 0.0
+        if any(eigen_matrix[i][i] < -1e-8 for i in range(size)):
+            raise ValueError("correlation matrix must be positive semidefinite")
+
+        variance = sum(
+            losses[left] * losses[right] * matrix[i][j]
+            for i, left in enumerate(names)
+            for j, right in enumerate(names)
+        )
         return sqrt(max(0.0, variance))
 
     def allocate(
