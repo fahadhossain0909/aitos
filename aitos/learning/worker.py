@@ -163,7 +163,7 @@ class ContinualLearningWorker:
             "processed_count": self._processed,
             "processed_experiences": sorted(self._legacy_processed),
             "n_samples_seen": self.scorer.n_samples_seen,
-            "regime_reward_history": self._reward_calibrator.snapshot(),
+            "regime_reward_history": getattr(self, "_reward_calibrator", RegimeRewardCalibrator()).snapshot(),
         }
         tmp = self.state_path.with_suffix(
             self.state_path.suffix + f".{os.getpid()}.tmp"
@@ -283,6 +283,8 @@ class ContinualLearningWorker:
         base_path = getattr(self.scorer, "_state_path", None)
         if base_path is None:
             return self.scorer
+        if not hasattr(self, "_regime_scorers"):
+            self._regime_scorers = {}
         cached = self._regime_scorers.get(key)
         if cached is not None:
             return cached
@@ -305,6 +307,8 @@ class ContinualLearningWorker:
         )
 
     def run_once(self) -> int:
+        if not hasattr(self, "_reward_calibrator"):
+            self._reward_calibrator = RegimeRewardCalibrator()
         rows = self._rows()
         processed_now = 0
         for row in rows:
