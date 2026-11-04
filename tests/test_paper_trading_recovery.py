@@ -276,7 +276,6 @@ async def test_closed_trade_restore_is_idempotent(event_bus, paper_trade):
     assert lifecycle._closed_trades[0].pnl == -7.0
 
 
-
 @pytest.mark.asyncio
 async def test_paper_portfolio_restores_peak_equity_and_persists_drawdown(
     paper_trade,
@@ -299,7 +298,6 @@ async def test_paper_portfolio_restores_peak_equity_and_persists_drawdown(
 
     await tracker.persist_state(lifecycle)
     assert store.saved_drawdown == ("PAPER", 980.0, 1_050.0)
-
 
 
 @pytest.mark.asyncio

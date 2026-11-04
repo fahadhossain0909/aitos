@@ -99,6 +99,7 @@ async def test_replay_filters_by_event_timestamp() -> None:
 async def _append(result: list[Event], event: Event) -> None:
     result.append(event)
 
+
 async def test_history_limit_is_global_across_topics() -> None:
     bus = InProcessBus(history_limit=2)
     await bus.initialize({})
@@ -174,6 +175,7 @@ async def test_request_reply_timeout_cleans_pending_future() -> None:
         assert bus._pending_replies == {}
     finally:
         await bus.shutdown()
+
 
 async def test_shutdown_drains_queued_events_within_grace_period() -> None:
     bus = await _new_bus()
