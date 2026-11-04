@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from aitos.app import (
     build_system,
@@ -54,9 +55,15 @@ async def main() -> None:
         )
     configure_logging(settings.log_level)
     redis_client = await connect_redis_with_retry(settings, logger=logger)
-    from aitos.eventbus.redis_bus import EventBus
+    from aitos.eventbus.factory import create_event_bus
 
-    event_bus = EventBus(redis_client=redis_client)
+    event_bus = create_event_bus(
+        {
+            "backend": os.getenv("AITOS_EVENTBUS_BACKEND", "redis"),
+            "runtime_mode": "live",
+        },
+        redis_client=redis_client,
+    )
     await event_bus.initialize({})
     market_repo, journal_repo = await connect_clickhouse_repositories(
         settings, logger=logger
