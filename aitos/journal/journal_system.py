@@ -344,11 +344,7 @@ class JournalSystem(AITOSModule):
         if self._repository is not None:
             await self._repository.save_trade_snapshot(trade_dict)
         decision_id = next(
-            (
-                did
-                for did, tid in self._decision_trade_ids.items()
-                if tid == trade_id
-            ),
+            (did for did, tid in self._decision_trade_ids.items() if tid == trade_id),
             None,
         )
         if not decision_id:
