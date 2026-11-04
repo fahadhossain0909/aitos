@@ -878,6 +878,14 @@ class TradeLifecycle(AITOSModule):
                 + trade.funding_pnl_usd,
                 8,
             )
+            initial_notional = trade.position_size_usd + sum(
+                exit.size_usd for exit in trade.partial_exits
+            )
+            trade.pnl_percent = (
+                round(trade.pnl / initial_notional * 100.0, 8)
+                if initial_notional > 0
+                else 0.0
+            )
         trade.updated_at = utc_now_iso()
         await self._event_bus.publish(
             Event(
