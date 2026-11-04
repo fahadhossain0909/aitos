@@ -194,7 +194,9 @@ async def test_journal_publishes_learning_outcome_without_decision_id(
     async def capture(event):
         received.append(event)
 
-    await event_bus.subscribe("journal.outcome_attributed", capture, group="outcome-test")
+    await event_bus.subscribe(
+        "journal.outcome_attributed", capture, group="outcome-test"
+    )
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})
     trade = await lifecycle.submit_opportunity(
