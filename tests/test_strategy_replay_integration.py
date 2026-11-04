@@ -89,9 +89,9 @@ def test_batch_allocation_and_dynamic_tp_contract_survive_historical_replay():
                 execution.execute("sell", position["quantity"], event.price)
                 position["closed"] = True
 
-    result = BacktestEngine(
-        initial_cash=5_000, fee_rate=0.0004, slippage_bps=0.0
-    ).run(events, strategy, mark_price=lambda event: event.price)
+    result = BacktestEngine(initial_cash=5_000, fee_rate=0.0004, slippage_bps=0.0).run(
+        events, strategy, mark_price=lambda event: event.price
+    )
 
     assert position["closed"] is True
     assert result.metrics.trades == 1
