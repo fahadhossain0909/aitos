@@ -387,7 +387,9 @@ async def main() -> None:
         try:
             await asyncio.shield(learning_task)
         except asyncio.CancelledError:
-            logger.warning("continual-learning worker task was cancelled during shutdown")
+            logger.warning(
+                "continual-learning worker task was cancelled during shutdown"
+            )
         except Exception:
             logger.exception("continual-learning worker exited with an error")
         finally:
