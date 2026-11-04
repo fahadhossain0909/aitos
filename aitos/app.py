@@ -441,9 +441,7 @@ class PaperPortfolioTracker:
         realized_pnl = sum(float(t.pnl or 0.0) for t in closed)
         equity = self.starting_equity_usd + realized_pnl
         self._peak_equity_usd = max(self._peak_equity_usd, equity)
-        await self.state_store.save_drawdown(
-            self.asset, equity, self._peak_equity_usd
-        )
+        await self.state_store.save_drawdown(self.asset, equity, self._peak_equity_usd)
 
     def build_portfolio_state(self, trade_lifecycle: TradeLifecycle) -> PortfolioState:
         closed, open_trades = (
