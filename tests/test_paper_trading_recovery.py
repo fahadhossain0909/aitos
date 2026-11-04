@@ -233,13 +233,14 @@ async def test_closed_trade_history_is_restored_for_equity_recovery(
         )
     ]
 
-    store = FakeStateStore()
+    store = FakeStateStore([paper_trade])
     store.closed_trades = [paper_trade]
     lifecycle = FakeLifecycle()
     lifecycle._closed_trades = []
     persistence = TradeStatePersistence(event_bus, lifecycle, store)
 
     assert await persistence.restore() == 0
+    assert lifecycle._open_trades == {}
     assert len(lifecycle._closed_trades) == 1
     restored = lifecycle._closed_trades[0]
     assert restored.trade_id == paper_trade.trade_id
