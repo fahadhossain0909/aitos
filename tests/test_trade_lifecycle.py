@@ -657,3 +657,45 @@ async def test_partial_exit_guard_enforces_count_cooldown_and_dust(
     allowed, reason = lifecycle._partial_exit_allowed(trade, 0.5)
     assert allowed is False
     assert reason == "partial_exit_would_create_dust"
+
+
+@pytest.mark.asyncio
+async def test_fee_and_funding_adjustments_are_idempotently_included_in_net_pnl(
+    event_bus, risk_engine
+):
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(breakeven_at_r_multiple=None), make_portfolio()
+    )
+
+    await lifecycle.apply_cost_adjustment(
+        trade.trade_id,
+        adjustment_id="entry-fee-fill-1",
+        kind="fee",
+        amount_usd=0.12,
+    )
+    await lifecycle.apply_cost_adjustment(
+        trade.trade_id,
+        adjustment_id="funding-payment-1",
+        kind="funding",
+        amount_usd=-0.03,
+    )
+    # Duplicate delivery must not double count either cost.
+    await lifecycle.apply_cost_adjustment(
+        trade.trade_id,
+        adjustment_id="entry-fee-fill-1",
+        kind="fee",
+        amount_usd=0.12,
+    )
+
+    closed = await lifecycle.close_trade(trade.trade_id, 102.0, "test_close")
+    expected_net = (
+        closed.gross_realized_pnl_usd
+        - 0.12
+        - 0.03
+    )
+    assert closed.fees_paid_usd == pytest.approx(0.12)
+    assert closed.funding_pnl_usd == pytest.approx(-0.03)
+    assert closed.pnl == pytest.approx(expected_net)
+    assert len(closed.cost_adjustments) == 2
