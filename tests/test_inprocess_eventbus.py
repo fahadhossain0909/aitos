@@ -176,3 +176,26 @@ async def test_request_reply_timeout_cleans_pending_future() -> None:
         assert bus._pending_replies == {}
     finally:
         await bus.shutdown()
+
+
+
+async def test_shutdown_drains_queued_events_within_grace_period() -> None:
+    bus = await _new_bus()
+    handler_started = asyncio.Event()
+    release_handler = asyncio.Event()
+    received: list[int] = []
+
+    async def handler(event: Event) -> None:
+        handler_started.set()
+        await release_handler.wait()
+        received.append(event.payload["n"])
+
+    await bus.subscribe("market.trade", handler, start_id="$")
+    await bus.publish(Event(topic="market.trade", payload={"n": 1}))
+    await asyncio.wait_for(handler_started.wait(), timeout=1)
+
+    shutdown_task = asyncio.create_task(bus.shutdown(grace_period_seconds=1))
+    await asyncio.sleep(0)
+    release_handler.set()
+    await asyncio.wait_for(shutdown_task, timeout=1)
+    assert received == [1]
