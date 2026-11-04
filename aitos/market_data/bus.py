@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Any
 
 from aitos.core.contracts import Event
-from aitos.eventbus import redis_bus as redis_bus_module
 from aitos.eventbus.contracts import EventBusProtocol, SubscriptionProtocol
 
 from .channels import (
@@ -23,7 +22,6 @@ from .channels import (
     CHANNEL_TRADE,
 )
 from .contracts import MarketEvent, MarketEventType, MarketSource
-from .retention import maxlen_for
 
 _CHANNEL_BY_TYPE = {
     MarketEventType.TRADE: CHANNEL_TRADE,
@@ -37,13 +35,6 @@ _CHANNEL_BY_TYPE = {
     MarketEventType.OPTIONS: CHANNEL_OPTIONS,
     MarketEventType.INSTRUMENT: CHANNEL_INSTRUMENT,
 }
-
-# The legacy EventBus is intentionally retained as the transport primitive during
-# migration. Register v1 semantic channels with its bounded-retention policy so
-# a canonical stream can never grow without limit.
-for _channel in set(_CHANNEL_BY_TYPE.values()):
-    redis_bus_module.STREAM_MAXLEN_DEFAULTS.setdefault(_channel, maxlen_for(_channel))
-
 
 def channel_for(event_type: MarketEventType) -> str:
     try:
@@ -192,7 +183,6 @@ class MarketDataBus:
         except Exception:
             # Telemetry and validation must never interrupt the trading path.
             pass
-        payload["retention_maxlen"] = maxlen_for(channel)
         symbol = str(event.symbol or "")
         started = time.perf_counter()
         try:
