@@ -39,4 +39,4 @@ def test_champion_challenger_gate_requires_sample_floor_and_significance():
 
 
 def test_regime_partition_key_cannot_escape_checkpoint_directory():
-    assert normalize_regime('../../outside/path') == 'outside_path'
+    assert normalize_regime("../../outside/path") == "outside_path"
