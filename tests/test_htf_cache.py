@@ -29,6 +29,7 @@ def test_htf_cache_reuses_snapshot_until_next_candle_close():
     now = [datetime(2026, 11, 4, 13, 10, tzinfo=timezone.utc)]
     cache = HigherTimeframeCandleCache(clock=lambda: now[0])
     calls = []
+
     async def fetch():
         calls.append(1)
         return [candle(datetime(2026, 11, 4, 12, 59, 59, tzinfo=timezone.utc))]
@@ -43,6 +44,7 @@ def test_htf_cache_reuses_snapshot_until_next_candle_close():
 
         now[0] = datetime(2026, 11, 4, 14, 1, tzinfo=timezone.utc)
         refreshed = candle(datetime(2026, 11, 4, 13, 59, 59, tzinfo=timezone.utc))
+
         async def fetch_next():
             calls.append(1)
             return [refreshed]
