@@ -121,6 +121,11 @@ async def _cancel_task(task: asyncio.Task) -> None:
         pass
 
 
+async def _shutdown_event_bus_if_unowned(event_bus, ownership) -> None:
+    if not ownership["components"]:
+        await event_bus.shutdown()
+
+
 async def _stop_learning_worker(worker, task: asyncio.Task) -> None:
     worker.request_stop()
     try:
@@ -162,6 +167,10 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
         redis_client=redis_client,
     )
     await event_bus.initialize({})
+    event_bus_cleanup_owner = {"components": False}
+    cleanup.push_async_callback(
+        _shutdown_event_bus_if_unowned, event_bus, event_bus_cleanup_owner
+    )
     market_repo, journal_repo = await connect_clickhouse_repositories(
         settings, logger=logger
     )
@@ -207,6 +216,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
         min_score_threshold=PAPER_MIN_SCORE_THRESHOLD,
         enable_exit_intelligence=True,
     )
+    event_bus_cleanup_owner["components"] = True
     cleanup.push_async_callback(shutdown_all, components)
     logger.info(
         "paper trading thresholds",
