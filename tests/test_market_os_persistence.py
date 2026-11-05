@@ -187,3 +187,42 @@ async def test_live_analytics_subscriptions_are_live_only():
     ]
     assert len(analytics_calls) == len(service.LIVE_ANALYTICS_TOPICS)
     assert all(call["live_only"] is True for call in analytics_calls)
+@pytest.mark.asyncio
+async def test_market_os_persistence_can_restart_and_reports_flush_task_health():
+    class Subscription:
+        def __init__(self):
+            self.cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+    class FakeBus:
+        def __init__(self):
+            self.subscriptions = []
+
+        async def subscribe(self, *args, **kwargs):
+            subscription = Subscription()
+            self.subscriptions.append(subscription)
+            return subscription
+
+    repository = FakeRepository()
+    bus = FakeBus()
+    service = MarketOSPersistence(bus, repository, flush_interval_seconds=60.0)
+
+    await service.initialize({})
+    first_batch = list(bus.subscriptions)
+    first_health = await service.health_check()
+    assert first_health.status.value == "healthy"
+    assert first_health.details["flush_task_alive"] is True
+
+    await service.shutdown()
+    assert all(subscription.cancelled for subscription in first_batch)
+    assert (await service.health_check()).status.value == "unhealthy"
+
+    await service.initialize({})
+    assert len(bus.subscriptions) > len(first_batch)
+    second_health = await service.health_check()
+    assert second_health.status.value == "healthy"
+    assert second_health.details["flush_task_alive"] is True
+
+    await service.shutdown()
