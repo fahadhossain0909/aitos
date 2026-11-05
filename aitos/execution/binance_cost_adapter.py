@@ -77,7 +77,8 @@ class BinanceUsdMExecutionCostAdapter:
         if interval_seconds <= 0:
             raise ValueError("funding interval must be positive")
         intervals = float(holding_horizon_seconds) / interval_seconds
-        funding_cost_bps = funding_rate * intervals * 10000.0
+        direction = 1.0 if side.upper() == "LONG" else -1.0
+        funding_cost_bps = funding_rate * direction * intervals * 10000.0
         slippage_bps = float(slippage["round_trip_bps"])
         liquidation_distance_pct = float(liquidation["distance_pct"])
         return ExecutionCostQuote(
