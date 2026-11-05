@@ -158,4 +158,3 @@ def test_htf_request_budget_is_shared_across_cache_instances():
         assert len(calls) == 2
 
     asyncio.run(run())
-
