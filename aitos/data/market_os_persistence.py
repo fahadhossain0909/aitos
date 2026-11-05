@@ -185,40 +185,63 @@ class MarketOSPersistence(AITOSModule):
             )
             self._initialized = True
             return
-        self._subscriptions = [
-            await self._event_bus.subscribe(
-                "market.orderflow.*",
-                self._handle_orderflow,
-                group="market-os-orderflow",
-            ),
-            await self._event_bus.subscribe(
-                "market.liquidity.*",
-                self._handle_liquidity,
-                group="market-os-liquidity",
-            ),
-            await self._event_bus.subscribe(
-                "market.live_state.*",
-                self._handle_live_state,
-                group="market-os-live-state",
-            ),
-            await self._event_bus.subscribe(
-                "market.orderbook.*",
-                self._handle_orderbook,
-                group="clickhouse-orderbook-history-v1",
-                start_id="0",
-            ),
-        ]
-        for topic in self.LIVE_ANALYTICS_TOPICS:
+
+        self._subscriptions.clear()
+        try:
             self._subscriptions.append(
                 await self._event_bus.subscribe(
-                    topic,
-                    self._handle_live_analytics,
-                    group=f"clickhouse-live-analytics-{topic.replace('.', '-')}",
-                    live_only=True,
+                    "market.orderflow.*",
+                    self._handle_orderflow,
+                    group="market-os-orderflow",
                 )
             )
-        self._flush_task = asyncio.create_task(self._flush_loop())
-        self._initialized = True
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    "market.liquidity.*",
+                    self._handle_liquidity,
+                    group="market-os-liquidity",
+                )
+            )
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    "market.live_state.*",
+                    self._handle_live_state,
+                    group="market-os-live-state",
+                )
+            )
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    "market.orderbook.*",
+                    self._handle_orderbook,
+                    group="clickhouse-orderbook-history-v1",
+                    start_id="0",
+                )
+            )
+            for topic in self.LIVE_ANALYTICS_TOPICS:
+                self._subscriptions.append(
+                    await self._event_bus.subscribe(
+                        topic,
+                        self._handle_live_analytics,
+                        group=f"clickhouse-live-analytics-{topic.replace('.', '-')}",
+                        live_only=True,
+                    )
+                )
+            self._flush_task = asyncio.create_task(self._flush_loop())
+            self._initialized = True
+        except Exception:
+            for subscription in self._subscriptions:
+                subscription.cancel()
+            self._subscriptions.clear()
+            if self._flush_task is not None:
+                self._flush_task.cancel()
+                try:
+                    await self._flush_task
+                except asyncio.CancelledError:
+                    pass
+                self._flush_task = None
+            self._initialized = False
+            raise
+
         logger.info(
             "Market OS persistence initialized (batch_size=%s, flush_interval=%.2fs, analytics_topics=%s)",
             self._batch_size,
@@ -227,11 +250,16 @@ class MarketOSPersistence(AITOSModule):
         )
 
     async def health_check(self) -> HealthStatus:
-        status = (
-            ModuleStatus.HEALTHY
-            if self._repository is not None
-            else ModuleStatus.DEGRADED
-        )
+        if not self._initialized:
+            status = ModuleStatus.UNHEALTHY
+        elif self._repository is None:
+            status = ModuleStatus.DEGRADED
+        elif self._flush_task is None or self._flush_task.done():
+            status = ModuleStatus.UNHEALTHY
+        elif self._errors:
+            status = ModuleStatus.DEGRADED
+        else:
+            status = ModuleStatus.HEALTHY
         return HealthStatus(
             module_id=self.module_id,
             status=status,
@@ -242,21 +270,199 @@ class MarketOSPersistence(AITOSModule):
                 "errors": self._errors,
                 "pending_batches": sum(len(rows) for rows in self._buffers.values()),
                 "analytics_topics": len(self.LIVE_ANALYTICS_TOPICS),
+                "flush_task_alive": (
+                    self._flush_task is not None and not self._flush_task.done()
+                ),
             },
         )
 
-    async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
-        for subscription in self._subscriptions:
-            subscription.cancel()
-        self._subscriptions.clear()
-        if self._flush_task is not None:
-            self._flush_task.cancel()
-            try:
-                await self._flush_task
-            except asyncio.CancelledError:
-                pass
-            self._flush_task = None
-        await self._flush_all()
+    async def emit_events(self):
+        return
+        yield
+
+    async def handle_event(self, event: Event) -> EventResponse | None:
+        return None
+
+    async def _handle_orderflow(self, event: Event) -> EventResponse | None:
+        p = event.payload
+        row = [
+            _parse_timestamp(event.created_at),
+            event.event_id,
+            _symbol_from_topic(event.topic),
+            int(p.get("trade_count", 0)),
+            float(p.get("buy_volume", 0.0)),
+            float(p.get("sell_volume", 0.0)),
+            float(p.get("delta", 0.0)),
+            float(p.get("cvd", 0.0)),
+            float(p.get("buy_ratio", 0.0)),
+            float(p.get("aggression", 0.0)),
+            float(p.get("imbalance", 0.0)),
+            float(p.get("vwap", 0.0)),
+            float(p.get("last_price", 0.0)),
+            str(p.get("direction", "")),
+        ]
+        await self._enqueue("market_orderflow", row, event)
+        return None
+
+    async def _handle_liquidity(self, event: Event) -> EventResponse | None:
+        p = event.payload
+        row = [
+            _parse_timestamp(event.created_at),
+            event.event_id,
+            _symbol_from_topic(event.topic),
+            str(p.get("kind", "")),
+            str(p.get("side", "")),
+            float(p.get("score", 0.0)),
+            float(p.get("price", 0.0)),
+            json.dumps(p.get("details", {}), sort_keys=True, default=str),
+            int(p.get("last_update_id", 0)),
+        ]
+        await self._enqueue("market_liquidity_events", row, event)
+        return None
+
+    async def _handle_live_state(self, event: Event) -> EventResponse | None:
+        p = event.payload
+        row = [
+            _parse_timestamp(event.created_at),
+            event.event_id,
+            _symbol_from_topic(event.topic),
+            int(p.get("trade_count", 0)),
+            json.dumps(p.get("order_flow"), sort_keys=True, default=str),
+            json.dumps(p.get("liquidity_events", []), sort_keys=True, default=str),
+            _optional_float(p.get("best_bid")),
+            _optional_float(p.get("best_ask")),
+            _parse_timestamp(p.get("timestamp")),
+        ]
+        await self._enqueue("market_live_state", row, event)
+        return None
+
+    async def _handle_orderbook(self, event: Event) -> EventResponse | None:
+        p = event.payload
+        row = [
+            _parse_timestamp(event.created_at),
+            event.event_id,
+            _symbol_from_topic(event.topic),
+            json.dumps(p.get("bids", []), sort_keys=True, default=str),
+            json.dumps(p.get("asks", []), sort_keys=True, default=str),
+            float(p.get("spread", 0.0)),
+            float(p.get("depth_ratio", 0.0)),
+            int(p.get("last_update_id", 0)),
+        ]
+        await self._enqueue("order_book_events", row, event)
+        return None
+
+    async def _handle_live_analytics(self, event: Event) -> EventResponse | None:
+        """Persist live analytics without replaying stale events."""
+        symbol = str(event.payload.get("symbol") or _symbol_from_topic(event.topic))
+        category = _analytics_category(event.topic)
+        event_time = _parse_timestamp(event.created_at)
+        row = [
+            event_time,
+            datetime.now(timezone.utc),
+            event.event_id,
+            category,
+            str(event.payload.get("exchange", "unknown")),
+            str(event.payload.get("market", "unknown")),
+            symbol,
+            event.source_module or "unknown",
+            event.correlation_id or event.event_id,
+            str(event.payload.get("schema_version", event.schema_version or "1.0")),
+            json.dumps(event.payload, sort_keys=True, default=str),
+        ]
+        await self._enqueue("live_analytics_events", row, event)
+        return None
+
+    async def _enqueue(self, table: str, row: list[Any], event: Event) -> None:
+        if self._repository is None:
+            return
+        async with self._flush_lock:
+            self._buffers[table].append(row)
+            flush_now = len(self._buffers[table]) >= self._batch_size
+        if flush_now:
+            await self._flush_table(table, event)
+        else:
+            self._record_success(event)
+
+    async def _flush_loop(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self._flush_interval_seconds)
+                await self._flush_all()
+        except asyncio.CancelledError:
+            raise
+
+    async def _flush_all(self) -> None:
+        for table in tuple(self._buffers):
+            await self._flush_table(table, None)
+
+    async def _flush_table(self, table: str, event: Event | None) -> None:
+        if self._repository is None:
+            return
+        async with self._flush_lock:
+            rows = self._buffers[table]
+            if not rows:
+                return
+            self._buffers[table] = []
+        try:
+            await self._repository._client.insert(
+                table, rows, column_names=self._column_names[table]
+            )
+            self._events_persisted += len(rows)
+            self._last_event_time = datetime.now(timezone.utc).isoformat()
+        except Exception:
+            self._errors += len(rows)
+            async with self._flush_lock:
+                self._buffers[table][0:0] = rows
+            logger.exception(
+                "failed to persist Market OS batch",
+                extra={
+                    "aitos_extra": {
+                        "table": table,
+                        "rows": len(rows),
+                        "event_id": getattr(event, "event_id", None),
+                    }
+                },
+            )
+            if event is not None:
+                raise
+
+    def _record_success(self, event: Event) -> None:
+        self._last_event_time = datetime.now(timezone.utc).isoformat()
+
+
+def _analytics_category(topic: str) -> str:
+    parts = topic.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else topic
+
+
+def _symbol_from_topic(topic: str) -> str:
+    return topic.rsplit(".", 1)[-1]
+
+
+def _optional_float(value: Any) -> float | None:
+    return None if value is None else float(value)
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))    async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        try:
+            for subscription in self._subscriptions:
+                subscription.cancel()
+            self._subscriptions.clear()
+            if self._flush_task is not None:
+                self._flush_task.cancel()
+                try:
+                    await self._flush_task
+                except asyncio.CancelledError:
+                    pass
+                self._flush_task = None
+            await self._flush_all()
+        finally:
+            self._initialized = False
 
     async def emit_events(self):
         return
