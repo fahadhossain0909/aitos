@@ -120,6 +120,7 @@ class CloseAndConfirm(Protocol):
 
 
 PortfolioProvider = Callable[[], Any | Awaitable[Any]]
+PairEvaluator = Callable[[Trade, Opportunity], Any | Awaitable[Any]]
 PositionFlatCheck = Callable[[str], bool | Awaitable[bool]]
 
 
@@ -206,13 +207,42 @@ class PositionSwitchCoordinator:
         journal: SwitchJournal,
         close_and_confirm: CloseAndConfirm,
         portfolio_provider: PortfolioProvider,
+        evaluate_pair: PairEvaluator | None = None,
     ) -> None:
         self.lifecycle = lifecycle
         self.gateway = gateway
         self.journal = journal
         self.close_and_confirm = close_and_confirm
         self.portfolio_provider = portfolio_provider
+        self.evaluate_pair = evaluate_pair
         self._locks: dict[str, asyncio.Lock] = {}
+
+    async def evaluate_scan_cycle(
+        self, candidates: list[Opportunity]
+    ) -> list[tuple[Trade, Opportunity, Any]]:
+        """Compare every eligible scan-cycle candidate with every open incumbent.
+
+        The evidence callback must use current PositionManager/market state and
+        venue cost estimates. No fallback heuristic is used when it is absent.
+        """
+        if self.evaluate_pair is None or not candidates:
+            return []
+        ranked: list[tuple[float, str, Trade, Opportunity, Any]] = []
+        for incumbent in self.lifecycle.get_open_trades():
+            if incumbent.state != TradeLifecycleState.POSITION_OPENED:
+                continue
+            for candidate in candidates:
+                if candidate.symbol.upper() == incumbent.symbol.upper():
+                    continue
+                result = self.evaluate_pair(incumbent, candidate)
+                decision = await result if hasattr(result, "__await__") else result
+                if getattr(decision, "should_switch", False):
+                    advantage = float(getattr(decision, "net_advantage_pct", 0.0))
+                    ranked.append(
+                        (advantage, candidate.opportunity_id, incumbent, candidate, decision)
+                    )
+        ranked.sort(key=lambda item: (-item[0], item[1], item[2].trade_id))
+        return [(incumbent, candidate, decision) for _, _, incumbent, candidate, decision in ranked]
 
     @staticmethod
     def switch_id(incumbent: Trade, candidate: Opportunity) -> str:
