@@ -223,14 +223,8 @@ class DataFlowRegistry:
     def cardinality_snapshot(self) -> dict[str, Any]:
         """Return bounded-cardinality registry gauges without exposing symbol labels."""
         with self._lock:
-            symbol_keys = [
-                (stage, symbol)
-                for stage, symbol in self._buckets
-                if symbol
-            ]
-            aggregate_count = sum(
-                1 for _, symbol in self._buckets if not symbol
-            )
+            symbol_keys = [(stage, symbol) for stage, symbol in self._buckets if symbol]
+            aggregate_count = sum(1 for _, symbol in self._buckets if not symbol)
             stage_bucket_counts: dict[str, int] = defaultdict(int)
             for stage, _ in self._buckets:
                 stage_bucket_counts[stage] += 1
