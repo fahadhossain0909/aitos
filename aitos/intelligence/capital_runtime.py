@@ -165,8 +165,15 @@ def install_capital_guard() -> None:
             setattr(self, _GATEWAY_ATTR, gateway)
 
         try:
+            execution_costs = dict(
+                protected_opportunity.agent_consensus.get("execution_costs") or {}
+            )
             decision, allocation = gateway.authorize_opportunity(
-                equity, protected_opportunity
+                equity,
+                protected_opportunity,
+                fee_bps=float(execution_costs.get("fee_bps", 10.0)),
+                slippage_bps=float(execution_costs.get("slippage_bps", 5.0)),
+                funding_bps=float(execution_costs.get("funding_bps", 0.0)),
             )
         except (TypeError, ValueError, ArithmeticError) as exc:
             return _rejected_trade(protected_opportunity, f"capital_objective: {exc}")
