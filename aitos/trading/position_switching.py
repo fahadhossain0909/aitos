@@ -46,6 +46,7 @@ class SwitchIntent:
     close_fill_price: float | None = None
     reason: str | None = None
     candidate_payload: dict[str, Any] = field(default_factory=dict)
+    schema_version: int = 1
 
 
 class SwitchJournal(Protocol):
