@@ -429,7 +429,7 @@ def test_worker_processes_12000_experiences_across_keyset_pages(tmp_path):
     worker._processed = 0
     worker._legacy_processed = set()
     worker.batch_limit = 5000
-    worker._regime_scorers = set()
+    worker._regime_scorers = {}
 
     class Scorer:
         n_samples_seen = 0
