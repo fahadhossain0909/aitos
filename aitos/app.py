@@ -48,7 +48,11 @@ from aitos.xai.attention_feedback import AttentionFeedbackLoop
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.ml_feedback import MLExplainerFeedbackLoop
 
-PositionSwitchingFactory = Callable[\n    [TradeLifecycle, PositionManager | None, ExchangeAdapter, OrderExecutor], Any\n]\n\nlogger = get_logger("aitos.app")
+PositionSwitchingFactory = Callable[
+    [TradeLifecycle, PositionManager | None, ExchangeAdapter, OrderExecutor], Any
+]
+
+logger = get_logger("aitos.app")
 
 
 @dataclass
