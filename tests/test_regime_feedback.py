@@ -1,3 +1,5 @@
+import pytest
+
 from aitos.learning.regime_feedback import (
     RegimeRewardCalibrator,
     compare_champion_candidate,
@@ -40,3 +42,29 @@ def test_champion_challenger_gate_requires_sample_floor_and_significance():
 
 def test_regime_partition_key_cannot_escape_checkpoint_directory():
     assert normalize_regime("../../outside/path") == "outside_path"
+
+def test_champion_comparison_filters_non_finite_and_malformed_rewards():
+    champion = [0.0] * 30 + [float("nan"), float("inf"), "invalid"]
+    candidate = [1.0] * 30 + [float("-inf"), "not-a-number"]
+
+    result = compare_champion_candidate(champion, candidate)
+
+    assert result.accepted is True
+    assert result.candidate_mean == 1.0
+    assert result.champion_mean == 0.0
+
+
+@pytest.mark.parametrize(
+    ("min_improvement", "z_score"),
+    [(float("nan"), 1.96), (0.05, float("inf")), (0.05, 0.0)],
+)
+def test_champion_comparison_rejects_non_finite_or_invalid_thresholds(
+    min_improvement, z_score
+):
+    with pytest.raises(ValueError, match="configuration"):
+        compare_champion_candidate(
+            [0.0] * 30,
+            [1.0] * 30,
+            min_improvement=min_improvement,
+            z_score=z_score,
+        )
