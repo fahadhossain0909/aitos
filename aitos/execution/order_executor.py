@@ -34,6 +34,8 @@ class OrderRequest:
     reference_price: float
     order_type: str = "MARKET"
     client_order_id: str | None = None
+    # Executors must fail closed if venue reduce-only semantics are unavailable.
+    reduce_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,10 @@ class OrderResult:
 class OrderExecutor(ABC):
     @abstractmethod
     async def submit_order(self, request: OrderRequest) -> OrderResult: ...
+
+    async def get_order_status(self, symbol: str, order_id: str) -> dict | None:
+        \"\"\"Return authoritative venue order state, or None when unsupported.\"\"\"
+        return None
 
     @property
     def supports_exchange_side_stops(self) -> bool:
