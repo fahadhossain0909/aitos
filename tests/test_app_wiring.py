@@ -363,3 +363,55 @@ async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
     # the real proof is simply that nothing opened despite a valid trending symbol being available.
 
     await shutdown_all(components)
+
+@pytest.mark.asyncio
+async def test_cost_adjustment_event_is_applied_to_trade_lifecycle(event_bus):
+    from aitos.core.contracts import Event
+
+    exchange = FakeScannerExchange()
+    components = await build_system(
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=SimulatedOrderExecutor(),
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
+    )
+    await initialize_all(components)
+    now = datetime.now(timezone.utc).isoformat()
+    trade = Trade(
+        trade_id="cost-adjustment-wiring",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=1.0,
+        position_size_usd=100.0,
+        risk_amount_usd=2.0,
+        strategy_id="test",
+        agent_consensus={},
+        explanation="test position",
+        sl_price=98.0,
+        tp_price=104.0,
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time=now,
+    )
+    components.trade_lifecycle._open_trades[trade.trade_id] = trade
+
+    await event_bus.publish(
+        Event(
+            topic="trade.cost_adjustment",
+            payload={
+                "trade_id": trade.trade_id,
+                "adjustment_id": "binance:income:12345",
+                "kind": "fee",
+                "amount_usd": 0.12,
+            },
+            source_module="test",
+        )
+    )
+
+    applied = await _wait_for(lambda: trade.fees_paid_usd == pytest.approx(0.12))
+    assert applied is True
+    assert "binance:income:12345" in trade.cost_adjustments
+
+    await shutdown_all(components)
