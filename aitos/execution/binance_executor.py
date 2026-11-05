@@ -216,8 +216,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 {"symbol": symbol, "origClientOrderId": client_order_id},
             )
         except BinanceAPIError as exc:
-            logger.info("client-order reconciliation not found: %s", exc)
-            return None
+            if "-2013" in str(exc):
+                return None
+            raise
 
     async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
         return await self._signed_request(
