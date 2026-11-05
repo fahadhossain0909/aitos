@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import math
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from datetime import datetime, timezone
@@ -19,7 +20,7 @@ from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.exchange.cost_adjustments")
 
-TradeResolver = Callable[[dict[str, Any]], Awaitable[str | None]]
+TradeResolver = Callable[[dict[str, Any]], Awaitable[str | None] | str | None]
 
 
 class UnattributedCostAdjustment(RuntimeError):
@@ -56,7 +57,12 @@ class BinanceCostAdjustmentPublisher:
             if not math.isfinite(amount) or not transaction_id:
                 raise ValueError("income amount and tranId must be finite/non-empty")
 
-            trade_id = await self._resolve_trade_id(row)
+            resolved_trade_id = self._resolve_trade_id(row)
+            trade_id = (
+                await resolved_trade_id
+                if inspect.isawaitable(resolved_trade_id)
+                else resolved_trade_id
+            )
             if not trade_id:
                 raise UnattributedCostAdjustment(
                     f"cannot safely attribute Binance income transaction {transaction_id}"
