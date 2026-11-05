@@ -16,6 +16,7 @@ from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.exchange.binance import BinanceFuturesAdapter
+from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
@@ -125,6 +126,12 @@ async def main() -> None:
     await trade_state_persistence.restore()
     await trade_state_persistence.initialize()
     await initialize_all(components)
+    income_reconciler = BinanceIncomeReconciliationService(
+        exchange,
+        components.trade_lifecycle,
+        event_bus,
+        state_store,
+    )
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     await market_os_persistence.initialize({})
     experience_recorder = LearningExperienceRecorder(
@@ -141,7 +148,8 @@ async def main() -> None:
     )
     await filter_refresher.start()
     health_server = HealthServer(
-        components.all_modules() + [experience_recorder, market_os_persistence],
+        components.all_modules()
+        + [experience_recorder, market_os_persistence, income_reconciler],
         # The health endpoint is intentionally container/network reachable.
         # nosec B104 - binding all interfaces is required for the Docker health check.
         host="0.0.0.0",  # nosec B104
@@ -161,6 +169,7 @@ async def main() -> None:
     price_safety_net.start()
     tracker = PersistentLivePortfolioTracker(order_executor, state_store)
     await tracker.restore()
+    await income_reconciler.initialize({})
     stop_event = asyncio.Event()
     install_signal_handlers(stop_event)
     try:
@@ -211,6 +220,7 @@ async def main() -> None:
             except TimeoutError:
                 pass
     finally:
+        await income_reconciler.shutdown()
         await price_safety_net.stop()
         await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)
