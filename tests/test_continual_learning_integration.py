@@ -102,8 +102,6 @@ def test_model_registry_promotes_only_candidates_with_locked_holdout(tmp_path):
     assert validation.passed
     assert validation.walk_forward is not None
     assert validation.walk_forward.locked_holdout is not None
-    promoted = registry.promote(
-        "strategy", "v1", validation_result=validation
-    )
+    promoted = registry.promote("strategy", "v1", validation_result=validation)
     assert promoted.status == "champion"
     assert promoted.metadata["promotion_evidence"]["walk_forward_windows"] > 0
