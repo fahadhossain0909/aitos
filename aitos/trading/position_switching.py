@@ -283,59 +283,66 @@ class PositionSwitchCoordinator:
         decision: Any,
     ) -> Trade | None:
         switch_id = self.switch_id(incumbent, candidate)
-        completed_intent = self.journal.get(switch_id)
-        if completed_intent is not None and completed_intent.state == "completed":
+        existing_intent = self.journal.get(switch_id)
+        if existing_intent is not None and existing_intent.state == "completed":
             return self._find_candidate_trade(candidate.opportunity_id)
-        if not getattr(decision, "should_switch", False):
-            return None
-        if self.evaluate_pair is None:
-            raise RuntimeError(
-                "fresh incumbent/candidate evidence callback is required for switching"
+        resume_after_close = existing_intent is not None and existing_intent.state in {
+            "close_confirmed",
+            "reservation_released",
+            "open_ready",
+            "open_submitting",
+        }
+        if not resume_after_close:
+            if not getattr(decision, "should_switch", False):
+                return None
+            if self.evaluate_pair is None:
+                raise RuntimeError(
+                    "fresh incumbent/candidate evidence callback is required for switching"
+                )
+            fresh_result = self.evaluate_pair(incumbent, candidate)
+            decision = (
+                await fresh_result
+                if hasattr(fresh_result, "__await__")
+                else fresh_result
             )
-        fresh_result = self.evaluate_pair(incumbent, candidate)
-        fresh_decision = (
-            await fresh_result if hasattr(fresh_result, "__await__") else fresh_result
-        )
-        if not getattr(fresh_decision, "should_switch", False):
-            return None
-        decision = fresh_decision
-        if (
-            getattr(decision, "incumbent_symbol", incumbent.symbol).upper()
-            != incumbent.symbol.upper()
-            or getattr(decision, "candidate_symbol", candidate.symbol).upper()
-            != candidate.symbol.upper()
-        ):
-            raise ValueError("rebalance decision identity does not match switch pair")
-        if opportunity_age_seconds(candidate.detected_at) > (
-            self.gateway.controls.opportunity_max_age_seconds
-        ):
-            return None
-        if incumbent.state != TradeLifecycleState.POSITION_OPENED:
-            raise ValueError("incumbent must be an open position")
+            if not getattr(decision, "should_switch", False):
+                return None
+            if (
+                getattr(decision, "incumbent_symbol", incumbent.symbol).upper()
+                != incumbent.symbol.upper()
+                or getattr(decision, "candidate_symbol", candidate.symbol).upper()
+                != candidate.symbol.upper()
+            ):
+                raise ValueError("rebalance decision identity does not match switch pair")
+            if opportunity_age_seconds(candidate.detected_at) > (
+                self.gateway.controls.opportunity_max_age_seconds
+            ):
+                return None
+            if incumbent.state != TradeLifecycleState.POSITION_OPENED:
+                raise ValueError("incumbent must be an open position")
+            other_incumbents = [
+                trade
+                for trade in self.lifecycle.get_open_trades()
+                if trade.trade_id != incumbent.trade_id
+                and trade.symbol.upper() == incumbent.symbol.upper()
+            ]
+            if other_incumbents:
+                raise RuntimeError(
+                    "symbol-scoped capital reservation cannot safely release one of "
+                    "multiple same-symbol positions"
+                )
+            if any(
+                trade.symbol.upper() == candidate.symbol.upper()
+                for trade in self.lifecycle.get_open_trades()
+            ):
+                raise RuntimeError("replacement symbol already has an open position")
         if candidate.symbol.upper() == incumbent.symbol.upper():
             raise ValueError("cannot switch into the same instrument")
-        other_incumbents = [
-            trade
-            for trade in self.lifecycle.get_open_trades()
-            if trade.trade_id != incumbent.trade_id
-            and trade.symbol.upper() == incumbent.symbol.upper()
-        ]
-        if other_incumbents:
-            raise RuntimeError(
-                "symbol-scoped capital reservation cannot safely release one of "
-                "multiple same-symbol positions"
-            )
-        if any(
-            trade.symbol.upper() == candidate.symbol.upper()
-            for trade in self.lifecycle.get_open_trades()
-        ):
-            raise RuntimeError("replacement symbol already has an open position")
         if candidate.is_production:
             raise PermissionError(
                 "automatic position switching is disabled for production opportunities"
             )
 
-        switch_id = self.switch_id(incumbent, candidate)
         lock = self._locks.setdefault(switch_id, asyncio.Lock())
         async with lock:
             intent = self.journal.get(switch_id)
@@ -429,6 +436,15 @@ class PositionSwitchCoordinator:
                 )
 
             if intent.state == "open_ready":
+                if opportunity_age_seconds(candidate.detected_at) > (
+                    self.gateway.controls.opportunity_max_age_seconds
+                ):
+                    self.journal.update(
+                        switch_id,
+                        state="failed",
+                        reason="candidate_expired_after_incumbent_close",
+                    )
+                    return None
                 self.journal.update(switch_id, state="open_submitting")
                 portfolio = await self._portfolio()
                 from dataclasses import replace
