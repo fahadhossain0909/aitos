@@ -8,6 +8,7 @@ margin mode. Missing or stale quotes are rejected by the registry.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from math import isfinite
 from typing import Any, Callable
 
@@ -98,4 +99,17 @@ class VenueExecutionCostRegistry:
             raise ValueError("execution-cost quote side mismatch")
         if quote.valid_for_seconds > self.max_quote_age_seconds:
             raise ValueError("execution-cost quote validity exceeds configured maximum")
+        try:
+            observed_at = datetime.fromisoformat(
+                quote.observed_at.replace("Z", "+00:00")
+            )
+            if observed_at.tzinfo is None:
+                observed_at = observed_at.replace(tzinfo=timezone.utc)
+            age = (datetime.now(timezone.utc) - observed_at).total_seconds()
+        except (TypeError, ValueError) as exc:
+            raise ValueError("execution-cost quote has invalid observed_at") from exc
+        if age < -1.0 or age > min(
+            quote.valid_for_seconds, self.max_quote_age_seconds
+        ):
+            raise ValueError("execution-cost quote is stale or from the future")
         return quote
