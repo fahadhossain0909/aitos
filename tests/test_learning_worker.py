@@ -503,6 +503,7 @@ def test_worker_trains_on_normalized_paper_live_outcomes():
     assert worker.run_once() == 2
     assert worker.scorer.rewards == [("BTCUSDT", 0.8)]
 
+
 def test_worker_query_includes_backtest_paper_and_live_experiences():
     from types import SimpleNamespace
 
