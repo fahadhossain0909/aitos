@@ -420,6 +420,7 @@ def test_worker_partitions_regime_models_and_normalizes_regime_labels(tmp_path):
     )
 
 
+
 def test_worker_processes_12000_experiences_across_keyset_pages(tmp_path):
     """Large replay must advance deterministically across multiple bounded pages."""
     worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
@@ -437,7 +438,9 @@ def test_worker_processes_12000_experiences_across_keyset_pages(tmp_path):
         def __init__(self):
             self.seen = set()
 
-        def update_experience_and_persist(self, experience_id, symbol, features, reward):
+        def update_experience_and_persist(
+            self, experience_id, symbol, features, reward
+        ):
             if experience_id in self.seen:
                 return False
             self.seen.add(experience_id)
@@ -451,17 +454,19 @@ def test_worker_processes_12000_experiences_across_keyset_pages(tmp_path):
     rows = []
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     for index in range(12_000):
-        rows.append({
-            "experience_id": f"00000000-0000-0000-0000-{index + 1:012d}",
-            "timestamp": base.replace(microsecond=index % 1_000_000),
-            "symbol": "BTCUSDT",
-            "decision": "backtest_trade",
-            "outcome": "closed",
-            "features_json": '{"trend_strength": 8}',
-            "risk_state_json": "{}",
-            "metadata_json": '{"reward_unit": "r_multiple", "regime": "unknown"}',
-            "reward": 1.0,
-        })
+        rows.append(
+            {
+                "experience_id": f"00000000-0000-0000-0000-{index + 1:012d}",
+                "timestamp": base.replace(microsecond=index % 1_000_000),
+                "symbol": "BTCUSDT",
+                "decision": "backtest_trade",
+                "outcome": "closed",
+                "features_json": '{"trend_strength": 8}',
+                "risk_state_json": "{}",
+                "metadata_json": '{"reward_unit": "r_multiple", "regime": "unknown"}',
+                "reward": 1.0,
+            }
+        )
 
     offset = 0
 
