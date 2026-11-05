@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Any
 
 from aitos.core.contracts import (
@@ -17,6 +18,7 @@ from aitos.data.repository import MarketDataRepository
 from aitos.eventbus.redis_bus import EventBus, Subscription
 
 from .experience import ExperienceRecord
+from .regime_feedback import outcome_feedback
 
 
 def _event_time(event: Event) -> datetime:
@@ -139,34 +141,73 @@ class LearningExperienceRecorder(AITOSModule):
     async def _on_outcome(self, event: Event) -> EventResponse | None:
         self._outcome_events_received += 1
         p = dict(event.payload)
-        pnl = p.get("pnl")
-        if pnl is None:
+        try:
+            pnl = float(p.get("pnl"))
+        except (TypeError, ValueError):
             return None
+        if not isfinite(pnl):
+            return None
+
+        try:
+            risk_amount = float(p.get("risk_amount_usd"))
+        except (TypeError, ValueError):
+            risk_amount = 0.0
+        has_risk = isfinite(risk_amount) and risk_amount > 0
+        reward = pnl / risk_amount if has_risk else pnl
+        reward_unit = "r_multiple" if has_risk else "unscaled_quote_pnl"
+
+        metadata = {
+            "decision_id": str(p.get("decision_id", "")),
+            "trade_id": str(p.get("trade_id", "")),
+            "event_type": "outcome",
+            "reward_unit": reward_unit,
+            "raw_pnl_usd": pnl,
+            "entry_price": p.get("entry_price"),
+            "exit_price": p.get("exit_price"),
+            "exit_reason": p.get("exit_reason"),
+            "pnl_percent": p.get("pnl_percent"),
+            "mae_price": p.get("mae_price"),
+            "mfe_price": p.get("mfe_price"),
+            "mae_r": p.get("mae_r"),
+            "mfe_r": p.get("mfe_r"),
+        }
+        if has_risk:
+            try:
+                mfe_r = float(p.get("mfe_r"))
+                feedback = outcome_feedback(
+                    realized_r=reward,
+                    mfe_r=mfe_r,
+                    exit_reason=str(p.get("exit_reason") or ""),
+                )
+            except (TypeError, ValueError):
+                metadata["exit_feedback_status"] = "unavailable"
+            else:
+                metadata.update(
+                    {
+                        "exit_feedback_status": "available",
+                        "premature_exit": feedback.premature_exit,
+                        "missed_opportunity_r": feedback.missed_opportunity_r,
+                        "realized_r": feedback.realized_r,
+                    }
+                )
+        else:
+            metadata["exit_feedback_status"] = "unavailable_missing_risk"
+
         record = ExperienceRecord(
             timestamp=_event_time(event),
             source=self._source,
             symbol=str(p.get("symbol", "unknown")),
             decision=str(p.get("side", "outcome")),
             outcome="closed",
-            reward=float(pnl),
+            reward=reward,
             price=(
                 float(p["entry_price"]) if p.get("entry_price") is not None else None
             ),
             features=dict(p.get("agent_consensus") or {}),
             market_state={"regime": p.get("regime")},
-            metadata={
-                "decision_id": str(p.get("decision_id", "")),
-                "trade_id": str(p.get("trade_id", "")),
-                "event_type": "outcome",
-                "entry_price": p.get("entry_price"),
-                "exit_price": p.get("exit_price"),
-                "exit_reason": p.get("exit_reason"),
-                "pnl_percent": p.get("pnl_percent"),
-                "mae_price": p.get("mae_price"),
-                "mfe_price": p.get("mfe_price"),
-                "mae_r": p.get("mae_r"),
-                "mfe_r": p.get("mfe_r"),
-            },
+            risk_state={"risk_amount_usd": risk_amount} if has_risk else {},
+            strategy_version=str(p.get("strategy_id") or "unknown"),
+            metadata=metadata,
         )
         await self._write(record)
         self._last_event_time = event.created_at
