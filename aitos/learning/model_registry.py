@@ -163,7 +163,9 @@ class ModelRegistry:
             or not walk_forward.passed
             or walk_forward.locked_holdout is None
         ):
-            raise ValueError("promotion requires passing walk-forward and locked holdout")
+            raise ValueError(
+                "promotion requires passing walk-forward and locked holdout"
+            )
         candidate_metrics = self._metrics_payload(validation_result.candidate)
         holdout_metrics = self._metrics_payload(walk_forward.locked_holdout)
 
@@ -200,7 +202,9 @@ class ModelRegistry:
                         "challenger validation must include the current champion backtest"
                     )
             elif champion_comparison is not None and not champion_comparison.accepted:
-                raise ValueError("initial champion comparison, when supplied, must pass")
+                raise ValueError(
+                    "initial champion comparison, when supplied, must pass"
+                )
 
             evidence = {
                 "validated_at": datetime.now(timezone.utc).isoformat(),
