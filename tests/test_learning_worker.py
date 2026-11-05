@@ -419,6 +419,7 @@ def test_worker_partitions_regime_models_and_normalizes_regime_labels(tmp_path):
         == "high_volatility"
     )
 
+
 def test_paper_and_live_outcomes_require_explicit_reward_units():
     paper_r = {
         "source": "paper",
