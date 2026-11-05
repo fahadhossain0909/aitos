@@ -5,6 +5,7 @@ hard-coded fee tiers. Wire these providers to authenticated commission data,
 funding-rate history/prediction, depth-based impact estimates, and the
 exchange's actual position/margin liquidation fields.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -53,7 +54,9 @@ class BinanceUsdMExecutionCostAdapter:
         holding_horizon_seconds: float,
     ) -> ExecutionCostQuote:
         if notional_usd <= 0 or leverage <= 0 or holding_horizon_seconds < 0:
-            raise ValueError("notional/leverage must be positive and horizon non-negative")
+            raise ValueError(
+                "notional/leverage must be positive and horizon non-negative"
+            )
         common = {
             "symbol": symbol.upper(),
             "side": side.upper(),
