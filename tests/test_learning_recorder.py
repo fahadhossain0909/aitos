@@ -46,6 +46,8 @@ async def test_outcome_record_retains_entry_features_and_mae_mfe():
     assert record.metadata["mfe_r"] == 1.5
     assert record.price == 100.0
     assert record.reward == 12.5
+
+
 @pytest.mark.asyncio
 async def test_recorder_can_be_restarted_without_duplicate_subscriptions():
     class Subscription:
