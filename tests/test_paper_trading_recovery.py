@@ -420,3 +420,82 @@ async def test_paper_equity_includes_realized_partial_pnl_on_open_positions(
 
     assert portfolio.equity_usd == 1_006.75
     assert store.saved_drawdown == ("PAPER", 1_006.75, 1_006.75)
+
+@pytest.mark.asyncio
+async def test_persistence_initialize_retains_partial_subscriptions_for_cleanup():
+    class Subscription:
+        def __init__(self):
+            self.cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+    class Store:
+        async def initialize(self):
+            return None
+
+    class FailingEventBus:
+        def __init__(self):
+            self.calls = 0
+            self.first_subscription = Subscription()
+
+        async def subscribe(self, topic, handler, group):
+            self.calls += 1
+            if self.calls == 1:
+                return self.first_subscription
+            raise RuntimeError("subscription registration failed")
+
+    event_bus = FailingEventBus()
+    persistence = TradeStatePersistence(event_bus, FakeLifecycle(), Store())
+
+    with pytest.raises(RuntimeError, match="subscription registration failed"):
+        await persistence.initialize()
+
+    await persistence.shutdown()
+    assert event_bus.first_subscription.cancelled is True
+
+
+@pytest.mark.asyncio
+async def test_paper_main_closes_redis_if_clickhouse_startup_fails(monkeypatch):
+    from types import SimpleNamespace
+
+    import run_paper_trading as runner
+    import aitos.eventbus.factory as eventbus_factory
+
+    class FakeRedis:
+        def __init__(self):
+            self.closed = False
+
+        async def close(self):
+            self.closed = True
+
+    class FakeEventBus:
+        async def initialize(self, config):
+            return None
+
+    redis = FakeRedis()
+    settings = SimpleNamespace(
+        tuning=SimpleNamespace(mode="paper"),
+        log_level="INFO",
+    )
+
+    async def connect_redis(*args, **kwargs):
+        return redis
+
+    async def fail_clickhouse(*args, **kwargs):
+        raise RuntimeError("ClickHouse startup failed")
+
+    monkeypatch.setattr(runner, "get_settings", lambda: settings)
+    monkeypatch.setattr(runner, "configure_logging", lambda level: None)
+    monkeypatch.setattr(runner, "connect_redis_with_retry", connect_redis)
+    monkeypatch.setattr(
+        eventbus_factory,
+        "create_event_bus",
+        lambda *args, **kwargs: FakeEventBus(),
+    )
+    monkeypatch.setattr(runner, "connect_clickhouse_repositories", fail_clickhouse)
+
+    with pytest.raises(RuntimeError, match="ClickHouse startup failed"):
+        await runner.main()
+
+    assert redis.closed is True
