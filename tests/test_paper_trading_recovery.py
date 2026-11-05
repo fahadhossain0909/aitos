@@ -421,6 +421,7 @@ async def test_paper_equity_includes_realized_partial_pnl_on_open_positions(
     assert portfolio.equity_usd == 1_006.75
     assert store.saved_drawdown == ("PAPER", 1_006.75, 1_006.75)
 
+
 @pytest.mark.asyncio
 async def test_persistence_initialize_retains_partial_subscriptions_for_cleanup():
     class Subscription:
