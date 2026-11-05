@@ -1548,6 +1548,10 @@ class TradeLifecycle(AITOSModule):
         if getattr(coordinator, "lifecycle", None) is not self:
             raise ValueError("coordinator must be bound to this TradeLifecycle")
         self._position_switch_coordinator = coordinator
+        # The switching coordinator and the final submit guard must share one
+        # reservation ledger so incumbent release and candidate authorization
+        # reconcile against the same source of truth.
+        setattr(self, "_aitos_capital_gateway", coordinator.gateway)
 
     async def evaluate_rebalance_scan_cycle(
         self, opportunities: list[Opportunity]
