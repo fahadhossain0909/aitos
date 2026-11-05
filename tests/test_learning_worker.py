@@ -418,3 +418,11 @@ def test_worker_partitions_regime_models_and_normalizes_regime_labels(tmp_path):
         )
         == "high_volatility"
     )
+
+def test_worker_extracts_strategy_id_for_reward_calibration():
+    row = {
+        "metadata_json": '{"strategy_id": "mean_reversion"}',
+        "features_json": "{}",
+    }
+    assert ContinualLearningWorker._row_strategy_id(row) == "mean_reversion"
+    assert ContinualLearningWorker._row_strategy_id({"metadata_json": "{}"}) is None
