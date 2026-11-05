@@ -183,9 +183,9 @@ class ContinualLearningWorker:
         sql = """
         SELECT toString(experience_id) AS experience_id,
                ingested_at AS timestamp, source, symbol, decision, outcome, reward,
-               features_json, risk_state_json, metadata_json
+               features_json, risk_state_json, strategy_version, metadata_json
         FROM learning_experiences
-        WHERE source = 'backtest'
+        WHERE source IN ('backtest', 'paper', 'live')
           AND (ingested_at > {cursor_timestamp:DateTime64(3)}
                OR (ingested_at = {cursor_timestamp:DateTime64(3)}
                    AND experience_id > toUUID({cursor_experience_id:String})))
