@@ -43,10 +43,10 @@ def _candidate(**overrides):
 
 def _context(**overrides):
     values = {
-        "current_portfolio_risk_pct": 2.0,
+        "portfolio_risk_after_incumbent_close_pct": 2.0,
         "candidate_correlated_incremental_risk_pct": 0.5,
         "drawdown_pct": 1.0,
-        "available_capital_usd": 1_000,
+        "available_capital_after_incumbent_close_usd": 1_000,
         "candidate_capital_usd": 500,
         "seconds_since_last_switch": 3_600,
         "switches_last_hour": 0,
@@ -86,7 +86,7 @@ def test_switch_is_vetoed_by_portfolio_risk_drawdown_or_liquidation_buffer():
     decision = DynamicRebalancer().evaluate(
         _incumbent(),
         _candidate(liquidation_distance_pct=0.2),
-        _context(current_portfolio_risk_pct=4.8, candidate_correlated_incremental_risk_pct=0.5),
+        _context(portfolio_risk_after_incumbent_close_pct=4.8, candidate_correlated_incremental_risk_pct=0.5),
     )
     assert not decision.should_switch
     assert "candidate_liquidation_buffer_too_small" in decision.reasons
@@ -100,7 +100,7 @@ def test_switch_is_vetoed_by_churn_controls_and_insufficient_capital():
         _context(
             seconds_since_last_switch=10,
             switches_last_hour=2,
-            available_capital_usd=100,
+            available_capital_after_incumbent_close_usd=100,
         ),
     )
     assert not decision.should_switch
@@ -126,3 +126,22 @@ def test_configuration_rejects_invalid_thresholds():
         assert "min_candidate_confidence" in str(exc)
     else:
         raise AssertionError("invalid confidence threshold accepted")
+
+
+
+def test_non_positive_candidate_edge_and_excess_loss_probability_are_vetoed():
+    decision = DynamicRebalancer().evaluate(
+        _incumbent(),
+        _candidate(expected_gross_return_pct=0.05),
+        _context(),
+    )
+    assert not decision.should_switch
+    assert "candidate_net_edge_non_positive" in decision.reasons
+
+    decision = DynamicRebalancer().evaluate(
+        _incumbent(),
+        _candidate(loss_probability=0.50),
+        _context(),
+    )
+    assert not decision.should_switch
+    assert "candidate_loss_probability_above_limit" in decision.reasons
