@@ -59,3 +59,16 @@ def test_reward_calibration_is_partitioned_by_strategy_within_regime():
     assert "mean_reversion__trending" in snapshot
     assert "breakout__trending" in snapshot
 
+def test_reward_calibration_is_partitioned_by_strategy_within_regime():
+    calibrator = RegimeRewardCalibrator(min_samples=3)
+    for reward in (0.2, 0.3, 0.1):
+        calibrator.calibrate("trending", reward, strategy_id="mean_reversion")
+
+    clipped = calibrator.calibrate("trending", 20.0, strategy_id="mean_reversion")
+    independent = calibrator.calibrate("trending", 20.0, strategy_id="breakout")
+
+    assert clipped < 1.0
+    assert independent == 5.0
+    snapshot = calibrator.snapshot()
+    assert "mean_reversion__trending" in snapshot
+    assert "breakout__trending" in snapshot
