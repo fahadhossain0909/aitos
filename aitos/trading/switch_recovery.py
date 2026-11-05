@@ -26,6 +26,7 @@ class PositionSwitchRecoveryWorker:
     """Resume incomplete intents after trade and exchange state hydration."""
 
     POST_CLOSE_STATES = {
+        "close_submitting",
         "close_confirmed",
         "reservation_released",
         "open_ready",
