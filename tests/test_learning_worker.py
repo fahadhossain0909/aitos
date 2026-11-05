@@ -426,4 +426,8 @@ def test_worker_extracts_strategy_id_for_reward_calibration():
         "features_json": "{}",
     }
     assert ContinualLearningWorker._row_strategy_id(row) == "mean_reversion"
+    assert (
+        ContinualLearningWorker._row_strategy_id({"strategy_version": "breakout-v2"})
+        == "breakout-v2"
+    )
     assert ContinualLearningWorker._row_strategy_id({"metadata_json": "{}"}) is None
