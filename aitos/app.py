@@ -652,8 +652,10 @@ async def run_scan_and_trade_cycle(
 
     switch_attempted_ids: set[str] = set()
     if not is_production and rebalance_opportunities:
-        switch_rankings = await components.trade_lifecycle.evaluate_rebalance_scan_cycle(
-            rebalance_opportunities
+        switch_rankings = (
+            await components.trade_lifecycle.evaluate_rebalance_scan_cycle(
+                rebalance_opportunities
+            )
         )
         if switch_rankings:
             incumbent, replacement, rebalance_decision = switch_rankings[0]
