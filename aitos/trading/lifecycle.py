@@ -227,6 +227,28 @@ class TradeLifecycle(AITOSModule):
         if self._initialized:
             return
         self._initialized = True
+        # Recovery is deliberately opt-in and must run after persisted trades
+        # and venue positions have been hydrated/reconciled by the application.
+        if config.get("recover_position_switches", False):
+            coordinator = self._position_switch_coordinator
+            if coordinator is None:
+                raise RuntimeError(
+                    "position-switch recovery requested without a configured coordinator"
+                )
+            from aitos.trading.switch_recovery import PositionSwitchRecoveryWorker
+
+            self._switch_recovery_report = await PositionSwitchRecoveryWorker(
+                coordinator
+            ).recover_pending()
+            logger.info(
+                "Position-switch startup recovery completed",
+                extra={"aitos_extra": {
+                    "scanned": self._switch_recovery_report.scanned,
+                    "resumed": self._switch_recovery_report.resumed,
+                    "pending": self._switch_recovery_report.pending,
+                    "manual_reconciliation": self._switch_recovery_report.manual_reconciliation,
+                }},
+            )
         logger.info(
             "TradeLifecycle initialized",
             extra={
@@ -1548,6 +1570,7 @@ class TradeLifecycle(AITOSModule):
         if getattr(coordinator, "lifecycle", None) is not self:
             raise ValueError("coordinator must be bound to this TradeLifecycle")
         self._position_switch_coordinator = coordinator
+        self._switch_recovery_report = None
         # The switching coordinator and the final submit guard must share one
         # reservation ledger so incumbent release and candidate authorization
         # reconcile against the same source of truth.
