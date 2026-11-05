@@ -43,6 +43,7 @@ def test_champion_challenger_gate_requires_sample_floor_and_significance():
 def test_regime_partition_key_cannot_escape_checkpoint_directory():
     assert normalize_regime("../../outside/path") == "outside_path"
 
+
 def test_champion_comparison_filters_non_finite_and_malformed_rewards():
     champion = [0.0] * 30 + [float("nan"), float("inf"), "invalid"]
     candidate = [1.0] * 30 + [float("-inf"), "not-a-number"]
