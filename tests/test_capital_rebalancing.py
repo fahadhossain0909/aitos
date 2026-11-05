@@ -86,7 +86,10 @@ def test_switch_is_vetoed_by_portfolio_risk_drawdown_or_liquidation_buffer():
     decision = DynamicRebalancer().evaluate(
         _incumbent(),
         _candidate(liquidation_distance_pct=0.2),
-        _context(portfolio_risk_after_incumbent_close_pct=4.8, candidate_correlated_incremental_risk_pct=0.5),
+        _context(
+            portfolio_risk_after_incumbent_close_pct=4.8,
+            candidate_correlated_incremental_risk_pct=0.5,
+        ),
     )
     assert not decision.should_switch
     assert "candidate_liquidation_buffer_too_small" in decision.reasons
@@ -128,7 +131,6 @@ def test_configuration_rejects_invalid_thresholds():
         raise AssertionError("invalid confidence threshold accepted")
 
 
-
 def test_non_positive_candidate_edge_and_excess_loss_probability_are_vetoed():
     decision = DynamicRebalancer().evaluate(
         _incumbent(),
@@ -145,3 +147,14 @@ def test_non_positive_candidate_edge_and_excess_loss_probability_are_vetoed():
     )
     assert not decision.should_switch
     assert "candidate_loss_probability_above_limit" in decision.reasons
+
+
+
+def test_drawdown_hard_stop_prevents_switch_even_with_large_advantage():
+    decision = DynamicRebalancer().evaluate(
+        _incumbent(),
+        _candidate(),
+        _context(drawdown_pct=10.0),
+    )
+    assert not decision.should_switch
+    assert "drawdown_protection_stop" in decision.reasons
