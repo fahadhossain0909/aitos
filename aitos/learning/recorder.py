@@ -159,6 +159,8 @@ class LearningExperienceRecorder(AITOSModule):
         metadata = {
             "decision_id": str(p.get("decision_id", "")),
             "trade_id": str(p.get("trade_id", "")),
+            "strategy_id": str(p.get("strategy_id") or "unknown"),
+            "regime": p.get("regime"),
             "event_type": "outcome",
             "reward_unit": reward_unit,
             "raw_pnl_usd": pnl,
