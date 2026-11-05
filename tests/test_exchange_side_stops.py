@@ -1,4 +1,5 @@
 import pytest
+from types import SimpleNamespace
 
 from aitos.execution.order_executor import (
     OrderExecutor,
@@ -6,7 +7,13 @@ from aitos.execution.order_executor import (
     OrderResult,
     SimulatedOrderExecutor,
 )
-from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
+from aitos.intelligence.exit_intelligence.models import ExitAction
+from aitos.models.trade import (
+    Opportunity,
+    Trade,
+    TradeLifecycleState,
+    TradeSide,
+)
 from aitos.risk.models import PortfolioState
 from aitos.trading.lifecycle import TradeLifecycle
 
@@ -430,3 +437,116 @@ async def test_reconcile_filled_tp_does_not_cancel_already_filled_order(
     assert closed.state == TradeLifecycleState.POSITION_CLOSED
     assert closed.exit_reason == "tp_triggered_exchange"
     assert filled_tp not in executor.cancelled_order_ids
+
+
+@pytest.mark.asyncio
+async def test_intelligent_dynamic_tp_extension_updates_local_checkpoint_only(
+    event_bus, risk_engine
+):
+    extension = SimpleNamespace(
+        approved=True,
+        target_price=115.0,
+        to_dict=lambda: {"approved": True, "target_price": 115.0},
+    )
+    decision = SimpleNamespace(
+        action=ExitAction.HOLD,
+        target_extension=extension,
+        new_stop_price=None,
+        to_dict=lambda: {"action": "HOLD", "target_extension": extension.to_dict()},
+    )
+
+    class FakePositionManager:
+        def evaluate(self, **kwargs):
+            return decision
+
+    executor = FakeExchangeCapableExecutor()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+        use_exchange_side_stops=True,
+        position_manager=FakePositionManager(),
+    )
+    trade = Trade(
+        trade_id="intelligent-tp-contract",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=1.0,
+        position_size_usd=100.0,
+        risk_amount_usd=2.0,
+        strategy_id="test-strategy",
+        agent_consensus={},
+        explanation="EIE TP checkpoint contract",
+        sl_price=98.0,
+        tp_price=104.0,
+        take_profit_levels=[104.0, 110.0],
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-11-05T00:00:00+00:00",
+    )
+    lifecycle._open_trades[trade.trade_id] = trade
+
+    await lifecycle._place_exchange_side_stops(trade)
+    assert [order["kind"] for order in executor.placed_orders.values()] == ["sl"]
+    assert trade.tp_order_ids == []
+
+    result = await lifecycle._apply_exit_intelligence(trade, 112.0)
+
+    assert result is None
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    assert trade.take_profit_levels == [104.0, 115.0]
+    assert trade.tp_order_ids == []
+    assert [order["kind"] for order in executor.placed_orders.values()] == ["sl"]
+
+
+@pytest.mark.asyncio
+async def test_intelligent_dynamic_tp_extension_veto_keeps_existing_target(
+    event_bus, risk_engine
+):
+    extension = SimpleNamespace(
+        approved=True,
+        target_price=103.0,
+        to_dict=lambda: {"approved": True, "target_price": 103.0},
+    )
+    decision = SimpleNamespace(
+        action=ExitAction.HOLD,
+        target_extension=extension,
+        new_stop_price=None,
+        to_dict=lambda: {"action": "HOLD", "target_extension": extension.to_dict()},
+    )
+
+    class FakePositionManager:
+        def evaluate(self, **kwargs):
+            return decision
+
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=FakeExchangeCapableExecutor(),
+        position_manager=FakePositionManager(),
+    )
+    trade = Trade(
+        trade_id="intelligent-tp-veto",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=1.0,
+        position_size_usd=100.0,
+        risk_amount_usd=2.0,
+        strategy_id="test-strategy",
+        agent_consensus={},
+        explanation="EIE TP extension veto",
+        sl_price=98.0,
+        tp_price=104.0,
+        take_profit_levels=[104.0, 110.0],
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time="2026-11-05T00:00:00+00:00",
+    )
+    lifecycle._open_trades[trade.trade_id] = trade
+
+    await lifecycle._apply_exit_intelligence(trade, 112.0)
+
+    assert trade.take_profit_levels == [104.0, 110.0]
+    assert trade.state == TradeLifecycleState.POSITION_OPENED

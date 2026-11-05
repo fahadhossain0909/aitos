@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Awaitable, Callable, Hashable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,51 @@ def timeframe_delta(timeframe: str) -> timedelta:
     if unit not in seconds:
         raise ValueError(f"unsupported timeframe: {timeframe}")
     return timedelta(seconds=seconds[unit] * amount)
+
+
+class HTFRequestBudget:
+    """Thread-safe sliding-window request budget shared by scanner instances."""
+
+    def __init__(self, max_requests: int = 60, window_seconds: float = 60.0) -> None:
+        if max_requests < 1 or window_seconds <= 0:
+            raise ValueError("HTF request budget limits must be positive")
+        self.max_requests = int(max_requests)
+        self.window = timedelta(seconds=window_seconds)
+        self._lock = threading.Lock()
+        self._request_times: list[datetime] = []
+
+    def reserve(self, now: datetime) -> bool:
+        """Atomically reserve one request in the configured sliding window."""
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
+        with self._lock:
+            cutoff = now - self.window
+            self._request_times = [
+                stamp for stamp in self._request_times if stamp > cutoff
+            ]
+            if len(self._request_times) >= self.max_requests:
+                return False
+            self._request_times.append(now)
+            return True
+
+
+_BUDGET_REGISTRY_LOCK = threading.Lock()
+_PROCESS_BUDGETS: dict[tuple[int, float], HTFRequestBudget] = {}
+
+
+def _process_request_budget(
+    max_requests: int, window_seconds: float
+) -> HTFRequestBudget:
+    """Return one process-wide budget for identical exchange limits."""
+    key = (int(max_requests), float(window_seconds))
+    with _BUDGET_REGISTRY_LOCK:
+        budget = _PROCESS_BUDGETS.get(key)
+        if budget is None:
+            budget = HTFRequestBudget(*key)
+            _PROCESS_BUDGETS[key] = budget
+        return budget
 
 
 @dataclass(frozen=True)
@@ -47,30 +93,21 @@ class HigherTimeframeCandleCache:
         max_requests: int = 60,
         window_seconds: float = 60.0,
         max_concurrent_fetches: int = 4,
+        request_budget: HTFRequestBudget | None = None,
     ) -> None:
         if max_requests < 1 or window_seconds <= 0 or max_concurrent_fetches < 1:
             raise ValueError("HTF request budgets and concurrency must be positive")
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._entries: dict[Hashable, _Entry] = {}
         self._locks: dict[Hashable, asyncio.Lock] = {}
-        self._budget_lock = asyncio.Lock()
-        self._request_times: list[datetime] = []
-        self._max_requests = int(max_requests)
-        self._window = timedelta(seconds=window_seconds)
+        self._request_budget = request_budget or _process_request_budget(
+            max_requests, window_seconds
+        )
         self._fetch_semaphore = asyncio.Semaphore(max_concurrent_fetches)
 
     async def _reserve_request(self) -> bool:
-        """Reserve one exchange request from the shared sliding-window budget."""
-        async with self._budget_lock:
-            now = self._clock().astimezone(timezone.utc)
-            cutoff = now - self._window
-            self._request_times = [
-                stamp for stamp in self._request_times if stamp > cutoff
-            ]
-            if len(self._request_times) >= self._max_requests:
-                return False
-            self._request_times.append(now)
-            return True
+        """Reserve one request from the process-wide sliding-window budget."""
+        return self._request_budget.reserve(self._clock())
 
     def _budget_fallback(self, entry: _Entry | None) -> tuple[list, dict]:
         if entry is None:

@@ -183,9 +183,9 @@ class ContinualLearningWorker:
         sql = """
         SELECT toString(experience_id) AS experience_id,
                ingested_at AS timestamp, source, symbol, decision, outcome, reward,
-               features_json, risk_state_json, metadata_json
+               features_json, risk_state_json, strategy_version, metadata_json
         FROM learning_experiences
-        WHERE source = 'backtest'
+        WHERE source IN ('backtest', 'paper', 'live')
           AND (ingested_at > {cursor_timestamp:DateTime64(3)}
                OR (ingested_at = {cursor_timestamp:DateTime64(3)}
                    AND experience_id > toUUID({cursor_experience_id:String})))
@@ -252,7 +252,11 @@ class ContinualLearningWorker:
     @classmethod
     def _reward_r_multiple(cls, row: dict[str, Any]) -> float | None:
         """Validate trade-level reward units and return a finite R multiple."""
-        if row.get("decision") != "backtest_trade" or row.get("outcome") != "closed":
+        source = str(row.get("source", "")).strip().lower()
+        decision = str(row.get("decision", "")).strip().lower()
+        if row.get("outcome") != "closed":
+            return None
+        if decision != "backtest_trade" and source not in {"paper", "live"}:
             return None
         try:
             reward = float(row.get("reward"))
@@ -268,6 +272,10 @@ class ContinualLearningWorker:
         if unit in {"r", "r_multiple", "risk_multiple"}:
             return reward
         if unit not in {"", "quote_pnl", "quote_currency", "usd"}:
+            return None
+        if source in {"paper", "live"} and not unit:
+            # Legacy paper/live rows may contain quote PnL; quarantine unless
+            # the reward unit is explicit.
             return None
 
         raw_risk = (
@@ -317,6 +325,19 @@ class ContinualLearningWorker:
             or features.get("regime")
         )
 
+    @staticmethod
+    def _row_strategy_id(row: dict[str, Any]) -> str | None:
+        metadata = ContinualLearningWorker._json_object(row.get("metadata_json"))
+        features = ContinualLearningWorker._json_object(row.get("features_json"))
+        value = (
+            metadata.get("strategy_id")
+            or metadata.get("strategy")
+            or features.get("strategy_id")
+            or row.get("strategy_id")
+            or row.get("strategy_version")
+        )
+        return str(value).strip() if value is not None and str(value).strip() else None
+
     def run_once(self) -> int:
         if not hasattr(self, "_reward_calibrator"):
             self._reward_calibrator = RegimeRewardCalibrator()
@@ -345,7 +366,9 @@ class ContinualLearningWorker:
                 if callable(apply):
                     regime = self._row_regime(row)
                     calibrated_reward = self._reward_calibrator.calibrate(
-                        regime, reward_r_multiple
+                        regime,
+                        reward_r_multiple,
+                        strategy_id=self._row_strategy_id(row),
                     )
                     regime_scorer = self._scorer_for_regime(regime)
                     regime_apply = getattr(

@@ -208,3 +208,5 @@ async def test_journal_publishes_learning_outcome_without_decision_id(
     assert received[0].payload["trade_id"] == trade.trade_id
     assert received[0].payload["decision_id"] == ""
     assert received[0].payload["pnl"] > 0
+    assert received[0].payload["risk_amount_usd"] == trade.risk_amount_usd
+    assert received[0].payload["strategy_id"] == trade.strategy_id

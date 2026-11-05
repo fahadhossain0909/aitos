@@ -83,10 +83,25 @@ def test_walk_forward_fails_closed_when_locked_holdout_has_no_events():
     assert result.reason == "locked holdout has no events"
 
 
-def test_model_registry_promotes_only_candidates(tmp_path):
+def test_model_registry_promotes_only_candidates_with_locked_holdout(tmp_path):
     registry = ModelRegistry(str(tmp_path / "registry.json"))
     registry.register(
         ModelArtifact(name="strategy", version="v1", kind="rule", status="candidate")
     )
-    promoted = registry.promote("strategy", "v1")
+    validation = CandidateValidator(
+        ValidationPolicy(
+            min_trades=0,
+            require_improvement_over_champion=False,
+            train_days=180,
+            test_days=30,
+            holdout_days=30,
+            min_positive_windows=1,
+        )
+    ).evaluate(_events(400), _strategy, lambda event: event.price)
+
+    assert validation.passed
+    assert validation.walk_forward is not None
+    assert validation.walk_forward.locked_holdout is not None
+    promoted = registry.promote("strategy", "v1", validation_result=validation)
     assert promoted.status == "champion"
+    assert promoted.metadata["promotion_evidence"]["walk_forward_windows"] > 0

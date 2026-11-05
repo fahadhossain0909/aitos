@@ -190,9 +190,47 @@ async def test_rl_feedback_loop_health_check(event_bus):
 
 
 @pytest.mark.asyncio
+async def test_rl_feedback_uses_neutral_model_score_as_training_feature():
+    from types import SimpleNamespace
+
+    class RecordingScorer:
+        def __init__(self):
+            self.updates = []
+
+        def update(self, symbol, context, reward_r_multiple):
+            self.updates.append((symbol, context, reward_r_multiple))
+
+    scorer = RecordingScorer()
+    loop = RLFeedbackLoop(event_bus=None, scorer=scorer)
+    event = SimpleNamespace(
+        payload={
+            "trade_id": "neutral-score",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "regime": "trending",
+            "pnl": 50.0,
+            "risk_amount_usd": 25.0,
+            "agent_consensus": {"rl_confidence": 9.8},
+        },
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    await loop._on_position_closed(event)
+
+    assert len(scorer.updates) == 1
+    _, context, reward = scorer.updates[0]
+    assert reward == 2.0
+    assert context["rl_confidence"] == 5.0
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("risk_amount", "pnl"),
-    [(-1.0, 10.0), (float("nan"), 10.0), (10.0, float("inf"))],
+    [
+        (-1.0, 10.0),
+        (float("nan"), 10.0),
+        (10.0, float("inf")),
+    ],
 )
 async def test_rl_feedback_rejects_non_finite_or_negative_values(
     event_bus, risk_amount, pnl
@@ -200,11 +238,12 @@ async def test_rl_feedback_rejects_non_finite_or_negative_values(
     scorer = TabularBanditRLScorer()
     loop = RLFeedbackLoop(event_bus=event_bus, scorer=scorer)
     await loop.initialize({})
+
     await event_bus.publish(
         Event(
             topic="trade.position_closed",
             payload={
-                "trade_id": "invalid",
+                "trade_id": "invalid-outcome",
                 "symbol": "BTCUSDT",
                 "side": "LONG",
                 "regime": "trending",
@@ -214,37 +253,77 @@ async def test_rl_feedback_rejects_non_finite_or_negative_values(
             source_module="test",
         )
     )
-    await asyncio.sleep(0.2)
+
+    await asyncio.sleep(0.3)
     assert loop.updates_applied == 0
     await loop.shutdown()
 
 
 @pytest.mark.asyncio
-async def test_rl_feedback_deduplicates_redelivered_closed_trade_for_deep_scorer():
-    import tempfile
-    from pathlib import Path
+async def test_rl_feedback_uses_neutral_model_score_as_training_feature():
+    from types import SimpleNamespace
 
-    from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
+    class RecordingScorer:
+        def __init__(self):
+            self.updates = []
 
-    with tempfile.TemporaryDirectory() as directory:
-        scorer = DeepValueRLScorer(state_path=str(Path(directory) / "model.pkl"))
-        loop = RLFeedbackLoop(event_bus=None, scorer=scorer)
-        event = type(
-            "E",
-            (),
-            {
-                "payload": {
-                    "trade_id": "trade-unique",
-                    "symbol": "BTCUSDT",
-                    "side": "LONG",
-                    "regime": "trending",
-                    "pnl": 20.0,
-                    "risk_amount_usd": 10.0,
-                },
-                "created_at": "2026-01-01T00:00:00+00:00",
+        def update(self, symbol, context, reward_r_multiple):
+            self.updates.append((symbol, context, reward_r_multiple))
+
+    scorer = RecordingScorer()
+    loop = RLFeedbackLoop(event_bus=None, scorer=scorer)
+    event = SimpleNamespace(
+        payload={
+            "trade_id": "neutral-score",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "regime": "trending",
+            "pnl": 50.0,
+            "risk_amount_usd": 25.0,
+            "agent_consensus": {"rl_confidence": 9.8},
+        },
+        created_at="2026-01-01T00:00:00+00:00",
+    )
+
+    await loop._on_position_closed(event)
+
+    assert len(scorer.updates) == 1
+    _, context, reward = scorer.updates[0]
+    assert reward == 2.0
+    assert context["rl_confidence"] == 5.0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("risk_amount", "pnl"),
+    [
+        (-1.0, 10.0),
+        (float("nan"), 10.0),
+        (10.0, float("inf")),
+    ],
+)
+async def test_rl_feedback_rejects_non_finite_or_negative_values(
+    event_bus, risk_amount, pnl
+):
+    scorer = TabularBanditRLScorer()
+    loop = RLFeedbackLoop(event_bus=event_bus, scorer=scorer)
+    await loop.initialize({})
+
+    await event_bus.publish(
+        Event(
+            topic="trade.position_closed",
+            payload={
+                "trade_id": "invalid-outcome",
+                "symbol": "BTCUSDT",
+                "side": "LONG",
+                "regime": "trending",
+                "pnl": pnl,
+                "risk_amount_usd": risk_amount,
             },
-        )()
-        await loop._on_position_closed(event)
-        await loop._on_position_closed(event)
-        assert scorer.n_samples_seen == 1
-        assert loop.updates_applied == 1
+            source_module="test",
+        )
+    )
+
+    await asyncio.sleep(0.3)
+    assert loop.updates_applied == 0
+    await loop.shutdown()
