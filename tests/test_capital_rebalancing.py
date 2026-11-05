@@ -180,3 +180,9 @@ def test_symbol_comparison_is_case_insensitive():
     )
     assert not decision.should_switch
     assert "same_instrument" in decision.reasons
+
+
+def test_funding_credit_is_treated_as_negative_execution_cost():
+    candidate = _candidate(funding_bps=-8.0)
+    assert candidate.total_cost_pct == 0.07
+    assert candidate.expected_net_edge_pct > _candidate().expected_net_edge_pct
