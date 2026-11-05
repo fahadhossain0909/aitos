@@ -328,6 +328,7 @@ class PositionSwitchCoordinator:
                 f"switch requires operator reconciliation: {existing_intent.reason}"
             )
         resume_after_close = existing_intent is not None and existing_intent.state in {
+            "close_submitting",
             "close_confirmed",
             "reservation_released",
             "open_ready",
