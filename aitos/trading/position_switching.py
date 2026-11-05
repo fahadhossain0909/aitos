@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import sqlite3
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -138,16 +139,21 @@ class CloseAndConfirm(Protocol):
 PortfolioProvider = Callable[[], Any | Awaitable[Any]]
 PairEvaluator = Callable[[Trade, Opportunity], Any | Awaitable[Any]]
 PositionFlatCheck = Callable[[str], bool | Awaitable[bool]]
+ReferencePriceProvider = Callable[[str], float | Awaitable[float]]
 
 
 class OrderExecutorCloseAdapter:
     """Reduce-only close adapter that requires FILLED plus venue-flat confirmation."""
 
     def __init__(
-        self, executor: OrderExecutor, position_is_flat: PositionFlatCheck
+        self,
+        executor: OrderExecutor,
+        position_is_flat: PositionFlatCheck,
+        reference_price_provider: ReferencePriceProvider,
     ) -> None:
         self.executor = executor
         self.position_is_flat = position_is_flat
+        self.reference_price_provider = reference_price_provider
 
     async def __call__(
         self, trade: Trade, client_order_id: str, existing_order_id: str | None
@@ -162,14 +168,18 @@ class OrderExecutorCloseAdapter:
                 trade.symbol, client_order_id
             )
         if status is None:
+            reference_price = self.reference_price_provider(trade.symbol)
+            if hasattr(reference_price, "__await__"):
+                reference_price = await reference_price
+            reference_price = float(reference_price)
+            if not math.isfinite(reference_price) or reference_price <= 0:
+                raise ValueError("fresh positive reference price is required for close")
             result = await self.executor.submit_order(
                 OrderRequest(
                     symbol=trade.symbol,
                     side=trade.side,
                     quantity=trade.quantity,
-                    reference_price=float(
-                        getattr(trade, "last_marked_price", None) or trade.entry_price
-                    ),
+                    reference_price=reference_price,
                     client_order_id=client_order_id,
                     reduce_only=True,
                 )
