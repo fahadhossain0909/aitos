@@ -88,7 +88,6 @@ class BinanceCostAdjustmentPublisher:
         return published
 
 
-
 class BinanceIncomeReconciliationService(AITOSModule):
     """Periodically reconcile Binance fees/funding against uniquely matched trades.
 
@@ -221,11 +220,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
             return None
 
         income_type = str(row.get("incomeType", "")).upper()
-        grace_ms = (
-            self._commission_close_grace_ms
-            if income_type == "COMMISSION"
-            else 0
-        )
+        grace_ms = self._commission_close_grace_ms if income_type == "COMMISSION" else 0
         matches: list[str] = []
         for trade in self._trades():
             if str(getattr(trade, "symbol", "")).upper() != symbol:
@@ -256,8 +251,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
         trades = self._trades()
         if cursor is None:
             entry_times = [
-                self._parse_time(getattr(trade, "entry_time", None))
-                for trade in trades
+                self._parse_time(getattr(trade, "entry_time", None)) for trade in trades
             ]
             valid_entry_times = [value for value in entry_times if value is not None]
             if not valid_entry_times:
@@ -304,9 +298,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
                     },
                 )
 
-        next_cursor = (
-            max(0, min(unresolved_times) - 1) if unresolved_times else now_ms
-        )
+        next_cursor = max(0, min(unresolved_times) - 1) if unresolved_times else now_ms
         await self._state_store.save_income_cursor(next_cursor, self._account)
         self._runs += 1
         self._published += published
