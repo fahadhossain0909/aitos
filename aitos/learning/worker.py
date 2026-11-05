@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from math import isfinite
+from math import isfinite
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -214,6 +215,17 @@ class ContinualLearningWorker:
             # Keep training aligned with inference; never feed the model its own score.
             result["rl_confidence"] = 5.0
         return result
+        result: dict[str, float] = {}
+        for key, raw in value.items():
+            if str(key) in excluded or not isinstance(raw, (int, float, bool)):
+                continue
+            number = float(raw)
+            if number == number and abs(number) != float("inf"):
+                result[str(key)] = number
+        if result:
+            # Keep training aligned with inference; never feed the model its own score.
+            result["rl_confidence"] = 5.0
+        return result
 
     @staticmethod
     def _json_object(value: Any) -> dict[str, Any]:
@@ -269,6 +281,52 @@ class ContinualLearningWorker:
         normalized = reward / risk_amount
         return normalized if isfinite(normalized) else None
 
+    @staticmethod
+    def _json_object(value: Any) -> dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        try:
+            parsed = json.loads(value or "{}")
+        except (TypeError, ValueError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @classmethod
+    def _reward_r_multiple(cls, row: dict[str, Any]) -> float | None:
+        """Return a strictly validated R reward; reject summaries and unscaled PnL."""
+        if row.get("decision") != "backtest_trade" or row.get("outcome") != "closed":
+            return None
+        try:
+            reward = float(row.get("reward"))
+        except (TypeError, ValueError):
+            return None
+        if not (reward == reward and abs(reward) != float("inf")):
+            return None
+
+        metadata = cls._json_object(row.get("metadata_json"))
+        risk_state = cls._json_object(row.get("risk_state_json"))
+        features = cls._json_object(row.get("features_json"))
+        reward_unit = str(metadata.get("reward_unit", "")).strip().lower()
+        if reward_unit in {"r", "r_multiple", "risk_multiple"}:
+            return reward
+        if reward_unit not in {"", "quote_pnl", "quote_currency", "usd"}:
+            return None
+
+        raw_risk = (
+            risk_state.get("risk_amount_usd")
+            or risk_state.get("initial_risk_usd")
+            or features.get("risk_amount_usd")
+            or features.get("initial_risk_usd")
+        )
+        try:
+            risk_amount = float(raw_risk)
+        except (TypeError, ValueError):
+            return None
+        if not isfinite(risk_amount) or risk_amount <= 0:
+            return None
+        normalized = reward / risk_amount
+        return normalized if isfinite(normalized) else None
+
     def run_once(self) -> int:
         rows = self._rows()
         changed = False
@@ -283,6 +341,10 @@ class ContinualLearningWorker:
             reward_r_multiple = self._reward_r_multiple(row)
             if not features or reward_r_multiple is None:
                 skipped += 1
+                # Permanently ineligible rows (e.g. summary or unscaled PnL)
+                # must not pin the bounded lookback query at the same records.
+                self._processed.add(experience_id)
+                changed = True
                 # Permanently ineligible rows (e.g. summary or unscaled PnL)
                 # must not pin the bounded lookback query at the same records.
                 self._processed.add(experience_id)

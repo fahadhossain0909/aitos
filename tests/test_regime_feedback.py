@@ -69,3 +69,21 @@ def test_champion_comparison_rejects_non_finite_or_invalid_thresholds(
             min_improvement=min_improvement,
             z_score=z_score,
         )
+
+
+def test_reward_calibration_is_partitioned_by_strategy_within_regime():
+    calibrator = RegimeRewardCalibrator(min_samples=3)
+    for reward in (0.2, 0.3, 0.1):
+        calibrator.calibrate("trending", reward, strategy_id="mean_reversion")
+
+    clipped = calibrator.calibrate("trending", 20.0, strategy_id="mean_reversion")
+    independent = calibrator.calibrate("trending", 20.0, strategy_id="breakout")
+
+    assert clipped < 1.0
+    assert independent == 5.0
+    snapshot = calibrator.snapshot()
+    assert any(key.startswith("mean_reversion_trending_") for key in snapshot)
+    assert any(key.startswith("breakout_trending_") for key in snapshot)
+    restored = RegimeRewardCalibrator(min_samples=3)
+    restored.restore(snapshot)
+    assert set(restored.snapshot()) == set(snapshot)
