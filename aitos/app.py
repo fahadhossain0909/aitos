@@ -368,46 +368,6 @@ async def _health_status(module: AITOSModule):
     return result
 
 
-async def restart_unhealthy_modules(modules: list[AITOSModule]) -> list[str]:
-    """Restart only the explicitly supplied auxiliary modules that report unhealthy.
-
-    Shutdown must succeed before initialize is attempted. This avoids creating
-    duplicate subscriptions when an auxiliary module cannot release its old
-    resources cleanly.
-    """
-    restarted: list[str] = []
-    for module in modules:
-        try:
-            health = await module.health_check()
-            if health.status.value != "unhealthy":
-                continue
-            await module.shutdown()
-            await module.initialize({})
-            refreshed = await module.health_check()
-            if refreshed.status.value in ("healthy", "degraded"):
-                restarted.append(module.module_id)
-                logger.info(
-                    "auxiliary module recovered",
-                    extra={"aitos_extra": {"module_id": module.module_id}},
-                )
-            else:
-                logger.error(
-                    "auxiliary module remains unhealthy after restart",
-                    extra={"aitos_extra": {"module_id": module.module_id}},
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "auxiliary module restart failed",
-                extra={
-                    "aitos_extra": {
-                        "module_id": getattr(module, "module_id", "unknown"),
-                        "error": str(exc),
-                    }
-                },
-            )
-    return restarted
-
-
 async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) -> None:
     for module in components.all_modules():
         await module.initialize({})
@@ -421,6 +381,11 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
             "market.trade.*",
             components.trade_lifecycle.handle_event,
             group="trade-lifecycle-prices",
+        ),
+        await components.event_bus.subscribe(
+            "trade.cost_adjustment",
+            components.trade_lifecycle.handle_event,
+            group="trade-lifecycle-costs",
         ),
     ]
     deadline = asyncio.get_running_loop().time() + timeout

@@ -366,34 +366,53 @@ async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
 
 
 @pytest.mark.asyncio
-async def test_restart_unhealthy_auxiliary_module_shuts_down_before_initialize():
-    from types import SimpleNamespace
+async def test_cost_adjustment_event_is_applied_to_trade_lifecycle(event_bus):
+    from aitos.core.contracts import Event
 
-    from aitos.app import restart_unhealthy_modules
+    exchange = FakeScannerExchange()
+    components = await build_system(
+        event_bus=event_bus,
+        exchange=exchange,
+        order_executor=SimulatedOrderExecutor(),
+        symbols=["BTCUSDT"],
+        min_score_threshold=0.0,
+    )
+    await initialize_all(components)
+    now = datetime.now(timezone.utc).isoformat()
+    trade = Trade(
+        trade_id="cost-adjustment-wiring",
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        entry_price=100.0,
+        quantity=1.0,
+        leverage=1.0,
+        position_size_usd=100.0,
+        risk_amount_usd=2.0,
+        strategy_id="test",
+        agent_consensus={},
+        explanation="test position",
+        sl_price=98.0,
+        tp_price=104.0,
+        state=TradeLifecycleState.POSITION_OPENED,
+        entry_time=now,
+    )
+    components.trade_lifecycle._open_trades[trade.trade_id] = trade
 
-    class RestartableModule:
-        module_id = "test-auxiliary"
+    await event_bus.publish(
+        Event(
+            topic="trade.cost_adjustment",
+            payload={
+                "trade_id": trade.trade_id,
+                "adjustment_id": "binance:income:12345",
+                "kind": "fee",
+                "amount_usd": 0.12,
+            },
+            source_module="test",
+        )
+    )
 
-        def __init__(self):
-            self.initialized = False
-            self.calls = []
+    applied = await _wait_for(lambda: trade.fees_paid_usd == pytest.approx(0.12))
+    assert applied is True
+    assert "binance:income:12345" in trade.cost_adjustments
 
-        async def health_check(self):
-            status = "healthy" if self.initialized else "unhealthy"
-            return SimpleNamespace(status=SimpleNamespace(value=status))
-
-        async def shutdown(self):
-            self.calls.append("shutdown")
-            self.initialized = False
-
-        async def initialize(self, config):
-            self.calls.append("initialize")
-            self.initialized = True
-
-    module = RestartableModule()
-
-    restarted = await restart_unhealthy_modules([module])
-
-    assert restarted == ["test-auxiliary"]
-    assert module.calls == ["shutdown", "initialize"]
-    assert module.initialized is True
+    await shutdown_all(components)
