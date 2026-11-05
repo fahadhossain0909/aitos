@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.execution.order_executor import OrderExecutor, OrderRequest
+from aitos.models.trade import TradeSide
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 
 
@@ -118,6 +120,73 @@ class CloseAndConfirm(Protocol):
 
 
 PortfolioProvider = Callable[[], Any | Awaitable[Any]]
+PositionFlatCheck = Callable[[str], bool | Awaitable[bool]]
+
+
+class OrderExecutorCloseAdapter:
+    """Reduce-only close adapter that requires FILLED plus venue-flat confirmation."""
+
+    def __init__(
+        self, executor: OrderExecutor, position_is_flat: PositionFlatCheck
+    ) -> None:
+        self.executor = executor
+        self.position_is_flat = position_is_flat
+
+    async def __call__(
+        self, trade: Trade, client_order_id: str, existing_order_id: str | None
+    ) -> CloseReceipt:
+        status = None
+        if existing_order_id:
+            status = await self.executor.get_order_status(
+                trade.symbol, existing_order_id
+            )
+        if status is None:
+            status = await self.executor.get_order_by_client_id(
+                trade.symbol, client_order_id
+            )
+        if status is None:
+            result = await self.executor.submit_order(
+                OrderRequest(
+                    symbol=trade.symbol,
+                    side=trade.side,
+                    quantity=trade.quantity,
+                    reference_price=float(
+                        getattr(trade, "last_marked_price", None)
+                        or trade.entry_price
+                    ),
+                    client_order_id=client_order_id,
+                    reduce_only=True,
+                )
+            )
+            if not result.success:
+                return CloseReceipt(False, result.order_id, 0.0, 0.0, False)
+            status = await self.executor.get_order_status(
+                trade.symbol, result.order_id
+            )
+            if status is None:
+                status = await self.executor.get_order_by_client_id(
+                    trade.symbol, client_order_id
+                )
+        if not status or str(status.get("status", "")).upper() != "FILLED":
+            return CloseReceipt(
+                False,
+                str((status or {}).get("orderId", existing_order_id or "")),
+                float((status or {}).get("avgPrice", 0.0) or 0.0),
+                float((status or {}).get("executedQty", 0.0) or 0.0),
+                False,
+            )
+        filled = float(status.get("executedQty", 0.0) or 0.0)
+        fill_price = float(status.get("avgPrice", 0.0) or 0.0)
+        flat = self.position_is_flat(trade.symbol)
+        if hasattr(flat, "__await__"):
+            flat = await flat
+        return CloseReceipt(
+            confirmed=bool(flat) and filled + 1e-12 >= trade.quantity,
+            order_id=str(status.get("orderId", existing_order_id or "")),
+            fill_price=fill_price,
+            filled_quantity=filled,
+            position_flat=bool(flat),
+        )
 
 
 class PositionSwitchCoordinator:
