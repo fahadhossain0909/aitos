@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -88,6 +89,7 @@ class _Lifecycle:
 class _Gateway:
     def __init__(self):
         self.released = []
+        self.controls = SimpleNamespace(opportunity_max_age_seconds=600.0)
 
     def release(self, symbol):
         self.released.append(symbol)
