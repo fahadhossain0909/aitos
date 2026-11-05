@@ -89,10 +89,7 @@ class IncumbentPosition:
         if not isfinite(float(self.remaining_net_edge_pct)):
             raise ValueError("remaining_net_edge_pct must be finite")
         _finite_non_negative(self.hold_seconds, "hold_seconds")
-        if (
-            not isfinite(self.stagnation_score)
-            or not 0 <= self.stagnation_score <= 1
-        ):
+        if not isfinite(self.stagnation_score) or not 0 <= self.stagnation_score <= 1:
             raise ValueError("stagnation_score must be between 0 and 1")
         if self.thesis_health.lower() not in {"intact", "degraded", "invalidated"}:
             raise ValueError("thesis_health must be intact, degraded, or invalidated")
@@ -137,10 +134,7 @@ class RebalanceCandidate:
             value = float(getattr(self, name))
             if not isfinite(value) or not 0 <= value <= 1:
                 raise ValueError(f"{name} must be between 0 and 1")
-        if (
-            not isfinite(self.liquidity_score)
-            or not 0 <= self.liquidity_score <= 10
-        ):
+        if not isfinite(self.liquidity_score) or not 0 <= self.liquidity_score <= 10:
             raise ValueError("liquidity_score must be between 0 and 10")
 
     @property
@@ -214,9 +208,7 @@ class DynamicRebalancer:
         context: RebalanceContext,
     ) -> RebalanceDecision:
         cfg = self.config
-        exit_cost = (
-            incumbent.exit_fee_bps + incumbent.exit_slippage_bps
-        ) * _BPS_TO_PCT
+        exit_cost = (incumbent.exit_fee_bps + incumbent.exit_slippage_bps) * _BPS_TO_PCT
         candidate_edge = candidate.expected_net_edge_pct
         advantage = candidate_edge - incumbent.remaining_net_edge_pct - exit_cost
         reasons: list[str] = []
