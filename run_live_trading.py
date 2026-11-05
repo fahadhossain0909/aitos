@@ -172,7 +172,6 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     )
     cleanup.push_async_callback(health_server.stop)
     await health_server.start()
-    from aitos.config.settings import get_settings
     from aitos.intelligence.position_runtime import get_tracked_lifecycles
     from aitos.trading.price_safety_net import PositionPriceSafetyNet
 
