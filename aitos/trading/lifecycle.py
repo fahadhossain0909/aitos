@@ -1549,6 +1549,15 @@ class TradeLifecycle(AITOSModule):
             raise ValueError("coordinator must be bound to this TradeLifecycle")
         self._position_switch_coordinator = coordinator
 
+    async def evaluate_rebalance_scan_cycle(
+        self, opportunities: list[Opportunity]
+    ) -> list[tuple[Trade, Opportunity, Any]]:
+        """Rank all scanner-approved opportunities against current open positions."""
+        coordinator = self._position_switch_coordinator
+        if coordinator is None:
+            return []
+        return await coordinator.evaluate_scan_cycle(opportunities)
+
     async def switch_position(
         self, incumbent: Trade, candidate: Opportunity, decision: Any
     ) -> Trade | None:
