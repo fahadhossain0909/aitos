@@ -186,6 +186,41 @@ class HealthServer:
             from aitos.forensics.data_flow_schema import PIPELINE_ORDER
 
             reg = get_data_flow_registry()
+            cardinality = reg.cardinality_snapshot()
+            for metric_name, description, key in (
+                (
+                    "aitos_data_flow_registry_bucket_count",
+                    "Total in-memory stage-symbol buckets",
+                    "bucket_count",
+                ),
+                (
+                    "aitos_data_flow_registry_symbol_bucket_count",
+                    "In-memory buckets keyed by a concrete symbol",
+                    "symbol_bucket_count",
+                ),
+                (
+                    "aitos_data_flow_registry_aggregate_bucket_count",
+                    "Aggregate in-memory stage buckets",
+                    "aggregate_bucket_count",
+                ),
+                (
+                    "aitos_data_flow_registry_symbol_count",
+                    "Unique symbols represented in the in-memory registry",
+                    "symbol_count",
+                ),
+            ):
+                lines.append(f"# HELP {metric_name} {description}")
+                lines.append(f"# TYPE {metric_name} gauge")
+                lines.append(f"{metric_name} {cardinality[key]}")
+            lines.append(
+                "# HELP aitos_data_flow_registry_stage_bucket_count "
+                "In-memory stage-symbol buckets by pipeline stage"
+            )
+            lines.append("# TYPE aitos_data_flow_registry_stage_bucket_count gauge")
+            for stage, count in cardinality["stage_bucket_counts"].items():
+                lines.append(
+                    f'aitos_data_flow_registry_stage_bucket_count{{stage="{stage}"}} {count}'
+                )
             lines.append(
                 "# HELP aitos_data_flow_input_rate Stage input events per second"
             )
