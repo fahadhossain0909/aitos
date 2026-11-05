@@ -5,6 +5,7 @@ venue reconciliation has completed. It never invents a replacement payload:
 the complete Opportunity snapshot is persisted with the intent. Ambiguous
 exchange outcomes remain fail-closed for operator reconciliation.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,9 +46,16 @@ class PositionSwitchRecoveryWorker:
         values = dict(payload)
         values["side"] = TradeSide(str(values["side"]).upper())
         required = {
-            "symbol", "side", "entry_price", "stop_loss_price",
-            "take_profit_levels", "confidence", "strategy_id", "rationale",
-            "opportunity_id", "detected_at",
+            "symbol",
+            "side",
+            "entry_price",
+            "stop_loss_price",
+            "take_profit_levels",
+            "confidence",
+            "strategy_id",
+            "rationale",
+            "opportunity_id",
+            "detected_at",
         }
         missing = required.difference(values)
         if missing:
@@ -85,7 +93,9 @@ class PositionSwitchRecoveryWorker:
                 else:
                     evaluator = self.coordinator.evaluate_pair
                     if evaluator is None:
-                        raise RuntimeError("fresh pair evaluator unavailable at startup")
+                        raise RuntimeError(
+                            "fresh pair evaluator unavailable at startup"
+                        )
                     value = evaluator(incumbent, candidate)
                     decision = await value if hasattr(value, "__await__") else value
                     if not getattr(decision, "should_switch", False):
