@@ -97,9 +97,27 @@ def compare_champion_candidate(
     z_score: float = 1.96,
 ) -> ModelComparison:
     """Conservative independent-sample acceptance gate for shadow evaluation."""
-    champion = [float(v) for v in champion_rewards if isfinite(float(v))]
-    candidate = [float(v) for v in candidate_rewards if isfinite(float(v))]
-    if min_samples < 2 or min_improvement < 0 or z_score <= 0:
+
+    def finite_rewards(values: Iterable[float]) -> list[float]:
+        result: list[float] = []
+        for value in values:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if isfinite(number):
+                result.append(number)
+        return result
+
+    champion = finite_rewards(champion_rewards)
+    candidate = finite_rewards(candidate_rewards)
+    if (
+        min_samples < 2
+        or not isfinite(min_improvement)
+        or min_improvement < 0
+        or not isfinite(z_score)
+        or z_score <= 0
+    ):
         raise ValueError("invalid champion/challenger gate configuration")
     if len(champion) < min_samples or len(candidate) < min_samples:
         return ModelComparison(False, 0.0, 0.0, float("inf"), "insufficient samples")
