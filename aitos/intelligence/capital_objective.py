@@ -92,11 +92,12 @@ class OpportunityEstimate:
             "expected_loss_pct",
             "fee_bps",
             "slippage_bps",
-            "funding_bps",
         ):
             value = getattr(self, name)
             if not isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be finite and non-negative")
+        if not isfinite(self.funding_bps):
+            raise ValueError("funding_bps must be finite")
         if not 0 <= self.loss_probability <= 1:
             raise ValueError("loss_probability must be between 0 and 1")
         if not 0 <= self.liquidity_score <= 10:
