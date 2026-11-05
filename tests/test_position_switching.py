@@ -113,7 +113,7 @@ class _Decision:
 @pytest.mark.asyncio
 async def test_reduce_only_adapter_requires_filled_order_and_flat_position():
     executor = SimulatedOrderExecutor()
-    adapter = OrderExecutorCloseAdapter(executor, lambda symbol: True)
+    adapter = OrderExecutorCloseAdapter(\n        executor, lambda symbol: True, lambda symbol: 101.0\n    )
     receipt = await adapter(_trade(), "stable-close-id", None)
     assert receipt.confirmed
     assert receipt.position_flat
