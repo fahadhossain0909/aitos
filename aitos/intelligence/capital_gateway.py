@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 from typing import Any
 
@@ -150,6 +150,7 @@ class CapitalGateway:
     ) -> CapitalGatewayResult:
         decisions: list[CapitalDecision] = []
         eligible_estimates: list[OpportunityEstimate] = []
+        decay_diagnostics: dict[str, tuple[float, float]] = {}
         for estimate in estimates:
             metadata = estimate.metadata
             age = opportunity_age_seconds(str(metadata.get("detected_at", "")))
@@ -168,6 +169,23 @@ class CapitalGateway:
                     )
                 )
                 continue
+            decay_factor = 0.5 ** (
+                age / self.controls.opportunity_decay_half_life_seconds
+            )
+            decay_diagnostics[estimate.symbol] = (age, decay_factor)
+            decayed_metadata = {
+                **metadata,
+                "opportunity_age_seconds": age,
+                "opportunity_decay_factor": decay_factor,
+            }
+            estimate = replace(
+                estimate,
+                expected_gross_return_pct=(
+                    estimate.expected_gross_return_pct * decay_factor
+                ),
+                confidence=estimate.confidence * decay_factor,
+                metadata=decayed_metadata,
+            )
             allowed, breaker_reason = self.circuit_breaker.check(
                 daily_pnl_pct=float(metadata.get("daily_pnl_pct", 0.0)),
                 consecutive_losses=int(metadata.get("consecutive_losses", 0)),
@@ -189,6 +207,17 @@ class CapitalGateway:
                 continue
             eligible_estimates.append(estimate)
         ranked = self.objective.rank(eligible_estimates)
+        ranked = [
+            replace(
+                decision,
+                rationale=decision.rationale
+                + (
+                    f"opportunity_age_seconds={decay_diagnostics[decision.symbol][0]:.3f}",
+                    f"opportunity_decay_factor={decay_diagnostics[decision.symbol][1]:.6f}",
+                ),
+            )
+            for decision in ranked
+        ]
         decisions.extend(ranked)
         allocations = self.allocator.allocate(
             equity_usd, ranked, max_positions=max_positions
