@@ -37,7 +37,7 @@ from aitos.kernel.ai_kernel import AIKernel
 from aitos.knowledge_graph.correlation_updater import SymbolCorrelationUpdater
 from aitos.knowledge_graph.writer import GraphDriver, KnowledgeGraphWriter
 from aitos.logging_setup import get_logger
-from aitos.models.trade import TradeLifecycleState
+from aitos.models.trade import Opportunity, TradeLifecycleState
 from aitos.risk.models import PortfolioState, PositionExposure, RiskLimits
 from aitos.risk.risk_engine import RiskEngine
 from aitos.trading.lifecycle import TradeLifecycle
@@ -690,15 +690,19 @@ async def run_scan_and_trade_cycle(
                         }
                     },
                 )
-                components.scanner.record_candidate_rejection(
-                    next(
+                rejected_candidate = next(
+                    (
                         item
                         for batch in ranked_batches
                         for item in batch
                         if item.symbol == replacement.symbol
                     ),
-                    "rebalance_switch_requires_reconciliation",
+                    None,
                 )
+                if rejected_candidate is not None:
+                    components.scanner.record_candidate_rejection(
+                        rejected_candidate, "rebalance_switch_requires_reconciliation"
+                    )
 
     for ranked_batch in ranked_batches:
         for candidate in ranked_batch:
