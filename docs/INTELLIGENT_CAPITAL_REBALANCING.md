@@ -41,7 +41,7 @@ The candidate's fee/slippage/funding inputs must represent its complete expected
 
 ## Runtime integration added in this PR
 
-The pure policy still never sends orders. Runtime orchestration is provided by `aitos.trading.position_switching.PositionSwitchCoordinator`, attached through `TradeLifecycle.configure_position_switching()`.
+The pure policy still never sends orders. Runtime orchestration is provided by `aitos.trading.position_switching.PositionSwitchCoordinator`, attached through `TradeLifecycle.configure_position_switching()`. `build_system()` exposes an explicit `position_switching_factory` hook so deployments can assemble the persistent journal, venue close adapter, fresh evidence callback and cost registry after the lifecycle/market context are built. The hook is unset by default.
 
 - The scanner now gathers the full scan-cycle batch, kernel-validates opportunities, and asks the lifecycle coordinator to compare every approved candidate against every open incumbent. The injected pair-evidence callback must use current PositionManager/thesis/stagnation state and venue cost quotes. The coordinator ranks approved decisions by net advantage; only the top switch is attempted in one scan cycle.
 - The coordinator journals each switch in SQLite using a persistent path and a deterministic switch identity. The database must live on durable storage and be included in backup/recovery.
