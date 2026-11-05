@@ -219,3 +219,47 @@ def test_legacy_symbol_only_trace_is_upgraded() -> None:
         trace_id="BTCUSDT",
     )
     assert event.trace_id == "md:BTCUSDT:legacy-42"
+
+def test_registry_cardinality_snapshot_counts_symbol_and_aggregate_buckets():
+    reg = DataFlowRegistry()
+    reg.record_input(PipelineStage.RECEIVE, symbol="BTCUSDT")
+    reg.record_input(PipelineStage.RECEIVE, symbol="ETHUSDT")
+    reg.record_output(PipelineStage.NORMALIZE, symbol="BTCUSDT")
+
+    snapshot = reg.cardinality_snapshot()
+
+    assert snapshot["bucket_count"] == 5
+    assert snapshot["symbol_bucket_count"] == 3
+    assert snapshot["aggregate_bucket_count"] == 2
+    assert snapshot["symbol_count"] == 2
+    assert snapshot["stage_bucket_counts"] == {"receive": 3, "normalize": 2}
+
+    reg.reset()
+    assert reg.cardinality_snapshot() == {
+        "bucket_count": 0,
+        "symbol_bucket_count": 0,
+        "aggregate_bucket_count": 0,
+        "symbol_count": 0,
+        "stage_bucket_counts": {},
+    }
+
+
+def test_health_metrics_export_registry_cardinality_without_symbol_labels(monkeypatch):
+    import aitos.forensics.data_flow_registry as data_flow_registry
+    from aitos.health_server import HealthServer
+
+    reg = DataFlowRegistry()
+    reg.record_input(PipelineStage.RECEIVE, symbol="BTCUSDT")
+    reg.record_input(PipelineStage.RECEIVE, symbol="ETHUSDT")
+    monkeypatch.setattr(data_flow_registry, "get_data_flow_registry", lambda: reg)
+
+    lines = []
+    HealthServer([])._append_data_flow_metrics(lines)
+    metrics = "\\n".join(lines)
+
+    assert "aitos_data_flow_registry_bucket_count 3" in metrics
+    assert "aitos_data_flow_registry_symbol_bucket_count 2" in metrics
+    assert "aitos_data_flow_registry_aggregate_bucket_count 1" in metrics
+    assert "aitos_data_flow_registry_symbol_count 2" in metrics
+    assert 'aitos_data_flow_registry_stage_bucket_count{stage="receive"} 3' in metrics
+    assert 'aitos_data_flow_registry_bucket_count{symbol="BTCUSDT"}' not in metrics
