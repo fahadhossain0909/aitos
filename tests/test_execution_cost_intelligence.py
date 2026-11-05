@@ -51,7 +51,9 @@ async def test_registry_rejects_stale_venue_quote():
             expected_slippage_bps=1.5,
             funding_cost_bps=0.8,
             liquidation_distance_pct=4.2,
-            observed_at=(datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat(),
+            observed_at=(
+                datetime.now(timezone.utc) - timedelta(seconds=60)
+            ).isoformat(),
             valid_for_seconds=20.0,
             source="test-adapter",
         ),
