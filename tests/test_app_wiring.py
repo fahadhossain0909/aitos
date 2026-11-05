@@ -364,6 +364,7 @@ async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
 
     await shutdown_all(components)
 
+
 @pytest.mark.asyncio
 async def test_cost_adjustment_event_is_applied_to_trade_lifecycle(event_bus):
     from aitos.core.contracts import Event
