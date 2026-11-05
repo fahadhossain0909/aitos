@@ -50,6 +50,7 @@ class SwitchJournal(Protocol):
     def get(self, switch_id: str) -> SwitchIntent | None: ...
     def create(self, intent: SwitchIntent) -> SwitchIntent: ...
     def update(self, switch_id: str, **changes: Any) -> SwitchIntent: ...
+    def list_incomplete(self) -> list[SwitchIntent]: ...
 
 
 class SQLiteSwitchJournal:
@@ -63,9 +64,16 @@ class SQLiteSwitchJournal:
             db.execute(
                 """CREATE TABLE IF NOT EXISTS position_switch_intents (
                     switch_id TEXT PRIMARY KEY,
+                    incumbent_trade_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
                     payload TEXT NOT NULL,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )"""
+            )
+            db.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS one_active_switch_per_incumbent
+                ON position_switch_intents(incumbent_trade_id)
+                WHERE state NOT IN ('completed', 'failed')"""
             )
 
     @staticmethod
@@ -85,8 +93,8 @@ class SQLiteSwitchJournal:
         with sqlite3.connect(self.path) as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
-                "INSERT OR IGNORE INTO position_switch_intents(switch_id,payload) VALUES(?,?)",
-                (intent.switch_id, payload),
+                "INSERT INTO position_switch_intents(switch_id,incumbent_trade_id,state,payload) VALUES(?,?,?,?)",
+                (intent.switch_id, intent.incumbent_trade_id, intent.state, payload),
             )
             row = db.execute(
                 "SELECT payload FROM position_switch_intents WHERE switch_id=?",
@@ -106,10 +114,17 @@ class SQLiteSwitchJournal:
             payload = json.loads(row[0])
             payload.update(changes)
             db.execute(
-                "UPDATE position_switch_intents SET payload=?, updated_at=CURRENT_TIMESTAMP WHERE switch_id=?",
-                (json.dumps(payload, sort_keys=True), switch_id),
+                "UPDATE position_switch_intents SET payload=?, state=?, updated_at=CURRENT_TIMESTAMP WHERE switch_id=?",
+                (json.dumps(payload, sort_keys=True), payload["state"], switch_id),
             )
         return SwitchIntent(**payload)
+
+    def list_incomplete(self) -> list[SwitchIntent]:
+        with sqlite3.connect(self.path) as db:
+            rows = db.execute(
+                "SELECT payload FROM position_switch_intents WHERE state NOT IN ('completed', 'failed')"
+            ).fetchall()
+        return [self._decode(row[0]) for row in rows]
 
 
 class CloseAndConfirm(Protocol):
@@ -347,6 +362,16 @@ class PositionSwitchCoordinator:
         async with lock:
             intent = self.journal.get(switch_id)
             if intent is None:
+                pending = [
+                    item
+                    for item in self.journal.list_incomplete()
+                    if item.incumbent_trade_id == incumbent.trade_id
+                ]
+                if pending:
+                    raise RuntimeError(
+                        "an earlier switch for this incumbent is still pending "
+                        "reconciliation"
+                    )
                 intent = self.journal.create(
                     SwitchIntent(
                         switch_id=switch_id,
