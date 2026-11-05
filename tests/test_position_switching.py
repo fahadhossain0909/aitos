@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from aitos.execution.order_executor import SimulatedOrderExecutor
-from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.models.trade import (
     Opportunity,
     Trade,
