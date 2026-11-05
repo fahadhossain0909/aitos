@@ -154,9 +154,9 @@ class ContinualLearningWorker:
         start = datetime.now(timezone.utc) - self.lookback
         sql = """
         SELECT experience_id, source, symbol, decision, outcome, reward,
-               features_json, risk_state_json, metadata_json
+               features_json, risk_state_json, strategy_version, metadata_json
         FROM learning_experiences
-        WHERE source = 'backtest'
+        WHERE source IN ('backtest', 'paper', 'live')
           AND decision = 'backtest_trade' AND outcome = 'closed'
           AND timestamp >= {start:DateTime64(3)}
         ORDER BY timestamp ASC
@@ -228,7 +228,11 @@ class ContinualLearningWorker:
     @classmethod
     def _reward_r_multiple(cls, row: dict[str, Any]) -> float | None:
         """Return a strictly validated R reward; reject summaries and unscaled PnL."""
-        if row.get("decision") != "backtest_trade" or row.get("outcome") != "closed":
+        source = str(row.get("source", "")).strip().lower()
+        decision = str(row.get("decision", "")).strip().lower()
+        if row.get("outcome") != "closed":
+            return None
+        if decision != "backtest_trade" and source not in {"paper", "live"}:
             return None
         try:
             reward = float(row.get("reward"))
@@ -244,6 +248,10 @@ class ContinualLearningWorker:
         if reward_unit in {"r", "r_multiple", "risk_multiple"}:
             return reward
         if reward_unit not in {"", "quote_pnl", "quote_currency", "usd"}:
+            return None
+        if source in {"paper", "live"} and not unit:
+            # Historical paper/live rows without explicit units may contain raw
+            # quote-currency PnL; never silently train on that value as R.
             return None
 
         raw_risk = (
