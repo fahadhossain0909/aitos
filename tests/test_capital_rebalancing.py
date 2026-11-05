@@ -149,7 +149,6 @@ def test_non_positive_candidate_edge_and_excess_loss_probability_are_vetoed():
     assert "candidate_loss_probability_above_limit" in decision.reasons
 
 
-
 def test_drawdown_hard_stop_prevents_switch_even_with_large_advantage():
     decision = DynamicRebalancer().evaluate(
         _incumbent(),
