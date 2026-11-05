@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +18,7 @@ from aitos.trading.position_switching import (
     OrderExecutorCloseAdapter,
     PositionSwitchCoordinator,
     SQLiteSwitchJournal,
+    SwitchIntent,
 )
 
 
@@ -197,3 +198,37 @@ async def test_close_not_confirmed_never_releases_or_opens(tmp_path: Path):
     assert gateway.released == []
     assert lifecycle.open_calls == 0
     assert lifecycle.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_pending_switch_blocks_a_second_candidate_for_same_incumbent(tmp_path: Path):
+    lifecycle = _Lifecycle()
+    gateway = _Gateway()
+    journal = SQLiteSwitchJournal(tmp_path / "switches.sqlite")
+    incumbent = lifecycle.open_trades[0]
+    first_candidate = _candidate()
+    journal.create(
+        SwitchIntent(
+            switch_id="switch:trade-old:opp-pending",
+            incumbent_trade_id=incumbent.trade_id,
+            incumbent_symbol=incumbent.symbol,
+            candidate_opportunity_id="opp-pending",
+            candidate_symbol="SOLUSDT",
+            state="close_pending",
+            close_client_order_id="stable-pending-close",
+        )
+    )
+    coordinator = PositionSwitchCoordinator(
+        lifecycle=lifecycle,
+        gateway=gateway,
+        journal=journal,
+        close_and_confirm=_Close(),
+        portfolio_provider=lambda: object(),
+        evaluate_pair=lambda current, candidate: _Decision(),
+    )
+    with pytest.raises(RuntimeError, match="earlier switch"):
+        await coordinator.switch(
+            incumbent=incumbent,
+            candidate=replace(first_candidate, opportunity_id="opp-new-2"),
+            decision=_Decision(),
+        )
