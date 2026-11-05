@@ -502,13 +502,23 @@ class PositionSwitchCoordinator:
                 trade = await self.lifecycle.submit_opportunity(
                     identified_candidate, portfolio
                 )
-                if trade.state != TradeLifecycleState.POSITION_OPENED:
+                if trade.state == TradeLifecycleState.REJECTED:
                     self.journal.update(
                         switch_id,
                         state="failed",
                         reason=trade.rejection_reason or trade.state.value,
                     )
                     return trade
+                if trade.state != TradeLifecycleState.POSITION_OPENED:
+                    self.journal.update(
+                        switch_id,
+                        state="manual_reconciliation_required",
+                        reason=f"replacement_open_not_confirmed:{trade.state.value}",
+                    )
+                    raise RuntimeError(
+                        "replacement open was not confirmed; reconcile venue order "
+                        "and position before retrying"
+                    )
                 self.journal.update(switch_id, state="completed", reason=None)
                 return trade
 
