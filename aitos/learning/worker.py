@@ -252,7 +252,11 @@ class ContinualLearningWorker:
     @classmethod
     def _reward_r_multiple(cls, row: dict[str, Any]) -> float | None:
         """Validate trade-level reward units and return a finite R multiple."""
-        if row.get("decision") != "backtest_trade" or row.get("outcome") != "closed":
+        source = str(row.get("source", "")).strip().lower()
+        decision = str(row.get("decision", "")).strip().lower()
+        if row.get("outcome") != "closed":
+            return None
+        if decision != "backtest_trade" and source not in {"paper", "live"}:
             return None
         try:
             reward = float(row.get("reward"))
@@ -268,6 +272,10 @@ class ContinualLearningWorker:
         if unit in {"r", "r_multiple", "risk_multiple"}:
             return reward
         if unit not in {"", "quote_pnl", "quote_currency", "usd"}:
+            return None
+        if source in {"paper", "live"} and not unit:
+            # Historical paper/live rows without explicit units may contain raw
+            # quote-currency PnL; never silently train on that value as R.
             return None
 
         raw_risk = (
