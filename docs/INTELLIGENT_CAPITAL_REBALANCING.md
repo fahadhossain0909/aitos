@@ -51,7 +51,7 @@ The pure policy still never sends orders. Runtime orchestration is provided by `
 - If the close is incomplete, no reservation is released and no replacement is submitted. If a crash occurs during close, the stable client order id supports reconciliation. If a crash occurs after the replacement enters its submission window and the result cannot be found in lifecycle records, the coordinator fails closed and requires operator reconciliation instead of blindly submitting a duplicate.
 - Production opportunities are explicitly refused by the automatic switch coordinator. This feature is for controlled paper/test environments only.
 
-The evidence callback and venue adapters are deliberately injected rather than replaced with guessed values. A missing callback means no switch decisions; a missing venue-flat confirmation means no close confirmation.
+The evidence callback must attach the fresh quote's `as_candidate_costs()` mapping to `Opportunity.agent_consensus['execution_costs']`; the final `capital_runtime` guard now forwards those fee/slippage/funding values into `CapitalGateway.authorize_opportunity()` rather than reverting to generic defaults. The evidence callback and venue adapters are deliberately injected rather than replaced with guessed values. A missing callback means no switch decisions; a missing venue-flat confirmation means no close confirmation.
 
 ## Venue execution-cost intelligence
 
