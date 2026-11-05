@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_controls import opportunity_age_seconds
 from aitos.execution.order_executor import OrderExecutor, OrderRequest
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 
@@ -274,6 +275,30 @@ class PositionSwitchCoordinator:
         decision: Any,
     ) -> Trade | None:
         if not getattr(decision, "should_switch", False):
+            return None
+        if self.evaluate_pair is None:
+            raise RuntimeError(
+                "fresh incumbent/candidate evidence callback is required for switching"
+            )
+        fresh_result = self.evaluate_pair(incumbent, candidate)
+        fresh_decision = (
+            await fresh_result
+            if hasattr(fresh_result, "__await__")
+            else fresh_result
+        )
+        if not getattr(fresh_decision, "should_switch", False):
+            return None
+        decision = fresh_decision
+        if (
+            getattr(decision, "incumbent_symbol", incumbent.symbol).upper()
+            != incumbent.symbol.upper()
+            or getattr(decision, "candidate_symbol", candidate.symbol).upper()
+            != candidate.symbol.upper()
+        ):
+            raise ValueError("rebalance decision identity does not match switch pair")
+        if opportunity_age_seconds(candidate.detected_at) > (
+            self.gateway.controls.opportunity_max_age_seconds
+        ):
             return None
         if incumbent.state != TradeLifecycleState.POSITION_OPENED:
             raise ValueError("incumbent must be an open position")
