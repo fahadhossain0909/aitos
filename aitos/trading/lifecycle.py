@@ -242,12 +242,14 @@ class TradeLifecycle(AITOSModule):
             ).recover_pending()
             logger.info(
                 "Position-switch startup recovery completed",
-                extra={"aitos_extra": {
-                    "scanned": self._switch_recovery_report.scanned,
-                    "resumed": self._switch_recovery_report.resumed,
-                    "pending": self._switch_recovery_report.pending,
-                    "manual_reconciliation": self._switch_recovery_report.manual_reconciliation,
-                }},
+                extra={
+                    "aitos_extra": {
+                        "scanned": self._switch_recovery_report.scanned,
+                        "resumed": self._switch_recovery_report.resumed,
+                        "pending": self._switch_recovery_report.pending,
+                        "manual_reconciliation": self._switch_recovery_report.manual_reconciliation,
+                    }
+                },
             )
         logger.info(
             "TradeLifecycle initialized",
