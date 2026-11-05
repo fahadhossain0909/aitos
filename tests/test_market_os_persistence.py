@@ -187,6 +187,8 @@ async def test_live_analytics_subscriptions_are_live_only():
     ]
     assert len(analytics_calls) == len(service.LIVE_ANALYTICS_TOPICS)
     assert all(call["live_only"] is True for call in analytics_calls)
+
+
 @pytest.mark.asyncio
 async def test_market_os_persistence_can_restart_and_reports_flush_task_health():
     class Subscription:
