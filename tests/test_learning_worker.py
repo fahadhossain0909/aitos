@@ -513,6 +513,7 @@ def test_learning_worker_singleton_file_lock_rejects_second_owner(tmp_path):
     second._acquire_singleton_lock()
     second._release_singleton_lock()
 
+
 def test_learning_worker_singleton_lock_rejects_second_process(tmp_path):
     state_path = tmp_path / "worker_state.json"
     ready_path = tmp_path / "worker.locked"
