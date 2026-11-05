@@ -245,9 +245,7 @@ def depth_event_flow_analysis(
             else float(max_age_ms + 1)
         )
         freshness_factor = (
-            max(0.0, 1.0 - freshness_ms / max_age_ms)
-            if fresh_events
-            else 0.0
+            max(0.0, 1.0 - freshness_ms / max_age_ms) if fresh_events else 0.0
         )
         sample_factor = min(1.0, len(fresh_events) / min_fresh_events)
         confidence = round(sample_factor * freshness_factor, 4)
