@@ -112,13 +112,14 @@ async def _close_stale_positions(components) -> None:
 
 
 async def _cancel_task(task: asyncio.Task) -> None:
-    if task.done():
-        return
-    task.cancel()
+    if not task.done():
+        task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    except Exception:
+        logger.exception("background task failed before shutdown")
 
 
 async def _shutdown_event_bus_if_unowned(event_bus, ownership) -> None:
