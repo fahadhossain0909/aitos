@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
@@ -158,6 +158,7 @@ async def build_system(
     min_score_threshold: float = 60.0,
     top_n: int | None = None,
     enable_exit_intelligence: bool = False,
+    position_switching_factory: Callable[[TradeLifecycle, PositionManager | None, ExchangeAdapter, OrderExecutor], Any] | None = None,
 ) -> SystemComponents:
     settings = get_settings()
     tuning = settings.tuning
@@ -309,6 +310,15 @@ async def build_system(
             object.__setattr__(trade_lifecycle, "handle_event", _handle_with_context)
             object.__setattr__(trade_lifecycle, "close_trade", _close_with_clear)
         logger.info("LiveStateContextProvider wired into TradeLifecycle")
+    if position_switching_factory is not None:
+        coordinator = position_switching_factory(
+            trade_lifecycle, position_manager, exchange, order_executor
+        )
+        if inspect.isawaitable(coordinator):
+            coordinator = await coordinator
+        trade_lifecycle.configure_position_switching(coordinator)
+        logger.info("Durable position-switching coordinator explicitly configured")
+
     decision_journal = decision_journal_repository or DecisionJournalRepository()
     journal = JournalSystem(
         event_bus=event_bus,
