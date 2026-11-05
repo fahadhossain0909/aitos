@@ -66,11 +66,14 @@ class PositionManagerEvidenceAdapter:
         if health == "invalidated":
             stagnation = 1.0
         remaining_edge_pct = float(self.remaining_edge_estimator(action, trade))
+        entry_time = datetime.fromisoformat(trade.entry_time.replace("Z", "+00:00"))
+        if entry_time.tzinfo is None:
+            entry_time = entry_time.replace(tzinfo=timezone.utc)
         incumbent = IncumbentPosition(
             symbol=trade.symbol,
             side=trade.side.value,
             remaining_net_edge_pct=remaining_edge_pct,
-            hold_seconds=max(0.0, (datetime.now(timezone.utc) - datetime.fromisoformat(trade.entry_time.replace("Z", "+00:00"))).total_seconds()),
+            hold_seconds=max(0.0, (datetime.now(timezone.utc) - entry_time).total_seconds()),
             stagnation_score=stagnation,
             thesis_health=health,
             exit_fee_bps=float(self.exit_fee_bps_provider(trade)),
