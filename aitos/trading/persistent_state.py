@@ -367,8 +367,6 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
     )
 
 
-
-
 def restored_position_feeds_ready(
     restored_open_count: int, subscription_result: dict[str, Any] | None
 ) -> bool:
