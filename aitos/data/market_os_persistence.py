@@ -238,6 +238,8 @@ class MarketOSPersistence(AITOSModule):
                     await self._flush_task
                 except asyncio.CancelledError:
                     pass
+                except Exception:
+                    logger.exception("Market OS flush task failed during shutdown")
                 self._flush_task = None
             self._initialized = False
             raise
