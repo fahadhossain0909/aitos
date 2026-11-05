@@ -363,6 +363,8 @@ async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
     # the real proof is simply that nothing opened despite a valid trending symbol being available.
 
     await shutdown_all(components)
+
+
 @pytest.mark.asyncio
 async def test_restart_unhealthy_auxiliary_module_shuts_down_before_initialize():
     from types import SimpleNamespace
