@@ -69,14 +69,19 @@ def _promotion_validation(*, champion=None):
     )
 
 
-def test_registry_requires_validated_candidate_and_statistical_challenger_gate(tmp_path):
+def test_registry_requires_validated_candidate_and_statistical_challenger_gate(
+    tmp_path,
+):
     registry = ModelRegistry(str(tmp_path / "registry.json"))
     registry.register(ModelArtifact("strategy", "v1", "parameter"))
     first = registry.promote(
         "strategy", "v1", validation_result=_promotion_validation()
     )
     assert first.status == "champion"
-    assert first.metadata["promotion_evidence"]["locked_holdout_metrics"]["total_return"] == 0.08
+    assert (
+        first.metadata["promotion_evidence"]["locked_holdout_metrics"]["total_return"]
+        == 0.08
+    )
 
     registry.register(ModelArtifact("strategy", "v2", "parameter"))
     validation = _promotion_validation(champion=SimpleNamespace(metrics=object()))
@@ -126,6 +131,7 @@ def test_registry_refuses_unvalidated_or_non_candidate_models(tmp_path):
                 walk_forward=None,
             ),
         )
+
 
 def test_model_registry_serializes_concurrent_candidate_writes(tmp_path):
     path = tmp_path / "registry.json"
