@@ -5,16 +5,16 @@ from __future__ import annotations
 
 import asyncio
 import math
-from contextlib import AsyncExitStack
 import os
+from contextlib import AsyncExitStack
 
 from aitos.agents import LearningAgent, MarketAgent, PortfolioAgent, RiskAgent
 from aitos.app import (
     PaperPortfolioTracker,
     build_system,
     initialize_all,
-    run_scan_and_trade_cycle,
     restart_unhealthy_modules,
+    run_scan_and_trade_cycle,
     shutdown_all,
 )
 from aitos.config.paths import get_model_data_dir

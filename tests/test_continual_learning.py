@@ -1,6 +1,6 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-import json
 from types import SimpleNamespace
 
 import pytest

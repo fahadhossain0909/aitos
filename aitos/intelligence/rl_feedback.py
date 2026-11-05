@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from math import isfinite
-from math import isfinite
 from typing import Any, Union
 
 from aitos.core.contracts import (

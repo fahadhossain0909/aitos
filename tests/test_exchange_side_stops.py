@@ -1,5 +1,6 @@
-import pytest
 from types import SimpleNamespace
+
+import pytest
 
 from aitos.execution.order_executor import (
     OrderExecutor,

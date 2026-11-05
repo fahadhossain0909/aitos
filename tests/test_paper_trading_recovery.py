@@ -460,8 +460,8 @@ async def test_persistence_initialize_retains_partial_subscriptions_for_cleanup(
 async def test_paper_main_closes_redis_if_clickhouse_startup_fails(monkeypatch):
     from types import SimpleNamespace
 
-    import run_paper_trading as runner
     import aitos.eventbus.factory as eventbus_factory
+    import run_paper_trading as runner
 
     class FakeRedis:
         def __init__(self):

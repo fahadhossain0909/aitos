@@ -323,7 +323,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
                     self._last_error = None
                 except asyncio.CancelledError:
                     raise
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     self._errors += 1
                     self._last_error = str(exc)
                     logger.exception("Binance income reconciliation failed")

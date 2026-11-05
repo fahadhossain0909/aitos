@@ -246,7 +246,7 @@ def test_registry_cardinality_snapshot_counts_symbol_and_aggregate_buckets():
 
 
 def test_health_metrics_export_registry_cardinality_without_symbol_labels(monkeypatch):
-    import aitos.forensics.data_flow_registry as data_flow_registry
+    from aitos.forensics import data_flow_registry
     from aitos.health_server import HealthServer
 
     reg = DataFlowRegistry()

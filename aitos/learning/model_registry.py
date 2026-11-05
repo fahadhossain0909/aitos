@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from math import isfinite
-from typing import Any, Iterator
+from typing import Any
 
 from aitos.config.paths import get_model_data_dir
 from aitos.learning.regime_feedback import ModelComparison

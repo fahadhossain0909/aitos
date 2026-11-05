@@ -395,7 +395,7 @@ async def restart_unhealthy_modules(modules: list[AITOSModule]) -> list[str]:
                     "auxiliary module remains unhealthy after restart",
                     extra={"aitos_extra": {"module_id": module.module_id}},
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception(
                 "auxiliary module restart failed",
                 extra={
