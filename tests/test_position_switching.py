@@ -130,6 +130,7 @@ async def test_coordinator_orders_close_confirmation_release_then_open(tmp_path:
         journal=SQLiteSwitchJournal(tmp_path / "switches.sqlite"),
         close_and_confirm=close,
         portfolio_provider=lambda: object(),
+        evaluate_pair=lambda incumbent, candidate: _Decision(),
     )
     result = await coordinator.switch(
         incumbent=lifecycle.open_trades[0],
