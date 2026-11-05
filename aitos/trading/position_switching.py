@@ -282,6 +282,10 @@ class PositionSwitchCoordinator:
         candidate: Opportunity,
         decision: Any,
     ) -> Trade | None:
+        switch_id = self.switch_id(incumbent, candidate)
+        completed_intent = self.journal.get(switch_id)
+        if completed_intent is not None and completed_intent.state == "completed":
+            return self._find_candidate_trade(candidate.opportunity_id)
         if not getattr(decision, "should_switch", False):
             return None
         if self.evaluate_pair is None:
