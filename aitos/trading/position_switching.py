@@ -18,7 +18,6 @@ from typing import Any, Awaitable, Callable, Protocol
 
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.execution.order_executor import OrderExecutor, OrderRequest
-from aitos.models.trade import TradeSide
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 
 
