@@ -9,6 +9,7 @@ or open side effects.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sqlite3
 from dataclasses import asdict, dataclass
@@ -198,7 +199,7 @@ class PositionSwitchCoordinator:
                         candidate_opportunity_id=candidate.opportunity_id,
                         candidate_symbol=candidate.symbol,
                         state="close_pending",
-                        close_client_order_id=f"aitos-switch-{abs(hash(switch_id)):x}"[:32],
+                        close_client_order_id=f"aitos-switch-{hashlib.sha256(switch_id.encode()).hexdigest()[:20]}",
                     )
                 )
 
@@ -257,7 +258,7 @@ class PositionSwitchCoordinator:
                 intent = self.journal.update(switch_id, state="reservation_released")
 
             if intent.state == "reservation_released":
-                intent = self.journal.update(switch_id, state="open_submitting")
+                intent = self.journal.update(switch_id, state="open_ready")
 
             if intent.state == "open_submitting":
                 existing = self._find_candidate_trade(candidate.opportunity_id)
@@ -277,8 +278,21 @@ class PositionSwitchCoordinator:
                 )
 
             if intent.state == "open_ready":
+                self.journal.update(switch_id, state="open_submitting")
                 portfolio = await self._portfolio()
-                trade = await self.lifecycle.submit_opportunity(candidate, portfolio)
+                from dataclasses import replace
+
+                identified_candidate = replace(
+                    candidate,
+                    agent_consensus={
+                        **candidate.agent_consensus,
+                        "opportunity_id": candidate.opportunity_id,
+                        "switch_id": switch_id,
+                    },
+                )
+                trade = await self.lifecycle.submit_opportunity(
+                    identified_candidate, portfolio
+                )
                 if trade.state != TradeLifecycleState.POSITION_OPENED:
                     self.journal.update(
                         switch_id,
