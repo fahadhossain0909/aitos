@@ -345,7 +345,9 @@ class PositionSwitchCoordinator:
                 or getattr(decision, "candidate_symbol", candidate.symbol).upper()
                 != candidate.symbol.upper()
             ):
-                raise ValueError("rebalance decision identity does not match switch pair")
+                raise ValueError(
+                    "rebalance decision identity does not match switch pair"
+                )
             if opportunity_age_seconds(candidate.detected_at) > (
                 self.gateway.controls.opportunity_max_age_seconds
             ):
