@@ -145,7 +145,9 @@ async def _shutdown_agents(agents) -> None:
         except Exception:
             logger.exception(
                 "failed to shut down auxiliary agent",
-                extra={"aitos_extra": {"agent_id": getattr(agent, "module_id", "unknown")}},
+                extra={
+                    "aitos_extra": {"agent_id": getattr(agent, "module_id", "unknown")}
+                },
             )
 
 
