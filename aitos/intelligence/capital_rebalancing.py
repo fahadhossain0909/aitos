@@ -41,6 +41,7 @@ class RebalanceConfig:
         for name in (
             "min_candidate_confidence",
             "min_incumbent_stagnation",
+            "max_candidate_loss_probability",
         ):
             value = float(getattr(self, name))
             if not isfinite(value) or not 0.0 <= value <= 1.0:
@@ -56,7 +57,10 @@ class RebalanceConfig:
             "max_drawdown_pct",
         ):
             _finite_non_negative(getattr(self, name), name)
-        if not isinstance(self.max_switches_per_hour, int) or self.max_switches_per_hour < 0:
+        if (
+            not isinstance(self.max_switches_per_hour, int)
+            or self.max_switches_per_hour < 0
+        ):
             raise ValueError("max_switches_per_hour must be a non-negative integer")
         if self.min_liquidity_score > 10:
             raise ValueError("min_liquidity_score cannot exceed 10")
@@ -83,7 +87,10 @@ class IncumbentPosition:
         if not isfinite(self.remaining_net_edge_pct):
             raise ValueError("remaining_net_edge_pct must be finite")
         _finite_non_negative(self.hold_seconds, "hold_seconds")
-        if not isfinite(self.stagnation_score) or not 0 <= self.stagnation_score <= 1:
+        if (
+            not isfinite(self.stagnation_score)
+            or not 0 <= self.stagnation_score <= 1
+        ):
             raise ValueError("stagnation_score must be between 0 and 1")
         if self.thesis_health not in {"intact", "degraded", "invalidated"}:
             raise ValueError("thesis_health must be intact, degraded, or invalidated")
@@ -127,7 +134,10 @@ class RebalanceCandidate:
             value = float(getattr(self, name))
             if not isfinite(value) or not 0 <= value <= 1:
                 raise ValueError(f"{name} must be between 0 and 1")
-        if not isfinite(self.liquidity_score) or not 0 <= self.liquidity_score <= 10:
+        if (
+            not isfinite(self.liquidity_score)
+            or not 0 <= self.liquidity_score <= 10
+        ):
             raise ValueError("liquidity_score must be between 0 and 10")
 
     @property
@@ -147,20 +157,20 @@ class RebalanceCandidate:
 class RebalanceContext:
     """Portfolio state required to authorize a proposed replacement."""
 
-    current_portfolio_risk_pct: float
+    portfolio_risk_after_incumbent_close_pct: float
     candidate_correlated_incremental_risk_pct: float
     drawdown_pct: float
-    available_capital_usd: float
+    available_capital_after_incumbent_close_usd: float
     candidate_capital_usd: float
     seconds_since_last_switch: float = float("inf")
     switches_last_hour: int = 0
 
     def __post_init__(self) -> None:
         for name in (
-            "current_portfolio_risk_pct",
+            "portfolio_risk_after_incumbent_close_pct",
             "candidate_correlated_incremental_risk_pct",
             "drawdown_pct",
-            "available_capital_usd",
+            "available_capital_after_incumbent_close_usd",
             "candidate_capital_usd",
             "seconds_since_last_switch",
         ):
@@ -207,6 +217,10 @@ class DynamicRebalancer:
         # An identical instrument is not a capital rotation.
         if candidate.symbol == incumbent.symbol:
             reasons.append("same_instrument")
+        if candidate.expected_net_edge_pct <= 0:
+            reasons.append("candidate_net_edge_non_positive")
+        if candidate.loss_probability > cfg.max_candidate_loss_probability:
+            reasons.append("candidate_loss_probability_above_limit")
         if candidate.confidence < cfg.min_candidate_confidence:
             reasons.append("candidate_confidence_below_threshold")
         if candidate.liquidity_score < cfg.min_liquidity_score:
@@ -216,14 +230,17 @@ class DynamicRebalancer:
         if candidate.risk_pct <= 0 or candidate.risk_pct > cfg.max_trade_risk_pct:
             reasons.append("candidate_trade_risk_out_of_bounds")
         if (
-            context.current_portfolio_risk_pct
+            context.portfolio_risk_after_incumbent_close_pct
             + context.candidate_correlated_incremental_risk_pct
             > cfg.max_portfolio_risk_pct
         ):
             reasons.append("portfolio_risk_limit")
         if context.drawdown_pct >= cfg.max_drawdown_pct:
             reasons.append("drawdown_protection_stop")
-        if context.candidate_capital_usd > context.available_capital_usd:
+        if (
+            context.candidate_capital_usd
+            > context.available_capital_after_incumbent_close_usd
+        ):
             reasons.append("insufficient_available_capital")
         if context.seconds_since_last_switch < cfg.switch_cooldown_seconds:
             reasons.append("switch_cooldown_active")
