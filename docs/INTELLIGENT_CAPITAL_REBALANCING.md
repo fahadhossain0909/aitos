@@ -39,27 +39,31 @@ The candidate's fee/slippage/funding inputs must represent its complete expected
 - Liquidity, liquidation buffer, candidate trade risk, aggregate/correlated portfolio risk, drawdown and available capital are independent vetoes.
 - Missing or invalid required inputs must be treated as unavailable by the runtime adapter; do not synthesize optimistic values.
 
-## Execution protocol — required runtime integration
+## Runtime integration added in this PR
 
-This evaluator is intentionally not an order-execution path. The orchestration layer must:
+The pure policy still never sends orders. Runtime orchestration is provided by `aitos.trading.position_switching.PositionSwitchCoordinator`, attached through `TradeLifecycle.configure_position_switching()`.
 
-1. Collect the batch of fresh candidates and rank/allocate them through the existing CapitalGateway.
-2. Evaluate only candidates that already have an eligible, reserved allocation.
-3. Re-check the incumbent's current thesis, completed-bar stagnation, fees/funding, and live portfolio risk immediately before acting.
-4. Ensure the incumbent close is reduce-only and idempotent; wait for confirmed fill/position reconciliation.
-5. Release the incumbent's reservation only after confirmed close, then reserve/authorize the replacement against refreshed portfolio state.
-6. Submit the replacement only after its capital authorization succeeds. On close failure, partial fill, stale candidate, reservation failure, or risk breach, do not open the replacement.
-7. Persist a switch intent/idempotency key and decision evidence so restart recovery cannot duplicate closes or entries.
+- The scanner now gathers the full scan-cycle batch, kernel-validates opportunities, and asks the lifecycle coordinator to compare every approved candidate against every open incumbent. The injected pair-evidence callback must use current PositionManager/thesis/stagnation state and venue cost quotes. The coordinator ranks approved decisions by net advantage; only the top switch is attempted in one scan cycle.
+- The coordinator journals each switch in SQLite using a persistent path and a deterministic switch identity. The database must live on durable storage and be included in backup/recovery.
+- `OrderRequest.reduce_only` is now explicit. The Binance executor maps it to the venue's one-way `reduceOnly=true` or hedge-mode `positionSide` semantics. Simulated orders retain their idempotency/status records for tests.
+- `OrderExecutorCloseAdapter` uses a stable client order id, reconciles by order id/client id before resubmission, requires an authoritative FILLED status, checks the full remaining quantity, and requires a venue-position-flat callback. Accepted/NEW/PARTIALLY_FILLED orders are not close confirmation.
+- Only after that confirmation does the coordinator call the local lifecycle close, release the incumbent reservation from the same CapitalGateway instance used by the final submit guard, refresh portfolio state, and call `TradeLifecycle.submit_opportunity()` for the replacement. The existing capital guard remains the only candidate authorization path.
+- If the close is incomplete, no reservation is released and no replacement is submitted. If a crash occurs during close, the stable client order id supports reconciliation. If a crash occurs after the replacement enters its submission window and the result cannot be found in lifecycle records, the coordinator fails closed and requires operator reconciliation instead of blindly submitting a duplicate.
+- Production opportunities are explicitly refused by the automatic switch coordinator. This feature is for controlled paper/test environments only.
 
-No exchange order should be sent directly by `DynamicRebalancer`.
+The evidence callback and venue adapters are deliberately injected rather than replaced with guessed values. A missing callback means no switch decisions; a missing venue-flat confirmation means no close confirmation.
+
+## Venue execution-cost intelligence
+
+`aitos.execution.cost_intelligence.VenueExecutionCostRegistry` requires a registered venue adapter and validates venue/symbol/side identity plus quote freshness. Quotes include taker fees, expected slippage/market impact, signed funding cost over the requested holding horizon, and liquidation distance for the actual leverage/margin mode. Funding credits are represented as negative costs; missing/stale quotes must veto a switch. No universal fee or liquidation-distance estimate is substituted.
 
 ## Rollout and validation
 
 - Unit-test the pure decision policy and all vetoes.
-- Integrate behind a disabled-by-default runtime feature flag.
-- Test close/replace sequencing, partial fills, timeouts, restart recovery, duplicate events, fee/funding attribution and reservation release.
+- Keep coordinator attachment opt-in; it is not automatically installed during application startup. Do not configure it for production.
+- Extend tests for close/replace sequencing, partial fills, timeouts, restart recovery, duplicate events, fee/funding attribution and reservation release. The current tests cover the core state machine and fail-closed unconfirmed-close path; venue-specific integration tests remain required.
 - Run historical replay with realistic fees, spread, slippage, funding, market impact and walk-forward partitions; compare against the unchanged hold-only baseline.
 - Run paper trading and restart recovery before any production enablement.
 - Never relax existing drawdown, liquidation, position-size, portfolio-risk or circuit-breaker controls to increase trade frequency.
 
-This document and pure evaluator do not claim profitability improvement. Runtime orchestration and exchange-specific cost/liquidation adapters remain separate integration gates.
+This document and pure evaluator do not claim profitability improvement. The coordinator, SQLite journal contract, reduce-only request contract, scan-cycle batch hook and venue quote registry are implemented. Runtime wiring of real venue adapters, the live PositionManager evidence callback, persistent journal path, exchange position-flat query, full failure-injection matrix, historical replay and paper-runtime verification remain outstanding. No profitability claim is made.
