@@ -159,7 +159,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             "quantity": quantity,
             "newClientOrderId": client_order_id,
         }
-        params.update(self._position_params(request.side, is_closing_order=False))
+        params.update(self._position_params(request.side, is_closing_order=request.reduce_only))
 
         try:
             response = await self._signed_request("POST", "/fapi/v1/order", params)
