@@ -60,28 +60,42 @@ class LearningExperienceRecorder(AITOSModule):
             return
         if self._repository is not None:
             await self._repository.ensure_learning_experience_schema()
-        self._subscriptions.extend(
-            [
+        self._subscriptions.clear()
+        try:
+            self._subscriptions.append(
                 await self._event_bus.subscribe(
                     "journal.decision_recorded",
                     self._on_decision,
                     group=f"learning-{self._source}",
-                ),
+                )
+            )
+            self._subscriptions.append(
                 await self._event_bus.subscribe(
                     "journal.outcome_attributed",
                     self._on_outcome,
                     group=f"learning-{self._source}",
-                ),
-            ]
-        )
+                )
+            )
+        except Exception:
+            for subscription in self._subscriptions:
+                subscription.cancel()
+            self._subscriptions.clear()
+            raise
         self._initialized = True
 
     async def health_check(self) -> HealthStatus:
+        status = (
+            ModuleStatus.UNHEALTHY
+            if not self._initialized
+            else (
+                ModuleStatus.HEALTHY
+                if self._repository is not None
+                else ModuleStatus.DEGRADED
+            )
+        )
         return HealthStatus(
             module_id=self.module_id,
-            status=(
-                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
-            ),
+            status=status,
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={
@@ -96,6 +110,7 @@ class LearningExperienceRecorder(AITOSModule):
         for sub in self._subscriptions:
             sub.cancel()
         self._subscriptions.clear()
+        self._initialized = False
 
     async def emit_events(self) -> AsyncIterator[Event]:
         return
