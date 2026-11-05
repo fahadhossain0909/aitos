@@ -4,6 +4,7 @@ The caller must supply a calibrated estimator that maps the PositionManager's
 heuristic exit edge into the same percentage unit as candidate expected edge.
 No heuristic score is silently treated as a return percentage.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -44,7 +45,9 @@ class PositionManagerEvidenceAdapter:
         self.exit_slippage_bps_provider = exit_slippage_bps_provider
         self.stagnation_bar_threshold = stagnation_bar_threshold
 
-    def evaluate(self, trade: Trade, current_price: float, **market_features: Any) -> IncumbentIntelligenceSnapshot:
+    def evaluate(
+        self, trade: Trade, current_price: float, **market_features: Any
+    ) -> IncumbentIntelligenceSnapshot:
         if current_price <= 0:
             raise ValueError("current price must be positive")
         context = self.market_context_provider.get_context(trade.symbol)
@@ -57,7 +60,9 @@ class PositionManagerEvidenceAdapter:
         thesis_eval = getattr(action, "thesis_eval", None)
         journey = getattr(action, "journey", None)
         if thesis_eval is None or journey is None:
-            raise RuntimeError("PositionManager did not return thesis and journey evidence")
+            raise RuntimeError(
+                "PositionManager did not return thesis and journey evidence"
+            )
         health = getattr(thesis_eval.health, "value", str(thesis_eval.health)).lower()
         observations = max(0, int(getattr(trade, "adaptive_exit_observations", 0)))
         stagnation = min(1.0, observations / self.stagnation_bar_threshold)
@@ -73,7 +78,9 @@ class PositionManagerEvidenceAdapter:
             symbol=trade.symbol,
             side=trade.side.value,
             remaining_net_edge_pct=remaining_edge_pct,
-            hold_seconds=max(0.0, (datetime.now(timezone.utc) - entry_time).total_seconds()),
+            hold_seconds=max(
+                0.0, (datetime.now(timezone.utc) - entry_time).total_seconds()
+            ),
             stagnation_score=stagnation,
             thesis_health=health,
             exit_fee_bps=float(self.exit_fee_bps_provider(trade)),
