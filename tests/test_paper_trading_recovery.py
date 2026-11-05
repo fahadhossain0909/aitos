@@ -470,10 +470,17 @@ async def test_paper_main_closes_redis_if_clickhouse_startup_fails(monkeypatch):
             self.closed = True
 
     class FakeEventBus:
+        def __init__(self):
+            self.closed = False
+
         async def initialize(self, config):
             return None
 
+        async def shutdown(self, grace_period_seconds=30.0):
+            self.closed = True
+
     redis = FakeRedis()
+    event_bus = FakeEventBus()
     settings = SimpleNamespace(
         tuning=SimpleNamespace(mode="paper"),
         log_level="INFO",
@@ -491,7 +498,7 @@ async def test_paper_main_closes_redis_if_clickhouse_startup_fails(monkeypatch):
     monkeypatch.setattr(
         eventbus_factory,
         "create_event_bus",
-        lambda *args, **kwargs: FakeEventBus(),
+        lambda *args, **kwargs: event_bus,
     )
     monkeypatch.setattr(runner, "connect_clickhouse_repositories", fail_clickhouse)
 
@@ -499,3 +506,4 @@ async def test_paper_main_closes_redis_if_clickhouse_startup_fails(monkeypatch):
         await runner.main()
 
     assert redis.closed is True
+    assert event_bus.closed is True
