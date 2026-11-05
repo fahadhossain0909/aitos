@@ -2,8 +2,8 @@
 
 This policy is deliberately pure: it proposes a switch but never closes a
 position, submits an order, changes a stop, or bypasses CapitalGateway. The
-runtime must authorize the replacement opportunity and confirm the incumbent
-close before opening the replacement.
+runtime must authorize the replacement and confirm the incumbent close
+before opening the replacement.
 """
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ class RebalanceConfig:
     """Strict anti-churn and capital-protection policy defaults."""
 
     min_candidate_confidence: float = 0.85
+    max_candidate_loss_probability: float = 0.35
     min_net_advantage_pct: float = 0.15
     min_incumbent_stagnation: float = 0.70
     min_hold_seconds: float = 60.0
@@ -40,8 +41,8 @@ class RebalanceConfig:
     def __post_init__(self) -> None:
         for name in (
             "min_candidate_confidence",
-            "min_incumbent_stagnation",
             "max_candidate_loss_probability",
+            "min_incumbent_stagnation",
         ):
             value = float(getattr(self, name))
             if not isfinite(value) or not 0.0 <= value <= 1.0:
@@ -59,6 +60,7 @@ class RebalanceConfig:
             _finite_non_negative(getattr(self, name), name)
         if (
             not isinstance(self.max_switches_per_hour, int)
+            or isinstance(self.max_switches_per_hour, bool)
             or self.max_switches_per_hour < 0
         ):
             raise ValueError("max_switches_per_hour must be a non-negative integer")
@@ -80,11 +82,11 @@ class IncumbentPosition:
     exit_slippage_bps: float = 0.0
 
     def __post_init__(self) -> None:
-        if not self.symbol:
+        if not self.symbol or not self.symbol.strip():
             raise ValueError("incumbent symbol is required")
         if self.side.upper() not in {"LONG", "SHORT"}:
             raise ValueError("incumbent side must be LONG or SHORT")
-        if not isfinite(self.remaining_net_edge_pct):
+        if not isfinite(float(self.remaining_net_edge_pct)):
             raise ValueError("remaining_net_edge_pct must be finite")
         _finite_non_negative(self.hold_seconds, "hold_seconds")
         if (
@@ -92,7 +94,7 @@ class IncumbentPosition:
             or not 0 <= self.stagnation_score <= 1
         ):
             raise ValueError("stagnation_score must be between 0 and 1")
-        if self.thesis_health not in {"intact", "degraded", "invalidated"}:
+        if self.thesis_health.lower() not in {"intact", "degraded", "invalidated"}:
             raise ValueError("thesis_health must be intact, degraded, or invalidated")
         _finite_non_negative(self.exit_fee_bps, "exit_fee_bps")
         _finite_non_negative(self.exit_slippage_bps, "exit_slippage_bps")
@@ -116,7 +118,7 @@ class RebalanceCandidate:
     liquidation_distance_pct: float
 
     def __post_init__(self) -> None:
-        if not self.symbol:
+        if not self.symbol or not self.symbol.strip():
             raise ValueError("candidate symbol is required")
         if self.side.upper() not in {"LONG", "SHORT"}:
             raise ValueError("candidate side must be LONG or SHORT")
@@ -178,7 +180,11 @@ class RebalanceContext:
             if name == "seconds_since_last_switch" and value == float("inf"):
                 continue
             _finite_non_negative(value, name)
-        if not isinstance(self.switches_last_hour, int) or self.switches_last_hour < 0:
+        if (
+            not isinstance(self.switches_last_hour, int)
+            or isinstance(self.switches_last_hour, bool)
+            or self.switches_last_hour < 0
+        ):
             raise ValueError("switches_last_hour must be a non-negative integer")
 
 
@@ -214,10 +220,9 @@ class DynamicRebalancer:
         advantage = candidate_edge - incumbent.remaining_net_edge_pct - exit_cost
         reasons: list[str] = []
 
-        # An identical instrument is not a capital rotation.
-        if candidate.symbol == incumbent.symbol:
+        if candidate.symbol.strip().upper() == incumbent.symbol.strip().upper():
             reasons.append("same_instrument")
-        if candidate.expected_net_edge_pct <= 0:
+        if candidate_edge <= 0:
             reasons.append("candidate_net_edge_non_positive")
         if candidate.loss_probability > cfg.max_candidate_loss_probability:
             reasons.append("candidate_loss_probability_above_limit")
@@ -250,7 +255,7 @@ class DynamicRebalancer:
             reasons.append("minimum_hold_time_not_met")
 
         incumbent_weak = (
-            incumbent.thesis_health in {"degraded", "invalidated"}
+            incumbent.thesis_health.lower() in {"degraded", "invalidated"}
             or incumbent.stagnation_score >= cfg.min_incumbent_stagnation
         )
         if not incumbent_weak:
