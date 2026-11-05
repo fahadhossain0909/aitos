@@ -501,3 +501,24 @@ def test_worker_trains_on_normalized_paper_live_outcomes():
 
     assert worker.run_once() == 2
     assert worker.scorer.rewards == [("BTCUSDT", 0.8)]
+
+def test_worker_query_includes_backtest_paper_and_live_experiences():
+    from types import SimpleNamespace
+
+    class FakeClient:
+        def __init__(self):
+            self.sql = ""
+
+        def query(self, sql, parameters):
+            self.sql = sql
+            return SimpleNamespace(column_names=[], result_rows=[])
+
+    worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
+    worker.client = FakeClient()
+    worker._cursor_timestamp = "1970-01-01 00:00:00.000"
+    worker._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
+    worker.batch_limit = 5000
+
+    assert worker._rows() == []
+    assert "source IN ('backtest', 'paper', 'live')" in worker.client.sql
+    assert "strategy_version" in worker.client.sql
