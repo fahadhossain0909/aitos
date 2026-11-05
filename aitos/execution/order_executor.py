@@ -55,7 +55,7 @@ class OrderExecutor(ABC):
     async def submit_order(self, request: OrderRequest) -> OrderResult: ...
 
     async def get_order_status(self, symbol: str, order_id: str) -> dict | None:
-        \"\"\"Return authoritative venue order state, or None when unsupported.\"\"\"
+        """Return authoritative venue order state, or None when unsupported."""
         return None
 
     @property
