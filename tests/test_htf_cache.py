@@ -128,7 +128,6 @@ def test_htf_cache_enforces_shared_request_budget_and_fails_closed():
     asyncio.run(run())
 
 
-
 def test_htf_request_budget_is_shared_across_cache_instances():
     now = datetime(2026, 11, 5, 8, 0, tzinfo=timezone.utc)
     first_cache = HigherTimeframeCandleCache(
