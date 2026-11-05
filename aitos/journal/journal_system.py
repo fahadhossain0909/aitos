@@ -343,48 +343,42 @@ class JournalSystem(AITOSModule):
         await self._persist(entry)
         if self._repository is not None:
             await self._repository.save_trade_snapshot(trade_dict)
-        if self._decision_repository is not None:
-            decision_id = next(
-                (
-                    did
-                    for did, tid in self._decision_trade_ids.items()
-                    if tid == trade_id
-                ),
-                None,
+        decision_id = next(
+            (did for did, tid in self._decision_trade_ids.items() if tid == trade_id),
+            None,
+        )
+        if not decision_id:
+            decision_id = (trade_dict.get("agent_consensus") or {}).get("decision_id")
+        if self._decision_repository is not None and decision_id:
+            await self._decision_repository.attribute_outcome(
+                str(decision_id), trade_dict
             )
-            if not decision_id:
-                decision_id = (trade_dict.get("agent_consensus") or {}).get(
-                    "decision_id"
-                )
-            if decision_id:
-                await self._decision_repository.attribute_outcome(
-                    str(decision_id), trade_dict
-                )
-                await self._event_bus.publish(
-                    Event(
-                        topic=TOPIC_OUTCOME_ATTRIBUTED,
-                        payload={
-                            "decision_id": str(decision_id),
-                            "trade_id": trade_id,
-                            "pnl": trade_dict.get("pnl"),
-                            "pnl_percent": trade_dict.get("pnl_percent"),
-                            "symbol": trade_dict.get("symbol"),
-                            "side": trade_dict.get("side"),
-                            "entry_price": trade_dict.get("entry_price"),
-                            "exit_price": trade_dict.get("exit_price"),
-                            "exit_reason": trade_dict.get("exit_reason"),
-                            "regime": trade_dict.get("regime"),
-                            "mae_price": trade_dict.get("mae_price"),
-                            "mfe_price": trade_dict.get("mfe_price"),
-                            "mae_r": trade_dict.get("mae_r"),
-                            "mfe_r": trade_dict.get("mfe_r"),
-                            "agent_consensus": dict(
-                                trade_dict.get("agent_consensus") or {}
-                            ),
-                        },
-                        source_module=self.module_id,
-                    )
-                )
+        # Every completed trade is a learning outcome, even when the upstream
+        # scanner did not attach a decision-journal ID. The recorder links by
+        # trade_id; decision_id remains optional metadata rather than a gate.
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_OUTCOME_ATTRIBUTED,
+                payload={
+                    "decision_id": str(decision_id or ""),
+                    "trade_id": trade_id,
+                    "pnl": trade_dict.get("pnl"),
+                    "pnl_percent": trade_dict.get("pnl_percent"),
+                    "symbol": trade_dict.get("symbol"),
+                    "side": trade_dict.get("side"),
+                    "entry_price": trade_dict.get("entry_price"),
+                    "exit_price": trade_dict.get("exit_price"),
+                    "exit_reason": trade_dict.get("exit_reason"),
+                    "regime": trade_dict.get("regime"),
+                    "mae_price": trade_dict.get("mae_price"),
+                    "mfe_price": trade_dict.get("mfe_price"),
+                    "mae_r": trade_dict.get("mae_r"),
+                    "mfe_r": trade_dict.get("mfe_r"),
+                    "agent_consensus": dict(trade_dict.get("agent_consensus") or {}),
+                },
+                source_module=self.module_id,
+            )
+        )
         self._last_event_time = entry.created_at
         return None
 
