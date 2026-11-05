@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
-from typing import Any, Callable
+from typing import Callable
 
 
 @dataclass(frozen=True, slots=True)
