@@ -5,6 +5,7 @@ position, submits an order, changes a stop, or bypasses CapitalGateway. The
 runtime must authorize the replacement and confirm the incumbent close
 before opening the replacement.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
