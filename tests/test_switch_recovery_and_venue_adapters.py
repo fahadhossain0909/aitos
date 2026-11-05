@@ -59,6 +59,7 @@ async def test_pending_candidate_is_reconstructed_and_resumed_after_restart(tmp_
         nonlocal close_calls
         close_calls += 1
         from aitos.trading.position_switching import CloseReceipt
+
         if close_calls == 1:
             return CloseReceipt(False, "exchange-close", 0.0, 0.4, False)
         return CloseReceipt(True, "exchange-close", 101.0, trade.quantity, True)
@@ -84,7 +85,9 @@ async def test_pending_candidate_is_reconstructed_and_resumed_after_restart(tmp_
     # Simulate a fresh application process: same durable journal, hydrated
     # lifecycle state and a new coordinator/worker instance.
     recovered = PositionSwitchCoordinator(
-        lifecycle=lifecycle, gateway=gateway, journal=journal,
+        lifecycle=lifecycle,
+        gateway=gateway,
+        journal=journal,
         close_and_confirm=close_once_then_confirm,
         portfolio_provider=lambda: object(),
         evaluate_pair=lambda incumbent, candidate: _Decision(),
@@ -106,11 +109,11 @@ async def test_recovery_fails_closed_when_candidate_payload_missing(tmp_path):
     journal.create(
         SwitchIntent(
         switch_id="switch:trade-old:missing",
-        incumbent_trade_id=incumbent.trade_id,
-        incumbent_symbol=incumbent.symbol,
-        candidate_opportunity_id="missing",
-        candidate_symbol="ETHUSDT",
-        state="close_pending",
+            incumbent_trade_id=incumbent.trade_id,
+            incumbent_symbol=incumbent.symbol,
+            candidate_opportunity_id="missing",
+            candidate_symbol="ETHUSDT",
+            state="close_pending",
             close_client_order_id="stable-close",
         )
     )
@@ -146,7 +149,8 @@ async def test_partial_close_and_cancelled_close_never_release_reservation_or_op
         return next(calls)
 
     coordinator = PositionSwitchCoordinator(
-        lifecycle=lifecycle, gateway=gateway,
+        lifecycle=lifecycle,
+        gateway=gateway,
         journal=SQLiteSwitchJournal(tmp_path / "partial.sqlite"),
         close_and_confirm=failing_close,
         portfolio_provider=lambda: object(),
@@ -160,7 +164,12 @@ async def test_partial_close_and_cancelled_close_never_release_reservation_or_op
         )
         is None
     )
-    assert await coordinator.switch(incumbent=incumbent, candidate=candidate, decision=_Decision()) is None
+    assert (
+        await coordinator.switch(
+            incumbent=incumbent, candidate=candidate, decision=_Decision()
+        )
+        is None
+    )
     assert gateway.released == []
     assert lifecycle.open_calls == 0
     assert lifecycle.close_calls == 0
@@ -208,7 +217,8 @@ async def test_repeated_recovery_event_does_not_duplicate_completed_switch(tmp_p
     journal = SQLiteSwitchJournal(tmp_path / "duplicate-event.sqlite")
     coordinator = PositionSwitchCoordinator(
         lifecycle=lifecycle, gateway=gateway, journal=journal,
-        close_and_confirm=_Close(), portfolio_provider=lambda: object(),
+        close_and_confirm=_Close(),
+        portfolio_provider=lambda: object(),
         evaluate_pair=lambda incumbent, candidate: _Decision(),
     )
     incumbent = lifecycle.open_trades[0]
