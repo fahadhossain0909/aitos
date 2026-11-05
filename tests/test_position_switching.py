@@ -203,7 +203,9 @@ async def test_close_not_confirmed_never_releases_or_opens(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_pending_switch_blocks_a_second_candidate_for_same_incumbent(tmp_path: Path):
+async def test_pending_switch_blocks_a_second_candidate_for_same_incumbent(
+    tmp_path: Path,
+):
     lifecycle = _Lifecycle()
     gateway = _Gateway()
     journal = SQLiteSwitchJournal(tmp_path / "switches.sqlite")
