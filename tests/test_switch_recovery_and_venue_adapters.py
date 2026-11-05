@@ -136,3 +136,62 @@ async def test_partial_close_and_cancelled_close_never_release_reservation_or_op
     assert gateway.released == []
     assert lifecycle.open_calls == 0
     assert lifecycle.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_close_timeout_keeps_stable_intent_for_restart_reconciliation(tmp_path):
+    from aitos.trading.position_switching import CloseReceipt
+
+    lifecycle = _Lifecycle()
+    gateway = _Gateway()
+    journal = SQLiteSwitchJournal(tmp_path / "timeout.sqlite")
+    calls = []
+
+    async def close_with_timeout_then_fill(trade, client_order_id, existing_order_id):
+        calls.append((client_order_id, existing_order_id))
+        if len(calls) == 1:
+            raise TimeoutError("transport timed out after exchange acceptance")
+        return CloseReceipt(True, "exchange-order-42", 101.0, trade.quantity, True)
+
+    coordinator = PositionSwitchCoordinator(
+        lifecycle=lifecycle, gateway=gateway, journal=journal,
+        close_and_confirm=close_with_timeout_then_fill,
+        portfolio_provider=lambda: object(),
+        evaluate_pair=lambda incumbent, candidate: _Decision(),
+    )
+    incumbent = lifecycle.open_trades[0]
+    candidate = _candidate()
+    with pytest.raises(TimeoutError):
+        await coordinator.switch(
+            incumbent=incumbent, candidate=candidate, decision=_Decision()
+        )
+    assert journal.list_incomplete()[0].state == "close_submitting"
+
+    report = await PositionSwitchRecoveryWorker(coordinator).recover_pending()
+    assert report.resumed == 1
+    assert calls[0][0] == calls[1][0]  # stable client order id across restart
+    assert lifecycle.open_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_repeated_recovery_event_does_not_duplicate_completed_switch(tmp_path):
+    lifecycle = _Lifecycle()
+    gateway = _Gateway()
+    journal = SQLiteSwitchJournal(tmp_path / "duplicate-event.sqlite")
+    coordinator = PositionSwitchCoordinator(
+        lifecycle=lifecycle, gateway=gateway, journal=journal,
+        close_and_confirm=_Close(), portfolio_provider=lambda: object(),
+        evaluate_pair=lambda incumbent, candidate: _Decision(),
+    )
+    incumbent = lifecycle.open_trades[0]
+    candidate = _candidate()
+    await coordinator.switch(
+        incumbent=incumbent, candidate=candidate, decision=_Decision()
+    )
+    worker = PositionSwitchRecoveryWorker(coordinator)
+    first = await worker.recover_pending()
+    second = await worker.recover_pending()
+    assert first.scanned == 0
+    assert second.scanned == 0
+    assert lifecycle.close_calls == 1
+    assert lifecycle.open_calls == 1
