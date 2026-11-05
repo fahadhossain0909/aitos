@@ -55,3 +55,6 @@ def test_reward_calibration_is_partitioned_by_strategy_within_regime():
     snapshot = calibrator.snapshot()
     assert any(key.startswith("mean_reversion_trending_") for key in snapshot)
     assert any(key.startswith("breakout_trending_") for key in snapshot)
+    restored = RegimeRewardCalibrator(min_samples=3)
+    restored.restore(snapshot)
+    assert set(restored.snapshot()) == set(snapshot)
