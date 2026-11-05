@@ -303,7 +303,10 @@ async def test_binance_funding_sign_is_reversed_for_short_positions():
         liquidation_distance_provider=lambda **_: {"distance_pct": 5.0},
     )
     quote = await adapter(
-        symbol="BTCUSDT", side="SHORT", notional_usd=1000,
-        leverage=3, holding_horizon_seconds=8 * 3600,
+        symbol="BTCUSDT",
+        side="SHORT",
+        notional_usd=1000,
+        leverage=3,
+        holding_horizon_seconds=8 * 3600,
     )
     assert quote.funding_cost_bps == pytest.approx(-1.0)
