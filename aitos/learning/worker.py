@@ -317,6 +317,17 @@ class ContinualLearningWorker:
             or features.get("regime")
         )
 
+    @staticmethod
+    def _row_strategy_id(row: dict[str, Any]) -> str | None:
+        metadata = ContinualLearningWorker._json_object(row.get("metadata_json"))
+        features = ContinualLearningWorker._json_object(row.get("features_json"))
+        value = (
+            metadata.get("strategy_id")
+            or metadata.get("strategy")
+            or features.get("strategy_id")
+        )
+        return str(value).strip() if value is not None and str(value).strip() else None
+
     def run_once(self) -> int:
         if not hasattr(self, "_reward_calibrator"):
             self._reward_calibrator = RegimeRewardCalibrator()
@@ -345,7 +356,9 @@ class ContinualLearningWorker:
                 if callable(apply):
                     regime = self._row_regime(row)
                     calibrated_reward = self._reward_calibrator.calibrate(
-                        regime, reward_r_multiple
+                        regime,
+                        reward_r_multiple,
+                        strategy_id=self._row_strategy_id(row),
                     )
                     regime_scorer = self._scorer_for_regime(regime)
                     regime_apply = getattr(
