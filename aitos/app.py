@@ -382,6 +382,11 @@ async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) 
             components.trade_lifecycle.handle_event,
             group="trade-lifecycle-prices",
         ),
+        await components.event_bus.subscribe(
+            "trade.cost_adjustment",
+            components.trade_lifecycle.handle_event,
+            group="trade-lifecycle-costs",
+        ),
     ]
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
