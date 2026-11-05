@@ -162,7 +162,7 @@ class BinanceIncomeReconciliationService(AITOSModule):
     async def health_check(self) -> HealthStatus:
         task_alive = self._task is not None and not self._task.done()
         status = ModuleStatus.HEALTHY if task_alive else ModuleStatus.UNHEALTHY
-        if self._errors and task_alive:
+        if self._last_error is not None and task_alive:
             status = ModuleStatus.DEGRADED
         return HealthStatus(
             module_id=self.module_id,
