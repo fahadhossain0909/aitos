@@ -48,7 +48,7 @@ from aitos.xai.attention_feedback import AttentionFeedbackLoop
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.ml_feedback import MLExplainerFeedbackLoop
 
-logger = get_logger("aitos.app")
+PositionSwitchingFactory = Callable[\n    [TradeLifecycle, PositionManager | None, ExchangeAdapter, OrderExecutor], Any\n]\n\nlogger = get_logger("aitos.app")
 
 
 @dataclass
@@ -158,7 +158,7 @@ async def build_system(
     min_score_threshold: float = 60.0,
     top_n: int | None = None,
     enable_exit_intelligence: bool = False,
-    position_switching_factory: Callable[[TradeLifecycle, PositionManager | None, ExchangeAdapter, OrderExecutor], Any] | None = None,
+    position_switching_factory: PositionSwitchingFactory | None = None,
 ) -> SystemComponents:
     settings = get_settings()
     tuning = settings.tuning
