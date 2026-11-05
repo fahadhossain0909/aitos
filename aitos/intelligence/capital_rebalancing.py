@@ -127,11 +127,12 @@ class RebalanceCandidate:
             "expected_loss_pct",
             "fee_bps",
             "slippage_bps",
-            "funding_bps",
             "risk_pct",
             "liquidation_distance_pct",
         ):
             _finite_non_negative(getattr(self, name), name)
+        if not isfinite(float(self.funding_bps)):
+            raise ValueError("funding_bps must be finite")
         for name in ("loss_probability", "confidence"):
             value = float(getattr(self, name))
             if not isfinite(value) or not 0 <= value <= 1:
