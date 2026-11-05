@@ -143,6 +143,7 @@ class TradeLifecycle(AITOSModule):
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
         self._closed_trades: list[Trade] = []
+        self._position_switch_coordinator: Any | None = None
         self._last_event_time: str | None = None
 
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
@@ -1534,6 +1535,30 @@ class TradeLifecycle(AITOSModule):
                 },
                 source_module=self.module_id,
             )
+        )
+
+    def configure_position_switching(self, coordinator: Any) -> None:
+        """Attach the durable, fail-closed position-switch coordinator.
+
+        Switching remains unavailable until the caller supplies a persistent
+        journal, an idempotent reduce-only close adapter and venue-flat check.
+        """
+        if coordinator is None:
+            raise ValueError("position switch coordinator is required")
+        if getattr(coordinator, "lifecycle", None) is not self:
+            raise ValueError("coordinator must be bound to this TradeLifecycle")
+        self._position_switch_coordinator = coordinator
+
+    async def switch_position(
+        self, incumbent: Trade, candidate: Opportunity, decision: Any
+    ) -> Trade | None:
+        """Execute one approved replacement through the durable switch state machine."""
+        self._require_initialized()
+        coordinator = self._position_switch_coordinator
+        if coordinator is None:
+            raise RuntimeError("safe position switching is not configured")
+        return await coordinator.switch(
+            incumbent=incumbent, candidate=candidate, decision=decision
         )
 
     def _require_initialized(self) -> None:
