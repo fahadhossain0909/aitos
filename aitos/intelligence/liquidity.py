@@ -11,6 +11,7 @@ streaming/replay layer.
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Sequence
 from typing import Any
 
@@ -171,16 +172,28 @@ def order_book_flow_imbalance(
 
 def depth_event_flow_analysis(
     events: Sequence[dict[str, Any]],
-) -> dict[str, float]:
-    """Aggregate depth OFI and execution-attributed liquidity reductions.
+    *,
+    now_ms: int | None = None,
+    max_age_ms: int = 1500,
+    min_fresh_events: int = 3,
+) -> dict[str, float | bool]:
+    """Aggregate depth OFI only from a sufficiently fresh event window.
 
-    When trade matching fields are present, only finalized unmatched reductions
-    contribute to the cancellation proxy. Older event payloads retain the
-    previous inferred-reduction behavior for backward compatibility.
+    Legacy events without timestamps retain their historical score for API
+    compatibility, but are explicitly marked unavailable so the scanner never
+    treats them as a trustworthy live OFI component.
     """
+    if max_age_ms <= 0 or min_fresh_events < 1:
+        raise ValueError("OFI freshness limits must be positive")
     if not events:
         return {
             "ofi_score": 5.0,
+            "ofi_confidence": 0.0,
+            "ofi_available": False,
+            "freshness_ms": -1.0,
+            "fresh_event_count": 0.0,
+            "stale_event_count": 0.0,
+            "timestamped_event_count": 0.0,
             "bid_add_qty": 0.0,
             "bid_reduce_qty": 0.0,
             "ask_add_qty": 0.0,
@@ -201,11 +214,55 @@ def depth_event_flow_analysis(
             "addition_qty": 0.0,
             "event_count": 0.0,
         }
-    raw_ofi = sum(e.get("ofi_raw", 0.0) for e in events)
-    depth_scale = sum(e.get("ofi_scale", 0.0) for e in events)
+
+    current_ms = int(now_ms if now_ms is not None else time.time() * 1000)
+    timestamped: list[tuple[dict[str, Any], float]] = []
+    fresh_events: list[dict[str, Any]] = []
+    stale_count = 0
+    for event in events:
+        try:
+            event_time = float(event.get("event_time_ms"))
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(event_time) or event_time <= 0:
+            continue
+        timestamped.append((event, event_time))
+        age_ms = current_ms - event_time
+        if 0 <= age_ms <= max_age_ms:
+            fresh_events.append(event)
+        elif age_ms > max_age_ms:
+            stale_count += 1
+
+    if timestamped:
+        calculation_events = fresh_events
+        newest_fresh = max(
+            (float(event["event_time_ms"]) for event in fresh_events),
+            default=0.0,
+        )
+        freshness_ms = (
+            float(max(0, current_ms - newest_fresh))
+            if newest_fresh
+            else float(max_age_ms + 1)
+        )
+        freshness_factor = (
+            max(0.0, 1.0 - freshness_ms / max_age_ms)
+            if fresh_events
+            else 0.0
+        )
+        sample_factor = min(1.0, len(fresh_events) / min_fresh_events)
+        confidence = round(sample_factor * freshness_factor, 4)
+    else:
+        # Preserve historical aggregate values for offline/legacy callers. The
+        # missing timestamps still make the live confidence contract unavailable.
+        calculation_events = list(events)
+        freshness_ms = -1.0
+        confidence = 0.0
+
+    raw_ofi = sum(e.get("ofi_raw", 0.0) for e in calculation_events)
+    depth_scale = sum(e.get("ofi_scale", 0.0) for e in calculation_events)
     normalized = raw_ofi / max(depth_scale, 1e-12)
     totals = {
-        key: sum(max(0.0, e.get(key, 0.0)) for e in events)
+        key: sum(max(0.0, e.get(key, 0.0)) for e in calculation_events)
         for key in (
             "bid_add_qty",
             "bid_reduce_qty",
@@ -222,7 +279,9 @@ def depth_event_flow_analysis(
         )
     }
     matched_trade_ids = {
-        trade_id for event in events for trade_id in event.get("matched_trade_ids", ())
+        trade_id
+        for event in calculation_events
+        for trade_id in event.get("matched_trade_ids", ())
     }
     cancellation_proxy = sum(
         max(
@@ -232,21 +291,36 @@ def depth_event_flow_analysis(
                 event.get("inferred_cancel_qty", 0.0),
             ),
         )
-        for event in events
+        for event in calculation_events
     )
     reduction_total = sum(
         max(
             0.0,
             e.get("reduction_qty", e.get("inferred_cancel_qty", 0.0)),
         )
-        for e in events
+        for e in calculation_events
     )
     totals.update(
         {
             "cancellation_proxy_qty": cancellation_proxy,
             "inferred_cancel_qty": cancellation_proxy,
             "matched_trade_count": float(len(matched_trade_ids)),
-            "ofi_score": round(max(0.0, min(10.0, 5.0 + 50.0 * normalized)), 2),
+            "ofi_score": (
+                round(max(0.0, min(10.0, 5.0 + 50.0 * normalized)), 2)
+                if calculation_events
+                else 5.0
+            ),
+            "ofi_confidence": confidence,
+            "ofi_available": bool(
+                timestamped
+                and len(fresh_events) >= min_fresh_events
+                and depth_scale > 0
+                and confidence > 0
+            ),
+            "freshness_ms": freshness_ms,
+            "fresh_event_count": float(len(fresh_events)),
+            "stale_event_count": float(stale_count),
+            "timestamped_event_count": float(len(timestamped)),
             "replenishment_ratio": round(
                 totals["replenishment_qty"] / max(reduction_total, 1e-12), 4
             ),
