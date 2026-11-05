@@ -137,3 +137,14 @@ def test_gateway_decays_expected_edge_and_confidence_with_opportunity_age(monkey
 def test_opportunity_decay_half_life_must_be_positive():
     with pytest.raises(ValueError, match="opportunity_decay_half_life_seconds"):
         CapitalControlConfig(opportunity_decay_half_life_seconds=0.0)
+
+
+def test_gateway_preserves_negative_funding_cost_as_credit():
+    estimate = CapitalGateway().estimate_opportunity(
+        make_opportunity(),
+        fee_bps=4.0,
+        slippage_bps=2.0,
+        funding_bps=-8.0,
+    )
+    assert estimate.funding_bps == -8.0
+    assert estimate.total_cost_pct < 0.0
