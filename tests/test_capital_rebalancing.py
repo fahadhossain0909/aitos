@@ -158,3 +158,26 @@ def test_drawdown_hard_stop_prevents_switch_even_with_large_advantage():
     )
     assert not decision.should_switch
     assert "drawdown_protection_stop" in decision.reasons
+
+
+def test_default_config_has_valid_loss_probability_threshold():
+    assert RebalanceConfig().max_candidate_loss_probability == 0.35
+
+
+def test_invalid_loss_probability_threshold_is_rejected():
+    try:
+        RebalanceConfig(max_candidate_loss_probability=1.01)
+    except ValueError as exc:
+        assert "max_candidate_loss_probability" in str(exc)
+    else:
+        raise AssertionError("invalid loss probability threshold accepted")
+
+
+def test_symbol_comparison_is_case_insensitive():
+    decision = DynamicRebalancer().evaluate(
+        _incumbent(symbol="btcusdt"),
+        _candidate(symbol="BTCUSDT"),
+        _context(),
+    )
+    assert not decision.should_switch
+    assert "same_instrument" in decision.reasons
