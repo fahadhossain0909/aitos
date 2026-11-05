@@ -183,6 +183,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     if graph_driver is not None:
         cleanup.push_async_callback(graph_driver.close)
     exchange = BinanceFuturesAdapter()
+    cleanup.push_async_callback(exchange.close)
     symbols = await resolve_live_universe(
         exchange,
         core_symbols=settings.tuning.scanner.core_symbols,
