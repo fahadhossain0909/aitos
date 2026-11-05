@@ -220,6 +220,7 @@ def test_legacy_symbol_only_trace_is_upgraded() -> None:
     )
     assert event.trace_id == "md:BTCUSDT:legacy-42"
 
+
 def test_registry_cardinality_snapshot_counts_symbol_and_aggregate_buckets():
     reg = DataFlowRegistry()
     reg.record_input(PipelineStage.RECEIVE, symbol="BTCUSDT")
