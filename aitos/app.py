@@ -702,6 +702,8 @@ async def run_scan_and_trade_cycle(
 
     for ranked_batch in ranked_batches:
         for candidate in ranked_batch:
+            if accepted_opportunities >= target_opportunities:
+                break
             logger.info(
                 "scanner candidate ranked",
                 extra={
