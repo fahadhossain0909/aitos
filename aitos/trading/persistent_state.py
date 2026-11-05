@@ -501,33 +501,42 @@ class TradeStatePersistence:
 
     async def initialize(self) -> None:
         await self._store.initialize()
-        self._subscriptions = [
+        self._subscriptions.clear()
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.position_opened",
                 self._save_event,
                 group="trade-state-persistence",
-            ),
+            )
+        )
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.position_updated",
                 self._save_event,
                 group="trade-state-persistence",
-            ),
+            )
+        )
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.trailing_sl",
                 self._save_event,
                 group="trade-state-persistence",
-            ),
+            )
+        )
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.partial_close",
                 self._save_event,
                 group="trade-state-persistence",
-            ),
+            )
+        )
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.position_closed",
                 self._delete_event,
                 group="trade-state-persistence",
-            ),
-        ]
+            )
+        )
         logger.info(
             "trade state persistence subscribed",
             extra={"aitos_extra": {"subscriptions": len(self._subscriptions)}},
