@@ -55,7 +55,7 @@ The evidence callback must attach the fresh quote's `as_candidate_costs()` mappi
 
 ## Venue execution-cost intelligence
 
-`aitos.execution.cost_intelligence.VenueExecutionCostRegistry` requires a registered venue adapter and validates venue/symbol/side identity plus quote freshness. Quotes include taker fees, expected slippage/market impact, signed funding cost over the requested holding horizon, and liquidation distance for the actual leverage/margin mode. Funding credits are represented as negative costs; missing/stale quotes must veto a switch. No universal fee or liquidation-distance estimate is substituted.
+`aitos.execution.cost_intelligence.VenueExecutionCostRegistry` requires a registered venue adapter and validates venue/symbol/side identity plus quote freshness. Quotes include round-trip taker fees, expected round-trip slippage/market impact, signed funding cost over the requested holding horizon, and liquidation distance for the actual leverage/margin mode. Funding credits are represented as negative costs; missing/stale quotes must veto a switch. No universal fee or liquidation-distance estimate is substituted.
 
 ## Rollout and validation
 
