@@ -420,8 +420,8 @@ def test_worker_partitions_regime_models_and_normalizes_regime_labels(tmp_path):
     )
 
 
-def test_worker_processes_12000_experiences_across_keyset_pages(tmp_path):
-    """Large replay must advance deterministically across multiple bounded pages."""
+def test_worker_processes_12000_experiences_across_bounded_batches(tmp_path):
+    """Large synthetic replay must advance across bounded worker batches."""
     worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
     worker.state_path = tmp_path / "worker_state.json"
     worker._cursor_timestamp = "1970-01-01 00:00:00.000"
