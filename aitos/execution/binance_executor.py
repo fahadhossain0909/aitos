@@ -209,11 +209,15 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
     async def get_order_by_client_id(
         self, symbol: str, client_order_id: str
     ) -> dict[str, Any] | None:
-        return await self._signed_request(
-            "GET",
-            "/fapi/v1/order",
-            {"symbol": symbol, "origClientOrderId": client_order_id},
-        )
+        try:
+            return await self._signed_request(
+                "GET",
+                "/fapi/v1/order",
+                {"symbol": symbol, "origClientOrderId": client_order_id},
+            )
+        except BinanceAPIError as exc:
+            logger.info("client-order reconciliation not found: %s", exc)
+            return None
 
     async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
         return await self._signed_request(
