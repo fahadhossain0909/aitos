@@ -232,3 +232,44 @@ async def test_pending_switch_blocks_a_second_candidate_for_same_incumbent(tmp_p
             candidate=replace(first_candidate, opportunity_id="opp-new-2"),
             decision=_Decision(),
         )
+
+
+@pytest.mark.asyncio
+async def test_restart_during_open_submission_fails_closed_without_duplicate_open(
+    tmp_path: Path,
+):
+    lifecycle = _Lifecycle()
+    gateway = _Gateway()
+    journal = SQLiteSwitchJournal(tmp_path / "switches.sqlite")
+    incumbent = lifecycle.open_trades.pop()
+    incumbent.state = TradeLifecycleState.POSITION_CLOSED
+    lifecycle.closed_trades.append(incumbent)
+    candidate = _candidate()
+    switch_id = f"switch:{incumbent.trade_id}:{candidate.opportunity_id}"
+    journal.create(
+        SwitchIntent(
+            switch_id=switch_id,
+            incumbent_trade_id=incumbent.trade_id,
+            incumbent_symbol=incumbent.symbol,
+            candidate_opportunity_id=candidate.opportunity_id,
+            candidate_symbol=candidate.symbol,
+            state="open_submitting",
+            close_client_order_id="stable-close",
+            close_order_id="exchange-close-1",
+            close_fill_price=101.0,
+        )
+    )
+    coordinator = PositionSwitchCoordinator(
+        lifecycle=lifecycle,
+        gateway=gateway,
+        journal=journal,
+        close_and_confirm=_Close(),
+        portfolio_provider=lambda: object(),
+        evaluate_pair=lambda current, replacement: _Decision(),
+    )
+    with pytest.raises(RuntimeError, match="outcome is unknown"):
+        await coordinator.switch(
+            incumbent=incumbent, candidate=candidate, decision=_Decision()
+        )
+    assert lifecycle.open_calls == 0
+    assert journal.get(switch_id).state == "manual_reconciliation_required"
