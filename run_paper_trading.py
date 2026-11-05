@@ -13,6 +13,7 @@ from aitos.app import (
     build_system,
     initialize_all,
     run_scan_and_trade_cycle,
+    restart_unhealthy_modules,
     shutdown_all,
 )
 from aitos.config.paths import get_model_data_dir
@@ -293,6 +294,14 @@ async def main() -> None:
                             }
                         },
                     )
+            await restart_unhealthy_modules(auxiliary_modules)
+
+    agents = (market_agent, risk_agent, portfolio_agent, learning_agent)
+    auxiliary_modules = [
+        experience_recorder,
+        market_os_persistence,
+        *agents,
+    ]
 
     heal_task = asyncio.create_task(_self_heal_loop())
     from aitos.config.settings import get_settings as _get_settings

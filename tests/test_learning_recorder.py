@@ -46,3 +46,46 @@ async def test_outcome_record_retains_entry_features_and_mae_mfe():
     assert record.metadata["mfe_r"] == 1.5
     assert record.price == 100.0
     assert record.reward == 12.5
+
+
+@pytest.mark.asyncio
+async def test_recorder_can_be_restarted_without_duplicate_subscriptions():
+    class Subscription:
+        def __init__(self):
+            self.cancelled = False
+
+        def cancel(self):
+            self.cancelled = True
+
+    class FakeBus:
+        def __init__(self):
+            self.subscriptions = []
+
+        async def subscribe(self, *args, **kwargs):
+            subscription = Subscription()
+            self.subscriptions.append(subscription)
+            return subscription
+
+    class SchemaRepository(FakeRepository):
+        async def ensure_learning_experience_schema(self):
+            return None
+
+    bus = FakeBus()
+    recorder = LearningExperienceRecorder(
+        event_bus=bus, repository=SchemaRepository(), source="paper"
+    )
+
+    await recorder.initialize({})
+    first_pair = list(bus.subscriptions)
+    assert len(first_pair) == 2
+
+    await recorder.shutdown()
+    assert all(subscription.cancelled for subscription in first_pair)
+    assert (await recorder.health_check()).status.value == "unhealthy"
+
+    await recorder.initialize({})
+    assert len(bus.subscriptions) == 4
+    assert all(subscription.cancelled for subscription in first_pair)
+    assert (await recorder.health_check()).status.value == "healthy"
+
+    await recorder.shutdown()

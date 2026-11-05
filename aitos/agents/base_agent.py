@@ -157,7 +157,10 @@ class BaseAgent(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
-        await self.on_shutdown(grace_period_seconds)
+        try:
+            await self.on_shutdown(grace_period_seconds)
+        finally:
+            self._initialized = False
         logger.info(
             "agent shut down", extra={"aitos_extra": {"agent_id": self.module_id}}
         )
