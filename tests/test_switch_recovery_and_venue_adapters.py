@@ -8,19 +8,28 @@ from aitos.execution.binance_cost_adapter import BinanceUsdMExecutionCostAdapter
 from aitos.execution.cost_intelligence import VenueExecutionCostRegistry
 from aitos.trading.switch_recovery import PositionSwitchRecoveryWorker
 from tests.test_position_switching import (
-    _Close, _Decision, _Gateway, _Lifecycle, _candidate,
+    _Close,
+    _Decision,
+    _Gateway,
+    _Lifecycle,
+    _candidate,
 )
-from aitos.trading.position_switching import PositionSwitchCoordinator, SQLiteSwitchJournal
+from aitos.trading.position_switching import (
+    PositionSwitchCoordinator,
+    SQLiteSwitchJournal,
+)
 
 
 @pytest.mark.asyncio
 async def test_binance_adapter_builds_fee_funding_slippage_and_liquidation_quote():
     adapter = BinanceUsdMExecutionCostAdapter(
         taker_fee_rate_provider=lambda **_: {
-            "entry_taker_rate": 0.0005, "exit_taker_rate": 0.0005
+            "entry_taker_rate": 0.0005,
+            "exit_taker_rate": 0.0005,
         },
         funding_rate_provider=lambda **_: {
-            "rate": -0.0001, "interval_seconds": 8 * 3600
+            "rate": -0.0001,
+            "interval_seconds": 8 * 3600,
         },
         depth_slippage_bps_provider=lambda **_: {"round_trip_bps": 2.5},
         liquidation_distance_provider=lambda **_: {"distance_pct": 5.0},
@@ -28,8 +37,12 @@ async def test_binance_adapter_builds_fee_funding_slippage_and_liquidation_quote
     registry = VenueExecutionCostRegistry(max_quote_age_seconds=30)
     registry.register("binance", adapter)
     quote = await registry.quote(
-        venue="binance", symbol="BTCUSDT", side="LONG",
-        notional_usd=1000, leverage=3, holding_horizon_seconds=8 * 3600,
+        venue="binance",
+        symbol="BTCUSDT",
+        side="LONG",
+        notional_usd=1000,
+        leverage=3,
+        holding_horizon_seconds=8 * 3600,
     )
     assert quote.round_trip_fee_bps == pytest.approx(10.0)
     assert quote.funding_cost_bps == pytest.approx(-1.0)
