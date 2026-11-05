@@ -152,8 +152,7 @@ class OrderExecutorCloseAdapter:
                     side=trade.side,
                     quantity=trade.quantity,
                     reference_price=float(
-                        getattr(trade, "last_marked_price", None)
-                        or trade.entry_price
+                        getattr(trade, "last_marked_price", None) or trade.entry_price
                     ),
                     client_order_id=client_order_id,
                     reduce_only=True,
@@ -161,9 +160,7 @@ class OrderExecutorCloseAdapter:
             )
             if not result.success:
                 return CloseReceipt(False, result.order_id, 0.0, 0.0, False)
-            status = await self.executor.get_order_status(
-                trade.symbol, result.order_id
-            )
+            status = await self.executor.get_order_status(trade.symbol, result.order_id)
             if status is None:
                 status = await self.executor.get_order_by_client_id(
                     trade.symbol, client_order_id
@@ -239,10 +236,19 @@ class PositionSwitchCoordinator:
                 if getattr(decision, "should_switch", False):
                     advantage = float(getattr(decision, "net_advantage_pct", 0.0))
                     ranked.append(
-                        (advantage, candidate.opportunity_id, incumbent, candidate, decision)
+                        (
+                            advantage,
+                            candidate.opportunity_id,
+                            incumbent,
+                            candidate,
+                            decision,
+                        )
                     )
         ranked.sort(key=lambda item: (-item[0], item[1], item[2].trade_id))
-        return [(incumbent, candidate, decision) for _, _, incumbent, candidate, decision in ranked]
+        return [
+            (incumbent, candidate, decision)
+            for _, _, incumbent, candidate, decision in ranked
+        ]
 
     @staticmethod
     def switch_id(incumbent: Trade, candidate: Opportunity) -> str:
@@ -261,7 +267,8 @@ class PositionSwitchCoordinator:
             (
                 trade
                 for trade in trades
-                if str(trade.agent_consensus.get("opportunity_id", "")) == opportunity_id
+                if str(trade.agent_consensus.get("opportunity_id", ""))
+                == opportunity_id
                 or str(trade.agent_consensus.get("decision_id", "")) == opportunity_id
             ),
             None,
@@ -282,9 +289,7 @@ class PositionSwitchCoordinator:
             )
         fresh_result = self.evaluate_pair(incumbent, candidate)
         fresh_decision = (
-            await fresh_result
-            if hasattr(fresh_result, "__await__")
-            else fresh_result
+            await fresh_result if hasattr(fresh_result, "__await__") else fresh_result
         )
         if not getattr(fresh_decision, "should_switch", False):
             return None
@@ -345,7 +350,9 @@ class PositionSwitchCoordinator:
             if intent.state == "completed":
                 return self._find_candidate_trade(candidate.opportunity_id)
             if intent.state in {"manual_reconciliation_required", "failed"}:
-                raise RuntimeError(f"switch requires operator reconciliation: {intent.reason}")
+                raise RuntimeError(
+                    f"switch requires operator reconciliation: {intent.reason}"
+                )
 
             if intent.state == "close_pending":
                 intent = self.journal.update(switch_id, state="close_submitting")
