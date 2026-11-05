@@ -465,9 +465,14 @@ def test_backtest_r_multiple_reward_is_not_normalized_twice():
 
 def test_worker_trains_only_valid_r_normalized_backtest_trades():
     worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
-    worker._processed = set()
+    worker._cursor_timestamp = "1970-01-01 00:00:00.000"
+    worker._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
+    worker._processed = 0
+    worker._legacy_processed = set()
+    timestamp = datetime(2026, 1, 1, tzinfo=timezone.utc)
     worker._rows = lambda: [
         {
+            "timestamp": timestamp,
             "experience_id": "summary-1",
             "symbol": "BTCUSDT",
             "decision": "backtest_summary",
@@ -478,6 +483,7 @@ def test_worker_trains_only_valid_r_normalized_backtest_trades():
             "metadata_json": "{}",
         },
         {
+            "timestamp": timestamp,
             "experience_id": "unscaled-1",
             "symbol": "BTCUSDT",
             "decision": "backtest_trade",
@@ -488,6 +494,7 @@ def test_worker_trains_only_valid_r_normalized_backtest_trades():
             "metadata_json": '{"reward_unit": "quote_pnl"}',
         },
         {
+            "timestamp": timestamp,
             "experience_id": "valid-1",
             "symbol": "BTCUSDT",
             "decision": "backtest_trade",
@@ -521,7 +528,7 @@ def test_worker_trains_only_valid_r_normalized_backtest_trades():
     assert symbol == "BTCUSDT"
     assert reward == 2.0
     assert features == {"trend_strength": 8.0, "rl_confidence": 5.0}
-    assert worker._processed == {"summary-1", "unscaled-1", "valid-1"}
+    assert worker._processed == 3
 
 
 def test_worker_processes_12000_experiences_across_bounded_batches(tmp_path):
