@@ -1,5 +1,9 @@
 import asyncio
+import os
+import subprocess
+import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
@@ -508,3 +512,67 @@ def test_learning_worker_singleton_file_lock_rejects_second_owner(tmp_path):
 
     second._acquire_singleton_lock()
     second._release_singleton_lock()
+
+def test_learning_worker_singleton_lock_rejects_second_process(tmp_path):
+    state_path = tmp_path / "worker_state.json"
+    ready_path = tmp_path / "worker.locked"
+    release_path = tmp_path / "worker.release"
+    child_code = """
+import sys
+import time
+from pathlib import Path
+from aitos.learning.worker import ContinualLearningWorker
+
+worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
+worker.state_path = Path(sys.argv[1])
+worker._lock_handle = None
+worker._acquire_singleton_lock()
+Path(sys.argv[2]).write_text("ready", encoding="utf-8")
+deadline = time.monotonic() + 10
+while not Path(sys.argv[3]).exists() and time.monotonic() < deadline:
+    time.sleep(0.01)
+worker._release_singleton_lock()
+if not Path(sys.argv[3]).exists():
+    raise SystemExit(3)
+"""
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            child_code,
+            str(state_path),
+            str(ready_path),
+            str(release_path),
+        ],
+        cwd=os.getcwd(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        deadline = time.monotonic() + 10
+        while not ready_path.exists() and process.poll() is None:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.01)
+        assert ready_path.exists(), process.communicate(timeout=2)
+
+        contender = ContinualLearningWorker.__new__(ContinualLearningWorker)
+        contender.state_path = state_path
+        contender._lock_handle = None
+        try:
+            contender._acquire_singleton_lock()
+            contender._release_singleton_lock()
+            assert False, "a second process must not acquire the worker state lock"
+        except RuntimeError as exc:
+            assert "another continual-learning worker" in str(exc)
+    finally:
+        release_path.write_text("release", encoding="utf-8")
+        stdout, stderr = process.communicate(timeout=10)
+    assert process.returncode == 0, (stdout, stderr)
+
+    recovered = ContinualLearningWorker.__new__(ContinualLearningWorker)
+    recovered.state_path = state_path
+    recovered._lock_handle = None
+    recovered._acquire_singleton_lock()
+    recovered._release_singleton_lock()
