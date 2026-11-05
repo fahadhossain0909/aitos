@@ -185,8 +185,15 @@ class OrderExecutorCloseAdapter:
                 )
             )
             if not result.success:
-                return CloseReceipt(False, result.order_id, 0.0, 0.0, False)
-            status = await self.executor.get_order_status(trade.symbol, result.order_id)
+                status = await self.executor.get_order_by_client_id(
+                    trade.symbol, client_order_id
+                )
+                if status is None:
+                    return CloseReceipt(False, result.order_id, 0.0, 0.0, False)
+            else:
+                status = await self.executor.get_order_status(
+                    trade.symbol, result.order_id
+                )
             if status is None:
                 status = await self.executor.get_order_by_client_id(
                     trade.symbol, client_order_id
