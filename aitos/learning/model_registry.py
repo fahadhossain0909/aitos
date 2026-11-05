@@ -1,13 +1,19 @@
-"""Versioned model registry with explicit candidate/champion states."""
+"""Versioned model registry with evidence-gated promotion and rollback history."""
 
 from __future__ import annotations
 
 import json
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Any
 
 from aitos.config.paths import get_model_data_dir
+from aitos.learning.regime_feedback import ModelComparison
+from aitos.learning.validation import ValidationResult
 
 
 @dataclass(frozen=True)
@@ -29,12 +35,46 @@ class ModelArtifact:
 
 
 class ModelRegistry:
-    """Filesystem-backed registry with explicit promotion and rollback history."""
+    """Filesystem-backed registry with serialized writes and evidence-gated promotion."""
 
     VALID_STATUSES = {"candidate", "champion", "rejected", "archived"}
 
     def __init__(self, path: str | None = None) -> None:
         self.path = str(path or (get_model_data_dir() / "registry.json"))
+
+    @contextmanager
+    def _write_lock(self) -> Iterator[None]:
+        os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+        handle = open(f"{self.path}.lock", "a+b")
+        locked = False
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(b"0")
+                    handle.flush()
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            locked = True
+            yield
+        finally:
+            if locked:
+                if os.name == "nt":
+                    import msvcrt
+
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            handle.close()
 
     def _load(self) -> list[dict[str, Any]]:
         try:
@@ -44,45 +84,158 @@ class ModelRegistry:
             return []
 
     def _save(self, rows: list[dict[str, Any]]) -> None:
-        import os
-
         os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
         tmp = f"{self.path}.tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
             json.dump(rows, handle, indent=2, sort_keys=True, default=str)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp, self.path)
 
-    def register(self, artifact: ModelArtifact) -> ModelArtifact:
-        if artifact.status not in self.VALID_STATUSES:
-            raise ValueError("invalid model status")
-        rows = self._load()
-        if any(
-            r["name"] == artifact.name and r["version"] == artifact.version
-            for r in rows
+    @staticmethod
+    def _artifact_from_row(row: dict[str, Any]) -> ModelArtifact:
+        value = dict(row)
+        created_at = value.get("created_at")
+        if isinstance(created_at, str):
+            value["created_at"] = datetime.fromisoformat(
+                created_at.replace("Z", "+00:00")
+            )
+        return ModelArtifact(**value)
+
+    @staticmethod
+    def _metrics_payload(result: Any) -> dict[str, float]:
+        metrics = getattr(result, "metrics", None)
+        if metrics is None:
+            raise ValueError("promotion requires backtest metrics")
+        payload: dict[str, float] = {}
+        for key in (
+            "total_return",
+            "max_drawdown",
+            "sharpe",
+            "trades",
+            "initial_equity",
+            "final_equity",
         ):
-            raise ValueError("model version already registered")
-        rows.append(artifact.as_dict())
-        self._save(rows)
+            value = getattr(metrics, key, None)
+            if value is None:
+                continue
+            number = float(value)
+            if not isfinite(number):
+                raise ValueError(f"promotion metric {key} must be finite")
+            payload[key] = number
+        required = {"total_return", "max_drawdown", "sharpe", "trades"}
+        if not required.issubset(payload):
+            raise ValueError("promotion evidence is missing required backtest metrics")
+        return payload
+
+    def register(self, artifact: ModelArtifact) -> ModelArtifact:
+        if artifact.status != "candidate":
+            raise ValueError("new model artifacts must be registered as candidates")
+        with self._write_lock():
+            rows = self._load()
+            if any(
+                row["name"] == artifact.name and row["version"] == artifact.version
+                for row in rows
+            ):
+                raise ValueError("model version already registered")
+            rows.append(artifact.as_dict())
+            self._save(rows)
         return artifact
 
-    def promote(self, name: str, version: str) -> ModelArtifact:
-        rows = self._load()
-        found = None
-        for row in rows:
-            if row["name"] == name and row["status"] == "champion":
-                row["status"] = "archived"
-            if row["name"] == name and row["version"] == version:
-                if row["status"] != "candidate":
-                    raise ValueError("only candidate models can be promoted")
-                row["status"] = "champion"
-                found = row
-        if found is None:
-            raise KeyError(f"unknown candidate: {name}:{version}")
-        self._save(rows)
-        return ModelArtifact(**found)
+    def promote(
+        self,
+        name: str,
+        version: str,
+        *,
+        validation_result: ValidationResult,
+        champion_comparison: ModelComparison | None = None,
+    ) -> ModelArtifact:
+        """Promote only after locked holdout, walk-forward and challenger evidence.
+
+        First promotion for a model family requires a passing locked holdout and
+        walk-forward result. Replacing an existing champion additionally requires
+        a statistically accepted champion/challenger reward comparison.
+        """
+        if not validation_result.passed:
+            raise ValueError("candidate failed validation and cannot be promoted")
+        walk_forward = validation_result.walk_forward
+        if (
+            walk_forward is None
+            or not walk_forward.passed
+            or walk_forward.locked_holdout is None
+        ):
+            raise ValueError(
+                "promotion requires passing walk-forward and locked holdout"
+            )
+        candidate_metrics = self._metrics_payload(validation_result.candidate)
+        holdout_metrics = self._metrics_payload(walk_forward.locked_holdout)
+
+        with self._write_lock():
+            rows = self._load()
+            candidate = next(
+                (
+                    row
+                    for row in rows
+                    if row["name"] == name
+                    and row["version"] == version
+                    and row["status"] == "candidate"
+                ),
+                None,
+            )
+            if candidate is None:
+                raise KeyError(f"unknown candidate: {name}:{version}")
+
+            current_champion = next(
+                (
+                    row
+                    for row in rows
+                    if row["name"] == name and row["status"] == "champion"
+                ),
+                None,
+            )
+            if current_champion is not None:
+                if champion_comparison is None or not champion_comparison.accepted:
+                    raise ValueError(
+                        "replacing a champion requires an accepted statistical comparison"
+                    )
+                if validation_result.champion is None:
+                    raise ValueError(
+                        "challenger validation must include the current champion backtest"
+                    )
+            elif champion_comparison is not None and not champion_comparison.accepted:
+                raise ValueError(
+                    "initial champion comparison, when supplied, must pass"
+                )
+
+            evidence = {
+                "validated_at": datetime.now(timezone.utc).isoformat(),
+                "validation_reason": validation_result.reason,
+                "candidate_metrics": candidate_metrics,
+                "walk_forward_reason": walk_forward.reason,
+                "walk_forward_windows": len(walk_forward.windows),
+                "locked_holdout_metrics": holdout_metrics,
+                "champion_comparison": (
+                    asdict(champion_comparison)
+                    if champion_comparison is not None
+                    else None
+                ),
+            }
+            metadata = dict(candidate.get("metadata") or {})
+            metadata["promotion_evidence"] = evidence
+
+            for row in rows:
+                if row["name"] == name and row["status"] == "champion":
+                    row["status"] = "archived"
+            candidate["status"] = "champion"
+            candidate["metadata"] = metadata
+            candidate["metrics"] = candidate_metrics
+            self._save(rows)
+            promoted = dict(candidate)
+
+        return self._artifact_from_row(promoted)
 
     def get_champion(self, name: str) -> ModelArtifact | None:
         for row in self._load():
             if row["name"] == name and row["status"] == "champion":
-                return ModelArtifact(**row)
+                return self._artifact_from_row(row)
         return None

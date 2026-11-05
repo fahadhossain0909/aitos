@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
 ORDER BY trade_id
 """
 
+CREATE_EXCHANGE_INCOME_CURSOR = """
+CREATE TABLE IF NOT EXISTS exchange_income_sync_cursor (
+    account LowCardinality(String),
+    cursor_time_ms UInt64,
+    updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY account
+"""
+
 
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
 
@@ -93,10 +102,37 @@ class DurableTradingStateStore:
             await self._repository._client.command(CREATE_RUNTIME_STATE)
             await self._repository._client.command(CREATE_DRAWDOWN_STATE)
             await self._repository._client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
+            await self._repository._client.command(CREATE_EXCHANGE_INCOME_CURSOR)
             logger.info("durable trading state tables ensured")
         except Exception:
             logger.exception("durable trading state table ensure failed")
             raise
+
+    async def load_income_cursor(self, account: str = "binance_usdm") -> int | None:
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT argMax(cursor_time_ms, updated_at)
+            FROM exchange_income_sync_cursor
+            WHERE account = {account:String}
+            """,
+            parameters={"account": account},
+        )
+        if not result.result_rows or result.result_rows[0][0] is None:
+            return None
+        return int(result.result_rows[0][0])
+
+    async def save_income_cursor(
+        self, cursor_time_ms: int, account: str = "binance_usdm"
+    ) -> None:
+        if cursor_time_ms < 0:
+            raise ValueError("income cursor must be non-negative")
+        client = self._client()
+        await client.insert(
+            "exchange_income_sync_cursor",
+            [[account, int(cursor_time_ms), datetime.now(timezone.utc)]],
+            column_names=["account", "cursor_time_ms", "updated_at"],
+        )
 
     async def save_trade(self, trade: Trade) -> None:
         client = self._client()
@@ -367,6 +403,37 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
     )
 
 
+def restored_position_feeds_ready(
+    restored_open_count: int, subscription_result: dict[str, Any] | None
+) -> bool:
+    """Fail closed when restored positions are not covered by verified feeds.
+
+    An empty portfolio needs no position-specific subscriptions. Once at least
+    one persisted position is restored, every registered ingestion instance
+    must confirm both trade and kline coverage before a trading loop may start.
+    """
+    if restored_open_count == 0:
+        return True
+    if restored_open_count < 0 or not isinstance(subscription_result, dict):
+        return False
+
+    symbols = subscription_result.get("symbols")
+    try:
+        ingestion_count = int(subscription_result.get("ingestions", 0))
+        verified_count = int(subscription_result.get("verified", 0))
+        failure_count = int(subscription_result.get("failures", 0))
+    except (TypeError, ValueError):
+        return False
+
+    return bool(
+        isinstance(symbols, list)
+        and symbols
+        and ingestion_count > 0
+        and verified_count == ingestion_count
+        and failure_count == 0
+    )
+
+
 class TradeStatePersistence:
     """Persist lifecycle events and restore open positions before streams start."""
 
@@ -501,33 +568,42 @@ class TradeStatePersistence:
 
     async def initialize(self) -> None:
         await self._store.initialize()
-        self._subscriptions = [
+        self._subscriptions.clear()
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.position_opened",
                 self._save_event,
                 group="trade-state-persistence",
-            ),
+            )
+        )
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.position_updated",
                 self._save_event,
                 group="trade-state-persistence",
-            ),
+            )
+        )
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.trailing_sl",
                 self._save_event,
                 group="trade-state-persistence",
-            ),
+            )
+        )
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.partial_close",
                 self._save_event,
                 group="trade-state-persistence",
-            ),
+            )
+        )
+        self._subscriptions.append(
             await self._event_bus.subscribe(
                 "trade.position_closed",
                 self._delete_event,
                 group="trade-state-persistence",
-            ),
-        ]
+            )
+        )
         logger.info(
             "trade state persistence subscribed",
             extra={"aitos_extra": {"subscriptions": len(self._subscriptions)}},

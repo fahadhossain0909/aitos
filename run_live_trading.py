@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from contextlib import AsyncExitStack
 
 from aitos.app import (
     build_system,
@@ -16,6 +17,7 @@ from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
 from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.exchange.binance import BinanceFuturesAdapter
+from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
@@ -35,6 +37,7 @@ from aitos.trading.persistent_state import (
     IdempotentOrderExecutor,
     PersistentLivePortfolioTracker,
     TradeStatePersistence,
+    restored_position_feeds_ready,
 )
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
@@ -47,7 +50,12 @@ HEALTH_SERVER_PORT = 8091
 SYMBOL_FILTER_TTL_SECONDS = 300.0
 
 
-async def main() -> None:
+async def _shutdown_event_bus_if_unowned(event_bus, ownership) -> None:
+    if not ownership["components"]:
+        await event_bus.shutdown()
+
+
+async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     settings = get_settings()
     if settings.tuning.mode != "live":
         raise RuntimeError(
@@ -55,6 +63,7 @@ async def main() -> None:
         )
     configure_logging(settings.log_level)
     redis_client = await connect_redis_with_retry(settings, logger=logger)
+    cleanup.push_async_callback(redis_client.aclose)
     from aitos.eventbus.factory import create_event_bus
 
     event_bus = create_event_bus(
@@ -65,11 +74,20 @@ async def main() -> None:
         redis_client=redis_client,
     )
     await event_bus.initialize({})
+    event_bus_cleanup_owner = {"components": False}
+    cleanup.push_async_callback(
+        _shutdown_event_bus_if_unowned, event_bus, event_bus_cleanup_owner
+    )
     market_repo, journal_repo = await connect_clickhouse_repositories(
         settings, logger=logger
     )
+    cleanup.push_async_callback(market_repo.shutdown)
+    cleanup.push_async_callback(journal_repo.shutdown)
     graph_driver = await try_connect_neo4j(settings, logger=logger)
+    if graph_driver is not None:
+        cleanup.push_async_callback(graph_driver.close)
     exchange = BinanceFuturesAdapter()
+    cleanup.push_async_callback(exchange.close)
     symbols = await resolve_live_universe(
         exchange,
         core_symbols=settings.tuning.scanner.core_symbols,
@@ -84,6 +102,7 @@ async def main() -> None:
         testnet=settings.binance.testnet,
     )
     raw_order_executor = await prepare_live_executor(settings, symbols)
+    cleanup.push_async_callback(raw_order_executor.close)
     order_executor = IdempotentOrderExecutor(raw_order_executor)
     state_store = DurableTradingStateStore(market_repo)
     await state_store.initialize()
@@ -113,6 +132,8 @@ async def main() -> None:
         attention_explainer=attention_explainer,
         use_exchange_side_stops=True,
     )
+    event_bus_cleanup_owner["components"] = True
+    cleanup.push_async_callback(shutdown_all, components)
     logger.info(
         "resolved dynamic live-trading universe",
         extra={"aitos_extra": {"symbol_count": len(symbols)}},
@@ -122,16 +143,42 @@ async def main() -> None:
         components.trade_lifecycle,
         state_store,
     )
-    await trade_state_persistence.restore()
+    cleanup.push_async_callback(trade_state_persistence.shutdown)
+    restored_count = await trade_state_persistence.restore()
     await trade_state_persistence.initialize()
     await initialize_all(components)
+    position_subscription_result = (
+        await trade_state_persistence.resubscribe_restored_positions()
+    )
+    position_recovery_ready = restored_position_feeds_ready(
+        restored_count, position_subscription_result
+    )
+    if not position_recovery_ready:
+        logger.critical(
+            "live startup blocked: restored positions lack verified market-data feeds",
+            extra={
+                "aitos_extra": {
+                    "restored_open_trades": restored_count,
+                    "subscription_result": position_subscription_result,
+                    "new_entries_allowed": False,
+                }
+            },
+        )
+    income_reconciler = BinanceIncomeReconciliationService(
+        exchange,
+        components.trade_lifecycle,
+        event_bus,
+        state_store,
+    )
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
+    cleanup.push_async_callback(market_os_persistence.shutdown)
     await market_os_persistence.initialize({})
     experience_recorder = LearningExperienceRecorder(
         event_bus,
         market_repo,
         source="live",
     )
+    cleanup.push_async_callback(experience_recorder.shutdown)
     await experience_recorder.initialize({})
     filter_refresher = SymbolFilterRefresher(
         exchange,
@@ -139,16 +186,18 @@ async def main() -> None:
         symbols,
         ttl_seconds=SYMBOL_FILTER_TTL_SECONDS,
     )
+    cleanup.push_async_callback(filter_refresher.stop)
     await filter_refresher.start()
     health_server = HealthServer(
-        components.all_modules() + [experience_recorder, market_os_persistence],
+        components.all_modules()
+        + [experience_recorder, market_os_persistence, income_reconciler],
         # The health endpoint is intentionally container/network reachable.
         # nosec B104 - binding all interfaces is required for the Docker health check.
         host="0.0.0.0",  # nosec B104
         port=HEALTH_SERVER_PORT,
     )
+    cleanup.push_async_callback(health_server.stop)
     await health_server.start()
-    from aitos.config.settings import get_settings
     from aitos.intelligence.position_runtime import get_tracked_lifecycles
     from aitos.trading.price_safety_net import PositionPriceSafetyNet
 
@@ -158,11 +207,19 @@ async def main() -> None:
         get_tracked_lifecycles,
         stale_symbol_blacklist=_settings.stale_symbol_blacklist,
     )
+    cleanup.push_async_callback(price_safety_net.stop)
     price_safety_net.start()
     tracker = PersistentLivePortfolioTracker(order_executor, state_store)
     await tracker.restore()
+    await income_reconciler.initialize({})
     stop_event = asyncio.Event()
+    if not position_recovery_ready:
+        # Fail closed through the managed shutdown path; never scan or submit
+        # orders while a restored position is outside verified feed coverage.
+        stop_event.set()
     install_signal_handlers(stop_event)
+    # Startup completed; the runtime finally block is now the sole teardown owner.
+    cleanup.pop_all()
     try:
         while not stop_event.is_set():
             try:
@@ -211,6 +268,7 @@ async def main() -> None:
             except TimeoutError:
                 pass
     finally:
+        await income_reconciler.shutdown()
         await price_safety_net.stop()
         await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)
@@ -228,6 +286,11 @@ async def main() -> None:
         await market_repo.shutdown()
         await journal_repo.shutdown()
         await redis_client.aclose()
+
+
+async def main() -> None:
+    async with AsyncExitStack() as cleanup:
+        await _run_live_trading(cleanup)
 
 
 if __name__ == "__main__":

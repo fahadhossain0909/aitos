@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
+from contextlib import AsyncExitStack
 
 from aitos.agents import LearningAgent, MarketAgent, PortfolioAgent, RiskAgent
 from aitos.app import (
     PaperPortfolioTracker,
     build_system,
     initialize_all,
+    restart_unhealthy_modules,
     run_scan_and_trade_cycle,
     shutdown_all,
 )
@@ -38,6 +41,7 @@ from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
     TradeStatePersistence,
+    restored_position_feeds_ready,
 )
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
@@ -109,7 +113,47 @@ async def _close_stale_positions(components) -> None:
             )
 
 
-async def main() -> None:
+async def _cancel_task(task: asyncio.Task) -> None:
+    if not task.done():
+        task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("background task failed before shutdown")
+
+
+async def _shutdown_event_bus_if_unowned(event_bus, ownership) -> None:
+    if not ownership["components"]:
+        await event_bus.shutdown()
+
+
+async def _stop_learning_worker(worker, task: asyncio.Task) -> None:
+    worker.request_stop()
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        logger.warning("continual-learning worker task was cancelled during shutdown")
+    except Exception:
+        logger.exception("continual-learning worker exited with an error")
+    await asyncio.to_thread(worker.shutdown)
+
+
+async def _shutdown_agents(agents) -> None:
+    for agent in reversed(agents):
+        try:
+            await agent.shutdown()
+        except Exception:
+            logger.exception(
+                "failed to shut down auxiliary agent",
+                extra={
+                    "aitos_extra": {"agent_id": getattr(agent, "module_id", "unknown")}
+                },
+            )
+
+
+async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     settings = get_settings()
     if settings.tuning.mode != "paper":
         raise RuntimeError(
@@ -117,15 +161,31 @@ async def main() -> None:
         )
     configure_logging(settings.log_level)
     redis_client = await connect_redis_with_retry(settings, logger=logger)
-    from aitos.eventbus.redis_bus import EventBus
+    cleanup.push_async_callback(redis_client.close)
+    from aitos.eventbus.factory import create_event_bus
 
-    event_bus = EventBus(redis_client=redis_client)
+    event_bus = create_event_bus(
+        {
+            "backend": os.getenv("AITOS_EVENTBUS_BACKEND", "redis"),
+            "runtime_mode": "paper",
+        },
+        redis_client=redis_client,
+    )
     await event_bus.initialize({})
+    event_bus_cleanup_owner = {"components": False}
+    cleanup.push_async_callback(
+        _shutdown_event_bus_if_unowned, event_bus, event_bus_cleanup_owner
+    )
     market_repo, journal_repo = await connect_clickhouse_repositories(
         settings, logger=logger
     )
+    cleanup.push_async_callback(market_repo.shutdown)
+    cleanup.push_async_callback(journal_repo.shutdown)
     graph_driver = await try_connect_neo4j(settings, logger=logger)
+    if graph_driver is not None:
+        cleanup.push_async_callback(graph_driver.close)
     exchange = BinanceFuturesAdapter(testnet=settings.binance.testnet)
+    cleanup.push_async_callback(exchange.close)
     symbols = await resolve_live_universe(
         exchange,
         core_symbols=settings.tuning.scanner.core_symbols,
@@ -162,6 +222,8 @@ async def main() -> None:
         min_score_threshold=PAPER_MIN_SCORE_THRESHOLD,
         enable_exit_intelligence=True,
     )
+    event_bus_cleanup_owner["components"] = True
+    cleanup.push_async_callback(shutdown_all, components)
     logger.info(
         "paper trading thresholds",
         extra={
@@ -176,6 +238,7 @@ async def main() -> None:
     trade_state_persistence = TradeStatePersistence(
         event_bus, components.trade_lifecycle, state_store
     )
+    cleanup.push_async_callback(trade_state_persistence.shutdown)
     # Ensure runtime-state tables and event subscriptions exist before recovery.
     # Restoring before initialization could query a table that has not yet been
     # created on a fresh/recreated ClickHouse volume.
@@ -196,7 +259,23 @@ async def main() -> None:
     await initialize_all(components)
     # Canonical market streams only become active during initialize_all().
     # Reconcile subscriptions afterwards and verify the effective symbol sets.
-    await trade_state_persistence.resubscribe_restored_positions()
+    position_subscription_result = (
+        await trade_state_persistence.resubscribe_restored_positions()
+    )
+    position_recovery_ready = restored_position_feeds_ready(
+        restored_count, position_subscription_result
+    )
+    if not position_recovery_ready:
+        logger.critical(
+            "paper startup blocked: restored positions lack verified market-data feeds",
+            extra={
+                "aitos_extra": {
+                    "restored_open_trades": restored_count,
+                    "subscription_result": position_subscription_result,
+                    "new_entries_allowed": False,
+                }
+            },
+        )
 
     # Register AI Kernel agents for multi-agent consensus
     market_agent = MarketAgent(event_bus=event_bus)
@@ -204,7 +283,9 @@ async def main() -> None:
     portfolio_agent = PortfolioAgent(event_bus=event_bus)
     learning_agent = LearningAgent(event_bus=event_bus)
 
-    for agent in (market_agent, risk_agent, portfolio_agent, learning_agent):
+    agents = (market_agent, risk_agent, portfolio_agent, learning_agent)
+    for agent in agents:
+        cleanup.push_async_callback(agent.shutdown)
         await agent.initialize({})
         await components.kernel.register_agent(agent)
         logger.info(
@@ -224,10 +305,12 @@ async def main() -> None:
     )
 
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
+    cleanup.push_async_callback(market_os_persistence.shutdown)
     await market_os_persistence.initialize({})
     experience_recorder = LearningExperienceRecorder(
         event_bus, market_repo, source="paper"
     )
+    cleanup.push_async_callback(experience_recorder.shutdown)
     await experience_recorder.initialize({})
     health_server = HealthServer(
         components.all_modules()
@@ -244,6 +327,7 @@ async def main() -> None:
         host="0.0.0.0",  # nosec B104
         port=HEALTH_SERVER_PORT,
     )
+    cleanup.push_async_callback(health_server.stop)
     await health_server.start()
 
     # Self-healing: periodically re-initialize modules that have died
@@ -269,8 +353,17 @@ async def main() -> None:
                             }
                         },
                     )
+            await restart_unhealthy_modules(auxiliary_modules)
+
+    agents = (market_agent, risk_agent, portfolio_agent, learning_agent)
+    auxiliary_modules = [
+        experience_recorder,
+        market_os_persistence,
+        *agents,
+    ]
 
     heal_task = asyncio.create_task(_self_heal_loop())
+    cleanup.push_async_callback(_cancel_task, heal_task)
     from aitos.config.settings import get_settings as _get_settings
     from aitos.intelligence.position_runtime import get_tracked_lifecycles
     from aitos.trading.price_safety_net import PositionPriceSafetyNet
@@ -281,6 +374,7 @@ async def main() -> None:
         get_tracked_lifecycles,
         stale_symbol_blacklist=_settings.stale_symbol_blacklist,
     )
+    cleanup.push_async_callback(price_safety_net.stop)
     price_safety_net.start()
     tracker = PaperPortfolioTracker(
         starting_equity_usd=STARTING_EQUITY_USD, state_store=state_store
@@ -299,6 +393,10 @@ async def main() -> None:
         },
     )
     stop_event = asyncio.Event()
+    if not position_recovery_ready:
+        # Enter the managed finally path without running a scan cycle. This
+        # shuts down already-started workers/modules while preventing new risk.
+        stop_event.set()
     install_signal_handlers(stop_event)
     # Construct and start the blocking worker only after all other startup
     # wiring succeeds. This keeps its ClickHouse client and singleton lock
@@ -312,6 +410,10 @@ async def main() -> None:
     )
     learning_task = asyncio.create_task(asyncio.to_thread(learning_worker.run_forever))
     learning_task.set_name("continual-learning-worker")
+    cleanup.push_async_callback(_stop_learning_worker, learning_worker, learning_task)
+    # Startup succeeded; the existing runtime finally block now owns teardown.
+    # If any earlier startup step raises, AsyncExitStack closes acquired resources.
+    cleanup.pop_all()
     try:
         while not stop_event.is_set():
             try:
@@ -368,26 +470,11 @@ async def main() -> None:
             except TimeoutError:
                 pass
     finally:
-        heal_task.cancel()
-        try:
-            await heal_task
-        except asyncio.CancelledError:
-            pass
-        # Let the worker finish its current ClickHouse batch and exit its
-        # own loop (which closes the client in run_forever's finally block).
-        # Cancelling asyncio.to_thread does not stop its underlying thread.
-        learning_worker.request_stop()
-        try:
-            await asyncio.shield(learning_task)
-        except asyncio.CancelledError:
-            logger.warning(
-                "continual-learning worker task was cancelled during shutdown"
-            )
-        except Exception:
-            logger.exception("continual-learning worker exited with an error")
-        finally:
-            await asyncio.to_thread(learning_worker.shutdown)
+        await _cancel_task(heal_task)
+        # Let the worker finish its current ClickHouse batch before joining.
+        await _stop_learning_worker(learning_worker, learning_task)
         await price_safety_net.stop()
+        await _shutdown_agents(agents)
         await tracker.persist_state(components.trade_lifecycle)
         await asyncio.to_thread(rl_scorer.save_state)
         await asyncio.to_thread(outcome_classifier.save_state)
@@ -404,6 +491,11 @@ async def main() -> None:
         if graph_driver is not None:
             await graph_driver.close()
         await redis_client.close()
+
+
+async def main() -> None:
+    async with AsyncExitStack() as cleanup:
+        await _run_paper_trading(cleanup)
 
 
 if __name__ == "__main__":

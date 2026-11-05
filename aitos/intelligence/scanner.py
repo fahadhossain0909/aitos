@@ -740,7 +740,9 @@ class OpportunityScanner(AITOSModule):
             else []
         )
         depth_analysis = depth_event_flow_analysis(depth_events)
-        ofi_score = depth_analysis["ofi_score"]
+        ofi_score = (
+            depth_analysis["ofi_score"] if depth_analysis["ofi_available"] else 5.0
+        )
         ofi_directional_score = (
             ofi_score
             if direction == TradeSide.LONG
@@ -820,6 +822,11 @@ class OpportunityScanner(AITOSModule):
                     "liquidity_score": liquidity_score,
                     "order_book_flow_imbalance": ofi_directional_score,
                     "depth_event_count": depth_analysis["event_count"],
+                    "depth_ofi_confidence": depth_analysis["ofi_confidence"],
+                    "depth_ofi_available": depth_analysis["ofi_available"],
+                    "depth_freshness_ms": depth_analysis["freshness_ms"],
+                    "depth_fresh_event_count": depth_analysis["fresh_event_count"],
+                    "depth_stale_event_count": depth_analysis["stale_event_count"],
                     "depth_inferred_cancel_qty": depth_analysis["inferred_cancel_qty"],
                     "depth_matched_execution_qty": depth_analysis[
                         "matched_execution_qty"
@@ -984,6 +991,8 @@ class OpportunityScanner(AITOSModule):
             "open_interest_trend": oi_score,
             "footprint_interaction": interaction_score,
             "order_book_flow_imbalance": ofi_directional_score,
+            "order_book_flow_imbalance_confidence": depth_analysis["ofi_confidence"],
+            "depth_freshness_ms": depth_analysis["freshness_ms"],
             "depth_inferred_cancel_pressure": depth_analysis[
                 "inferred_cancel_pressure"
             ],
@@ -1079,7 +1088,7 @@ class OpportunityScanner(AITOSModule):
             "rl_confidence": rl_available,
             "footprint_interaction": footprint_available,
             "a_stat": a_stat_score is not None,
-            "order_book_flow_imbalance": depth_analysis["event_count"] > 0,
+            "order_book_flow_imbalance": depth_analysis["ofi_available"],
             "entry_timing": atr > 0,
             "breakout_acceptance": structure_direction
             in {"bullish_bos", "bearish_bos"},
@@ -1106,7 +1115,7 @@ class OpportunityScanner(AITOSModule):
             f"{k.replace('_',' ')}={v:.1f}/10" for k, v in component_scores.items()
         ]
         rationale.append(
-            f"executed_trades={len(trades)}, candle_cvd={candle_cvd:.1f}, live_auction={live_auction:.1f}, candle_auction={candle_auction:.1f}, amt_score={amt_score:.1f}, regime={regime}, structure={structure_direction}, direction={direction.value}, market_source={market_source}, ofi={ofi_score:.2f}, inferred_cancel_pressure={depth_analysis['inferred_cancel_pressure']:.3f}, replenishment_ratio={depth_analysis['replenishment_ratio']:.3f}, entry_extension_atr={extension_atr:.3f}"
+            f"executed_trades={len(trades)}, candle_cvd={candle_cvd:.1f}, live_auction={live_auction:.1f}, candle_auction={candle_auction:.1f}, amt_score={amt_score:.1f}, regime={regime}, structure={structure_direction}, direction={direction.value}, market_source={market_source}, ofi={ofi_score:.2f}, ofi_confidence={depth_analysis['ofi_confidence']:.3f}, ofi_freshness_ms={depth_analysis['freshness_ms']:.1f}, inferred_cancel_pressure={depth_analysis['inferred_cancel_pressure']:.3f}, replenishment_ratio={depth_analysis['replenishment_ratio']:.3f}, entry_extension_atr={extension_atr:.3f}"
         )
         if amt_context is not None:
             rationale.extend(

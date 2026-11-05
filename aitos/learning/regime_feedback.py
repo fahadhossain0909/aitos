@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict, deque
 from collections.abc import Iterable
@@ -25,10 +26,22 @@ class RegimeRewardCalibrator:
         self._history = defaultdict(lambda: deque(maxlen=history_size))
         self._min_samples = min_samples
 
-    def calibrate(self, regime: str, reward_r: float) -> float:
+    @staticmethod
+    def _partition_key(regime: str, strategy_id: str | None = None) -> str:
+        normalized_regime = normalize_regime(regime)
+        if strategy_id is None or not str(strategy_id).strip():
+            return normalized_regime
+        strategy = normalize_regime(strategy_id)
+        identity = f"{strategy}\\0{normalized_regime}".encode()
+        digest = hashlib.sha256(identity).hexdigest()[:10]
+        return f"{strategy[:17]}_{normalized_regime[:17]}_{digest}"
+
+    def calibrate(
+        self, regime: str, reward_r: float, *, strategy_id: str | None = None
+    ) -> float:
         if not isfinite(reward_r):
             raise ValueError("reward must be finite")
-        history = self._history[normalize_regime(regime)]
+        history = self._history[self._partition_key(regime, strategy_id)]
         if len(history) < self._min_samples:
             calibrated = max(-5.0, min(5.0, reward_r))
         else:
@@ -97,9 +110,27 @@ def compare_champion_candidate(
     z_score: float = 1.96,
 ) -> ModelComparison:
     """Conservative independent-sample acceptance gate for shadow evaluation."""
-    champion = [float(v) for v in champion_rewards if isfinite(float(v))]
-    candidate = [float(v) for v in candidate_rewards if isfinite(float(v))]
-    if min_samples < 2 or min_improvement < 0 or z_score <= 0:
+
+    def finite_rewards(values: Iterable[float]) -> list[float]:
+        result: list[float] = []
+        for value in values:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                continue
+            if isfinite(number):
+                result.append(number)
+        return result
+
+    champion = finite_rewards(champion_rewards)
+    candidate = finite_rewards(candidate_rewards)
+    if (
+        min_samples < 2
+        or not isfinite(min_improvement)
+        or min_improvement < 0
+        or not isfinite(z_score)
+        or z_score <= 0
+    ):
         raise ValueError("invalid champion/challenger gate configuration")
     if len(champion) < min_samples or len(candidate) < min_samples:
         return ModelComparison(False, 0.0, 0.0, float("inf"), "insufficient samples")

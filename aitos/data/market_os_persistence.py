@@ -185,40 +185,65 @@ class MarketOSPersistence(AITOSModule):
             )
             self._initialized = True
             return
-        self._subscriptions = [
-            await self._event_bus.subscribe(
-                "market.orderflow.*",
-                self._handle_orderflow,
-                group="market-os-orderflow",
-            ),
-            await self._event_bus.subscribe(
-                "market.liquidity.*",
-                self._handle_liquidity,
-                group="market-os-liquidity",
-            ),
-            await self._event_bus.subscribe(
-                "market.live_state.*",
-                self._handle_live_state,
-                group="market-os-live-state",
-            ),
-            await self._event_bus.subscribe(
-                "market.orderbook.*",
-                self._handle_orderbook,
-                group="clickhouse-orderbook-history-v1",
-                start_id="0",
-            ),
-        ]
-        for topic in self.LIVE_ANALYTICS_TOPICS:
+
+        self._subscriptions.clear()
+        try:
             self._subscriptions.append(
                 await self._event_bus.subscribe(
-                    topic,
-                    self._handle_live_analytics,
-                    group=f"clickhouse-live-analytics-{topic.replace('.', '-')}",
-                    live_only=True,
+                    "market.orderflow.*",
+                    self._handle_orderflow,
+                    group="market-os-orderflow",
                 )
             )
-        self._flush_task = asyncio.create_task(self._flush_loop())
-        self._initialized = True
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    "market.liquidity.*",
+                    self._handle_liquidity,
+                    group="market-os-liquidity",
+                )
+            )
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    "market.live_state.*",
+                    self._handle_live_state,
+                    group="market-os-live-state",
+                )
+            )
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    "market.orderbook.*",
+                    self._handle_orderbook,
+                    group="clickhouse-orderbook-history-v1",
+                    start_id="0",
+                )
+            )
+            for topic in self.LIVE_ANALYTICS_TOPICS:
+                self._subscriptions.append(
+                    await self._event_bus.subscribe(
+                        topic,
+                        self._handle_live_analytics,
+                        group=f"clickhouse-live-analytics-{topic.replace('.', '-')}",
+                        live_only=True,
+                    )
+                )
+            self._flush_task = asyncio.create_task(self._flush_loop())
+            self._initialized = True
+        except Exception:
+            for subscription in self._subscriptions:
+                subscription.cancel()
+            self._subscriptions.clear()
+            if self._flush_task is not None:
+                self._flush_task.cancel()
+                try:
+                    await self._flush_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Market OS flush task failed during shutdown")
+                self._flush_task = None
+            self._initialized = False
+            raise
+
         logger.info(
             "Market OS persistence initialized (batch_size=%s, flush_interval=%.2fs, analytics_topics=%s)",
             self._batch_size,
@@ -227,11 +252,16 @@ class MarketOSPersistence(AITOSModule):
         )
 
     async def health_check(self) -> HealthStatus:
-        status = (
-            ModuleStatus.HEALTHY
-            if self._repository is not None
-            else ModuleStatus.DEGRADED
-        )
+        if not self._initialized:
+            status = ModuleStatus.UNHEALTHY
+        elif self._repository is None:
+            status = ModuleStatus.DEGRADED
+        elif self._flush_task is None or self._flush_task.done():
+            status = ModuleStatus.UNHEALTHY
+        elif self._errors:
+            status = ModuleStatus.DEGRADED
+        else:
+            status = ModuleStatus.HEALTHY
         return HealthStatus(
             module_id=self.module_id,
             status=status,
@@ -242,21 +272,29 @@ class MarketOSPersistence(AITOSModule):
                 "errors": self._errors,
                 "pending_batches": sum(len(rows) for rows in self._buffers.values()),
                 "analytics_topics": len(self.LIVE_ANALYTICS_TOPICS),
+                "flush_task_alive": (
+                    self._flush_task is not None and not self._flush_task.done()
+                ),
             },
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
-        for subscription in self._subscriptions:
-            subscription.cancel()
-        self._subscriptions.clear()
-        if self._flush_task is not None:
-            self._flush_task.cancel()
-            try:
-                await self._flush_task
-            except asyncio.CancelledError:
-                pass
-            self._flush_task = None
-        await self._flush_all()
+        try:
+            for subscription in self._subscriptions:
+                subscription.cancel()
+            self._subscriptions.clear()
+            if self._flush_task is not None:
+                self._flush_task.cancel()
+                try:
+                    await self._flush_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("Market OS flush task failed during shutdown")
+                self._flush_task = None
+            await self._flush_all()
+        finally:
+            self._initialized = False
 
     async def emit_events(self):
         return

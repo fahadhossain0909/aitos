@@ -364,6 +364,8 @@ class JournalSystem(AITOSModule):
                     "trade_id": trade_id,
                     "pnl": trade_dict.get("pnl"),
                     "pnl_percent": trade_dict.get("pnl_percent"),
+                    "risk_amount_usd": trade_dict.get("risk_amount_usd"),
+                    "strategy_id": trade_dict.get("strategy_id"),
                     "symbol": trade_dict.get("symbol"),
                     "side": trade_dict.get("side"),
                     "entry_price": trade_dict.get("entry_price"),

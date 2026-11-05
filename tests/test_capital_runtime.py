@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from aitos.intelligence.capital_controls import CapitalControlConfig
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_runtime import install_capital_guard
 from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
@@ -110,3 +111,29 @@ async def test_runtime_guard_allows_eligible_trade(event_bus, risk_engine):
     assert trade.state == TradeLifecycleState.POSITION_OPENED
     assert trade.agent_consensus["capital_objective"]["eligible"] is True
     assert trade.agent_consensus["capital_objective"]["risk_budget_usd"] <= 100.0
+
+
+def test_gateway_decays_expected_edge_and_confidence_with_opportunity_age(monkeypatch):
+    import aitos.intelligence.capital_gateway as gateway_module
+
+    estimate = CapitalGateway().estimate_opportunity(make_opportunity())
+    fresh_gateway = CapitalGateway(
+        controls=CapitalControlConfig(opportunity_decay_half_life_seconds=15.0)
+    )
+    stale_gateway = CapitalGateway(
+        controls=CapitalControlConfig(opportunity_decay_half_life_seconds=15.0)
+    )
+
+    monkeypatch.setattr(gateway_module, "opportunity_age_seconds", lambda _: 0.0)
+    fresh = fresh_gateway.evaluate(10_000.0, [estimate]).decisions[0]
+    monkeypatch.setattr(gateway_module, "opportunity_age_seconds", lambda _: 15.0)
+    stale = stale_gateway.evaluate(10_000.0, [estimate]).decisions[0]
+
+    assert stale.expected_net_edge_pct < fresh.expected_net_edge_pct
+    assert any("opportunity_decay_factor=0.500000" in item for item in stale.rationale)
+    assert any("opportunity_age_seconds=15.000" in item for item in stale.rationale)
+
+
+def test_opportunity_decay_half_life_must_be_positive():
+    with pytest.raises(ValueError, match="opportunity_decay_half_life_seconds"):
+        CapitalControlConfig(opportunity_decay_half_life_seconds=0.0)

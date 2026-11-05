@@ -1,3 +1,5 @@
+import pytest
+
 from aitos.learning.regime_feedback import (
     RegimeRewardCalibrator,
     compare_champion_candidate,
@@ -40,3 +42,48 @@ def test_champion_challenger_gate_requires_sample_floor_and_significance():
 
 def test_regime_partition_key_cannot_escape_checkpoint_directory():
     assert normalize_regime("../../outside/path") == "outside_path"
+
+
+def test_champion_comparison_filters_non_finite_and_malformed_rewards():
+    champion = [0.0] * 30 + [float("nan"), float("inf"), "invalid"]
+    candidate = [1.0] * 30 + [float("-inf"), "not-a-number"]
+
+    result = compare_champion_candidate(champion, candidate)
+
+    assert result.accepted is True
+    assert result.candidate_mean == 1.0
+    assert result.champion_mean == 0.0
+
+
+@pytest.mark.parametrize(
+    ("min_improvement", "z_score"),
+    [(float("nan"), 1.96), (0.05, float("inf")), (0.05, 0.0)],
+)
+def test_champion_comparison_rejects_non_finite_or_invalid_thresholds(
+    min_improvement, z_score
+):
+    with pytest.raises(ValueError, match="configuration"):
+        compare_champion_candidate(
+            [0.0] * 30,
+            [1.0] * 30,
+            min_improvement=min_improvement,
+            z_score=z_score,
+        )
+
+
+def test_reward_calibration_is_partitioned_by_strategy_within_regime():
+    calibrator = RegimeRewardCalibrator(min_samples=3)
+    for reward in (0.2, 0.3, 0.1):
+        calibrator.calibrate("trending", reward, strategy_id="mean_reversion")
+
+    clipped = calibrator.calibrate("trending", 20.0, strategy_id="mean_reversion")
+    independent = calibrator.calibrate("trending", 20.0, strategy_id="breakout")
+
+    assert clipped < 1.0
+    assert independent == 5.0
+    snapshot = calibrator.snapshot()
+    assert any(key.startswith("mean_reversion_trending_") for key in snapshot)
+    assert any(key.startswith("breakout_trending_") for key in snapshot)
+    restored = RegimeRewardCalibrator(min_samples=3)
+    restored.restore(snapshot)
+    assert set(restored.snapshot()) == set(snapshot)
