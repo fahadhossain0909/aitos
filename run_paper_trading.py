@@ -279,6 +279,7 @@ async def main() -> None:
                     )
             await restart_unhealthy_modules(auxiliary_modules)
 
+    agents = (market_agent, risk_agent, portfolio_agent, learning_agent)
     auxiliary_modules = [
         experience_recorder,
         market_os_persistence,
