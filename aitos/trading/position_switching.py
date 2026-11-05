@@ -301,6 +301,13 @@ class PositionSwitchCoordinator:
         existing_intent = self.journal.get(switch_id)
         if existing_intent is not None and existing_intent.state == "completed":
             return self._find_candidate_trade(candidate.opportunity_id)
+        if existing_intent is not None and existing_intent.state in {
+            "manual_reconciliation_required",
+            "failed",
+        }:
+            raise RuntimeError(
+                f"switch requires operator reconciliation: {existing_intent.reason}"
+            )
         resume_after_close = existing_intent is not None and existing_intent.state in {
             "close_confirmed",
             "reservation_released",
