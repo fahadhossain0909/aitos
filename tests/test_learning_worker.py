@@ -418,3 +418,86 @@ def test_worker_partitions_regime_models_and_normalizes_regime_labels(tmp_path):
         )
         == "high_volatility"
     )
+
+def test_paper_and_live_outcomes_require_explicit_reward_units():
+    paper_r = {
+        "source": "paper",
+        "decision": "LONG",
+        "outcome": "closed",
+        "reward": 0.8,
+        "metadata_json": '{"reward_unit": "r_multiple"}',
+        "risk_state_json": '{"risk_amount_usd": 5.0}',
+    }
+    live_quote = {
+        "source": "live",
+        "decision": "SHORT",
+        "outcome": "closed",
+        "reward": 4.0,
+        "metadata_json": '{"reward_unit": "quote_pnl"}',
+        "risk_state_json": '{"risk_amount_usd": 8.0}',
+    }
+    legacy_paper = {
+        "source": "paper",
+        "decision": "LONG",
+        "outcome": "closed",
+        "reward": 4.0,
+        "metadata_json": "{}",
+        "risk_state_json": '{"risk_amount_usd": 8.0}',
+    }
+
+    assert ContinualLearningWorker._reward_r_multiple(paper_r) == 0.8
+    assert ContinualLearningWorker._reward_r_multiple(live_quote) == 0.5
+    assert ContinualLearningWorker._reward_r_multiple(legacy_paper) is None
+
+
+def test_worker_trains_on_normalized_paper_live_outcomes():
+    worker = ContinualLearningWorker.__new__(ContinualLearningWorker)
+    worker._cursor_timestamp = "1970-01-01 00:00:00.000"
+    worker._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
+    worker._processed = 0
+    worker._legacy_processed = set()
+
+    class Scorer:
+        n_samples_seen = 0
+
+        def __init__(self):
+            self.rewards = []
+
+        def update_experience_and_persist(
+            self, experience_id, symbol, features, reward
+        ):
+            self.rewards.append((symbol, reward))
+            self.n_samples_seen += 1
+            return True
+
+    worker.scorer = Scorer()
+    worker._save_state = lambda: None
+    worker._rows = lambda: [
+        {
+            "experience_id": "paper-outcome-1",
+            "timestamp": datetime(2026, 1, 1, tzinfo=timezone.utc),
+            "source": "paper",
+            "symbol": "BTCUSDT",
+            "decision": "LONG",
+            "outcome": "closed",
+            "reward": 0.8,
+            "features_json": '{"trend_strength": 8}',
+            "risk_state_json": '{"risk_amount_usd": 5.0}',
+            "metadata_json": '{"reward_unit": "r_multiple"}',
+        },
+        {
+            "experience_id": "paper-outcome-2",
+            "timestamp": datetime(2026, 1, 2, tzinfo=timezone.utc),
+            "source": "paper",
+            "symbol": "ETHUSDT",
+            "decision": "LONG",
+            "outcome": "closed",
+            "reward": 4.0,
+            "features_json": '{"trend_strength": 7}',
+            "risk_state_json": '{"risk_amount_usd": 8.0}',
+            "metadata_json": "{}",
+        },
+    ]
+
+    assert worker.run_once() == 2
+    assert worker.scorer.rewards == [("BTCUSDT", 0.8)]
