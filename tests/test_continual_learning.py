@@ -1,4 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -124,3 +126,24 @@ def test_registry_refuses_unvalidated_or_non_candidate_models(tmp_path):
                 walk_forward=None,
             ),
         )
+
+def test_model_registry_serializes_concurrent_candidate_writes(tmp_path):
+    path = tmp_path / "registry.json"
+    registries = [ModelRegistry(str(path)) for _ in range(8)]
+
+    def register(index):
+        registries[index % len(registries)].register(
+            ModelArtifact(
+                "strategy",
+                f"v{index}",
+                "parameter",
+                metadata={"writer": index},
+            )
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(register, range(40)))
+
+    rows = json.loads(path.read_text(encoding="utf-8"))
+    assert len(rows) == 40
+    assert {row["version"] for row in rows} == {f"v{i}" for i in range(40)}
