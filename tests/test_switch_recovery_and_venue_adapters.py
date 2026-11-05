@@ -103,12 +103,13 @@ async def test_pending_candidate_is_reconstructed_and_resumed_after_restart(tmp_
 @pytest.mark.asyncio
 async def test_recovery_fails_closed_when_candidate_payload_missing(tmp_path):
     from aitos.trading.position_switching import SwitchIntent
+
     lifecycle = _Lifecycle()
     journal = SQLiteSwitchJournal(tmp_path / "missing.sqlite")
     incumbent = lifecycle.open_trades[0]
     journal.create(
         SwitchIntent(
-        switch_id="switch:trade-old:missing",
+            switch_id="switch:trade-old:missing",
             incumbent_trade_id=incumbent.trade_id,
             incumbent_symbol=incumbent.symbol,
             candidate_opportunity_id="missing",
@@ -136,6 +137,7 @@ async def test_partial_close_and_cancelled_close_never_release_reservation_or_op
     tmp_path,
 ):
     from aitos.trading.position_switching import CloseReceipt
+
     lifecycle = _Lifecycle()
     gateway = _Gateway()
     calls = iter(
@@ -184,14 +186,18 @@ async def test_close_timeout_keeps_stable_intent_for_restart_reconciliation(tmp_
     journal = SQLiteSwitchJournal(tmp_path / "timeout.sqlite")
     calls = []
 
-    async def close_with_timeout_then_fill(trade, client_order_id, existing_order_id):
+    async def close_with_timeout_then_fill(
+        trade, client_order_id, existing_order_id
+    ):
         calls.append((client_order_id, existing_order_id))
         if len(calls) == 1:
             raise TimeoutError("transport timed out after exchange acceptance")
         return CloseReceipt(True, "exchange-order-42", 101.0, trade.quantity, True)
 
     coordinator = PositionSwitchCoordinator(
-        lifecycle=lifecycle, gateway=gateway, journal=journal,
+        lifecycle=lifecycle,
+        gateway=gateway,
+        journal=journal,
         close_and_confirm=close_with_timeout_then_fill,
         portfolio_provider=lambda: object(),
         evaluate_pair=lambda incumbent, candidate: _Decision(),
@@ -216,7 +222,9 @@ async def test_repeated_recovery_event_does_not_duplicate_completed_switch(tmp_p
     gateway = _Gateway()
     journal = SQLiteSwitchJournal(tmp_path / "duplicate-event.sqlite")
     coordinator = PositionSwitchCoordinator(
-        lifecycle=lifecycle, gateway=gateway, journal=journal,
+        lifecycle=lifecycle,
+        gateway=gateway,
+        journal=journal,
         close_and_confirm=_Close(),
         portfolio_provider=lambda: object(),
         evaluate_pair=lambda incumbent, candidate: _Decision(),
