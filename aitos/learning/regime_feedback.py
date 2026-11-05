@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict, deque
 from collections.abc import Iterable
@@ -31,7 +32,9 @@ class RegimeRewardCalibrator:
         if strategy_id is None or not str(strategy_id).strip():
             return normalized_regime
         strategy = normalize_regime(strategy_id)
-        return f"{strategy[:22]}__{normalized_regime[:22]}"
+        identity = f"{strategy}\\0{normalized_regime}".encode("utf-8")
+        digest = hashlib.sha256(identity).hexdigest()[:10]
+        return f"{strategy[:17]}_{normalized_regime[:17]}_{digest}"
 
     def calibrate(
         self, regime: str, reward_r: float, *, strategy_id: str | None = None
