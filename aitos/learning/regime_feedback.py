@@ -97,6 +97,7 @@ def compare_champion_candidate(
     z_score: float = 1.96,
 ) -> ModelComparison:
     """Conservative independent-sample acceptance gate for shadow evaluation."""
+
     def finite_rewards(values: Iterable[float]) -> list[float]:
         result: list[float] = []
         for value in values:
