@@ -304,6 +304,22 @@ class PositionSwitchCoordinator:
             raise ValueError("incumbent must be an open position")
         if candidate.symbol.upper() == incumbent.symbol.upper():
             raise ValueError("cannot switch into the same instrument")
+        other_incumbents = [
+            trade
+            for trade in self.lifecycle.get_open_trades()
+            if trade.trade_id != incumbent.trade_id
+            and trade.symbol.upper() == incumbent.symbol.upper()
+        ]
+        if other_incumbents:
+            raise RuntimeError(
+                "symbol-scoped capital reservation cannot safely release one of "
+                "multiple same-symbol positions"
+            )
+        if any(
+            trade.symbol.upper() == candidate.symbol.upper()
+            for trade in self.lifecycle.get_open_trades()
+        ):
+            raise RuntimeError("replacement symbol already has an open position")
         if candidate.is_production:
             raise PermissionError(
                 "automatic position switching is disabled for production opportunities"
