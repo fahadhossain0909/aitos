@@ -6,6 +6,7 @@ before retrying, and confirm the venue position is flat before returning a
 receipt. The durable journal prevents a restart from blindly repeating close
 or open side effects.
 """
+
 from __future__ import annotations
 
 import asyncio
