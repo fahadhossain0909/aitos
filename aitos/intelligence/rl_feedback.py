@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from math import isfinite
+from math import isfinite
 from typing import Any, Union
 
 from aitos.core.contracts import (
@@ -106,6 +107,8 @@ class RLFeedbackLoop(AITOSModule):
             return None
 
         reward_r_multiple = pnl / risk_amount
+        if not isfinite(reward_r_multiple):
+            return None
         if not isfinite(reward_r_multiple):
             return None
         symbol = trade_dict.get("symbol", "unknown")
