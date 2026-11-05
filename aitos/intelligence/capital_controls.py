@@ -12,6 +12,7 @@ class CapitalControlConfig:
     """Conservative defaults; calibrate from paper/live telemetry."""
 
     opportunity_max_age_seconds: float = 30.0
+    opportunity_decay_half_life_seconds: float = 15.0
     max_daily_loss_pct: float = 3.0
     max_consecutive_losses: int = 5
     risk_reduction_after_losses: int = 2
@@ -21,6 +22,16 @@ class CapitalControlConfig:
     calibration_min_samples: int = 50
 
     def __post_init__(self) -> None:
+        if (
+            not isfinite(self.opportunity_max_age_seconds)
+            or self.opportunity_max_age_seconds <= 0
+        ):
+            raise ValueError("opportunity_max_age_seconds must be positive")
+        if (
+            not isfinite(self.opportunity_decay_half_life_seconds)
+            or self.opportunity_decay_half_life_seconds <= 0
+        ):
+            raise ValueError("opportunity_decay_half_life_seconds must be positive")
         if self.risk_reduction_after_losses < 1:
             raise ValueError("risk_reduction_after_losses must be >= 1")
         if not isfinite(self.risk_reduction_multiplier) or not (
