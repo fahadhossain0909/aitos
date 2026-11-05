@@ -108,8 +108,6 @@ class VenueExecutionCostRegistry:
             age = (datetime.now(timezone.utc) - observed_at).total_seconds()
         except (TypeError, ValueError) as exc:
             raise ValueError("execution-cost quote has invalid observed_at") from exc
-        if age < -1.0 or age > min(
-            quote.valid_for_seconds, self.max_quote_age_seconds
-        ):
+        if age < -1.0 or age > min(quote.valid_for_seconds, self.max_quote_age_seconds):
             raise ValueError("execution-cost quote is stale or from the future")
         return quote
