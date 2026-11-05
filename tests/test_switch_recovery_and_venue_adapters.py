@@ -66,7 +66,9 @@ async def test_pending_candidate_is_reconstructed_and_resumed_after_restart(tmp_
         return CloseReceipt(True, "exchange-close", 101.0, trade.quantity, True)
 
     coordinator = PositionSwitchCoordinator(
-        lifecycle=lifecycle, gateway=gateway, journal=journal,
+        lifecycle=lifecycle,
+        gateway=gateway,
+        journal=journal,
         close_and_confirm=close_once_then_confirm,
         portfolio_provider=lambda: object(),
         evaluate_pair=lambda incumbent, candidate: _Decision(),
@@ -103,18 +105,23 @@ async def test_recovery_fails_closed_when_candidate_payload_missing(tmp_path):
     lifecycle = _Lifecycle()
     journal = SQLiteSwitchJournal(tmp_path / "missing.sqlite")
     incumbent = lifecycle.open_trades[0]
-    journal.create(SwitchIntent(
+    journal.create(
+        SwitchIntent(
         switch_id="switch:trade-old:missing",
         incumbent_trade_id=incumbent.trade_id,
         incumbent_symbol=incumbent.symbol,
         candidate_opportunity_id="missing",
         candidate_symbol="ETHUSDT",
         state="close_pending",
-        close_client_order_id="stable-close",
-    ))
+            close_client_order_id="stable-close",
+        )
+    )
     coordinator = PositionSwitchCoordinator(
-        lifecycle=lifecycle, gateway=_Gateway(), journal=journal,
-        close_and_confirm=_Close(), portfolio_provider=lambda: object(),
+        lifecycle=lifecycle,
+        gateway=_Gateway(),
+        journal=journal,
+        close_and_confirm=_Close(),
+        portfolio_provider=lambda: object(),
         evaluate_pair=lambda incumbent, candidate: _Decision(),
     )
     report = await PositionSwitchRecoveryWorker(coordinator).recover_pending()
@@ -124,14 +131,18 @@ async def test_recovery_fails_closed_when_candidate_payload_missing(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_partial_close_and_cancelled_close_never_release_reservation_or_open(tmp_path):
+async def test_partial_close_and_cancelled_close_never_release_reservation_or_open(
+    tmp_path,
+):
     from aitos.trading.position_switching import CloseReceipt
     lifecycle = _Lifecycle()
     gateway = _Gateway()
-    calls = iter([
-        CloseReceipt(False, "partial", 100.5, 0.4, False),
-        CloseReceipt(False, "cancelled", 0.0, 0.0, False),
-    ])
+    calls = iter(
+        [
+            CloseReceipt(False, "partial", 100.5, 0.4, False),
+            CloseReceipt(False, "cancelled", 0.0, 0.0, False),
+        ]
+    )
 
     async def failing_close(*_):
         return next(calls)
@@ -139,12 +150,18 @@ async def test_partial_close_and_cancelled_close_never_release_reservation_or_op
     coordinator = PositionSwitchCoordinator(
         lifecycle=lifecycle, gateway=gateway,
         journal=SQLiteSwitchJournal(tmp_path / "partial.sqlite"),
-        close_and_confirm=failing_close, portfolio_provider=lambda: object(),
+        close_and_confirm=failing_close,
+        portfolio_provider=lambda: object(),
         evaluate_pair=lambda incumbent, candidate: _Decision(),
     )
     incumbent = lifecycle.open_trades[0]
     candidate = _candidate()
-    assert await coordinator.switch(incumbent=incumbent, candidate=candidate, decision=_Decision()) is None
+    assert (
+        await coordinator.switch(
+            incumbent=incumbent, candidate=candidate, decision=_Decision()
+        )
+        is None
+    )
     assert await coordinator.switch(incumbent=incumbent, candidate=candidate, decision=_Decision()) is None
     assert gateway.released == []
     assert lifecycle.open_calls == 0
