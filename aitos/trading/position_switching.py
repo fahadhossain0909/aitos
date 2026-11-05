@@ -14,7 +14,7 @@ import hashlib
 import json
 import math
 import sqlite3
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Protocol
 
@@ -45,6 +45,7 @@ class SwitchIntent:
     close_order_id: str | None = None
     close_fill_price: float | None = None
     reason: str | None = None
+    candidate_payload: dict[str, Any] = field(default_factory=dict)
 
 
 class SwitchJournal(Protocol):
@@ -407,6 +408,24 @@ class PositionSwitchCoordinator:
                         candidate_symbol=candidate.symbol,
                         state="close_pending",
                         close_client_order_id=f"aitos-switch-{hashlib.sha256(switch_id.encode()).hexdigest()[:20]}",
+                        candidate_payload={
+                            "symbol": candidate.symbol,
+                            "side": candidate.side.value,
+                            "entry_price": candidate.entry_price,
+                            "stop_loss_price": candidate.stop_loss_price,
+                            "take_profit_levels": list(candidate.take_profit_levels),
+                            "confidence": candidate.confidence,
+                            "strategy_id": candidate.strategy_id,
+                            "rationale": candidate.rationale,
+                            "agent_consensus": dict(candidate.agent_consensus),
+                            "is_production": candidate.is_production,
+                            "approved_by": candidate.approved_by,
+                            "trailing_sl_enabled": candidate.trailing_sl_enabled,
+                            "breakeven_at_r_multiple": candidate.breakeven_at_r_multiple,
+                            "regime": candidate.regime,
+                            "opportunity_id": candidate.opportunity_id,
+                            "detected_at": candidate.detected_at,
+                        },
                     )
                 )
 
