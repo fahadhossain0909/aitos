@@ -438,6 +438,7 @@ async def test_reconcile_filled_tp_does_not_cancel_already_filled_order(
     assert closed.exit_reason == "tp_triggered_exchange"
     assert filled_tp not in executor.cancelled_order_ids
 
+
 @pytest.mark.asyncio
 async def test_intelligent_dynamic_tp_extension_updates_local_checkpoint_only(
     event_bus, risk_engine
