@@ -1,0 +1,292 @@
+"""Durable, fail-closed orchestration for switching one position to another.
+
+The coordinator never assumes that an accepted order is a fill. The injected
+close adapter must use a stable client order id, reconcile an existing order
+before retrying, and confirm the venue position is flat before returning a
+receipt. The durable journal prevents a restart from blindly repeating close
+or open side effects.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import sqlite3
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Any, Awaitable, Callable, Protocol
+
+from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
+
+
+@dataclass(frozen=True, slots=True)
+class CloseReceipt:
+    confirmed: bool
+    order_id: str
+    fill_price: float
+    filled_quantity: float
+    position_flat: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SwitchIntent:
+    switch_id: str
+    incumbent_trade_id: str
+    incumbent_symbol: str
+    candidate_opportunity_id: str
+    candidate_symbol: str
+    state: str
+    close_client_order_id: str
+    close_order_id: str | None = None
+    close_fill_price: float | None = None
+    reason: str | None = None
+
+
+class SwitchJournal(Protocol):
+    def get(self, switch_id: str) -> SwitchIntent | None: ...
+    def create(self, intent: SwitchIntent) -> SwitchIntent: ...
+    def update(self, switch_id: str, **changes: Any) -> SwitchIntent: ...
+
+
+class SQLiteSwitchJournal:
+    """Small durable journal; use a persistent volume, never /tmp in production."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = str(path)
+        Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.path) as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS position_switch_intents (
+                    switch_id TEXT PRIMARY KEY,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )"""
+            )
+
+    @staticmethod
+    def _decode(payload: str) -> SwitchIntent:
+        return SwitchIntent(**json.loads(payload))
+
+    def get(self, switch_id: str) -> SwitchIntent | None:
+        with sqlite3.connect(self.path) as db:
+            row = db.execute(
+                "SELECT payload FROM position_switch_intents WHERE switch_id=?",
+                (switch_id,),
+            ).fetchone()
+        return self._decode(row[0]) if row else None
+
+    def create(self, intent: SwitchIntent) -> SwitchIntent:
+        payload = json.dumps(asdict(intent), sort_keys=True)
+        with sqlite3.connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                "INSERT OR IGNORE INTO position_switch_intents(switch_id,payload) VALUES(?,?)",
+                (intent.switch_id, payload),
+            )
+            row = db.execute(
+                "SELECT payload FROM position_switch_intents WHERE switch_id=?",
+                (intent.switch_id,),
+            ).fetchone()
+        return self._decode(row[0])
+
+    def update(self, switch_id: str, **changes: Any) -> SwitchIntent:
+        with sqlite3.connect(self.path) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT payload FROM position_switch_intents WHERE switch_id=?",
+                (switch_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"unknown switch intent: {switch_id}")
+            payload = json.loads(row[0])
+            payload.update(changes)
+            db.execute(
+                "UPDATE position_switch_intents SET payload=?, updated_at=CURRENT_TIMESTAMP WHERE switch_id=?",
+                (json.dumps(payload, sort_keys=True), switch_id),
+            )
+        return SwitchIntent(**payload)
+
+
+class CloseAndConfirm(Protocol):
+    async def __call__(
+        self, trade: Trade, client_order_id: str, existing_order_id: str | None
+    ) -> CloseReceipt:
+        """Idempotently submit/reconcile reduce-only close and verify flat state."""
+        ...
+
+
+PortfolioProvider = Callable[[], Any | Awaitable[Any]]
+
+
+class PositionSwitchCoordinator:
+    """Close-confirm-release-authorize-open state machine.
+
+    OPEN_SUBMITTING is intentionally a manual-reconciliation boundary after a
+    crash: if the resulting trade cannot be found by opportunity id, this
+    coordinator refuses to submit again because the exchange may have filled
+    the first request while the process was down.
+    """
+
+    def __init__(
+        self,
+        *,
+        lifecycle: Any,
+        gateway: CapitalGateway,
+        journal: SwitchJournal,
+        close_and_confirm: CloseAndConfirm,
+        portfolio_provider: PortfolioProvider,
+    ) -> None:
+        self.lifecycle = lifecycle
+        self.gateway = gateway
+        self.journal = journal
+        self.close_and_confirm = close_and_confirm
+        self.portfolio_provider = portfolio_provider
+        self._locks: dict[str, asyncio.Lock] = {}
+
+    @staticmethod
+    def switch_id(incumbent: Trade, candidate: Opportunity) -> str:
+        return f"switch:{incumbent.trade_id}:{candidate.opportunity_id}"
+
+    async def _portfolio(self) -> Any:
+        result = self.portfolio_provider()
+        return await result if hasattr(result, "__await__") else result
+
+    def _find_candidate_trade(self, opportunity_id: str) -> Trade | None:
+        trades = [
+            *self.lifecycle.get_open_trades(),
+            *self.lifecycle.get_closed_trades(),
+        ]
+        return next(
+            (
+                trade
+                for trade in trades
+                if str(trade.agent_consensus.get("opportunity_id", "")) == opportunity_id
+                or str(trade.agent_consensus.get("decision_id", "")) == opportunity_id
+            ),
+            None,
+        )
+
+    async def switch(
+        self,
+        *,
+        incumbent: Trade,
+        candidate: Opportunity,
+        decision: Any,
+    ) -> Trade | None:
+        if not getattr(decision, "should_switch", False):
+            return None
+        if incumbent.state != TradeLifecycleState.POSITION_OPENED:
+            raise ValueError("incumbent must be an open position")
+        if candidate.symbol.upper() == incumbent.symbol.upper():
+            raise ValueError("cannot switch into the same instrument")
+        if candidate.is_production:
+            raise PermissionError(
+                "automatic position switching is disabled for production opportunities"
+            )
+
+        switch_id = self.switch_id(incumbent, candidate)
+        lock = self._locks.setdefault(switch_id, asyncio.Lock())
+        async with lock:
+            intent = self.journal.get(switch_id)
+            if intent is None:
+                intent = self.journal.create(
+                    SwitchIntent(
+                        switch_id=switch_id,
+                        incumbent_trade_id=incumbent.trade_id,
+                        incumbent_symbol=incumbent.symbol,
+                        candidate_opportunity_id=candidate.opportunity_id,
+                        candidate_symbol=candidate.symbol,
+                        state="close_pending",
+                        close_client_order_id=f"aitos-switch-{abs(hash(switch_id)):x}"[:32],
+                    )
+                )
+
+            if intent.state == "completed":
+                return self._find_candidate_trade(candidate.opportunity_id)
+            if intent.state in {"manual_reconciliation_required", "failed"}:
+                raise RuntimeError(f"switch requires operator reconciliation: {intent.reason}")
+
+            if intent.state == "close_pending":
+                intent = self.journal.update(switch_id, state="close_submitting")
+
+            if intent.state == "close_submitting":
+                receipt = await self.close_and_confirm(
+                    incumbent, intent.close_client_order_id, intent.close_order_id
+                )
+                if not receipt.confirmed or not receipt.position_flat:
+                    self.journal.update(
+                        switch_id,
+                        state="close_pending",
+                        close_order_id=receipt.order_id or intent.close_order_id,
+                        reason="reduce_only_close_not_yet_confirmed_flat",
+                    )
+                    return None
+                if receipt.filled_quantity + 1e-12 < incumbent.quantity:
+                    self.journal.update(
+                        switch_id,
+                        state="close_pending",
+                        close_order_id=receipt.order_id,
+                        reason="close_fill_less_than_remaining_quantity",
+                    )
+                    return None
+                intent = self.journal.update(
+                    switch_id,
+                    state="close_confirmed",
+                    close_order_id=receipt.order_id,
+                    close_fill_price=receipt.fill_price,
+                    reason=None,
+                )
+
+            if intent.state == "close_confirmed":
+                open_trade = next(
+                    (
+                        item
+                        for item in self.lifecycle.get_open_trades()
+                        if item.trade_id == incumbent.trade_id
+                    ),
+                    None,
+                )
+                if open_trade is not None:
+                    await self.lifecycle.close_trade(
+                        incumbent.trade_id,
+                        float(intent.close_fill_price),
+                        f"capital_rebalance:{switch_id}",
+                    )
+                self.gateway.release(incumbent.symbol)
+                intent = self.journal.update(switch_id, state="reservation_released")
+
+            if intent.state == "reservation_released":
+                intent = self.journal.update(switch_id, state="open_submitting")
+
+            if intent.state == "open_submitting":
+                existing = self._find_candidate_trade(candidate.opportunity_id)
+                if existing is not None:
+                    self.journal.update(switch_id, state="completed", reason=None)
+                    return existing
+                # Never blindly retry after a crash in the open window. Venue
+                # order/position reconciliation must first establish no fill.
+                self.journal.update(
+                    switch_id,
+                    state="manual_reconciliation_required",
+                    reason="open_submission_outcome_unknown_after_restart",
+                )
+                raise RuntimeError(
+                    "replacement open outcome is unknown; reconcile exchange order "
+                    "and position before any retry"
+                )
+
+            if intent.state == "open_ready":
+                portfolio = await self._portfolio()
+                trade = await self.lifecycle.submit_opportunity(candidate, portfolio)
+                if trade.state != TradeLifecycleState.POSITION_OPENED:
+                    self.journal.update(
+                        switch_id,
+                        state="failed",
+                        reason=trade.rejection_reason or trade.state.value,
+                    )
+                    return trade
+                self.journal.update(switch_id, state="completed", reason=None)
+                return trade
+
+            return None
