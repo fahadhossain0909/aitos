@@ -112,6 +112,7 @@ async def test_runtime_guard_allows_eligible_trade(event_bus, risk_engine):
     assert trade.agent_consensus["capital_objective"]["eligible"] is True
     assert trade.agent_consensus["capital_objective"]["risk_budget_usd"] <= 100.0
 
+
 def test_gateway_decays_expected_edge_and_confidence_with_opportunity_age(monkeypatch):
     import aitos.intelligence.capital_gateway as gateway_module
 
