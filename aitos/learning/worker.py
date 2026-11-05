@@ -183,7 +183,7 @@ class ContinualLearningWorker:
         sql = """
         SELECT toString(experience_id) AS experience_id,
                ingested_at AS timestamp, source, symbol, decision, outcome, reward,
-               features_json, risk_state_json, metadata_json
+               features_json, risk_state_json, strategy_version, metadata_json
         FROM learning_experiences
         WHERE source = 'backtest'
           AND (ingested_at > {cursor_timestamp:DateTime64(3)}
@@ -325,6 +325,8 @@ class ContinualLearningWorker:
             metadata.get("strategy_id")
             or metadata.get("strategy")
             or features.get("strategy_id")
+            or row.get("strategy_id")
+            or row.get("strategy_version")
         )
         return str(value).strip() if value is not None and str(value).strip() else None
 
