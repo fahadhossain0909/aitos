@@ -5,6 +5,7 @@ provide current taker fees, expected market-impact/slippage, funding over the
 intended holding horizon, and liquidation distance for the actual leverage and
 margin mode. Missing or stale quotes are rejected by the registry.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
