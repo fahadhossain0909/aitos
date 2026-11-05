@@ -39,6 +39,7 @@ from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
     TradeStatePersistence,
+    restored_position_feeds_ready,
 )
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
@@ -203,7 +204,23 @@ async def main() -> None:
     await initialize_all(components)
     # Canonical market streams only become active during initialize_all().
     # Reconcile subscriptions afterwards and verify the effective symbol sets.
-    await trade_state_persistence.resubscribe_restored_positions()
+    position_subscription_result = (
+        await trade_state_persistence.resubscribe_restored_positions()
+    )
+    position_recovery_ready = restored_position_feeds_ready(
+        restored_count, position_subscription_result
+    )
+    if not position_recovery_ready:
+        logger.critical(
+            "paper startup blocked: restored positions lack verified market-data feeds",
+            extra={
+                "aitos_extra": {
+                    "restored_open_trades": restored_count,
+                    "subscription_result": position_subscription_result,
+                    "new_entries_allowed": False,
+                }
+            },
+        )
 
     # Register AI Kernel agents for multi-agent consensus
     market_agent = MarketAgent(event_bus=event_bus)
@@ -306,6 +323,10 @@ async def main() -> None:
         },
     )
     stop_event = asyncio.Event()
+    if not position_recovery_ready:
+        # Enter the managed finally path without running a scan cycle. This
+        # shuts down already-started workers/modules while preventing new risk.
+        stop_event.set()
     install_signal_handlers(stop_event)
     # Construct and start the blocking worker only after all other startup
     # wiring succeeds. This keeps its ClickHouse client and singleton lock

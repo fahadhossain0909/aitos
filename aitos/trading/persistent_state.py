@@ -367,6 +367,37 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
     )
 
 
+def restored_position_feeds_ready(
+    restored_open_count: int, subscription_result: dict[str, Any] | None
+) -> bool:
+    """Fail closed when restored positions are not covered by verified feeds.
+
+    An empty portfolio needs no position-specific subscriptions. Once at least
+    one persisted position is restored, every registered ingestion instance
+    must confirm both trade and kline coverage before a trading loop may start.
+    """
+    if restored_open_count == 0:
+        return True
+    if restored_open_count < 0 or not isinstance(subscription_result, dict):
+        return False
+
+    symbols = subscription_result.get("symbols")
+    try:
+        ingestion_count = int(subscription_result.get("ingestions", 0))
+        verified_count = int(subscription_result.get("verified", 0))
+        failure_count = int(subscription_result.get("failures", 0))
+    except (TypeError, ValueError):
+        return False
+
+    return bool(
+        isinstance(symbols, list)
+        and symbols
+        and ingestion_count > 0
+        and verified_count == ingestion_count
+        and failure_count == 0
+    )
+
+
 class TradeStatePersistence:
     """Persist lifecycle events and restore open positions before streams start."""
 

@@ -35,6 +35,7 @@ from aitos.trading.persistent_state import (
     IdempotentOrderExecutor,
     PersistentLivePortfolioTracker,
     TradeStatePersistence,
+    restored_position_feeds_ready,
 )
 from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
@@ -122,9 +123,26 @@ async def main() -> None:
         components.trade_lifecycle,
         state_store,
     )
-    await trade_state_persistence.restore()
+    restored_count = await trade_state_persistence.restore()
     await trade_state_persistence.initialize()
     await initialize_all(components)
+    position_subscription_result = (
+        await trade_state_persistence.resubscribe_restored_positions()
+    )
+    position_recovery_ready = restored_position_feeds_ready(
+        restored_count, position_subscription_result
+    )
+    if not position_recovery_ready:
+        logger.critical(
+            "live startup blocked: restored positions lack verified market-data feeds",
+            extra={
+                "aitos_extra": {
+                    "restored_open_trades": restored_count,
+                    "subscription_result": position_subscription_result,
+                    "new_entries_allowed": False,
+                }
+            },
+        )
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     await market_os_persistence.initialize({})
     experience_recorder = LearningExperienceRecorder(
@@ -162,6 +180,10 @@ async def main() -> None:
     tracker = PersistentLivePortfolioTracker(order_executor, state_store)
     await tracker.restore()
     stop_event = asyncio.Event()
+    if not position_recovery_ready:
+        # Fail closed through the managed shutdown path; never scan or submit
+        # orders while a restored position is outside verified feed coverage.
+        stop_event.set()
     install_signal_handlers(stop_event)
     try:
         while not stop_event.is_set():
