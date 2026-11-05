@@ -113,6 +113,7 @@ def test_depth_event_metrics_survive_canonical_market_data_bridge():
     event = book_snapshot_event(replace(_seed_book(), depth_event=event_metrics))
     assert event.payload["depth_event"] == event_metrics
 
+
 def test_ofi_confidence_requires_minimum_fresh_timestamped_depth_events():
     now_ms = 2_000_000
     events = [
@@ -182,9 +183,7 @@ def test_timestamped_ofi_aggregates_only_fresh_events():
 
 
 def test_legacy_depth_events_keep_diagnostic_score_but_are_not_live_available():
-    result = depth_event_flow_analysis(
-        [{"ofi_raw": 2.0, "ofi_scale": 100.0}]
-    )
+    result = depth_event_flow_analysis([{"ofi_raw": 2.0, "ofi_scale": 100.0}])
 
     assert result["ofi_score"] == 6.0
     assert result["ofi_available"] is False
