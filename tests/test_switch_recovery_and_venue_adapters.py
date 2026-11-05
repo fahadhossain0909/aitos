@@ -241,3 +241,69 @@ async def test_repeated_recovery_event_does_not_duplicate_completed_switch(tmp_p
     assert second.scanned == 0
     assert lifecycle.close_calls == 1
     assert lifecycle.open_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_position_manager_adapter_exports_thesis_journey_and_stagnation():
+    from types import SimpleNamespace
+
+    from aitos.trading.rebalance_evidence import PositionManagerEvidenceAdapter
+    from tests.test_position_switching import _trade
+
+    class Context:
+        def as_kwargs(self):
+            return {}
+
+    class ContextProvider:
+        def get_context(self, symbol):
+            assert symbol == "BTCUSDT"
+            return Context()
+
+    class PositionManager:
+        def evaluate(self, **kwargs):
+            return SimpleNamespace(
+                thesis_eval=SimpleNamespace(
+                    health=SimpleNamespace(value="DEGRADED"),
+                    consistency_score=0.42,
+                ),
+                journey=SimpleNamespace(health_score=38.0, path_adherence=0.31),
+            )
+
+    trade = _trade()
+    trade.adaptive_exit_observations = 28
+    adapter = PositionManagerEvidenceAdapter(
+        position_manager=PositionManager(),
+        market_context_provider=ContextProvider(),
+        remaining_edge_estimator=lambda action, current_trade: 0.12,
+        exit_fee_bps_provider=lambda current_trade: 2.0,
+        exit_slippage_bps_provider=lambda current_trade: 1.0,
+        stagnation_bar_threshold=35,
+    )
+    snapshot = adapter.evaluate(trade, 99.5)
+    assert snapshot.incumbent.remaining_net_edge_pct == pytest.approx(0.12)
+    assert snapshot.incumbent.thesis_health == "degraded"
+    assert snapshot.incumbent.stagnation_score == pytest.approx(0.8)
+    assert snapshot.thesis_consistency == pytest.approx(0.42)
+    assert snapshot.journey_health == pytest.approx(38.0)
+    assert snapshot.path_adherence == pytest.approx(0.31)
+
+
+@pytest.mark.asyncio
+async def test_binance_funding_sign_is_reversed_for_short_positions():
+    adapter = BinanceUsdMExecutionCostAdapter(
+        taker_fee_rate_provider=lambda **_: {
+            "entry_taker_rate": 0.0005,
+            "exit_taker_rate": 0.0005,
+        },
+        funding_rate_provider=lambda **_: {
+            "rate": 0.0001,
+            "interval_seconds": 8 * 3600,
+        },
+        depth_slippage_bps_provider=lambda **_: {"round_trip_bps": 2.5},
+        liquidation_distance_provider=lambda **_: {"distance_pct": 5.0},
+    )
+    quote = await adapter(
+        symbol="BTCUSDT", side="SHORT", notional_usd=1000,
+        leverage=3, holding_horizon_seconds=8 * 3600,
+    )
+    assert quote.funding_cost_bps == pytest.approx(-1.0)
