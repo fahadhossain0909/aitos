@@ -53,5 +53,5 @@ def test_reward_calibration_is_partitioned_by_strategy_within_regime():
     assert clipped < 1.0
     assert independent == 5.0
     snapshot = calibrator.snapshot()
-    assert "mean_reversion__trending" in snapshot
-    assert "breakout__trending" in snapshot
+    assert any(key.startswith("mean_reversion_trending_") for key in snapshot)
+    assert any(key.startswith("breakout_trending_") for key in snapshot)
