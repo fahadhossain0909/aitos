@@ -47,6 +47,7 @@ async def test_outcome_record_retains_entry_features_and_mae_mfe():
     assert record.price == 100.0
     assert record.reward == 12.5
 
+
 @pytest.mark.asyncio
 async def test_paper_live_outcome_uses_r_multiple_and_records_premature_exit_feedback():
     repository = FakeRepository()
