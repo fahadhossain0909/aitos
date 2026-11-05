@@ -19,7 +19,7 @@ class ExecutionCostQuote:
     venue: str
     symbol: str
     side: str
-    taker_fee_bps: float
+    round_trip_fee_bps: float
     expected_slippage_bps: float
     funding_cost_bps: float
     liquidation_distance_pct: float
@@ -29,7 +29,7 @@ class ExecutionCostQuote:
 
     def __post_init__(self) -> None:
         for name in (
-            "taker_fee_bps",
+            "round_trip_fee_bps",
             "expected_slippage_bps",
             "liquidation_distance_pct",
             "valid_for_seconds",
@@ -44,7 +44,7 @@ class ExecutionCostQuote:
 
     def as_candidate_costs(self) -> dict[str, float]:
         return {
-            "fee_bps": self.taker_fee_bps,
+            "fee_bps": self.round_trip_fee_bps,
             "slippage_bps": self.expected_slippage_bps,
             "funding_bps": self.funding_cost_bps,
             "liquidation_distance_pct": self.liquidation_distance_pct,
