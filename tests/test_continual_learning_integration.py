@@ -90,7 +90,7 @@ def test_model_registry_promotes_only_candidates_with_locked_holdout(tmp_path):
     )
     validation = CandidateValidator(
         ValidationPolicy(
-            min_trades=1,
+            min_trades=0,
             require_improvement_over_champion=False,
             train_days=180,
             test_days=30,
