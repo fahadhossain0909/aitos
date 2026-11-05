@@ -228,3 +228,38 @@ async def test_exchange_failure_does_not_advance_cursor():
 
     assert store.saved == []
     assert store.cursor is None
+
+@pytest.mark.asyncio
+async def test_durable_store_persists_exchange_income_cursor():
+    from types import SimpleNamespace
+
+    from aitos.trading.persistent_state import DurableTradingStateStore
+
+    class FakeClickHouse:
+        def __init__(self):
+            self.commands = []
+            self.inserted = []
+            self.query_rows = [(123456,)]
+
+        async def command(self, query):
+            self.commands.append(query)
+
+        async def query(self, query, parameters=None):
+            self.last_query = (query, parameters)
+            return SimpleNamespace(result_rows=self.query_rows)
+
+        async def insert(self, table, rows, column_names=None):
+            self.inserted.append((table, rows, column_names))
+
+    client = FakeClickHouse()
+    store = DurableTradingStateStore(SimpleNamespace(_client=client))
+
+    await store.initialize()
+    assert any("exchange_income_sync_cursor" in query for query in client.commands)
+    assert await store.load_income_cursor("binance_usdm") == 123456
+
+    await store.save_income_cursor(123999, "binance_usdm")
+    table, rows, columns = client.inserted[-1]
+    assert table == "exchange_income_sync_cursor"
+    assert rows[0][0:2] == ["binance_usdm", 123999]
+    assert columns == ["account", "cursor_time_ms", "updated_at"]
