@@ -72,9 +72,7 @@ def make_trade(
 def make_service(exchange, lifecycle, bus=None, store=None):
     bus = bus or FakeEventBus()
     store = store or FakeStateStore()
-    service = BinanceIncomeReconciliationService(
-        exchange, lifecycle, bus, store
-    )
+    service = BinanceIncomeReconciliationService(exchange, lifecycle, bus, store)
     return service, bus, store
 
 
@@ -122,20 +120,26 @@ def test_commission_allows_small_post_close_exchange_timestamp_lag():
     service, _, _ = make_service(FakeExchange(), FakeLifecycle(closed_trades=[closed]))
     row_time = exit_time + timedelta(seconds=30)
 
-    assert service.resolve_trade_id(
-        {
-            "incomeType": "COMMISSION",
-            "symbol": "BTCUSDT",
-            "time": int(row_time.timestamp() * 1000),
-        }
-    ) == "closed-1"
-    assert service.resolve_trade_id(
-        {
-            "incomeType": "FUNDING_FEE",
-            "symbol": "BTCUSDT",
-            "time": int(row_time.timestamp() * 1000),
-        }
-    ) is None
+    assert (
+        service.resolve_trade_id(
+            {
+                "incomeType": "COMMISSION",
+                "symbol": "BTCUSDT",
+                "time": int(row_time.timestamp() * 1000),
+            }
+        )
+        == "closed-1"
+    )
+    assert (
+        service.resolve_trade_id(
+            {
+                "incomeType": "FUNDING_FEE",
+                "symbol": "BTCUSDT",
+                "time": int(row_time.timestamp() * 1000),
+            }
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio
@@ -228,6 +232,7 @@ async def test_exchange_failure_does_not_advance_cursor():
 
     assert store.saved == []
     assert store.cursor is None
+
 
 @pytest.mark.asyncio
 async def test_durable_store_persists_exchange_income_cursor():
