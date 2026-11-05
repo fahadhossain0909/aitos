@@ -363,3 +363,35 @@ async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
     # the real proof is simply that nothing opened despite a valid trending symbol being available.
 
     await shutdown_all(components)
+@pytest.mark.asyncio
+async def test_restart_unhealthy_auxiliary_module_shuts_down_before_initialize():
+    from types import SimpleNamespace
+
+    from aitos.app import restart_unhealthy_modules
+
+    class RestartableModule:
+        module_id = "test-auxiliary"
+
+        def __init__(self):
+            self.initialized = False
+            self.calls = []
+
+        async def health_check(self):
+            status = "healthy" if self.initialized else "unhealthy"
+            return SimpleNamespace(status=SimpleNamespace(value=status))
+
+        async def shutdown(self):
+            self.calls.append("shutdown")
+            self.initialized = False
+
+        async def initialize(self, config):
+            self.calls.append("initialize")
+            self.initialized = True
+
+    module = RestartableModule()
+
+    restarted = await restart_unhealthy_modules([module])
+
+    assert restarted == ["test-auxiliary"]
+    assert module.calls == ["shutdown", "initialize"]
+    assert module.initialized is True
