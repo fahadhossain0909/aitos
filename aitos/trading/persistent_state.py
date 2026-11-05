@@ -50,6 +50,15 @@ CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
 ORDER BY trade_id
 """
 
+CREATE_EXCHANGE_INCOME_CURSOR = """
+CREATE TABLE IF NOT EXISTS exchange_income_sync_cursor (
+    account LowCardinality(String),
+    cursor_time_ms UInt64,
+    updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY account
+"""
+
 
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
 
@@ -93,10 +102,37 @@ class DurableTradingStateStore:
             await self._repository._client.command(CREATE_RUNTIME_STATE)
             await self._repository._client.command(CREATE_DRAWDOWN_STATE)
             await self._repository._client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
+            await self._repository._client.command(CREATE_EXCHANGE_INCOME_CURSOR)
             logger.info("durable trading state tables ensured")
         except Exception:
             logger.exception("durable trading state table ensure failed")
             raise
+
+    async def load_income_cursor(self, account: str = "binance_usdm") -> int | None:
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT argMax(cursor_time_ms, updated_at)
+            FROM exchange_income_sync_cursor
+            WHERE account = {account:String}
+            """,
+            parameters={"account": account},
+        )
+        if not result.result_rows or result.result_rows[0][0] is None:
+            return None
+        return int(result.result_rows[0][0])
+
+    async def save_income_cursor(
+        self, cursor_time_ms: int, account: str = "binance_usdm"
+    ) -> None:
+        if cursor_time_ms < 0:
+            raise ValueError("income cursor must be non-negative")
+        client = self._client()
+        await client.insert(
+            "exchange_income_sync_cursor",
+            [[account, int(cursor_time_ms), datetime.now(timezone.utc)]],
+            column_names=["account", "cursor_time_ms", "updated_at"],
+        )
 
     async def save_trade(self, trade: Trade) -> None:
         client = self._client()
