@@ -47,12 +47,8 @@ def test_reward_calibration_is_partitioned_by_strategy_within_regime():
     for reward in (0.2, 0.3, 0.1):
         calibrator.calibrate("trending", reward, strategy_id="mean_reversion")
 
-    clipped = calibrator.calibrate(
-        "trending", 20.0, strategy_id="mean_reversion"
-    )
-    independent = calibrator.calibrate(
-        "trending", 20.0, strategy_id="breakout"
-    )
+    clipped = calibrator.calibrate("trending", 20.0, strategy_id="mean_reversion")
+    independent = calibrator.calibrate("trending", 20.0, strategy_id="breakout")
 
     assert clipped < 1.0
     assert independent == 5.0
