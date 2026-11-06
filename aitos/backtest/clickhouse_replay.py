@@ -174,23 +174,24 @@ class ClickHouseReplayLoader:
                     }
                 )
             )
-        for row in books:
-            bids = tuple(
-                tuple(map(float, level)) for level in json.loads(row["bid_levels"])
-            )
-            asks = tuple(
-                tuple(map(float, level)) for level in json.loads(row["ask_levels"])
-            )
-            events.append(
-                OrderBookSnapshot(
-                    symbol=str(row["symbol"]),
-                    bids=bids,
-                    asks=asks,
-                    last_update_id=int(row["last_update_id"]),
-                    timestamp=row["time"],
-                    depth_event=depth_by_update.get(int(row["last_update_id"])),
+        if not replayed_depth:
+            for row in books:
+                bids = tuple(
+                    tuple(map(float, level)) for level in json.loads(row["bid_levels"])
                 )
-            )
+                asks = tuple(
+                    tuple(map(float, level)) for level in json.loads(row["ask_levels"])
+                )
+                events.append(
+                    OrderBookSnapshot(
+                        symbol=str(row["symbol"]),
+                        bids=bids,
+                        asks=asks,
+                        last_update_id=int(row["last_update_id"]),
+                        timestamp=row["time"],
+                        depth_event=depth_by_update.get(int(row["last_update_id"])),
+                    )
+                )
         events.extend(replayed_depth)
         events.sort(key=lambda event: event.timestamp)
         funding_events = tuple(
