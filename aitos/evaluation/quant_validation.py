@@ -68,12 +68,19 @@ def validate_observations(
             "fees_usd",
             "funding_usd",
             "counterfactual_net_pnl",
+            "predicted_win_probability",
         ):
             if row.get(key) is not None:
                 value = float(row[key])
                 if not isfinite(value):
                     raise ValueError(f"row {index}: {key} must be finite")
                 row[key] = value
+                if key == "predicted_win_probability" and not 0.0 <= value <= 1.0:
+                    raise ValueError(
+                        f"row {index}: predicted_win_probability must be within [0, 1]"
+                    )
+        if "realized_win" in row:
+            row["realized_win"] = bool(row["realized_win"])
         row["regime"] = str(row.get("regime") or "unknown")
         row["rejected_opportunity"] = bool(row.get("rejected_opportunity", False))
         validated.append(row)
@@ -209,6 +216,59 @@ def expectancy_confidence_interval(
     }
 
 
+def probability_calibration(
+    rows: Iterable[Mapping[str, Any]], bins: int = 10
+) -> dict[str, Any]:
+    """Brier/log-loss and reliability bins for supplied point-in-time forecasts."""
+    if bins < 2 or bins > 100:
+        raise ValueError("bins must be between 2 and 100")
+    observations = [
+        row
+        for row in rows
+        if row.get("predicted_win_probability") is not None
+    ]
+    if not observations:
+        return {
+            "samples": 0,
+            "brier_score": None,
+            "log_loss": None,
+            "reliability": [],
+        }
+    import math
+
+    grouped: dict[int, list[tuple[float, float]]] = defaultdict(list)
+    brier = 0.0
+    log_loss = 0.0
+    for row in observations:
+        probability = float(row["predicted_win_probability"])
+        outcome = float(row.get("realized_win", float(row["net_pnl"]) > 0.0))
+        probability = min(1.0 - 1e-12, max(1e-12, probability))
+        brier += (probability - outcome) ** 2
+        log_loss -= outcome * math.log(probability) + (1.0 - outcome) * math.log(
+            1.0 - probability
+        )
+        bucket = min(bins - 1, int(probability * bins))
+        grouped[bucket].append((probability, outcome))
+    reliability = []
+    for bucket, values in sorted(grouped.items()):
+        reliability.append(
+            {
+                "bin": bucket,
+                "samples": len(values),
+                "mean_predicted_probability": sum(p for p, _ in values)
+                / len(values),
+                "observed_win_rate": sum(y for _, y in values) / len(values),
+            }
+        )
+    count = len(observations)
+    return {
+        "samples": count,
+        "brier_score": brier / count,
+        "log_loss": log_loss / count,
+        "reliability": reliability,
+    }
+
+
 def rejected_opportunity_counterfactual(
     rows: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
@@ -249,6 +309,7 @@ def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             "by_regime": _regime_metrics(items),
             "research_diagnostics": _research_diagnostics(items),
             "expectancy_confidence_interval": expectancy_confidence_interval(items),
+            "probability_calibration": probability_calibration(items),
             "rejected_opportunity_counterfactual": rejected_opportunity_counterfactual(items),
             "trade_count": len(items),
             "date_range": {
@@ -298,6 +359,7 @@ def evaluate_fold_results(
                 "by_regime": _regime_metrics(test),
                 "research_diagnostics": _research_diagnostics(test),
                 "expectancy_confidence_interval": expectancy_confidence_interval(test),
+                "probability_calibration": probability_calibration(test),
                 "test_trade_count": len(test),
             }
         )
