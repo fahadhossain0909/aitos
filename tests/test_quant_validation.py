@@ -206,3 +206,19 @@ def test_closed_trade_ere_forecasts_settle_into_oos_calibration_rows():
     assert rows[0]["side"] == "LONG"
     report = expected_remaining_edge_calibration(rows)
     assert report["mean_absolute_error_pct"] == pytest.approx(0.1)
+
+
+
+def test_execution_cost_sensitivity_preserves_funding_rebates():
+    result = execution_cost_sensitivity(
+        [
+            {
+                "gross_pnl_usd": 1.0,
+                "fees_usd": 0.1,
+                "slippage_cost_usd": 0.1,
+                "funding_usd": -0.2,
+            }
+        ],
+        cost_multipliers=(1.0,),
+    )
+    assert result["scenarios"][0]["net_pnl_usd"] == pytest.approx(1.0)
