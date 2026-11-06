@@ -46,6 +46,21 @@ def deterministic_indicators(monkeypatch):
     monkeypatch.setattr(
         multi_timeframe.indicators, "momentum_score", lambda candles: 8.0
     )
+    monkeypatch.setattr(
+        multi_timeframe,
+        "_candle_evidence",
+        lambda candles: {
+            "structure": 8.0,
+            "order_flow": 8.0,
+            "momentum": 8.0,
+            "liquidity": 7.0,
+            "location": 8.0,
+            "participation": 6.0,
+            "relative_volume": 1.4,
+            "lower_sweep_reclaim": 1.0,
+            "upper_sweep_reclaim": 0.0,
+        },
+    )
 
 
 @pytest.mark.asyncio
@@ -79,3 +94,34 @@ async def test_all_stale_timeframes_fail_closed(deterministic_indicators):
     )
     assert not result.accepted
     assert set(result.diagnostics["stale_timeframes"]) == set(REQUIRED_TIMEFRAMES)
+
+
+
+def test_candle_evidence_derives_liquidity_location_and_participation(monkeypatch):
+    class Candle:
+        def __init__(self, close, high, low, volume, open_price=None):
+            self.close = close
+            self.high = high
+            self.low = low
+            self.open = close if open_price is None else open_price
+            self.volume = volume
+
+    candles = [
+        Candle(100.0, 101.0, 99.0, 100.0)
+        for _ in range(40)
+    ]
+    candles[-1] = Candle(100.8, 101.0, 98.0, 200.0, open_price=99.0)
+    monkeypatch.setattr(
+        multi_timeframe.indicators,
+        "analyze_market_structure",
+        lambda bars: SimpleNamespace(structure_score=8.0),
+    )
+    monkeypatch.setattr(multi_timeframe.indicators, "momentum_score", lambda bars: 7.0)
+    monkeypatch.setattr(multi_timeframe.indicators, "cvd_trend_score", lambda bars: 6.0)
+    result = multi_timeframe._candle_evidence(candles)
+    assert result["structure"] == 8.0
+    assert result["momentum"] == 7.0
+    assert result["order_flow"] == 6.0
+    assert result["participation"] > 5.0
+    assert result["location"] > 5.0
+    assert 0.0 <= result["liquidity"] <= 10.0
