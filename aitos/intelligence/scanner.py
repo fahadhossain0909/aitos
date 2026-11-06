@@ -714,6 +714,7 @@ class OpportunityScanner(AITOSModule):
                     allow_neutral=self._tuning.scanner.htf_allow_neutral,
                     neutral_min_score=self._tuning.scanner.htf_neutral_min_ltf_score,
                     countertrend_min_score=self._tuning.scanner.htf_countertrend_min_ltf_score,
+                    alignment_balance_threshold=self._tuning.scanner.htf_alignment_balance_threshold,
                 )
                 htf_diagnostics = dict(mtf_result.diagnostics)
                 htf_available = bool(mtf_result.diagnostics["available_timeframes"])
