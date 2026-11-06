@@ -51,3 +51,44 @@ def test_probability_calibrator_waits_for_minimum_samples_then_uses_empirical_ra
     calibrator.observe(0.2, True)
     assert calibrator.samples == 4
     assert calibrator.calibrate(0.2) == pytest.approx(0.25)
+
+
+
+def test_probability_calibrator_persists_and_deduplicates_trade_outcomes(tmp_path):
+    path = tmp_path / "calibration.sqlite3"
+    config = CapitalControlConfig(calibration_min_samples=2)
+    first = ProbabilityCalibrator(config, path=path)
+    assert first.observe(0.2, True, observation_id="trade-1") is True
+    assert first.observe(0.2, True, observation_id="trade-1") is False
+    first.close()
+
+    restarted = ProbabilityCalibrator(config, path=path)
+    assert restarted.samples == 1
+    assert restarted.calibrate(0.2) == pytest.approx(0.2)
+    assert restarted.observe(0.2, False, observation_id="trade-1") is False
+    assert restarted.observe(0.2, False, observation_id="trade-2") is True
+    assert restarted.samples == 2
+    assert restarted.calibrate(0.2) == pytest.approx(0.5)
+    restarted.close()
+
+
+def test_probability_calibrator_deduplicates_across_instances(tmp_path):
+    path = tmp_path / "shared-calibration.sqlite3"
+    config = CapitalControlConfig(calibration_min_samples=1)
+    first = ProbabilityCalibrator(config, path=path)
+    second = ProbabilityCalibrator(config, path=path)
+    try:
+        assert first.observe(0.7, True, observation_id="same-trade") is True
+        assert second.observe(0.7, True, observation_id="same-trade") is False
+        assert second.observe(0.7, False, observation_id="another-trade") is True
+        assert first.samples == 1
+        # A fresh reader sees the committed, globally deduplicated total.
+        first.close()
+        second.close()
+        reader = ProbabilityCalibrator(config, path=path)
+        assert reader.samples == 2
+        assert reader.calibrate(0.7) == pytest.approx(0.5)
+        reader.close()
+    finally:
+        first.close()
+        second.close()
