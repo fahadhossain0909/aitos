@@ -242,9 +242,13 @@ async def replay_depth_flow(
         )
     cutoff_ms = int(dataset.end.timestamp() * 1000)
     state.trade_depth_matcher.advance_watermark(cutoff_ms)
+    replay_window_ms = max(
+        1500, int((dataset.end - dataset.start).total_seconds() * 1000)
+    )
     return depth_event_flow_analysis(
         list(state.depth_event_history),
         now_ms=cutoff_ms,
+        max_age_ms=replay_window_ms,
         min_fresh_events=min_fresh_events,
     )
 
