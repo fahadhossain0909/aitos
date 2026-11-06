@@ -524,6 +524,12 @@ class TradeLifecycle(AITOSModule):
             raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
         if trade.state != TradeLifecycleState.POSITION_OPENED:
             return trade
+        capital_gateway = getattr(self, "_aitos_capital_gateway", None)
+        if capital_gateway is not None and not capital_gateway.renew(trade.symbol):
+            logger.error(
+                "open-position capital reservation lease could not be renewed",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
 
         # Record every valid market observation before evaluating exits so
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
@@ -1097,6 +1103,14 @@ class TradeLifecycle(AITOSModule):
                     continue
         self._closed_trades.append(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
+        if gateway is not None:
+            try:
+                gateway.release(trade.symbol)
+            except Exception:
+                logger.exception(
+                    "capital reservation release failed after position close",
+                    extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                )
         capital_objective = trade.agent_consensus.get("capital_objective", {})
         if not isinstance(capital_objective, dict):
             capital_objective = {}
