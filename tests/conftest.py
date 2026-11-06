@@ -22,6 +22,17 @@ from pathlib import Path
 _TEST_MODEL_ROOT = Path(tempfile.mkdtemp(prefix="aitos-models-"))
 os.environ["MODEL_DATA_DIR"] = str(_TEST_MODEL_ROOT)
 
+
+@pytest.fixture(autouse=True)
+def isolate_model_data_dir_per_test(tmp_path, monkeypatch):
+    """Keep durable runtime ledgers isolated between independent test cases.
+
+    Multi-process durability is tested explicitly with a shared tmp_path inside
+    each test; unrelated lifecycle tests must not inherit another test's open
+    position reservations or calibration observations.
+    """
+    monkeypatch.setenv("MODEL_DATA_DIR", str(tmp_path / "model-data"))
+
 import pytest
 import pytest_asyncio
 from fakeredis import aioredis as fake_aioredis
