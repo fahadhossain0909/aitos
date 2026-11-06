@@ -246,7 +246,7 @@ async def test_closed_trade_updates_probability_calibration_once(event_bus, risk
 
 @pytest.mark.asyncio
 async def test_late_fee_adjustment_revises_closed_trade_calibration(
-    event_bus, risk_engine
+    event_bus, risk_engine, tmp_path
 ):
     install_capital_guard()
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
@@ -254,8 +254,14 @@ async def test_late_fee_adjustment_revises_closed_trade_calibration(
     trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
     assert trade.state == TradeLifecycleState.POSITION_OPENED
     gateway = lifecycle._aitos_capital_gateway
-    calibrator = gateway.calibrator
-    calibrator.config = CapitalControlConfig(calibration_min_samples=1)
+    from aitos.intelligence.capital_controls import ProbabilityCalibrator
+
+    gateway.calibrator.close()
+    calibrator = ProbabilityCalibrator(
+        CapitalControlConfig(calibration_min_samples=1),
+        path=tmp_path / "late-settlement-calibration.sqlite3",
+    )
+    gateway.calibrator = calibrator
 
     closed = await lifecycle.close_trade(trade.trade_id, 101.0, "test_close")
     predicted = closed.agent_consensus["capital_objective"][
@@ -271,7 +277,7 @@ async def test_late_fee_adjustment_revises_closed_trade_calibration(
         amount_usd=100_000.0,
     )
     assert closed.pnl < 0.0
-    assert calibrator.samples >= 1
+    assert calibrator.samples == 1
     assert calibrator.calibrate(predicted) == pytest.approx(1.0)
 
     await lifecycle.apply_cost_adjustment(
