@@ -1661,6 +1661,7 @@ class OpportunityScanner(AITOSModule):
                 details={
                     "composite_score": candidate.composite_score,
                     "minimum_score": self._min_score_threshold,
+                    "trace_id": candidate.trace_id,
                 },
             )
         ranked = self._ranking_hysteresis.rank(eligible, n)
@@ -1680,6 +1681,7 @@ class OpportunityScanner(AITOSModule):
                 details={
                     "composite_score": candidate.composite_score,
                     "top_n": n,
+                    "trace_id": candidate.trace_id,
                 },
             )
         return ranked
