@@ -59,6 +59,7 @@ def deterministic_indicators(monkeypatch):
             "relative_volume": 1.4,
             "lower_sweep_reclaim": 1.0,
             "upper_sweep_reclaim": 0.0,
+            "displacement_atr": 1.2,
         },
     )
 
