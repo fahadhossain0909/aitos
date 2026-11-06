@@ -305,6 +305,51 @@ def rejected_opportunity_counterfactual(
     }
 
 
+def remaining_edge_observations_from_trades(
+    trades: Iterable[Any],
+) -> tuple[dict[str, Any], ...]:
+    """Extract settled, timestamped ERE forecasts from closed trade records."""
+    observations = []
+    for trade in trades:
+        payload = trade.to_dict() if hasattr(trade, "to_dict") else dict(trade)
+        if str(payload.get("state", "")).upper() != "POSITION_CLOSED":
+            continue
+        consensus = payload.get("agent_consensus") or {}
+        if not isinstance(consensus, Mapping):
+            continue
+        side = str(payload.get("side", "")).upper()
+        if side not in {"LONG", "SHORT"}:
+            continue
+        outcome_at = payload.get("exit_time")
+        if not outcome_at:
+            continue
+        for item in consensus.get("ere_observations", ()):
+            if not isinstance(item, Mapping):
+                continue
+            if item.get("realized_remaining_edge_pct") is None:
+                continue
+            realized = float(item["realized_remaining_edge_pct"])
+            predicted = float(item["predicted_remaining_edge_pct"])
+            decision_at = item.get("decision_at")
+            if not decision_at:
+                continue
+            observations.append(
+                {
+                    "decision_at": decision_at,
+                    "outcome_at": outcome_at,
+                    "side": side,
+                    "net_pnl": realized,
+                    "predicted_remaining_edge_pct": predicted,
+                    "realized_remaining_edge_pct": realized,
+                    "variant": str(payload.get("strategy_id") or "baseline"),
+                    "trade_id": str(payload.get("trade_id") or ""),
+                }
+            )
+    return tuple(
+        sorted(observations, key=lambda row: _time(row["decision_at"]))
+    )
+
+
 def expected_remaining_edge_calibration(
     rows: Iterable[Mapping[str, Any]],
 ) -> dict[str, Any]:
