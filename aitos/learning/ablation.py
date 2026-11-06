@@ -28,7 +28,9 @@ class AblationReport:
     deltas_vs_baseline: Mapping[str, Mapping[str, float | None]]
 
 
-def _directional_metrics(result: BacktestResult) -> tuple[dict[str, dict[str, float | None]], int]:
+def _directional_metrics(
+    result: BacktestResult,
+) -> tuple[dict[str, dict[str, float | None]], int]:
     groups: dict[str, list[dict[str, float]]] = {"LONG": [], "SHORT": []}
     unclassified = 0
     for trade in result.trades:
@@ -87,12 +89,18 @@ class HistoricalAblationRunner:
             raise ValueError(f"baseline strategy '{baseline}' is missing")
         if len(strategies) < 2:
             raise ValueError("ablation requires a baseline and at least one variant")
-        if any(not name or not callable(strategy) for name, strategy in strategies.items()):
-            raise ValueError("each ablation variant must have a name and callable strategy")
+        if any(
+            not name or not callable(strategy) for name, strategy in strategies.items()
+        ):
+            raise ValueError(
+                "each ablation variant must have a name and callable strategy"
+            )
 
         start = ordered[0].timestamp
         last = ordered[-1].timestamp
-        end = last.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        end = last.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+            days=1
+        )
         results: dict[str, AblationVariantResult] = {}
         for name, strategy in strategies.items():
             replay = BacktestEngine(
