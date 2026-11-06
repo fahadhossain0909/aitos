@@ -33,6 +33,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Exit Intelligence Engine already calculates probability-weighted path continuation value. This branch exposes its expected gain, expected loss, upside/downside probability mass and transaction-cost components in the decision feature record.
 - Exit decisions continue to require structural/thesis invalidation or confirmed exit pressure; a static TP touch is not treated as a reason to abandon a still-valid runner thesis.
 - Closed-trade probability calibration is persisted in SQLite and updated from the lifecycle close path using the stable trade ID as an idempotency key. A retried close/outcome event cannot increment the same observation twice; SQLite write transactions serialize competing writers, and readers refresh aggregates so separate processes observe committed outcomes.
+- Late fee/funding adjustments on already-closed trades revise the original calibration label atomically rather than adding a second sample. Duplicate adjustment IDs remain idempotent.
 - The path-based exit expectation is a heuristic probability-weighted estimate, not a calibrated statistical forecast. Calibration against out-of-sample realized path outcomes remains a research requirement.
 
 ## P4 — Capital allocation and correlation-aware portfolio risk
@@ -65,7 +66,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - LONG/SHORT directional diagnostics and adaptive HTF behavior.
 - EV entry/cost checks already present in capital runtime tests.
 - Probability-weighted exit expectancy diagnostics and mirrored SHORT path handling.
-- Persistent calibration across restart, duplicate trade-outcome delivery, cross-instance deduplication and lifecycle close integration.
+- Persistent calibration across restart, duplicate trade-outcome delivery, cross-instance deduplication, lifecycle close integration and late-settlement label correction.
 - Role-specific evidence weighting in the adaptive six-timeframe consensus.
 - Correlation-aware incremental portfolio risk.
 - SQLite cross-instance capital reservation, absolute budget enforcement and duplicate-symbol contention.
