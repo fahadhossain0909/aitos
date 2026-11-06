@@ -20,7 +20,9 @@ class LifecycleReplayEvent:
 
     def __post_init__(self) -> None:
         if not self.event_id or not self.event_type or self.timestamp_ms < 0:
-            raise ValueError("event id, event type and non-negative timestamp are required")
+            raise ValueError(
+                "event id, event type and non-negative timestamp are required"
+            )
         if not isinstance(self.payload, dict):
             raise ValueError("lifecycle replay payload must be an object")
 
