@@ -1071,9 +1071,7 @@ class TradeLifecycle(AITOSModule):
         capital_objective = trade.agent_consensus.get("capital_objective", {})
         if not isinstance(capital_objective, dict):
             capital_objective = {}
-        predicted_loss_probability = capital_objective.get(
-            "predicted_loss_probability"
-        )
+        predicted_loss_probability = capital_objective.get("predicted_loss_probability")
         if gateway is not None and predicted_loss_probability is not None:
             try:
                 await asyncio.to_thread(
