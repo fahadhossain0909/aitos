@@ -96,7 +96,6 @@ async def test_all_stale_timeframes_fail_closed(deterministic_indicators):
     assert set(result.diagnostics["stale_timeframes"]) == set(REQUIRED_TIMEFRAMES)
 
 
-
 def test_candle_evidence_derives_liquidity_location_and_participation(monkeypatch):
     class Candle:
         def __init__(self, close, high, low, volume, open_price=None):
