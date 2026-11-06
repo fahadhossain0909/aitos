@@ -314,6 +314,9 @@ class TradeLifecycle(AITOSModule):
             close_calibrator = getattr(gateway.calibrator, "close", None)
             if callable(close_calibrator):
                 close_calibrator()
+            close_reservation = getattr(gateway.reservation, "close", None)
+            if callable(close_reservation):
+                close_reservation()
         logger.info(
             "TradeLifecycle shut down",
             extra={"aitos_extra": {"open_trades": len(self._open_trades)}},
