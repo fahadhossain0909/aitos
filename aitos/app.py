@@ -537,8 +537,7 @@ class PaperPortfolioTracker:
                 leverage=t.leverage,
                 side=t.side.value,
                 risk_amount_usd=abs(
-                    t.entry_price
-                    - float(t.emergency_sl_price or t.sl_price)
+                    t.entry_price - float(t.emergency_sl_price or t.sl_price)
                 )
                 * t.quantity,
             )
