@@ -93,3 +93,22 @@ def test_probability_calibrator_deduplicates_across_instances(tmp_path):
     finally:
         first.close()
         second.close()
+
+
+
+def test_probability_calibrator_revises_late_settled_outcome(tmp_path):
+    path = tmp_path / "revised-calibration.sqlite3"
+    config = CapitalControlConfig(calibration_min_samples=1)
+    calibrator = ProbabilityCalibrator(config, path=path)
+    assert calibrator.observe(0.2, False, observation_id="trade-late-fee")
+    assert calibrator.calibrate(0.2) == pytest.approx(0.0)
+    assert calibrator.revise(0.2, True, observation_id="trade-late-fee")
+    assert calibrator.samples == 1
+    assert calibrator.calibrate(0.2) == pytest.approx(1.0)
+    assert calibrator.revise(0.2, True, observation_id="trade-late-fee") is False
+    assert calibrator.samples == 1
+    calibrator.close()
+    restarted = ProbabilityCalibrator(config, path=path)
+    assert restarted.samples == 1
+    assert restarted.calibrate(0.2) == pytest.approx(1.0)
+    restarted.close()
