@@ -150,26 +150,24 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     if hasattr(portfolio, "consecutive_losses"):
         consensus["consecutive_losses"] = int(portfolio.consecutive_losses)
     positions = getattr(portfolio, "positions", ()) or ()
-    if "position_risk_pct" not in consensus:
-        equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
-        consensus["position_risk_pct"] = {}
-        for position in positions:
-            symbol = str(getattr(position, "symbol", "") or "")
-            if not symbol:
-                continue
-            risk_amount = getattr(position, "risk_amount_usd", None)
-            if risk_amount is None or float(risk_amount) <= 0 or equity <= 0:
-                risk_pct = 1.0
-            else:
-                risk_pct = float(risk_amount) / equity * 100.0
-            consensus["position_risk_pct"][symbol] = risk_pct
-    if "position_sides" not in consensus:
-        consensus["position_sides"] = {
-            str(getattr(position, "symbol", "")): str(position.side).upper()
-            for position in positions
-            if getattr(position, "symbol", "")
-            and getattr(position, "side", None) is not None
-        }
+    equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
+    # The live portfolio is authoritative; scanner-supplied exposure snapshots
+    # may be stale by the time the final lifecycle gate is reached.
+    consensus["position_risk_pct"] = {}
+    consensus["position_sides"] = {}
+    for position in positions:
+        symbol = str(getattr(position, "symbol", "") or "")
+        if not symbol:
+            continue
+        risk_amount = getattr(position, "risk_amount_usd", None)
+        if risk_amount is None or float(risk_amount) <= 0 or equity <= 0:
+            risk_pct = 1.0
+        else:
+            risk_pct = float(risk_amount) / equity * 100.0
+        consensus["position_risk_pct"][symbol] = risk_pct
+        side = getattr(position, "side", None)
+        if side is not None:
+            consensus["position_sides"][symbol] = str(side).upper()
     if "correlations" not in consensus and positions:
         pairwise = getattr(portfolio, "max_pairwise_correlation", None)
         if pairwise is not None and float(pairwise) > 0.0:
