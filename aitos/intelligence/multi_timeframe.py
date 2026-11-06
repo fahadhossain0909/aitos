@@ -33,6 +33,14 @@ TIMEFRAME_ROLES = {
     "5m": ("trigger", "sweep_reclaim", "relative_participation"),
     "1m": ("micro_price_context", "micro_momentum", "wick_rejection"),
 }
+TIMEFRAME_WEIGHTS = {
+    "1d": 1.5,
+    "4h": 1.4,
+    "1h": 1.2,
+    "15m": 1.0,
+    "5m": 0.8,
+    "1m": 0.6,
+}
 
 
 def _clamp_score(value: float) -> float:
@@ -181,6 +189,7 @@ def _frame_context(
             "stale": stale,
             "reason": reason,
         },
+        weight=TIMEFRAME_WEIGHTS[timeframe],
     )
     return TimeframeSnapshot(timeframe, tuple(candles), context, cache_diagnostics, age)
 
@@ -297,6 +306,7 @@ class MultiTimeframeAnalyzer:
             "timeframe_roles": {
                 tf: list(roles) for tf, roles in TIMEFRAME_ROLES.items()
             },
+            "timeframe_weights": dict(TIMEFRAME_WEIGHTS),
         }
         return MultiTimeframeResult(
             decision.accepted, decision, snapshots, evidence, diagnostics
