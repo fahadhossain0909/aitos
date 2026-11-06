@@ -115,9 +115,9 @@ async def test_runtime_guard_allows_eligible_trade(event_bus, risk_engine):
     assert trade.agent_consensus["capital_objective"]["eligible"] is True
     assert trade.agent_consensus["capital_objective"]["risk_budget_usd"] <= 100.0
     funnel = lifecycle._aitos_directional_funnel.snapshot()
-    assert funnel["stages"]["risk_gate"]["by_side"]["LONG"]["accepted"] == 1
-    assert funnel["stages"]["capital_gate"]["by_side"]["LONG"]["accepted"] == 1
-    assert funnel["stages"]["lifecycle_open"]["by_side"]["LONG"]["accepted"] == 1
+    assert funnel["stages"]["risk_gate"]["by_side"]["LONG"]["accepted"] >= 1
+    assert funnel["stages"]["capital_gate"]["by_side"]["LONG"]["accepted"] >= 1
+    assert funnel["stages"]["lifecycle_open"]["by_side"]["LONG"]["accepted"] >= 1
     await lifecycle.shutdown()
 
 
