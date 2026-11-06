@@ -1578,6 +1578,19 @@ class OpportunityScanner(AITOSModule):
                             timeout=cfg.timeout_seconds,
                         )
                     except Exception as exc:
+                        for rejected_side in ("LONG", "SHORT"):
+                            await self._record_funnel(
+                                symbol=symbol,
+                                side=rejected_side,
+                                stage="scanner_batch",
+                                accepted=False,
+                                reason=(
+                                    "scan_timeout"
+                                    if isinstance(exc, asyncio.TimeoutError)
+                                    else "scan_exception"
+                                ),
+                                details={"error": str(exc)[:500]},
+                            )
                         logger.error(
                             "candidate batch scan failed",
                             extra={
