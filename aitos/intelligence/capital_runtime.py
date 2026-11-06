@@ -299,6 +299,7 @@ def install_capital_guard() -> None:
             )
             setattr(self, _GATEWAY_ATTR, gateway)
 
+        reservation_held = False
         try:
             execution_costs = dict(
                 protected_opportunity.agent_consensus.get("execution_costs") or {}
@@ -416,11 +417,13 @@ def install_capital_guard() -> None:
                 reason="position_opened" if accepted else rejection_reason,
                 details={"trade_id": trade.trade_id},
             )
+            reservation_held = accepted
             return trade
         finally:
-            # Reservations cover only the authorization/execution window. The
-            # live portfolio is the source of truth after lifecycle processing.
-            gateway.release(opportunity.symbol)
+            # An open position retains its capital lease until close. Failed
+            # authorization/submission releases the temporary reservation.
+            if not reservation_held:
+                gateway.release(opportunity.symbol)
 
     TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
 
