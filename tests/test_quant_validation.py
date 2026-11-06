@@ -178,7 +178,6 @@ def test_execution_cost_sensitivity_stresses_fees_slippage_and_funding():
     assert execution_cost_sensitivity([{"gross_pnl_usd": 1.0}])["available"] is False
 
 
-
 def test_closed_trade_ere_forecasts_settle_into_oos_calibration_rows():
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     closed = {
@@ -206,7 +205,6 @@ def test_closed_trade_ere_forecasts_settle_into_oos_calibration_rows():
     assert rows[0]["side"] == "LONG"
     report = expected_remaining_edge_calibration(rows)
     assert report["mean_absolute_error_pct"] == pytest.approx(0.1)
-
 
 
 def test_execution_cost_sensitivity_preserves_funding_rebates():
