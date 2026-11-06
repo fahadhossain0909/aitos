@@ -153,7 +153,6 @@ def test_candidate_hedge_can_reduce_existing_correlated_risk_above_limit():
     assert decision.correlated_risk_pct < 2.5
 
 
-
 def test_sqlite_reservations_prevent_cross_instance_oversubscription(tmp_path):
     path = tmp_path / "reservations.sqlite3"
     first = CapitalReservation(path=path)
@@ -194,7 +193,6 @@ def test_sqlite_reservations_prevent_cross_instance_oversubscription(tmp_path):
         second.close()
 
 
-
 def test_adverse_funding_cost_is_a_hard_veto():
     decision = PortfolioProtection().evaluate(
         symbol="BTCUSDT",
@@ -233,7 +231,6 @@ def test_leveraged_position_requires_a_safe_liquidation_buffer():
     assert not too_close.allowed
     assert too_close.reason == "liquidation_buffer_below_minimum"
     assert safe.allowed
-
 
 
 def _reserve_from_child_process(path, symbol, result_queue):
