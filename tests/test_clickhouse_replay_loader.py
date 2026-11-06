@@ -13,6 +13,22 @@ from aitos.models.market import OrderBookSnapshot, TradeTick
 
 class _Repository:
     async def _query(self, sql, parameters):
+        if "FROM market_ohlcv" in sql:
+            return [
+                {
+                    "time": parameters["candle_start"],
+                    "timeframe": "1h",
+                    "open": 99.0,
+                    "high": 101.0,
+                    "low": 98.0,
+                    "close": 100.0,
+                    "volume": 10.0,
+                    "quote_volume": 1000.0,
+                    "trades_count": 5,
+                    "taker_buy_volume": 6.0,
+                    "taker_buy_quote_volume": 600.0,
+                }
+            ]
         if "FROM trade_ticks" in sql:
             return [
                 {
@@ -68,6 +84,11 @@ async def test_clickhouse_loader_builds_bounded_point_in_time_dataset():
     assert dataset.events[0].depth_event["ofi_raw"] == 2.0
     assert isinstance(dataset.events[1], TradeTick)
     assert dataset.funding_events[0]["funding_rate"] == pytest.approx(0.0001)
+    assert dataset.candles[0]["timeframe"] == "1h"
+    assert len(dataset.candles_as_of(start + timedelta(seconds=3))) == 1
+    assert len(
+        dataset.candles_as_of(dataset.candles[0]["open_time"] + timedelta(minutes=30))
+    ) == 0
     assert dataset.provenance["depth_event_history_available"] is True
     assert (
         dataset.provenance["lookahead_policy"] == "strict [start,end), no forward fill"
@@ -145,6 +166,8 @@ class _RawDepthRepository:
                     "last_update_id": 100,
                 }
             ]
+        if "FROM market_ohlcv" in sql:
+            return []
         if "FROM trade_ticks" in sql or (
             "FROM order_book_snapshots" in sql and "time >=" in sql
         ):
