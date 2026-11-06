@@ -166,18 +166,14 @@ class AITOSHistoricalRunner:
             bids = [
                 BookLevel(
                     float(level.price if hasattr(level, "price") else level[0]),
-                    float(
-                        level.quantity if hasattr(level, "quantity") else level[1]
-                    ),
+                    float(level.quantity if hasattr(level, "quantity") else level[1]),
                 )
                 for level in book.bids
             ]
             asks = [
                 BookLevel(
                     float(level.price if hasattr(level, "price") else level[0]),
-                    float(
-                        level.quantity if hasattr(level, "quantity") else level[1]
-                    ),
+                    float(level.quantity if hasattr(level, "quantity") else level[1]),
                 )
                 for level in book.asks
             ]
