@@ -74,7 +74,7 @@ def test_missing_htf_is_not_silently_treated_as_neutral():
 
 def test_expectancy_accounts_for_fees_and_slippage_in_r():
     result = estimate_net_expectancy(0.55, 2.0, costs_r=0.1)
-    assert result.net_expectancy_r == 0.55
+    assert result.net_expectancy_r == pytest.approx(0.55)
 
 
 def test_portfolio_exposure_is_directional_and_gross_aware():
