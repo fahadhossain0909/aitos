@@ -215,6 +215,11 @@ class TradeDepthMatcher:
         while len(self._reductions) > self.max_pending_items:
             self._reductions.popleft()
 
+    def advance_watermark(self, timestamp_ms: int) -> None:
+        """Finalize pending depth attribution through an exchange-time cutoff."""
+        self._watermark_ms = max(self._watermark_ms, int(timestamp_ms))
+        self._reconcile()
+
     def reset(self) -> None:
         self._trades.clear()
         self._reductions.clear()
