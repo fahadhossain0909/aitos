@@ -34,12 +34,12 @@ TIMEFRAME_ROLES = {
     "1m": ("micro_price_context", "micro_momentum", "wick_rejection"),
 }
 TIMEFRAME_WEIGHTS = {
-    "1d": 1.5,
-    "4h": 1.4,
-    "1h": 1.2,
-    "15m": 1.0,
-    "5m": 0.8,
-    "1m": 0.6,
+    "1d": 2.0,
+    "4h": 1.8,
+    "1h": 1.0,
+    "15m": 0.8,
+    "5m": 0.6,
+    "1m": 0.4,
 }
 
 
