@@ -78,3 +78,23 @@ def test_capital_gateway_uses_point_in_time_return_history():
     assert snapshot.correlation("BBB", "AAA", 0.75) == snapshot.correlation(
         "AAA", "BBB", 0.75
     )
+
+
+
+def test_correlation_uses_identical_return_intervals_when_one_asset_has_gaps():
+    start = datetime(2026, 2, 1, tzinfo=timezone.utc)
+    rows = []
+    left = right = 100.0
+    for index in range(35):
+        stamp = start + timedelta(days=index)
+        move = 0.01 if index % 2 else -0.01
+        left *= 1.0 + move
+        right *= 1.0 + move
+        rows.append({"symbol": "AAA", "timestamp": stamp, "price": left})
+        if index not in {8, 17, 26}:
+            rows.append({"symbol": "BBB", "timestamp": stamp, "price": right})
+    estimator = PointInTimeCorrelationEstimator(
+        min_observations=10, shrinkage_observations=20
+    )
+    result = estimator.estimate(rows, as_of=start + timedelta(days=34))
+    assert result[("AAA", "BBB")] == pytest.approx(1.0)
