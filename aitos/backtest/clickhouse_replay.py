@@ -8,6 +8,8 @@ from typing import Any
 import json
 
 from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
+from aitos.intelligence.liquidity import depth_event_flow_analysis
+from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
@@ -222,10 +224,36 @@ class ClickHouseReplayLoader:
         )
 
 
+async def replay_depth_flow(
+    dataset: ClickHouseReplayDataset, *, min_fresh_events: int = 3
+) -> dict[str, Any]:
+    """Replay loaded L2 snapshots and trades through the live OFI consumer."""
+    cache = LiveScannerCache(None, [dataset.symbol])
+    for event in dataset.events:
+        if isinstance(event, TradeTick):
+            await cache.accept_live_trade(event)
+        elif isinstance(event, OrderBookSnapshot) and event.depth_event:
+            await cache.accept_live_order_book(event)
+    state = cache.snapshot(dataset.symbol)
+    if state is None:
+        return depth_event_flow_analysis(
+            [], now_ms=int(dataset.end.timestamp() * 1000),
+            min_fresh_events=min_fresh_events,
+        )
+    cutoff_ms = int(dataset.end.timestamp() * 1000)
+    state.trade_depth_matcher.advance_watermark(cutoff_ms)
+    return depth_event_flow_analysis(
+        list(state.depth_event_history),
+        now_ms=cutoff_ms,
+        min_fresh_events=min_fresh_events,
+    )
+
+
 @dataclass(frozen=True)
 class ClickHouseAblationRun:
     dataset: ClickHouseReplayDataset
     report: Any
+    depth_flow: dict[str, Any]
 
 
 class ClickHouseHistoricalAblationRunner:
@@ -255,6 +283,12 @@ class ClickHouseHistoricalAblationRunner:
                 "point-in-time OFI ablation requires raw sequenced depth deltas "
                 "and a pre-window order-book bootstrap snapshot"
             )
+        depth_flow = await replay_depth_flow(dataset)
+        if not depth_flow.get("ofi_available"):
+            raise ValueError(
+                "point-in-time OFI replay is unavailable: "
+                + str(depth_flow.get("reason", "insufficient fresh depth events"))
+            )
 
         def mark_price(event: Any) -> float:
             if isinstance(event, TradeTick):
@@ -269,4 +303,8 @@ class ClickHouseHistoricalAblationRunner:
             mark_price,
             baseline=baseline,
         )
-        return ClickHouseAblationRun(dataset=dataset, report=report)
+        return ClickHouseAblationRun(
+            dataset=dataset,
+            report=report,
+            depth_flow=depth_flow,
+        )
