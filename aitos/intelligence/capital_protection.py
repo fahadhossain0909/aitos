@@ -526,6 +526,27 @@ class CapitalReservation:
             self._conn.commit()
             return Reservation(symbol.upper(), float(row[0]), float(row[1]))
 
+    def renew(self, symbol: str) -> bool:
+        """Extend an open-position reservation lease owned by this runtime."""
+        with self._lock:
+            if self._conn is None:
+                return symbol in self._reservations
+            cursor = self._conn.execute(
+                """
+                UPDATE capital_reservations
+                SET expires_at = ?
+                WHERE symbol = ? AND owner_id = ? AND expires_at > ?
+                """,
+                (
+                    time.time() + self._lease_seconds,
+                    symbol.upper(),
+                    self._owner_id,
+                    time.time(),
+                ),
+            )
+            self._conn.commit()
+            return cursor.rowcount == 1
+
     def get(self, symbol: str) -> Reservation | None:
         with self._lock:
             if self._conn is None:
