@@ -27,7 +27,9 @@ class ValidationPolicy:
 
     def __post_init__(self) -> None:
         if self.train_days < 1 or self.test_days < 1 or self.holdout_days < 1:
-            raise ValueError("walk-forward train/test/holdout durations must be positive")
+            raise ValueError(
+                "walk-forward train/test/holdout durations must be positive"
+            )
         if self.min_trades < 0 or self.min_positive_windows < 1:
             raise ValueError("validation sample thresholds are invalid")
         if not 0 <= self.max_drawdown <= 1:
@@ -69,8 +71,7 @@ class CandidateValidator:
             raise ValueError("candidate validation requires historical events")
         if self.policy.require_walk_forward:
             if any(
-                event.timestamp.tzinfo is None
-                or event.timestamp.utcoffset() is None
+                event.timestamp.tzinfo is None or event.timestamp.utcoffset() is None
                 for event in events
             ):
                 raise ValueError("walk-forward event timestamps must be timezone-aware")
@@ -83,9 +84,9 @@ class CandidateValidator:
                 event for event in events if event.timestamp < holdout_start
             ]
             if not development_events:
-                candidate = BacktestEngine(
-                    initial_cash, fee_rate, slippage_bps
-                ).run([], candidate_strategy, mark_price)
+                candidate = BacktestEngine(initial_cash, fee_rate, slippage_bps).run(
+                    [], candidate_strategy, mark_price
+                )
                 return ValidationResult(
                     False,
                     "no development events remain before the locked holdout",
@@ -103,18 +104,24 @@ class CandidateValidator:
         metrics = candidate.metrics
         if metrics.total_return < self.policy.min_total_return:
             return ValidationResult(
-                False, "candidate return below minimum on development data",
-                candidate, champion_result,
+                False,
+                "candidate return below minimum on development data",
+                candidate,
+                champion_result,
             )
         if metrics.max_drawdown > self.policy.max_drawdown:
             return ValidationResult(
-                False, "candidate drawdown above maximum on development data",
-                candidate, champion_result,
+                False,
+                "candidate drawdown above maximum on development data",
+                candidate,
+                champion_result,
             )
         if metrics.sharpe < self.policy.min_sharpe:
             return ValidationResult(
-                False, "candidate Sharpe below minimum on development data",
-                candidate, champion_result,
+                False,
+                "candidate Sharpe below minimum on development data",
+                candidate,
+                champion_result,
             )
         if metrics.trades < self.policy.min_trades:
             return ValidationResult(

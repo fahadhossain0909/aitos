@@ -270,7 +270,12 @@ async def test_hold_decision_is_persisted_as_management_attribution(
     await event_bus.publish(
         Event(
             topic="decision.exit",
-            payload={"trade_id": "trade-hold-1", "symbol": "BTCUSDT", "action": "HOLD", "reason": "thesis_intact"},
+            payload={
+                "trade_id": "trade-hold-1",
+                "symbol": "BTCUSDT",
+                "action": "HOLD",
+                "reason": "thesis_intact",
+            },
             source_module="test",
         )
     )
@@ -299,8 +304,12 @@ async def test_rejection_emits_final_decision_outcome(event_bus, risk_engine):
     await event_bus.publish(
         Event(
             topic="trade.rejected",
-            payload={"trade_id": "trade-rejected-1", "symbol": "BTCUSDT", "side": "LONG",
-                     "rejection_reason": "order submission failed: timeout"},
+            payload={
+                "trade_id": "trade-rejected-1",
+                "symbol": "BTCUSDT",
+                "side": "LONG",
+                "rejection_reason": "order submission failed: timeout",
+            },
             source_module="test",
         )
     )
