@@ -299,7 +299,11 @@ class OpportunityScanner(AITOSModule):
         self._amt_ib_minutes = amt_ib_minutes
         self._initialized = False
         self._last_oi = {}
-        self._htf_cache = HigherTimeframeCandleCache()
+        self._htf_cache = HigherTimeframeCandleCache(
+            max_requests=self._tuning.scanner.htf_request_budget_per_minute,
+            window_seconds=60.0,
+            max_concurrent_fetches=self._tuning.scanner.htf_fetch_concurrency,
+        )
         self._last_order_books = {}
         self._last_order_book_sources = {}
         self._last_amt_profile = {}
@@ -696,6 +700,7 @@ class OpportunityScanner(AITOSModule):
                 mtf = MultiTimeframeAnalyzer(
                     self._htf_cache,
                     lookback=self._tuning.scanner.htf_lookback,
+                    freshness_grace_seconds=self._tuning.scanner.htf_freshness_grace_seconds,
                 )
                 mtf_result = await mtf.analyze(
                     self._exchange,
