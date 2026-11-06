@@ -1601,7 +1601,44 @@ class OpportunityScanner(AITOSModule):
         eligible = [
             c for c in candidates if c.composite_score >= self._min_score_threshold
         ]
-        return self._ranking_hysteresis.rank(eligible, n)
+        eligible_symbols = {candidate.symbol for candidate in eligible}
+        for candidate in candidates:
+            accepted = candidate.symbol in eligible_symbols
+            await self._record_funnel(
+                symbol=candidate.symbol,
+                side=candidate.direction.value,
+                stage="scanner_score_gate",
+                accepted=accepted,
+                reason=(
+                    "score_above_threshold"
+                    if accepted
+                    else "composite_score_below_threshold"
+                ),
+                details={
+                    "composite_score": candidate.composite_score,
+                    "minimum_score": self._min_score_threshold,
+                },
+            )
+        ranked = self._ranking_hysteresis.rank(eligible, n)
+        ranked_symbols = {candidate.symbol for candidate in ranked}
+        for candidate in eligible:
+            accepted = candidate.symbol in ranked_symbols
+            await self._record_funnel(
+                symbol=candidate.symbol,
+                side=candidate.direction.value,
+                stage="ranking_gate",
+                accepted=accepted,
+                reason=(
+                    "selected_for_execution_queue"
+                    if accepted
+                    else "excluded_by_top_n_or_hysteresis"
+                ),
+                details={
+                    "composite_score": candidate.composite_score,
+                    "top_n": n,
+                },
+            )
+        return ranked
 
     async def decide_with_kernel(self, candidate: ScanCandidate, kernel: Any) -> Any:
         from aitos.kernel.ai_kernel import DecisionContext
