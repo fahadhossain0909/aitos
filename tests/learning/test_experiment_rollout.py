@@ -215,7 +215,6 @@ def test_experiment_plan_rejects_unsupported_or_weak_diagnostics():
 def test_healthy_canary_requires_approval_then_supports_rollback(tmp_path):
     registry = FakeRegistry()
     routed = []
-    coordinator = RolloutCoordinator(
         str(tmp_path / "rollouts.json"),
         registry,
         canary_router=lambda *args: routed.append(("canary", *args)),
@@ -255,6 +254,7 @@ def test_healthy_canary_requires_approval_then_supports_rollback(tmp_path):
 
 def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(tmp_path):
     coordinator = RolloutCoordinator(
+    coordinator = RolloutCoordinator(
         str(tmp_path / "rollouts.json"),
         FakeRegistry(),
         canary_router=lambda *args: None,
@@ -267,13 +267,17 @@ def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(tmp_path
     )
     coordinator.stage("strategy", "v2", _validation())
     coordinator.start_canary("strategy", "v2")
+    coordinator.start_canary("strategy", "v2")
     row = coordinator.observe_canary(
         "strategy",
         "v2",
-        sample_count=1,
         error_rate=0.5,
         drawdown=0.5,
         return_delta=-0.5,
     )
     assert row["state"] == "rollback_pending"
+    assert (
+        coordinator.get("strategy", "v2")["rollback_reason"]
+        == "canary_rollback_route_failed"
+    )
     assert coordinator.get("strategy", "v2")["rollback_reason"] == "canary_rollback_route_failed"

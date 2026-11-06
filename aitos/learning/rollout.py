@@ -42,6 +42,8 @@ class RolloutCoordinator:
         self.path, self.registry = path, registry
         self.canary_router = canary_router
         self.production_router = production_router
+        self.canary_router = canary_router
+        self.production_router = production_router
         self.rollback_router = rollback_router
         self.minimum_canary_samples = minimum_canary_samples
         self.minimum_canary_observations = minimum_canary_observations
@@ -221,6 +223,9 @@ class RolloutCoordinator:
                         "reason": row["rollback_reason"],
                     }
                 )
+                        "reason": row["rollback_reason"],
+                    }
+                )
             elif (
                 sample_count >= self.minimum_canary_samples
                 and len(row["canary_observations"]) >= self.minimum_canary_observations
@@ -229,10 +234,6 @@ class RolloutCoordinator:
                 row["audit"].append({"state": "canary_healthy", "at": now})
             self._write(rows)
             return dict(row)
-            ):
-                row["state"] = "canary_healthy"
-                row["audit"].append({"state": "canary_healthy", "at": now})
-            self._write(rows)
             return dict(row)
 
     def promote(
