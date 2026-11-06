@@ -102,18 +102,25 @@ async def test_two_consecutive_losses_halves_next_risk_budget(event_bus, risk_en
     normal = await normal_lifecycle.submit_opportunity(
         make_opportunity(), make_portfolio(consecutive_losses=0)
     )
-    reduced = await reduced_lifecycle.submit_opportunity(
-        make_opportunity(symbol="ETHUSDT"),
-        make_portfolio(consecutive_losses=2),
-    )
     assert normal.state == TradeLifecycleState.POSITION_OPENED
-    assert reduced.state == TradeLifecycleState.POSITION_OPENED
     normal_risk = normal.agent_consensus["capital_objective"]["risk_budget_usd"]
+    await normal_lifecycle.close_trade(
+        normal.trade_id, normal.entry_price, "release_test_reservation"
+    )
+    reduced = await reduced_lifecycle.submit_opportunity(
+        make_opportunity(), make_portfolio(consecutive_losses=2)
+    )
+    assert reduced.state == TradeLifecycleState.POSITION_OPENED
     reduced_risk = reduced.agent_consensus["capital_objective"]["risk_budget_usd"]
     assert reduced_risk == pytest.approx(normal_risk * 0.5)
     # The approved budget must cap the real sized position, not just metadata.
     assert reduced.risk_amount_usd <= reduced_risk + 1e-8
     assert reduced.risk_amount_usd == pytest.approx(normal.risk_amount_usd * 0.5)
+    await reduced_lifecycle.close_trade(
+        reduced.trade_id, reduced.entry_price, "release_test_reservation"
+    )
+    await normal_lifecycle.shutdown()
+    await reduced_lifecycle.shutdown()
 
 
 @pytest.mark.asyncio
