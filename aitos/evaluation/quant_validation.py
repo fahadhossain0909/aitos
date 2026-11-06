@@ -335,9 +335,7 @@ def expected_remaining_edge_calibration(
         pairs.append((predicted, realized))
     errors = [realized - predicted for predicted, realized in pairs]
     positive_predictions = [
-        (predicted, realized)
-        for predicted, realized in pairs
-        if predicted > 0
+        (predicted, realized) for predicted, realized in pairs if predicted > 0
     ]
     return {
         "samples": len(pairs),
@@ -392,9 +390,7 @@ def execution_cost_sensitivity(
             net_values.append(
                 gross - multiplier * (abs(fees) + abs(slippage) + abs(funding))
             )
-        metrics = walk_forward_metrics(
-            [{"net_pnl": value} for value in net_values]
-        )
+        metrics = walk_forward_metrics([{"net_pnl": value} for value in net_values])
         scenarios.append(
             {
                 "cost_multiplier": multiplier,
