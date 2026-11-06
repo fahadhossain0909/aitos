@@ -132,3 +132,11 @@ def test_probability_calibration_rejects_invalid_forecast_probability():
     rows[0]["predicted_win_probability"] = 1.1
     with pytest.raises(ValueError, match="predicted_win_probability"):
         validate_observations(rows)
+
+
+
+def test_validation_rejects_non_boolean_realized_outcome_labels():
+    rows = observations(2)
+    rows[0]["realized_win"] = "false"
+    with pytest.raises(ValueError, match="realized_win"):
+        validate_observations(rows)
