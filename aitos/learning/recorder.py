@@ -76,6 +76,13 @@ class LearningExperienceRecorder(AITOSModule):
                     group=f"learning-{self._source}",
                 )
             )
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
+                    "journal.management_decision_recorded",
+                    self._on_management_decision,
+                    group=f"learning-{self._source}",
+                )
+            )
         except Exception:
             for subscription in self._subscriptions:
                 subscription.cancel()
