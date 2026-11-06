@@ -66,6 +66,21 @@ class ClickHouseReplayLoader:
             """,
             parameters,
         )
+        depth_rows = await self.repository._query(
+            """
+            SELECT event_time, final_update_id, payload_json
+            FROM depth_events
+            WHERE symbol = {symbol:String}
+              AND event_time >= {start:DateTime64(3, 'UTC')}
+              AND event_time < {end:DateTime64(3, 'UTC')}
+            ORDER BY event_time, final_update_id LIMIT {limit:UInt32}
+            """,
+            parameters,
+        )
+        depth_by_update = {
+            int(row["final_update_id"]): json.loads(row["payload_json"])
+            for row in depth_rows
+        }
         funding = await self.repository._query(
             """
             SELECT time, funding_rate, mark_price FROM funding_rates
@@ -100,6 +115,7 @@ class ClickHouseReplayLoader:
                     asks=asks,
                     last_update_id=int(row["last_update_id"]),
                     timestamp=row["time"],
+                    depth_event=depth_by_update.get(int(row["last_update_id"])),
                 )
             )
         events.sort(key=lambda event: event.timestamp)
@@ -124,6 +140,7 @@ class ClickHouseReplayLoader:
                 "funding_rows": len(funding),
                 "event_rows": len(events),
                 "lookahead_policy": "strict [start,end), no forward fill",
-                "depth_event_history_available": False,
+                "depth_event_rows": len(depth_rows),
+                "depth_event_history_available": bool(depth_rows),
             },
         )
