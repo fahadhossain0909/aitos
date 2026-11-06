@@ -412,6 +412,44 @@ class MarketDataRepository(AITOSModule):
                 ],
             )
 
+    async def save_depth_events(self, events: list[dict[str, Any]]) -> None:
+        """Persist raw sequenced exchange depth deltas for deterministic replay."""
+        self._require_initialized()
+        rows = []
+        for event in events:
+            payload = dict(event.get("payload") or {})
+            final_update_id = payload.get("final_update_id", payload.get("u"))
+            if final_update_id is None:
+                continue
+            first_update_id = payload.get("first_update_id", payload.get("U", 0))
+            previous_update_id = payload.get(
+                "previous_update_id", payload.get("pu", max(0, int(first_update_id) - 1))
+            )
+            event_time = event.get("event_time")
+            if event_time is None:
+                continue
+            rows.append(
+                [
+                    event_time,
+                    str(event["symbol"]).upper(),
+                    int(final_update_id),
+                    int(previous_update_id or 0),
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                ]
+            )
+        if rows:
+            await self._insert_rows(
+                "depth_events",
+                rows,
+                column_names=[
+                    "event_time",
+                    "symbol",
+                    "final_update_id",
+                    "previous_update_id",
+                    "payload_json",
+                ],
+            )
+
     async def save_trade_tick(self, trade: TradeTick) -> None:
         await self.save_trade_ticks([trade])
 
