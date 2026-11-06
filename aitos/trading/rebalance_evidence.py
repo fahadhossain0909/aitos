@@ -7,9 +7,10 @@ No heuristic score is silently treated as a return percentage.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 from aitos.intelligence.capital_rebalancing import IncumbentPosition
 from aitos.models.trade import Trade

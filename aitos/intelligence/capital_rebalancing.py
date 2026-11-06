@@ -11,7 +11,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from math import isfinite
 
-
 _BPS_TO_PCT = 0.01
 
 

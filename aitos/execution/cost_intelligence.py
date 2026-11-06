@@ -8,10 +8,10 @@ margin mode. Missing or stale quotes are rejected by the registry.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
-from typing import Callable
 
 
 @dataclass(frozen=True, slots=True)

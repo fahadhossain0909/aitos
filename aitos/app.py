@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Protocol
+from typing import Any, Protocol
 
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings

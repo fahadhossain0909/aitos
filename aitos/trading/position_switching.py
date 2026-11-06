@@ -14,13 +14,14 @@ import hashlib
 import json
 import math
 import sqlite3
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Protocol
 
-from aitos.intelligence.capital_gateway import CapitalGateway
-from aitos.intelligence.capital_controls import opportunity_age_seconds
 from aitos.execution.order_executor import OrderExecutor, OrderRequest
+from aitos.intelligence.capital_controls import opportunity_age_seconds
+from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 
 

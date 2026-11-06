@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import pytest
 
-from aitos.execution.binance_cost_adapter import BinanceUsdMExecutionCostAdapter
 from aitos.execution.binance_account_cost_providers import (
     BinanceUsdMAccountCostProviders,
 )
+from aitos.execution.binance_cost_adapter import BinanceUsdMExecutionCostAdapter
 
 
 class _FakeBinanceExecutor:

@@ -9,7 +9,8 @@ the *proposed* position; using a current unrelated position would be unsafe.
 from __future__ import annotations
 
 import math
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from aitos.execution.binance_cost_adapter import BinanceUsdMExecutionCostAdapter
 

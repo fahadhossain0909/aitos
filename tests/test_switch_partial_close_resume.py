@@ -8,11 +8,10 @@ from aitos.trading.position_switching import (
     SQLiteSwitchJournal,
 )
 from tests.test_position_switching import (
-    _Close,
+    _candidate,
     _Decision,
     _Gateway,
     _Lifecycle,
-    _candidate,
 )
 
 

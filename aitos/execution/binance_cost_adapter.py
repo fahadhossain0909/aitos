@@ -9,11 +9,11 @@ exchange's actual position/margin liquidation fields.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 from aitos.execution.cost_intelligence import ExecutionCostQuote
-
 
 Provider = Callable[..., Any]
 

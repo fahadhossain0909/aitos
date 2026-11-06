@@ -4,17 +4,17 @@ import pytest
 
 from aitos.execution.binance_cost_adapter import BinanceUsdMExecutionCostAdapter
 from aitos.execution.cost_intelligence import VenueExecutionCostRegistry
+from aitos.trading.position_switching import (
+    PositionSwitchCoordinator,
+    SQLiteSwitchJournal,
+)
 from aitos.trading.switch_recovery import PositionSwitchRecoveryWorker
 from tests.test_position_switching import (
+    _candidate,
     _Close,
     _Decision,
     _Gateway,
     _Lifecycle,
-    _candidate,
-)
-from aitos.trading.position_switching import (
-    PositionSwitchCoordinator,
-    SQLiteSwitchJournal,
 )
 
 
