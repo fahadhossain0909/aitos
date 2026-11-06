@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from aitos.execution.binance_cost_adapter import BinanceUsdMExecutionCostAdapter
 from aitos.execution.binance_account_cost_providers import (
     BinanceUsdMAccountCostProviders,
 )
@@ -67,3 +68,31 @@ async def test_binance_cost_provider_fails_closed_when_depth_is_insufficient():
     )
     with pytest.raises(RuntimeError, match="depth is insufficient"):
         await providers.depth_slippage(symbol="BTCUSDT", side="LONG", notional_usd=1000)
+
+@pytest.mark.asyncio
+async def test_binance_cost_adapter_rejects_invalid_side_and_non_finite_inputs():
+    async def empty_provider(**_):
+        return {}
+
+    adapter = BinanceUsdMExecutionCostAdapter(
+        taker_fee_rate_provider=empty_provider,
+        funding_rate_provider=empty_provider,
+        depth_slippage_bps_provider=empty_provider,
+        liquidation_distance_provider=empty_provider,
+    )
+    with pytest.raises(ValueError, match="side must be LONG or SHORT"):
+        await adapter(
+            symbol="BTCUSDT",
+            side="BUY",
+            notional_usd=1000,
+            leverage=2,
+            holding_horizon_seconds=0,
+        )
+    with pytest.raises(ValueError, match="finite and positive"):
+        await adapter(
+            symbol="BTCUSDT",
+            side="LONG",
+            notional_usd=float("nan"),
+            leverage=2,
+            holding_horizon_seconds=0,
+        )
