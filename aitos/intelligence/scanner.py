@@ -662,6 +662,25 @@ class OpportunityScanner(AITOSModule):
             structure_bias=market_structure.bias,
             structure_event=market_structure.event,
         )
+        from aitos.intelligence.adaptive_mtf import directional_diagnostics
+
+        directional_funnel = directional_diagnostics(
+            structure_direction,
+            flow_score,
+            structure_bias=market_structure.bias,
+        )
+        logger.info(
+            "directional signal funnel",
+            extra={"aitos_extra": {
+                "symbol": symbol,
+                "structure_direction": structure_direction,
+                "structure_bias": market_structure.bias,
+                "cvd_score": round(flow_score, 4),
+                "selected_direction": direction.value if direction else "none",
+                "long": directional_funnel["long"],
+                "short": directional_funnel["short"],
+            }},
+        )
         # Keep the OI baseline fresh even when the HTF gate rejects this entry.
         self._last_oi[symbol] = oi_current
         htf_alignment_score = 5.0
