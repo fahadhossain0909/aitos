@@ -496,11 +496,7 @@ class PositionManager:
                 float(exit_decision.expected_remaining_edge) * 100.0
             ),
             "estimated_cost_pct": (
-                float(
-                    exit_decision.features.get(
-                        "path_transaction_cost_fraction", 0.0
-                    )
-                )
+                float(exit_decision.features.get("path_transaction_cost_fraction", 0.0))
                 * 100.0
             ),
             "action": exit_decision.action.value,
