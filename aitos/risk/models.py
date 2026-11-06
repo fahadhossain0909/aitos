@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from math import isfinite
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -69,8 +70,19 @@ class PositionExposure:
     notional_usd: float
     leverage: float
     sector: str = ""
+    side: str | None = None
+    risk_amount_usd: float | None = None
 
     def __post_init__(self) -> None:
+        if self.side is not None:
+            normalized_side = str(self.side).upper()
+            if normalized_side not in {"LONG", "SHORT"}:
+                raise ValueError("position side must be LONG or SHORT")
+            object.__setattr__(self, "side", normalized_side)
+        if self.risk_amount_usd is not None and (
+            not isfinite(float(self.risk_amount_usd)) or self.risk_amount_usd < 0
+        ):
+            raise ValueError("risk_amount_usd must be finite and non-negative")
         if not self.sector or self.sector == "unclassified":
             from aitos.risk.sector import sector_for_symbol
 
