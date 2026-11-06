@@ -8,7 +8,9 @@ from aioresponses import aioresponses
 
 from aitos.exchange.binance import (
     REST_BASE_URL,
+    TESTNET_REST_BASE_URL,
     WS_MARKET_BASE_URL,
+    WS_MARKET_TESTNET_BASE_URL,
     WS_PUBLIC_BASE_URL,
     BinanceFuturesAdapter,
 )
@@ -301,3 +303,34 @@ async def test_fetch_income_history_signs_request_and_deduplicates_transactions(
                 start_time_ms=1, end_time_ms=300, limit=10
             )
     assert [row["tranId"] for row in result] == [10, 11]
+
+
+@pytest.mark.asyncio
+async def test_testnet_flag_routes_rest_and_ws_to_testnet_endpoints():
+    from tests.test_binance_parsing import SAMPLE_KLINE_WS
+
+    async with BinanceFuturesAdapter(testnet=True) as adapter:
+        with aioresponses() as m:
+            m.get(
+                f"{TESTNET_REST_BASE_URL}/fapi/v1/openInterest?symbol=BTCUSDT",
+                payload=SAMPLE_OPEN_INTEREST,
+            )
+            oi = await adapter.fetch_open_interest("BTCUSDT")
+        assert oi.open_interest == 45123.456
+
+    envelope = {"stream": "btcusdt@kline_1m", "data": SAMPLE_KLINE_WS}
+    fake_ws = FakeWebSocket([envelope])
+    async with BinanceFuturesAdapter(
+        ws_connector=fake_ws, testnet=True
+    ) as testnet_ws_adapter:
+        received = []
+
+        async def consume():
+            async for kline in testnet_ws_adapter.stream_klines(["BTCUSDT"], "1m"):
+                received.append(kline)
+                if len(received) >= 1:
+                    return
+
+        await asyncio.wait_for(consume(), timeout=5)
+        assert len(received) == 1
+        assert fake_ws.url == (f"{WS_MARKET_TESTNET_BASE_URL}?streams=btcusdt@kline_1m")
