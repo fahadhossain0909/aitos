@@ -128,3 +128,33 @@ def test_lifecycle_replay_normalizes_raw_binance_user_stream_events(tmp_path):
     assert events[1].event_type == "ACCOUNT_UPDATE"
     assert events[1].symbol == ""
     assert events[0].event_id != events[1].event_id
+
+@pytest.mark.asyncio
+async def test_lifecycle_replay_preserves_capture_order_for_equal_exchange_timestamps(
+    tmp_path,
+):
+    path = tmp_path / "same-timestamp.jsonl"
+    rows = [
+        {
+            "event_id": "z-order",
+            "timestamp_ms": 100,
+            "event_type": "ORDER_TRADE_UPDATE",
+            "symbol": "BTCUSDT",
+        },
+        {
+            "event_id": "a-account",
+            "timestamp_ms": 100,
+            "event_type": "ACCOUNT_UPDATE",
+            "symbol": "BTCUSDT",
+        },
+    ]
+    path.write_text(
+        "\n".join(json.dumps(row) for row in rows),
+        encoding="utf-8",
+    )
+    observed = []
+    replay = LifecycleEventReplay(lambda event: observed.append(event.event_id))
+
+    await replay.replay(LifecycleEventReplay.read_jsonl(path))
+
+    assert observed == ["z-order", "a-account"]
