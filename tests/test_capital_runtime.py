@@ -167,11 +167,11 @@ def test_portfolio_consensus_uses_actual_stop_risk_and_position_side():
         ),
         max_pairwise_correlation=0.85,
     )
-    opportunity = make_opportunity()
+    opportunity = make_opportunity(symbol="ETHUSDT")
     result = _portfolio_consensus(portfolio, opportunity)
     assert result["position_risk_pct"]["BTCUSDT"] == pytest.approx(1.5)
     assert result["position_sides"]["BTCUSDT"] == "SHORT"
-    assert result["correlations"]["BTCUSDT:BTCUSDT"] == pytest.approx(0.85)
+    assert result["correlations"]["BTCUSDT:ETHUSDT"] == pytest.approx(0.85)
 
 
 def test_portfolio_consensus_keeps_explicit_side_and_risk_overrides():
