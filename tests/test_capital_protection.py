@@ -12,6 +12,7 @@ def snapshot(**kwargs):
         equity_peak_usd=kwargs.get("peak", 10_000.0),
         position_risk_pct=kwargs.get("positions", {}),
         correlations=kwargs.get("correlations", {}),
+        position_sides=kwargs.get("sides"),
     )
 
 
@@ -86,3 +87,49 @@ def test_reservation_prevents_oversubscription_and_is_idempotent():
     assert ledger.release("BTCUSDT") == first
     assert ledger.release("BTCUSDT") is None
     assert ledger.reserved_capital_usd == 0.0
+
+
+
+def test_opposite_direction_position_receives_correlation_hedge_credit():
+    decision = PortfolioProtection().evaluate(
+        symbol="ETHUSDT",
+        side="SHORT",
+        requested_risk_pct=1.0,
+        snapshot=snapshot(
+            positions={"BTCUSDT": 2.0},
+            correlations={("BTCUSDT", "ETHUSDT"): 0.95},
+            sides={"BTCUSDT": "LONG"},
+        ),
+    )
+    assert decision.allowed
+    assert decision.allowed_risk_pct == 1.0
+    assert decision.correlated_risk_pct < 1.5
+
+
+def test_negative_asset_correlation_increases_opposite_side_pnl_risk():
+    decision = PortfolioProtection().evaluate(
+        symbol="ETHUSDT",
+        side="SHORT",
+        requested_risk_pct=1.0,
+        snapshot=snapshot(
+            positions={"BTCUSDT": 2.0},
+            correlations={("BTCUSDT", "ETHUSDT"): -0.95},
+            sides={"BTCUSDT": "LONG"},
+        ),
+    )
+    assert decision.allowed
+    assert decision.allowed_risk_pct < 0.60
+
+
+def test_missing_existing_side_metadata_never_grants_hedge_credit():
+    decision = PortfolioProtection().evaluate(
+        symbol="ETHUSDT",
+        side="SHORT",
+        requested_risk_pct=1.0,
+        snapshot=snapshot(
+            positions={"BTCUSDT": 2.0},
+            correlations={("BTCUSDT", "ETHUSDT"): 0.95},
+        ),
+    )
+    assert decision.allowed
+    assert decision.allowed_risk_pct < 0.60
