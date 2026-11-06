@@ -304,6 +304,10 @@ class TradeLifecycle(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        funnel_store = getattr(self, "_aitos_directional_funnel", None)
+        if funnel_store is not None:
+            funnel_store.close()
+            delattr(self, "_aitos_directional_funnel")
         logger.info(
             "TradeLifecycle shut down",
             extra={"aitos_extra": {"open_trades": len(self._open_trades)}},
