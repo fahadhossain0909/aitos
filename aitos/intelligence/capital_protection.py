@@ -27,6 +27,9 @@ class ProtectionConfig:
     drawdown_mult_3: float = 0.25
     volatility_mult_high: float = 0.50
     volatility_mult_extreme: float = 0.25
+    max_adverse_funding_pct: float = 0.20
+    minimum_liquidation_buffer_pct: float = 1.0
+    require_liquidation_buffer_for_leverage: bool = True
 
     def __post_init__(self) -> None:
         for name in (
@@ -42,6 +45,8 @@ class ProtectionConfig:
             "drawdown_mult_3",
             "volatility_mult_high",
             "volatility_mult_extreme",
+            "max_adverse_funding_pct",
+            "minimum_liquidation_buffer_pct",
         ):
             value = float(getattr(self, name))
             if not isfinite(value) or value < 0:
@@ -176,7 +181,54 @@ class PortfolioProtection:
         side: str = "LONG",
         regime: str | None = None,
         volatility_score: float | None = None,
+        adverse_funding_pct: float = 0.0,
+        liquidation_buffer_pct: float | None = None,
+        leverage: float = 1.0,
     ) -> ProtectionDecision:
+        if (
+            not isfinite(float(adverse_funding_pct))
+            or adverse_funding_pct < 0
+            or not isfinite(float(leverage))
+            or leverage <= 0
+            or (
+                liquidation_buffer_pct is not None
+                and (
+                    not isfinite(float(liquidation_buffer_pct))
+                    or liquidation_buffer_pct < 0
+                )
+            )
+        ):
+            return ProtectionDecision(
+                False, 0.0, requested_risk_pct, 0.0,
+                snapshot.total_risk_pct, snapshot.drawdown_pct,
+                "invalid_funding_or_liquidation_input",
+            )
+        if adverse_funding_pct > self.config.max_adverse_funding_pct:
+            return ProtectionDecision(
+                False, 0.0, requested_risk_pct, 0.0,
+                snapshot.total_risk_pct, snapshot.drawdown_pct,
+                "adverse_funding_cost_exceeds_limit",
+            )
+        if (
+            leverage > 1.0
+            and self.config.require_liquidation_buffer_for_leverage
+            and liquidation_buffer_pct is None
+        ):
+            return ProtectionDecision(
+                False, 0.0, requested_risk_pct, 0.0,
+                snapshot.total_risk_pct, snapshot.drawdown_pct,
+                "liquidation_buffer_unavailable",
+            )
+        if (
+            leverage > 1.0
+            and liquidation_buffer_pct is not None
+            and liquidation_buffer_pct < self.config.minimum_liquidation_buffer_pct
+        ):
+            return ProtectionDecision(
+                False, 0.0, requested_risk_pct, 0.0,
+                snapshot.total_risk_pct, snapshot.drawdown_pct,
+                "liquidation_buffer_below_minimum",
+            )
         if requested_risk_pct <= 0 or not isfinite(requested_risk_pct):
             return ProtectionDecision(
                 False,
