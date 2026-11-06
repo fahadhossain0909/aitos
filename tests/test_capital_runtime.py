@@ -4,9 +4,12 @@ import pytest
 
 from aitos.intelligence.capital_controls import CapitalControlConfig
 from aitos.intelligence.capital_gateway import CapitalGateway
-from aitos.intelligence.capital_runtime import install_capital_guard
+from aitos.intelligence.capital_runtime import (
+    _portfolio_consensus,
+    install_capital_guard,
+)
 from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
-from aitos.risk.models import PortfolioState
+from aitos.risk.models import PortfolioState, PositionExposure
 from aitos.trading.lifecycle import TradeLifecycle
 
 
@@ -148,3 +151,47 @@ def test_gateway_preserves_negative_funding_cost_as_credit():
     )
     assert estimate.funding_bps == -8.0
     assert estimate.total_cost_pct < 0.0
+
+
+
+def test_portfolio_consensus_uses_actual_stop_risk_and_position_side():
+    portfolio = make_portfolio(
+        positions=(
+            PositionExposure(
+                symbol="BTCUSDT",
+                notional_usd=5_000.0,
+                leverage=5.0,
+                side="SHORT",
+                risk_amount_usd=150.0,
+            ),
+        ),
+        max_pairwise_correlation=0.85,
+    )
+    opportunity = make_opportunity()
+    result = _portfolio_consensus(portfolio, opportunity)
+    assert result["position_risk_pct"]["BTCUSDT"] == pytest.approx(1.5)
+    assert result["position_sides"]["BTCUSDT"] == "SHORT"
+    assert result["correlations"]["BTCUSDT:BTCUSDT"] == pytest.approx(0.85)
+
+
+def test_portfolio_consensus_keeps_explicit_side_and_risk_overrides():
+    portfolio = make_portfolio(
+        positions=(
+            PositionExposure(
+                symbol="BTCUSDT",
+                notional_usd=5_000.0,
+                leverage=5.0,
+                side="LONG",
+                risk_amount_usd=100.0,
+            ),
+        )
+    )
+    opportunity = make_opportunity(
+        agent_consensus={
+            "position_risk_pct": {"BTCUSDT": 2.0},
+            "position_sides": {"BTCUSDT": "SHORT"},
+        }
+    )
+    result = _portfolio_consensus(portfolio, opportunity)
+    assert result["position_risk_pct"]["BTCUSDT"] == 2.0
+    assert result["position_sides"]["BTCUSDT"] == "SHORT"
