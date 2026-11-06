@@ -39,9 +39,11 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 
 - The lifecycle capital guard calls the shared CapitalGateway before sizing/execution.
 - The gateway applies expected-edge ranking, per-trade/portfolio risk budgets, drawdown and volatility multipliers, circuit breakers, capital reservations and portfolio protection.
+- Lifecycle-created gateways use a durable SQLite reservation ledger. BEGIN IMMEDIATE transactions enforce absolute equity and portfolio-risk budgets across processes, prevent duplicate same-symbol reservations by competing owners, and use bounded leases so crashed workers do not leave permanent reservations. In-memory reservations remain available for isolated tests and callers that do not configure persistence.
 - Existing portfolio correlation data is consumed by PortfolioProtection. Unknown correlations use a conservative configured fallback; known correlations increase correlated-risk usage and constrain incremental risk.
 - The gateway's approved risk budget is passed into the trade sizing path; the capital gate cannot be bypassed by calling lifecycle submission directly.
 - Correlation estimates must be point-in-time, symmetric and refreshed from measured returns. A single portfolio-wide max-pairwise fallback is conservative but not a substitute for a complete covariance matrix.
+- Durable reservation contention has dedicated cross-instance regression coverage; production multiprocess stress and crash/lease-expiry behavior still require CI and runtime verification.
 
 ## P5 — Historical replay, walk-forward and ablation evaluation
 
@@ -66,6 +68,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Persistent calibration across restart, duplicate trade-outcome delivery, cross-instance deduplication and lifecycle close integration.
 - Role-specific evidence weighting in the adaptive six-timeframe consensus.
 - Correlation-aware incremental portfolio risk.
+- SQLite cross-instance capital reservation, absolute budget enforcement and duplicate-symbol contention.
 - Chronological walk-forward embargo, timestamp leakage rejection, ablation reporting and LONG/SHORT comparative metrics.
 
 ## Verification status
