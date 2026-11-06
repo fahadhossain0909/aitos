@@ -17,6 +17,7 @@ from aitos.exchange.binance import (
 from tests.test_binance_parsing import (
     SAMPLE_DEPTH_REST,
     SAMPLE_KLINE_ROW,
+    SAMPLE_KLINE_WS,
     SAMPLE_OPEN_INTEREST,
     SAMPLE_PREMIUM_INDEX,
     SAMPLE_TRADE_REST,
@@ -307,8 +308,6 @@ async def test_fetch_income_history_signs_request_and_deduplicates_transactions(
 
 @pytest.mark.asyncio
 async def test_testnet_flag_routes_rest_and_ws_to_testnet_endpoints():
-    from tests.test_binance_parsing import SAMPLE_KLINE_WS
-
     async with BinanceFuturesAdapter(testnet=True) as adapter:
         with aioresponses() as m:
             m.get(

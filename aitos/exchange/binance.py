@@ -236,8 +236,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 await self._rate_limiter.acquire(30)
                 await self.connect()
                 assert self._session is not None
+                base = getattr(self, "_rest_base_url", REST_BASE_URL)
                 async with self._session.get(
-                    f"{REST_BASE_URL}/fapi/v1/income?{query}&signature={signature}",
+                    f"{base}/fapi/v1/income?{query}&signature={signature}",
                     headers={"X-MBX-APIKEY": self._api_key},
                 ) as response:
                     response.raise_for_status()
