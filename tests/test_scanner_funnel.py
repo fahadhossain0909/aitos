@@ -41,3 +41,57 @@ async def test_scanner_score_and_top_n_rejections_are_funnel_attributed():
     assert indexed[("ETHUSDT", "scanner_score_gate")]["accepted"] is True
     assert indexed[("ETHUSDT", "ranking_gate")]["accepted"] is False
     assert indexed[("BTCUSDT", "ranking_gate")]["accepted"] is True
+
+
+@pytest.mark.asyncio
+async def test_scanner_funnel_persists_active_trace_id():
+    from aitos.intelligence import scanner as scanner_module
+
+    class Store:
+        def __init__(self):
+            self.events = []
+
+        def record(self, **event):
+            self.events.append(event)
+
+    instance = object.__new__(OpportunityScanner)
+    instance._directional_funnel = Store()
+    token = scanner_module._ACTIVE_SCAN_TRACE_ID.set("md:BTCUSDT:event-123")
+    try:
+        await instance._record_funnel(
+            symbol="BTCUSDT",
+            side="LONG",
+            stage="directional_gate",
+            accepted=False,
+            reason="cvd_below_directional_threshold",
+            details={"cvd_score": 4.0},
+        )
+    finally:
+        scanner_module._ACTIVE_SCAN_TRACE_ID.reset(token)
+
+    assert instance._directional_funnel.events[0]["details"] == {
+        "cvd_score": 4.0,
+        "trace_id": "md:BTCUSDT:event-123",
+    }
+
+
+def test_scan_trace_id_survives_opportunity_conversion(event_bus):
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=None,
+        symbols=[],
+    )
+    candidate = ScanCandidate(
+        "BTCUSDT",
+        TradeSide.LONG,
+        80.0,
+        {},
+        {},
+        [],
+        100.0,
+        1.0,
+        "trending",
+        trace_id="md:BTCUSDT:event-456",
+    )
+    opportunity = scanner.to_opportunity(candidate)
+    assert opportunity.agent_consensus["trace_id"] == "md:BTCUSDT:event-456"
