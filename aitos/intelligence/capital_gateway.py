@@ -282,7 +282,7 @@ class CapitalGateway:
                 capital_limit_usd=equity_usd,
                 risk_limit_usd=(
                     equity_usd
-                    * self.protection.config.max_portfolio_risk_pct
+                    * self.objective.config.max_portfolio_risk_pct
                     / 100.0
                 ),
             ):
