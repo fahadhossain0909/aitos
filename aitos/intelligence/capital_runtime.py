@@ -151,6 +151,15 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
         consensus["daily_pnl_pct"] = float(portfolio.daily_pnl_pct)
     if hasattr(portfolio, "consecutive_losses"):
         consensus["consecutive_losses"] = int(portfolio.consecutive_losses)
+    for field_name in (
+        "leverage",
+        "liquidation_buffer_pct",
+        "return_observations",
+        "decision_at",
+    ):
+        value = getattr(portfolio, field_name, None)
+        if value is not None:
+            consensus[field_name] = value
     positions = getattr(portfolio, "positions", ()) or ()
     equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
     # The live portfolio is authoritative; scanner-supplied exposure snapshots
@@ -187,15 +196,26 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     return consensus
 
 
-async def _hard_limit_reason(self: TradeLifecycle, portfolio: Any) -> str | None:
+async def _hard_limit_reason(
+    self: TradeLifecycle, portfolio: Any, opportunity: Opportunity
+) -> str | None:
     """Return a hard-cap reason while preserving RiskEngine emergency effects."""
     risk_engine = getattr(self, "_risk_engine", None)
     if risk_engine is None:
         return None
     try:
         breaches = risk_engine.check_limits(portfolio)
-    except Exception:
-        return None
+    except Exception as exc:
+        await _record_funnel(
+            self,
+            symbol=opportunity.symbol,
+            side=opportunity.side.value,
+            stage="risk_engine_gate",
+            accepted=False,
+            reason="risk_engine_check_failed",
+            details={"error": str(exc)[:500]},
+        )
+        return f"risk engine unavailable: {type(exc).__name__}"
     breach = next(
         (item for item in breaches if getattr(item, "is_hard_cap", False)), None
     )
@@ -226,7 +246,9 @@ def install_capital_guard() -> None:
         *args: Any,
         **kwargs: Any,
     ) -> Trade:
-        hard_limit_reason = await _hard_limit_reason(self, portfolio)
+        hard_limit_reason = await _hard_limit_reason(
+            self, portfolio, opportunity
+        )
         if hard_limit_reason is not None:
             await _record_funnel(
                 self,
