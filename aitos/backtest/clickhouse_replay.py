@@ -212,6 +212,8 @@ class ClickHouseReplayLoader:
                 "lookahead_policy": "strict [start,end), no forward fill",
                 "depth_event_rows": len(depth_rows),
                 "raw_depth_events_replayed": len(replayed_depth),
+                "raw_depth_event_replay_available": bool(replayed_depth),
+                "derived_depth_snapshot_count": len(depth_by_update),
                 "depth_event_history_available": bool(replayed_depth)
                 or bool(depth_by_update),
             },
@@ -246,10 +248,10 @@ class ClickHouseHistoricalAblationRunner:
         dataset = await self.loader.load(symbol, start, end, limit=limit)
         if not dataset.events:
             raise ValueError("ClickHouse replay dataset contains no market events")
-        if not dataset.provenance["depth_event_history_available"]:
+        if not dataset.provenance["raw_depth_event_replay_available"]:
             raise ValueError(
-                "point-in-time depth replay requires sequenced depth events and a "
-                "pre-window order-book bootstrap snapshot"
+                "point-in-time OFI ablation requires raw sequenced depth deltas "
+                "and a pre-window order-book bootstrap snapshot"
             )
 
         def mark_price(event: Any) -> float:
