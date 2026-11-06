@@ -484,6 +484,32 @@ class PositionManager:
             thesis_eval=thesis_eval,
             timestamp=ts,
         )
+        observations = trade.agent_consensus.get("ere_observations")
+        if not isinstance(observations, list):
+            observations = []
+            trade.agent_consensus["ere_observations"] = observations
+        decision_at = ts.isoformat()
+        prediction = {
+            "decision_at": decision_at,
+            "price": float(current_price),
+            "predicted_remaining_edge_pct": (
+                float(exit_decision.expected_remaining_edge) * 100.0
+            ),
+            "estimated_cost_pct": (
+                float(
+                    exit_decision.features.get(
+                        "path_transaction_cost_fraction", 0.0
+                    )
+                )
+                * 100.0
+            ),
+            "action": exit_decision.action.value,
+        }
+        if observations and observations[-1].get("decision_at") == decision_at:
+            observations[-1] = prediction
+        else:
+            observations.append(prediction)
+        del observations[:-128]
         hedge_decision = (
             self._hedge_engine.evaluate(
                 trade=trade,
