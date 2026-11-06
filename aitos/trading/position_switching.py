@@ -60,11 +60,17 @@ class SwitchJournal(Protocol):
 class SQLiteSwitchJournal:
     """Small durable journal; use a persistent volume, never /tmp in production."""
 
+    SQLITE_BUSY_TIMEOUT_MS = 30_000
+
     def __init__(self, path: str | Path) -> None:
         self.path = str(path)
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.path) as db:
+        # Multiple worker processes may construct the journal simultaneously.
+        # A bounded busy timeout lets WAL/DDL setup and writes serialize at the
+        # database boundary instead of leaking SQLITE_BUSY to callers.
+        with self._connect() as db:
             db.execute("PRAGMA journal_mode=WAL")
+            db.execute("PRAGMA synchronous=NORMAL")
             db.execute(
                 """CREATE TABLE IF NOT EXISTS position_switch_intents (
                     switch_id TEXT PRIMARY KEY,
@@ -80,12 +86,21 @@ class SQLiteSwitchJournal:
                 WHERE state NOT IN ('completed', 'failed')"""
             )
 
+    def _connect(self) -> sqlite3.Connection:
+        db = sqlite3.connect(
+            self.path,
+            timeout=self.SQLITE_BUSY_TIMEOUT_MS / 1000.0,
+            isolation_level="DEFERRED",
+        )
+        db.execute(f"PRAGMA busy_timeout={self.SQLITE_BUSY_TIMEOUT_MS}")
+        return db
+
     @staticmethod
     def _decode(payload: str) -> SwitchIntent:
         return SwitchIntent(**json.loads(payload))
 
     def get(self, switch_id: str) -> SwitchIntent | None:
-        with sqlite3.connect(self.path) as db:
+        with self._connect() as db:
             row = db.execute(
                 "SELECT payload FROM position_switch_intents WHERE switch_id=?",
                 (switch_id,),
@@ -94,7 +109,7 @@ class SQLiteSwitchJournal:
 
     def create(self, intent: SwitchIntent) -> SwitchIntent:
         payload = json.dumps(asdict(intent), sort_keys=True)
-        with sqlite3.connect(self.path) as db:
+        with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT INTO position_switch_intents(switch_id,incumbent_trade_id,state,payload) VALUES(?,?,?,?)",
@@ -107,7 +122,7 @@ class SQLiteSwitchJournal:
         return self._decode(row[0])
 
     def update(self, switch_id: str, **changes: Any) -> SwitchIntent:
-        with sqlite3.connect(self.path) as db:
+        with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT payload FROM position_switch_intents WHERE switch_id=?",
@@ -124,7 +139,7 @@ class SQLiteSwitchJournal:
         return SwitchIntent(**payload)
 
     def list_incomplete(self) -> list[SwitchIntent]:
-        with sqlite3.connect(self.path) as db:
+        with self._connect() as db:
             rows = db.execute(
                 "SELECT payload FROM position_switch_intents WHERE state NOT IN ('completed', 'failed')"
             ).fetchall()
