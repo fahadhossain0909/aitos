@@ -150,7 +150,6 @@ def test_participation_pressure_is_signed_and_double_sweep_is_not_bullish(
     assert 4.5 <= result["liquidity"] <= 5.5
 
 
-
 def test_sweep_reclaim_requires_directional_displacement_for_confirmation(
     monkeypatch,
 ):
@@ -170,9 +169,7 @@ def test_sweep_reclaim_requires_directional_displacement_for_confirmation(
         lambda bars: SimpleNamespace(structure_score=8.0),
     )
     monkeypatch.setattr(multi_timeframe.indicators, "momentum_score", lambda bars: 8.0)
-    monkeypatch.setattr(
-        multi_timeframe.indicators, "cvd_trend_score", lambda bars: 8.0
-    )
+    monkeypatch.setattr(multi_timeframe.indicators, "cvd_trend_score", lambda bars: 8.0)
     bullish = multi_timeframe._candle_evidence(candles)
     assert bullish["lower_sweep_reclaim"] == 1.0
     assert bullish["bullish_sweep_displacement"] == 1.0
