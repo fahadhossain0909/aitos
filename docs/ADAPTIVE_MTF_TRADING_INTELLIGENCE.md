@@ -7,7 +7,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 ## P0 — Directional diagnostics
 
 - Scanner emits a symmetric LONG/SHORT directional funnel record, including structure event, selected-side rejection reasons and both-side rejection attribution when no side is selected.
-- Directional-gate, direction-selection, adaptive-MTF, execution-quality and scanner-candidate events are persisted in a bounded SQLite ledger. Health diagnostics expose per-stage/per-side accepted and rejected counts plus reason attribution. Persistence is best-effort and cannot change the scanner's trade decision.
+- Directional-gate, direction-selection, adaptive-MTF, execution-quality and scanner-candidate events are persisted in a bounded SQLite ledger. Health diagnostics expose per-stage/per-side accepted and rejected counts plus reason attribution. Persistence is best-effort, written off the async scan loop, and cannot change the scanner's trade decision.
 - Both sides expose structure pass, CVD pass, bias conflict, diagnostic acceptance, and explicit rejection reason codes.
 - CHoCH/CVD thresholds remain symmetric: LONG >= 6.5 and SHORT <= 3.5. Threshold relaxation is not inferred from diagnostics.
 
