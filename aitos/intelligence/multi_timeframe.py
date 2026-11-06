@@ -31,7 +31,7 @@ TIMEFRAME_ROLES = {
     "1h": ("trend_structure", "bos_choch", "vwap_location"),
     "15m": ("setup", "momentum", "cvd_divergence"),
     "5m": ("trigger", "sweep_reclaim", "relative_participation"),
-    "1m": ("execution_context", "micro_momentum", "wick_rejection"),
+    "1m": ("micro_price_context", "micro_momentum", "wick_rejection"),
 }
 
 
@@ -62,7 +62,12 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
     last = candles[-1]
     close, high, low = float(last.close), float(last.high), float(last.low)
     span = max(high - low, 1e-12)
-    close_location = _clamp_score(10.0 * (close - low) / span)
+    range_high = max(float(k.high) for k in candles[-20:])
+    range_low = min(float(k.low) for k in candles[-20:])
+    range_span = max(range_high - range_low, 1e-12)
+    # Location is premium/discount within the rolling range, not the close's
+    # position inside the current candle.
+    close_location = _clamp_score(10.0 * (close - range_low) / range_span)
     lower_sweep = low < lowest and close > lowest
     upper_sweep = high > highest and close < highest
     lower_wick = max(0.0, min(close, float(last.open)) - low) / span
