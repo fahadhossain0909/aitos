@@ -142,3 +142,30 @@ def test_balanced_mixed_mtf_requires_ltf_quality_floor():
     )
     assert decision.accepted
     assert decision.mode == "neutral_or_mixed"
+
+
+
+def test_macro_timeframes_carry_more_consensus_weight_than_execution_frames():
+    decision = evaluate_adaptive_htf(
+        TradeSide.LONG,
+        [
+            TimeframeContext("1d", "bullish", 8.0, weight=1.5),
+            TimeframeContext("4h", "bullish", 8.0, weight=1.4),
+            TimeframeContext("1h", "bearish", 8.0, weight=1.2),
+            TimeframeContext("15m", "bearish", 8.0, weight=1.0),
+            TimeframeContext("5m", "bearish", 8.0, weight=0.8),
+            TimeframeContext("1m", "bearish", 8.0, weight=0.6),
+        ],
+        ltf=DirectionalEvidence(),
+        alignment_balance_threshold=0.10,
+    )
+    assert decision.accepted
+    assert decision.mode == "aligned"
+    assert decision.diagnostics["timeframe_weights"]["1d"] > decision.diagnostics["timeframe_weights"]["1m"]
+
+
+def test_timeframe_weight_must_be_positive_and_bounded():
+    with pytest.raises(ValueError, match="weight"):
+        TimeframeContext("1m", "bullish", 5.0, weight=0.0)
+    with pytest.raises(ValueError, match="weight"):
+        TimeframeContext("1d", "bullish", 5.0, weight=3.1)
