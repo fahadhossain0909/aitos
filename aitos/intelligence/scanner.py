@@ -673,6 +673,23 @@ class OpportunityScanner(AITOSModule):
             flow_score,
             structure_bias=market_structure.bias,
         )
+        selected_side = (
+            directional_funnel["long"]
+            if direction == TradeSide.LONG
+            else directional_funnel["short"]
+            if direction == TradeSide.SHORT
+            else None
+        )
+        candidate_rejection_reasons = (
+            list(selected_side["rejection_reasons"])
+            if selected_side is not None
+            else sorted(
+                set(
+                    directional_funnel["long"]["rejection_reasons"]
+                    + directional_funnel["short"]["rejection_reasons"]
+                )
+            )
+        )
         logger.info(
             "directional signal funnel",
             extra={
@@ -680,8 +697,10 @@ class OpportunityScanner(AITOSModule):
                     "symbol": symbol,
                     "structure_direction": structure_direction,
                     "structure_bias": market_structure.bias,
+                    "structure_event": market_structure.event,
                     "cvd_score": round(flow_score, 4),
                     "selected_direction": direction.value if direction else "none",
+                    "selected_rejection_reasons": candidate_rejection_reasons,
                     "long": directional_funnel["long"],
                     "short": directional_funnel["short"],
                 }
