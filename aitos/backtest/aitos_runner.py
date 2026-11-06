@@ -100,9 +100,10 @@ class AITOSHistoricalRunner:
                 and schedule[funding_index]["timestamp"] <= event.timestamp
             ):
                 settlement = schedule[funding_index]
-                if last_price > 0:
+                settlement_mark = float(settlement.get("mark_price") or last_price)
+                if settlement_mark > 0:
                     self.margin.apply_funding(
-                        float(settlement["funding_rate"]), last_price
+                        float(settlement["funding_rate"]), settlement_mark
                     )
                     funding_events_applied += 1
                 else:
