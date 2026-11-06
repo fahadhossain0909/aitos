@@ -249,9 +249,7 @@ def install_capital_guard() -> None:
         *args: Any,
         **kwargs: Any,
     ) -> Trade:
-        hard_limit_reason = await _hard_limit_reason(
-            self, portfolio, opportunity
-        )
+        hard_limit_reason = await _hard_limit_reason(self, portfolio, opportunity)
         if hard_limit_reason is not None:
             await _record_funnel(
                 self,
