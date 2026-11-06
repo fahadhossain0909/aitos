@@ -53,7 +53,6 @@ def test_probability_calibrator_waits_for_minimum_samples_then_uses_empirical_ra
     assert calibrator.calibrate(0.2) == pytest.approx(0.25)
 
 
-
 def test_probability_calibrator_persists_and_deduplicates_trade_outcomes(tmp_path):
     path = tmp_path / "calibration.sqlite3"
     config = CapitalControlConfig(calibration_min_samples=2)
@@ -93,7 +92,6 @@ def test_probability_calibrator_deduplicates_across_instances(tmp_path):
     finally:
         first.close()
         second.close()
-
 
 
 def test_probability_calibrator_revises_late_settled_outcome(tmp_path):
