@@ -201,7 +201,6 @@ def test_portfolio_consensus_keeps_explicit_side_and_risk_overrides():
     assert result["position_sides"]["BTCUSDT"] == "SHORT"
 
 
-
 def test_capital_gateway_snapshot_preserves_candidate_and_existing_position_sides():
     opportunity = make_opportunity(
         symbol="ETHUSDT",
