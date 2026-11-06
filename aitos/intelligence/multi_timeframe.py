@@ -49,8 +49,14 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
     recent = candles[-20:]
     prior = candles[-40:-20]
     avg_recent = sum(float(k.volume) for k in recent) / len(recent)
-    avg_prior = sum(float(k.volume) for k in prior) / len(prior) if prior else avg_recent
-    participation = _clamp_score(5.0 + 2.5 * (avg_recent / avg_prior - 1.0)) if avg_prior > 0 else 5.0
+    avg_prior = (
+        sum(float(k.volume) for k in prior) / len(prior) if prior else avg_recent
+    )
+    participation = (
+        _clamp_score(5.0 + 2.5 * (avg_recent / avg_prior - 1.0))
+        if avg_prior > 0
+        else 5.0
+    )
     highest = max(float(k.high) for k in candles[-21:-1])
     lowest = min(float(k.low) for k in candles[-21:-1])
     last = candles[-1]
@@ -61,7 +67,11 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
     upper_sweep = high > highest and close < highest
     lower_wick = max(0.0, min(close, float(last.open)) - low) / span
     upper_wick = max(0.0, high - max(close, float(last.open))) / span
-    liquidity = _clamp_score(5.0 + (3.0 if lower_sweep else -3.0 if upper_sweep else 0.0) + 2.0 * (lower_wick - upper_wick))
+    liquidity = _clamp_score(
+        5.0
+        + (3.0 if lower_sweep else -3.0 if upper_sweep else 0.0)
+        + 2.0 * (lower_wick - upper_wick)
+    )
     return {
         "structure": _clamp_score(structure.structure_score),
         "order_flow": cvd,
@@ -279,7 +289,9 @@ class MultiTimeframeAnalyzer:
             "ltf_score": evidence.score_for(side),
             "ltf_evidence": evidence.as_dict(),
             "candle_evidence": candle_scores,
-            "timeframe_roles": {tf: list(roles) for tf, roles in TIMEFRAME_ROLES.items()},
+            "timeframe_roles": {
+                tf: list(roles) for tf, roles in TIMEFRAME_ROLES.items()
+            },
         }
         return MultiTimeframeResult(
             decision.accepted, decision, snapshots, evidence, diagnostics
