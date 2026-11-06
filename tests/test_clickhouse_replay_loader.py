@@ -115,8 +115,8 @@ def test_historical_runner_applies_funding_only_at_scheduled_settlement():
     events = [
         OrderBookSnapshot(
             symbol="BTCUSDT",
-            bids=(BookLevel(100.0, 5.0),),
-            asks=(BookLevel(101.0, 5.0),),
+            bids=((100.0, 5.0),),
+            asks=((101.0, 5.0),),
             last_update_id=1,
             timestamp=start,
         ),
