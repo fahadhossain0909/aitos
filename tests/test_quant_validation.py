@@ -43,8 +43,7 @@ def test_walk_forward_is_chronological_and_embargoes_overlapping_outcomes():
             for i in fold.train_indices
         )
         assert fold.train_end == max(
-            datetime.fromisoformat(rows[i]["decision_at"])
-            for i in fold.train_indices
+            datetime.fromisoformat(rows[i]["decision_at"]) for i in fold.train_indices
         )
 
 
