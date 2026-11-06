@@ -335,6 +335,10 @@ class CapitalGateway:
             decision = self.objective.evaluate(estimate)
         return decision, result.allocation_for(opportunity.symbol)
 
+    def renew(self, symbol: str) -> bool:
+        """Renew an open-position capital reservation lease."""
+        return self.reservation.renew(symbol)
+
     def release(self, symbol: str) -> Reservation | None:
         """Release a reservation after cancellation/close."""
         return self.reservation.release(symbol)
