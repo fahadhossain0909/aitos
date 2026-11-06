@@ -219,7 +219,6 @@ def test_capital_gateway_snapshot_preserves_candidate_and_existing_position_side
     assert snapshot.correlation("BTCUSDT", "ETHUSDT", 0.75) == pytest.approx(0.9)
 
 
-
 @pytest.mark.asyncio
 async def test_closed_trade_updates_probability_calibration_once(
     event_bus, risk_engine
@@ -236,14 +235,16 @@ async def test_closed_trade_updates_probability_calibration_once(
     closed = await lifecycle.close_trade(trade.trade_id, 101.0, "test_close")
     assert closed.state == TradeLifecycleState.POSITION_CLOSED
     assert calibrator.samples == samples_before + 1
-    assert calibrator.observe(
-        closed.agent_consensus["capital_objective"]["predicted_loss_probability"],
-        closed.pnl <= 0.0,
-        observation_id=closed.trade_id,
-    ) is False
+    assert (
+        calibrator.observe(
+            closed.agent_consensus["capital_objective"]["predicted_loss_probability"],
+            closed.pnl <= 0.0,
+            observation_id=closed.trade_id,
+        )
+        is False
+    )
     assert calibrator.samples == samples_before + 1
     await lifecycle.shutdown()
-
 
 
 @pytest.mark.asyncio
