@@ -329,13 +329,11 @@ def depth_event_flow_analysis(
                 totals["replenishment_qty"] / max(reduction_total, 1e-12), 4
             ),
             "bid_replenishment_ratio": round(
-                totals["bid_replenishment_qty"]
-                / max(totals["bid_reduce_qty"], 1e-12),
+                totals["bid_replenishment_qty"] / max(totals["bid_reduce_qty"], 1e-12),
                 4,
             ),
             "ask_replenishment_ratio": round(
-                totals["ask_replenishment_qty"]
-                / max(totals["ask_reduce_qty"], 1e-12),
+                totals["ask_replenishment_qty"] / max(totals["ask_reduce_qty"], 1e-12),
                 4,
             ),
             "inferred_cancel_pressure": round(
