@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from aitos.backtest.execution import ExecutionSimulator
 from aitos.backtest.l2_execution import BookLevel, L2ExecutionModel
@@ -39,6 +40,8 @@ class HistoricalRunResult:
     liquidated: bool
     passive_orders: int = 0
     passive_fills: int = 0
+    funding_events_applied: int = 0
+    funding_events_skipped_without_mark: int = 0
 
 
 class AITOSHistoricalRunner:
@@ -75,13 +78,36 @@ class AITOSHistoricalRunner:
         events: Iterable[TradeTick | OrderBookSnapshot],
         decide: Callable[[HistoricalMarketState], HistoricalDecision],
         funding_rate: Callable[[datetime], float] | None = None,
+        funding_events: Iterable[dict[str, Any]] | None = None,
     ) -> HistoricalRunResult:
         ordered = MarketReplay(events)
         states = decisions = fills = passive_orders = passive_fills = 0
+        funding_events_applied = funding_events_skipped = 0
         requested = filled = 0.0
         last_price = 0.0
         last_funding_time = None
+        schedule = sorted(
+            tuple(funding_events or ()),
+            key=lambda item: item["timestamp"],
+        )
+        funding_index = 0
         for event in ordered.events:
+            # Apply a settlement only when its timestamp has been crossed by
+            # the replay clock, using the last mark already observed before it.
+            while (
+                funding_events is not None
+                and funding_index < len(schedule)
+                and schedule[funding_index]["timestamp"] <= event.timestamp
+            ):
+                settlement = schedule[funding_index]
+                if last_price > 0:
+                    self.margin.apply_funding(
+                        float(settlement["funding_rate"]), last_price
+                    )
+                    funding_events_applied += 1
+                else:
+                    funding_events_skipped += 1
+                funding_index += 1
             if isinstance(event, TradeTick):
                 self.adapter.on_trade(event)
                 last_price = event.price
@@ -98,7 +124,11 @@ class AITOSHistoricalRunner:
                 self.adapter.on_order_book(event)
                 if event.best_bid > 0 and event.best_ask > 0:
                     last_price = (event.best_bid + event.best_ask) / 2.0
-            if funding_rate is not None and last_funding_time != event.timestamp:
+            if (
+                funding_events is None
+                and funding_rate is not None
+                and last_funding_time != event.timestamp
+            ):
                 if last_price > 0:
                     self.margin.apply_funding(funding_rate(event.timestamp), last_price)
                 last_funding_time = event.timestamp
@@ -155,4 +185,6 @@ class AITOSHistoricalRunner:
             self.margin.liquidated,
             passive_orders,
             passive_fills,
+            funding_events_applied,
+            funding_events_skipped,
         )
