@@ -65,7 +65,9 @@ class LifecycleEventReplay:
     @staticmethod
     def read_jsonl(path: str | Path) -> list[LifecycleReplayEvent]:
         events = []
-        for line_no, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), 1):
+        for line_no, line in enumerate(
+            Path(path).read_text(encoding="utf-8").splitlines(), 1
+        ):
             if not line.strip():
                 continue
             try:
@@ -76,12 +78,16 @@ class LifecycleEventReplay:
                         event_id=str(raw["event_id"]),
                         timestamp_ms=int(raw["timestamp_ms"]),
                         event_type=str(raw["event_type"]),
-                        symbol=str(raw.get("symbol", payload.get("symbol", ""))).upper(),
+                        symbol=str(
+                            raw.get("symbol", payload.get("symbol", ""))
+                        ).upper(),
                         payload=dict(payload),
                     )
                 )
             except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-                raise ValueError(f"invalid lifecycle replay row {line_no}: {exc}") from exc
+                raise ValueError(
+                    f"invalid lifecycle replay row {line_no}: {exc}"
+                ) from exc
         return sorted(events, key=lambda item: (item.timestamp_ms, item.event_id))
 
     async def replay(self, events: Iterable[LifecycleReplayEvent]) -> dict[str, int]:
