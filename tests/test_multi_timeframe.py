@@ -81,6 +81,10 @@ async def test_analyzer_fetches_and_integrates_all_six_timeframes(
     assert len(cache.calls) == 6
     assert result.accepted
     assert result.decision.mode == "aligned"
+    for snapshot in result.snapshots:
+        role_evidence = snapshot.context.diagnostics["role_evidence"]
+        assert "displacement_atr" in role_evidence
+        assert role_evidence["displacement_atr"] == pytest.approx(1.2)
 
 
 @pytest.mark.asyncio
