@@ -81,7 +81,8 @@ def test_probability_calibrator_deduplicates_across_instances(tmp_path):
         assert first.observe(0.7, True, observation_id="same-trade") is True
         assert second.observe(0.7, True, observation_id="same-trade") is False
         assert second.observe(0.7, False, observation_id="another-trade") is True
-        assert first.samples == 1
+        assert first.samples == 2
+        assert first.calibrate(0.7) == pytest.approx(0.5)
         # A fresh reader sees the committed, globally deduplicated total.
         first.close()
         second.close()
