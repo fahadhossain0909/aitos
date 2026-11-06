@@ -761,9 +761,9 @@ class OpportunityScanner(AITOSModule):
                     direction,
                     [htf_context],
                     ltf=ltf_evidence,
-                    min_aligned_score=6.0,
-                    countertrend_score=7.0,
-                    allow_neutral=True,
+                    min_aligned_score=self._tuning.scanner.htf_neutral_min_ltf_score,
+                    countertrend_score=self._tuning.scanner.htf_countertrend_min_ltf_score,
+                    allow_neutral=self._tuning.scanner.htf_allow_neutral,
                 )
                 htf_diagnostics.update({
                     "adaptive_mode": htf_decision.mode,
