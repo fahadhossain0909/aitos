@@ -1,4 +1,5 @@
 """Auditable staged/canary rollout state machine with fail-closed routing hooks."""
+
 from __future__ import annotations
 
 import hashlib
@@ -216,15 +217,15 @@ class RolloutCoordinator:
             if not row or row.get("state") not in {"canary", "canary_healthy"}:
                 raise ValueError("candidate is not in canary")
             observations = row["canary_observations"]
-            if any(item.get("observation_id") == observation_id for item in observations):
+            if any(
+                item.get("observation_id") == observation_id for item in observations
+            ):
                 return dict(row)
             previous_count = max(
                 (int(item["sample_count"]) for item in observations), default=0
             )
             if sample_count <= previous_count:
-                raise ValueError(
-                    "canary sample_count must increase monotonically"
-                )
+                raise ValueError("canary sample_count must increase monotonically")
             now = datetime.now(timezone.utc).isoformat()
             observation = {
                 **observation_payload,
@@ -277,9 +278,7 @@ class RolloutCoordinator:
             row = rows.get(key)
             if not row or row.get("state") != "canary_healthy":
                 raise ValueError("promotion requires a healthy canary")
-            digest = validation_evidence_digest(
-                validation_result, champion_comparison
-            )
+            digest = validation_evidence_digest(validation_result, champion_comparison)
             if digest != row["validation_digest"]:
                 raise ValueError("validation evidence changed after staging")
             promoted = self.registry.promote(

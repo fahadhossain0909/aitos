@@ -48,8 +48,7 @@ def _validation():
 def test_experiment_engine_runs_paired_ablation_and_cost_sensitivity():
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     events = [
-        {"timestamp": start + timedelta(days=i), "regime": "trend"}
-        for i in range(40)
+        {"timestamp": start + timedelta(days=i), "regime": "trend"} for i in range(40)
     ]
     plan = ExperimentPlan(
         name="ofi-ablation",
@@ -213,9 +212,7 @@ def test_experiment_plan_rejects_unsupported_or_weak_diagnostics():
         evidence_ids=("trade-1",),
     )
     with pytest.raises(ValueError, match="no safe research ablation"):
-        ExperimentPlan.from_hypothesis(
-            unsupported, (CostScenario("base", 0.0, 0.0),)
-        )
+        ExperimentPlan.from_hypothesis(unsupported, (CostScenario("base", 0.0, 0.0),))
     weak = SimpleNamespace(
         category="adverse_order_flow",
         sample_count=2,
@@ -235,8 +232,7 @@ def test_run_hypotheses_generates_and_executes_experiments():
     )
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     events = [
-        {"timestamp": start + timedelta(days=i), "regime": "trend"}
-        for i in range(40)
+        {"timestamp": start + timedelta(days=i), "regime": "trend"} for i in range(40)
     ]
 
     def evaluate(rows, variant, cost, regime):
