@@ -8,6 +8,7 @@ exchange's actual position/margin liquidation fields.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -53,13 +54,24 @@ class BinanceUsdMExecutionCostAdapter:
         leverage: float,
         holding_horizon_seconds: float,
     ) -> ExecutionCostQuote:
-        if notional_usd <= 0 or leverage <= 0 or holding_horizon_seconds < 0:
+        values = (notional_usd, leverage, holding_horizon_seconds)
+        if (
+            not all(math.isfinite(float(value)) for value in values)
+            or notional_usd <= 0
+            or leverage <= 0
+            or holding_horizon_seconds < 0
+        ):
             raise ValueError(
-                "notional/leverage must be positive and horizon non-negative"
+                "notional/leverage must be finite and positive; horizon finite and non-negative"
             )
+        normalized_side = side.upper()
+        if normalized_side not in {"LONG", "SHORT"}:
+            raise ValueError("side must be LONG or SHORT")
+        if not symbol or not symbol.strip():
+            raise ValueError("symbol is required")
         common = {
             "symbol": symbol.upper(),
-            "side": side.upper(),
+            "side": normalized_side,
             "notional_usd": float(notional_usd),
             "leverage": float(leverage),
             "holding_horizon_seconds": float(holding_horizon_seconds),
@@ -87,7 +99,7 @@ class BinanceUsdMExecutionCostAdapter:
         return ExecutionCostQuote(
             venue=self.venue,
             symbol=symbol.upper(),
-            side=side.upper(),
+            side=normalized_side,
             round_trip_fee_bps=round_trip_fee_bps,
             expected_slippage_bps=slippage_bps,
             funding_cost_bps=funding_cost_bps,
