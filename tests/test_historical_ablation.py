@@ -21,9 +21,21 @@ def make_events(days=8):
         events.extend(
             [
                 Event(base, 100.0, {"action": "open", "side": "LONG"}),
-                Event(base + timedelta(hours=6), 110.0, {"action": "close", "side": "LONG"}),
-                Event(base + timedelta(hours=7), 110.0, {"action": "open", "side": "SHORT"}),
-                Event(base + timedelta(hours=12), 100.0, {"action": "close", "side": "SHORT"}),
+                Event(
+                    base + timedelta(hours=6),
+                    110.0,
+                    {"action": "close", "side": "LONG"},
+                ),
+                Event(
+                    base + timedelta(hours=7),
+                    110.0,
+                    {"action": "open", "side": "SHORT"},
+                ),
+                Event(
+                    base + timedelta(hours=12),
+                    100.0,
+                    {"action": "close", "side": "SHORT"},
+                ),
             ]
         )
     return events
@@ -71,6 +83,10 @@ def test_historical_ablation_runs_canonical_replay_walk_forward_and_side_metrics
 def test_historical_ablation_requires_baseline_and_multiple_variants():
     runner = HistoricalAblationRunner(train_days=2, test_days=1, holdout_days=1)
     with pytest.raises(ValueError, match="baseline strategy"):
-        runner.run(make_events(), {"long_only": long_only_strategy}, lambda event: event.price)
+        runner.run(
+            make_events(), {"long_only": long_only_strategy}, lambda event: event.price
+        )
     with pytest.raises(ValueError, match="at least one variant"):
-        runner.run(make_events(), {"baseline": both_sides_strategy}, lambda event: event.price)
+        runner.run(
+            make_events(), {"baseline": both_sides_strategy}, lambda event: event.price
+        )
