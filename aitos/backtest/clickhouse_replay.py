@@ -112,6 +112,10 @@ class ClickHouseReplayLoader:
             local_book = LocalOrderBook(normalized_symbol, max_levels=100)
             local_book.seed(bootstrap_book)
             for row, payload in depth_payloads:
+                has_bid_delta = "bids" in payload or "b" in payload
+                has_ask_delta = "asks" in payload or "a" in payload
+                if not (has_bid_delta and has_ask_delta):
+                    continue
                 raw_bids = payload.get("bids", payload.get("b", ()))
                 raw_asks = payload.get("asks", payload.get("a", ()))
                 first_id = payload.get("first_update_id", payload.get("U"))
