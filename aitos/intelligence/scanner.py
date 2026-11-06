@@ -1021,7 +1021,27 @@ class OpportunityScanner(AITOSModule):
                         "cancellation_proxy_qty"
                     ],
                     "depth_replenishment_qty": depth_analysis["replenishment_qty"],
+                    "depth_bid_replenishment_qty": depth_analysis[
+                        "bid_replenishment_qty"
+                    ],
+                    "depth_ask_replenishment_qty": depth_analysis[
+                        "ask_replenishment_qty"
+                    ],
+                    "depth_bid_replenishment_ratio": depth_analysis[
+                        "bid_replenishment_ratio"
+                    ],
+                    "depth_ask_replenishment_ratio": depth_analysis[
+                        "ask_replenishment_ratio"
+                    ],
                     "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+            "depth_bid_replenishment_qty": depth_analysis["bid_replenishment_qty"],
+            "depth_ask_replenishment_qty": depth_analysis["ask_replenishment_qty"],
+            "depth_bid_replenishment_ratio": depth_analysis[
+                "bid_replenishment_ratio"
+            ],
+            "depth_ask_replenishment_ratio": depth_analysis[
+                "ask_replenishment_ratio"
+            ],
                     "depth_inferred_cancel_pressure": depth_analysis[
                         "inferred_cancel_pressure"
                     ],
