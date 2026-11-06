@@ -226,9 +226,11 @@ class TradeLifecycle(AITOSModule):
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
-        self._initialized = True
         # Recovery is deliberately opt-in and must run after persisted trades
         # and venue positions have been hydrated/reconciled by the application.
+        # Mark the module initialized only after recovery succeeds: otherwise a
+        # transient journal/venue error would leave a half-started module that
+        # silently skips recovery on the next initialize attempt.
         if config.get("recover_position_switches", False):
             coordinator = self._position_switch_coordinator
             if coordinator is None:
@@ -251,11 +253,15 @@ class TradeLifecycle(AITOSModule):
                     }
                 },
             )
+        self._initialized = True
         logger.info(
             "TradeLifecycle initialized",
             extra={
                 "aitos_extra": {
                     "exit_intelligence": self._position_manager is not None,
+                    "position_switch_recovery": (
+                        getattr(self, "_switch_recovery_report", None) is not None
+                    ),
                 }
             },
         )
