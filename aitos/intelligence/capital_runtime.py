@@ -249,10 +249,18 @@ def install_capital_guard() -> None:
         *args: Any,
         **kwargs: Any,
     ) -> Trade:
+        trace_id = str(opportunity.agent_consensus.get("trace_id") or "")
+
+        async def record_gate(**event: Any) -> None:
+            details = dict(event.get("details") or {})
+            if trace_id:
+                details.setdefault("trace_id", trace_id)
+            event["details"] = details
+            await _record_funnel(self, **event)
+
         hard_limit_reason = await _hard_limit_reason(self, portfolio, opportunity)
         if hard_limit_reason is not None:
-            await _record_funnel(
-                self,
+            await record_gate(
                 symbol=opportunity.symbol,
                 side=opportunity.side.value,
                 stage="risk_gate",
@@ -260,8 +268,7 @@ def install_capital_guard() -> None:
                 reason=hard_limit_reason,
             )
             return _rejected_trade(opportunity, hard_limit_reason)
-        await _record_funnel(
-            self,
+        await record_gate(
             symbol=opportunity.symbol,
             side=opportunity.side.value,
             stage="risk_gate",
@@ -272,8 +279,7 @@ def install_capital_guard() -> None:
         equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
         if equity <= 0:
             reason = "capital_objective: invalid or unavailable equity"
-            await _record_funnel(
-                self,
+            await record_gate(
                 symbol=opportunity.symbol,
                 side=opportunity.side.value,
                 stage="capital_gate",
@@ -313,8 +319,7 @@ def install_capital_guard() -> None:
             )
         except (TypeError, ValueError, ArithmeticError) as exc:
             reason = f"capital_objective: {exc}"
-            await _record_funnel(
-                self,
+            await record_gate(
                 symbol=opportunity.symbol,
                 side=opportunity.side.value,
                 stage="capital_gate",
@@ -325,8 +330,7 @@ def install_capital_guard() -> None:
 
         if not decision.eligible or allocation is None:
             reason = _capital_reason(decision)
-            await _record_funnel(
-                self,
+            await record_gate(
                 symbol=opportunity.symbol,
                 side=opportunity.side.value,
                 stage="capital_gate",
@@ -338,8 +342,7 @@ def install_capital_guard() -> None:
                 },
             )
             return _rejected_trade(protected_opportunity, reason)
-        await _record_funnel(
-            self,
+        await record_gate(
             symbol=opportunity.symbol,
             side=opportunity.side.value,
             stage="capital_gate",
@@ -386,8 +389,7 @@ def install_capital_guard() -> None:
         try:
             trade = await original(self, authorized, portfolio, *args, **kwargs)
         except Exception:
-            await _record_funnel(
-                self,
+            await record_gate(
                 symbol=opportunity.symbol,
                 side=opportunity.side.value,
                 stage="lifecycle_open",
@@ -408,8 +410,7 @@ def install_capital_guard() -> None:
                     else "lifecycle_open"
                 )
             )
-            await _record_funnel(
-                self,
+            await record_gate(
                 symbol=opportunity.symbol,
                 side=opportunity.side.value,
                 stage=stage,
