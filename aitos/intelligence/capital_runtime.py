@@ -170,7 +170,11 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
         side = getattr(position, "side", None)
         if side is not None:
             consensus["position_sides"][symbol] = str(side).upper()
-    if "correlations" not in consensus and positions:
+    if (
+        "correlations" not in consensus
+        and not consensus.get("return_observations")
+        and positions
+    ):
         pairwise = getattr(portfolio, "max_pairwise_correlation", None)
         if pairwise is not None and float(pairwise) > 0.0:
             consensus["correlations"] = {
