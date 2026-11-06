@@ -178,7 +178,7 @@ def test_portfolio_consensus_uses_actual_stop_risk_and_position_side():
     assert result["correlations"]["BTCUSDT:ETHUSDT"] == pytest.approx(0.85)
 
 
-def test_portfolio_consensus_keeps_explicit_side_and_risk_overrides():
+def test_portfolio_consensus_prefers_live_portfolio_over_stale_consensus():
     portfolio = make_portfolio(
         positions=(
             PositionExposure(
@@ -197,8 +197,8 @@ def test_portfolio_consensus_keeps_explicit_side_and_risk_overrides():
         }
     )
     result = _portfolio_consensus(portfolio, opportunity)
-    assert result["position_risk_pct"]["BTCUSDT"] == 2.0
-    assert result["position_sides"]["BTCUSDT"] == "SHORT"
+    assert result["position_risk_pct"]["BTCUSDT"] == pytest.approx(1.0)
+    assert result["position_sides"]["BTCUSDT"] == "LONG"
 
 
 def test_capital_gateway_snapshot_preserves_candidate_and_existing_position_sides():
