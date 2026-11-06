@@ -9,8 +9,10 @@ from typing import Any, Iterable
 
 
 def _timestamp(value: Any) -> datetime:
-    result = value if isinstance(value, datetime) else datetime.fromisoformat(
-        str(value).replace("Z", "+00:00")
+    result = (
+        value
+        if isinstance(value, datetime)
+        else datetime.fromisoformat(str(value).replace("Z", "+00:00"))
     )
     if result.tzinfo is None:
         raise ValueError("price observation timestamps must be timezone-aware")
@@ -58,8 +60,10 @@ class PointInTimeCorrelationEstimator:
             ordered = sorted(series.items())
             returns[symbol] = {
                 current_time: current_price / previous_price - 1.0
-                for (previous_time, previous_price), (current_time, current_price)
-                in zip(ordered, ordered[1:])
+                for (previous_time, previous_price), (
+                    current_time,
+                    current_price,
+                ) in zip(ordered, ordered[1:])
                 if current_time > previous_time and previous_price > 0
             }
 
