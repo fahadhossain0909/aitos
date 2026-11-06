@@ -551,12 +551,23 @@ class OpportunityScanner(AITOSModule):
             pass
         try:
             result = await self._scan_symbol_impl(symbol, reference_klines)
-        except Exception:
+        except Exception as exc:
             try:
                 record_error(
                     PipelineStage.SCANNER.value,
                     symbol=symbol,
                     issue="processing_error",
+                )
+            except Exception:
+                pass
+            try:
+                await self._record_funnel(
+                    symbol=symbol,
+                    side="UNKNOWN",
+                    stage="scanner_error",
+                    accepted=False,
+                    reason=type(exc).__name__,
+                    details={"error": str(exc)[:500]},
                 )
             except Exception:
                 pass
@@ -594,6 +605,22 @@ class OpportunityScanner(AITOSModule):
         # must be evaluated only on completed bars, irrespective of source.
         klines = [k for k in klines if getattr(k, "is_closed", True)]
         if len(klines) < 20:
+            await self._record_funnel(
+                symbol=symbol,
+                side="LONG",
+                stage="market_data_gate",
+                accepted=False,
+                reason="insufficient_klines",
+                details={"kline_count": len(klines), "minimum": 20},
+            )
+            await self._record_funnel(
+                symbol=symbol,
+                side="SHORT",
+                stage="market_data_gate",
+                accepted=False,
+                reason="insufficient_klines",
+                details={"kline_count": len(klines), "minimum": 20},
+            )
             logger.info(
                 "paper signal diagnostics",
                 extra={
@@ -607,6 +634,14 @@ class OpportunityScanner(AITOSModule):
             return None
         live_trades, live_book, live_fresh = self._live_market_data(symbol)
         if self._tuning.mode == "live" and not live_fresh:
+            for rejected_side in ("LONG", "SHORT"):
+                await self._record_funnel(
+                    symbol=symbol,
+                    side=rejected_side,
+                    stage="market_data_gate",
+                    accepted=False,
+                    reason="live_market_data_stale_or_unavailable",
+                )
             logger.warning(
                 "entry blocked: live market data is stale or unavailable",
                 extra={
@@ -798,6 +833,14 @@ class OpportunityScanner(AITOSModule):
                     details=htf_diagnostics,
                 )
                 if not mtf_result.accepted:
+                    await self._record_funnel(
+                        symbol=symbol,
+                        side=direction.value,
+                        stage="scanner_terminal",
+                        accepted=False,
+                        reason="mtf_rejected",
+                        details={"mtf_reason": mtf_result.decision.reason},
+                    )
                     logger.info(
                         "entry rejected by six-timeframe adaptive policy",
                         extra={
@@ -817,6 +860,21 @@ class OpportunityScanner(AITOSModule):
                     else 7.0 if mode == "neutral_or_mixed" else 6.0
                 )
             except Exception as exc:
+                await self._record_funnel(
+                    symbol=symbol,
+                    side=direction.value,
+                    stage="mtf_gate",
+                    accepted=False,
+                    reason="mtf_analysis_error",
+                    details={"error": str(exc)[:500]},
+                )
+                await self._record_funnel(
+                    symbol=symbol,
+                    side=direction.value,
+                    stage="scanner_terminal",
+                    accepted=False,
+                    reason="mtf_analysis_error",
+                )
                 logger.warning(
                     "entry blocked: multi-timeframe confirmation unavailable: %s",
                     str(exc),
@@ -865,6 +923,14 @@ class OpportunityScanner(AITOSModule):
                         "market_source": market_source,
                     }
                 },
+            )
+            await self._record_funnel(
+                symbol=symbol,
+                side=direction.value,
+                stage="scanner_terminal",
+                accepted=False,
+                reason="adverse_flow_without_price_progress",
+                details={"market_source": market_source},
             )
             return None
         if direction is not None:
@@ -967,6 +1033,18 @@ class OpportunityScanner(AITOSModule):
             },
         )
         if direction is None:
+            await self._record_funnel(
+                symbol=symbol,
+                side="UNKNOWN",
+                stage="scanner_terminal",
+                accepted=False,
+                reason="no_direction_selected",
+                details={
+                    "structure_direction": structure_direction,
+                    "structure_bias": market_structure.bias,
+                    "cvd_score": round(flow_score, 4),
+                },
+            )
             return None
         adx_score = min(10.0, indicators.adx(klines) / 10.0)
         structure_boost = min(2.0, structure_strength * 0.2)
