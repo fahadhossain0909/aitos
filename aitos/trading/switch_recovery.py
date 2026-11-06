@@ -86,12 +86,9 @@ class PositionSwitchRecoveryWorker:
                 incumbent = self._incumbent(intent.incumbent_trade_id)
                 if incumbent is None:
                     raise RuntimeError("incumbent trade is not hydrated")
-                resume_close = (
-                    intent.state in self.POST_CLOSE_STATES
-                    or (
-                        intent.state == "close_pending"
-                        and bool(intent.reason or intent.close_order_id)
-                    )
+                resume_close = intent.state in self.POST_CLOSE_STATES or (
+                    intent.state == "close_pending"
+                    and bool(intent.reason or intent.close_order_id)
                 )
                 if resume_close:
                     # An incomplete close must be reconciled to flat; a fresh
