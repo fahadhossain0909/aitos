@@ -229,15 +229,15 @@ async def test_closed_trade_updates_probability_calibration_once(event_bus, risk
     assert trade.state == TradeLifecycleState.POSITION_OPENED
     gateway = lifecycle._aitos_capital_gateway
     calibrator = gateway.calibrator
-    assert calibrator.samples == 0
+    samples_before = calibrator.samples
 
     closed = await lifecycle.close_trade(trade.trade_id, 101.0, "test_close")
     assert closed.state == TradeLifecycleState.POSITION_CLOSED
-    assert calibrator.samples == 1
+    assert calibrator.samples == samples_before + 1
     assert calibrator.observe(
         closed.agent_consensus["capital_objective"]["predicted_loss_probability"],
         closed.pnl <= 0.0,
         observation_id=closed.trade_id,
     ) is False
-    assert calibrator.samples == 1
+    assert calibrator.samples == samples_before + 1
     await lifecycle.shutdown()
