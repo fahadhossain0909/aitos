@@ -161,6 +161,7 @@ async def test_completed_switch_is_idempotent(tmp_path: Path):
         journal=SQLiteSwitchJournal(tmp_path / "switches.sqlite"),
         close_and_confirm=close,
         portfolio_provider=lambda: object(),
+        evaluate_pair=lambda current, replacement: _Decision(),
     )
     incumbent = lifecycle.open_trades[0]
     candidate = _candidate()
@@ -190,6 +191,7 @@ async def test_close_not_confirmed_never_releases_or_opens(tmp_path: Path):
         journal=SQLiteSwitchJournal(tmp_path / "switches.sqlite"),
         close_and_confirm=pending_close,
         portfolio_provider=lambda: object(),
+        evaluate_pair=lambda current, replacement: _Decision(),
     )
     result = await coordinator.switch(
         incumbent=lifecycle.open_trades[0],
