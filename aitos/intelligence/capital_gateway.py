@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from math import isfinite
 from typing import Any
 
@@ -20,6 +21,7 @@ from aitos.intelligence.capital_objective import (
     CapitalObjective,
     OpportunityEstimate,
 )
+from aitos.intelligence.point_in_time_risk import PointInTimeCorrelationEstimator
 from aitos.intelligence.capital_protection import (
     CapitalReservation,
     PortfolioProtection,
@@ -121,6 +123,11 @@ class CapitalGateway:
                 "correlations": consensus.get("correlations", {}),
                 "daily_pnl_pct": consensus.get("daily_pnl_pct", 0.0),
                 "consecutive_losses": consensus.get("consecutive_losses", 0),
+                "leverage": consensus.get("leverage", 1.0),
+                "liquidation_buffer_pct": consensus.get("liquidation_buffer_pct"),
+                "return_observations": consensus.get("return_observations", ()),
+                "decision_at": consensus.get("decision_at") or opportunity.detected_at,
+                "funding_bps": float(funding_bps),
             },
         )
 
@@ -145,6 +152,19 @@ class CapitalGateway:
             str(k): str(v).upper()
             for k, v in dict(metadata.get("position_sides") or {}).items()
         }
+        if not correlations and metadata.get("return_observations"):
+            decision_at = metadata.get("decision_at")
+            if decision_at is not None:
+                cutoff = (
+                    decision_at
+                    if isinstance(decision_at, datetime)
+                    else datetime.fromisoformat(str(decision_at).replace("Z", "+00:00"))
+                )
+                if cutoff.tzinfo is None:
+                    raise ValueError("decision_at must be timezone-aware")
+                correlations = PointInTimeCorrelationEstimator().estimate(
+                    metadata["return_observations"], as_of=cutoff
+                )
         return PortfolioRiskSnapshot(
             equity_usd, peak, positions, correlations, position_sides
         )
@@ -252,6 +272,11 @@ class CapitalGateway:
                 side=str(metadata.get("side") or "LONG"),
                 regime=str(metadata.get("regime") or ""),
                 volatility_score=metadata.get("volatility_score"),
+                adverse_funding_pct=max(
+                    0.0, float(metadata.get("funding_bps", 0.0)) / 100.0
+                ),
+                liquidation_buffer_pct=metadata.get("liquidation_buffer_pct"),
+                leverage=float(metadata.get("leverage", 1.0)),
             )
             if not protection.allowed:
                 continue
