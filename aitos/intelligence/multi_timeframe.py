@@ -85,9 +85,7 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
         if lower_sweep and upper_sweep
         else 3.0 if lower_sweep else -3.0 if upper_sweep else 0.0
     )
-    liquidity = _clamp_score(
-        5.0 + sweep_pressure + 2.0 * (lower_wick - upper_wick)
-    )
+    liquidity = _clamp_score(5.0 + sweep_pressure + 2.0 * (lower_wick - upper_wick))
     return {
         "structure": _clamp_score(structure.structure_score),
         "order_flow": cvd,
