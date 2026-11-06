@@ -144,3 +144,49 @@ class ClickHouseReplayLoader:
                 "depth_event_history_available": bool(depth_rows),
             },
         )
+
+
+
+@dataclass(frozen=True)
+class ClickHouseAblationRun:
+    dataset: ClickHouseReplayDataset
+    report: Any
+
+
+class ClickHouseHistoricalAblationRunner:
+    """Connect real ClickHouse observations to canonical replay and holdout."""
+
+    def __init__(self, repository: Any, **runner_config: Any) -> None:
+        from aitos.learning.ablation import HistoricalAblationRunner
+
+        self.loader = ClickHouseReplayLoader(repository)
+        self.runner = HistoricalAblationRunner(**runner_config)
+
+    async def run(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        strategies: dict[str, Any],
+        *,
+        baseline: str = "baseline",
+        limit: int | None = None,
+    ) -> ClickHouseAblationRun:
+        dataset = await self.loader.load(symbol, start, end, limit=limit)
+        if not dataset.events:
+            raise ValueError("ClickHouse replay dataset contains no market events")
+
+        def mark_price(event: Any) -> float:
+            if isinstance(event, TradeTick):
+                return float(event.price)
+            if event.best_bid > 0 and event.best_ask > 0:
+                return (event.best_bid + event.best_ask) / 2.0
+            return 0.0
+
+        report = self.runner.run(
+            dataset.events,
+            strategies,
+            mark_price,
+            baseline=baseline,
+        )
+        return ClickHouseAblationRun(dataset=dataset, report=report)
