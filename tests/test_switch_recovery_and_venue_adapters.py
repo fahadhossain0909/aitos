@@ -186,9 +186,7 @@ async def test_close_timeout_keeps_stable_intent_for_restart_reconciliation(tmp_
     journal = SQLiteSwitchJournal(tmp_path / "timeout.sqlite")
     calls = []
 
-    async def close_with_timeout_then_fill(
-        trade, client_order_id, existing_order_id
-    ):
+    async def close_with_timeout_then_fill(trade, client_order_id, existing_order_id):
         calls.append((client_order_id, existing_order_id))
         if len(calls) == 1:
             raise TimeoutError("transport timed out after exchange acceptance")
