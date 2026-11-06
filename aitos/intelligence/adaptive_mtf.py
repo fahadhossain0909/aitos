@@ -4,6 +4,7 @@ This module is deliberately pure: it does not fetch data, place orders, mutate
 positions, or enable live trading. Callers supply completed candles and evidence.
 All directional calculations are symmetric and return auditable diagnostics.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -91,21 +92,28 @@ def evaluate_adaptive_htf(
     valid = tuple(c for c in frames if c.available and c.completed)
     invalid = tuple(c.timeframe for c in frames if not c.available or not c.completed)
     if require_any_context and not valid:
-        return HTFDecision(False, "unavailable", 0.0, "htf_context_unavailable", {
-            "available_timeframes": [], "invalid_timeframes": list(invalid),
-        })
+        return HTFDecision(
+            False,
+            "unavailable",
+            0.0,
+            "htf_context_unavailable",
+            {
+                "available_timeframes": [],
+                "invalid_timeframes": list(invalid),
+            },
+        )
 
     directional = [c for c in valid if c.bias in {"bullish", "bearish"}]
-    aligned = [c for c in directional if
-               (c.bias == "bullish" and side == TradeSide.LONG) or
-               (c.bias == "bearish" and side == TradeSide.SHORT)]
+    aligned = [
+        c
+        for c in directional
+        if (c.bias == "bullish" and side == TradeSide.LONG)
+        or (c.bias == "bearish" and side == TradeSide.SHORT)
+    ]
     opposed = [c for c in directional if c not in aligned]
     neutral = [c for c in valid if c.bias in {"neutral", "unknown"}]
     weights = [max(0.25, c.strength / 10.0) for c in directional]
-    signed = [
-        (1.0 if c in aligned else -1.0) * w
-        for c, w in zip(directional, weights)
-    ]
+    signed = [(1.0 if c in aligned else -1.0) * w for c, w in zip(directional, weights)]
     trend_balance = sum(signed) / sum(weights) if weights else 0.0
     ltf_score = ltf.score_for(side)
     reversal_evidence = (
@@ -117,8 +125,12 @@ def evaluate_adaptive_htf(
     # provides a third independent confirmation rather than a single trigger.
     if opposed and not aligned:
         if ltf_score >= countertrend_score and reversal_evidence:
-            return HTFDecision(True, "countertrend_reversal", -0.5,
-                "strong_ltf_reversal_against_htf", {
+            return HTFDecision(
+                True,
+                "countertrend_reversal",
+                -0.5,
+                "strong_ltf_reversal_against_htf",
+                {
                     "trend_balance": round(trend_balance, 4),
                     "aligned": [c.timeframe for c in aligned],
                     "opposed": [c.timeframe for c in opposed],
@@ -126,9 +138,14 @@ def evaluate_adaptive_htf(
                     "ltf_score": ltf_score,
                     "reversal_evidence": True,
                     "invalid_timeframes": list(invalid),
-                })
-        return HTFDecision(False, "countertrend", 0.0,
-            "countertrend_without_confirmed_reversal", {
+                },
+            )
+        return HTFDecision(
+            False,
+            "countertrend",
+            0.0,
+            "countertrend_without_confirmed_reversal",
+            {
                 "trend_balance": round(trend_balance, 4),
                 "aligned": [c.timeframe for c in aligned],
                 "opposed": [c.timeframe for c in opposed],
@@ -136,34 +153,63 @@ def evaluate_adaptive_htf(
                 "ltf_score": ltf_score,
                 "reversal_evidence": bool(reversal_evidence),
                 "invalid_timeframes": list(invalid),
-            })
+            },
+        )
     if aligned and not opposed:
-        return HTFDecision(True, "aligned", 1.0, "htf_aligned", {
-            "trend_balance": round(trend_balance, 4),
-            "aligned": [c.timeframe for c in aligned],
-            "opposed": [],
-            "neutral": [c.timeframe for c in neutral],
-            "ltf_score": ltf_score,
-            "invalid_timeframes": list(invalid),
-        })
-    if allow_neutral and (neutral or not directional):
-        return HTFDecision(True, "neutral_or_mixed", 0.0,
-            "htf_neutral_ltf_quality_required", {
+        return HTFDecision(
+            True,
+            "aligned",
+            1.0,
+            "htf_aligned",
+            {
                 "trend_balance": round(trend_balance, 4),
                 "aligned": [c.timeframe for c in aligned],
-                "opposed": [c.timeframe for c in opposed],
+                "opposed": [],
                 "neutral": [c.timeframe for c in neutral],
                 "ltf_score": ltf_score,
                 "invalid_timeframes": list(invalid),
-            }) if ltf_score >= min_aligned_score else HTFDecision(
-                False, "neutral_or_mixed", 0.0, "ltf_quality_below_neutral_floor", {
-                    "trend_balance": round(trend_balance, 4), "ltf_score": ltf_score,
+            },
+        )
+    if allow_neutral and (neutral or not directional):
+        return (
+            HTFDecision(
+                True,
+                "neutral_or_mixed",
+                0.0,
+                "htf_neutral_ltf_quality_required",
+                {
+                    "trend_balance": round(trend_balance, 4),
+                    "aligned": [c.timeframe for c in aligned],
+                    "opposed": [c.timeframe for c in opposed],
+                    "neutral": [c.timeframe for c in neutral],
+                    "ltf_score": ltf_score,
                     "invalid_timeframes": list(invalid),
-                })
-    return HTFDecision(False, "conflicted", 0.0, "conflicting_htf_context", {
-        "trend_balance": round(trend_balance, 4), "ltf_score": ltf_score,
-        "invalid_timeframes": list(invalid),
-    })
+                },
+            )
+            if ltf_score >= min_aligned_score
+            else HTFDecision(
+                False,
+                "neutral_or_mixed",
+                0.0,
+                "ltf_quality_below_neutral_floor",
+                {
+                    "trend_balance": round(trend_balance, 4),
+                    "ltf_score": ltf_score,
+                    "invalid_timeframes": list(invalid),
+                },
+            )
+        )
+    return HTFDecision(
+        False,
+        "conflicted",
+        0.0,
+        "conflicting_htf_context",
+        {
+            "trend_balance": round(trend_balance, 4),
+            "ltf_score": ltf_score,
+            "invalid_timeframes": list(invalid),
+        },
+    )
 
 
 def directional_diagnostics(
@@ -196,14 +242,22 @@ def directional_diagnostics(
 
     return {
         "long": {
-            "structure_pass": long_structure_pass, "flow_pass": long_flow,
-            "bias_conflict": long_bias_conflict, "accepted_by_diagnostic": long_pass,
-            "rejection_reasons": reasons(long_structure_pass, long_flow, long_bias_conflict),
+            "structure_pass": long_structure_pass,
+            "flow_pass": long_flow,
+            "bias_conflict": long_bias_conflict,
+            "accepted_by_diagnostic": long_pass,
+            "rejection_reasons": reasons(
+                long_structure_pass, long_flow, long_bias_conflict
+            ),
         },
         "short": {
-            "structure_pass": short_structure_pass, "flow_pass": short_flow,
-            "bias_conflict": short_bias_conflict, "accepted_by_diagnostic": short_pass,
-            "rejection_reasons": reasons(short_structure_pass, short_flow, short_bias_conflict),
+            "structure_pass": short_structure_pass,
+            "flow_pass": short_flow,
+            "bias_conflict": short_bias_conflict,
+            "accepted_by_diagnostic": short_pass,
+            "rejection_reasons": reasons(
+                short_structure_pass, short_flow, short_bias_conflict
+            ),
         },
         "cvd_score": cvd_score,
         "thresholds": {"long_min": 6.5, "short_max": 3.5},
@@ -262,7 +316,9 @@ def portfolio_directional_exposure(
     }
 
 
-def walk_forward_metrics(trades: Iterable[Mapping[str, Any]]) -> dict[str, float | None]:
+def walk_forward_metrics(
+    trades: Iterable[Mapping[str, Any]],
+) -> dict[str, float | None]:
     """Compute transparent trade-level diagnostics from realized net PnL rows."""
     pnl = [float(row["net_pnl"]) for row in trades]
     if any(not isfinite(value) for value in pnl):
@@ -280,7 +336,9 @@ def walk_forward_metrics(trades: Iterable[Mapping[str, Any]]) -> dict[str, float
     return {
         "trade_count": float(count),
         "win_rate": len(wins) / count if count else 0.0,
-        "profit_factor": gross_profit / gross_loss if gross_loss else (None if gross_profit else 0.0),
+        "profit_factor": (
+            gross_profit / gross_loss if gross_loss else (None if gross_profit else 0.0)
+        ),
         "expectancy": sum(pnl) / count if count else 0.0,
         "gross_profit": gross_profit,
         "gross_loss": gross_loss,
