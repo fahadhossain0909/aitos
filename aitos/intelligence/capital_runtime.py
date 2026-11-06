@@ -17,6 +17,7 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any
 
 from aitos.config.paths import get_model_data_dir
+from aitos.intelligence.capital_controls import ProbabilityCalibrator
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.opportunity_outcomes import DirectionalFunnelStore
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
@@ -259,7 +260,11 @@ def install_capital_guard() -> None:
         )
         gateway = getattr(self, _GATEWAY_ATTR, None)
         if gateway is None:
-            gateway = CapitalGateway()
+            gateway = CapitalGateway(
+                calibrator=ProbabilityCalibrator(
+                    path=get_model_data_dir() / "capital_probability_calibration.sqlite3"
+                )
+            )
             setattr(self, _GATEWAY_ATTR, gateway)
 
         try:
@@ -323,10 +328,19 @@ def install_capital_guard() -> None:
             if consecutive_losses >= gateway.controls.risk_reduction_after_losses
             else 1.0
         )
+        raw_loss_probability = protected_opportunity.agent_consensus.get(
+            "loss_probability"
+        )
+        if raw_loss_probability is None:
+            raw_loss_probability = 1.0 - float(protected_opportunity.confidence)
+        predicted_loss_probability = gateway.calibrator.calibrate(
+            float(raw_loss_probability)
+        )
         consensus["capital_objective"] = {
             "eligible": True,
             "composite_score": decision.composite_score,
             "expected_net_edge_pct": decision.expected_net_edge_pct,
+            "predicted_loss_probability": predicted_loss_probability,
             "risk_budget_usd": allocation.risk_budget_usd,
             "capital_usd": allocation.capital_usd,
             "risk_budget_pct": (allocation.risk_budget_usd / equity) * 100.0,
