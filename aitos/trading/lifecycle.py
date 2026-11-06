@@ -223,35 +223,52 @@ class TradeLifecycle(AITOSModule):
     def market_context_provider(self, provider: MarketContextProvider | None) -> None:
         self._market_context_provider = provider
 
+    async def recover_position_switches(
+        self,
+        *,
+        trades_hydrated: bool,
+        venue_positions_reconciled: bool,
+    ) -> Any:
+        """Recover switch intents only after both local and venue state are ready."""
+        if not trades_hydrated or not venue_positions_reconciled:
+            raise RuntimeError(
+                "position-switch recovery requires hydrated trades and reconciled venue positions"
+            )
+        coordinator = self._position_switch_coordinator
+        if coordinator is None:
+            raise RuntimeError(
+                "position-switch recovery requested without a configured coordinator"
+            )
+        from aitos.trading.switch_recovery import PositionSwitchRecoveryWorker
+
+        self._switch_recovery_report = await PositionSwitchRecoveryWorker(
+            coordinator
+        ).recover_pending()
+        logger.info(
+            "Position-switch startup recovery completed",
+            extra={
+                "aitos_extra": {
+                    "scanned": self._switch_recovery_report.scanned,
+                    "resumed": self._switch_recovery_report.resumed,
+                    "pending": self._switch_recovery_report.pending,
+                    "manual_reconciliation": self._switch_recovery_report.manual_reconciliation,
+                }
+            },
+        )
+        return self._switch_recovery_report
+
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
-        # Recovery is deliberately opt-in and must run after persisted trades
-        # and venue positions have been hydrated/reconciled by the application.
-        # Mark the module initialized only after recovery succeeds: otherwise a
-        # transient journal/venue error would leave a half-started module that
-        # silently skips recovery on the next initialize attempt.
+        # The application must explicitly attest that state hydration and
+        # authoritative venue reconciliation have completed before recovery.
+        # Mark initialized only after recovery succeeds so failures can retry.
         if config.get("recover_position_switches", False):
-            coordinator = self._position_switch_coordinator
-            if coordinator is None:
-                raise RuntimeError(
-                    "position-switch recovery requested without a configured coordinator"
-                )
-            from aitos.trading.switch_recovery import PositionSwitchRecoveryWorker
-
-            self._switch_recovery_report = await PositionSwitchRecoveryWorker(
-                coordinator
-            ).recover_pending()
-            logger.info(
-                "Position-switch startup recovery completed",
-                extra={
-                    "aitos_extra": {
-                        "scanned": self._switch_recovery_report.scanned,
-                        "resumed": self._switch_recovery_report.resumed,
-                        "pending": self._switch_recovery_report.pending,
-                        "manual_reconciliation": self._switch_recovery_report.manual_reconciliation,
-                    }
-                },
+            await self.recover_position_switches(
+                trades_hydrated=bool(config.get("trades_hydrated", False)),
+                venue_positions_reconciled=bool(
+                    config.get("venue_positions_reconciled", False)
+                ),
             )
         self._initialized = True
         logger.info(
