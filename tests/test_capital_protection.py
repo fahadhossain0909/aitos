@@ -165,6 +165,13 @@ def test_sqlite_reservations_prevent_cross_instance_oversubscription(tmp_path):
             available_risk_usd=100.0,
             **limits,
         )
+        # A repeated reservation cannot silently replace the live owner lease.
+        assert not first.reserve(
+            Reservation("BTCUSDT", 5_000.0, 50.0),
+            available_capital_usd=10_000.0,
+            available_risk_usd=100.0,
+            **limits,
+        )
         # A second process cannot reserve the same symbol under another owner.
         assert not second.reserve(
             Reservation("BTCUSDT", 6_000.0, 60.0),
