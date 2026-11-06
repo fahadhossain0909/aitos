@@ -78,7 +78,6 @@ def test_fold_results_score_only_held_out_observations():
     assert all(result["test_trade_count"] > 0 for result in results)
 
 
-
 def test_quant_scorecard_reports_mae_mfe_costs_and_regime_splits():
     rows = observations(8)
     for index, row in enumerate(rows):
@@ -114,7 +113,6 @@ def test_rejected_opportunity_counterfactual_reports_missed_markouts():
 def test_expectancy_interval_is_not_claimed_with_insufficient_samples():
     assert expectancy_confidence_interval([{"net_pnl": 1.0}])["lower"] is None
     assert expectancy_confidence_interval([])["upper"] is None
-
 
 
 def test_probability_calibration_reports_brier_log_loss_and_reliability():
