@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,9 +25,42 @@ class LifecycleEventReplay:
     def __init__(
         self,
         handler: Callable[[LifecycleReplayEvent], Any | Awaitable[Any]],
+        *,
+        checkpoint_path: str | Path | None = None,
     ) -> None:
         self.handler = handler
         self._processed: set[str] = set()
+        self.checkpoint_path = str(checkpoint_path) if checkpoint_path else None
+        if self.checkpoint_path:
+            Path(self.checkpoint_path).parent.mkdir(parents=True, exist_ok=True)
+            with sqlite3.connect(self.checkpoint_path) as db:
+                db.execute("PRAGMA journal_mode=WAL")
+                db.execute(
+                    "CREATE TABLE IF NOT EXISTS lifecycle_replay_events "
+                    "(event_id TEXT PRIMARY KEY, timestamp_ms INTEGER NOT NULL)"
+                )
+
+    def _contains(self, event_id: str) -> bool:
+        if self.checkpoint_path:
+            with sqlite3.connect(self.checkpoint_path) as db:
+                row = db.execute(
+                    "SELECT 1 FROM lifecycle_replay_events WHERE event_id=?",
+                    (event_id,),
+                ).fetchone()
+            return row is not None
+        return event_id in self._processed
+
+    def _mark_processed(self, event: LifecycleReplayEvent) -> None:
+        if self.checkpoint_path:
+            with sqlite3.connect(self.checkpoint_path) as db:
+                db.execute("BEGIN IMMEDIATE")
+                db.execute(
+                    "INSERT OR IGNORE INTO lifecycle_replay_events "
+                    "(event_id,timestamp_ms) VALUES(?,?)",
+                    (event.event_id, event.timestamp_ms),
+                )
+        else:
+            self._processed.add(event.event_id)
 
     @staticmethod
     def read_jsonl(path: str | Path) -> list[LifecycleReplayEvent]:
@@ -54,12 +88,12 @@ class LifecycleEventReplay:
         ordered = sorted(events, key=lambda item: (item.timestamp_ms, item.event_id))
         processed = duplicates = 0
         for event in ordered:
-            if event.event_id in self._processed:
+            if self._contains(event.event_id):
                 duplicates += 1
                 continue
             result = self.handler(event)
             if hasattr(result, "__await__"):
                 await result
-            self._processed.add(event.event_id)
+            self._mark_processed(event)
             processed += 1
         return {"seen": len(ordered), "processed": processed, "duplicates": duplicates}
