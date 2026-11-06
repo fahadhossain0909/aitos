@@ -739,7 +739,8 @@ class OpportunityScanner(AITOSModule):
                 )
             except Exception as exc:
                 logger.warning(
-                    "entry blocked: multi-timeframe confirmation unavailable",
+                    "entry blocked: multi-timeframe confirmation unavailable: %s",
+                    str(exc),
                     extra={
                         "aitos_extra": {
                             "symbol": symbol,
