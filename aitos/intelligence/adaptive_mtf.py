@@ -177,11 +177,34 @@ def directional_diagnostics(
     short_structure = structure_direction == "bearish_bos"
     long_flow = cvd_score >= 6.5
     short_flow = cvd_score <= 3.5
+    long_bias_conflict = bias == "bearish"
+    short_bias_conflict = bias == "bullish"
+    long_structure_pass = long_structure or structure_direction == "none"
+    short_structure_pass = short_structure or structure_direction == "none"
+    long_pass = long_structure_pass and long_flow and not long_bias_conflict
+    short_pass = short_structure_pass and short_flow and not short_bias_conflict
+
+    def reasons(structure_ok: bool, flow_ok: bool, bias_conflict: bool) -> list[str]:
+        result = []
+        if not structure_ok:
+            result.append("structure_not_confirmed")
+        if not flow_ok:
+            result.append("cvd_below_directional_threshold")
+        if bias_conflict:
+            result.append("higher_structure_bias_conflict")
+        return result
+
     return {
-        "long": {"structure_pass": long_structure or structure_direction == "none",
-                 "flow_pass": long_flow, "bias_conflict": bias == "bearish"},
-        "short": {"structure_pass": short_structure or structure_direction == "none",
-                  "flow_pass": short_flow, "bias_conflict": bias == "bullish"},
+        "long": {
+            "structure_pass": long_structure_pass, "flow_pass": long_flow,
+            "bias_conflict": long_bias_conflict, "accepted_by_diagnostic": long_pass,
+            "rejection_reasons": reasons(long_structure_pass, long_flow, long_bias_conflict),
+        },
+        "short": {
+            "structure_pass": short_structure_pass, "flow_pass": short_flow,
+            "bias_conflict": short_bias_conflict, "accepted_by_diagnostic": short_pass,
+            "rejection_reasons": reasons(short_structure_pass, short_flow, short_bias_conflict),
+        },
         "cvd_score": cvd_score,
         "thresholds": {"long_min": 6.5, "short_max": 3.5},
     }
@@ -239,7 +262,7 @@ def portfolio_directional_exposure(
     }
 
 
-def walk_forward_metrics(trades: Iterable[Mapping[str, Any]]) -> dict[str, float]:
+def walk_forward_metrics(trades: Iterable[Mapping[str, Any]]) -> dict[str, float | None]:
     """Compute transparent trade-level diagnostics from realized net PnL rows."""
     pnl = [float(row["net_pnl"]) for row in trades]
     if any(not isfinite(value) for value in pnl):
@@ -257,7 +280,7 @@ def walk_forward_metrics(trades: Iterable[Mapping[str, Any]]) -> dict[str, float
     return {
         "trade_count": float(count),
         "win_rate": len(wins) / count if count else 0.0,
-        "profit_factor": gross_profit / gross_loss if gross_loss else (float("inf") if gross_profit else 0.0),
+        "profit_factor": gross_profit / gross_loss if gross_loss else (None if gross_profit else 0.0),
         "expectancy": sum(pnl) / count if count else 0.0,
         "gross_profit": gross_profit,
         "gross_loss": gross_loss,
