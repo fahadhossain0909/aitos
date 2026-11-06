@@ -86,9 +86,14 @@ async def test_clickhouse_loader_builds_bounded_point_in_time_dataset():
     assert dataset.funding_events[0]["funding_rate"] == pytest.approx(0.0001)
     assert dataset.candles[0]["timeframe"] == "1h"
     assert len(dataset.candles_as_of(start + timedelta(seconds=3))) == 1
-    assert len(
-        dataset.candles_as_of(dataset.candles[0]["open_time"] + timedelta(minutes=30))
-    ) == 0
+    assert (
+        len(
+            dataset.candles_as_of(
+                dataset.candles[0]["open_time"] + timedelta(minutes=30)
+            )
+        )
+        == 0
+    )
     assert dataset.provenance["depth_event_history_available"] is True
     assert (
         dataset.provenance["lookahead_policy"] == "strict [start,end), no forward fill"
