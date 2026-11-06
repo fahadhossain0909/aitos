@@ -1045,6 +1045,8 @@ class TradeLifecycle(AITOSModule):
         self._closed_trades.append(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
         capital_objective = trade.agent_consensus.get("capital_objective", {})
+        if not isinstance(capital_objective, dict):
+            capital_objective = {}
         predicted_loss_probability = capital_objective.get(
             "predicted_loss_probability"
         )
