@@ -92,3 +92,38 @@ def _write_event_file(path):
         encoding="utf-8",
     )
     return path
+
+def test_lifecycle_replay_normalizes_raw_binance_user_stream_events(tmp_path):
+    path = tmp_path / "binance-user-stream.jsonl"
+    raw_order = {
+        "e": "ORDER_TRADE_UPDATE",
+        "E": 1700000000123,
+        "o": {
+            "s": "BTCUSDT",
+            "i": 987,
+            "c": "aitos-switch-open",
+            "X": "FILLED",
+            "x": "TRADE",
+            "z": "0.25",
+            "ap": "40000.0",
+        },
+    }
+    raw_account = {
+        "e": "ACCOUNT_UPDATE",
+        "E": 1700000000456,
+        "a": {"m": "ORDER", "P": [{"s": "BTCUSDT", "pa": "0.25"}]},
+    }
+    path.write_text(
+        "\n".join([json.dumps(raw_order), json.dumps(raw_account)]),
+        encoding="utf-8",
+    )
+
+    events = LifecycleEventReplay.read_jsonl(path)
+
+    assert len(events) == 2
+    assert events[0].event_type == "ORDER_TRADE_UPDATE"
+    assert events[0].symbol == "BTCUSDT"
+    assert events[0].payload["o"]["X"] == "FILLED"
+    assert events[1].event_type == "ACCOUNT_UPDATE"
+    assert events[1].symbol == ""
+    assert events[0].event_id != events[1].event_id
