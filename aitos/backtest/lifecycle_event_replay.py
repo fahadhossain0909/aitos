@@ -18,6 +18,12 @@ class LifecycleReplayEvent:
     symbol: str
     payload: dict[str, Any]
 
+    def __post_init__(self) -> None:
+        if not self.event_id or not self.event_type or self.timestamp_ms < 0:
+            raise ValueError("event id, event type and non-negative timestamp are required")
+        if not isinstance(self.payload, dict):
+            raise ValueError("lifecycle replay payload must be an object")
+
 
 class LifecycleEventReplay:
     """Deterministic, idempotency-aware event projector; never submits orders."""
