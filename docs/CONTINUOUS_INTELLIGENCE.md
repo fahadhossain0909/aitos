@@ -171,3 +171,8 @@ Use `ExperimentEngine` with the canonical BacktestEngine-backed evaluator to run
 `RolloutCoordinator` persists stage/canary/promotion/rollback state under a cross-process file lock and atomic replacement. It requires authenticated deployment adapters for canary, production and rollback routing. Canary threshold breaches invoke rollback; promotion requires minimum canary samples, unchanged staged validation digest, the existing statistical gates and explicit operator approval. If a first-ever champion cannot be restored after a routing failure, the state becomes `rollback_pending` for manual reconciliation.
 
 These are orchestration primitives, not proof that the authenticated approval UI, deployment router, periodic canary metrics collector or paper/live reporting schedule is configured. Those adapters must be wired and exercised in the target runtime before production rollout is certified.
+
+
+## Holdout isolation contract
+
+Candidate-level minimum-return, drawdown, Sharpe and champion-comparison gates run only on development events strictly before the reserved final holdout interval. Walk-forward test windows and the final locked holdout are evaluated separately and are never included in those candidate-level metrics. Event timestamps must be timezone-aware. Candidate strategies are treated as frozen proposals during validation; fitting or tuning must occur outside the validator on development data only. Regime-wise ablations and cost-sensitivity are produced by the experiment runner and remain evidence reports, not automatic model-selection decisions.
