@@ -69,6 +69,10 @@ def validate_observations(
             "funding_usd",
             "counterfactual_net_pnl",
             "predicted_win_probability",
+            "predicted_remaining_edge_pct",
+            "realized_remaining_edge_pct",
+            "gross_pnl_usd",
+            "slippage_cost_usd",
         ):
             if row.get(key) is not None:
                 value = float(row[key])
@@ -314,6 +318,8 @@ def expected_remaining_edge_calibration(
     if not data:
         return {
             "samples": 0,
+            "available": False,
+            "reason": "predicted and realized remaining edge observations are required",
             "mean_predicted_edge_pct": None,
             "mean_realized_edge_pct": None,
             "mean_absolute_error_pct": None,
@@ -335,6 +341,7 @@ def expected_remaining_edge_calibration(
     ]
     return {
         "samples": len(pairs),
+        "available": True,
         "mean_predicted_edge_pct": sum(p for p, _ in pairs) / len(pairs),
         "mean_realized_edge_pct": sum(r for _, r in pairs) / len(pairs),
         "mean_absolute_error_pct": sum(abs(e) for e in errors) / len(errors),
@@ -357,6 +364,14 @@ def execution_cost_sensitivity(
     data = tuple(rows)
     if not data:
         return {"samples": 0, "scenarios": []}
+    required = ("gross_pnl_usd", "fees_usd", "slippage_cost_usd", "funding_usd")
+    if any(any(row.get(key) is None for key in required) for row in data):
+        return {
+            "samples": len(data),
+            "available": False,
+            "reason": "gross PnL, fees, slippage cost and funding are required",
+            "scenarios": [],
+        }
     if not cost_multipliers or any(
         not isfinite(value) or value < 0 for value in cost_multipliers
     ):
@@ -390,7 +405,7 @@ def execution_cost_sensitivity(
                 "metrics": metrics,
             }
         )
-    return {"samples": len(data), "scenarios": scenarios}
+    return {"samples": len(data), "available": True, "scenarios": scenarios}
 
 
 def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
