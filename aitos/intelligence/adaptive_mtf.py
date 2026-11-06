@@ -109,9 +109,9 @@ def evaluate_adaptive_htf(
     trend_balance = sum(signed) / sum(weights) if weights else 0.0
     ltf_score = ltf.score_for(side)
     reversal_evidence = (
-        ltf.structure >= 6.5 if side == TradeSide.LONG else ltf.structure <= 3.5
-    ) and ltf.order_flow >= 6.5 if side == TradeSide.LONG else (
-        ltf.structure <= 3.5 and ltf.order_flow <= 3.5
+        ltf.structure >= 6.5 and ltf.order_flow >= 6.5
+        if side == TradeSide.LONG
+        else ltf.structure <= 3.5 and ltf.order_flow <= 3.5
     )
     # Strong countertrend evidence must include structure and flow; momentum
     # provides a third independent confirmation rather than a single trigger.
