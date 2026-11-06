@@ -29,16 +29,18 @@ def test_directional_funnel_persists_and_aggregates_gate_events(tmp_path):
     )
     before_close = store.snapshot()
     assert before_close["events_retained"] == 3
-    assert before_close["stages"]["directional_gate"]["by_side"]["LONG"]["accepted"] == 1
-    assert before_close["stages"]["directional_gate"]["by_side"]["SHORT"]["rejected"] == 1
+    assert (
+        before_close["stages"]["directional_gate"]["by_side"]["LONG"]["accepted"] == 1
+    )
+    assert (
+        before_close["stages"]["directional_gate"]["by_side"]["SHORT"]["rejected"] == 1
+    )
     store.close()
 
     reopened = DirectionalFunnelStore(path)
     after_reopen = reopened.snapshot()
     assert after_reopen == before_close
-    assert (
-        after_reopen["stages"]["mtf_gate"]["by_side"]["LONG"]["rejected"] == 1
-    )
+    assert after_reopen["stages"]["mtf_gate"]["by_side"]["LONG"]["rejected"] == 1
     reopened.close()
 
 
