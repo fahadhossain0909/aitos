@@ -150,7 +150,6 @@ def test_validation_rejects_ambiguous_rejected_opportunity_labels():
         validate_observations(rows)
 
 
-
 def test_expected_remaining_edge_calibration_reports_out_of_sample_error():
     rows = [
         {"predicted_remaining_edge_pct": 0.5, "realized_remaining_edge_pct": 0.4},
