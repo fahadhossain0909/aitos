@@ -173,7 +173,6 @@ def test_timeframe_weight_must_be_positive_and_bounded():
         TimeframeContext("1d", "bullish", 5.0, weight=3.1)
 
 
-
 def test_role_specific_evidence_adjusts_timeframe_weight_and_is_auditable():
     decision = evaluate_adaptive_htf(
         TradeSide.LONG,
@@ -205,6 +204,7 @@ def test_role_specific_evidence_adjusts_timeframe_weight_and_is_auditable():
     )
     assert decision.diagnostics["role_directional_scores"]["1d"] == pytest.approx(8.5)
     assert decision.diagnostics["role_directional_scores"]["5m"] == pytest.approx(1.0)
-    assert decision.diagnostics["role_weight_factors"]["1d"] > decision.diagnostics[
-        "role_weight_factors"
-    ]["5m"]
+    assert (
+        decision.diagnostics["role_weight_factors"]["1d"]
+        > decision.diagnostics["role_weight_factors"]["5m"]
+    )
