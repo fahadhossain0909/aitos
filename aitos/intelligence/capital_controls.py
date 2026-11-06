@@ -224,7 +224,10 @@ class ProbabilityCalibrator:
         if not isfinite(raw) or not 0.0 <= raw <= 1.0:
             raise ValueError("probability must be finite and within [0, 1]")
         with self._lock:
-            if sum(bucket[0] for bucket in self._bins.values()) < self.config.calibration_min_samples:
+            if (
+                sum(bucket[0] for bucket in self._bins.values())
+                < self.config.calibration_min_samples
+            ):
                 return raw
             bucket = self._bins.get(self._bin(raw))
             if not bucket or bucket[0] == 0:
@@ -237,4 +240,3 @@ class ProbabilityCalibrator:
             if self._conn is not None:
                 self._conn.close()
                 self._conn = None
-
