@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from inspect import signature
 from typing import Any
 import json
 
@@ -20,7 +21,17 @@ class ClickHouseReplayDataset:
     end: datetime
     events: tuple[TradeTick | OrderBookSnapshot, ...]
     funding_events: tuple[dict[str, Any], ...]
+    candles: tuple[dict[str, Any], ...]
     provenance: dict[str, Any]
+
+    def candles_as_of(self, timestamp: datetime) -> tuple[dict[str, Any], ...]:
+        """Return only fully closed candles known by the supplied event time."""
+        cutoff = timestamp
+        if cutoff.tzinfo is None:
+            raise ValueError("candle decision timestamp must be timezone-aware")
+        return tuple(
+            candle for candle in self.candles if candle["close_time"] <= cutoff
+        )
 
 
 class ClickHouseReplayLoader:
@@ -49,6 +60,21 @@ class ClickHouseReplayLoader:
             "end": end.astimezone(timezone.utc),
             "limit": row_limit,
         }
+        candle_start = parameters["start"] - timedelta(days=90)
+        candle_parameters = {**parameters, "candle_start": candle_start}
+        candles = await self.repository._query(
+            """
+            SELECT time, timeframe, open, high, low, close, volume,
+                   quote_volume, trades_count, taker_buy_volume,
+                   taker_buy_quote_volume
+            FROM market_ohlcv
+            WHERE symbol = {symbol:String}
+              AND time >= {candle_start:DateTime64(3, 'UTC')}
+              AND time < {end:DateTime64(3, 'UTC')}
+            ORDER BY time, timeframe LIMIT {limit:UInt32}
+            """,
+            candle_parameters,
+        )
         bootstrap_rows = await self.repository._query(
             """
             SELECT time, symbol, bid_levels, ask_levels, last_update_id
@@ -202,17 +228,61 @@ class ClickHouseReplayLoader:
             }
             for row in funding
         )
+        timeframe_durations = {
+            "1m": timedelta(minutes=1),
+            "3m": timedelta(minutes=3),
+            "5m": timedelta(minutes=5),
+            "15m": timedelta(minutes=15),
+            "30m": timedelta(minutes=30),
+            "1h": timedelta(hours=1),
+            "2h": timedelta(hours=2),
+            "4h": timedelta(hours=4),
+            "6h": timedelta(hours=6),
+            "8h": timedelta(hours=8),
+            "12h": timedelta(hours=12),
+            "1d": timedelta(days=1),
+        }
+        candle_rows = []
+        for row in candles:
+            open_time = row["time"]
+            if open_time.tzinfo is None:
+                raise ValueError("historical candle timestamps must be timezone-aware")
+            timeframe = str(row["timeframe"]).lower()
+            duration = timeframe_durations.get(timeframe)
+            if duration is None:
+                continue
+            candle_rows.append(
+                {
+                    "open_time": open_time,
+                    "close_time": open_time + duration,
+                    "timeframe": timeframe,
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row["volume"]),
+                    "quote_volume": float(row.get("quote_volume", 0.0)),
+                    "trades_count": int(row.get("trades_count", 0)),
+                    "taker_buy_volume": float(row.get("taker_buy_volume", 0.0)),
+                    "taker_buy_quote_volume": float(
+                        row.get("taker_buy_quote_volume", 0.0)
+                    ),
+                }
+            )
         return ClickHouseReplayDataset(
             symbol=normalized_symbol,
             start=parameters["start"],
             end=parameters["end"],
             events=tuple(events),
             funding_events=funding_events,
+            candles=tuple(candle_rows),
             provenance={
                 "source": "clickhouse.trade_ticks+order_book_snapshots+funding_rates",
                 "trade_rows": len(trades),
                 "order_book_rows": len(books),
                 "funding_rows": len(funding),
+                "candle_rows": len(candle_rows),
+                "candle_lookback_days": 90,
                 "event_rows": len(events),
                 "lookahead_policy": "strict [start,end), no forward fill",
                 "depth_event_rows": len(depth_rows),
@@ -303,9 +373,33 @@ class ClickHouseHistoricalAblationRunner:
                 return (event.best_bid + event.best_ask) / 2.0
             raise ValueError("historical replay event has no valid point-in-time mark")
 
+        point_in_time_strategies = {}
+        for name, strategy in strategies.items():
+            try:
+                accepts_context = len(signature(strategy).parameters) >= 3
+            except (TypeError, ValueError):
+                accepts_context = False
+            if accepts_context:
+
+                def with_context(
+                    event: Any, execution: Any, *, _strategy=strategy
+                ) -> Any:
+                    context = {
+                        "candles": dataset.candles_as_of(event.timestamp),
+                        "funding_events": tuple(
+                            item
+                            for item in dataset.funding_events
+                            if item["timestamp"] <= event.timestamp
+                        ),
+                    }
+                    return _strategy(event, execution, context)
+
+                point_in_time_strategies[name] = with_context
+            else:
+                point_in_time_strategies[name] = strategy
         report = self.runner.run(
             dataset.events,
-            strategies,
+            point_in_time_strategies,
             mark_price,
             baseline=baseline,
         )
