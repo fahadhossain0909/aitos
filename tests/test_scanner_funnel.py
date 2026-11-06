@@ -75,9 +75,9 @@ async def test_scanner_funnel_persists_active_trace_id():
     }
 
 
-def test_scan_trace_id_survives_opportunity_conversion(event_bus):
+def test_scan_trace_id_survives_opportunity_conversion():
     scanner = OpportunityScanner(
-        event_bus=event_bus,
+        event_bus=None,
         exchange=None,
         symbols=[],
     )
