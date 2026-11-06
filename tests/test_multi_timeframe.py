@@ -148,3 +148,36 @@ def test_participation_pressure_is_signed_and_double_sweep_is_not_bullish(
     assert result["lower_sweep_reclaim"] == 1.0
     assert result["upper_sweep_reclaim"] == 1.0
     assert 4.5 <= result["liquidity"] <= 5.5
+
+
+
+def test_sweep_reclaim_requires_directional_displacement_for_confirmation(
+    monkeypatch,
+):
+    class Candle:
+        def __init__(self, open_price, close, high, low, volume=100.0):
+            self.open = open_price
+            self.close = close
+            self.high = high
+            self.low = low
+            self.volume = volume
+
+    candles = [Candle(100.0, 100.0, 101.0, 99.0) for _ in range(40)]
+    candles[-1] = Candle(97.5, 100.5, 101.0, 97.0, volume=200.0)
+    monkeypatch.setattr(
+        multi_timeframe.indicators,
+        "analyze_market_structure",
+        lambda bars: SimpleNamespace(structure_score=8.0),
+    )
+    monkeypatch.setattr(multi_timeframe.indicators, "momentum_score", lambda bars: 8.0)
+    monkeypatch.setattr(
+        multi_timeframe.indicators, "cvd_trend_score", lambda bars: 8.0
+    )
+    bullish = multi_timeframe._candle_evidence(candles)
+    assert bullish["lower_sweep_reclaim"] == 1.0
+    assert bullish["bullish_sweep_displacement"] == 1.0
+
+    candles[-1] = Candle(102.5, 99.5, 103.0, 99.0, volume=200.0)
+    bearish = multi_timeframe._candle_evidence(candles)
+    assert bearish["upper_sweep_reclaim"] == 1.0
+    assert bearish["bearish_sweep_displacement"] == 1.0
