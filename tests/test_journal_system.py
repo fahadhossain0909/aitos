@@ -316,3 +316,56 @@ async def test_rejection_emits_final_decision_outcome(event_bus, risk_engine):
     assert await _wait_for(lambda: len(received) == 1)
     assert received[0].payload["state"] == "rejected"
     assert received[0].payload["execution_failure"] is True
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_recovers_entry_and_management_decisions_after_restart(
+    event_bus, risk_engine
+):
+    from aitos.core.contracts import Event
+
+    class DurableDecisionRepository:
+        def __init__(self):
+            self.attributed = []
+
+        async def get_trade_records(self, trade_id):
+            assert trade_id == "trade-recovered"
+            return [
+                {"record_type": "TRADE_LINK", "decision_id": "entry-decision"},
+                {
+                    "record_type": "MANAGEMENT_DECISION",
+                    "decision_id": "hold-decision",
+                },
+            ]
+
+        async def attribute_outcome(self, decision_id, trade):
+            self.attributed.append((decision_id, trade["trade_id"]))
+
+    repository = DurableDecisionRepository()
+    journal = JournalSystem(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        decision_repository=repository,
+    )
+    await journal.initialize({})
+    journal._decision_trade_ids.clear()
+    journal._decision_snapshots.clear()
+
+    await journal._on_position_closed(
+        Event(
+            topic="trade.position_closed",
+            payload={
+                "trade_id": "trade-recovered",
+                "symbol": "BTCUSDT",
+                "side": "LONG",
+                "pnl": 4.0,
+                "risk_amount_usd": 2.0,
+            },
+            source_module="test",
+        )
+    )
+
+    assert repository.attributed == [
+        ("entry-decision", "trade-recovered"),
+        ("hold-decision", "trade-recovered"),
+    ]

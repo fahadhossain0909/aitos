@@ -102,6 +102,25 @@ class FakeRegistry:
         self.rollbacks.append((name, version, reason))
         return SimpleNamespace(version=version)
 
+    def promote(
+        self,
+        name,
+        version,
+        *,
+        validation_result,
+        approval,
+        champion_comparison=None,
+    ):
+        approval.validate(
+            candidate_name=name,
+            candidate_version=version,
+            validation_digest=validation_evidence_digest(
+                validation_result, champion_comparison
+            ),
+        )
+        self.champion = SimpleNamespace(version=version)
+        return SimpleNamespace(version=version, parent_version="v1")
+
 
 def test_canary_threshold_breach_rolls_back_and_persists_state(tmp_path):
     registry, routed = FakeRegistry(), []

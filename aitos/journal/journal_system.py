@@ -382,10 +382,38 @@ class JournalSystem(AITOSModule):
         await self._persist(entry)
         if self._repository is not None:
             await self._repository.save_trade_snapshot(trade_dict)
+        trade_records = []
+        if self._decision_repository is not None and trade_id:
+            get_trade_records = getattr(
+                self._decision_repository, "get_trade_records", None
+            )
+            if callable(get_trade_records):
+                try:
+                    trade_records = await get_trade_records(str(trade_id))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "trade decision recovery failed during outcome attribution",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": str(trade_id),
+                                "error": str(exc),
+                            }
+                        },
+                    )
         decision_id = next(
             (did for did, tid in self._decision_trade_ids.items() if tid == trade_id),
             None,
         )
+        if not decision_id:
+            trade_link = next(
+                (
+                    record
+                    for record in trade_records
+                    if record.get("record_type") == "TRADE_LINK"
+                ),
+                None,
+            )
+            decision_id = trade_link.get("decision_id") if trade_link else None
         if not decision_id:
             decision_id = (trade_dict.get("agent_consensus") or {}).get("decision_id")
         decision_snapshot = (
@@ -425,32 +453,17 @@ class JournalSystem(AITOSModule):
                             }
                         },
                     )
-        management_ids = list(
+        memory_management_ids = list(
             self._management_decisions_by_trade.pop(str(trade_id), [])
         )
-        if self._decision_repository is not None:
-            get_trade_records = getattr(
-                self._decision_repository, "get_trade_records", None
-            )
-            if callable(get_trade_records) and trade_id:
-                try:
-                    records = await get_trade_records(str(trade_id))
-                    management_ids = [
-                        str(record.get("decision_id"))
-                        for record in records
-                        if record.get("record_type") == "MANAGEMENT_DECISION"
-                        and record.get("decision_id")
-                    ]
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning(
-                        "management decision recovery failed during outcome attribution",
-                        extra={
-                            "aitos_extra": {
-                                "trade_id": str(trade_id),
-                                "error": str(exc),
-                            }
-                        },
-                    )
+        management_ids = [
+            str(record.get("decision_id"))
+            for record in trade_records
+            if record.get("record_type") == "MANAGEMENT_DECISION"
+            and record.get("decision_id")
+        ]
+        if not management_ids:
+            management_ids = memory_management_ids
             if decision_id:
                 await self._decision_repository.attribute_outcome(
                     str(decision_id), trade_dict
