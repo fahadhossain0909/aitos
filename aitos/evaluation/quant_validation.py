@@ -301,6 +301,98 @@ def rejected_opportunity_counterfactual(
     }
 
 
+def expected_remaining_edge_calibration(
+    rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Evaluate predicted remaining edge against realized OOS net edge."""
+    data = [
+        row
+        for row in rows
+        if row.get("predicted_remaining_edge_pct") is not None
+        and row.get("realized_remaining_edge_pct") is not None
+    ]
+    if not data:
+        return {
+            "samples": 0,
+            "mean_predicted_edge_pct": None,
+            "mean_realized_edge_pct": None,
+            "mean_absolute_error_pct": None,
+            "bias_pct": None,
+            "positive_prediction_realization_rate": None,
+        }
+    pairs = []
+    for index, row in enumerate(data):
+        predicted = float(row["predicted_remaining_edge_pct"])
+        realized = float(row["realized_remaining_edge_pct"])
+        if not isfinite(predicted) or not isfinite(realized):
+            raise ValueError(f"row {index}: remaining edge values must be finite")
+        pairs.append((predicted, realized))
+    errors = [realized - predicted for predicted, realized in pairs]
+    positive_predictions = [
+        (predicted, realized)
+        for predicted, realized in pairs
+        if predicted > 0
+    ]
+    return {
+        "samples": len(pairs),
+        "mean_predicted_edge_pct": sum(p for p, _ in pairs) / len(pairs),
+        "mean_realized_edge_pct": sum(r for _, r in pairs) / len(pairs),
+        "mean_absolute_error_pct": sum(abs(e) for e in errors) / len(errors),
+        "bias_pct": sum(errors) / len(errors),
+        "positive_prediction_realization_rate": (
+            sum(realized > 0 for _, realized in positive_predictions)
+            / len(positive_predictions)
+            if positive_predictions
+            else None
+        ),
+    }
+
+
+def execution_cost_sensitivity(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    cost_multipliers: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0),
+) -> dict[str, Any]:
+    """Stress OOS net PnL under scaled observed fees, slippage and funding."""
+    data = tuple(rows)
+    if not data:
+        return {"samples": 0, "scenarios": []}
+    if not cost_multipliers or any(
+        not isfinite(value) or value < 0 for value in cost_multipliers
+    ):
+        raise ValueError("cost multipliers must be finite and non-negative")
+    scenarios = []
+    for multiplier in cost_multipliers:
+        net_values = []
+        for index, row in enumerate(data):
+            required = ("gross_pnl_usd", "fees_usd", "slippage_cost_usd", "funding_usd")
+            if any(row.get(key) is None for key in required):
+                raise ValueError(
+                    f"row {index}: cost sensitivity requires {', '.join(required)}"
+                )
+            values = [float(row[key]) for key in required]
+            if any(not isfinite(value) for value in values):
+                raise ValueError(f"row {index}: PnL and cost values must be finite")
+            gross, fees, slippage, funding = values
+            net_values.append(
+                gross - multiplier * (abs(fees) + abs(slippage) + abs(funding))
+            )
+        metrics = walk_forward_metrics(
+            [{"net_pnl": value} for value in net_values]
+        )
+        scenarios.append(
+            {
+                "cost_multiplier": multiplier,
+                "net_pnl_usd": sum(net_values),
+                "mean_net_pnl_usd": sum(net_values) / len(net_values),
+                "positive_trade_rate": sum(value > 0 for value in net_values)
+                / len(net_values),
+                "metrics": metrics,
+            }
+        )
+    return {"samples": len(data), "scenarios": scenarios}
+
+
 def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     """Report baseline/ablation variants and LONG/SHORT outcomes separately."""
     data = validate_observations(rows)
@@ -316,6 +408,10 @@ def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             "research_diagnostics": _research_diagnostics(items),
             "expectancy_confidence_interval": expectancy_confidence_interval(items),
             "probability_calibration": probability_calibration(items),
+            "expected_remaining_edge_calibration": expected_remaining_edge_calibration(
+                items
+            ),
+            "execution_cost_sensitivity": execution_cost_sensitivity(items),
             "rejected_opportunity_counterfactual": rejected_opportunity_counterfactual(
                 items
             ),
@@ -368,6 +464,10 @@ def evaluate_fold_results(
                 "research_diagnostics": _research_diagnostics(test),
                 "expectancy_confidence_interval": expectancy_confidence_interval(test),
                 "probability_calibration": probability_calibration(test),
+                "expected_remaining_edge_calibration": (
+                    expected_remaining_edge_calibration(test)
+                ),
+                "execution_cost_sensitivity": execution_cost_sensitivity(test),
                 "test_trade_count": len(test),
             }
         )
