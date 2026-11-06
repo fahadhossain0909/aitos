@@ -15,7 +15,9 @@ from aitos.intelligence.capital_rebalancing import (
 )
 
 
-def _frame(timestamp, incumbent_symbol, candidate_symbol, candidate_confidence, returns):
+def _frame(
+    timestamp, incumbent_symbol, candidate_symbol, candidate_confidence, returns
+):
     incumbent = IncumbentPosition(
         symbol=incumbent_symbol,
         side="LONG",
