@@ -3,6 +3,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from aitos.intelligence.point_in_time_risk import PointInTimeCorrelationEstimator
+from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_objective import OpportunityEstimate
 
 
 def test_point_in_time_correlations_are_symmetric_and_exclude_future_prices():
@@ -36,3 +38,38 @@ def test_point_in_time_correlations_fail_closed_without_aligned_history():
             [{"symbol": "AAA", "timestamp": datetime(2026, 1, 1), "price": 100.0}],
             as_of=now,
         )
+
+
+
+def test_capital_gateway_uses_point_in_time_return_history():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = []
+    left = right = 100.0
+    for index in range(31):
+        stamp = start + timedelta(days=index)
+        move = 0.01 if index % 2 else -0.01
+        left *= 1.0 + move
+        right *= 1.0 + move
+        rows.extend(
+            [
+                {"symbol": "AAA", "timestamp": stamp, "price": left},
+                {"symbol": "BBB", "timestamp": stamp, "price": right},
+            ]
+        )
+    estimate = OpportunityEstimate(
+        symbol="CCC",
+        expected_gross_return_pct=1.0,
+        expected_loss_pct=1.0,
+        loss_probability=0.1,
+        fee_bps=2.0,
+        slippage_bps=2.0,
+        metadata={
+            "decision_at": start + timedelta(days=30),
+            "return_observations": rows,
+        },
+    )
+    snapshot = CapitalGateway._snapshot(10_000.0, estimate)
+    assert snapshot.correlation("AAA", "BBB", 0.75) > 0.0
+    assert snapshot.correlation("BBB", "AAA", 0.75) == snapshot.correlation(
+        "AAA", "BBB", 0.75
+    )
