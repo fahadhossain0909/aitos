@@ -60,16 +60,16 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
     avg_prior = (
         sum(float(k.volume) for k in prior) / len(prior) if prior else avg_recent
     )
-    participation = (
-        _clamp_score(5.0 + 2.5 * (avg_recent / avg_prior - 1.0))
-        if avg_prior > 0
-        else 5.0
-    )
+    relative_volume = avg_recent / avg_prior if avg_prior > 0 else 1.0
     highest = max(float(k.high) for k in candles[-21:-1])
     lowest = min(float(k.low) for k in candles[-21:-1])
     last = candles[-1]
     close, high, low = float(last.close), float(last.high), float(last.low)
+    open_price = float(last.open)
     span = max(high - low, 1e-12)
+    volume_participation = min(1.0, max(0.0, (relative_volume - 1.0) / 1.5))
+    signed_body = (close - open_price) / span
+    participation = _clamp_score(5.0 + 5.0 * volume_participation * signed_body)
     range_high = max(float(k.high) for k in candles[-20:])
     range_low = min(float(k.low) for k in candles[-20:])
     range_span = max(range_high - range_low, 1e-12)
@@ -80,10 +80,13 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
     upper_sweep = high > highest and close < highest
     lower_wick = max(0.0, min(close, float(last.open)) - low) / span
     upper_wick = max(0.0, high - max(close, float(last.open))) / span
+    sweep_pressure = (
+        0.0
+        if lower_sweep and upper_sweep
+        else 3.0 if lower_sweep else -3.0 if upper_sweep else 0.0
+    )
     liquidity = _clamp_score(
-        5.0
-        + (3.0 if lower_sweep else -3.0 if upper_sweep else 0.0)
-        + 2.0 * (lower_wick - upper_wick)
+        5.0 + sweep_pressure + 2.0 * (lower_wick - upper_wick)
     )
     return {
         "structure": _clamp_score(structure.structure_score),
@@ -92,7 +95,7 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
         "liquidity": liquidity,
         "location": close_location,
         "participation": participation,
-        "relative_volume": round(avg_recent / avg_prior, 4) if avg_prior > 0 else 1.0,
+        "relative_volume": round(relative_volume, 4),
         "lower_sweep_reclaim": float(lower_sweep),
         "upper_sweep_reclaim": float(upper_sweep),
     }
