@@ -1034,14 +1034,6 @@ class OpportunityScanner(AITOSModule):
                         "ask_replenishment_ratio"
                     ],
                     "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
-            "depth_bid_replenishment_qty": depth_analysis["bid_replenishment_qty"],
-            "depth_ask_replenishment_qty": depth_analysis["ask_replenishment_qty"],
-            "depth_bid_replenishment_ratio": depth_analysis[
-                "bid_replenishment_ratio"
-            ],
-            "depth_ask_replenishment_ratio": depth_analysis[
-                "ask_replenishment_ratio"
-            ],
                     "depth_inferred_cancel_pressure": depth_analysis[
                         "inferred_cancel_pressure"
                     ],
@@ -1228,6 +1220,14 @@ class OpportunityScanner(AITOSModule):
             "depth_matched_trade_count": depth_analysis["matched_trade_count"],
             "depth_cancellation_proxy_qty": depth_analysis["cancellation_proxy_qty"],
             "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+            "depth_bid_replenishment_qty": depth_analysis["bid_replenishment_qty"],
+            "depth_ask_replenishment_qty": depth_analysis["ask_replenishment_qty"],
+            "depth_bid_replenishment_ratio": depth_analysis[
+                "bid_replenishment_ratio"
+            ],
+            "depth_ask_replenishment_ratio": depth_analysis[
+                "ask_replenishment_ratio"
+            ],
             "entry_timing": entry_timing_score,
             "breakout_acceptance": breakout_acceptance,
             "relative_strength": relative_strength,
