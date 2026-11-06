@@ -6,13 +6,13 @@ candidate. Callers must supply the canonical BacktestEngine-backed evaluator.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from math import isfinite
 from typing import Any
-import hashlib
-import json
 
 
 @dataclass(frozen=True)
@@ -82,7 +82,7 @@ class ExperimentPlan:
         *,
         regimes: tuple[str, ...] = (),
         minimum_samples: int = 30,
-    ) -> "ExperimentPlan":
+    ) -> ExperimentPlan:
         """Turn an evidence-backed diagnostic into a bounded ablation plan."""
         component_by_category = {
             "adverse_order_flow": "order_flow",

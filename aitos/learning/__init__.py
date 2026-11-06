@@ -9,8 +9,6 @@ from .continuous_intelligence import (
 )
 from .evolution import EvolutionEngine, EvolutionProposal
 from .experience import ExperienceRecord
-from .governance import PromotionApproval, validation_evidence_digest
-from .model_registry import ModelArtifact, ModelRegistry
 from .experiment_engine import (
     CostScenario,
     ExperimentEngine,
@@ -18,25 +16,27 @@ from .experiment_engine import (
     ExperimentReport,
     ExperimentVariant,
 )
+from .governance import PromotionApproval, validation_evidence_digest
+from .model_registry import ModelArtifact, ModelRegistry
 from .rollout import RolloutCoordinator
 
 __all__ = [
     "ContinuousIntelligenceEngine",
     "ContinuousIntelligenceReport",
-    "DriftDetector",
     "CostScenario",
+    "DriftDetector",
+    "EvolutionEngine",
+    "EvolutionProposal",
+    "ExperienceRecord",
     "ExperimentEngine",
     "ExperimentPlan",
     "ExperimentReport",
     "ExperimentVariant",
-    "RolloutCoordinator",
-    "EvolutionEngine",
-    "EvolutionProposal",
-    "ExperienceRecord",
     "ModelArtifact",
     "ModelRegistry",
     "PromotionApproval",
     "ResearchHypothesis",
+    "RolloutCoordinator",
     "TradeObservation",
     "validation_evidence_digest",
 ]

@@ -6,9 +6,10 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Callable, Iterator
+from typing import Any
 
 from aitos.learning.governance import PromotionApproval, validation_evidence_digest
 

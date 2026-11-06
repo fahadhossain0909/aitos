@@ -43,7 +43,7 @@ class TradeObservation:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_record(cls, record: Mapping[str, Any]) -> "TradeObservation":
+    def from_record(cls, record: Mapping[str, Any]) -> TradeObservation:
         metadata = _metadata(record)
         if record.get("outcome") != "closed":
             raise ValueError("only closed-trade experiences are eligible")

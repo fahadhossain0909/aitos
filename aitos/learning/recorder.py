@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from math import isfinite
-import uuid
 from typing import Any
 
 from aitos.core.contracts import (
