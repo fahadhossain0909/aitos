@@ -10,6 +10,7 @@ from aitos.evaluation.quant_validation import (
     expected_remaining_edge_calibration,
     expectancy_confidence_interval,
     probability_calibration,
+    remaining_edge_observations_from_trades,
     rejected_opportunity_counterfactual,
     validate_observations,
 )
@@ -175,3 +176,33 @@ def test_execution_cost_sensitivity_stresses_fees_slippage_and_funding():
     assert result["available"] is True
     assert [item["net_pnl_usd"] for item in result["scenarios"]] == [8.0, 6.0]
     assert execution_cost_sensitivity([{"gross_pnl_usd": 1.0}])["available"] is False
+
+
+
+def test_closed_trade_ere_forecasts_settle_into_oos_calibration_rows():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    closed = {
+        "trade_id": "trade-ere-1",
+        "state": "POSITION_CLOSED",
+        "side": "LONG",
+        "strategy_id": "mtf-v2",
+        "exit_time": (start + timedelta(hours=2)).isoformat(),
+        "agent_consensus": {
+            "ere_observations": [
+                {
+                    "decision_at": start.isoformat(),
+                    "price": 100.0,
+                    "predicted_remaining_edge_pct": 0.5,
+                    "estimated_cost_pct": 0.1,
+                    "realized_remaining_edge_pct": 0.4,
+                    "outcome_at": (start + timedelta(hours=2)).isoformat(),
+                }
+            ]
+        },
+    }
+    rows = remaining_edge_observations_from_trades([closed])
+    assert len(rows) == 1
+    assert rows[0]["trade_id"] == "trade-ere-1"
+    assert rows[0]["side"] == "LONG"
+    report = expected_remaining_edge_calibration(rows)
+    assert report["mean_absolute_error_pct"] == pytest.approx(0.1)
