@@ -9,8 +9,11 @@ from aitos.learning.experiment_engine import (
     ExperimentPlan,
     ExperimentVariant,
 )
+from aitos.learning.governance import (
+    PromotionApproval,
+    validation_evidence_digest,
+)
 from aitos.learning.rollout import RolloutCoordinator
-from aitos.learning.governance import PromotionApproval, validation_evidence_digest
 
 
 def _validation():
@@ -45,7 +48,8 @@ def _validation():
 def test_experiment_engine_runs_paired_ablation_and_cost_sensitivity():
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     events = [
-        {"timestamp": start + timedelta(days=i), "regime": "trend"} for i in range(40)
+        {"timestamp": start + timedelta(days=i), "regime": "trend"}
+        for i in range(40)
     ]
     plan = ExperimentPlan(
         name="ofi-ablation",
@@ -76,12 +80,16 @@ def test_experiment_engine_runs_paired_ablation_and_cost_sensitivity():
     assert len(report.cells) == 4
     assert report.deltas_vs_baseline["trend|base|without_ofi"]["total_return"] < 0
     assert len(report.experiment_id) == 24
+    assert len(report.dataset_fingerprint) == 64
 
 
 def test_experiment_engine_rejects_naive_timestamps():
     events = [{"timestamp": datetime(2026, 1, 1), "regime": "trend"}]
     plan = ExperimentPlan(
-        "bad-data", ExperimentVariant("baseline"), (), (CostScenario("base", 0.0, 0.0),)
+        "bad-data",
+        ExperimentVariant("baseline"),
+        (),
+        (CostScenario("base", 0.0, 0.0),),
     )
     with pytest.raises(ValueError, match="timezone-aware"):
         ExperimentEngine().run(plan, events, lambda *args: {})
@@ -101,6 +109,7 @@ class FakeRegistry:
 
     def rollback(self, name, version, *, reason):
         self.rollbacks.append((name, version, reason))
+        self.champion = SimpleNamespace(version=version)
         return SimpleNamespace(version=version)
 
     def promote(
@@ -151,7 +160,7 @@ def test_canary_threshold_breach_rolls_back_and_persists_state(tmp_path):
     )
 
 
-def test_canary_requires_minimum_sample_count_before_healthy(tmp_path):
+def test_canary_requires_minimum_sample_count_and_observations(tmp_path):
     coordinator = RolloutCoordinator(
         str(tmp_path / "rollouts.json"),
         FakeRegistry(),
@@ -199,12 +208,18 @@ def test_experiment_plan_is_generated_from_evidence_backed_diagnostic():
 
 def test_experiment_plan_rejects_unsupported_or_weak_diagnostics():
     unsupported = SimpleNamespace(
-        category="unknown", sample_count=100, evidence_ids=("trade-1",)
+        category="unknown",
+        sample_count=100,
+        evidence_ids=("trade-1",),
     )
     with pytest.raises(ValueError, match="no safe research ablation"):
-        ExperimentPlan.from_hypothesis(unsupported, (CostScenario("base", 0.0, 0.0),))
+        ExperimentPlan.from_hypothesis(
+            unsupported, (CostScenario("base", 0.0, 0.0),)
+        )
     weak = SimpleNamespace(
-        category="adverse_order_flow", sample_count=2, evidence_ids=("trade-1",)
+        category="adverse_order_flow",
+        sample_count=2,
+        evidence_ids=("trade-1",),
     )
     with pytest.raises(ValueError, match="sample gate"):
         ExperimentPlan.from_hypothesis(
@@ -212,9 +227,41 @@ def test_experiment_plan_rejects_unsupported_or_weak_diagnostics():
         )
 
 
+def test_run_hypotheses_generates_and_executes_experiments():
+    hypothesis = SimpleNamespace(
+        category="premature_exit",
+        sample_count=40,
+        evidence_ids=("closed-trade-7",),
+    )
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    events = [
+        {"timestamp": start + timedelta(days=i), "regime": "trend"}
+        for i in range(40)
+    ]
+
+    def evaluate(rows, variant, cost, regime):
+        return {
+            "total_return": 0.1,
+            "max_drawdown": 0.03,
+            "sharpe": 1.0,
+            "trades": len(rows),
+            "sample_count": len(rows),
+        }
+
+    reports = ExperimentEngine().run_hypotheses(
+        [hypothesis],
+        events,
+        evaluate,
+        (CostScenario("base", 0.0004, 2.0),),
+    )
+    assert len(reports) == 1
+    assert reports[0].plan_name == "diagnostic-premature_exit"
+
+
 def test_healthy_canary_requires_approval_then_supports_rollback(tmp_path):
     registry = FakeRegistry()
     routed = []
+    coordinator = RolloutCoordinator(
         str(tmp_path / "rollouts.json"),
         registry,
         canary_router=lambda *args: routed.append(("canary", *args)),
@@ -252,25 +299,27 @@ def test_healthy_canary_requires_approval_then_supports_rollback(tmp_path):
     assert routed[-1] == ("rollback", "strategy", "v1")
 
 
-def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(tmp_path):
-    coordinator = RolloutCoordinator(
+def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(
+    tmp_path,
+):
+    def fail_rollback(*args):
+        raise RuntimeError("router unavailable")
+
     coordinator = RolloutCoordinator(
         str(tmp_path / "rollouts.json"),
         FakeRegistry(),
         canary_router=lambda *args: None,
         production_router=lambda *args: None,
-        rollback_router=lambda *args: (_ for _ in ()).throw(
-            RuntimeError("router unavailable")
-        ),
+        rollback_router=fail_rollback,
         minimum_canary_samples=1,
         minimum_canary_observations=1,
     )
     coordinator.stage("strategy", "v2", _validation())
     coordinator.start_canary("strategy", "v2")
-    coordinator.start_canary("strategy", "v2")
     row = coordinator.observe_canary(
         "strategy",
         "v2",
+        sample_count=1,
         error_rate=0.5,
         drawdown=0.5,
         return_delta=-0.5,
@@ -280,7 +329,3 @@ def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(tmp_path
         coordinator.get("strategy", "v2")["rollback_reason"]
         == "canary_rollback_route_failed"
     )
-        coordinator.get("strategy", "v2")["rollback_reason"]
-        == "canary_rollback_route_failed"
-    )
-    assert coordinator.get("strategy", "v2")["rollback_reason"] == "canary_rollback_route_failed"

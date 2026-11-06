@@ -1,7 +1,7 @@
 """Auditable staged/canary rollout state machine with fail-closed routing hooks."""
-
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -39,9 +39,8 @@ class RolloutCoordinator:
             )
         if not 0 <= maximum_error_rate <= 1 or not 0 <= maximum_drawdown <= 1:
             raise ValueError("canary thresholds must be in [0, 1]")
-        self.path, self.registry = path, registry
-        self.canary_router = canary_router
-        self.production_router = production_router
+        self.path = path
+        self.registry = registry
         self.canary_router = canary_router
         self.production_router = production_router
         self.rollback_router = rollback_router
@@ -148,7 +147,10 @@ class RolloutCoordinator:
         with self._lock():
             rows = self._read()
             existing = rows.get(key)
-            if existing and existing.get("state") not in {"rolled_back", "rejected"}:
+            if existing and existing.get("state") not in {
+                "rolled_back",
+                "rejected",
+            }:
                 raise ValueError("candidate already has an active rollout")
             rows[key] = row
             self._write(rows)
@@ -167,9 +169,14 @@ class RolloutCoordinator:
                 raise ValueError("only staged candidates can enter canary")
             self.canary_router(name, version, traffic_fraction)
             now = datetime.now(timezone.utc).isoformat()
-            row["state"], row["traffic_fraction"] = "canary", traffic_fraction
+            row["state"] = "canary"
+            row["traffic_fraction"] = traffic_fraction
             row["audit"].append(
-                {"state": "canary", "at": now, "traffic_fraction": traffic_fraction}
+                {
+                    "state": "canary",
+                    "at": now,
+                    "traffic_fraction": traffic_fraction,
+                }
             )
             self._write(rows)
             return dict(row)
@@ -186,26 +193,45 @@ class RolloutCoordinator:
     ) -> dict[str, Any]:
         key = self._key(name, version)
         values = (float(error_rate), float(drawdown), float(return_delta))
-        if sample_count < 0 or not all(math.isfinite(v) for v in values):
+        if sample_count < 0 or not all(math.isfinite(value) for value in values):
             raise ValueError(
                 "canary observations must be finite and sample_count non-negative"
             )
         if not 0 <= error_rate <= 1 or not 0 <= drawdown <= 1:
             raise ValueError("canary error rate and drawdown must be in [0, 1]")
+        observation_payload = {
+            "sample_count": int(sample_count),
+            "error_rate": error_rate,
+            "drawdown": drawdown,
+            "return_delta": return_delta,
+        }
+        observation_id = hashlib.sha256(
+            json.dumps(
+                observation_payload, sort_keys=True, separators=(",", ":")
+            ).encode()
+        ).hexdigest()
         with self._lock():
             rows = self._read()
             row = rows.get(key)
             if not row or row.get("state") not in {"canary", "canary_healthy"}:
                 raise ValueError("candidate is not in canary")
+            observations = row["canary_observations"]
+            if any(item.get("observation_id") == observation_id for item in observations):
+                return dict(row)
+            previous_count = max(
+                (int(item["sample_count"]) for item in observations), default=0
+            )
+            if sample_count <= previous_count:
+                raise ValueError(
+                    "canary sample_count must increase monotonically"
+                )
             now = datetime.now(timezone.utc).isoformat()
             observation = {
+                **observation_payload,
+                "observation_id": observation_id,
                 "at": now,
-                "sample_count": int(sample_count),
-                "error_rate": error_rate,
-                "drawdown": drawdown,
-                "return_delta": return_delta,
             }
-            row["canary_observations"].append(observation)
+            observations.append(observation)
             failed = (
                 error_rate > self.maximum_error_rate
                 or drawdown > self.maximum_drawdown
@@ -220,20 +246,21 @@ class RolloutCoordinator:
                 except Exception as exc:
                     row["state"] = "rollback_pending"
                     row["rollback_reason"] = "canary_rollback_route_failed"
-                        "reason": row["rollback_reason"],
-                    }
-                )
+                    row["rollback_error"] = str(exc)
+                row["audit"].append(
+                    {
+                        "state": row["state"],
+                        "at": now,
                         "reason": row["rollback_reason"],
                     }
                 )
             elif (
                 sample_count >= self.minimum_canary_samples
-                and len(row["canary_observations"]) >= self.minimum_canary_observations
+                and len(observations) >= self.minimum_canary_observations
             ):
                 row["state"] = "canary_healthy"
                 row["audit"].append({"state": "canary_healthy", "at": now})
             self._write(rows)
-            return dict(row)
             return dict(row)
 
     def promote(
@@ -250,7 +277,9 @@ class RolloutCoordinator:
             row = rows.get(key)
             if not row or row.get("state") != "canary_healthy":
                 raise ValueError("promotion requires a healthy canary")
-            digest = validation_evidence_digest(validation_result, champion_comparison)
+            digest = validation_evidence_digest(
+                validation_result, champion_comparison
+            )
             if digest != row["validation_digest"]:
                 raise ValueError("validation evidence changed after staging")
             promoted = self.registry.promote(
@@ -295,7 +324,11 @@ class RolloutCoordinator:
             row["approval_id"] = approval.approval_id
             now = datetime.now(timezone.utc).isoformat()
             row["audit"].append(
-                {"state": "promoted", "at": now, "approval_id": approval.approval_id}
+                {
+                    "state": "promoted",
+                    "at": now,
+                    "approval_id": approval.approval_id,
+                }
             )
             self._write(rows)
             return promoted
