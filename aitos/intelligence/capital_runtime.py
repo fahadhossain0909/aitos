@@ -159,7 +159,10 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     ):
         value = getattr(portfolio, field_name, None)
         if value is not None:
-            consensus[field_name] = value
+            if field_name == "return_observations":
+                consensus[field_name] = tuple(value)[-1_000:]
+            else:
+                consensus[field_name] = value
     positions = getattr(portfolio, "positions", ()) or ()
     equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
     # The live portfolio is authoritative; scanner-supplied exposure snapshots
@@ -351,6 +354,9 @@ def install_capital_guard() -> None:
         )
 
         consensus = dict(protected_opportunity.agent_consensus)
+        # Historical returns are an input to this one decision, not trade
+        # metadata; keeping them on every position would inflate the ledger.
+        consensus.pop("return_observations", None)
         consecutive_losses = max(
             0, int(protected_opportunity.agent_consensus.get("consecutive_losses", 0))
         )
