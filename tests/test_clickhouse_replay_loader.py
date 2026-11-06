@@ -129,7 +129,6 @@ def test_historical_runner_applies_funding_only_at_scheduled_settlement():
     assert result.funding_paid == pytest.approx(0.01)
 
 
-
 class _RawDepthRepository:
     async def _query(self, sql, parameters):
         start = parameters["start"]
