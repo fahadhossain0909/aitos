@@ -41,6 +41,7 @@ class CanonicalMarketDataPersistenceSink:
         batch_wait_seconds: float = 0.05,
         persist_event_types: tuple[MarketEventType, ...] = (
             MarketEventType.TRADE,
+            MarketEventType.BOOK_DELTA,
             MarketEventType.BOOK_SNAPSHOT,
         ),
     ) -> None:
@@ -119,6 +120,10 @@ class CanonicalMarketDataPersistenceSink:
             return
         if event.event_type is MarketEventType.TRADE:
             if event.symbol.upper() not in self._historical_trades:
+                self._filtered += 1
+                return
+        elif event.event_type is MarketEventType.BOOK_DELTA:
+            if event.symbol.upper() not in self._historical_books:
                 self._filtered += 1
                 return
         elif event.event_type is MarketEventType.BOOK_SNAPSHOT:
@@ -236,6 +241,19 @@ class CanonicalMarketDataPersistenceSink:
         if trades:
             await self._repository.save_trade_ticks(
                 [TradeTick.from_dict(dict(event.payload)) for event in trades]
+            )
+
+        deltas = grouped.get(MarketEventType.BOOK_DELTA, [])
+        if deltas:
+            await self._repository.save_depth_events(
+                [
+                    {
+                        "symbol": event.symbol,
+                        "event_time": event.event_time,
+                        "payload": dict(event.payload),
+                    }
+                    for event in deltas
+                ]
             )
 
         books = grouped.get(MarketEventType.BOOK_SNAPSHOT, [])
