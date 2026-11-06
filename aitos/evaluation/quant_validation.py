@@ -432,9 +432,12 @@ def execution_cost_sensitivity(
             if any(not isfinite(value) for value in values):
                 raise ValueError(f"row {index}: PnL and cost values must be finite")
             gross, fees, slippage, funding = values
-            net_values.append(
-                gross - multiplier * (abs(fees) + abs(slippage) + abs(funding))
-            )
+            if fees < 0 or slippage < 0:
+                raise ValueError(
+                    f"row {index}: fees and slippage costs must be non-negative"
+                )
+            # Funding is a signed cash flow: positive is paid, negative is received.
+            net_values.append(gross - multiplier * (fees + slippage + funding))
         metrics = walk_forward_metrics([{"net_pnl": value} for value in net_values])
         scenarios.append(
             {
