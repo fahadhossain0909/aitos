@@ -68,23 +68,31 @@ class SQLiteSwitchJournal:
         # Multiple worker processes may construct the journal simultaneously.
         # A bounded busy timeout lets WAL/DDL setup and writes serialize at the
         # database boundary instead of leaking SQLITE_BUSY to callers.
-        with self._connect() as db:
-            db.execute("PRAGMA journal_mode=WAL")
-            db.execute("PRAGMA synchronous=NORMAL")
-            db.execute(
-                """CREATE TABLE IF NOT EXISTS position_switch_intents (
-                    switch_id TEXT PRIMARY KEY,
-                    incumbent_trade_id TEXT NOT NULL,
-                    state TEXT NOT NULL,
-                    payload TEXT NOT NULL,
-                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )"""
-            )
-            db.execute(
-                """CREATE UNIQUE INDEX IF NOT EXISTS one_active_switch_per_incumbent
-                ON position_switch_intents(incumbent_trade_id)
-                WHERE state NOT IN ('completed', 'failed')"""
-            )
+        import time
+
+        for attempt in range(50):
+            try:
+                with self._connect() as db:
+                    db.execute("PRAGMA journal_mode=WAL")
+                    db.execute("PRAGMA synchronous=NORMAL")
+                    db.execute("""CREATE TABLE IF NOT EXISTS position_switch_intents (
+                            switch_id TEXT PRIMARY KEY,
+                            incumbent_trade_id TEXT NOT NULL,
+                            state TEXT NOT NULL,
+                            payload TEXT NOT NULL,
+                            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                        )""")
+                    db.execute(
+                        """CREATE UNIQUE INDEX IF NOT EXISTS one_active_switch_per_incumbent
+                        ON position_switch_intents(incumbent_trade_id)
+                        WHERE state NOT IN ('completed', 'failed')"""
+                    )
+                break
+            except sqlite3.OperationalError as exc:
+                if "locked" in str(exc) and attempt < 49:
+                    time.sleep(0.05)
+                    continue
+                raise
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(
