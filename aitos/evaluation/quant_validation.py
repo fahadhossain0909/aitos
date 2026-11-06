@@ -149,9 +149,7 @@ def _side_metrics(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, floa
     return {side: walk_forward_metrics(items) for side, items in sorted(groups.items())}
 
 
-def _optional_metric(
-    rows: Iterable[Mapping[str, Any]], key: str
-) -> float | None:
+def _optional_metric(rows: Iterable[Mapping[str, Any]], key: str) -> float | None:
     values = [float(row[key]) for row in rows if row.get(key) is not None]
     if not values:
         return None
