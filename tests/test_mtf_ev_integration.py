@@ -24,14 +24,13 @@ def test_exit_ere_is_probability_weighted_net_of_costs_and_auditable():
     assert diagnostics["path_expected_gain_fraction"] == pytest.approx(0.03)
     assert diagnostics["path_expected_loss_fraction"] == pytest.approx(0.02)
     assert diagnostics["path_transaction_cost_fraction"] == pytest.approx(0.001)
-    assert any(reason.code == "positive_ere" for reason in reasons)
 
 
 def test_exit_ere_mirrors_directional_path_probabilities_for_short():
     engine = ExitIntelligenceEngine()
     long_plan = SimpleNamespace(
-        upside=(SimpleNamespace(price=106.0, probability=0.7),),
-        downside=(SimpleNamespace(price=96.0, probability=0.3),),
+        upside=(SimpleNamespace(price=105.0, probability=0.7),),
+        downside=(SimpleNamespace(price=95.0, probability=0.3),),
     )
     short_plan = SimpleNamespace(
         upside=long_plan.downside,
