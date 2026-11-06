@@ -106,8 +106,12 @@ class ClickHouseReplayLoader:
                 )
             )
         for row in books:
-            bids = tuple(tuple(map(float, level)) for level in json.loads(row["bid_levels"]))
-            asks = tuple(tuple(map(float, level)) for level in json.loads(row["ask_levels"]))
+            bids = tuple(
+                tuple(map(float, level)) for level in json.loads(row["bid_levels"])
+            )
+            asks = tuple(
+                tuple(map(float, level)) for level in json.loads(row["ask_levels"])
+            )
             events.append(
                 OrderBookSnapshot(
                     symbol=str(row["symbol"]),
@@ -144,7 +148,6 @@ class ClickHouseReplayLoader:
                 "depth_event_history_available": bool(depth_rows),
             },
         )
-
 
 
 @dataclass(frozen=True)
