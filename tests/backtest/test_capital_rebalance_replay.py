@@ -86,6 +86,10 @@ def test_paired_replay_compares_switch_policy_with_hold_only_without_lookahead()
 
     assert result.hold_only.switches == 0
     assert result.rebalanced.switches == 1
+    assert result.rebalanced.fee_cost_pct == pytest.approx(0.05)
+    assert result.rebalanced.slippage_cost_pct == pytest.approx(0.03)
+    assert result.rebalanced.funding_cost_pct == pytest.approx(0.0)
+    assert result.rebalanced.positive_advantage_vetoes == 1
     assert result.switch_log[0][1:3] == ("BTCUSDT", "ETHUSDT")
     assert result.rebalanced.final_equity > result.hold_only.final_equity
     assert result.incremental_equity == pytest.approx(
