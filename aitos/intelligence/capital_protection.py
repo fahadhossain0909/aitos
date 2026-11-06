@@ -83,7 +83,6 @@ class PortfolioRiskSnapshot:
             return unknown
         return max(-1.0, min(1.0, value))
 
-
     def correlated_risk_pct(
         self,
         positions: dict[str, float] | None = None,
@@ -107,9 +106,7 @@ class PortfolioRiskSnapshot:
         variance = sum(risk * risk for risk in risks.values())
         for index, symbol_a in enumerate(symbols):
             for symbol_b in symbols[index + 1 :]:
-                correlation = self.correlation(
-                    symbol_a, symbol_b, unknown_correlation
-                )
+                correlation = self.correlation(symbol_a, symbol_b, unknown_correlation)
                 side_a = sides.get(symbol_a)
                 side_b = sides.get(symbol_b)
                 if side_a in {"LONG", "SHORT"} and side_b in {"LONG", "SHORT"}:
@@ -117,9 +114,7 @@ class PortfolioRiskSnapshot:
                         correlation *= -1.0
                 else:
                     correlation = abs(correlation)
-                variance += (
-                    2.0 * correlation * risks[symbol_a] * risks[symbol_b]
-                )
+                variance += 2.0 * correlation * risks[symbol_a] * risks[symbol_b]
         return max(0.0, variance) ** 0.5
 
 
@@ -247,9 +242,7 @@ class PortfolioProtection:
         discriminant = linear * linear - 4.0 * constant
         allowed_risk = 0.0
         if constant <= 0.0:
-            upper_root = (
-                -linear + max(0.0, discriminant) ** 0.5
-            ) / 2.0
+            upper_root = (-linear + max(0.0, discriminant) ** 0.5) / 2.0
             allowed_risk = min(requested_after_protection, max(0.0, upper_root))
         elif discriminant >= 0.0 and linear < 0.0:
             root = discriminant**0.5
@@ -257,12 +250,13 @@ class PortfolioProtection:
             upper_root = (-linear + root) / 2.0
             if requested_after_protection >= lower_root:
                 allowed_risk = min(requested_after_protection, upper_root)
-        correlated_risk = max(
-            0.0,
-            existing_variance
-            + 2.0 * cross_term * allowed_risk
-            + allowed_risk**2,
-        ) ** 0.5
+        correlated_risk = (
+            max(
+                0.0,
+                existing_variance + 2.0 * cross_term * allowed_risk + allowed_risk**2,
+            )
+            ** 0.5
+        )
         allowed_risk = max(0.0, round(allowed_risk, 12))
         if allowed_risk <= 0:
             return ProtectionDecision(
