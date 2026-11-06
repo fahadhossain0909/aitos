@@ -4,6 +4,7 @@ import json
 import pytest
 
 from aitos.backtest.clickhouse_replay import ClickHouseReplayLoader
+from aitos.backtest.aitos_runner import AITOSHistoricalRunner, HistoricalDecision
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
@@ -75,3 +76,53 @@ async def test_clickhouse_loader_rejects_naive_or_invalid_time_ranges():
         await ClickHouseReplayLoader(_Repository()).load(
             "BTCUSDT", start, start + timedelta(days=1)
         )
+
+
+
+def test_historical_runner_applies_funding_only_at_scheduled_settlement():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    events = [
+        OrderBookSnapshot(
+            symbol="BTCUSDT",
+            bids=((100.0, 5.0),),
+            asks=((101.0, 5.0),),
+            last_update_id=1,
+            timestamp=start,
+        ),
+        OrderBookSnapshot(
+            symbol="BTCUSDT",
+            bids=((100.0, 5.0),),
+            asks=((101.0, 5.0),),
+            last_update_id=2,
+            timestamp=start + timedelta(hours=9),
+        ),
+    ]
+    runner = AITOSHistoricalRunner(
+        symbol="BTCUSDT",
+        tick_size=0.1,
+        initial_cash=1_000.0,
+        leverage=2.0,
+    )
+    decisions = 0
+
+    def decide(_state):
+        nonlocal decisions
+        decisions += 1
+        if decisions == 1:
+            return HistoricalDecision("long", 1.0, 1.0)
+        return HistoricalDecision("short", 1.0, 1.0)
+
+    result = runner.run(
+        events,
+        decide,
+        funding_events=[
+            {
+                "timestamp": start + timedelta(hours=8),
+                "funding_rate": 0.0001,
+                "mark_price": 100.0,
+            }
+        ],
+    )
+    assert result.funding_events_applied == 1
+    assert result.funding_events_skipped_without_mark == 0
+    assert result.funding_paid == pytest.approx(0.0101)
