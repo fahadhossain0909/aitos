@@ -217,3 +217,27 @@ def test_capital_gateway_snapshot_preserves_candidate_and_existing_position_side
     assert estimate.metadata["side"] == "SHORT"
     assert snapshot.position_sides == {"BTCUSDT": "LONG"}
     assert snapshot.correlation("BTCUSDT", "ETHUSDT", 0.75) == pytest.approx(0.9)
+
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_updates_probability_calibration_once(event_bus, risk_engine):
+    install_capital_guard()
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    gateway = lifecycle._aitos_capital_gateway
+    calibrator = gateway.calibrator
+    assert calibrator.samples == 0
+
+    closed = await lifecycle.close_trade(trade.trade_id, 101.0, "test_close")
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    assert calibrator.samples == 1
+    assert calibrator.observe(
+        closed.agent_consensus["capital_objective"]["predicted_loss_probability"],
+        closed.pnl <= 0.0,
+        observation_id=closed.trade_id,
+    ) is False
+    assert calibrator.samples == 1
+    await lifecycle.shutdown()
