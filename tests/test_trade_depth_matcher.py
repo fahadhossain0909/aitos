@@ -180,9 +180,25 @@ async def test_depth_producer_to_live_scanner_to_ofi_side_attribution_replay():
     assert produced.depth_event is not None
     assert produced.depth_event["bid_reduce_qty"] == 2.0
     assert produced.depth_event["ask_reduce_qty"] == 1.0
+    followups = []
+    for offset, update_id in ((200, 102), (300, 103)):
+        snapshot = local_book.apply(
+            DepthUpdate(
+                first_update_id=update_id,
+                final_update_id=update_id,
+                previous_update_id=update_id - 1,
+                bids=((100.0, 3.0),),
+                asks=((101.0, 4.0),),
+                event_time_ms=timestamp_ms + offset,
+            )
+        )
+        assert snapshot is not None
+        followups.append(snapshot)
 
     cache = LiveScannerCache(None, ["BTCUSDT"])
     await cache.accept_live_order_book(produced)
+    for snapshot in followups:
+        await cache.accept_live_order_book(snapshot)
     await cache.accept_live_trade(
         _trade(1, side=TradeSide.SELL, price=100.0, quantity=1.0, offset_ms=200)
     )
