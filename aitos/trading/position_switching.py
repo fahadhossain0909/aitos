@@ -327,13 +327,20 @@ class PositionSwitchCoordinator:
             raise RuntimeError(
                 f"switch requires operator reconciliation: {existing_intent.reason}"
             )
-        resume_after_close = existing_intent is not None and existing_intent.state in {
-            "close_submitting",
-            "close_confirmed",
-            "reservation_released",
-            "open_ready",
-            "open_submitting",
-        }
+        resume_after_close = existing_intent is not None and (
+            existing_intent.state
+            in {
+                "close_submitting",
+                "close_confirmed",
+                "reservation_released",
+                "open_ready",
+                "open_submitting",
+            }
+            or (
+                existing_intent.state == "close_pending"
+                and bool(existing_intent.reason or existing_intent.close_order_id)
+            )
+        )
         if not resume_after_close:
             if not getattr(decision, "should_switch", False):
                 return None
