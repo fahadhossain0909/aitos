@@ -60,6 +60,22 @@ def validate_observations(
         row.update(
             decision_at=decision_at, outcome_at=outcome_at, side=side, net_pnl=pnl
         )
+        for key in (
+            "mae_pct",
+            "mfe_pct",
+            "entry_capture_pct",
+            "slippage_bps",
+            "fees_usd",
+            "funding_usd",
+            "counterfactual_net_pnl",
+        ):
+            if row.get(key) is not None:
+                value = float(row[key])
+                if not isfinite(value):
+                    raise ValueError(f"row {index}: {key} must be finite")
+                row[key] = value
+        row["regime"] = str(row.get("regime") or "unknown")
+        row["rejected_opportunity"] = bool(row.get("rejected_opportunity", False))
         validated.append(row)
     return tuple(sorted(validated, key=lambda item: item["decision_at"]))
 
@@ -123,6 +139,102 @@ def _side_metrics(rows: Iterable[Mapping[str, Any]]) -> dict[str, dict[str, floa
     return {side: walk_forward_metrics(items) for side, items in sorted(groups.items())}
 
 
+def _optional_metric(
+    rows: Iterable[Mapping[str, Any]], key: str
+) -> float | None:
+    values = [float(row[key]) for row in rows if row.get(key) is not None]
+    if not values:
+        return None
+    if any(not isfinite(value) for value in values):
+        raise ValueError(f"{key} values must be finite")
+    return sum(values) / len(values)
+
+
+def _regime_metrics(
+    rows: Iterable[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    groups: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
+    for row in rows:
+        groups[str(row.get("regime") or "unknown")].append(row)
+    return {
+        regime: {
+            "metrics": walk_forward_metrics(items),
+            "long_short": _side_metrics(items),
+            "trade_count": len(items),
+        }
+        for regime, items in sorted(groups.items())
+    }
+
+
+def _research_diagnostics(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    data = tuple(rows)
+    return {
+        "mean_mae_pct": _optional_metric(data, "mae_pct"),
+        "mean_mfe_pct": _optional_metric(data, "mfe_pct"),
+        "mean_entry_capture_pct": _optional_metric(data, "entry_capture_pct"),
+        "mean_slippage_bps": _optional_metric(data, "slippage_bps"),
+        "mean_fees_usd": _optional_metric(data, "fees_usd"),
+        "mean_funding_usd": _optional_metric(data, "funding_usd"),
+        "samples": len(data),
+    }
+
+
+def expectancy_confidence_interval(
+    rows: Iterable[Mapping[str, Any]], confidence_z: float = 1.96
+) -> dict[str, float | int | None]:
+    """Normal-approximation interval for mean net PnL; not a profitability test."""
+    values = [float(row["net_pnl"]) for row in rows]
+    if any(not isfinite(value) for value in values):
+        raise ValueError("net_pnl values must be finite")
+    if not isfinite(confidence_z) or confidence_z <= 0:
+        raise ValueError("confidence_z must be finite and positive")
+    count = len(values)
+    if count < 2:
+        return {
+            "samples": count,
+            "mean": sum(values) / count if count else None,
+            "lower": None,
+            "upper": None,
+            "confidence_z": confidence_z,
+        }
+    mean = sum(values) / count
+    variance = sum((value - mean) ** 2 for value in values) / (count - 1)
+    margin = confidence_z * (variance**0.5) / (count**0.5)
+    return {
+        "samples": count,
+        "mean": mean,
+        "lower": mean - margin,
+        "upper": mean + margin,
+        "confidence_z": confidence_z,
+    }
+
+
+def rejected_opportunity_counterfactual(
+    rows: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Summarize realized markouts for rejected opportunities, when supplied."""
+    rejected = [
+        row
+        for row in rows
+        if bool(row.get("rejected_opportunity"))
+        and row.get("counterfactual_net_pnl") is not None
+    ]
+    pnl = [float(row["counterfactual_net_pnl"]) for row in rejected]
+    if any(not isfinite(value) for value in pnl):
+        raise ValueError("counterfactual_net_pnl values must be finite")
+    missed = sum(value > 0 for value in pnl)
+    return {
+        "samples": len(pnl),
+        "counterfactual_metrics": walk_forward_metrics(
+            [{"net_pnl": value} for value in pnl]
+        ),
+        "positive_markout_rate": missed / len(pnl) if pnl else 0.0,
+        "negative_markout_rate": (
+            sum(value < 0 for value in pnl) / len(pnl) if pnl else 0.0
+        ),
+    }
+
+
 def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
     """Report baseline/ablation variants and LONG/SHORT outcomes separately."""
     data = validate_observations(rows)
@@ -134,6 +246,10 @@ def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
         report[variant] = {
             "overall": walk_forward_metrics(items),
             "by_side": _side_metrics(items),
+            "by_regime": _regime_metrics(items),
+            "research_diagnostics": _research_diagnostics(items),
+            "expectancy_confidence_interval": expectancy_confidence_interval(items),
+            "rejected_opportunity_counterfactual": rejected_opportunity_counterfactual(items),
             "trade_count": len(items),
             "date_range": {
                 "start": items[0]["decision_at"].isoformat(),
@@ -179,6 +295,9 @@ def evaluate_fold_results(
                 "test_end": fold.test_end.isoformat(),
                 "test_metrics": walk_forward_metrics(test),
                 "long_short": _side_metrics(test),
+                "by_regime": _regime_metrics(test),
+                "research_diagnostics": _research_diagnostics(test),
+                "expectancy_confidence_interval": expectancy_confidence_interval(test),
                 "test_trade_count": len(test),
             }
         )
