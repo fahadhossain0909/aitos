@@ -436,8 +436,8 @@ def execution_cost_sensitivity(
                 raise ValueError(
                     f"row {index}: fees and slippage costs must be non-negative"
                 )
-            # Funding is a signed cash flow: positive is paid, negative is received.
-            net_values.append(gross - multiplier * (fees + slippage + funding))
+            # Funding is signed PnL in the trade ledger: positive is received.
+            net_values.append(gross - multiplier * (fees + slippage) + multiplier * funding)
         metrics = walk_forward_metrics([{"net_pnl": value} for value in net_values])
         scenarios.append(
             {
