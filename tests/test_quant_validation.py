@@ -141,7 +141,6 @@ def test_validation_rejects_non_boolean_realized_outcome_labels():
         validate_observations(rows)
 
 
-
 def test_validation_rejects_ambiguous_rejected_opportunity_labels():
     rows = observations(2)
     rows[0]["rejected_opportunity"] = "false"
