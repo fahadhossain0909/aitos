@@ -208,3 +208,23 @@ def test_role_specific_evidence_adjusts_timeframe_weight_and_is_auditable():
         decision.diagnostics["role_weight_factors"]["1d"]
         > decision.diagnostics["role_weight_factors"]["5m"]
     )
+
+
+
+def test_choch_directional_attribution_matches_reversal_entry_policy():
+    bullish_flip = directional_diagnostics(
+        "bullish_bos",
+        6.5,
+        structure_bias="bearish",
+        structure_event="choch",
+    )
+    bearish_flip = directional_diagnostics(
+        "bearish_bos",
+        3.5,
+        structure_bias="bullish",
+        structure_event="choch",
+    )
+    assert bullish_flip["long"]["accepted_by_diagnostic"] is True
+    assert bullish_flip["long"]["rejection_reasons"] == []
+    assert bearish_flip["short"]["accepted_by_diagnostic"] is True
+    assert bearish_flip["short"]["rejection_reasons"] == []
