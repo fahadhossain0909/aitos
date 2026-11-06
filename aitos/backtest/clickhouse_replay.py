@@ -104,16 +104,20 @@ class ClickHouseReplayLoader:
             """,
             parameters,
         )
+        depth_start = (
+            bootstrap_rows[0]["time"] if bootstrap_rows else parameters["start"]
+        )
+        depth_parameters = {**parameters, "depth_start": depth_start}
         depth_rows = await self.repository._query(
             """
             SELECT event_time, final_update_id, payload_json
             FROM depth_events
             WHERE symbol = {symbol:String}
-              AND event_time >= {start:DateTime64(3, 'UTC')}
+              AND event_time >= {depth_start:DateTime64(3, 'UTC')}
               AND event_time < {end:DateTime64(3, 'UTC')}
             ORDER BY event_time, final_update_id LIMIT {limit:UInt32}
             """,
-            parameters,
+            depth_parameters,
         )
         depth_payloads = [(row, json.loads(row["payload_json"])) for row in depth_rows]
         depth_by_update = {
@@ -174,7 +178,11 @@ class ClickHouseReplayLoader:
                     event_time_ms=int(row["event_time"].timestamp() * 1000),
                 )
                 snapshot = local_book.apply(update)
-                if snapshot is not None and snapshot.depth_event is not None:
+                if (
+                    snapshot is not None
+                    and snapshot.depth_event is not None
+                    and snapshot.timestamp >= parameters["start"]
+                ):
                     replayed_depth.append(snapshot)
         funding = await self.repository._query(
             """
@@ -286,6 +294,9 @@ class ClickHouseReplayLoader:
                 "event_rows": len(events),
                 "lookahead_policy": "strict [start,end), no forward fill",
                 "depth_event_rows": len(depth_rows),
+                "depth_replay_bootstrap_time": (
+                    depth_start.isoformat() if bootstrap_rows else None
+                ),
                 "raw_depth_events_replayed": len(replayed_depth),
                 "raw_depth_event_replay_available": bool(replayed_depth),
                 "derived_depth_snapshot_count": len(depth_by_update),
