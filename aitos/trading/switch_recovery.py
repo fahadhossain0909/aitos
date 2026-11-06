@@ -86,9 +86,17 @@ class PositionSwitchRecoveryWorker:
                 incumbent = self._incumbent(intent.incumbent_trade_id)
                 if incumbent is None:
                     raise RuntimeError("incumbent trade is not hydrated")
-                if intent.state in self.POST_CLOSE_STATES:
-                    # switch() uses the journal state to resume after close and
-                    # will reconcile open_submitting rather than resubmit blindly.
+                resume_close = (
+                    intent.state in self.POST_CLOSE_STATES
+                    or (
+                        intent.state == "close_pending"
+                        and bool(intent.reason or intent.close_order_id)
+                    )
+                )
+                if resume_close:
+                    # An incomplete close must be reconciled to flat; a fresh
+                    # alpha veto cannot undo a partial reduction already made.
+                    # open_submitting remains fail-closed inside the coordinator.
                     decision = type("RecoveryDecision", (), {"should_switch": True})()
                 else:
                     evaluator = self.coordinator.evaluate_pair
