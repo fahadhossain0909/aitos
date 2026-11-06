@@ -287,9 +287,21 @@ def _env_overrides() -> dict[str, Any]:
             "htf_allow_neutral",
             _parse_bool,
         ),
-        "AITOS_TUNING_SCANNER_HTF_REQUEST_BUDGET_PER_MINUTE": ("scanner", "htf_request_budget_per_minute", int),
-        "AITOS_TUNING_SCANNER_HTF_FETCH_CONCURRENCY": ("scanner", "htf_fetch_concurrency", int),
-        "AITOS_TUNING_SCANNER_HTF_FRESHNESS_GRACE_SECONDS": ("scanner", "htf_freshness_grace_seconds", float),
+        "AITOS_TUNING_SCANNER_HTF_REQUEST_BUDGET_PER_MINUTE": (
+            "scanner",
+            "htf_request_budget_per_minute",
+            int,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_FETCH_CONCURRENCY": (
+            "scanner",
+            "htf_fetch_concurrency",
+            int,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_FRESHNESS_GRACE_SECONDS": (
+            "scanner",
+            "htf_freshness_grace_seconds",
+            float,
+        ),
         "AITOS_TUNING_SCANNER_CORE_SYMBOLS": (
             "scanner",
             "core_symbols",
