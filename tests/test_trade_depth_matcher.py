@@ -154,7 +154,6 @@ async def test_live_scanner_cache_matches_trade_events_to_depth_reductions():
     assert state.depth_event_history[0]["matched_execution_qty"] == 2.0
 
 
-
 @pytest.mark.asyncio
 async def test_depth_producer_to_live_scanner_to_ofi_side_attribution_replay():
     timestamp_ms = int(BASE.timestamp() * 1000)
