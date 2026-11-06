@@ -18,7 +18,10 @@ def test_exit_ere_is_probability_weighted_net_of_costs_and_auditable():
         downside=(SimpleNamespace(price=95.0, probability=0.4),),
     )
     edge, reasons, diagnostics = engine._path_and_ere(
-        "LONG", 100.0, plan, 0.001,
+        "LONG",
+        100.0,
+        plan,
+        0.001,
     )
     assert edge == pytest.approx(0.009)
     assert diagnostics["path_expected_gain_fraction"] == pytest.approx(0.03)
@@ -42,11 +45,13 @@ def test_exit_ere_mirrors_directional_path_probabilities_for_short():
 
 
 def test_correlation_aware_portfolio_protection_caps_incremental_risk():
-    protection = PortfolioProtection(ProtectionConfig(
-        max_portfolio_risk_pct=5.0,
-        max_correlated_risk_pct=1.5,
-        unknown_correlation=0.9,
-    ))
+    protection = PortfolioProtection(
+        ProtectionConfig(
+            max_portfolio_risk_pct=5.0,
+            max_correlated_risk_pct=1.5,
+            unknown_correlation=0.9,
+        )
+    )
     snapshot = PortfolioRiskSnapshot(
         equity_usd=10_000.0,
         equity_peak_usd=10_000.0,
@@ -54,7 +59,9 @@ def test_correlation_aware_portfolio_protection_caps_incremental_risk():
         correlations={("BTCUSDT", "ETHUSDT"): 0.9},
     )
     decision = protection.evaluate(
-        symbol="ETHUSDT", requested_risk_pct=1.0, snapshot=snapshot,
+        symbol="ETHUSDT",
+        requested_risk_pct=1.0,
+        snapshot=snapshot,
     )
     assert decision.allowed
     assert decision.allowed_risk_pct == pytest.approx(0.6)
