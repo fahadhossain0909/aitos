@@ -38,6 +38,10 @@ class PairedReplayMetrics:
     max_drawdown_pct: float
     switches: int
     transaction_cost_pct: float
+    fee_cost_pct: float
+    slippage_cost_pct: float
+    funding_cost_pct: float
+    positive_advantage_vetoes: int
     observations: int
 
 
@@ -55,6 +59,10 @@ def _metrics(
     curve: Sequence[float],
     switches: int,
     transaction_cost_pct: float,
+    fee_cost_pct: float,
+    slippage_cost_pct: float,
+    funding_cost_pct: float,
+    positive_advantage_vetoes: int,
 ) -> PairedReplayMetrics:
     final = curve[-1] if curve else initial_equity
     peak = initial_equity
@@ -70,6 +78,10 @@ def _metrics(
         max_drawdown_pct=drawdown,
         switches=switches,
         transaction_cost_pct=transaction_cost_pct,
+        fee_cost_pct=fee_cost_pct,
+        slippage_cost_pct=slippage_cost_pct,
+        funding_cost_pct=funding_cost_pct,
+        positive_advantage_vetoes=positive_advantage_vetoes,
         observations=len(curve),
     )
 
@@ -103,7 +115,7 @@ class CapitalRebalanceReplay:
         ):
             raise ValueError("replay frames must be timestamp ordered")
         if not ordered:
-            empty = _metrics(initial_equity, (), 0, 0.0)
+            empty = _metrics(initial_equity, (), 0, 0.0, 0.0, 0.0, 0.0, 0)
             return CapitalRebalanceReplayResult(empty, empty, 0.0, 0.0, ())
 
         baseline_symbol = ordered[0].incumbent.symbol.upper()
@@ -112,7 +124,10 @@ class CapitalRebalanceReplay:
         hold_curve: list[float] = []
         rebalanced_curve: list[float] = []
         switches = 0
-        rebalance_cost_pct = 0.0
+        rebalance_fee_cost_pct = 0.0
+        rebalance_slippage_cost_pct = 0.0
+        rebalance_funding_cost_pct = 0.0
+        positive_advantage_vetoes = 0
         switch_log: list[tuple[datetime, str, str, float]] = []
 
         for frame in ordered:
@@ -142,18 +157,21 @@ class CapitalRebalanceReplay:
                 # The incumbent is exited and the replacement is entered at
                 # this frame's decision boundary. Charge both sides' expected
                 # execution costs once; funding is signed, so credits reduce cost.
-                cost_bps = (
-                    frame.incumbent.exit_fee_bps
-                    + frame.incumbent.exit_slippage_bps
-                    + frame.candidate.fee_bps
+                fee_cost_pct = (
+                    frame.incumbent.exit_fee_bps + frame.candidate.fee_bps
+                ) * 0.01
+                slippage_cost_pct = (
+                    frame.incumbent.exit_slippage_bps
                     + frame.candidate.slippage_bps
-                    + frame.candidate.funding_bps
-                )
-                cost_pct = cost_bps * 0.01
+                ) * 0.01
+                funding_cost_pct = frame.candidate.funding_bps * 0.01
+                cost_pct = fee_cost_pct + slippage_cost_pct + funding_cost_pct
                 if cost_pct >= 100.0:
                     raise ValueError("switch transaction cost would consume equity")
                 rebalanced_equity *= 1.0 - cost_pct / 100.0
-                rebalance_cost_pct += cost_pct
+                rebalance_fee_cost_pct += fee_cost_pct
+                rebalance_slippage_cost_pct += slippage_cost_pct
+                rebalance_funding_cost_pct += funding_cost_pct
                 active_symbol = candidate_symbol
                 switches += 1
                 switch_log.append(
@@ -164,6 +182,8 @@ class CapitalRebalanceReplay:
                         decision.net_advantage_pct,
                     )
                 )
+            elif candidate_symbol != active_symbol and decision.net_advantage_pct > 0:
+                positive_advantage_vetoes += 1
 
             active_return = float(returns[active_symbol])
             if not isfinite(active_return) or active_return <= -100.0:
@@ -175,7 +195,9 @@ class CapitalRebalanceReplay:
             rebalanced_equity *= 1.0 + active_return / 100.0
             rebalanced_curve.append(rebalanced_equity)
 
-        final_cost_pct = (final_exit_fee_bps + final_exit_slippage_bps) * 0.01
+        final_fee_cost_pct = final_exit_fee_bps * 0.01
+        final_slippage_cost_pct = final_exit_slippage_bps * 0.01
+        final_cost_pct = final_fee_cost_pct + final_slippage_cost_pct
         if final_cost_pct >= 100.0:
             raise ValueError("final exit cost would consume equity")
         hold_equity *= 1.0 - final_cost_pct / 100.0
@@ -183,17 +205,41 @@ class CapitalRebalanceReplay:
         # already charged at each switch boundary. Avoid charging the final
         # switched position's exit a second time. If no switch occurred, both
         # paths are the same hold-only position and both pay the final exit.
-        rebalanced_final_cost_pct = final_cost_pct if switches == 0 else 0.0
+        rebalanced_final_fee_cost_pct = final_fee_cost_pct if switches == 0 else 0.0
+        rebalanced_final_slippage_cost_pct = (
+            final_slippage_cost_pct if switches == 0 else 0.0
+        )
+        rebalanced_final_cost_pct = (
+            rebalanced_final_fee_cost_pct + rebalanced_final_slippage_cost_pct
+        )
         rebalanced_equity *= 1.0 - rebalanced_final_cost_pct / 100.0
         hold_curve[-1] = hold_equity
         rebalanced_curve[-1] = rebalanced_equity
 
-        hold_metrics = _metrics(initial_equity, hold_curve, 0, final_cost_pct)
+        hold_metrics = _metrics(
+            initial_equity,
+            hold_curve,
+            0,
+            final_cost_pct,
+            final_fee_cost_pct,
+            final_slippage_cost_pct,
+            0.0,
+            0,
+        )
         rebalanced_metrics = _metrics(
             initial_equity,
             rebalanced_curve,
             switches,
-            rebalance_cost_pct + rebalanced_final_cost_pct,
+            (
+                rebalance_fee_cost_pct
+                + rebalance_slippage_cost_pct
+                + rebalance_funding_cost_pct
+                + rebalanced_final_cost_pct
+            ),
+            rebalance_fee_cost_pct + rebalanced_final_fee_cost_pct,
+            rebalance_slippage_cost_pct + rebalanced_final_slippage_cost_pct,
+            rebalance_funding_cost_pct,
+            positive_advantage_vetoes,
         )
         return CapitalRebalanceReplayResult(
             hold_only=hold_metrics,
