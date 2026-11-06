@@ -159,10 +159,7 @@ class ProbabilityCalibrator:
         rows = self._conn.execute(
             "SELECT bin, samples, losses FROM probability_calibration_bins"
         )
-        self._bins = {
-            int(row[0]): [int(row[1]), int(row[2])]
-            for row in rows
-        }
+        self._bins = {int(row[0]): [int(row[1]), int(row[2])] for row in rows}
 
     def observe(
         self,
