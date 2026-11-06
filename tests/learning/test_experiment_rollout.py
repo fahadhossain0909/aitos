@@ -252,3 +252,27 @@ def test_healthy_canary_requires_approval_then_supports_rollback(tmp_path):
     assert restored.version == "v1"
     assert coordinator.get("strategy", "v2")["state"] == "rolled_back"
     assert routed[-1] == ("rollback", "strategy", "v1")
+
+
+def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(tmp_path):
+    coordinator = RolloutCoordinator(
+        str(tmp_path / "rollouts.json"),
+        FakeRegistry(),
+        canary_router=lambda *args: None,
+        production_router=lambda *args: None,
+        rollback_router=lambda *args: (_ for _ in ()).throw(RuntimeError("router unavailable")),
+        minimum_canary_samples=1,
+        minimum_canary_observations=1,
+    )
+    coordinator.stage("strategy", "v2", _validation())
+    coordinator.start_canary("strategy", "v2")
+    row = coordinator.observe_canary(
+        "strategy",
+        "v2",
+        sample_count=1,
+        error_rate=0.5,
+        drawdown=0.5,
+        return_delta=-0.5,
+    )
+    assert row["state"] == "rollback_pending"
+    assert coordinator.get("strategy", "v2")["rollback_reason"] == "canary_rollback_route_failed"

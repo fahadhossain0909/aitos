@@ -209,12 +209,17 @@ class RolloutCoordinator:
             )
             if failed:
                 previous = row.get("previous_champion")
-                self.rollback_router(name, previous)
-                row["state"] = "rolled_back"
-                row["rollback_reason"] = "canary_threshold_breach"
+                try:
+                    self.rollback_router(name, previous)
+                    row["state"] = "rolled_back"
+                    row["rollback_reason"] = "canary_threshold_breach"
+                except Exception as exc:
+                    row["state"] = "rollback_pending"
+                    row["rollback_reason"] = "canary_rollback_route_failed"
+                    row["rollback_error"] = str(exc)
                 row["audit"].append(
                     {
-                        "state": "rolled_back",
+                        "state": row["state"],
                         "at": now,
                         "reason": row["rollback_reason"],
                     }
@@ -255,22 +260,34 @@ class RolloutCoordinator:
             )
             try:
                 self.production_router(name, version)
-            except Exception:
+            except Exception as promotion_error:
                 previous = row.get("previous_champion")
-                self.rollback_router(name, previous)
-                if previous:
-                    self.registry.rollback(
-                        name, previous, reason="production_router_failed"
-                    )
-                    row["state"] = "rolled_back"
-                else:
+                try:
+                    self.rollback_router(name, previous)
+                    if previous:
+                        self.registry.rollback(
+                            name, previous, reason="production_router_failed"
+                        )
+                        row["state"] = "rolled_back"
+                    else:
+                        row["state"] = "rollback_pending"
+                except Exception as rollback_error:
                     row["state"] = "rollback_pending"
+                    row["rollback_error"] = str(rollback_error)
                 now = datetime.now(timezone.utc).isoformat()
                 row["rollback_reason"] = "production_router_failed"
                 row["audit"].append(
-                    {"state": row["state"], "at": now, "reason": row["rollback_reason"]}
+                    {
+                        "state": row["state"],
+                        "at": now,
+                        "reason": row["rollback_reason"],
+                    }
                 )
                 self._write(rows)
+                if row["state"] == "rollback_pending":
+                    raise RuntimeError(
+                        "promotion failed and rollback requires manual reconciliation"
+                    ) from promotion_error
                 raise
             row["state"] = "promoted"
             row["approval_id"] = approval.approval_id
@@ -306,7 +323,23 @@ class RolloutCoordinator:
                     "no previous champion; manual reconciliation required"
                 )
             restored = self.registry.rollback(name, previous, reason=reason)
-            self.rollback_router(name, previous)
+            try:
+                self.rollback_router(name, previous)
+            except Exception as exc:
+                row["state"] = "rollback_pending"
+                row["rollback_reason"] = reason
+                row["rollback_error"] = str(exc)
+                row["audit"].append(
+                    {
+                        "state": "rollback_pending",
+                        "at": datetime.now(timezone.utc).isoformat(),
+                        "reason": reason,
+                    }
+                )
+                self._write(rows)
+                raise RuntimeError(
+                    "registry restored but runtime rollback needs reconciliation"
+                ) from exc
             row["state"] = "rolled_back"
             row["rollback_reason"] = reason
             row["audit"].append(

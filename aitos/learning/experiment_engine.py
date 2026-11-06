@@ -88,6 +88,7 @@ class ExperimentCell:
 class ExperimentReport:
     experiment_id: str
     plan_name: str
+    dataset_fingerprint: str
     cells: tuple[ExperimentCell, ...]
     deltas_vs_baseline: Mapping[str, Mapping[str, float]]
     passed_sample_gates: bool
@@ -101,6 +102,7 @@ class ExperimentReport:
         return {
             "experiment_id": self.experiment_id,
             "plan_name": self.plan_name,
+            "dataset_fingerprint": self.dataset_fingerprint,
             "cells": [asdict(cell) for cell in self.cells],
             "deltas_vs_baseline": dict(self.deltas_vs_baseline),
             "passed_sample_gates": self.passed_sample_gates,
@@ -129,6 +131,18 @@ class ExperimentEngine:
         if not isinstance(value, datetime) or value.tzinfo is None:
             raise ValueError("experiment events require timezone-aware timestamps")
         return value
+
+    @staticmethod
+    def _event_payload(event: Any) -> Any:
+        if isinstance(event, Mapping):
+            return dict(event)
+        if hasattr(event, "__dict__"):
+            return vars(event)
+        return {
+            "timestamp": ExperimentEngine._timestamp(event).isoformat(),
+            "regime": ExperimentEngine._regime(event),
+            "representation": repr(event),
+        }
 
     @staticmethod
     def _regime(event: Any) -> str:
@@ -276,8 +290,17 @@ class ExperimentEngine:
         expected = len(regimes) * len(plan.cost_scenarios) * len(variants)
         if len(cells) != expected:
             passed = False
+        dataset_fingerprint = hashlib.sha256(
+            json.dumps(
+                [self._event_payload(event) for event in ordered],
+                sort_keys=True,
+                default=str,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
         canonical = {
             "name": plan.name,
+            "dataset_fingerprint": dataset_fingerprint,
             "evidence_ids": sorted(plan.evidence_ids),
             "regimes": list(regimes),
             "costs": [asdict(c) for c in plan.cost_scenarios],
@@ -291,5 +314,11 @@ class ExperimentEngine:
             json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()[:24]
         return ExperimentReport(
-            experiment_id, plan.name, tuple(cells), deltas, passed, plan.evidence_ids
+            experiment_id,
+            plan.name,
+            dataset_fingerprint,
+            tuple(cells),
+            deltas,
+            passed,
+            plan.evidence_ids,
         )
