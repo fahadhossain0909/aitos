@@ -24,6 +24,11 @@ os.environ["MODEL_DATA_DIR"] = str(_TEST_MODEL_ROOT)
 
 import pytest
 import pytest_asyncio
+from fakeredis import aioredis as fake_aioredis
+
+from aitos.eventbus.redis_bus import EventBus
+from aitos.kernel.ai_kernel import AIKernel
+from aitos.risk.risk_engine import RiskEngine
 
 
 @pytest.fixture(autouse=True)
@@ -35,11 +40,6 @@ def isolate_model_data_dir_per_test(tmp_path, monkeypatch):
     position reservations or calibration observations.
     """
     monkeypatch.setenv("MODEL_DATA_DIR", str(tmp_path / "model-data"))
-from fakeredis import aioredis as fake_aioredis
-
-from aitos.eventbus.redis_bus import EventBus
-from aitos.kernel.ai_kernel import AIKernel
-from aitos.risk.risk_engine import RiskEngine
 
 
 @pytest_asyncio.fixture
