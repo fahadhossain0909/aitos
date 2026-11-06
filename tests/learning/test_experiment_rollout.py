@@ -280,4 +280,7 @@ def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(tmp_path
         coordinator.get("strategy", "v2")["rollback_reason"]
         == "canary_rollback_route_failed"
     )
+        coordinator.get("strategy", "v2")["rollback_reason"]
+        == "canary_rollback_route_failed"
+    )
     assert coordinator.get("strategy", "v2")["rollback_reason"] == "canary_rollback_route_failed"
