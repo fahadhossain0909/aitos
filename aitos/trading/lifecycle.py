@@ -260,17 +260,21 @@ class TradeLifecycle(AITOSModule):
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
-        # The application must explicitly attest that state hydration and
-        # authoritative venue reconciliation have completed before recovery.
-        # Mark initialized only after recovery succeeds so failures can retry.
-        if config.get("recover_position_switches", False):
-            await self.recover_position_switches(
-                trades_hydrated=bool(config.get("trades_hydrated", False)),
-                venue_positions_reconciled=bool(
-                    config.get("venue_positions_reconciled", False)
-                ),
-            )
+        # Recovery uses normal lifecycle close/open methods, which require the
+        # module to be initialized. Roll back the flag if recovery fails so the
+        # caller can correct the startup dependency and retry initialization.
         self._initialized = True
+        try:
+            if config.get("recover_position_switches", False):
+                await self.recover_position_switches(
+                    trades_hydrated=bool(config.get("trades_hydrated", False)),
+                    venue_positions_reconciled=bool(
+                        config.get("venue_positions_reconciled", False)
+                    ),
+                )
+        except Exception:
+            self._initialized = False
+            raise
         logger.info(
             "TradeLifecycle initialized",
             extra={
