@@ -66,7 +66,9 @@ async def test_clickhouse_loader_builds_bounded_point_in_time_dataset():
     assert isinstance(dataset.events[1], TradeTick)
     assert dataset.funding_events[0]["funding_rate"] == pytest.approx(0.0001)
     assert dataset.provenance["depth_event_history_available"] is True
-    assert dataset.provenance["lookahead_policy"] == "strict [start,end), no forward fill"
+    assert (
+        dataset.provenance["lookahead_policy"] == "strict [start,end), no forward fill"
+    )
 
 
 @pytest.mark.asyncio
@@ -76,7 +78,6 @@ async def test_clickhouse_loader_rejects_naive_or_invalid_time_ranges():
         await ClickHouseReplayLoader(_Repository()).load(
             "BTCUSDT", start, start + timedelta(days=1)
         )
-
 
 
 def test_historical_runner_applies_funding_only_at_scheduled_settlement():
