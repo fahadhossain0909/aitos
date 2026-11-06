@@ -90,3 +90,45 @@ class PointInTimeCorrelationEstimator:
                 correlations[(left, right)] = round(value, 6)
                 correlations[(right, left)] = round(value, 6)
         return correlations
+
+    def estimate_covariance(
+        self, observations: Iterable[dict[str, Any]], *, as_of: datetime
+    ) -> dict[tuple[str, str], float]:
+        """Return pairwise sample covariance of aligned point-in-time returns."""
+        cutoff = _timestamp(as_of)
+        start = cutoff - self.lookback
+        prices: dict[str, dict[datetime, float]] = defaultdict(dict)
+        for row in observations:
+            symbol = str(row.get("symbol", "")).upper()
+            if not symbol:
+                continue
+            timestamp = _timestamp(row["timestamp"])
+            if timestamp < start or timestamp > cutoff:
+                continue
+            price = float(row["price"])
+            if isfinite(price) and price > 0:
+                prices[symbol][timestamp] = price
+
+        covariance: dict[tuple[str, str], float] = {}
+        symbols = sorted(prices)
+        for index, left in enumerate(symbols):
+            for right in symbols[index:]:
+                common = sorted(set(prices[left]).intersection(prices[right]))
+                if len(common) - 1 < self.min_observations:
+                    continue
+                x = []
+                y = []
+                for previous, current in zip(common, common[1:]):
+                    left_previous = prices[left][previous]
+                    right_previous = prices[right][previous]
+                    x.append(prices[left][current] / left_previous - 1.0)
+                    y.append(prices[right][current] / right_previous - 1.0)
+                if len(x) < self.min_observations:
+                    continue
+                mean_x, mean_y = sum(x) / len(x), sum(y) / len(y)
+                value = sum(
+                    (a - mean_x) * (b - mean_y) for a, b in zip(x, y)
+                ) / (len(x) - 1)
+                covariance[(left, right)] = value
+                covariance[(right, left)] = value
+        return covariance
