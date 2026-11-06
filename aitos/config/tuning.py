@@ -60,6 +60,9 @@ class ScannerTuning(BaseModel):
     htf_neutral_min_ltf_score: float = Field(default=6.0, ge=0, le=10)
     htf_countertrend_min_ltf_score: float = Field(default=7.0, ge=0, le=10)
     htf_allow_neutral: bool = True
+    htf_request_budget_per_minute: int = Field(default=360, ge=6, le=1200)
+    htf_fetch_concurrency: int = Field(default=4, ge=1, le=16)
+    htf_freshness_grace_seconds: float = Field(default=15.0, ge=0, le=300)
 
 
 class AnalysisTuning(BaseModel):
@@ -284,6 +287,9 @@ def _env_overrides() -> dict[str, Any]:
             "htf_allow_neutral",
             _parse_bool,
         ),
+        "AITOS_TUNING_SCANNER_HTF_REQUEST_BUDGET_PER_MINUTE": ("scanner", "htf_request_budget_per_minute", int),
+        "AITOS_TUNING_SCANNER_HTF_FETCH_CONCURRENCY": ("scanner", "htf_fetch_concurrency", int),
+        "AITOS_TUNING_SCANNER_HTF_FRESHNESS_GRACE_SECONDS": ("scanner", "htf_freshness_grace_seconds", float),
         "AITOS_TUNING_SCANNER_CORE_SYMBOLS": (
             "scanner",
             "core_symbols",
