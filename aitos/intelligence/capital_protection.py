@@ -61,6 +61,7 @@ class PortfolioRiskSnapshot:
     equity_peak_usd: float
     position_risk_pct: dict[str, float]
     correlations: dict[tuple[str, str], float]
+    position_sides: dict[str, str] | None = None
 
     @property
     def total_risk_pct(self) -> float:
@@ -81,6 +82,45 @@ class PortfolioRiskSnapshot:
         if not isfinite(value):
             return unknown
         return max(-1.0, min(1.0, value))
+
+
+    def correlated_risk_pct(
+        self,
+        positions: dict[str, float] | None = None,
+        position_sides: dict[str, str] | None = None,
+        unknown_correlation: float = 0.75,
+    ) -> float:
+        """Portfolio loss-risk volatility using side-adjusted return correlation.
+
+        If either side is unknown, correlation is treated as positively aligned
+        by absolute magnitude; missing side metadata never grants hedge credit.
+        """
+        risks = {
+            str(symbol): max(0.0, float(risk))
+            for symbol, risk in (positions or self.position_risk_pct).items()
+        }
+        sides = {
+            str(symbol): str(side).upper()
+            for symbol, side in (position_sides or self.position_sides or {}).items()
+        }
+        symbols = sorted(risks)
+        variance = sum(risk * risk for risk in risks.values())
+        for index, symbol_a in enumerate(symbols):
+            for symbol_b in symbols[index + 1 :]:
+                correlation = self.correlation(
+                    symbol_a, symbol_b, unknown_correlation
+                )
+                side_a = sides.get(symbol_a)
+                side_b = sides.get(symbol_b)
+                if side_a in {"LONG", "SHORT"} and side_b in {"LONG", "SHORT"}:
+                    if side_a != side_b:
+                        correlation *= -1.0
+                else:
+                    correlation = abs(correlation)
+                variance += (
+                    2.0 * correlation * risks[symbol_a] * risks[symbol_b]
+                )
+        return max(0.0, variance) ** 0.5
 
 
 @dataclass(frozen=True)
@@ -134,6 +174,7 @@ class PortfolioProtection:
         symbol: str,
         requested_risk_pct: float,
         snapshot: PortfolioRiskSnapshot,
+        side: str = "LONG",
         regime: str | None = None,
         volatility_score: float | None = None,
     ) -> ProtectionDecision:
@@ -160,21 +201,51 @@ class PortfolioProtection:
                 snapshot.drawdown_pct,
                 "drawdown_protection_stop",
             )
-        existing_correlated = 0.0
-        for other, risk in snapshot.position_risk_pct.items():
-            existing_correlated += max(0.0, risk) * abs(
-                snapshot.correlation(symbol, other, self.config.unknown_correlation)
-            )
-        correlated_risk = existing_correlated + requested_risk_pct * multiplier
         portfolio_remaining = max(
             0.0, self.config.max_portfolio_risk_pct - snapshot.total_risk_pct
         )
-        correlated_remaining = max(
-            0.0, self.config.max_correlated_risk_pct - existing_correlated
+        requested_after_protection = min(
+            requested_risk_pct * multiplier, portfolio_remaining
         )
-        allowed_risk = min(
-            requested_risk_pct * multiplier, portfolio_remaining, correlated_remaining
+        existing_correlated = snapshot.correlated_risk_pct(
+            unknown_correlation=self.config.unknown_correlation
         )
+        existing_positions = dict(snapshot.position_risk_pct)
+        existing_sides = dict(snapshot.position_sides or {})
+        candidate_side = str(side).upper()
+        if candidate_side not in {"LONG", "SHORT"}:
+            return ProtectionDecision(
+                False,
+                multiplier,
+                requested_risk_pct,
+                0.0,
+                existing_correlated,
+                snapshot.drawdown_pct,
+                "invalid_position_side",
+            )
+
+        def combined_risk(candidate_risk: float) -> float:
+            positions = {**existing_positions, symbol: candidate_risk}
+            sides = {**existing_sides, symbol: candidate_side}
+            return snapshot.correlated_risk_pct(
+                positions,
+                sides,
+                self.config.unknown_correlation,
+            )
+
+        upper_risk = requested_after_protection
+        if combined_risk(upper_risk) <= self.config.max_correlated_risk_pct:
+            allowed_risk = upper_risk
+        else:
+            lower_risk = 0.0
+            for _ in range(60):
+                midpoint = (lower_risk + upper_risk) / 2.0
+                if combined_risk(midpoint) <= self.config.max_correlated_risk_pct:
+                    lower_risk = midpoint
+                else:
+                    upper_risk = midpoint
+            allowed_risk = lower_risk
+        correlated_risk = combined_risk(allowed_risk)
         allowed_risk = max(0.0, round(allowed_risk, 12))
         if allowed_risk <= 0:
             return ProtectionDecision(
