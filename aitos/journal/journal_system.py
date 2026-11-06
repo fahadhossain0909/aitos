@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -349,6 +350,43 @@ class JournalSystem(AITOSModule):
         )
         if not decision_id:
             decision_id = (trade_dict.get("agent_consensus") or {}).get("decision_id")
+        decision_snapshot = (
+            dict(self._decision_snapshots.get(str(decision_id), {}))
+            if decision_id
+            else {}
+        )
+        if (
+            decision_id
+            and not decision_snapshot
+            and self._decision_repository is not None
+        ):
+            get_records = getattr(self._decision_repository, "get_records", None)
+            if callable(get_records):
+                try:
+                    records = await get_records(str(decision_id))
+                    for record in records:
+                        if record.get("record_type") != "DECISION":
+                            continue
+                        raw_snapshot = record.get("payload")
+                        snapshot = (
+                            json.loads(raw_snapshot)
+                            if isinstance(raw_snapshot, str)
+                            else raw_snapshot
+                        )
+                        if isinstance(snapshot, dict):
+                            decision_snapshot = snapshot
+                            self._decision_snapshots[str(decision_id)] = snapshot
+                            break
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "decision snapshot recovery failed during outcome attribution",
+                        extra={
+                            "aitos_extra": {
+                                "decision_id": str(decision_id),
+                                "error": str(exc),
+                            }
+                        },
+                    )
         if self._decision_repository is not None and decision_id:
             await self._decision_repository.attribute_outcome(
                 str(decision_id), trade_dict
@@ -377,6 +415,10 @@ class JournalSystem(AITOSModule):
                     "mae_r": trade_dict.get("mae_r"),
                     "mfe_r": trade_dict.get("mfe_r"),
                     "agent_consensus": dict(trade_dict.get("agent_consensus") or {}),
+                    "decision_snapshot": decision_snapshot,
+                    "root_cause_tags": list(trade_dict.get("root_cause_tags") or []),
+                    "total_cost_r": trade_dict.get("total_cost_r"),
+                    "diagnostics": dict(trade_dict.get("diagnostics") or {}),
                 },
                 source_module=self.module_id,
             )

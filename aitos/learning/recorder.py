@@ -147,6 +147,18 @@ class LearningExperienceRecorder(AITOSModule):
             metadata={
                 "decision_id": str(p.get("decision_id") or event.event_id),
                 "event_type": "decision",
+                "decision_diagnostics": {
+                    "candidate_score": p.get("candidate_score"),
+                    "component_scores": dict(p.get("candidate_component_scores") or {}),
+                    "component_availability": dict(
+                        p.get("candidate_component_availability") or {}
+                    ),
+                    "weights": dict(p.get("candidate_weights") or {}),
+                    "threshold": p.get("candidate_threshold"),
+                    "rationale": list(
+                        p.get("candidate_rationale") or p.get("rationale") or []
+                    ),
+                },
             },
         )
         await self._write(record)
@@ -187,6 +199,10 @@ class LearningExperienceRecorder(AITOSModule):
             "mfe_price": p.get("mfe_price"),
             "mae_r": p.get("mae_r"),
             "mfe_r": p.get("mfe_r"),
+            "decision_snapshot": dict(p.get("decision_snapshot") or {}),
+            "root_cause_tags": list(p.get("root_cause_tags") or []),
+            "total_cost_r": p.get("total_cost_r"),
+            "diagnostics": dict(p.get("diagnostics") or {}),
         }
         if has_risk:
             try:

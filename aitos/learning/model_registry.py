@@ -12,6 +12,7 @@ from math import isfinite
 from typing import Any
 
 from aitos.config.paths import get_model_data_dir
+from aitos.learning.governance import PromotionApproval, validation_evidence_digest
 from aitos.learning.regime_feedback import ModelComparison
 from aitos.learning.validation import ValidationResult
 
@@ -148,6 +149,7 @@ class ModelRegistry:
         version: str,
         *,
         validation_result: ValidationResult,
+        approval: PromotionApproval | None = None,
         champion_comparison: ModelComparison | None = None,
     ) -> ModelArtifact:
         """Promote only after locked holdout, walk-forward and challenger evidence.
@@ -169,6 +171,14 @@ class ModelRegistry:
             )
         candidate_metrics = self._metrics_payload(validation_result.candidate)
         holdout_metrics = self._metrics_payload(walk_forward.locked_holdout)
+        digest = validation_evidence_digest(validation_result, champion_comparison)
+        if not isinstance(approval, PromotionApproval):
+            raise ValueError("promotion requires an explicit operator approval")
+        approval.validate(
+            candidate_name=name,
+            candidate_version=version,
+            validation_digest=digest,
+        )
 
         with self._write_lock():
             rows = self._load()
@@ -207,8 +217,20 @@ class ModelRegistry:
                     "initial champion comparison, when supplied, must pass"
                 )
 
+            if any(
+                (row.get("metadata") or {})
+                .get("promotion_evidence", {})
+                .get("operator_approval", {})
+                .get("approval_id")
+                == approval.approval_id
+                for row in rows
+            ):
+                raise ValueError("promotion approval has already been consumed")
+
             evidence = {
                 "validated_at": datetime.now(timezone.utc).isoformat(),
+                "operator_approval": approval.to_dict(),
+                "validation_digest": digest,
                 "validation_reason": validation_result.reason,
                 "candidate_metrics": candidate_metrics,
                 "walk_forward_reason": walk_forward.reason,

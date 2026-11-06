@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import replace
 
 import pytest
@@ -24,6 +25,13 @@ class FakeDecisionRepository:
 
     async def attribute_outcome(self, decision_id, trade):
         self.outcomes.append((decision_id, trade))
+
+    async def get_records(self, decision_id):
+        return [
+            {"record_type": "DECISION", "payload": json.dumps(snapshot)}
+            for stored_id, snapshot in self.decisions
+            if stored_id == decision_id
+        ]
 
 
 def make_opportunity(**overrides):
@@ -130,14 +138,31 @@ async def test_closed_trade_is_attributed_to_original_decision(event_bus, risk_e
         make_opportunity(agent_consensus={"decision_id": opportunity.opportunity_id}),
         PortfolioState(equity_usd=10_000.0, peak_equity_usd=10_000.0),
     )
+    assert await _wait_for(lambda: len(repo.decisions) == 1)
+    # Simulate a JournalSystem restart: its in-memory decision cache is gone,
+    # but the durable DecisionJournalRepository still has the original snapshot.
+    journal._decision_snapshots.clear()
+    journal._decision_trade_ids.clear()
+    received = []
+
+    async def capture_outcome(event):
+        received.append(event)
+
+    await event_bus.subscribe(
+        "journal.outcome_attributed",
+        capture_outcome,
+        group="decision-journal-restart-test",
+    )
     await lifecycle.update_price(trade.trade_id, 105.0)
 
     assert await _wait_for(lambda: len(repo.outcomes) == 1)
+    assert await _wait_for(lambda: len(received) == 1)
     decision_id, outcome = repo.outcomes[0]
     assert decision_id == opportunity.opportunity_id
     assert outcome["trade_id"] == trade.trade_id
     assert outcome["state"] == TradeLifecycleState.POSITION_CLOSED.value
     assert outcome["pnl"] > 0
+    assert received[0].payload["decision_snapshot"]["decision_id"] == decision_id
 
 
 @pytest.mark.asyncio

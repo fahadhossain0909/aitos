@@ -111,6 +111,39 @@ async def test_journal_records_rejected_opportunities(event_bus, risk_engine):
 
 
 @pytest.mark.asyncio
+async def test_journal_links_decision_snapshot_to_closed_trade_outcome(
+    event_bus, risk_engine
+):
+    journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
+    await journal.initialize({})
+    received = []
+
+    async def capture(event):
+        received.append(event)
+
+    await event_bus.subscribe(
+        "journal.outcome_attributed", capture, group="linked-decision-outcome-test"
+    )
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    trade.agent_consensus["decision_id"] = "decision-linked"
+    journal._decision_snapshots["decision-linked"] = {
+        "decision_id": "decision-linked",
+        "root_cause_tags": ["adverse_order_flow"],
+        "candidate_score": 7.8,
+    }
+
+    await lifecycle.update_price(trade.trade_id, 105.0)
+
+    assert await _wait_for(lambda: len(received) == 1)
+    assert received[0].payload["decision_id"] == "decision-linked"
+    assert received[0].payload["decision_snapshot"]["root_cause_tags"] == [
+        "adverse_order_flow"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_record_mistake_creates_mistake_entry(event_bus, risk_engine):
     journal = JournalSystem(event_bus=event_bus)
     await journal.initialize({})
