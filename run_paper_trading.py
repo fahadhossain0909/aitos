@@ -53,10 +53,10 @@ KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 1_000.0
 HEALTH_SERVER_PORT = 8090
 PAPER_MIN_SCORE_THRESHOLD = 50.0
-STALE_POSITION_MAX_HOURS = 72
+STALE_POSITION_MAX_HOURS = float(os.getenv("STALE_POSITION_MAX_HOURS", "4.0"))
 
 
-async def _close_stale_positions(components) -> None:
+async def _close_stale_positions(components, exchange=None) -> None:
     """Close open trades held longer than STALE_POSITION_MAX_HOURS."""
     from datetime import datetime, timezone
 
@@ -77,6 +77,19 @@ async def _close_stale_positions(components) -> None:
                 # the process has just recovered a position. Keep the position
                 # open and observable until a valid mark is available.
                 last_price = getattr(trade, "last_marked_price", None)
+                if (
+                    not isinstance(last_price, (int, float))
+                    or not math.isfinite(last_price)
+                    or last_price <= 0
+                ):
+                    try:
+                        latest_ticks = await exchange.fetch_recent_trades(
+                            trade.symbol, limit=1
+                        )
+                        if latest_ticks:
+                            last_price = float(latest_ticks[0].price)
+                    except Exception:
+                        pass
                 if (
                     not isinstance(last_price, (int, float))
                     or not math.isfinite(last_price)
@@ -458,7 +471,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
                 )
 
                 # Close stale positions (holding > STALE_POSITION_MAX_HOURS)
-                await _close_stale_positions(components)
+                await _close_stale_positions(components, exchange)
                 await tracker.persist_state(components.trade_lifecycle)
             except Exception as exc:
                 logger.error("scan cycle failed: %s", exc)

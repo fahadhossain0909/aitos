@@ -83,7 +83,7 @@ class AITOSSettings(BaseSettings):
     log_level: str = Field(default="INFO", description="Python logging level")
     require_human_approval_for_prod: bool = True
     stale_symbol_blacklist: list[str] = Field(
-        default=["TRUTHUSDT", "PDDUSDT"],
+        default=["TRUTHUSDT", "PDDUSDT", "RDNTUSDT"],
         description="Symbols to skip in the position price safety-net REST fallback",
     )
 

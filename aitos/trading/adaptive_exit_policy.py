@@ -8,6 +8,7 @@ not wall-clock time.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from math import isfinite
 from typing import Any
@@ -33,7 +34,8 @@ class AdaptiveExitPolicy:
         self._be_lock_r = float(cfg.get("breakeven_lock_r", 0.15))
         self._fee_rate = float(cfg.get("round_trip_cost_rate", 0.0008))
         self._slippage_rate = float(cfg.get("slippage_buffer_rate", 0.0002))
-        self._stagnation_bars = int(cfg.get("stagnation_bars", 35))
+        default_bars = int(os.getenv("ADAPTIVE_STAGNATION_BARS", "8"))
+        self._stagnation_bars = int(cfg.get("stagnation_bars", default_bars))
         self._stagnation_min_progress_r = float(
             cfg.get("stagnation_min_progress_r", 0.4)
         )
