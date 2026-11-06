@@ -279,6 +279,12 @@ class CapitalGateway:
                 ),
                 available_capital_usd=available_capital,
                 available_risk_usd=available_risk,
+                capital_limit_usd=equity_usd,
+                risk_limit_usd=(
+                    equity_usd
+                    * self.protection.config.max_portfolio_risk_pct
+                    / 100.0
+                ),
             ):
                 protected.append(candidate)
         return CapitalGatewayResult(tuple(decisions), tuple(protected))
