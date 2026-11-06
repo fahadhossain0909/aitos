@@ -183,4 +183,5 @@ async def test_clickhouse_loader_replays_raw_depth_deltas_from_pre_window_bootst
     assert depth_events[0]["bid_reduce_qty"] == pytest.approx(2.0)
     assert depth_events[0]["ask_reduce_qty"] == pytest.approx(1.0)
     assert dataset.provenance["raw_depth_events_replayed"] == 1
+    assert dataset.provenance["raw_depth_event_replay_available"] is True
     assert dataset.provenance["depth_event_history_available"] is True
