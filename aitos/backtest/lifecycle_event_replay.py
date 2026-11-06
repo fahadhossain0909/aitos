@@ -97,10 +97,10 @@ class LifecycleEventReplay:
                 raise ValueError(
                     f"invalid lifecycle replay row {line_no}: {exc}"
                 ) from exc
-        return sorted(events, key=lambda item: (item.timestamp_ms, item.event_id))
+        return sorted(events, key=lambda item: item.timestamp_ms)
 
     async def replay(self, events: Iterable[LifecycleReplayEvent]) -> dict[str, int]:
-        ordered = sorted(events, key=lambda item: (item.timestamp_ms, item.event_id))
+        ordered = sorted(events, key=lambda item: item.timestamp_ms)
         processed = duplicates = 0
         for event in ordered:
             if self._contains(event.event_id):
