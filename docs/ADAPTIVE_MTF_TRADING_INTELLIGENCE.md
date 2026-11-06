@@ -62,3 +62,8 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - This branch's test suite and GitHub Actions must be run and reviewed before the work can be called regression-verified.
 - Exchange-connected runtime, paper trading, restart recovery against a live market stream, and execution-quality verification are deliberately not part of this phase.
 - No profitability or performance improvement is claimed without historical replay on point-in-time data and a locked out-of-sample holdout.
+
+
+## CI follow-up
+
+Formatting changes were applied after the initial CI report. Re-run CI on the latest branch head before treating regression verification as complete.
