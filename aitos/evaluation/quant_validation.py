@@ -345,9 +345,7 @@ def remaining_edge_observations_from_trades(
                     "trade_id": str(payload.get("trade_id") or ""),
                 }
             )
-    return tuple(
-        sorted(observations, key=lambda row: _time(row["decision_at"]))
-    )
+    return tuple(sorted(observations, key=lambda row: _time(row["decision_at"])))
 
 
 def expected_remaining_edge_calibration(
@@ -437,7 +435,9 @@ def execution_cost_sensitivity(
                     f"row {index}: fees and slippage costs must be non-negative"
                 )
             # Funding is signed PnL in the trade ledger: positive is received.
-            net_values.append(gross - multiplier * (fees + slippage) + multiplier * funding)
+            net_values.append(
+                gross - multiplier * (fees + slippage) + multiplier * funding
+            )
         metrics = walk_forward_metrics([{"net_pnl": value} for value in net_values])
         scenarios.append(
             {
