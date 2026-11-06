@@ -112,10 +112,12 @@ class CapitalGateway:
             metadata={
                 "opportunity_id": opportunity.opportunity_id,
                 "detected_at": opportunity.detected_at,
+                "side": opportunity.side.value,
                 "regime": opportunity.regime or consensus.get("runtime_regime"),
                 "volatility_score": volatility,
                 "equity_peak_usd": consensus.get("equity_peak_usd"),
                 "position_risk_pct": consensus.get("position_risk_pct", {}),
+                "position_sides": consensus.get("position_sides", {}),
                 "correlations": consensus.get("correlations", {}),
                 "daily_pnl_pct": consensus.get("daily_pnl_pct", 0.0),
                 "consecutive_losses": consensus.get("consecutive_losses", 0),
@@ -139,7 +141,13 @@ class CapitalGateway:
             elif isinstance(key, str) and ":" in key:
                 a, b = key.split(":", 1)
                 correlations[(a, b)] = float(value)
-        return PortfolioRiskSnapshot(equity_usd, peak, positions, correlations)
+        position_sides = {
+            str(k): str(v).upper()
+            for k, v in dict(metadata.get("position_sides") or {}).items()
+        }
+        return PortfolioRiskSnapshot(
+            equity_usd, peak, positions, correlations, position_sides
+        )
 
     def evaluate(
         self,
@@ -241,6 +249,7 @@ class CapitalGateway:
                 symbol=allocation.symbol,
                 requested_risk_pct=requested_pct,
                 snapshot=snapshot,
+                side=str(metadata.get("side") or "LONG"),
                 regime=str(metadata.get("regime") or ""),
                 volatility_score=metadata.get("volatility_score"),
             )
