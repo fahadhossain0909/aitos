@@ -153,7 +153,6 @@ def test_gateway_preserves_negative_funding_cost_as_credit():
     assert estimate.total_cost_pct < 0.0
 
 
-
 def test_portfolio_consensus_uses_actual_stop_risk_and_position_side():
     portfolio = make_portfolio(
         positions=(
