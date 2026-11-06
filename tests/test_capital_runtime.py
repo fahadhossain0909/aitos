@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import aitos.intelligence.capital_runtime as capital_runtime
 from aitos.intelligence.capital_controls import CapitalControlConfig
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_runtime import (
@@ -290,4 +291,32 @@ async def test_late_fee_adjustment_revises_closed_trade_calibration(
         amount_usd=100_000.0,
     )
     assert calibrator.calibrate(predicted) == pytest.approx(1.0)
+    await lifecycle.shutdown()
+
+
+
+@pytest.mark.asyncio
+async def test_open_position_retains_capital_reservation_until_close(
+    event_bus, risk_engine, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        capital_runtime,
+        "get_model_data_dir",
+        lambda: tmp_path,
+    )
+    install_capital_guard()
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    gateway = lifecycle._aitos_capital_gateway
+    reservation = gateway.reservation.get(trade.symbol)
+    assert reservation is not None
+    assert reservation.capital_usd > 0.0
+
+    await lifecycle.update_price(trade.trade_id, 100.5)
+    assert gateway.reservation.get(trade.symbol) is not None
+
+    await lifecycle.close_trade(trade.trade_id, 101.0, "test_close")
+    assert gateway.reservation.get(trade.symbol) is None
     await lifecycle.shutdown()
