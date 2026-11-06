@@ -174,7 +174,12 @@ class CapitalRebalanceReplay:
         if final_cost_pct >= 100.0:
             raise ValueError("final exit cost would consume equity")
         hold_equity *= 1.0 - final_cost_pct / 100.0
-        rebalanced_equity *= 1.0 - final_cost_pct / 100.0
+        # Candidate fee/slippage fields are the complete expected round trip,
+        # already charged at each switch boundary. Avoid charging the final
+        # switched position's exit a second time. If no switch occurred, both
+        # paths are the same hold-only position and both pay the final exit.
+        rebalanced_final_cost_pct = final_cost_pct if switches == 0 else 0.0
+        rebalanced_equity *= 1.0 - rebalanced_final_cost_pct / 100.0
         hold_curve[-1] = hold_equity
         rebalanced_curve[-1] = rebalanced_equity
 
@@ -183,7 +188,7 @@ class CapitalRebalanceReplay:
             initial_equity,
             rebalanced_curve,
             switches,
-            rebalance_cost_pct + final_cost_pct,
+            rebalance_cost_pct + rebalanced_final_cost_pct,
         )
         return CapitalRebalanceReplayResult(
             hold_only=hold_metrics,
