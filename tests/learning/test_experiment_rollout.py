@@ -160,3 +160,35 @@ def test_canary_requires_minimum_sample_count_before_healthy(tmp_path):
         return_delta=0.0,
     )
     assert row["state"] == "canary_healthy"
+
+
+
+def test_experiment_plan_is_generated_from_evidence_backed_diagnostic():
+    hypothesis = SimpleNamespace(
+        category="adverse_order_flow",
+        sample_count=45,
+        evidence_ids=("trade-1", "trade-2"),
+    )
+    plan = ExperimentPlan.from_hypothesis(
+        hypothesis, (CostScenario("base", 0.0004, 2.0),)
+    )
+    assert plan.name == "diagnostic-adverse_order_flow"
+    assert plan.variants[0].disabled_components == ("order_flow",)
+    assert plan.evidence_ids == ("trade-1", "trade-2")
+
+
+def test_experiment_plan_rejects_unsupported_or_weak_diagnostics():
+    unsupported = SimpleNamespace(
+        category="unknown", sample_count=100, evidence_ids=("trade-1",)
+    )
+    with pytest.raises(ValueError, match="no safe research ablation"):
+        ExperimentPlan.from_hypothesis(
+            unsupported, (CostScenario("base", 0.0, 0.0),)
+        )
+    weak = SimpleNamespace(
+        category="adverse_order_flow", sample_count=2, evidence_ids=("trade-1",)
+    )
+    with pytest.raises(ValueError, match="sample gate"):
+        ExperimentPlan.from_hypothesis(
+            weak, (CostScenario("base", 0.0, 0.0),), minimum_samples=10
+        )

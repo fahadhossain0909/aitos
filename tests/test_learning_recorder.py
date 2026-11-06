@@ -235,3 +235,34 @@ async def test_management_and_rejected_outcomes_are_recorded_without_reward_leak
     assert repository.records[1].outcome == "rejected"
     assert repository.records[1].reward == 0.0
     assert repository.records[1].metadata["reward_unit"] == "not_applicable"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_outcome_delivery_is_idempotent_across_recorder_restarts():
+    event = Event(
+        topic="journal.outcome_attributed",
+        payload={
+            "trade_id": "stable-trade-1",
+            "decision_id": "stable-decision-1",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "state": "closed",
+            "pnl": 5.0,
+            "risk_amount_usd": 10.0,
+        },
+        source_module="journal",
+    )
+    first_repository = FakeRepository()
+    first_recorder = LearningExperienceRecorder(
+        event_bus=None, repository=first_repository, source="paper"
+    )
+    await first_recorder._on_outcome(event)
+    await first_recorder._on_outcome(event)
+    assert len(first_repository.records) == 1
+
+    restarted_repository = FakeRepository()
+    restarted_recorder = LearningExperienceRecorder(
+        event_bus=None, repository=restarted_repository, source="paper"
+    )
+    await restarted_recorder._on_outcome(event)
+    assert restarted_repository.records[0].experience_id == first_repository.records[0].experience_id
