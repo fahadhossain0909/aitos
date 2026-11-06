@@ -1,59 +1,64 @@
 # Adaptive Multi-Timeframe Trading Intelligence — Implementation Notes
 
-## Scope
+## Scope and safety
 
-This change introduces pure, deterministic decision and measurement primitives and wires the existing scanner's completed-HTF-candle path to an adaptive policy. It does not submit orders, change exchange adapters, or enable live trading.
+This branch extends AITOS decision intelligence only. It does not place orders, connect to a live exchange account, or enable live trading. Paper-trading/runtime market verification is intentionally deferred to the user's later consolidated session.
 
-## Implemented in this change
+## P0 — Directional diagnostics
 
-### P0 — Directional diagnostics
-- Scanner emits a symmetric LONG/SHORT directional funnel record with structure, bias, CVD, and the selected side.
-- A pure diagnostic helper reports side-specific structure, flow, and bias gates.
-- Existing direction thresholds are intentionally not relaxed without replay evidence. Diagnostics identify restrictive stages before threshold changes.
+- Scanner emits a symmetric LONG/SHORT directional funnel record.
+- Both sides expose structure pass, CVD pass, bias conflict, diagnostic acceptance, and explicit rejection reason codes.
+- CHoCH/CVD thresholds remain symmetric: LONG >= 6.5 and SHORT <= 3.5. Threshold relaxation is not inferred from diagnostics.
 
-### P1 — Adaptive HTF decision policy
-- Added immutable timeframe/evidence/decision contracts.
-- Distinguishes aligned, neutral/mixed, countertrend, conflicted, and unavailable HTF context.
-- Neutral HTF can proceed only when LTF quality meets a configurable floor; countertrend requires directional structure and order-flow evidence.
-- Incomplete or unavailable HTF data is never re-labelled as neutral.
-- Scanner retains completed-candle HTF cache and stale-cache protection.
+## P1/P2 — Adaptive six-timeframe analysis
 
-### P2 — LTF evidence contract
-- Defines a common 0..10 LONG-oriented evidence scale; SHORT is its exact mirror.
-- Scanner passes structure, order-flow and momentum into the adaptive policy.
-- Current integration uses the configured primary HTF and entry timeframe. Independently fetched 1D/4H/1H/15M/5M/1M contexts, footprint/tick aggregation, and multi-cache orchestration remain deferred integration work.
+- Added a candle-close-aware multi-timeframe orchestration layer for **1D, 4H, 1H, 15M, 5M and 1M**.
+- Every timeframe uses the shared `HigherTimeframeCandleCache`; cache refresh is keyed by symbol/timeframe/lookback and single-flight protected.
+- Each frame reports latest closed candle timestamp, age, permitted freshness age, ADX, DI gap, structure bias, regime and cache state.
+- Forming candles are excluded by the cache. A stale fallback, insufficient history or missing timeframe marks the stack incomplete.
+- The scanner requires all six frames to be fresh and complete before accepting an MTF decision. It does not convert unavailable data into neutral evidence.
+- All six timeframe contexts are evaluated together under the adaptive HTF policy. Directional reversal against the stack still requires strong structure + order-flow evidence.
+- Cache request budget, fetch concurrency and freshness grace are centrally configurable with environment overrides.
+- The primary timeframe map and legacy single-HTF helper remain for compatibility; the scanner decision path now uses the six-frame analyzer.
 
-### P3 — Entry/exit and risk research primitives
-- Added net expectancy in R, including fees/slippage expressed as R costs.
-- Added a volatility risk dampener that cannot increase base risk.
-- These are measurement/policy primitives; they do not override RiskEngine, lifecycle, protective stop, TP, or execution contracts.
-- Existing adaptive exit and position sizing systems remain authoritative.
+## P3 — Expected-value entry and exit integration
 
-### P4 — Portfolio exposure
-- Added gross and signed LONG/SHORT notional aggregation for diagnostics. It does not reserve capital or replace the existing portfolio/capital gateway.
+- Entry authorization is enforced at the `TradeLifecycle.submit_opportunity` boundary by `CapitalGateway`, not only by scanner ranking.
+- Entry EV includes calibrated loss probability, nearest TP gross return, stop loss, fee, slippage, funding, liquidity, confidence, opportunity age decay and minimum net-edge/expected-return thresholds.
+- Capital authorization fails closed when EV, cost, loss probability, liquidity, age, circuit-breaker or portfolio protection gates fail.
+- Exit Intelligence Engine already calculates probability-weighted path continuation value. This branch exposes its expected gain, expected loss, upside/downside probability mass and transaction-cost components in the decision feature record.
+- Exit decisions continue to require structural/thesis invalidation or confirmed exit pressure; a static TP touch is not treated as a reason to abandon a still-valid runner thesis.
+- The path-based exit expectation is a heuristic probability-weighted estimate, not a calibrated statistical forecast. Calibration against out-of-sample realized path outcomes remains a research requirement.
 
-### P5 — Quant validation
-- Added trade-level win rate, profit factor, expectancy and max drawdown metrics.
-- Added deterministic unit tests for direction symmetry, adaptive HTF decisions, missing data, expectancy, volatility dampening, exposure and metrics.
-- Historical replay, walk-forward split orchestration, leakage checks, ablation runner, and paper runtime validation are not executed by this code-only change.
+## P4 — Capital allocation and correlation-aware portfolio risk
 
-## Centralized configuration
+- The lifecycle capital guard calls the shared CapitalGateway before sizing/execution.
+- The gateway applies expected-edge ranking, per-trade/portfolio risk budgets, drawdown and volatility multipliers, circuit breakers, capital reservations and portfolio protection.
+- Existing portfolio correlation data is consumed by PortfolioProtection. Unknown correlations use a conservative configured fallback; known correlations increase correlated-risk usage and constrain incremental risk.
+- The gateway's approved risk budget is passed into the trade sizing path; the capital gate cannot be bypassed by calling lifecycle submission directly.
+- Correlation estimates must be point-in-time, symmetric and refreshed from measured returns. A single portfolio-wide max-pairwise fallback is conservative but not a substitute for a complete covariance matrix.
 
-New settings in the validated tuning model and environment override whitelist:
-- HTF neutral minimum LTF score (default 6.0)
-- HTF countertrend minimum LTF score (default 7.0)
-- HTF neutral acceptance (default true)
+## P5 — Historical replay, walk-forward and ablation evaluation
 
-Existing ADX, DI-gap, HTF timeframe and lookback settings remain in force.
+- Added leakage-aware chronological split generation with a configurable embargo.
+- Evaluation rows require timezone-aware decision/outcome timestamps, outcome strictly after decision, finite net PnL and explicit LONG/SHORT side.
+- Held-out fold summaries report trade count, expectancy, win rate, profit factor, drawdown and LONG/SHORT-separated metrics.
+- Comparative reports support baseline versus ablation variants (for example removing order-flow, MTF, liquidity or footprint evidence) and calculate deltas where metrics are defined.
+- These helpers consume normalized observations produced by the canonical historical replay/backtest stack; they do not synthesize historical data or claim a backtest result on their own.
+- No model/strategy is promoted automatically. Use a locked holdout after walk-forward and keep paper/shadow validation as a separate approval gate.
 
-## Safety and rollout
+## Tests authored
 
-- No live mode activation or automatic parameter learning is introduced.
-- Missing/stale HTF data remains fail-closed.
-- The policy does not promise higher win rate or profitability.
-- Before enabling wider countertrend behavior, run unit tests, scanner integration tests, historical replay, walk-forward evaluation, and paper trading with LONG/SHORT-separated diagnostics.
-- Compare opportunity capture, rejection outcomes, net expectancy, profit factor, drawdown, MAE/MFE, and execution costs. Do not optimize win rate alone.
+- Six-frame fetch coverage and stale-stack fail-closed behavior.
+- LONG/SHORT directional diagnostics and adaptive HTF behavior.
+- EV entry/cost checks already present in capital runtime tests.
+- Probability-weighted exit expectancy diagnostics and mirrored SHORT path handling.
+- Correlation-aware incremental portfolio risk.
+- Chronological walk-forward embargo, timestamp leakage rejection, ablation reporting and LONG/SHORT comparative metrics.
 
-## Explicitly deferred runtime work
+## Verification status
 
-Per the implementation request, runtime exchange/paper-trading tests are deferred for a later consolidated session. New tests are authored but are not claimed as executed or passing.
+- New and existing tests are authored for CI/regression verification.
+- This branch's test suite and GitHub Actions must be run and reviewed before the work can be called regression-verified.
+- Exchange-connected runtime, paper trading, restart recovery against a live market stream, and execution-quality verification are deliberately not part of this phase.
+- No profitability or performance improvement is claimed without historical replay on point-in-time data and a locked out-of-sample holdout.
