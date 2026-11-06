@@ -36,8 +36,8 @@ def test_exit_ere_mirrors_directional_path_probabilities_for_short():
         downside=(SimpleNamespace(price=95.0, probability=0.3),),
     )
     short_plan = SimpleNamespace(
-        upside=long_plan.downside,
-        downside=long_plan.upside,
+        upside=(SimpleNamespace(price=105.0, probability=0.3),),
+        downside=(SimpleNamespace(price=95.0, probability=0.7),),
     )
     long_edge, _, _ = engine._path_and_ere("LONG", 100.0, long_plan, 0.001)
     short_edge, _, _ = engine._path_and_ere("SHORT", 100.0, short_plan, 0.001)
