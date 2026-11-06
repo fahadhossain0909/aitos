@@ -126,9 +126,9 @@ class PointInTimeCorrelationEstimator:
                 if len(x) < self.min_observations:
                     continue
                 mean_x, mean_y = sum(x) / len(x), sum(y) / len(y)
-                value = sum(
-                    (a - mean_x) * (b - mean_y) for a, b in zip(x, y)
-                ) / (len(x) - 1)
+                value = sum((a - mean_x) * (b - mean_y) for a, b in zip(x, y)) / (
+                    len(x) - 1
+                )
                 covariance[(left, right)] = value
                 covariance[(right, left)] = value
         return covariance
