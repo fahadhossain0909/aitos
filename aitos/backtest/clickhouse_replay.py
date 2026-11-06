@@ -346,11 +346,31 @@ class ClickHouseAblationRun:
 class ClickHouseHistoricalAblationRunner:
     """Connect real ClickHouse observations to canonical replay and holdout."""
 
-    def __init__(self, repository: Any, **runner_config: Any) -> None:
+    def __init__(
+        self,
+        repository: Any,
+        *,
+        required_timeframes: tuple[str, ...] = (
+            "1m",
+            "5m",
+            "15m",
+            "1h",
+            "4h",
+            "1d",
+        ),
+        min_candles_per_timeframe: int = 20,
+        **runner_config: Any,
+    ) -> None:
         from aitos.learning.ablation import HistoricalAblationRunner
 
+        if min_candles_per_timeframe < 1:
+            raise ValueError("min_candles_per_timeframe must be positive")
         self.loader = ClickHouseReplayLoader(repository)
         self.runner = HistoricalAblationRunner(**runner_config)
+        self.required_timeframes = tuple(
+            timeframe.lower() for timeframe in required_timeframes
+        )
+        self.min_candles_per_timeframe = min_candles_per_timeframe
 
     async def run(
         self,
@@ -369,6 +389,22 @@ class ClickHouseHistoricalAblationRunner:
             raise ValueError(
                 "point-in-time OFI ablation requires raw sequenced depth deltas "
                 "and a pre-window order-book bootstrap snapshot"
+            )
+        candle_counts = {
+            timeframe: sum(
+                candle["timeframe"] == timeframe for candle in dataset.candles
+            )
+            for timeframe in self.required_timeframes
+        }
+        insufficient = {
+            timeframe: count
+            for timeframe, count in candle_counts.items()
+            if count < self.min_candles_per_timeframe
+        }
+        if insufficient:
+            raise ValueError(
+                "point-in-time MTF replay lacks required closed-candle history: "
+                + repr(insufficient)
             )
         depth_flow = await replay_depth_flow(dataset)
         if not depth_flow.get("ofi_available"):
