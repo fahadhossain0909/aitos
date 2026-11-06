@@ -7,6 +7,7 @@ from aitos.evaluation.quant_validation import (
     comparative_report,
     evaluate_fold_results,
     expectancy_confidence_interval,
+    probability_calibration,
     rejected_opportunity_counterfactual,
     validate_observations,
 )
@@ -113,3 +114,23 @@ def test_rejected_opportunity_counterfactual_reports_missed_markouts():
 def test_expectancy_interval_is_not_claimed_with_insufficient_samples():
     assert expectancy_confidence_interval([{"net_pnl": 1.0}])["lower"] is None
     assert expectancy_confidence_interval([])["upper"] is None
+
+
+
+def test_probability_calibration_reports_brier_log_loss_and_reliability():
+    rows = observations(4)
+    probabilities = [0.9, 0.8, 0.2, 0.1]
+    for index, row in enumerate(rows):
+        row["predicted_win_probability"] = probabilities[index]
+    result = probability_calibration(validate_observations(rows), bins=5)
+    assert result["samples"] == 4
+    assert 0.0 <= result["brier_score"] <= 1.0
+    assert result["log_loss"] > 0.0
+    assert result["reliability"]
+
+
+def test_probability_calibration_rejects_invalid_forecast_probability():
+    rows = observations(2)
+    rows[0]["predicted_win_probability"] = 1.1
+    with pytest.raises(ValueError, match="predicted_win_probability"):
+        validate_observations(rows)
