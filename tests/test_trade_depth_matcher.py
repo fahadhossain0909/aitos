@@ -5,6 +5,7 @@ import pytest
 from aitos.intelligence.liquidity import depth_event_flow_analysis
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
+from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
 BASE = datetime(2026, 11, 2, 12, 0, tzinfo=timezone.utc)
@@ -151,3 +152,56 @@ async def test_live_scanner_cache_matches_trade_events_to_depth_reductions():
     state = cache.snapshot("BTCUSDT")
     assert state is not None
     assert state.depth_event_history[0]["matched_execution_qty"] == 2.0
+
+
+
+@pytest.mark.asyncio
+async def test_depth_producer_to_live_scanner_to_ofi_side_attribution_replay():
+    timestamp_ms = int(BASE.timestamp() * 1000)
+    local_book = LocalOrderBook("BTCUSDT", max_levels=20)
+    initial = OrderBookSnapshot(
+        symbol="BTCUSDT",
+        bids=((100.0, 5.0),),
+        asks=((101.0, 5.0),),
+        last_update_id=100,
+        timestamp=BASE,
+    )
+    local_book.seed(initial)
+    update = DepthUpdate(
+        first_update_id=101,
+        final_update_id=101,
+        previous_update_id=100,
+        bids=((100.0, 3.0),),
+        asks=((101.0, 4.0),),
+        event_time_ms=timestamp_ms + 100,
+    )
+    produced = local_book.apply(update)
+    assert produced is not None
+    assert produced.depth_event is not None
+    assert produced.depth_event["bid_reduce_qty"] == 2.0
+    assert produced.depth_event["ask_reduce_qty"] == 1.0
+
+    cache = LiveScannerCache(None, ["BTCUSDT"])
+    await cache.accept_live_order_book(produced)
+    await cache.accept_live_trade(
+        _trade(1, side=TradeSide.SELL, price=100.0, quantity=1.0, offset_ms=200)
+    )
+    await cache.accept_live_trade(
+        _trade(2, side=TradeSide.BUY, price=101.0, quantity=0.5, offset_ms=250)
+    )
+    # Advance the exchange-time watermark beyond the attribution window.
+    await cache.accept_live_trade(
+        _trade(3, side=TradeSide.BUY, price=102.0, quantity=0.1, offset_ms=800)
+    )
+    state = cache.snapshot("BTCUSDT")
+    assert state is not None
+    result = depth_event_flow_analysis(
+        list(state.depth_event_history), now_ms=timestamp_ms + 900
+    )
+    assert result["ofi_available"] is True
+    assert result["matched_bid_execution_qty"] == 1.0
+    assert result["matched_ask_execution_qty"] == 0.5
+    assert result["bid_cancellation_proxy_qty"] == 1.0
+    assert result["ask_cancellation_proxy_qty"] == 0.5
+    assert result["attribution_pending_qty"] == 0.0
+    assert result["execution_attributed_ratio"] == pytest.approx(0.5)
