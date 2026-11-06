@@ -199,14 +199,22 @@ class PortfolioProtection:
             )
         ):
             return ProtectionDecision(
-                False, 0.0, requested_risk_pct, 0.0,
-                snapshot.total_risk_pct, snapshot.drawdown_pct,
+                False,
+                0.0,
+                requested_risk_pct,
+                0.0,
+                snapshot.total_risk_pct,
+                snapshot.drawdown_pct,
                 "invalid_funding_or_liquidation_input",
             )
         if adverse_funding_pct > self.config.max_adverse_funding_pct:
             return ProtectionDecision(
-                False, 0.0, requested_risk_pct, 0.0,
-                snapshot.total_risk_pct, snapshot.drawdown_pct,
+                False,
+                0.0,
+                requested_risk_pct,
+                0.0,
+                snapshot.total_risk_pct,
+                snapshot.drawdown_pct,
                 "adverse_funding_cost_exceeds_limit",
             )
         if (
@@ -215,8 +223,12 @@ class PortfolioProtection:
             and liquidation_buffer_pct is None
         ):
             return ProtectionDecision(
-                False, 0.0, requested_risk_pct, 0.0,
-                snapshot.total_risk_pct, snapshot.drawdown_pct,
+                False,
+                0.0,
+                requested_risk_pct,
+                0.0,
+                snapshot.total_risk_pct,
+                snapshot.drawdown_pct,
                 "liquidation_buffer_unavailable",
             )
         if (
@@ -225,8 +237,12 @@ class PortfolioProtection:
             and liquidation_buffer_pct < self.config.minimum_liquidation_buffer_pct
         ):
             return ProtectionDecision(
-                False, 0.0, requested_risk_pct, 0.0,
-                snapshot.total_risk_pct, snapshot.drawdown_pct,
+                False,
+                0.0,
+                requested_risk_pct,
+                0.0,
+                snapshot.total_risk_pct,
+                snapshot.drawdown_pct,
                 "liquidation_buffer_below_minimum",
             )
         if requested_risk_pct <= 0 or not isfinite(requested_risk_pct):
@@ -405,7 +421,9 @@ class CapitalReservation:
             available_risk_usd,
         )
         if any(not isfinite(float(value)) or float(value) < 0 for value in values):
-            raise ValueError("reservation and availability values must be finite and non-negative")
+            raise ValueError(
+                "reservation and availability values must be finite and non-negative"
+            )
         if self._conn is None:
             with self._lock:
                 previous = self._reservations.get(reservation.symbol)
@@ -426,7 +444,9 @@ class CapitalReservation:
             or capital_limit_usd < 0
             or risk_limit_usd < 0
         ):
-            raise ValueError("durable reservations require finite absolute capital and risk limits")
+            raise ValueError(
+                "durable reservations require finite absolute capital and risk limits"
+            )
         now = time.time()
         with self._lock:
             try:
@@ -563,8 +583,7 @@ class CapitalReservation:
                 (time.time(),),
             ).fetchall()
             return tuple(
-                Reservation(str(row[0]), float(row[1]), float(row[2]))
-                for row in rows
+                Reservation(str(row[0]), float(row[1]), float(row[2])) for row in rows
             )
 
     def close(self) -> None:
