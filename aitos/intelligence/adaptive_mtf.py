@@ -81,7 +81,14 @@ def _role_directional_score(context: TimeframeContext, side: TradeSide) -> float
     if not isinstance(raw, Mapping) or not raw:
         return None
     values = []
-    for key in ("structure", "order_flow", "momentum", "liquidity", "location", "participation"):
+    for key in (
+        "structure",
+        "order_flow",
+        "momentum",
+        "liquidity",
+        "location",
+        "participation",
+    ):
         value = raw.get(key)
         if value is None:
             continue
