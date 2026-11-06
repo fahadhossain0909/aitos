@@ -129,6 +129,7 @@ def test_lifecycle_replay_normalizes_raw_binance_user_stream_events(tmp_path):
     assert events[1].symbol == ""
     assert events[0].event_id != events[1].event_id
 
+
 @pytest.mark.asyncio
 async def test_lifecycle_replay_preserves_capture_order_for_equal_exchange_timestamps(
     tmp_path,
