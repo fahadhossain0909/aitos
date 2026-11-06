@@ -87,9 +87,7 @@ class ClickHouseReplayLoader:
             """,
             parameters,
         )
-        depth_payloads = [
-            (row, json.loads(row["payload_json"])) for row in depth_rows
-        ]
+        depth_payloads = [(row, json.loads(row["payload_json"])) for row in depth_rows]
         depth_by_update = {
             int(row["final_update_id"]): payload
             for row, payload in depth_payloads
