@@ -1208,6 +1208,8 @@ class TradeLifecycle(AITOSModule):
             symbol=opportunity.symbol,
             notional_usd=sizing.position_size_usd,
             leverage=sizing.leverage,
+            side=opportunity.side.value,
+            risk_amount_usd=sizing.risk_amount_usd,
         )
         return PortfolioState(
             equity_usd=portfolio.equity_usd,
