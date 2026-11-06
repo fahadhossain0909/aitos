@@ -338,13 +338,17 @@ class ExitIntelligenceEngine:
     ) -> tuple[float, list[ExitReason], dict[str, float]]:
         reasons: list[ExitReason] = []
         if plan is None or current_price <= 0:
-            return 0.0, reasons, {
-                "path_expected_gain_fraction": 0.0,
-                "path_expected_loss_fraction": 0.0,
-                "path_upside_probability_mass": 0.0,
-                "path_downside_probability_mass": 0.0,
-                "path_transaction_cost_fraction": max(0.0, cost_pct),
-            }
+            return (
+                0.0,
+                reasons,
+                {
+                    "path_expected_gain_fraction": 0.0,
+                    "path_expected_loss_fraction": 0.0,
+                    "path_upside_probability_mass": 0.0,
+                    "path_downside_probability_mass": 0.0,
+                    "path_transaction_cost_fraction": max(0.0, cost_pct),
+                },
+            )
         if side == "LONG":
             upside_dests, downside_dests = plan.upside, plan.downside
         else:
