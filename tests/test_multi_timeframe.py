@@ -121,3 +121,27 @@ def test_candle_evidence_derives_liquidity_location_and_participation(monkeypatc
     assert result["participation"] > 5.0
     assert result["location"] > 5.0
     assert 0.0 <= result["liquidity"] <= 10.0
+
+
+
+def test_participation_pressure_is_signed_and_double_sweep_is_not_bullish():
+    class Candle:
+        def __init__(self, open_price, close, high, low, volume):
+            self.open = open_price
+            self.close = close
+            self.high = high
+            self.low = low
+            self.volume = volume
+
+    candles = [Candle(100.0, 100.0, 101.0, 99.0, 100.0) for _ in range(40)]
+    candles[-1] = Candle(101.0, 99.2, 102.0, 98.0, 200.0)
+    multi_timeframe.indicators.analyze_market_structure = lambda bars: SimpleNamespace(
+        structure_score=4.0
+    )
+    multi_timeframe.indicators.momentum_score = lambda bars: 4.0
+    multi_timeframe.indicators.cvd_trend_score = lambda bars: 4.0
+    result = multi_timeframe._candle_evidence(candles)
+    assert result["participation"] < 5.0
+    assert result["lower_sweep_reclaim"] == 1.0
+    assert result["upper_sweep_reclaim"] == 1.0
+    assert result["liquidity"] < 7.0
