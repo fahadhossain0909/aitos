@@ -55,12 +55,15 @@ class TimeframeContext:
     available: bool = True
     completed: bool = True
     diagnostics: Mapping[str, Any] = field(default_factory=dict)
+    weight: float = 1.0
 
     def __post_init__(self) -> None:
         if self.bias not in {"bullish", "bearish", "neutral", "unknown"}:
             raise ValueError("bias must be bullish, bearish, neutral, or unknown")
         if not isfinite(self.strength) or not 0.0 <= self.strength <= 10.0:
             raise ValueError("strength must be finite and within [0, 10]")
+        if not isfinite(self.weight) or not 0.0 < self.weight <= 3.0:
+            raise ValueError("weight must be finite and within (0, 3]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +118,7 @@ def evaluate_adaptive_htf(
     ]
     opposed = [c for c in directional if c not in aligned]
     neutral = [c for c in valid if c.bias in {"neutral", "unknown"}]
-    weights = [max(0.25, c.strength / 10.0) for c in directional]
+    weights = [max(0.25, c.strength / 10.0) * c.weight for c in directional]
     signed = [(1.0 if c in aligned else -1.0) * w for c, w in zip(directional, weights)]
     trend_balance = sum(signed) / sum(weights) if weights else 0.0
     ltf_score = ltf.score_for(side)
@@ -128,6 +131,7 @@ def evaluate_adaptive_htf(
         "trend_balance": round(trend_balance, 4),
         "aligned": [c.timeframe for c in aligned],
         "opposed": [c.timeframe for c in opposed],
+        "timeframe_weights": {c.timeframe: c.weight for c in directional},
         "neutral": [c.timeframe for c in neutral],
         "ltf_score": ltf_score,
         "invalid_timeframes": list(invalid),
