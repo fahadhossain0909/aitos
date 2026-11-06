@@ -64,8 +64,6 @@ def test_correlation_aware_portfolio_protection_caps_incremental_risk():
         snapshot=snapshot,
     )
     assert decision.allowed
-    expected_incremental_risk = (
-        -1.8 + (1.8**2 + 4.0 * (1.5**2 - 1.0**2)) ** 0.5
-    ) / 2.0
+    expected_incremental_risk = (-1.8 + (1.8**2 + 4.0 * (1.5**2 - 1.0**2)) ** 0.5) / 2.0
     assert decision.allowed_risk_pct == pytest.approx(expected_incremental_risk)
     assert decision.correlated_risk_pct == pytest.approx(1.5)
