@@ -79,6 +79,7 @@ def evaluate_adaptive_htf(
     ltf: DirectionalEvidence,
     min_aligned_score: float = 4.0,
     countertrend_score: float = 7.0,
+    alignment_balance_threshold: float = 0.25,
     allow_neutral: bool = True,
     require_any_context: bool = True,
 ) -> HTFDecision:
@@ -88,6 +89,8 @@ def evaluate_adaptive_htf(
     countertrend setup needs strong LTF reversal evidence; aligned contexts
     boost confidence, while mixed/neutral contexts are conditional.
     """
+    if not 0.0 < alignment_balance_threshold <= 1.0:
+        raise ValueError("alignment_balance_threshold must be within (0, 1]")
     frames = tuple(contexts)
     valid = tuple(c for c in frames if c.available and c.completed)
     invalid = tuple(c.timeframe for c in frames if not c.available or not c.completed)
@@ -121,94 +124,42 @@ def evaluate_adaptive_htf(
         if side == TradeSide.LONG
         else ltf.structure <= 3.5 and ltf.order_flow <= 3.5
     )
-    # Strong countertrend evidence must include structure and flow; momentum
-    # provides a third independent confirmation rather than a single trigger.
-    if opposed and not aligned:
+    details = {
+        "trend_balance": round(trend_balance, 4),
+        "aligned": [c.timeframe for c in aligned],
+        "opposed": [c.timeframe for c in opposed],
+        "neutral": [c.timeframe for c in neutral],
+        "ltf_score": ltf_score,
+        "invalid_timeframes": list(invalid),
+        "alignment_balance_threshold": alignment_balance_threshold,
+    }
+    # Weighted consensus avoids requiring every timeframe to agree.
+    if trend_balance >= alignment_balance_threshold:
+        return HTFDecision(
+            True, "aligned", round(min(1.0, trend_balance), 4),
+            "htf_weighted_consensus_aligned", details,
+        )
+    if trend_balance <= -alignment_balance_threshold:
         if ltf_score >= countertrend_score and reversal_evidence:
             return HTFDecision(
-                True,
-                "countertrend_reversal",
-                -0.5,
+                True, "countertrend_reversal", -0.5,
                 "strong_ltf_reversal_against_htf",
-                {
-                    "trend_balance": round(trend_balance, 4),
-                    "aligned": [c.timeframe for c in aligned],
-                    "opposed": [c.timeframe for c in opposed],
-                    "neutral": [c.timeframe for c in neutral],
-                    "ltf_score": ltf_score,
-                    "reversal_evidence": True,
-                    "invalid_timeframes": list(invalid),
-                },
+                {**details, "reversal_evidence": True},
             )
         return HTFDecision(
-            False,
-            "countertrend",
-            0.0,
+            False, "countertrend", 0.0,
             "countertrend_without_confirmed_reversal",
-            {
-                "trend_balance": round(trend_balance, 4),
-                "aligned": [c.timeframe for c in aligned],
-                "opposed": [c.timeframe for c in opposed],
-                "neutral": [c.timeframe for c in neutral],
-                "ltf_score": ltf_score,
-                "reversal_evidence": bool(reversal_evidence),
-                "invalid_timeframes": list(invalid),
-            },
+            {**details, "reversal_evidence": bool(reversal_evidence)},
         )
-    if aligned and not opposed:
+    if allow_neutral and ltf_score >= min_aligned_score:
         return HTFDecision(
-            True,
-            "aligned",
-            1.0,
-            "htf_aligned",
-            {
-                "trend_balance": round(trend_balance, 4),
-                "aligned": [c.timeframe for c in aligned],
-                "opposed": [],
-                "neutral": [c.timeframe for c in neutral],
-                "ltf_score": ltf_score,
-                "invalid_timeframes": list(invalid),
-            },
-        )
-    if allow_neutral and (neutral or not directional):
-        return (
-            HTFDecision(
-                True,
-                "neutral_or_mixed",
-                0.0,
-                "htf_neutral_ltf_quality_required",
-                {
-                    "trend_balance": round(trend_balance, 4),
-                    "aligned": [c.timeframe for c in aligned],
-                    "opposed": [c.timeframe for c in opposed],
-                    "neutral": [c.timeframe for c in neutral],
-                    "ltf_score": ltf_score,
-                    "invalid_timeframes": list(invalid),
-                },
-            )
-            if ltf_score >= min_aligned_score
-            else HTFDecision(
-                False,
-                "neutral_or_mixed",
-                0.0,
-                "ltf_quality_below_neutral_floor",
-                {
-                    "trend_balance": round(trend_balance, 4),
-                    "ltf_score": ltf_score,
-                    "invalid_timeframes": list(invalid),
-                },
-            )
+            True, "neutral_or_mixed", 0.0,
+            "htf_mixed_ltf_quality_sufficient", details,
         )
     return HTFDecision(
-        False,
-        "conflicted",
-        0.0,
-        "conflicting_htf_context",
-        {
-            "trend_balance": round(trend_balance, 4),
-            "ltf_score": ltf_score,
-            "invalid_timeframes": list(invalid),
-        },
+        False, "neutral_or_mixed", 0.0,
+        "ltf_quality_below_neutral_floor" if allow_neutral else "neutral_context_disabled",
+        details,
     )
 
 
