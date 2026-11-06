@@ -30,7 +30,7 @@ class ValidationPolicy:
             raise ValueError(
                 "walk-forward train/test/holdout durations must be positive"
             )
-        if self.min_trades < 0 or self.min_positive_windows < 1:
+        if self.min_trades < 0 or self.min_positive_windows < 0:
             raise ValueError("validation sample thresholds are invalid")
         if not 0 <= self.max_drawdown <= 1:
             raise ValueError("max_drawdown must be in [0, 1]")
@@ -87,11 +87,27 @@ class CandidateValidator:
                 candidate = BacktestEngine(initial_cash, fee_rate, slippage_bps).run(
                     [], candidate_strategy, mark_price
                 )
+                walk_forward = WalkForwardValidator(
+                    initial_cash=initial_cash,
+                    fee_rate=fee_rate,
+                    slippage_bps=slippage_bps,
+                    min_positive_windows=self.policy.min_positive_windows,
+                ).evaluate(
+                    events,
+                    candidate_strategy,
+                    mark_price,
+                    start=start,
+                    end=end,
+                    train_days=self.policy.train_days,
+                    test_days=self.policy.test_days,
+                    holdout_days=self.policy.holdout_days,
+                )
                 return ValidationResult(
                     False,
-                    "no development events remain before the locked holdout",
+                    walk_forward.reason,
                     candidate,
                     champion_result,
+                    walk_forward,
                 )
         else:
             start = events[0].timestamp

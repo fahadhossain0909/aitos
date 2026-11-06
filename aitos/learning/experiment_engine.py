@@ -75,6 +75,51 @@ class ExperimentPlan:
                 raise ValueError("holdout_end must be after holdout_start")
 
 
+    @classmethod
+    def from_hypothesis(
+        cls,
+        hypothesis: Any,
+        cost_scenarios: tuple[CostScenario, ...],
+        *,
+        regimes: tuple[str, ...] = (),
+        minimum_samples: int = 30,
+    ) -> "ExperimentPlan":
+        """Turn an evidence-backed diagnostic into a bounded ablation plan."""
+        component_by_category = {
+            "adverse_order_flow": "order_flow",
+            "regime_mismatch": "regime_filter",
+            "execution_degraded": "execution_cost_model",
+            "premature_exit": "exit_management",
+            "missed_opportunity": "entry_filter",
+        }
+        category = str(getattr(hypothesis, "category", "")).strip().lower()
+        component = component_by_category.get(category)
+        if component is None:
+            raise ValueError(
+                f"no safe research ablation is defined for diagnostic: {category}"
+            )
+        evidence_ids = tuple(
+            str(item) for item in (getattr(hypothesis, "evidence_ids", ()) or ())
+        )
+        if not evidence_ids:
+            raise ValueError(
+                "diagnostic hypothesis must retain supporting evidence IDs"
+            )
+        sample_count = int(getattr(hypothesis, "sample_count", 0) or 0)
+        if sample_count < minimum_samples:
+            raise ValueError(
+                "diagnostic hypothesis does not meet experiment sample gate"
+            )
+        return cls(
+            name=f"diagnostic-{category}",
+            baseline=ExperimentVariant("baseline"),
+            variants=(ExperimentVariant(f"without-{component}", (component,)),),
+            cost_scenarios=cost_scenarios,
+            regimes=regimes,
+            minimum_samples=minimum_samples,
+            evidence_ids=evidence_ids,
+        )
+
 @dataclass(frozen=True)
 class ExperimentCell:
     regime: str
@@ -168,51 +213,6 @@ class ExperimentEngine:
         if count < 0:
             raise ValueError("sample_count cannot be negative")
         return values, count
-
-    @classmethod
-    def from_hypothesis(
-        cls,
-        hypothesis: Any,
-        cost_scenarios: tuple[CostScenario, ...],
-        *,
-        regimes: tuple[str, ...] = (),
-        minimum_samples: int = 30,
-    ) -> "ExperimentPlan":
-        """Turn an evidence-backed diagnostic into a bounded ablation plan."""
-        component_by_category = {
-            "adverse_order_flow": "order_flow",
-            "regime_mismatch": "regime_filter",
-            "execution_degraded": "execution_cost_model",
-            "premature_exit": "exit_management",
-            "missed_opportunity": "entry_filter",
-        }
-        category = str(getattr(hypothesis, "category", "")).strip().lower()
-        component = component_by_category.get(category)
-        if component is None:
-            raise ValueError(
-                f"no safe research ablation is defined for diagnostic: {category}"
-            )
-        evidence_ids = tuple(
-            str(item) for item in (getattr(hypothesis, "evidence_ids", ()) or ())
-        )
-        if not evidence_ids:
-            raise ValueError(
-                "diagnostic hypothesis must retain supporting evidence IDs"
-            )
-        sample_count = int(getattr(hypothesis, "sample_count", 0) or 0)
-        if sample_count < minimum_samples:
-            raise ValueError(
-                "diagnostic hypothesis does not meet experiment sample gate"
-            )
-        return cls(
-            name=f"diagnostic-{category}",
-            baseline=ExperimentVariant("baseline"),
-            variants=(ExperimentVariant(f"without-{component}", (component,)),),
-            cost_scenarios=cost_scenarios,
-            regimes=regimes,
-            minimum_samples=minimum_samples,
-            evidence_ids=evidence_ids,
-        )
 
     def run_hypotheses(
         self,
