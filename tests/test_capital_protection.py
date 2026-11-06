@@ -133,3 +133,20 @@ def test_missing_existing_side_metadata_never_grants_hedge_credit():
     )
     assert decision.allowed
     assert decision.allowed_risk_pct < 0.60
+
+
+
+def test_candidate_hedge_can_reduce_existing_correlated_risk_above_limit():
+    decision = PortfolioProtection().evaluate(
+        symbol="ETHUSDT",
+        side="SHORT",
+        requested_risk_pct=1.0,
+        snapshot=snapshot(
+            positions={"BTCUSDT": 3.0},
+            correlations={("BTCUSDT", "ETHUSDT"): 0.95},
+            sides={"BTCUSDT": "LONG"},
+        ),
+    )
+    assert decision.allowed
+    assert decision.allowed_risk_pct == 1.0
+    assert decision.correlated_risk_pct < 2.5
