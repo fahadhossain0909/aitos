@@ -11,7 +11,6 @@ import json
 from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.intelligence.liquidity import depth_event_flow_analysis
 from aitos.intelligence.live_scanner import LiveScannerCache
-from aitos.backtest.l2_execution import BookLevel
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
@@ -132,11 +131,11 @@ class ClickHouseReplayLoader:
             bootstrap_book = OrderBookSnapshot(
                 symbol=str(bootstrap["symbol"]),
                 bids=tuple(
-                    BookLevel(float(level[0]), float(level[1]))
+                    tuple(map(float, level))
                     for level in json.loads(bootstrap["bid_levels"])
                 ),
                 asks=tuple(
-                    BookLevel(float(level[0]), float(level[1]))
+                    tuple(map(float, level))
                     for level in json.loads(bootstrap["ask_levels"])
                 ),
                 last_update_id=int(bootstrap["last_update_id"]),
@@ -212,12 +211,10 @@ class ClickHouseReplayLoader:
         if not replayed_depth:
             for row in books:
                 bids = tuple(
-                    BookLevel(float(level[0]), float(level[1]))
-                    for level in json.loads(row["bid_levels"])
+                    tuple(map(float, level)) for level in json.loads(row["bid_levels"])
                 )
                 asks = tuple(
-                    BookLevel(float(level[0]), float(level[1]))
-                    for level in json.loads(row["ask_levels"])
+                    tuple(map(float, level)) for level in json.loads(row["ask_levels"])
                 )
                 events.append(
                     OrderBookSnapshot(
