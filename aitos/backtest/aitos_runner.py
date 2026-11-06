@@ -163,8 +163,24 @@ class AITOSHistoricalRunner:
             book = state.latest_order_book
             if book is None:
                 continue
-            bids = [BookLevel(level.price, level.quantity) for level in book.bids]
-            asks = [BookLevel(level.price, level.quantity) for level in book.asks]
+            bids = [
+                BookLevel(
+                    float(level.price if hasattr(level, "price") else level[0]),
+                    float(
+                        level.quantity if hasattr(level, "quantity") else level[1]
+                    ),
+                )
+                for level in book.bids
+            ]
+            asks = [
+                BookLevel(
+                    float(level.price if hasattr(level, "price") else level[0]),
+                    float(
+                        level.quantity if hasattr(level, "quantity") else level[1]
+                    ),
+                )
+                for level in book.asks
+            ]
             result = self.l2.execute(side, decision.quantity, bids, asks)
             if result.filled_quantity > 0:
                 self._apply_fill(side, result.filled_quantity, result.average_price)
