@@ -458,10 +458,10 @@ class OpportunityScanner(AITOSModule):
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
 
-    def _record_funnel(self, **event: Any) -> None:
-        """Persist diagnostics best-effort; telemetry must not change trade decisions."""
+    async def _record_funnel(self, **event: Any) -> None:
+        """Persist diagnostics off-loop; telemetry must not change trade decisions."""
         try:
-            self._directional_funnel.record(**event)
+            await asyncio.to_thread(self._directional_funnel.record, **event)
         except Exception:
             logger.exception(
                 "directional funnel persistence failed",
@@ -712,7 +712,7 @@ class OpportunityScanner(AITOSModule):
         try:
             for side_key in ("long", "short"):
                 side_diagnostic = directional_funnel[side_key]
-                self._record_funnel(
+                await self._record_funnel(
                     symbol=symbol,
                     side=side_key,
                     stage="directional_gate",
@@ -729,7 +729,7 @@ class OpportunityScanner(AITOSModule):
                         "cvd_score": round(flow_score, 4),
                     },
                 )
-            self._record_funnel(
+            await self._record_funnel(
                 symbol=symbol,
                 side=direction.value if direction else "UNKNOWN",
                 stage="direction_selection",
@@ -789,7 +789,7 @@ class OpportunityScanner(AITOSModule):
                 )
                 htf_diagnostics = dict(mtf_result.diagnostics)
                 htf_available = bool(mtf_result.diagnostics["available_timeframes"])
-                self._record_funnel(
+                await self._record_funnel(
                     symbol=symbol,
                     side=direction.value,
                     stage="mtf_gate",
