@@ -14,6 +14,15 @@ from aitos.risk.models import PortfolioState, PositionExposure
 from aitos.trading.lifecycle import TradeLifecycle
 
 
+@pytest.fixture(autouse=True)
+def isolate_capital_runtime_storage(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        capital_runtime,
+        "get_model_data_dir",
+        lambda: tmp_path,
+    )
+
+
 def make_portfolio(**overrides) -> PortfolioState:
     values = dict(equity_usd=10_000.0, peak_equity_usd=10_000.0)
     values.update(overrides)
@@ -94,7 +103,8 @@ async def test_two_consecutive_losses_halves_next_risk_budget(event_bus, risk_en
         make_opportunity(), make_portfolio(consecutive_losses=0)
     )
     reduced = await reduced_lifecycle.submit_opportunity(
-        make_opportunity(), make_portfolio(consecutive_losses=2)
+        make_opportunity(symbol="ETHUSDT"),
+        make_portfolio(consecutive_losses=2),
     )
     assert normal.state == TradeLifecycleState.POSITION_OPENED
     assert reduced.state == TradeLifecycleState.POSITION_OPENED
