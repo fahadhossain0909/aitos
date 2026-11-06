@@ -1,6 +1,8 @@
 import multiprocessing
 import time
 
+import pytest
+
 from aitos.intelligence.capital_protection import (
     CapitalReservation,
     PortfolioProtection,
@@ -150,7 +152,9 @@ def test_candidate_hedge_can_reduce_existing_correlated_risk_above_limit():
     )
     assert decision.allowed
     assert decision.allowed_risk_pct == 1.0
-    assert decision.correlated_risk_pct < 2.5
+    # 3% incumbent risk, 1% short hedge, +0.95 asset correlation:
+    # side-adjusted covariance is -0.95; resulting risk is sqrt(4.3).
+    assert decision.correlated_risk_pct == pytest.approx(4.3**0.5)
 
 
 def test_sqlite_reservations_prevent_cross_instance_oversubscription(tmp_path):
