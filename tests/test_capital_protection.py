@@ -311,7 +311,6 @@ def test_crashed_worker_reservation_expires_after_lease(tmp_path):
         ledger.close()
 
 
-
 def test_reservation_owner_can_renew_lease_but_other_owner_cannot(tmp_path):
     path = tmp_path / "renewable-reservation.sqlite3"
     first = CapitalReservation(path=path, lease_seconds=0.05)
