@@ -728,6 +728,7 @@ class OpportunityScanner(AITOSModule):
             structure_direction,
             flow_score,
             structure_bias=market_structure.bias,
+            structure_event=market_structure.event,
         )
         selected_side = (
             directional_funnel["long"]
