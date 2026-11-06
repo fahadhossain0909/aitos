@@ -224,28 +224,45 @@ class PortfolioProtection:
                 "invalid_position_side",
             )
 
-        def combined_risk(candidate_risk: float) -> float:
-            positions = {**existing_positions, symbol: candidate_risk}
-            sides = {**existing_sides, symbol: candidate_side}
-            return snapshot.correlated_risk_pct(
-                positions,
-                sides,
-                self.config.unknown_correlation,
+        existing_variance = existing_correlated**2
+        cross_term = 0.0
+        for other, risk in existing_positions.items():
+            correlation = snapshot.correlation(
+                symbol, other, self.config.unknown_correlation
             )
+            existing_side = existing_sides.get(other)
+            if existing_side in {"LONG", "SHORT"}:
+                if existing_side != candidate_side:
+                    correlation *= -1.0
+            else:
+                correlation = abs(correlation)
+            cross_term += max(0.0, float(risk)) * correlation
 
-        upper_risk = requested_after_protection
-        if combined_risk(upper_risk) <= self.config.max_correlated_risk_pct:
-            allowed_risk = upper_risk
-        else:
-            lower_risk = 0.0
-            for _ in range(60):
-                midpoint = (lower_risk + upper_risk) / 2.0
-                if combined_risk(midpoint) <= self.config.max_correlated_risk_pct:
-                    lower_risk = midpoint
-                else:
-                    upper_risk = midpoint
-            allowed_risk = lower_risk
-        correlated_risk = combined_risk(allowed_risk)
+        # Solve x² + 2*cross*x + (existing_variance - cap²) <= 0
+        # analytically. A hedge can make risk fall before it rises again, so a
+        # monotonic binary search would incorrectly reject valid hedge sizes.
+        cap_squared = self.config.max_correlated_risk_pct**2
+        constant = existing_variance - cap_squared
+        linear = 2.0 * cross_term
+        discriminant = linear * linear - 4.0 * constant
+        allowed_risk = 0.0
+        if constant <= 0.0:
+            upper_root = (
+                -linear + max(0.0, discriminant) ** 0.5
+            ) / 2.0
+            allowed_risk = min(requested_after_protection, max(0.0, upper_root))
+        elif discriminant >= 0.0 and linear < 0.0:
+            root = discriminant**0.5
+            lower_root = (-linear - root) / 2.0
+            upper_root = (-linear + root) / 2.0
+            if requested_after_protection >= lower_root:
+                allowed_risk = min(requested_after_protection, upper_root)
+        correlated_risk = max(
+            0.0,
+            existing_variance
+            + 2.0 * cross_term * allowed_risk
+            + allowed_risk**2,
+        ) ** 0.5
         allowed_risk = max(0.0, round(allowed_risk, 12))
         if allowed_risk <= 0:
             return ProtectionDecision(
