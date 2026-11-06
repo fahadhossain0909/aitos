@@ -25,6 +25,55 @@ from aitos.models.trade import TradeSide
 REQUIRED_TIMEFRAMES = ("1d", "4h", "1h", "15m", "5m", "1m")
 DEFAULT_LOOKBACK = 80
 
+TIMEFRAME_ROLES = {
+    "1d": ("macro_regime", "major_swings", "premium_discount"),
+    "4h": ("macro_structure", "supply_demand", "major_liquidity"),
+    "1h": ("trend_structure", "bos_choch", "vwap_location"),
+    "15m": ("setup", "momentum", "cvd_divergence"),
+    "5m": ("trigger", "sweep_reclaim", "relative_participation"),
+    "1m": ("execution_context", "micro_momentum", "wick_rejection"),
+}
+
+
+def _clamp_score(value: float) -> float:
+    return round(min(10.0, max(0.0, float(value))), 4)
+
+
+def _candle_evidence(candles: list[Any]) -> dict[str, float]:
+    """Build reproducible OHLCV evidence; no fabricated neutral placeholders."""
+    if len(candles) < 30:
+        raise ValueError("at least 30 completed candles are required")
+    structure = indicators.analyze_market_structure(candles)
+    momentum = _clamp_score(indicators.momentum_score(candles))
+    cvd = _clamp_score(indicators.cvd_trend_score(candles))
+    recent = candles[-20:]
+    prior = candles[-40:-20]
+    avg_recent = sum(float(k.volume) for k in recent) / len(recent)
+    avg_prior = sum(float(k.volume) for k in prior) / len(prior) if prior else avg_recent
+    participation = _clamp_score(5.0 + 2.5 * (avg_recent / avg_prior - 1.0)) if avg_prior > 0 else 5.0
+    highest = max(float(k.high) for k in candles[-21:-1])
+    lowest = min(float(k.low) for k in candles[-21:-1])
+    last = candles[-1]
+    close, high, low = float(last.close), float(last.high), float(last.low)
+    span = max(high - low, 1e-12)
+    close_location = _clamp_score(10.0 * (close - low) / span)
+    lower_sweep = low < lowest and close > lowest
+    upper_sweep = high > highest and close < highest
+    lower_wick = max(0.0, min(close, float(last.open)) - low) / span
+    upper_wick = max(0.0, high - max(close, float(last.open))) / span
+    liquidity = _clamp_score(5.0 + (3.0 if lower_sweep else -3.0 if upper_sweep else 0.0) + 2.0 * (lower_wick - upper_wick))
+    return {
+        "structure": _clamp_score(structure.structure_score),
+        "order_flow": cvd,
+        "momentum": momentum,
+        "liquidity": liquidity,
+        "location": close_location,
+        "participation": participation,
+        "relative_volume": round(avg_recent / avg_prior, 4) if avg_prior > 0 else 1.0,
+        "lower_sweep_reclaim": float(lower_sweep),
+        "upper_sweep_reclaim": float(upper_sweep),
+    }
+
 
 @dataclass(frozen=True, slots=True)
 class TimeframeSnapshot:
@@ -91,7 +140,7 @@ def _frame_context(
     context = TimeframeContext(
         timeframe=timeframe,
         bias=bias if not stale else "unknown",
-        strength=min(10.0, max(0.0, adx / 10.0)),
+        strength=min(10.0, max(0.0, (adx - 10.0) / 3.0)),
         regime=str(indicators.classify_regime(candles)),
         available=not stale,
         completed=True,
@@ -161,21 +210,16 @@ class MultiTimeframeAnalyzer:
         snapshots = tuple(
             await asyncio.gather(*(load(tf) for tf in REQUIRED_TIMEFRAMES))
         )
-        # LTF evidence uses entry bars plus flow. Structure and momentum remain
-        # on a common LONG-oriented 0..10 scale; SHORT is mirrored centrally.
-        structure_score = (
-            8.0
-            if structure_bias == "bullish"
-            else 2.0 if structure_bias == "bearish" else 5.0
-        )
-        momentum_score = float(indicators.momentum_score(entry_candles))
+        # Entry-timeframe evidence is computed from completed OHLCV bars.
+        # Trade-derived flow is retained, while candle CVD is exposed separately.
+        candle_scores = _candle_evidence(entry_candles)
         evidence = DirectionalEvidence(
-            structure=structure_score,
-            order_flow=float(flow_score),
-            momentum=momentum_score,
-            liquidity=5.0,
-            location=5.0,
-            participation=5.0,
+            structure=candle_scores["structure"],
+            order_flow=_clamp_score(float(flow_score)),
+            momentum=candle_scores["momentum"],
+            liquidity=candle_scores["liquidity"],
+            location=candle_scores["location"],
+            participation=candle_scores["participation"],
         )
         # All six frames are part of the requested contract. A partial stack
         # is not silently promoted to a complete multi-timeframe decision.
@@ -223,6 +267,9 @@ class MultiTimeframeAnalyzer:
             "decision_mode": decision.mode,
             "decision_reason": decision.reason,
             "ltf_score": evidence.score_for(side),
+            "ltf_evidence": evidence.as_dict(),
+            "candle_evidence": candle_scores,
+            "timeframe_roles": {tf: list(roles) for tf, roles in TIMEFRAME_ROLES.items()},
         }
         return MultiTimeframeResult(
             decision.accepted, decision, snapshots, evidence, diagnostics
