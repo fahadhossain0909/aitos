@@ -425,7 +425,9 @@ class JournalSystem(AITOSModule):
                             }
                         },
                     )
-        management_ids = list(self._management_decisions_by_trade.pop(str(trade_id), []))
+        management_ids = list(
+            self._management_decisions_by_trade.pop(str(trade_id), [])
+        )
         if self._decision_repository is not None:
             get_trade_records = getattr(
                 self._decision_repository, "get_trade_records", None
@@ -530,7 +532,9 @@ class JournalSystem(AITOSModule):
             or "fill" in reason.lower()
         )
         decision_id = str(decision_id or "")
-        snapshot = dict(self._decision_snapshots.get(decision_id, {})) if decision_id else {}
+        snapshot = (
+            dict(self._decision_snapshots.get(decision_id, {})) if decision_id else {}
+        )
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_OUTCOME_ATTRIBUTED,

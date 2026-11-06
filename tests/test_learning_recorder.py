@@ -200,20 +200,33 @@ async def test_management_and_rejected_outcomes_are_recorded_without_reward_leak
     from aitos.core.contracts import Event
 
     repository = FakeRepository()
-    recorder = LearningExperienceRecorder(event_bus=None, repository=repository, source="paper")
+    recorder = LearningExperienceRecorder(
+        event_bus=None, repository=repository, source="paper"
+    )
     await recorder._on_management_decision(
         Event(
             topic="journal.management_decision_recorded",
-            payload={"decision_id": "d:hold-1", "trade_id": "t-1", "symbol": "BTCUSDT", "action": "HOLD"},
+            payload={
+                "decision_id": "d:hold-1",
+                "trade_id": "t-1",
+                "symbol": "BTCUSDT",
+                "action": "HOLD",
+            },
             source_module="journal",
         )
     )
     await recorder._on_outcome(
         Event(
             topic="journal.outcome_attributed",
-            payload={"decision_id": "d-2", "trade_id": "t-2", "symbol": "ETHUSDT",
-                     "side": "LONG", "state": "rejected", "execution_failure": True,
-                     "rejection_reason": "order submission failed"},
+            payload={
+                "decision_id": "d-2",
+                "trade_id": "t-2",
+                "symbol": "ETHUSDT",
+                "side": "LONG",
+                "state": "rejected",
+                "execution_failure": True,
+                "rejection_reason": "order submission failed",
+            },
             source_module="journal",
         )
     )

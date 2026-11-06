@@ -250,7 +250,9 @@ async def test_journal_publishes_learning_outcome_without_decision_id(
 
 
 @pytest.mark.asyncio
-async def test_hold_decision_is_persisted_as_management_attribution(event_bus, risk_engine):
+async def test_hold_decision_is_persisted_as_management_attribution(
+    event_bus, risk_engine
+):
     from aitos.core.contracts import Event
 
     journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)

@@ -168,8 +168,6 @@ class DecisionJournalRepository(AITOSModule):
         )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
-
-
     async def save_management_decision(self, decision_id, trade_id, snapshot):
         """Persist a HOLD/MANAGE/EXIT decision under its trade identity."""
         self._require_initialized()

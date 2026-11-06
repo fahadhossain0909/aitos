@@ -35,16 +35,13 @@ def test_candidate_metrics_exclude_locked_holdout(monkeypatch):
                 reason="walk-forward and locked holdout passed",
             )
 
-    monkeypatch.setattr(
-        "aitos.learning.validation.BacktestEngine", FakeBacktestEngine
-    )
+    monkeypatch.setattr("aitos.learning.validation.BacktestEngine", FakeBacktestEngine)
     monkeypatch.setattr(
         "aitos.learning.validation.WalkForwardValidator", FakeWalkForwardValidator
     )
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     events = [
-        SimpleNamespace(timestamp=start + timedelta(days=index))
-        for index in range(100)
+        SimpleNamespace(timestamp=start + timedelta(days=index)) for index in range(100)
     ]
     policy = ValidationPolicy(
         train_days=30, test_days=20, holdout_days=30, min_trades=1

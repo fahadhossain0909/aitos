@@ -1,4 +1,5 @@
 """Leakage-aware validation gate around the canonical backtest engine."""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable

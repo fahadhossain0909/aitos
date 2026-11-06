@@ -172,7 +172,6 @@ class LearningExperienceRecorder(AITOSModule):
         self._last_event_time = event.created_at
         return None
 
-
     async def _on_management_decision(self, event: Event) -> EventResponse | None:
         """Retain HOLD/MANAGE/EXIT observations without treating them as entries."""
         p = dict(event.payload)
@@ -204,14 +203,19 @@ class LearningExperienceRecorder(AITOSModule):
         state = str(p.get("state") or "").lower()
         if state in {"rejected", "execution_failure"}:
             record = ExperienceRecord(
-                timestamp=_event_time(event), source=self._source,
+                timestamp=_event_time(event),
+                source=self._source,
                 symbol=str(p.get("symbol") or "unknown"),
-                decision=str(p.get("side") or "UNKNOWN"), outcome=state, reward=0.0,
+                decision=str(p.get("side") or "UNKNOWN"),
+                outcome=state,
+                reward=0.0,
                 metadata={
                     "decision_id": str(p.get("decision_id") or ""),
                     "trade_id": str(p.get("trade_id") or ""),
                     "event_type": "decision_outcome",
-                    "execution_failure": bool(p.get("execution_failure", state == "execution_failure")),
+                    "execution_failure": bool(
+                        p.get("execution_failure", state == "execution_failure")
+                    ),
                     "rejection_reason": p.get("rejection_reason"),
                     "reward_unit": "not_applicable",
                 },

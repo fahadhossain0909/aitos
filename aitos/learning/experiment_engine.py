@@ -3,6 +3,7 @@
 This module orchestrates comparisons; it never tunes, promotes, or deploys a
 candidate. Callers must supply the canonical BacktestEngine-backed evaluator.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
@@ -21,7 +22,11 @@ class CostScenario:
     slippage_bps: float
 
     def __post_init__(self) -> None:
-        if not self.name.strip() or not isfinite(self.fee_rate) or not isfinite(self.slippage_bps):
+        if (
+            not self.name.strip()
+            or not isfinite(self.fee_rate)
+            or not isfinite(self.slippage_bps)
+        ):
             raise ValueError("cost scenario fields must be finite and named")
         if self.fee_rate < 0 or self.slippage_bps < 0:
             raise ValueError("execution costs cannot be negative")
@@ -53,7 +58,9 @@ class ExperimentPlan:
 
     def __post_init__(self) -> None:
         if not self.name.strip() or self.minimum_samples < 1:
-            raise ValueError("experiment name and positive minimum_samples are required")
+            raise ValueError(
+                "experiment name and positive minimum_samples are required"
+            )
         names = [self.baseline.name, *(v.name for v in self.variants)]
         if len(set(names)) != len(names):
             raise ValueError("baseline and variant names must be unique")
@@ -102,7 +109,9 @@ class ExperimentReport:
         }
 
 
-Evaluator = Callable[[list[Any], ExperimentVariant, CostScenario, str], Mapping[str, Any]]
+Evaluator = Callable[
+    [list[Any], ExperimentVariant, CostScenario, str], Mapping[str, Any]
+]
 
 
 class ExperimentEngine:
@@ -112,14 +121,22 @@ class ExperimentEngine:
 
     @staticmethod
     def _timestamp(event: Any) -> datetime:
-        value = event.get("timestamp") if isinstance(event, Mapping) else getattr(event, "timestamp", None)
+        value = (
+            event.get("timestamp")
+            if isinstance(event, Mapping)
+            else getattr(event, "timestamp", None)
+        )
         if not isinstance(value, datetime) or value.tzinfo is None:
             raise ValueError("experiment events require timezone-aware timestamps")
         return value
 
     @staticmethod
     def _regime(event: Any) -> str:
-        value = event.get("regime", "unknown") if isinstance(event, Mapping) else getattr(event, "regime", "unknown")
+        value = (
+            event.get("regime", "unknown")
+            if isinstance(event, Mapping)
+            else getattr(event, "regime", "unknown")
+        )
         return str(value or "unknown").lower()
 
     @classmethod
@@ -151,7 +168,8 @@ class ExperimentEngine:
             # Only the explicitly reserved interval is evaluated. The caller
             # must keep this report out of candidate/parameter selection.
             ordered = [
-                e for e in ordered
+                e
+                for e in ordered
                 if plan.holdout_start <= self._timestamp(e) < plan.holdout_end
             ]
             if not ordered:
@@ -171,7 +189,9 @@ class ExperimentEngine:
                 for variant in variants:
                     raw = evaluator(list(regime_events), variant, cost, regime)
                     metrics, count = self._metrics(raw)
-                    cell = ExperimentCell(regime, cost.name, variant.name, metrics, count)
+                    cell = ExperimentCell(
+                        regime, cost.name, variant.name, metrics, count
+                    )
                     cells.append(cell)
                     if count < plan.minimum_samples:
                         passed = False
@@ -194,7 +214,9 @@ class ExperimentEngine:
             "regimes": list(regimes),
             "costs": [asdict(c) for c in plan.cost_scenarios],
             "variants": [asdict(v) for v in variants],
-            "holdout_start": plan.holdout_start.isoformat() if plan.holdout_start else None,
+            "holdout_start": (
+                plan.holdout_start.isoformat() if plan.holdout_start else None
+            ),
             "holdout_end": plan.holdout_end.isoformat() if plan.holdout_end else None,
         }
         experiment_id = hashlib.sha256(
