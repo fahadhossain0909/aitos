@@ -6,6 +6,8 @@ from aitos.evaluation.quant_validation import (
     chronological_walk_forward_splits,
     comparative_report,
     evaluate_fold_results,
+    expectancy_confidence_interval,
+    rejected_opportunity_counterfactual,
     validate_observations,
 )
 
@@ -73,3 +75,41 @@ def test_fold_results_score_only_held_out_observations():
     results = evaluate_fold_results(rows, folds)
     assert results
     assert all(result["test_trade_count"] > 0 for result in results)
+
+
+
+def test_quant_scorecard_reports_mae_mfe_costs_and_regime_splits():
+    rows = observations(8)
+    for index, row in enumerate(rows):
+        row.update(
+            regime="trending" if index % 2 == 0 else "ranging",
+            mae_pct=0.2 + index / 100,
+            mfe_pct=0.5 + index / 100,
+            entry_capture_pct=0.4,
+            slippage_bps=1.5,
+            fees_usd=0.02,
+            funding_usd=-0.01,
+        )
+    report = comparative_report(rows)
+    baseline = report["baseline"]
+    assert set(baseline["by_regime"]) == {"trending"}
+    assert baseline["research_diagnostics"]["mean_mae_pct"] is not None
+    assert baseline["research_diagnostics"]["mean_mfe_pct"] is not None
+    assert baseline["research_diagnostics"]["mean_slippage_bps"] == 1.5
+    assert baseline["expectancy_confidence_interval"]["samples"] == 4
+
+
+def test_rejected_opportunity_counterfactual_reports_missed_markouts():
+    rows = observations(4)
+    for index, row in enumerate(rows):
+        row["rejected_opportunity"] = True
+        row["counterfactual_net_pnl"] = 2.0 if index % 2 == 0 else -1.0
+    result = rejected_opportunity_counterfactual(validate_observations(rows))
+    assert result["samples"] == 4
+    assert result["positive_markout_rate"] == 0.5
+    assert result["negative_markout_rate"] == 0.5
+
+
+def test_expectancy_interval_is_not_claimed_with_insufficient_samples():
+    assert expectancy_confidence_interval([{"net_pnl": 1.0}])["lower"] is None
+    assert expectancy_confidence_interval([])["upper"] is None
