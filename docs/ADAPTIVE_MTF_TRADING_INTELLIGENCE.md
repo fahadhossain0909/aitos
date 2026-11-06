@@ -6,7 +6,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 
 ## P0 — Directional diagnostics
 
-- Scanner emits a symmetric LONG/SHORT directional funnel record.
+- Scanner emits a symmetric LONG/SHORT directional funnel record, including structure event, selected-side rejection reasons and both-side rejection attribution when no side is selected.
 - Both sides expose structure pass, CVD pass, bias conflict, diagnostic acceptance, and explicit rejection reason codes.
 - CHoCH/CVD thresholds remain symmetric: LONG >= 6.5 and SHORT <= 3.5. Threshold relaxation is not inferred from diagnostics.
 
@@ -14,9 +14,11 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 
 - Added a candle-close-aware multi-timeframe orchestration layer for **1D, 4H, 1H, 15M, 5M and 1M**.
 - Every timeframe uses the shared `HigherTimeframeCandleCache`; cache refresh is keyed by symbol/timeframe/lookback and single-flight protected.
-- Each frame reports latest closed candle timestamp, age, permitted freshness age, ADX, DI gap, structure bias, regime and cache state.
+- Each frame reports latest closed candle timestamp, age, permitted freshness age, ADX, DI gap, structure bias, regime, cache state and candle-derived structure/CVD/momentum/liquidity/location/participation evidence.
+- The 1D/4H/1H/15M/5M/1M responsibility map is emitted with every decision. Location is measured against a rolling 20-candle range (premium/discount proxy); liquidity evidence uses completed-candle sweep/reclaim and wick rejection; participation compares recent versus preceding candle volume.
+- Conflicting DI direction and confirmed market-structure bias is classified as neutral/mixed rather than forced into a trend label. ADX strength is normalized to the configured 0–10 evidence scale.
 - Forming candles are excluded by the cache. A stale fallback, insufficient history or missing timeframe marks the stack incomplete.
-- The scanner requires all six frames to be fresh and complete before accepting an MTF decision. It does not convert unavailable data into neutral evidence.
+- The scanner requires all six frames to be fresh and complete before accepting an MTF decision. It does not convert unavailable data into neutral evidence. Tick/order-book OFI and cancellation/replenishment evidence remain a separate downstream execution-quality gate in the scanner, not a fabricated 1M candle feature.
 - All six timeframe contexts are evaluated together using a configurable strength-weighted consensus threshold. A single lower-timeframe counter-move does not automatically veto a higher-timeframe majority; balanced stacks require the LTF quality floor, and dominant countertrend stacks require strong structure + order-flow reversal evidence.
 - Cache request budget, fetch concurrency and freshness grace are centrally configurable with environment overrides.
 - The primary timeframe map and legacy single-HTF helper remain for compatibility; the scanner decision path now uses the six-frame analyzer.
