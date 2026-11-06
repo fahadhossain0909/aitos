@@ -1,3 +1,6 @@
+import multiprocessing
+import time
+
 from aitos.intelligence.capital_protection import (
     CapitalReservation,
     PortfolioProtection,
@@ -230,3 +233,75 @@ def test_leveraged_position_requires_a_safe_liquidation_buffer():
     assert not too_close.allowed
     assert too_close.reason == "liquidation_buffer_below_minimum"
     assert safe.allowed
+
+
+
+def _reserve_from_child_process(path, symbol, result_queue):
+    ledger = CapitalReservation(path=path, lease_seconds=30.0)
+    try:
+        accepted = ledger.reserve(
+            Reservation(symbol, 20.0, 2.0),
+            available_capital_usd=100.0,
+            available_risk_usd=10.0,
+            capital_limit_usd=100.0,
+            risk_limit_usd=10.0,
+        )
+        result_queue.put(bool(accepted))
+    finally:
+        ledger.close()
+
+
+def test_sqlite_reservations_survive_real_multiprocess_contention(tmp_path):
+    path = str(tmp_path / "multiprocess-reservations.sqlite3")
+    context = multiprocessing.get_context("spawn")
+    result_queue = context.Queue()
+    processes = [
+        context.Process(
+            target=_reserve_from_child_process,
+            args=(path, f"SYM{index}USDT", result_queue),
+        )
+        for index in range(8)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=15.0)
+        assert process.exitcode == 0
+    accepted = [result_queue.get(timeout=2.0) for _ in processes]
+    assert sum(accepted) == 5
+    ledger = CapitalReservation(path=path)
+    try:
+        assert ledger.reserved_capital_usd == 100.0
+        assert ledger.reserved_risk_usd == 10.0
+    finally:
+        ledger.close()
+
+
+def test_crashed_worker_reservation_expires_after_lease(tmp_path):
+    ledger = CapitalReservation(
+        path=tmp_path / "lease-expiry.sqlite3", lease_seconds=0.05
+    )
+    try:
+        assert ledger.reserve(
+            Reservation("BTCUSDT", 50.0, 5.0),
+            available_capital_usd=100.0,
+            available_risk_usd=10.0,
+            capital_limit_usd=100.0,
+            risk_limit_usd=10.0,
+        )
+        time.sleep(0.08)
+        replacement = CapitalReservation(
+            path=tmp_path / "lease-expiry.sqlite3", lease_seconds=1.0
+        )
+        try:
+            assert replacement.reserve(
+                Reservation("ETHUSDT", 100.0, 10.0),
+                available_capital_usd=100.0,
+                available_risk_usd=10.0,
+                capital_limit_usd=100.0,
+                risk_limit_usd=10.0,
+            )
+        finally:
+            replacement.close()
+    finally:
+        ledger.close()
