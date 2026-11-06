@@ -114,6 +114,7 @@ class ProbabilityCalibrator:
         self.config = config or CapitalControlConfig()
         self._bins: dict[int, list[int]] = {}
         self._observed_ids: set[str] = set()
+        self._observations: dict[str, tuple[int, bool]] = {}
         self._lock = RLock()
         self._conn: sqlite3.Connection | None = None
         if path is not None:
@@ -224,6 +225,117 @@ class ProbabilityCalibrator:
             bucket[1] += int(realized_loss)
             if observation_id is not None:
                 self._observed_ids.add(observation_id)
+            return True
+
+    def revise(
+        self,
+        predicted_loss_probability: float,
+        realized_loss: bool,
+        *,
+        observation_id: str,
+    ) -> bool:
+        """Correct a previously recorded outcome after late fee/funding updates."""
+        probability = float(predicted_loss_probability)
+        if not isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError("predicted_loss_probability must be within [0, 1]")
+        if not isinstance(realized_loss, bool):
+            raise ValueError("realized_loss must be boolean")
+        if not isinstance(observation_id, str) or not observation_id.strip():
+            raise ValueError("observation_id must be a non-empty string")
+        new_bin = self._bin(probability)
+        with self._lock:
+            if self._conn is None:
+                previous = self._observations.get(observation_id)
+                if previous == (new_bin, realized_loss):
+                    return False
+                if previous is not None:
+                    old_bin, old_loss = previous
+                    bucket = self._bins[old_bin]
+                    bucket[0] -= 1
+                    bucket[1] -= int(old_loss)
+                bucket = self._bins.setdefault(new_bin, [0, 0])
+                bucket[0] += 1
+                bucket[1] += int(realized_loss)
+                self._observations[observation_id] = (new_bin, realized_loss)
+                self._observed_ids.add(observation_id)
+                return True
+
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                previous = self._conn.execute(
+                    """
+                    SELECT bin, realized_loss
+                    FROM probability_calibration_observations
+                    WHERE observation_id = ?
+                    """,
+                    (observation_id,),
+                ).fetchone()
+                if previous is None:
+                    self._conn.execute(
+                        """
+                        INSERT INTO probability_calibration_observations
+                        (observation_id, bin, realized_loss)
+                        VALUES (?, ?, ?)
+                        """,
+                        (observation_id, new_bin, int(realized_loss)),
+                    )
+                    self._conn.execute(
+                        """
+                        INSERT INTO probability_calibration_bins(bin, samples, losses)
+                        VALUES (?, 1, ?)
+                        ON CONFLICT(bin) DO UPDATE SET
+                            samples = samples + 1,
+                            losses = losses + excluded.losses
+                        """,
+                        (new_bin, int(realized_loss)),
+                    )
+                else:
+                    old_bin, old_loss = int(previous[0]), bool(previous[1])
+                    if (old_bin, old_loss) == (new_bin, realized_loss):
+                        self._conn.rollback()
+                        self._observed_ids.add(observation_id)
+                        self._observations[observation_id] = (new_bin, realized_loss)
+                        return False
+                    self._conn.execute(
+                        """
+                        UPDATE probability_calibration_bins
+                        SET samples = samples - 1, losses = losses - ?
+                        WHERE bin = ?
+                        """,
+                        (int(old_loss), old_bin),
+                    )
+                    self._conn.execute(
+                        """
+                        DELETE FROM probability_calibration_bins
+                        WHERE bin = ? AND samples <= 0
+                        """,
+                        (old_bin,),
+                    )
+                    self._conn.execute(
+                        """
+                        INSERT INTO probability_calibration_bins(bin, samples, losses)
+                        VALUES (?, 1, ?)
+                        ON CONFLICT(bin) DO UPDATE SET
+                            samples = samples + 1,
+                            losses = losses + excluded.losses
+                        """,
+                        (new_bin, int(realized_loss)),
+                    )
+                    self._conn.execute(
+                        """
+                        UPDATE probability_calibration_observations
+                        SET bin = ?, realized_loss = ?, observed_at = CURRENT_TIMESTAMP
+                        WHERE observation_id = ?
+                        """,
+                        (new_bin, int(realized_loss), observation_id),
+                    )
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            self._observed_ids.add(observation_id)
+            self._observations[observation_id] = (new_bin, realized_loss)
+            self._refresh_bins_locked()
             return True
 
     @property
