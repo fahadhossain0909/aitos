@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from aitos.config.paths import get_model_data_dir
 from aitos.intelligence.capital_controls import ProbabilityCalibrator
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_protection import CapitalReservation
 from aitos.intelligence.opportunity_outcomes import DirectionalFunnelStore
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 
@@ -261,10 +262,13 @@ def install_capital_guard() -> None:
         gateway = getattr(self, _GATEWAY_ATTR, None)
         if gateway is None:
             gateway = CapitalGateway(
+                reservation=CapitalReservation(
+                    path=get_model_data_dir() / "capital_reservations.sqlite3"
+                ),
                 calibrator=ProbabilityCalibrator(
                     path=get_model_data_dir()
                     / "capital_probability_calibration.sqlite3"
-                )
+                ),
             )
             setattr(self, _GATEWAY_ATTR, gateway)
 
