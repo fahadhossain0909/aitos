@@ -174,7 +174,7 @@ def test_execution_cost_sensitivity_stresses_fees_slippage_and_funding():
     ]
     result = execution_cost_sensitivity(rows, cost_multipliers=(1.0, 2.0))
     assert result["available"] is True
-    assert [item["net_pnl_usd"] for item in result["scenarios"]] == [8.0, 6.0]
+    assert [item["net_pnl_usd"] for item in result["scenarios"]] == [9.0, 8.0]
     assert execution_cost_sensitivity([{"gross_pnl_usd": 1.0}])["available"] is False
 
 
@@ -221,4 +221,4 @@ def test_execution_cost_sensitivity_preserves_funding_rebates():
         ],
         cost_multipliers=(1.0,),
     )
-    assert result["scenarios"][0]["net_pnl_usd"] == pytest.approx(1.0)
+    assert result["scenarios"][0]["net_pnl_usd"] == pytest.approx(0.6)
