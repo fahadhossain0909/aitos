@@ -8,7 +8,8 @@ from aitos.backtest.clickhouse_replay import (
     replay_depth_flow,
 )
 from aitos.backtest.aitos_runner import AITOSHistoricalRunner, HistoricalDecision
-from aitos.models.market import BookLevel, OrderBookSnapshot, TradeTick
+from aitos.backtest.l2_execution import BookLevel
+from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
 class _Repository:
