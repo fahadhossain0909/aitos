@@ -7,7 +7,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 ## P0 — Directional diagnostics
 
 - Scanner emits a symmetric LONG/SHORT directional funnel record, including structure event, selected-side rejection reasons and both-side rejection attribution when no side is selected.
-- Directional-gate, direction-selection, adaptive-MTF, execution-quality, scanner-candidate, capital-gate, risk-engine, governance and lifecycle-open events are persisted in a bounded SQLite ledger. Health diagnostics expose per-stage/per-side accepted and rejected counts plus reason attribution. Persistence is best-effort, written off the async scan loop, and cannot change the scanner's trade decision.
+- Directional-gate, direction-selection, market-data sufficiency, adaptive-MTF, execution-quality, scanner terminal/error, composite-score, top-N/hysteresis ranking, capital-gate, risk-engine, governance and lifecycle-open events are persisted in a bounded SQLite ledger. Scanner timeout and exception paths are also attributed. Health diagnostics expose per-stage/per-side accepted and rejected counts plus reason attribution. Persistence is best-effort, written off the async scan loop, and cannot change the scanner's trade decision.
 - Both sides expose structure pass, CVD pass, bias conflict, diagnostic acceptance, and explicit rejection reason codes.
 - CHoCH/CVD thresholds remain symmetric: LONG >= 6.5 and SHORT <= 3.5. Threshold relaxation is not inferred from diagnostics.
 
@@ -34,17 +34,18 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Exit decisions continue to require structural/thesis invalidation or confirmed exit pressure; a static TP touch is not treated as a reason to abandon a still-valid runner thesis.
 - Closed-trade probability calibration is persisted in SQLite and updated from the lifecycle close path using the stable trade ID as an idempotency key. A retried close/outcome event cannot increment the same observation twice; SQLite write transactions serialize competing writers, and readers refresh aggregates so separate processes observe committed outcomes.
 - Late fee/funding adjustments on already-closed trades revise the original calibration label atomically rather than adding a second sample. Duplicate adjustment IDs remain idempotent.
-- The path-based exit expectation is a heuristic probability-weighted estimate, not a calibrated statistical forecast. Calibration against out-of-sample realized path outcomes remains a research requirement.
+- The path-based exit expectation is a heuristic probability-weighted estimate, not a calibrated statistical forecast. The OOS evaluation layer now compares predicted versus realized remaining edge and stresses fees, slippage and funding at configurable cost multipliers. A real OOS calibration result still requires populated historical observations.
 
 ## P4 — Capital allocation and correlation-aware portfolio risk
 
 - The lifecycle capital guard calls the shared CapitalGateway before sizing/execution.
 - The gateway applies expected-edge ranking, per-trade/portfolio risk budgets, drawdown and volatility multipliers, circuit breakers, capital reservations and portfolio protection.
 - Lifecycle-created gateways use a durable SQLite reservation ledger. BEGIN IMMEDIATE transactions enforce absolute equity and portfolio-risk budgets across processes, prevent duplicate same-symbol reservations by competing owners, and use bounded leases so crashed workers do not leave permanent reservations. In-memory reservations remain available for isolated tests and callers that do not configure persistence.
-- Existing portfolio correlation data is consumed by PortfolioProtection. Unknown correlations use a conservative configured fallback; known correlations increase correlated-risk usage and constrain incremental risk.
+- Existing portfolio correlation data is consumed by PortfolioProtection. A leakage-safe point-in-time estimator now builds symmetric pairwise correlations from aligned timestamped returns at the decision cutoff, without forward filling or future observations; it is used when return history is supplied in the capital context. Unknown correlations use a conservative configured fallback.
+- Adverse funding cost and leveraged-position liquidation-buffer checks are now hard risk gates. A leveraged candidate with no liquidation-buffer input fails closed; excessive adverse funding or an insufficient buffer is rejected.
 - The gateway's approved risk budget is passed into the trade sizing path; the capital gate cannot be bypassed by calling lifecycle submission directly.
 - Correlation estimates must be point-in-time, symmetric and refreshed from measured returns. A single portfolio-wide max-pairwise fallback is conservative but not a substitute for a complete covariance matrix.
-- Durable reservation contention has dedicated cross-instance regression coverage; production multiprocess stress and crash/lease-expiry behavior still require CI and runtime verification.
+- Durable reservation contention has both cross-instance and spawned multi-process regression coverage, including stale-budget oversubscription and lease expiry after a crashed worker. These tests still require a successful latest-head CI run.
 
 ## P5 — Historical replay, walk-forward and ablation evaluation
 
@@ -56,6 +57,8 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - When point-in-time predicted win probabilities are present, the report adds Brier score, log loss and reliability bins against realized outcomes. Probability inputs outside [0, 1] are rejected; no forecasts are inferred from outcomes.
 - Comparative reports support baseline versus ablation variants (for example removing order-flow, MTF, liquidity or footprint evidence) and calculate deltas where metrics are defined.
 - Added `HistoricalAblationRunner`, which executes baseline and component-disabled strategy callables through the canonical `BacktestEngine`, then runs each variant through the existing `WalkForwardValidator` with a locked holdout.
+- Added a bounded `ClickHouseReplayLoader` and `ClickHouseHistoricalAblationRunner` that load persisted trade ticks, L2 snapshots and funding rows over strict timezone-aware [start,end) ranges, preserve exchange timestamps and feed the canonical replay/walk-forward/locked-holdout pipeline.
+- Sequenced depth events are now persisted separately in ClickHouse `depth_events` and attached to loaded book snapshots. The futures replay runner applies funding only when a recorded settlement timestamp is crossed, using the last already-observed mark rather than charging funding on every market event.
 - The ablation report includes full replay metrics, walk-forward/holdout outcomes, LONG/SHORT-separated realized PnL metrics, unclassified-trade counts and deltas versus baseline. Strategy variants are supplied as named callables so OFI/order-flow/MTF/liquidity/footprint components can be switched off without silently changing the baseline.
 - The leakage-aware observation helpers remain available for externally recorded journals; they do not synthesize historical data or claim a backtest result without the canonical replay.
 - No model/strategy is promoted automatically. Use a locked holdout after walk-forward and keep paper/shadow validation as a separate approval gate.
@@ -69,14 +72,17 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Persistent calibration across restart, duplicate trade-outcome delivery, cross-instance deduplication, lifecycle close integration and late-settlement label correction.
 - Role-specific evidence weighting in the adaptive six-timeframe consensus.
 - Correlation-aware incremental portfolio risk.
-- SQLite cross-instance capital reservation, absolute budget enforcement and duplicate-symbol contention.
+- SQLite cross-instance and real multi-process capital reservation, absolute budget enforcement, duplicate-symbol contention and lease expiry.
+- Sequenced LocalOrderBook → LiveScannerCache → TradeDepthMatcher → OFI aggregation replay with bid/ask execution, cancellation-proxy and replenishment attribution.
+- ClickHouse replay dataset loading, persisted depth-event association and scheduled funding settlement.
 - Chronological walk-forward embargo, timestamp leakage rejection, ablation reporting and LONG/SHORT comparative metrics.
 
 ## Verification status
 
-- New and existing tests are authored for CI/regression verification.
-- This branch's test suite and GitHub Actions must be run and reviewed before the work can be called regression-verified.
-- Exchange-connected runtime, paper trading, restart recovery against a live market stream, and execution-quality verification are deliberately not part of this phase.
+- New regression tests now cover scanner score/ranking attribution, real multiprocess reservations, lease expiry, point-in-time correlation cutoffs, OOS expected-remaining-edge calibration, cost sensitivity, sequenced depth-event replay and ClickHouse loader behavior.
+- CI is currently running on the latest implementation head; its final result must be reviewed before the work can be called regression-verified.
+- Exchange-connected runtime and paper trading remain deliberately deferred. Existing ClickHouse data has not been queried in this session, so no real-market historical replay, walk-forward metrics or locked-holdout pass/fail result is claimed.
+- Historical depth-event persistence is forward-looking: snapshots recorded before the new `depth_events` table was deployed cannot be reconstructed into true diff-depth events from top-of-book snapshots alone. Backfill requires archived exchange diff-depth payloads.
 - No profitability or performance improvement is claimed without historical replay on point-in-time data and a locked out-of-sample holdout.
 
 
