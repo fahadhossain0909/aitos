@@ -244,7 +244,11 @@ def evaluate_adaptive_htf(
 
 
 def directional_diagnostics(
-    structure_direction: str, cvd_score: float, *, structure_bias: str | None = None
+    structure_direction: str,
+    cvd_score: float,
+    *,
+    structure_bias: str | None = None,
+    structure_event: str | None = None,
 ) -> dict[str, Any]:
     """Explain both directional opportunities with mirror-symmetric thresholds."""
     if not isfinite(cvd_score):
@@ -254,8 +258,9 @@ def directional_diagnostics(
     short_structure = structure_direction == "bearish_bos"
     long_flow = cvd_score >= 6.5
     short_flow = cvd_score <= 3.5
-    long_bias_conflict = bias == "bearish"
-    short_bias_conflict = bias == "bullish"
+    is_choch = (structure_event or "").lower() == "choch"
+    long_bias_conflict = bias == "bearish" and not is_choch
+    short_bias_conflict = bias == "bullish" and not is_choch
     long_structure_pass = long_structure or structure_direction == "none"
     short_structure_pass = short_structure or structure_direction == "none"
     long_pass = long_structure_pass and long_flow and not long_bias_conflict
@@ -291,6 +296,7 @@ def directional_diagnostics(
             ),
         },
         "cvd_score": cvd_score,
+        "structure_event": structure_event or "none",
         "thresholds": {"long_min": 6.5, "short_max": 3.5},
     }
 
