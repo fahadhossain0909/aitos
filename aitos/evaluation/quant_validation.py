@@ -4,6 +4,7 @@ These functions consume already-recorded, point-in-time trade observations.
 They do not fabricate market data or execute orders. The caller is responsible
 for generating observations with the canonical backtest/replay engine.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -37,7 +38,9 @@ def _time(value: Any) -> datetime:
     return result
 
 
-def validate_observations(rows: Iterable[Mapping[str, Any]]) -> tuple[dict[str, Any], ...]:
+def validate_observations(
+    rows: Iterable[Mapping[str, Any]],
+) -> tuple[dict[str, Any], ...]:
     """Validate chronological, finite observations and point-in-time boundaries."""
     validated = []
     for index, raw in enumerate(rows):
@@ -54,20 +57,29 @@ def validate_observations(rows: Iterable[Mapping[str, Any]]) -> tuple[dict[str, 
             raise ValueError(f"row {index}: net_pnl must be finite")
         if not str(row.get("variant", "baseline")):
             raise ValueError(f"row {index}: variant cannot be empty")
-        row.update(decision_at=decision_at, outcome_at=outcome_at, side=side, net_pnl=pnl)
+        row.update(
+            decision_at=decision_at, outcome_at=outcome_at, side=side, net_pnl=pnl
+        )
         validated.append(row)
     return tuple(sorted(validated, key=lambda item: item["decision_at"]))
 
 
 def chronological_walk_forward_splits(
-    rows: Iterable[Mapping[str, Any]], *, train_fraction: float = 0.6,
-    test_fraction: float = 0.2, step_fraction: float = 0.2,
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    train_fraction: float = 0.6,
+    test_fraction: float = 0.2,
+    step_fraction: float = 0.2,
     embargo: timedelta = timedelta(0),
 ) -> tuple[EvaluationFold, ...]:
     """Create expanding chronological folds with an explicit leakage embargo."""
     data = validate_observations(rows)
     count = len(data)
-    if not 0 < train_fraction < 1 or not 0 < test_fraction < 1 or not 0 < step_fraction <= 1:
+    if (
+        not 0 < train_fraction < 1
+        or not 0 < test_fraction < 1
+        or not 0 < step_fraction <= 1
+    ):
         raise ValueError("fractions must be in (0,1), with step_fraction <= 1")
     if embargo < timedelta(0):
         raise ValueError("embargo cannot be negative")
@@ -80,20 +92,25 @@ def chronological_walk_forward_splits(
         train_end = data[train_end_idx - 1]["decision_at"]
         test_start = data[test_start_idx]["decision_at"]
         eligible_train = tuple(
-            i for i in range(train_end_idx)
+            i
+            for i in range(train_end_idx)
             if data[i]["outcome_at"] + embargo <= test_start
         )
-        test_indices = tuple(range(test_start_idx, min(count, test_start_idx + test_size)))
+        test_indices = tuple(
+            range(test_start_idx, min(count, test_start_idx + test_size))
+        )
         if not eligible_train or not test_indices:
             continue
-        folds.append(EvaluationFold(
-            train_start=data[eligible_train[0]]["decision_at"],
-            train_end=train_end,
-            test_start=test_start,
-            test_end=data[test_indices[-1]]["decision_at"],
-            train_indices=eligible_train,
-            test_indices=test_indices,
-        ))
+        folds.append(
+            EvaluationFold(
+                train_start=data[eligible_train[0]]["decision_at"],
+                train_end=train_end,
+                test_start=test_start,
+                test_end=data[test_indices[-1]]["decision_at"],
+                train_indices=eligible_train,
+                test_indices=test_indices,
+            )
+        )
     return tuple(folds)
 
 
@@ -127,9 +144,19 @@ def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             if variant == "baseline":
                 continue
             result["delta_vs_baseline"] = {
-                "expectancy": result["overall"]["expectancy"] - baseline["overall"]["expectancy"],
-                "profit_factor": (result["overall"]["profit_factor"] - baseline["overall"]["profit_factor"]) if result["overall"]["profit_factor"] is not None and baseline["overall"]["profit_factor"] is not None else None,
-                "max_drawdown": result["overall"]["max_drawdown"] - baseline["overall"]["max_drawdown"],
+                "expectancy": result["overall"]["expectancy"]
+                - baseline["overall"]["expectancy"],
+                "profit_factor": (
+                    (
+                        result["overall"]["profit_factor"]
+                        - baseline["overall"]["profit_factor"]
+                    )
+                    if result["overall"]["profit_factor"] is not None
+                    and baseline["overall"]["profit_factor"] is not None
+                    else None
+                ),
+                "max_drawdown": result["overall"]["max_drawdown"]
+                - baseline["overall"]["max_drawdown"],
             }
     return report
 
@@ -142,13 +169,15 @@ def evaluate_fold_results(
     results = []
     for index, fold in enumerate(folds):
         test = [data[i] for i in fold.test_indices]
-        results.append({
-            "fold": index,
-            "train_end": fold.train_end.isoformat(),
-            "test_start": fold.test_start.isoformat(),
-            "test_end": fold.test_end.isoformat(),
-            "test_metrics": walk_forward_metrics(test),
-            "long_short": _side_metrics(test),
-            "test_trade_count": len(test),
-        })
+        results.append(
+            {
+                "fold": index,
+                "train_end": fold.train_end.isoformat(),
+                "test_start": fold.test_start.isoformat(),
+                "test_end": fold.test_end.isoformat(),
+                "test_metrics": walk_forward_metrics(test),
+                "long_short": _side_metrics(test),
+                "test_trade_count": len(test),
+            }
+        )
     return tuple(results)
