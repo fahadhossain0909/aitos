@@ -691,112 +691,50 @@ class OpportunityScanner(AITOSModule):
         }
         if direction is not None and self._tuning.scanner.htf_filter_enabled:
             try:
-                htf_timeframe = resolve_higher_timeframe(
-                    self._timeframe, self._tuning.scanner.htf_timeframe
-                )
-                htf_klines, htf_cache_diagnostics = await self._htf_cache.get(
-                    symbol,
-                    htf_timeframe,
-                    self._tuning.scanner.htf_lookback,
-                    lambda: self._exchange.fetch_klines(
-                        symbol,
-                        htf_timeframe,
-                        limit=self._tuning.scanner.htf_lookback,
-                    ),
-                )
-                if htf_cache_diagnostics.get("stale"):
-                    logger.warning(
-                        "entry blocked: higher-timeframe cache has not advanced after candle close",
-                        extra={
-                            "aitos_extra": {
-                                "symbol": symbol,
-                                "timeframe": htf_timeframe,
-                                "cache": htf_cache_diagnostics,
-                            }
-                        },
-                    )
-                    return None
-                _, htf_diagnostics = higher_timeframe_alignment(
-                    htf_klines,
-                    direction,
-                    min_adx=self._tuning.scanner.htf_min_adx,
-                    min_di_gap=self._tuning.scanner.htf_min_di_gap,
-                )
-                htf_diagnostics["timeframe"] = htf_timeframe
-                htf_diagnostics["cache"] = htf_cache_diagnostics
-                htf_available = len(htf_klines) >= 30
-                from aitos.intelligence.adaptive_mtf import (
-                    DirectionalEvidence,
-                    TimeframeContext,
-                    evaluate_adaptive_htf,
-                )
+                from aitos.intelligence.multi_timeframe import MultiTimeframeAnalyzer
 
-                htf_bias = htf_diagnostics.get("trend", "unknown")
-                htf_context = TimeframeContext(
-                    timeframe=htf_timeframe,
-                    bias=htf_bias if htf_bias in {"bullish", "bearish", "neutral"} else "unknown",
-                    strength=min(10.0, max(0.0, float(htf_diagnostics.get("adx", 0.0)) / 10.0)),
-                    regime=indicators.classify_regime(htf_klines),
-                    available=htf_available,
-                    completed=True,
-                    diagnostics=htf_diagnostics,
+                mtf = MultiTimeframeAnalyzer(
+                    self._htf_cache,
+                    lookback=self._tuning.scanner.htf_lookback,
                 )
-                # Convert all evidence into the same 0..10 LONG-oriented scale.
-                # SHORT evaluation mirrors it inside DirectionalEvidence.score_for().
-                structure_evidence = (
-                    8.0 if market_structure.bias == "bullish"
-                    else 2.0 if market_structure.bias == "bearish"
-                    else 5.0
-                )
-                momentum_evidence = indicators.momentum_score(klines)
-                ltf_evidence = DirectionalEvidence(
-                    structure=structure_evidence,
-                    order_flow=flow_score,
-                    momentum=momentum_evidence,
-                    liquidity=5.0,
-                    location=5.0,
-                    participation=5.0,
-                )
-                htf_decision = evaluate_adaptive_htf(
+                mtf_result = await mtf.analyze(
+                    self._exchange,
+                    symbol,
                     direction,
-                    [htf_context],
-                    ltf=ltf_evidence,
-                    min_aligned_score=self._tuning.scanner.htf_neutral_min_ltf_score,
-                    countertrend_score=self._tuning.scanner.htf_countertrend_min_ltf_score,
+                    klines,
+                    flow_score=flow_score,
+                    structure_bias=market_structure.bias,
                     allow_neutral=self._tuning.scanner.htf_allow_neutral,
+                    neutral_min_score=self._tuning.scanner.htf_neutral_min_ltf_score,
+                    countertrend_min_score=self._tuning.scanner.htf_countertrend_min_ltf_score,
                 )
-                htf_diagnostics.update({
-                    "adaptive_mode": htf_decision.mode,
-                    "adaptive_reason": htf_decision.reason,
-                    "adaptive_confidence_adjustment": htf_decision.confidence_adjustment,
-                    "adaptive_evidence": dict(htf_decision.diagnostics),
-                })
-                if not htf_decision.accepted:
+                htf_diagnostics = dict(mtf_result.diagnostics)
+                htf_available = bool(mtf_result.diagnostics["available_timeframes"])
+                if not mtf_result.accepted:
                     logger.info(
-                        "entry rejected by adaptive higher-timeframe policy",
+                        "entry rejected by six-timeframe adaptive policy",
                         extra={"aitos_extra": {
                             "symbol": symbol,
                             "direction": direction.value,
                             "entry_timeframe": self._timeframe,
-                            "htf": htf_diagnostics,
+                            "mtf": htf_diagnostics,
                         }},
                     )
                     return None
+                mode = mtf_result.decision.mode
                 htf_alignment_score = (
-                    10.0 if htf_decision.mode == "aligned"
-                    else 7.0 if htf_decision.mode == "neutral_or_mixed"
+                    10.0 if mode == "aligned"
+                    else 7.0 if mode == "neutral_or_mixed"
                     else 6.0
                 )
             except Exception as exc:
                 logger.warning(
-                    "entry blocked: higher-timeframe confirmation unavailable",
-                    extra={
-                        "aitos_extra": {
-                            "symbol": symbol,
-                            "entry_timeframe": self._timeframe,
-                            "error": str(exc),
-                        }
-                    },
+                    "entry blocked: multi-timeframe confirmation unavailable",
+                    extra={"aitos_extra": {
+                        "symbol": symbol,
+                        "entry_timeframe": self._timeframe,
+                        "error": str(exc),
+                    }},
                 )
                 return None
 
