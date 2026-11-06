@@ -89,13 +89,15 @@ def chronological_walk_forward_splits(
     folds = []
     for train_end_idx in range(train_size, count - test_size + 1, step):
         test_start_idx = train_end_idx
-        train_end = data[train_end_idx - 1]["decision_at"]
         test_start = data[test_start_idx]["decision_at"]
         eligible_train = tuple(
             i
             for i in range(train_end_idx)
             if data[i]["outcome_at"] + embargo <= test_start
         )
+        if not eligible_train:
+            continue
+        train_end = data[eligible_train[-1]]["decision_at"]
         test_indices = tuple(
             range(test_start_idx, min(count, test_start_idx + test_size))
         )
