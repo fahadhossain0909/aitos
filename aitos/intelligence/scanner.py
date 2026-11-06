@@ -676,9 +676,7 @@ class OpportunityScanner(AITOSModule):
         selected_side = (
             directional_funnel["long"]
             if direction == TradeSide.LONG
-            else directional_funnel["short"]
-            if direction == TradeSide.SHORT
-            else None
+            else directional_funnel["short"] if direction == TradeSide.SHORT else None
         )
         candidate_rejection_reasons = (
             list(selected_side["rejection_reasons"])
