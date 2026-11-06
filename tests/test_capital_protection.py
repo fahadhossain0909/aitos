@@ -302,3 +302,23 @@ def test_crashed_worker_reservation_expires_after_lease(tmp_path):
             replacement.close()
     finally:
         ledger.close()
+
+
+
+def test_reservation_owner_can_renew_lease_but_other_owner_cannot(tmp_path):
+    path = tmp_path / "renewable-reservation.sqlite3"
+    first = CapitalReservation(path=path, lease_seconds=0.05)
+    second = CapitalReservation(path=path, lease_seconds=0.05)
+    try:
+        assert first.reserve(
+            Reservation("BTCUSDT", 50.0, 5.0),
+            available_capital_usd=100.0,
+            available_risk_usd=10.0,
+            capital_limit_usd=100.0,
+            risk_limit_usd=10.0,
+        )
+        assert first.renew("BTCUSDT")
+        assert not second.renew("BTCUSDT")
+    finally:
+        first.close()
+        second.close()
