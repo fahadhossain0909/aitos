@@ -11,7 +11,8 @@ import json
 from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.intelligence.liquidity import depth_event_flow_analysis
 from aitos.intelligence.live_scanner import LiveScannerCache
-from aitos.models.market import BookLevel, OrderBookSnapshot, TradeTick
+from aitos.backtest.l2_execution import BookLevel
+from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
 @dataclass(frozen=True)
