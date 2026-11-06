@@ -36,7 +36,7 @@ def test_htf_countertrend_requires_structure_and_flow_confirmation():
     )
     strong = evaluate_adaptive_htf(
         TradeSide.SHORT, contexts,
-        ltf=DirectionalEvidence(structure=2, order_flow=2, momentum=8),
+        ltf=DirectionalEvidence(structure=2, order_flow=2, momentum=2, liquidity=2, location=2, participation=2),
     )
     assert not weak.accepted
     assert strong.accepted
@@ -47,7 +47,7 @@ def test_neutral_htf_does_not_automatically_reject_quality_setup():
     decision = evaluate_adaptive_htf(
         TradeSide.SHORT,
         [TimeframeContext("1h", "neutral", 2.0)],
-        ltf=DirectionalEvidence(structure=2, order_flow=2, momentum=8),
+        ltf=DirectionalEvidence(structure=2, order_flow=2, momentum=2),
     )
     assert decision.accepted
     assert decision.mode == "neutral_or_mixed"
