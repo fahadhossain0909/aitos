@@ -261,3 +261,55 @@ class ModelRegistry:
             if row["name"] == name and row["status"] == "champion":
                 return self._artifact_from_row(row)
         return None
+
+
+    def list_artifacts(self, name: str | None = None) -> list[ModelArtifact]:
+        """Return a snapshot of registered artifacts for governance workflows."""
+        rows = self._load()
+        if name is not None:
+            rows = [row for row in rows if row.get("name") == name]
+        return [self._artifact_from_row(dict(row)) for row in rows]
+
+    def get_artifact(self, name: str, version: str) -> ModelArtifact | None:
+        for row in self._load():
+            if row.get("name") == name and row.get("version") == version:
+                return self._artifact_from_row(dict(row))
+        return None
+
+    def rollback(self, name: str, version: str, *, reason: str) -> ModelArtifact:
+        """Restore a previously archived version as champion with an audit record."""
+        if not reason.strip():
+            raise ValueError("rollback reason is required")
+        with self._write_lock():
+            rows = self._load()
+            target = next(
+                (row for row in rows if row.get("name") == name
+                 and row.get("version") == version
+                 and row.get("status") in {"archived", "champion"}),
+                None,
+            )
+            if target is None:
+                raise KeyError(f"unknown rollback target: {name}:{version}")
+            current = next(
+                (row for row in rows if row.get("name") == name
+                 and row.get("status") == "champion"),
+                None,
+            )
+            if current is target:
+                return self._artifact_from_row(dict(target))
+            now = datetime.now(timezone.utc).isoformat()
+            if current is not None:
+                current["status"] = "archived"
+                current_meta = dict(current.get("metadata") or {})
+                history = list(current_meta.get("rollback_history") or [])
+                history.append({"at": now, "reason": reason, "restored_version": version})
+                current_meta["rollback_history"] = history
+                current["metadata"] = current_meta
+            target["status"] = "champion"
+            target_meta = dict(target.get("metadata") or {})
+            history = list(target_meta.get("rollback_history") or [])
+            history.append({"at": now, "reason": reason, "from_version": current.get("version") if current else None})
+            target_meta["rollback_history"] = history
+            target["metadata"] = target_meta
+            self._save(rows)
+            return self._artifact_from_row(dict(target))

@@ -1,0 +1,205 @@
+"""Reproducible, cost-aware research experiments over the canonical backtest evaluator.
+
+This module orchestrates comparisons; it never tunes, promotes, or deploys a
+candidate. Callers must supply the canonical BacktestEngine-backed evaluator.
+"""
+from __future__ import annotations
+
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import asdict, dataclass, field
+from datetime import datetime
+from math import isfinite
+from typing import Any
+import hashlib
+import json
+
+
+@dataclass(frozen=True)
+class CostScenario:
+    name: str
+    fee_rate: float
+    slippage_bps: float
+
+    def __post_init__(self) -> None:
+        if not self.name.strip() or not isfinite(self.fee_rate) or not isfinite(self.slippage_bps):
+            raise ValueError("cost scenario fields must be finite and named")
+        if self.fee_rate < 0 or self.slippage_bps < 0:
+            raise ValueError("execution costs cannot be negative")
+
+
+@dataclass(frozen=True)
+class ExperimentVariant:
+    name: str
+    disabled_components: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.name.strip():
+            raise ValueError("experiment variant name is required")
+        if len(set(self.disabled_components)) != len(self.disabled_components):
+            raise ValueError("disabled components must be unique")
+
+
+@dataclass(frozen=True)
+class ExperimentPlan:
+    name: str
+    baseline: ExperimentVariant
+    variants: tuple[ExperimentVariant, ...]
+    cost_scenarios: tuple[CostScenario, ...]
+    regimes: tuple[str, ...] = ()
+    minimum_samples: int = 30
+    evidence_ids: tuple[str, ...] = ()
+    holdout_start: datetime | None = None
+    holdout_end: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name.strip() or self.minimum_samples < 1:
+            raise ValueError("experiment name and positive minimum_samples are required")
+        names = [self.baseline.name, *(v.name for v in self.variants)]
+        if len(set(names)) != len(names):
+            raise ValueError("baseline and variant names must be unique")
+        if not self.cost_scenarios:
+            raise ValueError("at least one execution-cost scenario is required")
+        if (self.holdout_start is None) != (self.holdout_end is None):
+            raise ValueError("holdout boundaries must be supplied together")
+        if self.holdout_start is not None:
+            if self.holdout_start.tzinfo is None or self.holdout_end.tzinfo is None:
+                raise ValueError("holdout boundaries must be timezone-aware")
+            if self.holdout_end <= self.holdout_start:
+                raise ValueError("holdout_end must be after holdout_start")
+
+
+@dataclass(frozen=True)
+class ExperimentCell:
+    regime: str
+    cost_scenario: str
+    variant: str
+    metrics: Mapping[str, float]
+    sample_count: int
+
+
+@dataclass(frozen=True)
+class ExperimentReport:
+    experiment_id: str
+    plan_name: str
+    cells: tuple[ExperimentCell, ...]
+    deltas_vs_baseline: Mapping[str, Mapping[str, float]]
+    passed_sample_gates: bool
+    evidence_ids: tuple[str, ...]
+    limitations: tuple[str, ...] = (
+        "Research evidence only; no parameter tuning, strategy mutation or deployment.",
+        "Holdout data must be reserved before experiment design and never reused for selection.",
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "experiment_id": self.experiment_id,
+            "plan_name": self.plan_name,
+            "cells": [asdict(cell) for cell in self.cells],
+            "deltas_vs_baseline": dict(self.deltas_vs_baseline),
+            "passed_sample_gates": self.passed_sample_gates,
+            "evidence_ids": list(self.evidence_ids),
+            "limitations": list(self.limitations),
+        }
+
+
+Evaluator = Callable[[list[Any], ExperimentVariant, CostScenario, str], Mapping[str, Any]]
+
+
+class ExperimentEngine:
+    """Run paired baseline/ablation/cost comparisons on identical event slices."""
+
+    REQUIRED_METRICS = ("total_return", "max_drawdown", "sharpe", "trades")
+
+    @staticmethod
+    def _timestamp(event: Any) -> datetime:
+        value = event.get("timestamp") if isinstance(event, Mapping) else getattr(event, "timestamp", None)
+        if not isinstance(value, datetime) or value.tzinfo is None:
+            raise ValueError("experiment events require timezone-aware timestamps")
+        return value
+
+    @staticmethod
+    def _regime(event: Any) -> str:
+        value = event.get("regime", "unknown") if isinstance(event, Mapping) else getattr(event, "regime", "unknown")
+        return str(value or "unknown").lower()
+
+    @classmethod
+    def _metrics(cls, raw: Mapping[str, Any]) -> tuple[dict[str, float], int]:
+        values: dict[str, float] = {}
+        for key in cls.REQUIRED_METRICS:
+            try:
+                value = float(raw[key])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"evaluator omitted numeric metric {key}") from exc
+            if not isfinite(value):
+                raise ValueError(f"metric {key} must be finite")
+            values[key] = value
+        count = int(raw.get("sample_count", values["trades"]))
+        if count < 0:
+            raise ValueError("sample_count cannot be negative")
+        return values, count
+
+    def run(
+        self,
+        plan: ExperimentPlan,
+        events: Iterable[Any],
+        evaluator: Evaluator,
+    ) -> ExperimentReport:
+        ordered = sorted(list(events), key=self._timestamp)
+        if not ordered:
+            raise ValueError("experiment requires non-empty historical events")
+        if plan.holdout_start is not None:
+            # Only the explicitly reserved interval is evaluated. The caller
+            # must keep this report out of candidate/parameter selection.
+            ordered = [
+                e for e in ordered
+                if plan.holdout_start <= self._timestamp(e) < plan.holdout_end
+            ]
+            if not ordered:
+                raise ValueError("reserved holdout contains no events")
+        regimes = plan.regimes or tuple(sorted({self._regime(e) for e in ordered}))
+        cells: list[ExperimentCell] = []
+        baseline_index: dict[tuple[str, str], dict[str, float]] = {}
+        deltas: dict[str, dict[str, float]] = {}
+        passed = True
+        variants = (plan.baseline, *plan.variants)
+        for regime in regimes:
+            regime_events = [e for e in ordered if self._regime(e) == regime]
+            if not regime_events:
+                passed = False
+                continue
+            for cost in plan.cost_scenarios:
+                for variant in variants:
+                    raw = evaluator(list(regime_events), variant, cost, regime)
+                    metrics, count = self._metrics(raw)
+                    cell = ExperimentCell(regime, cost.name, variant.name, metrics, count)
+                    cells.append(cell)
+                    if count < plan.minimum_samples:
+                        passed = False
+                    if variant.name == plan.baseline.name:
+                        baseline_index[(regime, cost.name)] = metrics
+                    else:
+                        base = baseline_index.get((regime, cost.name))
+                        if base is not None:
+                            key = f"{regime}|{cost.name}|{variant.name}"
+                            deltas[key] = {
+                                metric: metrics[metric] - base[metric]
+                                for metric in self.REQUIRED_METRICS
+                            }
+        expected = len(regimes) * len(plan.cost_scenarios) * len(variants)
+        if len(cells) != expected:
+            passed = False
+        canonical = {
+            "name": plan.name,
+            "evidence_ids": sorted(plan.evidence_ids),
+            "regimes": list(regimes),
+            "costs": [asdict(c) for c in plan.cost_scenarios],
+            "variants": [asdict(v) for v in variants],
+            "holdout_start": plan.holdout_start.isoformat() if plan.holdout_start else None,
+            "holdout_end": plan.holdout_end.isoformat() if plan.holdout_end else None,
+        }
+        experiment_id = hashlib.sha256(
+            json.dumps(canonical, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()[:24]
+        return ExperimentReport(
+            experiment_id, plan.name, tuple(cells), deltas, passed, plan.evidence_ids
+        )

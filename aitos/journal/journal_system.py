@@ -428,6 +428,7 @@ class JournalSystem(AITOSModule):
 
     async def _on_rejected(self, event: Event) -> EventResponse | None:
         trade_dict = dict(event.payload)
+        decision_id = None
         entry = JournalEntry(
             trade_id=trade_dict.get("trade_id"),
             entry_type=JournalEntryType.PRE_TRADE,

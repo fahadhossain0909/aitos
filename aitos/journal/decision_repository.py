@@ -168,6 +168,33 @@ class DecisionJournalRepository(AITOSModule):
         )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
+
+
+    async def save_management_decision(self, decision_id, trade_id, snapshot):
+        """Persist a HOLD/MANAGE/EXIT decision under its trade identity."""
+        self._require_initialized()
+        await self._insert(
+            "MANAGEMENT_DECISION",
+            decision_id,
+            trade_id,
+            snapshot.get("symbol", ""),
+            snapshot.get("side", ""),
+            snapshot.get("strategy_id", ""),
+            snapshot.get("regime", "unknown"),
+            snapshot.get("confidence"),
+            snapshot,
+            evidence=snapshot.get("reasons") or [],
+        )
+
+    async def get_trade_records(self, trade_id):
+        """Recover all decision and outcome records for a trade after restart."""
+        self._require_initialized()
+        result = await self._client.query(
+            "SELECT * FROM decision_journal WHERE trade_id = {trade_id:String} ORDER BY recorded_at",
+            parameters={"trade_id": trade_id},
+        )
+        return [dict(zip(result.column_names, row)) for row in result.result_rows]
+
     async def _insert(
         self,
         record_type,

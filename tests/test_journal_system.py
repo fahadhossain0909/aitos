@@ -247,3 +247,61 @@ async def test_journal_publishes_learning_outcome_without_decision_id(
     assert received[0].payload["pnl"] > 0
     assert received[0].payload["risk_amount_usd"] == trade.risk_amount_usd
     assert received[0].payload["strategy_id"] == trade.strategy_id
+
+
+@pytest.mark.asyncio
+async def test_hold_decision_is_persisted_as_management_attribution(event_bus, risk_engine):
+    from aitos.core.contracts import Event
+
+    journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
+    await journal.initialize({})
+    received = []
+
+    async def capture(event):
+        received.append(event)
+
+    await event_bus.subscribe(
+        "journal.management_decision_recorded",
+        capture,
+        group="management-attribution-test",
+    )
+    await event_bus.publish(
+        Event(
+            topic="decision.exit",
+            payload={"trade_id": "trade-hold-1", "symbol": "BTCUSDT", "action": "HOLD", "reason": "thesis_intact"},
+            source_module="test",
+        )
+    )
+    assert await _wait_for(lambda: len(received) == 1)
+    assert received[0].payload["trade_id"] == "trade-hold-1"
+    assert received[0].payload["action"] == "HOLD"
+    assert received[0].payload["decision_type"] == "exit_management"
+
+
+@pytest.mark.asyncio
+async def test_rejection_emits_final_decision_outcome(event_bus, risk_engine):
+    from aitos.core.contracts import Event
+
+    journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
+    await journal.initialize({})
+    received = []
+
+    async def capture(event):
+        received.append(event)
+
+    await event_bus.subscribe(
+        "journal.outcome_attributed",
+        capture,
+        group="rejection-outcome-attribution-test",
+    )
+    await event_bus.publish(
+        Event(
+            topic="trade.rejected",
+            payload={"trade_id": "trade-rejected-1", "symbol": "BTCUSDT", "side": "LONG",
+                     "rejection_reason": "order submission failed: timeout"},
+            source_module="test",
+        )
+    )
+    assert await _wait_for(lambda: len(received) == 1)
+    assert received[0].payload["state"] == "rejected"
+    assert received[0].payload["execution_failure"] is True

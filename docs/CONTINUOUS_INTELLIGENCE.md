@@ -162,3 +162,12 @@ operator must still verify against the local paper stack:
 
 No strategy/risk semantics, live order behavior, VPS deployment or automatic
 production promotion are changed by this subsystem.
+
+
+## Experiment orchestration and rollout lifecycle
+
+Use `ExperimentEngine` with the canonical BacktestEngine-backed evaluator to run paired baseline/ablation comparisons across regimes and fee/slippage scenarios. The evaluator must return finite `total_return`, `max_drawdown`, `sharpe`, `trades`, and `sample_count`. Reports are evidence only; they cannot tune, mutate, or promote a strategy. A supplied holdout interval is evaluated exclusively and must remain reserved from candidate/parameter selection.
+
+`RolloutCoordinator` persists stage/canary/promotion/rollback state under a cross-process file lock and atomic replacement. It requires authenticated deployment adapters for canary, production and rollback routing. Canary threshold breaches invoke rollback; promotion requires minimum canary samples, unchanged staged validation digest, the existing statistical gates and explicit operator approval. If a first-ever champion cannot be restored after a routing failure, the state becomes `rollback_pending` for manual reconciliation.
+
+These are orchestration primitives, not proof that the authenticated approval UI, deployment router, periodic canary metrics collector or paper/live reporting schedule is configured. Those adapters must be wired and exercised in the target runtime before production rollout is certified.

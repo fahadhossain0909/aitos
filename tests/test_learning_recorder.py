@@ -193,3 +193,32 @@ async def test_recorder_can_be_restarted_without_duplicate_subscriptions():
     assert (await recorder.health_check()).status.value == "healthy"
 
     await recorder.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_management_and_rejected_outcomes_are_recorded_without_reward_leakage():
+    from aitos.core.contracts import Event
+
+    repository = FakeRepository()
+    recorder = LearningExperienceRecorder(event_bus=None, repository=repository, source="paper")
+    await recorder._on_management_decision(
+        Event(
+            topic="journal.management_decision_recorded",
+            payload={"decision_id": "d:hold-1", "trade_id": "t-1", "symbol": "BTCUSDT", "action": "HOLD"},
+            source_module="journal",
+        )
+    )
+    await recorder._on_outcome(
+        Event(
+            topic="journal.outcome_attributed",
+            payload={"decision_id": "d-2", "trade_id": "t-2", "symbol": "ETHUSDT",
+                     "side": "LONG", "state": "rejected", "execution_failure": True,
+                     "rejection_reason": "order submission failed"},
+            source_module="journal",
+        )
+    )
+    assert repository.records[0].metadata["event_type"] == "management_decision"
+    assert repository.records[0].outcome is None
+    assert repository.records[1].outcome == "rejected"
+    assert repository.records[1].reward == 0.0
+    assert repository.records[1].metadata["reward_unit"] == "not_applicable"

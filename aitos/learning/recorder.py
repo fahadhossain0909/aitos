@@ -165,9 +165,53 @@ class LearningExperienceRecorder(AITOSModule):
         self._last_event_time = event.created_at
         return None
 
+
+    async def _on_management_decision(self, event: Event) -> EventResponse | None:
+        """Retain HOLD/MANAGE/EXIT observations without treating them as entries."""
+        p = dict(event.payload)
+        record = ExperienceRecord(
+            timestamp=_event_time(event),
+            source=self._source,
+            symbol=str(p.get("symbol") or "unknown"),
+            decision=str(p.get("action") or "UNKNOWN").upper(),
+            confidence=0.0,
+            outcome=None,
+            features=dict(p.get("features") or {}),
+            market_state={"regime": p.get("regime")},
+            metadata={
+                "decision_id": str(p.get("decision_id") or event.event_id),
+                "trade_id": str(p.get("trade_id") or ""),
+                "event_type": "management_decision",
+                "decision_type": "exit_management",
+                "reason": p.get("reason"),
+                "reasons": list(p.get("reasons") or []),
+            },
+        )
+        await self._write(record)
+        self._last_event_time = event.created_at
+        return None
+
     async def _on_outcome(self, event: Event) -> EventResponse | None:
         self._outcome_events_received += 1
         p = dict(event.payload)
+        state = str(p.get("state") or "").lower()
+        if state in {"rejected", "execution_failure"}:
+            record = ExperienceRecord(
+                timestamp=_event_time(event), source=self._source,
+                symbol=str(p.get("symbol") or "unknown"),
+                decision=str(p.get("side") or "UNKNOWN"), outcome=state, reward=0.0,
+                metadata={
+                    "decision_id": str(p.get("decision_id") or ""),
+                    "trade_id": str(p.get("trade_id") or ""),
+                    "event_type": "decision_outcome",
+                    "execution_failure": bool(p.get("execution_failure", state == "execution_failure")),
+                    "rejection_reason": p.get("rejection_reason"),
+                    "reward_unit": "not_applicable",
+                },
+            )
+            await self._write(record)
+            self._last_event_time = event.created_at
+            return None
         try:
             pnl = float(p.get("pnl"))
         except (TypeError, ValueError):
@@ -202,6 +246,7 @@ class LearningExperienceRecorder(AITOSModule):
             "decision_snapshot": dict(p.get("decision_snapshot") or {}),
             "root_cause_tags": list(p.get("root_cause_tags") or []),
             "total_cost_r": p.get("total_cost_r"),
+            "management_decision_ids": list(p.get("management_decision_ids") or []),
             "diagnostics": dict(p.get("diagnostics") or {}),
         }
         if has_risk:
