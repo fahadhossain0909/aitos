@@ -238,7 +238,8 @@ async def replay_depth_flow(
     state = cache.snapshot(dataset.symbol)
     if state is None:
         return depth_event_flow_analysis(
-            [], now_ms=int(dataset.end.timestamp() * 1000),
+            [],
+            now_ms=int(dataset.end.timestamp() * 1000),
             min_fresh_events=min_fresh_events,
         )
     cutoff_ms = int(dataset.end.timestamp() * 1000)
