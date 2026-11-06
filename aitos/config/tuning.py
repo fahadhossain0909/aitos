@@ -59,6 +59,7 @@ class ScannerTuning(BaseModel):
     htf_min_di_gap: float = Field(default=5.0, ge=0, le=100)
     htf_neutral_min_ltf_score: float = Field(default=6.0, ge=0, le=10)
     htf_countertrend_min_ltf_score: float = Field(default=7.0, ge=0, le=10)
+    htf_alignment_balance_threshold: float = Field(default=0.25, gt=0, le=1)
     htf_allow_neutral: bool = True
     htf_request_budget_per_minute: int = Field(default=360, ge=6, le=1200)
     htf_fetch_concurrency: int = Field(default=4, ge=1, le=16)
@@ -280,6 +281,11 @@ def _env_overrides() -> dict[str, Any]:
         "AITOS_TUNING_SCANNER_HTF_COUNTERTREND_MIN_LTF_SCORE": (
             "scanner",
             "htf_countertrend_min_ltf_score",
+            float,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_ALIGNMENT_BALANCE_THRESHOLD": (
+            "scanner",
+            "htf_alignment_balance_threshold",
             float,
         ),
         "AITOS_TUNING_SCANNER_HTF_ALLOW_NEUTRAL": (
