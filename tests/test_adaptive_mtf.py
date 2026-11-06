@@ -144,7 +144,6 @@ def test_balanced_mixed_mtf_requires_ltf_quality_floor():
     assert decision.mode == "neutral_or_mixed"
 
 
-
 def test_macro_timeframes_carry_more_consensus_weight_than_execution_frames():
     decision = evaluate_adaptive_htf(
         TradeSide.LONG,
@@ -161,7 +160,10 @@ def test_macro_timeframes_carry_more_consensus_weight_than_execution_frames():
     )
     assert decision.accepted
     assert decision.mode == "aligned"
-    assert decision.diagnostics["timeframe_weights"]["1d"] > decision.diagnostics["timeframe_weights"]["1m"]
+    assert (
+        decision.diagnostics["timeframe_weights"]["1d"]
+        > decision.diagnostics["timeframe_weights"]["1m"]
+    )
 
 
 def test_timeframe_weight_must_be_positive_and_bounded():
