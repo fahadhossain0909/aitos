@@ -123,7 +123,6 @@ def test_candle_evidence_derives_liquidity_location_and_participation(monkeypatc
     assert 0.0 <= result["liquidity"] <= 10.0
 
 
-
 def test_participation_pressure_is_signed_and_double_sweep_is_not_bullish(
     monkeypatch,
 ):
@@ -143,9 +142,7 @@ def test_participation_pressure_is_signed_and_double_sweep_is_not_bullish(
         lambda bars: SimpleNamespace(structure_score=4.0),
     )
     monkeypatch.setattr(multi_timeframe.indicators, "momentum_score", lambda bars: 4.0)
-    monkeypatch.setattr(
-        multi_timeframe.indicators, "cvd_trend_score", lambda bars: 4.0
-    )
+    monkeypatch.setattr(multi_timeframe.indicators, "cvd_trend_score", lambda bars: 4.0)
     result = multi_timeframe._candle_evidence(candles)
     assert result["participation"] < 5.0
     assert result["lower_sweep_reclaim"] == 1.0
