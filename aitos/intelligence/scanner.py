@@ -717,9 +717,11 @@ class OpportunityScanner(AITOSModule):
                     side=side_key,
                     stage="directional_gate",
                     accepted=side_diagnostic["accepted_by_diagnostic"],
-                    reason="accepted"
-                    if side_diagnostic["accepted_by_diagnostic"]
-                    else ",".join(side_diagnostic["rejection_reasons"]),
+                    reason=(
+                        "accepted"
+                        if side_diagnostic["accepted_by_diagnostic"]
+                        else ",".join(side_diagnostic["rejection_reasons"])
+                    ),
                     details={
                         "structure_direction": structure_direction,
                         "structure_bias": market_structure.bias,
