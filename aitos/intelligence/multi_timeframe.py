@@ -139,6 +139,7 @@ class MultiTimeframeAnalyzer:
         allow_neutral: bool = True,
         neutral_min_score: float = 6.0,
         countertrend_min_score: float = 7.0,
+        alignment_balance_threshold: float = 0.25,
     ) -> MultiTimeframeResult:
         now = _utc(datetime.now(timezone.utc))
 
@@ -194,6 +195,7 @@ class MultiTimeframeAnalyzer:
                 ltf=evidence,
                 min_aligned_score=neutral_min_score,
                 countertrend_score=countertrend_min_score,
+                alignment_balance_threshold=alignment_balance_threshold,
                 allow_neutral=allow_neutral,
                 require_any_context=True,
             )
