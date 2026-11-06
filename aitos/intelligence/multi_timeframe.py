@@ -123,15 +123,21 @@ class MultiTimeframeAnalyzer:
             momentum=momentum_score,
             liquidity=5.0, location=5.0, participation=5.0,
         )
-        # The full stack is evaluated together. Any stale frame is explicitly
-        # unavailable; the decision policy fails closed when the entire stack
-        # cannot establish at least one fresh context.
-        decision = evaluate_adaptive_htf(
-            side, [item.context for item in snapshots], ltf=evidence,
-            min_aligned_score=neutral_min_score,
-            countertrend_score=countertrend_min_score,
-            allow_neutral=allow_neutral, require_any_context=True,
-        )
+        # All six frames are part of the requested contract. A partial stack
+        # is not silently promoted to a complete multi-timeframe decision.
+        missing = [item.timeframe for item in snapshots if not item.context.available]
+        if missing:
+            decision = HTFDecision(
+                False, "incomplete_stack", 0.0, "required_timeframe_unavailable_or_stale",
+                {"missing_or_stale_timeframes": missing},
+            )
+        else:
+            decision = evaluate_adaptive_htf(
+                side, [item.context for item in snapshots], ltf=evidence,
+                min_aligned_score=neutral_min_score,
+                countertrend_score=countertrend_min_score,
+                allow_neutral=allow_neutral, require_any_context=True,
+            )
         diagnostics = {
             "required_timeframes": list(REQUIRED_TIMEFRAMES),
             "available_timeframes": [s.timeframe for s in snapshots if s.context.available],
