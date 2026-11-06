@@ -106,10 +106,7 @@ def test_candle_evidence_derives_liquidity_location_and_participation(monkeypatc
             self.open = close if open_price is None else open_price
             self.volume = volume
 
-    candles = [
-        Candle(100.0, 101.0, 99.0, 100.0)
-        for _ in range(40)
-    ]
+    candles = [Candle(100.0, 101.0, 99.0, 100.0) for _ in range(40)]
     candles[-1] = Candle(100.8, 101.0, 98.0, 200.0, open_price=99.0)
     monkeypatch.setattr(
         multi_timeframe.indicators,
