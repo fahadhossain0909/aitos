@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 import json
 
+from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
 
@@ -46,6 +47,15 @@ class ClickHouseReplayLoader:
             "end": end.astimezone(timezone.utc),
             "limit": row_limit,
         }
+        bootstrap_rows = await self.repository._query(
+            """
+            SELECT time, symbol, bid_levels, ask_levels, last_update_id
+            FROM order_book_snapshots
+            WHERE symbol = {symbol:String} AND time < {start:DateTime64(3, 'UTC')}
+            ORDER BY time DESC, last_update_id DESC LIMIT 1
+            """,
+            parameters,
+        )
         trades = await self.repository._query(
             """
             SELECT time, symbol, trade_id, price, quantity, side, is_buyer_maker
@@ -77,10 +87,65 @@ class ClickHouseReplayLoader:
             """,
             parameters,
         )
+        depth_payloads = [
+            (row, json.loads(row["payload_json"])) for row in depth_rows
+        ]
         depth_by_update = {
-            int(row["final_update_id"]): json.loads(row["payload_json"])
-            for row in depth_rows
+            int(row["final_update_id"]): payload
+            for row, payload in depth_payloads
+            if "ofi_raw" in payload or "bid_reduce_qty" in payload
         }
+        replayed_depth: list[OrderBookSnapshot] = []
+        if bootstrap_rows:
+            bootstrap = bootstrap_rows[0]
+            bootstrap_book = OrderBookSnapshot(
+                symbol=str(bootstrap["symbol"]),
+                bids=tuple(
+                    tuple(map(float, level))
+                    for level in json.loads(bootstrap["bid_levels"])
+                ),
+                asks=tuple(
+                    tuple(map(float, level))
+                    for level in json.loads(bootstrap["ask_levels"])
+                ),
+                last_update_id=int(bootstrap["last_update_id"]),
+                timestamp=bootstrap["time"],
+            )
+            local_book = LocalOrderBook(normalized_symbol, max_levels=100)
+            local_book.seed(bootstrap_book)
+            for row, payload in depth_payloads:
+                raw_bids = payload.get("bids", payload.get("b", ()))
+                raw_asks = payload.get("asks", payload.get("a", ()))
+                first_id = payload.get("first_update_id", payload.get("U"))
+                final_id = payload.get("final_update_id", payload.get("u"))
+                if first_id is None or final_id is None:
+                    continue
+
+                def levels(items: Any) -> tuple[tuple[float, float], ...]:
+                    converted = []
+                    for item in items:
+                        if isinstance(item, dict):
+                            price = item.get("price")
+                            quantity = item.get("quantity", item.get("qty"))
+                        else:
+                            price, quantity = item[0], item[1]
+                        converted.append((float(price), float(quantity)))
+                    return tuple(converted)
+
+                previous_id = payload.get(
+                    "previous_update_id", payload.get("pu", max(0, int(first_id) - 1))
+                )
+                update = DepthUpdate(
+                    first_update_id=int(first_id),
+                    final_update_id=int(final_id),
+                    previous_update_id=int(previous_id),
+                    bids=levels(raw_bids),
+                    asks=levels(raw_asks),
+                    event_time_ms=int(row["event_time"].timestamp() * 1000),
+                )
+                snapshot = local_book.apply(update)
+                if snapshot is not None and snapshot.depth_event is not None:
+                    replayed_depth.append(snapshot)
         funding = await self.repository._query(
             """
             SELECT time, funding_rate, mark_price FROM funding_rates
@@ -122,6 +187,7 @@ class ClickHouseReplayLoader:
                     depth_event=depth_by_update.get(int(row["last_update_id"])),
                 )
             )
+        events.extend(replayed_depth)
         events.sort(key=lambda event: event.timestamp)
         funding_events = tuple(
             {
@@ -145,7 +211,9 @@ class ClickHouseReplayLoader:
                 "event_rows": len(events),
                 "lookahead_policy": "strict [start,end), no forward fill",
                 "depth_event_rows": len(depth_rows),
-                "depth_event_history_available": bool(depth_rows),
+                "raw_depth_events_replayed": len(replayed_depth),
+                "depth_event_history_available": bool(replayed_depth)
+                or bool(depth_by_update),
             },
         )
 
@@ -178,13 +246,18 @@ class ClickHouseHistoricalAblationRunner:
         dataset = await self.loader.load(symbol, start, end, limit=limit)
         if not dataset.events:
             raise ValueError("ClickHouse replay dataset contains no market events")
+        if not dataset.provenance["depth_event_history_available"]:
+            raise ValueError(
+                "point-in-time depth replay requires sequenced depth events and a "
+                "pre-window order-book bootstrap snapshot"
+            )
 
         def mark_price(event: Any) -> float:
             if isinstance(event, TradeTick):
                 return float(event.price)
             if event.best_bid > 0 and event.best_ask > 0:
                 return (event.best_bid + event.best_ask) / 2.0
-            return 0.0
+            raise ValueError("historical replay event has no valid point-in-time mark")
 
         report = self.runner.run(
             dataset.events,
