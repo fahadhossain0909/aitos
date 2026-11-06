@@ -694,6 +694,37 @@ class OpportunityScanner(AITOSModule):
                 )
             )
         )
+        try:
+            for side_key in ("long", "short"):
+                side_diagnostic = directional_funnel[side_key]
+                self._directional_funnel.record(
+                    symbol=symbol,
+                    side=side_key,
+                    stage="directional_gate",
+                    accepted=side_diagnostic["accepted_by_diagnostic"],
+                    reason="accepted"
+                    if side_diagnostic["accepted_by_diagnostic"]
+                    else ",".join(side_diagnostic["rejection_reasons"]),
+                    details={
+                        "structure_direction": structure_direction,
+                        "structure_bias": market_structure.bias,
+                        "structure_event": market_structure.event,
+                        "cvd_score": round(flow_score, 4),
+                    },
+                )
+            self._directional_funnel.record(
+                symbol=symbol,
+                side=direction.value if direction else "UNKNOWN",
+                stage="direction_selection",
+                accepted=direction is not None,
+                reason="selected" if direction is not None else "no_directional_setup",
+                details={"cvd_score": round(flow_score, 4)},
+            )
+        except Exception:
+            logger.exception(
+                "could not persist directional funnel event",
+                extra={"aitos_extra": {"symbol": symbol}},
+            )
         logger.info(
             "directional signal funnel",
             extra={
@@ -741,6 +772,14 @@ class OpportunityScanner(AITOSModule):
                 )
                 htf_diagnostics = dict(mtf_result.diagnostics)
                 htf_available = bool(mtf_result.diagnostics["available_timeframes"])
+                self._directional_funnel.record(
+                    symbol=symbol,
+                    side=direction.value,
+                    stage="mtf_gate",
+                    accepted=mtf_result.accepted,
+                    reason=mtf_result.decision.reason,
+                    details=htf_diagnostics,
+                )
                 if not mtf_result.accepted:
                     logger.info(
                         "entry rejected by six-timeframe adaptive policy",
@@ -792,6 +831,14 @@ class OpportunityScanner(AITOSModule):
         if direction is not None and adverse_flow_without_progress(
             trades, direction.value
         ):
+            self._directional_funnel.record(
+                symbol=symbol,
+                side=direction.value,
+                stage="execution_quality_gate",
+                accepted=False,
+                reason="adverse_flow_without_price_progress",
+                details={"market_source": market_source},
+            )
             logger.info(
                 "entry rejected: aggressive flow failed to produce price progress",
                 extra={
@@ -803,6 +850,15 @@ class OpportunityScanner(AITOSModule):
                 },
             )
             return None
+        if direction is not None:
+            self._directional_funnel.record(
+                symbol=symbol,
+                side=direction.value,
+                stage="execution_quality_gate",
+                accepted=True,
+                reason="flow_progress_confirmed",
+                details={"market_source": market_source},
+            )
 
         liquidity_quality = liquidity_quality_score(order_book)
         depth_imbalance = depth_imbalance_score(order_book)
@@ -1194,7 +1250,7 @@ class OpportunityScanner(AITOSModule):
                 f"confidence={a_stat_result.probability_confidence:.3f}, "
                 f"advanced_stack={a_stat_result.advanced is not None}"
             )
-        return ScanCandidate(
+        candidate = ScanCandidate(
             symbol=symbol,
             direction=direction,
             composite_score=round(composite, 2),
@@ -1206,6 +1262,19 @@ class OpportunityScanner(AITOSModule):
             regime=regime,
             htf_adx=float(htf_diagnostics.get("adx", 0.0)),
         )
+        self._directional_funnel.record(
+            symbol=symbol,
+            side=direction.value,
+            stage="scanner_candidate",
+            accepted=True,
+            reason="candidate_scored",
+            details={
+                "composite_score": candidate.composite_score,
+                "component_availability": candidate.component_availability,
+                "regime": candidate.regime,
+            },
+        )
+        return candidate
 
     async def _lightweight_rank_symbols(self, limit: int | None = None) -> list[str]:
         """Rank the configured universe cheaply before invoking full intelligence.
