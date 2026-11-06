@@ -34,7 +34,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Exit decisions continue to require structural/thesis invalidation or confirmed exit pressure; a static TP touch is not treated as a reason to abandon a still-valid runner thesis.
 - Closed-trade probability calibration is persisted in SQLite and updated from the lifecycle close path using the stable trade ID as an idempotency key. A retried close/outcome event cannot increment the same observation twice; SQLite write transactions serialize competing writers, and readers refresh aggregates so separate processes observe committed outcomes.
 - Late fee/funding adjustments on already-closed trades revise the original calibration label atomically rather than adding a second sample. Duplicate adjustment IDs remain idempotent.
-- The path-based exit expectation is a heuristic probability-weighted estimate, not a calibrated statistical forecast. The OOS evaluation layer now compares predicted versus realized remaining edge and stresses fees, slippage and funding at configurable cost multipliers. A real OOS calibration result still requires populated historical observations.
+- PositionManager now records a bounded timestamped ERE forecast at each management decision. On close, lifecycle settles each forecast against the subsequent directional price move net of the EIE estimated transaction cost; the evaluation helper exports these settled forecasts as point-in-time OOS rows. The path-based exit expectation itself remains a heuristic probability-weighted estimate, not a calibrated statistical forecast. A real OOS calibration result still requires populated closed-trade observations.
 
 ## P4 — Capital allocation and correlation-aware portfolio risk
 
@@ -79,7 +79,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 
 ## Verification status
 
-- New regression tests now cover scanner score/ranking attribution, real multiprocess reservations, lease expiry, point-in-time correlation cutoffs, OOS expected-remaining-edge calibration, cost sensitivity, sequenced depth-event replay and ClickHouse loader behavior.
+- New regression tests now cover scanner score/ranking attribution, CHoCH-aware directional diagnostics, real multiprocess reservations, lease expiry, point-in-time correlation cutoffs, ERE forecast settlement/OOS extraction, cost sensitivity, sequenced depth-event replay and ClickHouse loader behavior.
 - CI is currently running on the latest implementation head; its final result must be reviewed before the work can be called regression-verified.
 - Exchange-connected runtime and paper trading remain deliberately deferred. Existing ClickHouse data has not been queried in this session, so no real-market historical replay, walk-forward metrics or locked-holdout pass/fail result is claimed.
 - Historical depth-event persistence is forward-looking: snapshots recorded before the new `depth_events` table was deployed cannot be reconstructed into true diff-depth events from top-of-book snapshots alone. Backfill requires archived exchange diff-depth payloads.
