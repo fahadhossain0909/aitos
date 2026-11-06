@@ -181,14 +181,19 @@ async def test_depth_producer_to_live_scanner_to_ofi_side_attribution_replay():
     assert produced.depth_event["bid_reduce_qty"] == 2.0
     assert produced.depth_event["ask_reduce_qty"] == 1.0
     followups = []
-    for offset, update_id in ((200, 102), (300, 103)):
+    replay_updates = (
+        (200, 102, 3.0, 4.0),
+        (300, 103, 3.0, 4.0),
+        (400, 104, 4.0, 4.5),
+    )
+    for offset, update_id, bid_qty, ask_qty in replay_updates:
         snapshot = local_book.apply(
             DepthUpdate(
                 first_update_id=update_id,
                 final_update_id=update_id,
                 previous_update_id=update_id - 1,
-                bids=((100.0, 3.0),),
-                asks=((101.0, 4.0),),
+                bids=((100.0, bid_qty),),
+                asks=((101.0, ask_qty),),
                 event_time_ms=timestamp_ms + offset,
             )
         )
@@ -221,3 +226,7 @@ async def test_depth_producer_to_live_scanner_to_ofi_side_attribution_replay():
     assert result["ask_cancellation_proxy_qty"] == 0.5
     assert result["attribution_pending_qty"] == 0.0
     assert result["execution_attributed_ratio"] == pytest.approx(0.5)
+    assert result["bid_replenishment_qty"] == 1.0
+    assert result["ask_replenishment_qty"] == 0.5
+    assert result["bid_replenishment_ratio"] == pytest.approx(0.5)
+    assert result["ask_replenishment_ratio"] == pytest.approx(0.5)
