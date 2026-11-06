@@ -89,7 +89,6 @@ def test_reservation_prevents_oversubscription_and_is_idempotent():
     assert ledger.reserved_capital_usd == 0.0
 
 
-
 def test_opposite_direction_position_receives_correlation_hedge_credit():
     decision = PortfolioProtection().evaluate(
         symbol="ETHUSDT",
@@ -133,7 +132,6 @@ def test_missing_existing_side_metadata_never_grants_hedge_credit():
     )
     assert decision.allowed
     assert decision.allowed_risk_pct < 0.60
-
 
 
 def test_candidate_hedge_can_reduce_existing_correlated_risk_above_limit():
