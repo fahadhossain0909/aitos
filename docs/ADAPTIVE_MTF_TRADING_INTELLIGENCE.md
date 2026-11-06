@@ -17,7 +17,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Every timeframe uses the shared `HigherTimeframeCandleCache`; cache refresh is keyed by symbol/timeframe/lookback and single-flight protected.
 - Each frame reports latest closed candle timestamp, age, permitted freshness age, ADX, DI gap, structure bias, regime, cache state and candle-derived structure/CVD/momentum/liquidity/location/participation evidence.
 - Consensus uses explicit timeframe role weights (1D 2.0, 4H 1.8, 1H 1.0, 15M 0.8, 5M 0.6, 1M 0.4), so macro context has greater influence than execution-timeframe noise. The weights are visible in decision diagnostics.
-- The 1D/4H/1H/15M/5M/1M responsibility map is emitted with every decision. Location is measured against a rolling 20-candle range (premium/discount proxy); liquidity evidence uses completed-candle sweep/reclaim and wick rejection; participation compares recent versus preceding candle volume.
+- The 1D/4H/1H/15M/5M/1M responsibility map is emitted with every decision. Role-specific evidence is now consumed by the MTF consensus: each timeframe's assigned evidence adjusts its directional weight, with the resulting role score and weight factor exposed in diagnostics. Location is measured against a rolling 20-candle range (premium/discount proxy); liquidity evidence uses completed-candle sweep/reclaim and wick rejection; participation compares recent versus preceding candle volume.
 - Conflicting DI direction and confirmed market-structure bias is classified as neutral/mixed rather than forced into a trend label. ADX strength is normalized to the configured 0–10 evidence scale.
 - Forming candles are excluded by the cache. A stale fallback, insufficient history or missing timeframe marks the stack incomplete.
 - The scanner requires all six frames to be fresh and complete before accepting an MTF decision. It does not convert unavailable data into neutral evidence. Tick/order-book OFI and cancellation/replenishment evidence remain a separate downstream execution-quality gate in the scanner, not a fabricated 1M candle feature.
@@ -32,6 +32,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Capital authorization fails closed when EV, cost, loss probability, liquidity, age, circuit-breaker or portfolio protection gates fail.
 - Exit Intelligence Engine already calculates probability-weighted path continuation value. This branch exposes its expected gain, expected loss, upside/downside probability mass and transaction-cost components in the decision feature record.
 - Exit decisions continue to require structural/thesis invalidation or confirmed exit pressure; a static TP touch is not treated as a reason to abandon a still-valid runner thesis.
+- Closed-trade probability calibration is persisted in SQLite and updated from the lifecycle close path using the stable trade ID as an idempotency key. A retried close/outcome event cannot increment the same observation twice; SQLite write transactions serialize competing writers, and readers refresh aggregates so separate processes observe committed outcomes.
 - The path-based exit expectation is a heuristic probability-weighted estimate, not a calibrated statistical forecast. Calibration against out-of-sample realized path outcomes remains a research requirement.
 
 ## P4 — Capital allocation and correlation-aware portfolio risk
@@ -62,6 +63,8 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - LONG/SHORT directional diagnostics and adaptive HTF behavior.
 - EV entry/cost checks already present in capital runtime tests.
 - Probability-weighted exit expectancy diagnostics and mirrored SHORT path handling.
+- Persistent calibration across restart, duplicate trade-outcome delivery, cross-instance deduplication and lifecycle close integration.
+- Role-specific evidence weighting in the adaptive six-timeframe consensus.
 - Correlation-aware incremental portfolio risk.
 - Chronological walk-forward embargo, timestamp leakage rejection, ablation reporting and LONG/SHORT comparative metrics.
 
@@ -75,4 +78,4 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 
 ## CI follow-up
 
-Formatting changes were applied after the initial CI report. Re-run CI on the latest branch head before treating regression verification as complete.
+Formatting changes were applied after the initial CI report. The prior CI attempt on commit 85da343 reported Black formatting failures in seven files; those diffs were corrected on subsequent commits. That CI run's Backtest Tests passed, but it did not verify the corrected latest head. Re-run CI on the latest branch head before treating regression verification as complete.
