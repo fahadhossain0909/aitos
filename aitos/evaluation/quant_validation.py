@@ -85,7 +85,15 @@ def validate_observations(
                 raise ValueError(f"row {index}: realized_win must be boolean or 0/1")
             row["realized_win"] = bool(realized_win)
         row["regime"] = str(row.get("regime") or "unknown")
-        row["rejected_opportunity"] = bool(row.get("rejected_opportunity", False))
+        rejected_opportunity = row.get("rejected_opportunity", False)
+        if not isinstance(rejected_opportunity, bool) and rejected_opportunity not in (
+            0,
+            1,
+        ):
+            raise ValueError(
+                f"row {index}: rejected_opportunity must be boolean or 0/1"
+            )
+        row["rejected_opportunity"] = bool(rejected_opportunity)
         validated.append(row)
     return tuple(sorted(validated, key=lambda item: item["decision_at"]))
 
