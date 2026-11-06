@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextvars import ContextVar
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -62,6 +63,7 @@ from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeSide
 
 logger = get_logger("aitos.intelligence.scanner")
+_ACTIVE_SCAN_TRACE_ID: ContextVar[str] = ContextVar("aitos_scan_trace_id", default="")
 TOPIC_SCAN_COMPLETE = "market.opportunity_scanned"
 DEFAULT_WEIGHTS: dict[str, float] = {
     "trend_strength": 0.10,
@@ -200,6 +202,7 @@ class ScanCandidate:
     regime: str
     scanned_at: str = field(default_factory=_utc_now_iso)
     htf_adx: float = 0.0
+    trace_id: str | None = None
 
 
 def _volatility_fitness(
@@ -460,6 +463,11 @@ class OpportunityScanner(AITOSModule):
 
     async def _record_funnel(self, **event: Any) -> None:
         """Persist diagnostics off-loop; telemetry must not change trade decisions."""
+        trace_id = _ACTIVE_SCAN_TRACE_ID.get()
+        if trace_id:
+            details = dict(event.get("details") or {})
+            details.setdefault("trace_id", trace_id)
+            event["details"] = details
         try:
             await asyncio.to_thread(self._directional_funnel.record, **event)
         except Exception:
@@ -517,6 +525,7 @@ class OpportunityScanner(AITOSModule):
         import time
 
         started = time.perf_counter()
+        trace_token = None
         try:
             from aitos.forensics.data_flow_hooks import (
                 note_trace,
@@ -540,6 +549,7 @@ class OpportunityScanner(AITOSModule):
             )
             if not trace_id:
                 trace_id = f"scan:{symbol.upper()}:{time.time_ns()}"
+            trace_token = _ACTIVE_SCAN_TRACE_ID.set(trace_id)
             note_trace(
                 trace_id=trace_id,
                 stage=PipelineStage.SCANNER.value,
@@ -572,6 +582,9 @@ class OpportunityScanner(AITOSModule):
             except Exception:
                 pass
             raise
+        finally:
+            if trace_token is not None:
+                _ACTIVE_SCAN_TRACE_ID.reset(trace_token)
         try:
             latency_ms = (time.perf_counter() - started) * 1000.0
             record_output(
@@ -1373,6 +1386,7 @@ class OpportunityScanner(AITOSModule):
             atr=atr,
             regime=regime,
             htf_adx=float(htf_diagnostics.get("adx", 0.0)),
+            trace_id=_ACTIVE_SCAN_TRACE_ID.get() or None,
         )
         await self._record_funnel(
             symbol=symbol,
@@ -1726,7 +1740,10 @@ class OpportunityScanner(AITOSModule):
             confidence=round(candidate.composite_score / 100.0, 4),
             strategy_id=strategy_id,
             rationale="; ".join(candidate.rationale),
-            agent_consensus=dict(candidate.component_scores),
+            agent_consensus={
+                **dict(candidate.component_scores),
+                "trace_id": candidate.trace_id,
+            },
             is_production=is_production,
             approved_by=approved_by,
             trailing_sl_enabled=True,
