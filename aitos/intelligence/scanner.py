@@ -848,7 +848,7 @@ class OpportunityScanner(AITOSModule):
         if direction is not None and adverse_flow_without_progress(
             trades, direction.value
         ):
-            self._record_funnel(
+            await self._record_funnel(
                 symbol=symbol,
                 side=direction.value,
                 stage="execution_quality_gate",
@@ -868,7 +868,7 @@ class OpportunityScanner(AITOSModule):
             )
             return None
         if direction is not None:
-            self._record_funnel(
+            await self._record_funnel(
                 symbol=symbol,
                 side=direction.value,
                 stage="execution_quality_gate",
@@ -1279,7 +1279,7 @@ class OpportunityScanner(AITOSModule):
             regime=regime,
             htf_adx=float(htf_diagnostics.get("adx", 0.0)),
         )
-        self._record_funnel(
+        await self._record_funnel(
             symbol=symbol,
             side=direction.value,
             stage="scanner_candidate",
