@@ -306,9 +306,7 @@ class CapitalGateway:
                 available_risk_usd=available_risk,
                 capital_limit_usd=equity_usd,
                 risk_limit_usd=(
-                    equity_usd
-                    * self.objective.config.max_portfolio_risk_pct
-                    / 100.0
+                    equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
                 ),
             ):
                 protected.append(candidate)
