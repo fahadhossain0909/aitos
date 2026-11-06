@@ -189,3 +189,44 @@ def test_sqlite_reservations_prevent_cross_instance_oversubscription(tmp_path):
     finally:
         first.close()
         second.close()
+
+
+
+def test_adverse_funding_cost_is_a_hard_veto():
+    decision = PortfolioProtection().evaluate(
+        symbol="BTCUSDT",
+        requested_risk_pct=0.5,
+        snapshot=snapshot(),
+        adverse_funding_pct=0.21,
+    )
+    assert not decision.allowed
+    assert decision.reason == "adverse_funding_cost_exceeds_limit"
+
+
+def test_leveraged_position_requires_a_safe_liquidation_buffer():
+    gate = PortfolioProtection()
+    unavailable = gate.evaluate(
+        symbol="BTCUSDT",
+        requested_risk_pct=0.5,
+        snapshot=snapshot(),
+        leverage=5.0,
+    )
+    too_close = gate.evaluate(
+        symbol="BTCUSDT",
+        requested_risk_pct=0.5,
+        snapshot=snapshot(),
+        leverage=5.0,
+        liquidation_buffer_pct=0.5,
+    )
+    safe = gate.evaluate(
+        symbol="BTCUSDT",
+        requested_risk_pct=0.5,
+        snapshot=snapshot(),
+        leverage=5.0,
+        liquidation_buffer_pct=2.0,
+    )
+    assert not unavailable.allowed
+    assert unavailable.reason == "liquidation_buffer_unavailable"
+    assert not too_close.allowed
+    assert too_close.reason == "liquidation_buffer_below_minimum"
+    assert safe.allowed
