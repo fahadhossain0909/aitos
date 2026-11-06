@@ -951,6 +951,27 @@ class TradeLifecycle(AITOSModule):
                 if initial_notional > 0
                 else 0.0
             )
+        if trade.state == TradeLifecycleState.POSITION_CLOSED:
+            gateway = getattr(self, "_aitos_capital_gateway", None)
+            capital_objective = trade.agent_consensus.get("capital_objective", {})
+            predicted_loss_probability = (
+                capital_objective.get("predicted_loss_probability")
+                if isinstance(capital_objective, dict)
+                else None
+            )
+            if gateway is not None and predicted_loss_probability is not None:
+                try:
+                    await asyncio.to_thread(
+                        gateway.calibrator.revise,
+                        float(predicted_loss_probability),
+                        trade.pnl <= 0.0,
+                        observation_id=trade.trade_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "capital probability calibration revision failed",
+                        extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                    )
         trade.updated_at = utc_now_iso()
         await self._event_bus.publish(
             Event(
