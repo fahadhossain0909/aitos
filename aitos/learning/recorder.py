@@ -302,14 +302,18 @@ class LearningExperienceRecorder(AITOSModule):
         else:
             metadata["exit_feedback_status"] = "unavailable_missing_risk"
 
-        outcome_identity = str(p.get("trade_id") or p.get("decision_id") or event.event_id)
+        outcome_identity = str(
+            p.get("trade_id") or p.get("decision_id") or event.event_id
+        )
         record = ExperienceRecord(
             timestamp=_event_time(event),
             source=self._source,
             symbol=str(p.get("symbol", "unknown")),
             decision=str(p.get("side", "outcome")),
             outcome="closed",
-            experience_id=self._stable_experience_id("closed_outcome", outcome_identity),
+            experience_id=self._stable_experience_id(
+                "closed_outcome", outcome_identity
+            ),
             reward=reward,
             price=(
                 float(p["entry_price"]) if p.get("entry_price") is not None else None

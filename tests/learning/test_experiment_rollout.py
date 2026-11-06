@@ -162,7 +162,6 @@ def test_canary_requires_minimum_sample_count_before_healthy(tmp_path):
     assert row["state"] == "canary_healthy"
 
 
-
 def test_experiment_plan_is_generated_from_evidence_backed_diagnostic():
     hypothesis = SimpleNamespace(
         category="adverse_order_flow",
@@ -182,9 +181,7 @@ def test_experiment_plan_rejects_unsupported_or_weak_diagnostics():
         category="unknown", sample_count=100, evidence_ids=("trade-1",)
     )
     with pytest.raises(ValueError, match="no safe research ablation"):
-        ExperimentPlan.from_hypothesis(
-            unsupported, (CostScenario("base", 0.0, 0.0),)
-        )
+        ExperimentPlan.from_hypothesis(unsupported, (CostScenario("base", 0.0, 0.0),))
     weak = SimpleNamespace(
         category="adverse_order_flow", sample_count=2, evidence_ids=("trade-1",)
     )

@@ -182,10 +182,14 @@ class ExperimentEngine:
             str(item) for item in (getattr(hypothesis, "evidence_ids", ()) or ())
         )
         if not evidence_ids:
-            raise ValueError("diagnostic hypothesis must retain supporting evidence IDs")
+            raise ValueError(
+                "diagnostic hypothesis must retain supporting evidence IDs"
+            )
         sample_count = int(getattr(hypothesis, "sample_count", 0) or 0)
         if sample_count < minimum_samples:
-            raise ValueError("diagnostic hypothesis does not meet experiment sample gate")
+            raise ValueError(
+                "diagnostic hypothesis does not meet experiment sample gate"
+            )
         return cls(
             name=f"diagnostic-{category}",
             baseline=ExperimentVariant("baseline"),

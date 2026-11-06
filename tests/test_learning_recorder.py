@@ -265,4 +265,7 @@ async def test_duplicate_outcome_delivery_is_idempotent_across_recorder_restarts
         event_bus=None, repository=restarted_repository, source="paper"
     )
     await restarted_recorder._on_outcome(event)
-    assert restarted_repository.records[0].experience_id == first_repository.records[0].experience_id
+    assert (
+        restarted_repository.records[0].experience_id
+        == first_repository.records[0].experience_id
+    )
