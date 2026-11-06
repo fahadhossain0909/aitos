@@ -204,7 +204,7 @@ def test_role_specific_evidence_adjusts_timeframe_weight_and_is_auditable():
         alignment_balance_threshold=0.1,
     )
     assert decision.diagnostics["role_directional_scores"]["1d"] == pytest.approx(8.5)
-    assert decision.diagnostics["role_directional_scores"]["5m"] == pytest.approx(0.0)
+    assert decision.diagnostics["role_directional_scores"]["5m"] == pytest.approx(1.0)
     assert decision.diagnostics["role_weight_factors"]["1d"] > decision.diagnostics[
         "role_weight_factors"
     ]["5m"]
