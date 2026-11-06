@@ -458,6 +458,21 @@ class OpportunityScanner(AITOSModule):
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
 
+    def _record_funnel(self, **event: Any) -> None:
+        """Persist diagnostics best-effort; telemetry must not change trade decisions."""
+        try:
+            self._directional_funnel.record(**event)
+        except Exception:
+            logger.exception(
+                "directional funnel persistence failed",
+                extra={
+                    "aitos_extra": {
+                        "symbol": event.get("symbol"),
+                        "stage": event.get("stage"),
+                    }
+                },
+            )
+
     def _footprint_tick_size(self, symbol: str) -> float | None:
         tick = self._footprint_tick_sizes.get(symbol)
         return tick if tick is not None and tick > 0 else None
@@ -697,7 +712,7 @@ class OpportunityScanner(AITOSModule):
         try:
             for side_key in ("long", "short"):
                 side_diagnostic = directional_funnel[side_key]
-                self._directional_funnel.record(
+                self._record_funnel(
                     symbol=symbol,
                     side=side_key,
                     stage="directional_gate",
@@ -712,7 +727,7 @@ class OpportunityScanner(AITOSModule):
                         "cvd_score": round(flow_score, 4),
                     },
                 )
-            self._directional_funnel.record(
+            self._record_funnel(
                 symbol=symbol,
                 side=direction.value if direction else "UNKNOWN",
                 stage="direction_selection",
@@ -772,7 +787,7 @@ class OpportunityScanner(AITOSModule):
                 )
                 htf_diagnostics = dict(mtf_result.diagnostics)
                 htf_available = bool(mtf_result.diagnostics["available_timeframes"])
-                self._directional_funnel.record(
+                self._record_funnel(
                     symbol=symbol,
                     side=direction.value,
                     stage="mtf_gate",
@@ -831,7 +846,7 @@ class OpportunityScanner(AITOSModule):
         if direction is not None and adverse_flow_without_progress(
             trades, direction.value
         ):
-            self._directional_funnel.record(
+            self._record_funnel(
                 symbol=symbol,
                 side=direction.value,
                 stage="execution_quality_gate",
@@ -851,7 +866,7 @@ class OpportunityScanner(AITOSModule):
             )
             return None
         if direction is not None:
-            self._directional_funnel.record(
+            self._record_funnel(
                 symbol=symbol,
                 side=direction.value,
                 stage="execution_quality_gate",
@@ -1262,7 +1277,7 @@ class OpportunityScanner(AITOSModule):
             regime=regime,
             htf_adx=float(htf_diagnostics.get("adx", 0.0)),
         )
-        self._directional_funnel.record(
+        self._record_funnel(
             symbol=symbol,
             side=direction.value,
             stage="scanner_candidate",
