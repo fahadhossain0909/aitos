@@ -675,15 +675,17 @@ class OpportunityScanner(AITOSModule):
         )
         logger.info(
             "directional signal funnel",
-            extra={"aitos_extra": {
-                "symbol": symbol,
-                "structure_direction": structure_direction,
-                "structure_bias": market_structure.bias,
-                "cvd_score": round(flow_score, 4),
-                "selected_direction": direction.value if direction else "none",
-                "long": directional_funnel["long"],
-                "short": directional_funnel["short"],
-            }},
+            extra={
+                "aitos_extra": {
+                    "symbol": symbol,
+                    "structure_direction": structure_direction,
+                    "structure_bias": market_structure.bias,
+                    "cvd_score": round(flow_score, 4),
+                    "selected_direction": direction.value if direction else "none",
+                    "long": directional_funnel["long"],
+                    "short": directional_funnel["short"],
+                }
+            },
         )
         # Keep the OI baseline fresh even when the HTF gate rejects this entry.
         self._last_oi[symbol] = oi_current
@@ -718,28 +720,32 @@ class OpportunityScanner(AITOSModule):
                 if not mtf_result.accepted:
                     logger.info(
                         "entry rejected by six-timeframe adaptive policy",
-                        extra={"aitos_extra": {
-                            "symbol": symbol,
-                            "direction": direction.value,
-                            "entry_timeframe": self._timeframe,
-                            "mtf": htf_diagnostics,
-                        }},
+                        extra={
+                            "aitos_extra": {
+                                "symbol": symbol,
+                                "direction": direction.value,
+                                "entry_timeframe": self._timeframe,
+                                "mtf": htf_diagnostics,
+                            }
+                        },
                     )
                     return None
                 mode = mtf_result.decision.mode
                 htf_alignment_score = (
-                    10.0 if mode == "aligned"
-                    else 7.0 if mode == "neutral_or_mixed"
-                    else 6.0
+                    10.0
+                    if mode == "aligned"
+                    else 7.0 if mode == "neutral_or_mixed" else 6.0
                 )
             except Exception as exc:
                 logger.warning(
                     "entry blocked: multi-timeframe confirmation unavailable",
-                    extra={"aitos_extra": {
-                        "symbol": symbol,
-                        "entry_timeframe": self._timeframe,
-                        "error": str(exc),
-                    }},
+                    extra={
+                        "aitos_extra": {
+                            "symbol": symbol,
+                            "entry_timeframe": self._timeframe,
+                            "error": str(exc),
+                        }
+                    },
                 )
                 return None
 
