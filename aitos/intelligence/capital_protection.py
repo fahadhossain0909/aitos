@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import isfinite
+from pathlib import Path
+import sqlite3
 from threading import RLock
+import time
+import uuid
 
 
 @dataclass(frozen=True)
@@ -287,9 +291,51 @@ class Reservation:
 
 
 class CapitalReservation:
-    def __init__(self) -> None:
+    """Atomic in-process or SQLite-backed reservation ledger.
+
+    The durable mode uses a database transaction and absolute portfolio
+    budgets, so two worker processes cannot both spend the same stale
+    availability snapshot. Reservations are leases and expire after a crashed
+    worker stops renewing/finishing its authorization window.
+    """
+
+    def __init__(
+        self,
+        path: str | Path | None = None,
+        *,
+        lease_seconds: float = 300.0,
+    ) -> None:
+        if not isfinite(lease_seconds) or lease_seconds <= 0:
+            raise ValueError("lease_seconds must be finite and positive")
         self._lock = RLock()
         self._reservations: dict[str, Reservation] = {}
+        self._owner_id = uuid.uuid4().hex
+        self._lease_seconds = float(lease_seconds)
+        self._conn: sqlite3.Connection | None = None
+        if path is not None:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(
+                str(target), check_same_thread=False, timeout=5.0
+            )
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS capital_reservations (
+                    symbol TEXT PRIMARY KEY,
+                    owner_id TEXT NOT NULL,
+                    capital_usd REAL NOT NULL,
+                    risk_budget_usd REAL NOT NULL,
+                    expires_at REAL NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_capital_reservation_expiry "
+                "ON capital_reservations(expires_at)"
+            )
+            self._conn.commit()
 
     def reserve(
         self,
@@ -297,38 +343,180 @@ class CapitalReservation:
         *,
         available_capital_usd: float,
         available_risk_usd: float,
+        capital_limit_usd: float | None = None,
+        risk_limit_usd: float | None = None,
     ) -> bool:
-        if reservation.capital_usd < 0 or reservation.risk_budget_usd < 0:
-            raise ValueError("reservation values must be non-negative")
+        values = (
+            reservation.capital_usd,
+            reservation.risk_budget_usd,
+            available_capital_usd,
+            available_risk_usd,
+        )
+        if any(not isfinite(float(value)) or float(value) < 0 for value in values):
+            raise ValueError("reservation and availability values must be finite and non-negative")
+        if self._conn is None:
+            with self._lock:
+                previous = self._reservations.get(reservation.symbol)
+                released_capital = previous.capital_usd if previous else 0.0
+                released_risk = previous.risk_budget_usd if previous else 0.0
+                if reservation.capital_usd > available_capital_usd + released_capital:
+                    return False
+                if reservation.risk_budget_usd > available_risk_usd + released_risk:
+                    return False
+                self._reservations[reservation.symbol] = reservation
+                return True
+
+        if (
+            capital_limit_usd is None
+            or risk_limit_usd is None
+            or not isfinite(float(capital_limit_usd))
+            or not isfinite(float(risk_limit_usd))
+            or capital_limit_usd < 0
+            or risk_limit_usd < 0
+        ):
+            raise ValueError("durable reservations require finite absolute capital and risk limits")
+        now = time.time()
         with self._lock:
-            previous = self._reservations.get(reservation.symbol)
-            released_capital = previous.capital_usd if previous else 0.0
-            released_risk = previous.risk_budget_usd if previous else 0.0
-            if reservation.capital_usd > available_capital_usd + released_capital:
-                return False
-            if reservation.risk_budget_usd > available_risk_usd + released_risk:
-                return False
-            self._reservations[reservation.symbol] = reservation
-            return True
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute(
+                    "DELETE FROM capital_reservations WHERE expires_at <= ?",
+                    (now,),
+                )
+                existing = self._conn.execute(
+                    "SELECT owner_id, capital_usd, risk_budget_usd "
+                    "FROM capital_reservations WHERE symbol = ?",
+                    (reservation.symbol.upper(),),
+                ).fetchone()
+                if existing is not None and existing[0] != self._owner_id:
+                    self._conn.rollback()
+                    return False
+                totals = self._conn.execute(
+                    """
+                    SELECT COALESCE(SUM(capital_usd), 0),
+                           COALESCE(SUM(risk_budget_usd), 0)
+                    FROM capital_reservations
+                    WHERE symbol != ?
+                    """,
+                    (reservation.symbol.upper(),),
+                ).fetchone()
+                total_capital = float(totals[0]) + reservation.capital_usd
+                total_risk = float(totals[1]) + reservation.risk_budget_usd
+                if (
+                    total_capital > float(capital_limit_usd) + 1e-9
+                    or total_risk > float(risk_limit_usd) + 1e-9
+                ):
+                    self._conn.rollback()
+                    return False
+                self._conn.execute(
+                    """
+                    INSERT INTO capital_reservations
+                    (symbol, owner_id, capital_usd, risk_budget_usd, expires_at)
+                    VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(symbol) DO UPDATE SET
+                        owner_id = excluded.owner_id,
+                        capital_usd = excluded.capital_usd,
+                        risk_budget_usd = excluded.risk_budget_usd,
+                        expires_at = excluded.expires_at
+                    """,
+                    (
+                        reservation.symbol.upper(),
+                        self._owner_id,
+                        reservation.capital_usd,
+                        reservation.risk_budget_usd,
+                        now + self._lease_seconds,
+                    ),
+                )
+                self._conn.commit()
+                return True
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def release(self, symbol: str) -> Reservation | None:
         with self._lock:
-            return self._reservations.pop(symbol, None)
+            if self._conn is None:
+                return self._reservations.pop(symbol, None)
+            row = self._conn.execute(
+                """
+                SELECT capital_usd, risk_budget_usd
+                FROM capital_reservations
+                WHERE symbol = ? AND owner_id = ?
+                """,
+                (symbol.upper(), self._owner_id),
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "DELETE FROM capital_reservations WHERE symbol = ? AND owner_id = ?",
+                (symbol.upper(), self._owner_id),
+            )
+            self._conn.commit()
+            return Reservation(symbol.upper(), float(row[0]), float(row[1]))
 
     def get(self, symbol: str) -> Reservation | None:
         with self._lock:
-            return self._reservations.get(symbol)
+            if self._conn is None:
+                return self._reservations.get(symbol)
+            row = self._conn.execute(
+                """
+                SELECT capital_usd, risk_budget_usd
+                FROM capital_reservations
+                WHERE symbol = ? AND owner_id = ? AND expires_at > ?
+                """,
+                (symbol.upper(), self._owner_id, time.time()),
+            ).fetchone()
+            return (
+                Reservation(symbol.upper(), float(row[0]), float(row[1]))
+                if row is not None
+                else None
+            )
 
     @property
     def reserved_capital_usd(self) -> float:
         with self._lock:
-            return sum(item.capital_usd for item in self._reservations.values())
+            if self._conn is None:
+                return sum(item.capital_usd for item in self._reservations.values())
+            return float(
+                self._conn.execute(
+                    "SELECT COALESCE(SUM(capital_usd), 0) FROM capital_reservations "
+                    "WHERE expires_at > ?",
+                    (time.time(),),
+                ).fetchone()[0]
+            )
 
     @property
     def reserved_risk_usd(self) -> float:
         with self._lock:
-            return sum(item.risk_budget_usd for item in self._reservations.values())
+            if self._conn is None:
+                return sum(item.risk_budget_usd for item in self._reservations.values())
+            return float(
+                self._conn.execute(
+                    "SELECT COALESCE(SUM(risk_budget_usd), 0) FROM capital_reservations "
+                    "WHERE expires_at > ?",
+                    (time.time(),),
+                ).fetchone()[0]
+            )
 
     def snapshot(self) -> tuple[Reservation, ...]:
         with self._lock:
-            return tuple(self._reservations.values())
+            if self._conn is None:
+                return tuple(self._reservations.values())
+            rows = self._conn.execute(
+                """
+                SELECT symbol, capital_usd, risk_budget_usd
+                FROM capital_reservations WHERE expires_at > ?
+                ORDER BY symbol
+                """,
+                (time.time(),),
+            ).fetchall()
+            return tuple(
+                Reservation(str(row[0]), float(row[1]), float(row[2]))
+                for row in rows
+            )
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
