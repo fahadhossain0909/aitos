@@ -221,7 +221,9 @@ def test_capital_gateway_snapshot_preserves_candidate_and_existing_position_side
 
 
 @pytest.mark.asyncio
-async def test_closed_trade_updates_probability_calibration_once(event_bus, risk_engine):
+async def test_closed_trade_updates_probability_calibration_once(
+    event_bus, risk_engine
+):
     install_capital_guard()
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})
