@@ -161,8 +161,7 @@ class CapitalRebalanceReplay:
                     frame.incumbent.exit_fee_bps + frame.candidate.fee_bps
                 ) * 0.01
                 slippage_cost_pct = (
-                    frame.incumbent.exit_slippage_bps
-                    + frame.candidate.slippage_bps
+                    frame.incumbent.exit_slippage_bps + frame.candidate.slippage_bps
                 ) * 0.01
                 funding_cost_pct = frame.candidate.funding_bps * 0.01
                 cost_pct = fee_cost_pct + slippage_cost_pct + funding_cost_pct
