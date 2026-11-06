@@ -304,7 +304,6 @@ async def test_late_fee_adjustment_revises_closed_trade_calibration(
     await lifecycle.shutdown()
 
 
-
 @pytest.mark.asyncio
 async def test_open_position_retains_capital_reservation_until_close(
     event_bus, risk_engine, tmp_path, monkeypatch
