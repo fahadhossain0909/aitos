@@ -31,12 +31,21 @@ def test_htf_aligned_long_is_accepted():
 def test_htf_countertrend_requires_structure_and_flow_confirmation():
     contexts = [TimeframeContext("4h", "bullish", 8.0)]
     weak = evaluate_adaptive_htf(
-        TradeSide.SHORT, contexts,
+        TradeSide.SHORT,
+        contexts,
         ltf=DirectionalEvidence(structure=4, order_flow=2, momentum=8),
     )
     strong = evaluate_adaptive_htf(
-        TradeSide.SHORT, contexts,
-        ltf=DirectionalEvidence(structure=2, order_flow=2, momentum=2, liquidity=2, location=2, participation=2),
+        TradeSide.SHORT,
+        contexts,
+        ltf=DirectionalEvidence(
+            structure=2,
+            order_flow=2,
+            momentum=2,
+            liquidity=2,
+            location=2,
+            participation=2,
+        ),
     )
     assert not weak.accepted
     assert strong.accepted
@@ -69,10 +78,12 @@ def test_expectancy_accounts_for_fees_and_slippage_in_r():
 
 
 def test_portfolio_exposure_is_directional_and_gross_aware():
-    result = portfolio_directional_exposure([
-        {"side": "LONG", "notional_usd": 100},
-        {"side": "SHORT", "notional_usd": 40},
-    ])
+    result = portfolio_directional_exposure(
+        [
+            {"side": "LONG", "notional_usd": 100},
+            {"side": "SHORT", "notional_usd": 40},
+        ]
+    )
     assert result["gross_notional_usd"] == 140
     assert result["net_directional_usd"] == 60
 
@@ -82,9 +93,13 @@ def test_volatility_dampener_never_increases_risk():
 
 
 def test_walk_forward_metrics_include_drawdown_and_expectancy():
-    result = walk_forward_metrics([
-        {"net_pnl": 10}, {"net_pnl": -4}, {"net_pnl": 6},
-    ])
+    result = walk_forward_metrics(
+        [
+            {"net_pnl": 10},
+            {"net_pnl": -4},
+            {"net_pnl": 6},
+        ]
+    )
     assert result["trade_count"] == 3
     assert result["win_rate"] == 2 / 3
     assert result["expectancy"] == 4
