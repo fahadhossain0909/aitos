@@ -201,7 +201,6 @@ async def test_persistence_capacity_telemetry_tracks_rejected_history():
     assert capacity["max_queue_depth"] == 1
 
 
-
 @pytest.mark.asyncio
 async def test_book_delta_is_persisted_without_snapshot_sampling():
     repo = FakeRepository()
