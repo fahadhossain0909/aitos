@@ -128,7 +128,7 @@ def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
                 continue
             result["delta_vs_baseline"] = {
                 "expectancy": result["overall"]["expectancy"] - baseline["overall"]["expectancy"],
-                "profit_factor": result["overall"]["profit_factor"] - baseline["overall"]["profit_factor"],
+                "profit_factor": (result["overall"]["profit_factor"] - baseline["overall"]["profit_factor"]) if result["overall"]["profit_factor"] is not None and baseline["overall"]["profit_factor"] is not None else None,
                 "max_drawdown": result["overall"]["max_drawdown"] - baseline["overall"]["max_drawdown"],
             }
     return report
