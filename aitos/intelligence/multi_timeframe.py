@@ -41,8 +41,8 @@ def _clamp_score(value: float) -> float:
 
 def _candle_evidence(candles: list[Any]) -> dict[str, float]:
     """Build reproducible OHLCV evidence; no fabricated neutral placeholders."""
-    if len(candles) < 30:
-        raise ValueError("at least 30 completed candles are required")
+    if len(candles) < 21:
+        raise ValueError("at least 21 completed candles are required")
     structure = indicators.analyze_market_structure(candles)
     momentum = _clamp_score(indicators.momentum_score(candles))
     cvd = _clamp_score(indicators.cvd_trend_score(candles))
@@ -129,9 +129,16 @@ def _frame_context(
     plus_di, minus_di = indicators.di_plus_minus(candles)
     gap = abs(float(plus_di) - float(minus_di))
     structure = indicators.analyze_market_structure(candles)
+    candle_evidence = _candle_evidence(candles)
+    di_bias = "bullish" if plus_di > minus_di else "bearish"
+    structure_bias = str(structure.bias).lower()
     bias = "neutral"
     if adx >= 20.0 and gap >= 3.0:
-        bias = "bullish" if plus_di > minus_di else "bearish"
+        # Conflicting confirmed structure and directional movement are mixed.
+        if structure_bias in {"bullish", "bearish"} and structure_bias != di_bias:
+            bias = "neutral"
+        else:
+            bias = di_bias
     reason = "fresh_completed_candles"
     if stale:
         reason = "stale_candles"
@@ -149,7 +156,10 @@ def _frame_context(
             "plus_di": float(plus_di),
             "minus_di": float(minus_di),
             "di_gap": gap,
-            "structure_bias": str(structure.bias),
+            "structure_bias": structure_bias,
+            "directional_index_bias": di_bias,
+            "evidence": candle_evidence,
+            "role": list(TIMEFRAME_ROLES[timeframe]),
             "latest_closed_at": latest.isoformat(),
             "age_seconds": age,
             "max_age_seconds": max_age,
