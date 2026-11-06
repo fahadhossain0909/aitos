@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import pytest
 from types import SimpleNamespace
 
-from aitos.trading.position_switching import SQLiteSwitchJournal
+import pytest
 
 from aitos.trading.lifecycle import TradeLifecycle
+from aitos.trading.position_switching import SQLiteSwitchJournal
 
 
 @pytest.mark.asyncio
@@ -37,6 +37,7 @@ async def test_lifecycle_initializes_normally_when_recovery_is_not_enabled():
 
     assert lifecycle._initialized is True
 
+
 @pytest.mark.asyncio
 async def test_lifecycle_recovery_requires_hydrated_and_reconciled_state():
     lifecycle = TradeLifecycle.__new__(TradeLifecycle)
@@ -47,6 +48,7 @@ async def test_lifecycle_recovery_requires_hydrated_and_reconciled_state():
         await lifecycle.initialize({"recover_position_switches": True})
 
     assert lifecycle._initialized is False
+
 
 @pytest.mark.asyncio
 async def test_lifecycle_runs_opt_in_recovery_after_hydration_gate(tmp_path):
