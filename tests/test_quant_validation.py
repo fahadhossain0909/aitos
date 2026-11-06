@@ -134,7 +134,6 @@ def test_probability_calibration_rejects_invalid_forecast_probability():
         validate_observations(rows)
 
 
-
 def test_validation_rejects_non_boolean_realized_outcome_labels():
     rows = observations(2)
     rows[0]["realized_win"] = "false"
