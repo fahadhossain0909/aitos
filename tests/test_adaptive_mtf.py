@@ -106,7 +106,6 @@ def test_walk_forward_metrics_include_drawdown_and_expectancy():
     assert result["max_drawdown"] == 4
 
 
-
 def test_weighted_mtf_consensus_accepts_majority_alignment_with_one_counter_move():
     decision = evaluate_adaptive_htf(
         TradeSide.LONG,
@@ -130,7 +129,14 @@ def test_balanced_mixed_mtf_requires_ltf_quality_floor():
             TimeframeContext("4h", "bullish", 8.0),
             TimeframeContext("1h", "bearish", 8.0),
         ],
-        ltf=DirectionalEvidence(structure=2, order_flow=2, momentum=2, liquidity=2, location=2, participation=2),
+        ltf=DirectionalEvidence(
+            structure=2,
+            order_flow=2,
+            momentum=2,
+            liquidity=2,
+            location=2,
+            participation=2,
+        ),
     )
     assert decision.accepted
     assert decision.mode == "neutral_or_mixed"
