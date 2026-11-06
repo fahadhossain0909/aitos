@@ -47,6 +47,8 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Added leakage-aware chronological split generation with a configurable embargo.
 - Evaluation rows require timezone-aware decision/outcome timestamps, outcome strictly after decision, finite net PnL and explicit LONG/SHORT side.
 - Held-out fold summaries report trade count, expectancy, win rate, profit factor, drawdown and LONG/SHORT-separated metrics.
+- Optional point-in-time observation fields now produce regime-wise scorecards, MAE/MFE, entry capture, slippage, fees and funding summaries, plus a normal-approximation expectancy interval (reported as uncertainty, not a significance/profitability claim).
+- Rejected-opportunity counterfactual markouts are reported separately when their realized counterfactual net PnL is supplied; absent historical markouts are never synthesized.
 - Comparative reports support baseline versus ablation variants (for example removing order-flow, MTF, liquidity or footprint evidence) and calculate deltas where metrics are defined.
 - Added `HistoricalAblationRunner`, which executes baseline and component-disabled strategy callables through the canonical `BacktestEngine`, then runs each variant through the existing `WalkForwardValidator` with a locked holdout.
 - The ablation report includes full replay metrics, walk-forward/holdout outcomes, LONG/SHORT-separated realized PnL metrics, unclassified-trade counts and deltas versus baseline. Strategy variants are supplied as named callables so OFI/order-flow/MTF/liquidity/footprint components can be switched off without silently changing the baseline.
