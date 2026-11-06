@@ -262,7 +262,8 @@ def install_capital_guard() -> None:
         if gateway is None:
             gateway = CapitalGateway(
                 calibrator=ProbabilityCalibrator(
-                    path=get_model_data_dir() / "capital_probability_calibration.sqlite3"
+                    path=get_model_data_dir()
+                    / "capital_probability_calibration.sqlite3"
                 )
             )
             setattr(self, _GATEWAY_ATTR, gateway)
