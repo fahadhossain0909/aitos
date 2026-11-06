@@ -77,7 +77,12 @@ class BinanceUsdMAccountCostProviders:
         for raw_price, raw_quantity in levels:
             price = float(raw_price)
             quantity = float(raw_quantity)
-            if not math.isfinite(price) or not math.isfinite(quantity) or price <= 0 or quantity <= 0:
+            if (
+                not math.isfinite(price)
+                or not math.isfinite(quantity)
+                or price <= 0
+                or quantity <= 0
+            ):
                 continue
             level_quote = price * quantity
             take_quote = min(remaining, level_quote)
@@ -86,7 +91,9 @@ class BinanceUsdMAccountCostProviders:
             if remaining <= max(1e-8, quote_notional * 1e-10):
                 break
         if remaining > max(1e-8, quote_notional * 1e-10) or base_filled <= 0:
-            raise RuntimeError("Binance order book depth is insufficient for requested notional")
+            raise RuntimeError(
+                "Binance order book depth is insufficient for requested notional"
+            )
         return quote_notional / base_filled
 
     async def depth_slippage(
