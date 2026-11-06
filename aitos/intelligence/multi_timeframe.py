@@ -41,6 +41,14 @@ TIMEFRAME_WEIGHTS = {
     "5m": 0.6,
     "1m": 0.4,
 }
+TIMEFRAME_EVIDENCE_FIELDS = {
+    "1d": ("structure", "location", "liquidity"),
+    "4h": ("structure", "liquidity", "participation"),
+    "1h": ("structure", "momentum", "location"),
+    "15m": ("momentum", "order_flow", "participation"),
+    "5m": ("liquidity", "participation", "lower_sweep_reclaim", "upper_sweep_reclaim"),
+    "1m": ("momentum", "liquidity", "location", "displacement_atr"),
+}
 
 
 def _clamp_score(value: float) -> float:
@@ -78,12 +86,39 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
     close_location = _clamp_score(10.0 * (close - range_low) / range_span)
     lower_sweep = low < lowest and close > lowest
     upper_sweep = high > highest and close < highest
-    lower_wick = max(0.0, min(close, float(last.open)) - low) / span
-    upper_wick = max(0.0, high - max(close, float(last.open))) / span
+    lower_wick = max(0.0, min(close, open_price) - low) / span
+    upper_wick = max(0.0, high - max(close, open_price)) / span
+    true_ranges = []
+    for index in range(max(1, len(candles) - 14), len(candles)):
+        candle = candles[index]
+        previous_close = float(candles[index - 1].close)
+        true_ranges.append(
+            max(
+                float(candle.high) - float(candle.low),
+                abs(float(candle.high) - previous_close),
+                abs(float(candle.low) - previous_close),
+            )
+        )
+    atr = sum(true_ranges) / len(true_ranges) if true_ranges else span
+    displacement_atr = abs(close - open_price) / max(atr, 1e-12)
+    bullish_sweep_displacement = (
+        lower_sweep and close > open_price and displacement_atr >= 1.0
+    )
+    bearish_sweep_displacement = (
+        upper_sweep and close < open_price and displacement_atr >= 1.0
+    )
     sweep_pressure = (
         0.0
         if lower_sweep and upper_sweep
-        else 3.0 if lower_sweep else -3.0 if upper_sweep else 0.0
+        else 4.0
+        if bullish_sweep_displacement
+        else -4.0
+        if bearish_sweep_displacement
+        else 3.0
+        if lower_sweep
+        else -3.0
+        if upper_sweep
+        else 0.0
     )
     liquidity = _clamp_score(5.0 + sweep_pressure + 2.0 * (lower_wick - upper_wick))
     return {
@@ -96,6 +131,9 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
         "relative_volume": round(relative_volume, 4),
         "lower_sweep_reclaim": float(lower_sweep),
         "upper_sweep_reclaim": float(upper_sweep),
+        "displacement_atr": round(displacement_atr, 4),
+        "bullish_sweep_displacement": float(bullish_sweep_displacement),
+        "bearish_sweep_displacement": float(bearish_sweep_displacement),
     }
 
 
@@ -184,6 +222,10 @@ def _frame_context(
             "directional_index_bias": di_bias,
             "evidence": candle_evidence,
             "role": list(TIMEFRAME_ROLES[timeframe]),
+            "role_evidence": {
+                field: candle_evidence[field]
+                for field in TIMEFRAME_EVIDENCE_FIELDS[timeframe]
+            },
             "latest_closed_at": latest.isoformat(),
             "age_seconds": age,
             "max_age_seconds": max_age,
