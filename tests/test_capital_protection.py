@@ -148,3 +148,44 @@ def test_candidate_hedge_can_reduce_existing_correlated_risk_above_limit():
     assert decision.allowed
     assert decision.allowed_risk_pct == 1.0
     assert decision.correlated_risk_pct < 2.5
+
+
+
+def test_sqlite_reservations_prevent_cross_instance_oversubscription(tmp_path):
+    path = tmp_path / "reservations.sqlite3"
+    first = CapitalReservation(path=path)
+    second = CapitalReservation(path=path)
+    limits = {"capital_limit_usd": 10_000.0, "risk_limit_usd": 100.0}
+    try:
+        assert first.reserve(
+            Reservation("BTCUSDT", 6_000.0, 60.0),
+            available_capital_usd=10_000.0,
+            available_risk_usd=100.0,
+            **limits,
+        )
+        # A second process cannot reserve the same symbol under another owner.
+        assert not second.reserve(
+            Reservation("BTCUSDT", 6_000.0, 60.0),
+            available_capital_usd=10_000.0,
+            available_risk_usd=100.0,
+            **limits,
+        )
+        # Nor can it rely on a stale availability snapshot for another symbol.
+        assert not second.reserve(
+            Reservation("ETHUSDT", 5_000.0, 50.0),
+            available_capital_usd=10_000.0,
+            available_risk_usd=100.0,
+            **limits,
+        )
+        assert first.reserved_capital_usd == 6_000.0
+        assert first.release("BTCUSDT") == Reservation("BTCUSDT", 6_000.0, 60.0)
+        assert second.reserve(
+            Reservation("ETHUSDT", 5_000.0, 50.0),
+            available_capital_usd=10_000.0,
+            available_risk_usd=100.0,
+            **limits,
+        )
+        assert second.reserved_risk_usd == 50.0
+    finally:
+        first.close()
+        second.close()
