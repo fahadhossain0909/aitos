@@ -69,6 +69,7 @@ async def test_binance_cost_provider_fails_closed_when_depth_is_insufficient():
     with pytest.raises(RuntimeError, match="depth is insufficient"):
         await providers.depth_slippage(symbol="BTCUSDT", side="LONG", notional_usd=1000)
 
+
 @pytest.mark.asyncio
 async def test_binance_cost_adapter_rejects_invalid_side_and_non_finite_inputs():
     async def empty_provider(**_):
