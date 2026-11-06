@@ -17,7 +17,7 @@ This branch extends AITOS decision intelligence only. It does not place orders, 
 - Each frame reports latest closed candle timestamp, age, permitted freshness age, ADX, DI gap, structure bias, regime and cache state.
 - Forming candles are excluded by the cache. A stale fallback, insufficient history or missing timeframe marks the stack incomplete.
 - The scanner requires all six frames to be fresh and complete before accepting an MTF decision. It does not convert unavailable data into neutral evidence.
-- All six timeframe contexts are evaluated together under the adaptive HTF policy. Directional reversal against the stack still requires strong structure + order-flow evidence.
+- All six timeframe contexts are evaluated together using a configurable strength-weighted consensus threshold. A single lower-timeframe counter-move does not automatically veto a higher-timeframe majority; balanced stacks require the LTF quality floor, and dominant countertrend stacks require strong structure + order-flow reversal evidence.
 - Cache request budget, fetch concurrency and freshness grace are centrally configurable with environment overrides.
 - The primary timeframe map and legacy single-HTF helper remain for compatibility; the scanner decision path now uses the six-frame analyzer.
 
