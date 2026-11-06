@@ -225,6 +225,7 @@ class ProbabilityCalibrator:
             bucket[1] += int(realized_loss)
             if observation_id is not None:
                 self._observed_ids.add(observation_id)
+                self._observations[observation_id] = (key, realized_loss)
             return True
 
     def revise(
