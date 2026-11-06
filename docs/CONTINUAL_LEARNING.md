@@ -93,6 +93,15 @@ Paper trading does not need to be stopped for this command. The backtest contain
 
 The learning worker starts with the normal stack and is resource-limited so it does not compete aggressively with paper trading.
 
+## Continuous Intelligence & Evolution
+
+The read-only performance attribution, evidence-based root-cause diagnostics,
+counterfactual replay contract, sample-aware drift monitoring and explicit
+operator-approval promotion gate are documented in
+[`CONTINUOUS_INTELLIGENCE.md`](CONTINUOUS_INTELLIGENCE.md). These capabilities
+consume the canonical Experience Store and do not replace the continual-learning
+worker or mutate trading behavior.
+
 ## Production safety boundary
 
 Continual learning is allowed to collect experience, train candidate models, and propose strategy/weight changes. Production deployment remains a separate governance step. A model must pass the configured validation pipeline before it can become a champion; this foundation does not silently replace a live strategy.

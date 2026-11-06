@@ -785,6 +785,14 @@ async def run_scan_and_trade_cycle(
                         "approved_by": opportunity.approved_by,
                         "kernel_direction": decision.direction,
                         "kernel_confidence": decision.confidence,
+                        "candidate_score": candidate.composite_score,
+                        "candidate_component_scores": dict(candidate.component_scores),
+                        "candidate_component_availability": dict(
+                            candidate.component_availability or {}
+                        ),
+                        "candidate_weights": dict(components.scanner._weights),
+                        "candidate_threshold": components.scanner._min_score_threshold,
+                        "candidate_rationale": list(candidate.rationale or []),
                     },
                     source_module="aitos.app",
                 )

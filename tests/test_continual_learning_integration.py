@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 from aitos.backtest.cli import HistoricalEvent
 from aitos.learning.experience import ExperienceRecord
+from aitos.learning.governance import PromotionApproval, validation_evidence_digest
 from aitos.learning.model_registry import ModelArtifact, ModelRegistry
 from aitos.learning.validation import CandidateValidator, ValidationPolicy
 from aitos.learning.walk_forward import WalkForwardValidator
@@ -102,6 +103,16 @@ def test_model_registry_promotes_only_candidates_with_locked_holdout(tmp_path):
     assert validation.passed
     assert validation.walk_forward is not None
     assert validation.walk_forward.locked_holdout is not None
-    promoted = registry.promote("strategy", "v1", validation_result=validation)
+    approval = PromotionApproval(
+        candidate_name="strategy",
+        candidate_version="v1",
+        approved_by="operator:integration-test",
+        approval_id="integration-approval-v1",
+        validation_digest=validation_evidence_digest(validation),
+        approved_at=datetime.now(timezone.utc),
+    )
+    promoted = registry.promote(
+        "strategy", "v1", validation_result=validation, approval=approval
+    )
     assert promoted.status == "champion"
     assert promoted.metadata["promotion_evidence"]["walk_forward_windows"] > 0

@@ -551,6 +551,7 @@ class MarketDataRepository(AITOSModule):
                 "model_version",
                 "metadata_json",
             ],
+            settings={"insert_deduplication_token": str(record.experience_id)},
         )
 
     async def get_recent_klines(
