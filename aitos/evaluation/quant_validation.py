@@ -223,9 +223,7 @@ def probability_calibration(
     if bins < 2 or bins > 100:
         raise ValueError("bins must be between 2 and 100")
     observations = [
-        row
-        for row in rows
-        if row.get("predicted_win_probability") is not None
+        row for row in rows if row.get("predicted_win_probability") is not None
     ]
     if not observations:
         return {
@@ -255,8 +253,7 @@ def probability_calibration(
             {
                 "bin": bucket,
                 "samples": len(values),
-                "mean_predicted_probability": sum(p for p, _ in values)
-                / len(values),
+                "mean_predicted_probability": sum(p for p, _ in values) / len(values),
                 "observed_win_rate": sum(y for _, y in values) / len(values),
             }
         )
@@ -310,7 +307,9 @@ def comparative_report(rows: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
             "research_diagnostics": _research_diagnostics(items),
             "expectancy_confidence_interval": expectancy_confidence_interval(items),
             "probability_calibration": probability_calibration(items),
-            "rejected_opportunity_counterfactual": rejected_opportunity_counterfactual(items),
+            "rejected_opportunity_counterfactual": rejected_opportunity_counterfactual(
+                items
+            ),
             "trade_count": len(items),
             "date_range": {
                 "start": items[0]["decision_at"].isoformat(),
