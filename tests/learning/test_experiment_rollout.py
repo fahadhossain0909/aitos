@@ -10,6 +10,7 @@ from aitos.learning.experiment_engine import (
     ExperimentVariant,
 )
 from aitos.learning.rollout import RolloutCoordinator
+from aitos.learning.governance import PromotionApproval, validation_evidence_digest
 
 
 def _validation():
@@ -158,6 +159,7 @@ def test_canary_requires_minimum_sample_count_before_healthy(tmp_path):
         production_router=lambda *args: None,
         rollback_router=lambda *args: None,
         minimum_canary_samples=10,
+        minimum_canary_observations=2,
     )
     coordinator.stage("strategy", "v2", _validation())
     coordinator.start_canary("strategy", "v2")
@@ -208,3 +210,45 @@ def test_experiment_plan_rejects_unsupported_or_weak_diagnostics():
         ExperimentPlan.from_hypothesis(
             weak, (CostScenario("base", 0.0, 0.0),), minimum_samples=10
         )
+
+
+
+def test_healthy_canary_requires_approval_then_supports_rollback(tmp_path):
+    registry = FakeRegistry()
+    routed = []
+    coordinator = RolloutCoordinator(
+        str(tmp_path / "rollouts.json"),
+        registry,
+        canary_router=lambda *args: routed.append(("canary", *args)),
+        production_router=lambda *args: routed.append(("production", *args)),
+        rollback_router=lambda *args: routed.append(("rollback", *args)),
+        minimum_canary_samples=5,
+        minimum_canary_observations=3,
+    )
+    validation = _validation()
+    coordinator.stage("strategy", "v2", validation)
+    coordinator.start_canary("strategy", "v2")
+    for count in (5, 6, 7):
+        coordinator.observe_canary(
+            "strategy",
+            "v2",
+            sample_count=count,
+            error_rate=0.0,
+            drawdown=0.01,
+            return_delta=0.02,
+        )
+    approval = PromotionApproval(
+        candidate_name="strategy",
+        candidate_version="v2",
+        approved_by="operator:test",
+        approval_id="rollout-approval-v2",
+        validation_digest=validation_evidence_digest(validation),
+        approved_at=datetime.now(timezone.utc),
+    )
+    promoted = coordinator.promote("strategy", "v2", validation, approval)
+    assert promoted.version == "v2"
+    assert coordinator.get("strategy", "v2")["state"] == "promoted"
+    restored = coordinator.rollback("strategy", "v2", "canary regression")
+    assert restored.version == "v1"
+    assert coordinator.get("strategy", "v2")["state"] == "rolled_back"
+    assert routed[-1] == ("rollback", "strategy", "v1")

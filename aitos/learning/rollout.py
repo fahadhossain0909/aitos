@@ -28,12 +28,13 @@ class RolloutCoordinator:
         production_router: Callable[[str, str], None],
         rollback_router: Callable[[str, str | None], None],
         minimum_canary_samples: int = 100,
+        minimum_canary_observations: int = 3,
         maximum_error_rate: float = 0.01,
         maximum_drawdown: float = 0.10,
         minimum_return_delta: float = -0.02,
     ) -> None:
-        if minimum_canary_samples < 1:
-            raise ValueError("minimum_canary_samples must be positive")
+        if minimum_canary_samples < 1 or minimum_canary_observations < 1:
+            raise ValueError("canary sample and observation thresholds must be positive")
         if not 0 <= maximum_error_rate <= 1 or not 0 <= maximum_drawdown <= 1:
             raise ValueError("canary thresholds must be in [0, 1]")
         self.path, self.registry = path, registry
@@ -41,6 +42,7 @@ class RolloutCoordinator:
         self.production_router = production_router
         self.rollback_router = rollback_router
         self.minimum_canary_samples = minimum_canary_samples
+        self.minimum_canary_observations = minimum_canary_observations
         self.maximum_error_rate = maximum_error_rate
         self.maximum_drawdown = maximum_drawdown
         self.minimum_return_delta = minimum_return_delta
@@ -217,7 +219,11 @@ class RolloutCoordinator:
                         "reason": row["rollback_reason"],
                     }
                 )
-            elif sample_count >= self.minimum_canary_samples:
+            elif (
+                sample_count >= self.minimum_canary_samples
+                and len(row["canary_observations"])
+                >= self.minimum_canary_observations
+            ):
                 row["state"] = "canary_healthy"
                 row["audit"].append({"state": "canary_healthy", "at": now})
             self._write(rows)

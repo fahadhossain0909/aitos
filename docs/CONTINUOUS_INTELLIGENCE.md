@@ -176,3 +176,5 @@ These are orchestration primitives, not proof that the authenticated approval UI
 ## Holdout isolation contract
 
 Candidate-level minimum-return, drawdown, Sharpe and champion-comparison gates run only on development events strictly before the reserved final holdout interval. Walk-forward test windows and the final locked holdout are evaluated separately and are never included in those candidate-level metrics. Event timestamps must be timezone-aware. Candidate strategies are treated as frozen proposals during validation; fitting or tuning must occur outside the validator on development data only. Regime-wise ablations and cost-sensitivity are produced by the experiment runner and remain evidence reports, not automatic model-selection decisions.
+
+Canary health requires both a cumulative sample-count threshold and a minimum number of separate healthy observation windows (default: 100 samples and 3 observations). Each observation must report cumulative samples and the same defined candidate-versus-champion metric basis; a single healthy snapshot cannot clear the canary gate.

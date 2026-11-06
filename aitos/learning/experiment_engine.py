@@ -200,6 +200,29 @@ class ExperimentEngine:
             evidence_ids=evidence_ids,
         )
 
+    def run_hypotheses(
+        self,
+        hypotheses: Iterable[Any],
+        events: Iterable[Any],
+        evaluator: Evaluator,
+        cost_scenarios: tuple[CostScenario, ...],
+        *,
+        regimes: tuple[str, ...] = (),
+        minimum_samples: int = 30,
+    ) -> tuple[ExperimentReport, ...]:
+        """Generate and execute one bounded experiment per eligible diagnostic."""
+        event_rows = list(events)
+        reports = []
+        for hypothesis in hypotheses:
+            plan = ExperimentPlan.from_hypothesis(
+                hypothesis,
+                cost_scenarios,
+                regimes=regimes,
+                minimum_samples=minimum_samples,
+            )
+            reports.append(self.run(plan, event_rows, evaluator))
+        return tuple(reports)
+
     def run(
         self,
         plan: ExperimentPlan,
