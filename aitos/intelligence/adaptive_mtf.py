@@ -136,29 +136,45 @@ def evaluate_adaptive_htf(
     # Weighted consensus avoids requiring every timeframe to agree.
     if trend_balance >= alignment_balance_threshold:
         return HTFDecision(
-            True, "aligned", round(min(1.0, trend_balance), 4),
-            "htf_weighted_consensus_aligned", details,
+            True,
+            "aligned",
+            round(min(1.0, trend_balance), 4),
+            "htf_weighted_consensus_aligned",
+            details,
         )
     if trend_balance <= -alignment_balance_threshold:
         if ltf_score >= countertrend_score and reversal_evidence:
             return HTFDecision(
-                True, "countertrend_reversal", -0.5,
+                True,
+                "countertrend_reversal",
+                -0.5,
                 "strong_ltf_reversal_against_htf",
                 {**details, "reversal_evidence": True},
             )
         return HTFDecision(
-            False, "countertrend", 0.0,
+            False,
+            "countertrend",
+            0.0,
             "countertrend_without_confirmed_reversal",
             {**details, "reversal_evidence": bool(reversal_evidence)},
         )
     if allow_neutral and ltf_score >= min_aligned_score:
         return HTFDecision(
-            True, "neutral_or_mixed", 0.0,
-            "htf_mixed_ltf_quality_sufficient", details,
+            True,
+            "neutral_or_mixed",
+            0.0,
+            "htf_mixed_ltf_quality_sufficient",
+            details,
         )
     return HTFDecision(
-        False, "neutral_or_mixed", 0.0,
-        "ltf_quality_below_neutral_floor" if allow_neutral else "neutral_context_disabled",
+        False,
+        "neutral_or_mixed",
+        0.0,
+        (
+            "ltf_quality_below_neutral_floor"
+            if allow_neutral
+            else "neutral_context_disabled"
+        ),
         details,
     )
 
