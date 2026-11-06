@@ -74,7 +74,6 @@ class ExperimentPlan:
             if self.holdout_end <= self.holdout_start:
                 raise ValueError("holdout_end must be after holdout_start")
 
-
     @classmethod
     def from_hypothesis(
         cls,
@@ -119,6 +118,7 @@ class ExperimentPlan:
             minimum_samples=minimum_samples,
             evidence_ids=evidence_ids,
         )
+
 
 @dataclass(frozen=True)
 class ExperimentCell:
