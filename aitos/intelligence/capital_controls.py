@@ -169,7 +169,9 @@ class ProbabilityCalibrator:
             return sum(bucket[0] for bucket in self._bins.values())
 
     def calibrate(self, probability: float) -> float:
-        raw = max(0.0, min(1.0, float(probability)))
+        raw = float(probability)
+        if not isfinite(raw) or not 0.0 <= raw <= 1.0:
+            raise ValueError("probability must be finite and within [0, 1]")
         with self._lock:
             if sum(bucket[0] for bucket in self._bins.values()) < self.config.calibration_min_samples:
                 return raw
