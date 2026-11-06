@@ -37,6 +37,7 @@ partial-reduce or tighten protection.
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -308,6 +309,11 @@ class TradeLifecycle(AITOSModule):
         if funnel_store is not None:
             funnel_store.close()
             delattr(self, "_aitos_directional_funnel")
+        gateway = getattr(self, "_aitos_capital_gateway", None)
+        if gateway is not None:
+            close_calibrator = getattr(gateway.calibrator, "close", None)
+            if callable(close_calibrator):
+                close_calibrator()
         logger.info(
             "TradeLifecycle shut down",
             extra={"aitos_extra": {"open_trades": len(self._open_trades)}},
@@ -1037,6 +1043,23 @@ class TradeLifecycle(AITOSModule):
         trade.state = TradeLifecycleState.POSITION_CLOSED
         trade.updated_at = trade.exit_time
         self._closed_trades.append(trade)
+        gateway = getattr(self, "_aitos_capital_gateway", None)
+        capital_objective = trade.agent_consensus.get("capital_objective", {})
+        predicted_loss_probability = capital_objective.get(
+            "predicted_loss_probability"
+        )
+        if gateway is not None and predicted_loss_probability is not None:
+            try:
+                await asyncio.to_thread(
+                    gateway.calibrator.observe,
+                    float(predicted_loss_probability),
+                    trade.pnl <= 0.0,
+                )
+            except Exception:
+                logger.exception(
+                    "capital probability calibration update failed",
+                    extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                )
         if self._position_manager is not None:
             self._position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
         self._last_intensive_analysis_at.pop(trade.trade_id, None)
