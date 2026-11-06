@@ -1056,6 +1056,7 @@ class TradeLifecycle(AITOSModule):
                     gateway.calibrator.observe,
                     float(predicted_loss_probability),
                     trade.pnl <= 0.0,
+                    observation_id=trade.trade_id,
                 )
             except Exception:
                 logger.exception(
