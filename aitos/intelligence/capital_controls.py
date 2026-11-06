@@ -151,6 +151,18 @@ class ProbabilityCalibrator:
     def _bin(probability: float) -> int:
         return max(0, min(9, int(max(0.0, min(0.999999, probability)) * 10)))
 
+    def _refresh_bins_locked(self) -> None:
+        """Refresh the durable aggregate so separate processes see new outcomes."""
+        if self._conn is None:
+            return
+        rows = self._conn.execute(
+            "SELECT bin, samples, losses FROM probability_calibration_bins"
+        )
+        self._bins = {
+            int(row[0]): [int(row[1]), int(row[2])]
+            for row in rows
+        }
+
     def observe(
         self,
         predicted_loss_probability: float,
@@ -217,6 +229,7 @@ class ProbabilityCalibrator:
     @property
     def samples(self) -> int:
         with self._lock:
+            self._refresh_bins_locked()
             return sum(bucket[0] for bucket in self._bins.values())
 
     def calibrate(self, probability: float) -> float:
@@ -224,6 +237,7 @@ class ProbabilityCalibrator:
         if not isfinite(raw) or not 0.0 <= raw <= 1.0:
             raise ValueError("probability must be finite and within [0, 1]")
         with self._lock:
+            self._refresh_bins_locked()
             if (
                 sum(bucket[0] for bucket in self._bins.values())
                 < self.config.calibration_min_samples
