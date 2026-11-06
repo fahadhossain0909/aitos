@@ -149,12 +149,12 @@ def test_macro_timeframes_carry_more_consensus_weight_than_execution_frames():
     decision = evaluate_adaptive_htf(
         TradeSide.LONG,
         [
-            TimeframeContext("1d", "bullish", 8.0, weight=1.5),
-            TimeframeContext("4h", "bullish", 8.0, weight=1.4),
-            TimeframeContext("1h", "bearish", 8.0, weight=1.2),
-            TimeframeContext("15m", "bearish", 8.0, weight=1.0),
-            TimeframeContext("5m", "bearish", 8.0, weight=0.8),
-            TimeframeContext("1m", "bearish", 8.0, weight=0.6),
+            TimeframeContext("1d", "bullish", 8.0, weight=2.0),
+            TimeframeContext("4h", "bullish", 8.0, weight=1.8),
+            TimeframeContext("1h", "bearish", 8.0, weight=1.0),
+            TimeframeContext("15m", "bearish", 8.0, weight=0.8),
+            TimeframeContext("5m", "bearish", 8.0, weight=0.6),
+            TimeframeContext("1m", "bearish", 8.0, weight=0.4),
         ],
         ltf=DirectionalEvidence(),
         alignment_balance_threshold=0.10,
