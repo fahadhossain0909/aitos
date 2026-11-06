@@ -1,14 +1,14 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
 
 from aitos.intelligence import multi_timeframe
-from aitos.intelligence.multi_timeframe import (
-    MultiTimeframeAnalyzer,
-    REQUIRED_TIMEFRAMES,
-)
 from aitos.intelligence.htf_cache import timeframe_delta
+from aitos.intelligence.multi_timeframe import (
+    REQUIRED_TIMEFRAMES,
+    MultiTimeframeAnalyzer,
+)
 from aitos.models.trade import TradeSide
 
 

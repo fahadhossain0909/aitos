@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import datetime, timedelta
 from math import isfinite
-from typing import Any, Iterable
+from typing import Any
 
 
 def _timestamp(value: Any) -> datetime:

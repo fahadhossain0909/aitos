@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from typing import Any, Callable
+from datetime import datetime, timezone
+from typing import Any
 
 from aitos.intelligence import indicators
 from aitos.intelligence.adaptive_mtf import (

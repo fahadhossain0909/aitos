@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from inspect import signature
 from typing import Any
-import json
 
 from aitos.exchange.orderbook import DepthUpdate, LocalOrderBook
 from aitos.intelligence.liquidity import depth_event_flow_analysis

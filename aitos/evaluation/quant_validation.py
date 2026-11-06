@@ -8,10 +8,11 @@ for generating observations with the canonical backtest/replay engine.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import isfinite
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from aitos.intelligence.adaptive_mtf import walk_forward_metrics
 

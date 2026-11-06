@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime
 from math import isfinite
 from typing import Any
 
@@ -21,13 +21,13 @@ from aitos.intelligence.capital_objective import (
     CapitalObjective,
     OpportunityEstimate,
 )
-from aitos.intelligence.point_in_time_risk import PointInTimeCorrelationEstimator
 from aitos.intelligence.capital_protection import (
     CapitalReservation,
     PortfolioProtection,
     PortfolioRiskSnapshot,
     Reservation,
 )
+from aitos.intelligence.point_in_time_risk import PointInTimeCorrelationEstimator
 from aitos.models.trade import Opportunity, TradeSide
 
 

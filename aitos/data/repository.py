@@ -395,7 +395,9 @@ class MarketDataRepository(AITOSModule):
                     datetime.fromtimestamp(event_time_ms / 1000, tz=timezone.utc),
                     book.symbol,
                     int(event.get("final_update_id", book.last_update_id)),
-                    int(event.get("previous_update_id", max(0, book.last_update_id - 1))),
+                    int(
+                        event.get("previous_update_id", max(0, book.last_update_id - 1))
+                    ),
                     json.dumps(event, sort_keys=True, separators=(",", ":")),
                 ]
             )
@@ -423,7 +425,8 @@ class MarketDataRepository(AITOSModule):
                 continue
             first_update_id = payload.get("first_update_id", payload.get("U", 0))
             previous_update_id = payload.get(
-                "previous_update_id", payload.get("pu", max(0, int(first_update_id) - 1))
+                "previous_update_id",
+                payload.get("pu", max(0, int(first_update_id) - 1)),
             )
             event_time = event.get("event_time")
             if event_time is None:

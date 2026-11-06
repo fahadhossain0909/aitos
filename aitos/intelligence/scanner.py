@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import time
-from contextvars import ContextVar
 from collections.abc import AsyncIterator
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any

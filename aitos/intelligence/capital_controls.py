@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
 from pathlib import Path
-import sqlite3
 from threading import RLock
 
 

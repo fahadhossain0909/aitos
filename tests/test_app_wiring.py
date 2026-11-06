@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-import aitos.intelligence.capital_runtime as capital_runtime
 from aitos.app import (
     PaperPortfolioTracker,
     build_system,
@@ -12,6 +11,7 @@ from aitos.app import (
     shutdown_all,
 )
 from aitos.execution.order_executor import SimulatedOrderExecutor
+from aitos.intelligence import capital_runtime
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from tests.test_scanner import FakeScannerExchange
 

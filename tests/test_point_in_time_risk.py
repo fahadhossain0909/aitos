@@ -2,9 +2,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from aitos.intelligence.point_in_time_risk import PointInTimeCorrelationEstimator
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_objective import OpportunityEstimate
+from aitos.intelligence.point_in_time_risk import PointInTimeCorrelationEstimator
 
 
 def test_point_in_time_correlations_are_symmetric_and_exclude_future_prices():

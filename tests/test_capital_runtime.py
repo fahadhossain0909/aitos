@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import aitos.intelligence.capital_runtime as capital_runtime
+from aitos.intelligence import capital_runtime
 from aitos.intelligence.capital_controls import CapitalControlConfig
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_runtime import (
