@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from aitos.backtest.lifecycle_event_replay import LifecycleEventReplay
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_replay_orders_events_and_persists_deduplication(tmp_path):
+    path = tmp_path / "account-events.jsonl"
+    path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event_id": "event-b",
+                        "timestamp_ms": 200,
+                        "event_type": "ACCOUNT_UPDATE",
+                        "symbol": "BTCUSDT",
+                        "payload": {"wallet": "100"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "event_id": "event-a",
+                        "timestamp_ms": 100,
+                        "event_type": "ORDER_TRADE_UPDATE",
+                        "symbol": "BTCUSDT",
+                        "payload": {"status": "FILLED"},
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    checkpoint = tmp_path / "replay.sqlite"
+    observed = []
+    events = LifecycleEventReplay.read_jsonl(path)
+    first_runner = LifecycleEventReplay(
+        lambda event: observed.append(event.event_id),
+        checkpoint_path=checkpoint,
+    )
+    first = await first_runner.replay(events)
+    second_runner = LifecycleEventReplay(
+        lambda event: observed.append(event.event_id),
+        checkpoint_path=checkpoint,
+    )
+    second = await second_runner.replay(events)
+
+    assert observed == ["event-a", "event-b"]
+    assert first == {"seen": 2, "processed": 2, "duplicates": 0}
+    assert second == {"seen": 2, "processed": 0, "duplicates": 2}
+
+
+@pytest.mark.asyncio
+async def test_failed_replay_handler_does_not_advance_checkpoint(tmp_path):
+    path = tmp_path / "retry.sqlite"
+    event = LifecycleEventReplay.read_jsonl(
+        _write_event_file(tmp_path / "single.jsonl")
+    )[0]
+
+    async def failing(_event):
+        raise RuntimeError("projection failed")
+
+    runner = LifecycleEventReplay(failing, checkpoint_path=path)
+    with pytest.raises(RuntimeError, match="projection failed"):
+        await runner.replay([event])
+
+    retry_observed = []
+    retry = LifecycleEventReplay(
+        lambda item: retry_observed.append(item.event_id),
+        checkpoint_path=path,
+    )
+    report = await retry.replay([event])
+    assert report["processed"] == 1
+    assert retry_observed == [event.event_id]
+
+
+def _write_event_file(path):
+    path.write_text(
+        json.dumps(
+            {
+                "event_id": "retry-event",
+                "timestamp_ms": 123,
+                "event_type": "ORDER_TRADE_UPDATE",
+                "symbol": "ETHUSDT",
+                "payload": {"status": "PARTIALLY_FILLED"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return path
