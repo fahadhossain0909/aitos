@@ -464,6 +464,7 @@ class JournalSystem(AITOSModule):
         ]
         if not management_ids:
             management_ids = memory_management_ids
+        if self._decision_repository is not None:
             if decision_id:
                 await self._decision_repository.attribute_outcome(
                     str(decision_id), trade_dict
