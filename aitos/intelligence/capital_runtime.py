@@ -9,12 +9,18 @@ capital gate by skipping the scanner/application helper.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import datetime, timezone
 from functools import wraps
+from threading import RLock
 from typing import TYPE_CHECKING, Any
 
+from aitos.config.paths import get_model_data_dir
+from aitos.intelligence.capital_controls import ProbabilityCalibrator
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_protection import CapitalReservation
+from aitos.intelligence.opportunity_outcomes import DirectionalFunnelStore
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 
 if TYPE_CHECKING:
@@ -34,6 +40,65 @@ if TYPE_CHECKING:
 
 _ORIGINAL_ATTR = "_aitos_capital_original_submit_opportunity"
 _GATEWAY_ATTR = "_aitos_capital_gateway"
+_FUNNEL_ATTR = "_aitos_directional_funnel"
+_FUNNEL_LOCK = RLock()
+
+
+def _funnel_store(self: TradeLifecycle) -> DirectionalFunnelStore:
+    with _FUNNEL_LOCK:
+        store = getattr(self, _FUNNEL_ATTR, None)
+        if store is None:
+            store = DirectionalFunnelStore(
+                get_model_data_dir() / "directional_funnel.sqlite3"
+            )
+            setattr(self, _FUNNEL_ATTR, store)
+        return store
+
+
+def _record_funnel_sync(
+    self: TradeLifecycle,
+    *,
+    symbol: str,
+    side: str,
+    stage: str,
+    accepted: bool,
+    reason: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    _funnel_store(self).record(
+        symbol=symbol,
+        side=side,
+        stage=stage,
+        accepted=accepted,
+        reason=reason,
+        details=details,
+    )
+
+
+async def _record_funnel(
+    self: TradeLifecycle,
+    *,
+    symbol: str,
+    side: str,
+    stage: str,
+    accepted: bool,
+    reason: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    try:
+        await asyncio.to_thread(
+            _record_funnel_sync,
+            self,
+            symbol=symbol,
+            side=side,
+            stage=stage,
+            accepted=accepted,
+            reason=reason,
+            details=details,
+        )
+    except Exception:
+        # The ledger is diagnostic only; it must never veto or delay a trade.
+        return
 
 
 def _rejected_trade(opportunity: Opportunity, reason: str) -> Trade:
@@ -86,14 +151,42 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
         consensus["daily_pnl_pct"] = float(portfolio.daily_pnl_pct)
     if hasattr(portfolio, "consecutive_losses"):
         consensus["consecutive_losses"] = int(portfolio.consecutive_losses)
+    for field_name in (
+        "leverage",
+        "liquidation_buffer_pct",
+        "return_observations",
+        "decision_at",
+    ):
+        value = getattr(portfolio, field_name, None)
+        if value is not None:
+            if field_name == "return_observations":
+                consensus[field_name] = tuple(value)[-1_000:]
+            else:
+                consensus[field_name] = value
     positions = getattr(portfolio, "positions", ()) or ()
-    if "position_risk_pct" not in consensus:
-        consensus["position_risk_pct"] = {
-            str(getattr(position, "symbol", "")): 1.0
-            for position in positions
-            if getattr(position, "symbol", "")
-        }
-    if "correlations" not in consensus and positions:
+    equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
+    # The live portfolio is authoritative; scanner-supplied exposure snapshots
+    # may be stale by the time the final lifecycle gate is reached.
+    consensus["position_risk_pct"] = {}
+    consensus["position_sides"] = {}
+    for position in positions:
+        symbol = str(getattr(position, "symbol", "") or "")
+        if not symbol:
+            continue
+        risk_amount = getattr(position, "risk_amount_usd", None)
+        if risk_amount is None or float(risk_amount) <= 0 or equity <= 0:
+            risk_pct = 1.0
+        else:
+            risk_pct = float(risk_amount) / equity * 100.0
+        consensus["position_risk_pct"][symbol] = risk_pct
+        side = getattr(position, "side", None)
+        if side is not None:
+            consensus["position_sides"][symbol] = str(side).upper()
+    if (
+        "correlations" not in consensus
+        and not consensus.get("return_observations")
+        and positions
+    ):
         pairwise = getattr(portfolio, "max_pairwise_correlation", None)
         if pairwise is not None and float(pairwise) > 0.0:
             consensus["correlations"] = {
@@ -106,15 +199,26 @@ def _portfolio_consensus(portfolio: Any, opportunity: Opportunity) -> dict[str, 
     return consensus
 
 
-async def _hard_limit_reason(self: TradeLifecycle, portfolio: Any) -> str | None:
+async def _hard_limit_reason(
+    self: TradeLifecycle, portfolio: Any, opportunity: Opportunity
+) -> str | None:
     """Return a hard-cap reason while preserving RiskEngine emergency effects."""
     risk_engine = getattr(self, "_risk_engine", None)
     if risk_engine is None:
         return None
     try:
         breaches = risk_engine.check_limits(portfolio)
-    except Exception:
-        return None
+    except Exception as exc:
+        await _record_funnel(
+            self,
+            symbol=opportunity.symbol,
+            side=opportunity.side.value,
+            stage="risk_engine_gate",
+            accepted=False,
+            reason="risk_engine_check_failed",
+            details={"error": str(exc)[:500]},
+        )
+        return f"risk engine unavailable: {type(exc).__name__}"
     breach = next(
         (item for item in breaches if getattr(item, "is_hard_cap", False)), None
     )
@@ -145,15 +249,44 @@ def install_capital_guard() -> None:
         *args: Any,
         **kwargs: Any,
     ) -> Trade:
-        hard_limit_reason = await _hard_limit_reason(self, portfolio)
+        trace_id = str(opportunity.agent_consensus.get("trace_id") or "")
+
+        async def record_gate(**event: Any) -> None:
+            details = dict(event.get("details") or {})
+            if trace_id:
+                details.setdefault("trace_id", trace_id)
+            event["details"] = details
+            await _record_funnel(self, **event)
+
+        hard_limit_reason = await _hard_limit_reason(self, portfolio, opportunity)
         if hard_limit_reason is not None:
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="risk_gate",
+                accepted=False,
+                reason=hard_limit_reason,
+            )
             return _rejected_trade(opportunity, hard_limit_reason)
+        await record_gate(
+            symbol=opportunity.symbol,
+            side=opportunity.side.value,
+            stage="risk_gate",
+            accepted=True,
+            reason="hard_limits_clear",
+        )
 
         equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
         if equity <= 0:
-            return _rejected_trade(
-                opportunity, "capital_objective: invalid or unavailable equity"
+            reason = "capital_objective: invalid or unavailable equity"
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=reason,
             )
+            return _rejected_trade(opportunity, reason)
 
         protected_opportunity = replace(
             opportunity,
@@ -161,9 +294,18 @@ def install_capital_guard() -> None:
         )
         gateway = getattr(self, _GATEWAY_ATTR, None)
         if gateway is None:
-            gateway = CapitalGateway()
+            gateway = CapitalGateway(
+                reservation=CapitalReservation(
+                    path=get_model_data_dir() / "capital_reservations.sqlite3"
+                ),
+                calibrator=ProbabilityCalibrator(
+                    path=get_model_data_dir()
+                    / "capital_probability_calibration.sqlite3"
+                ),
+            )
             setattr(self, _GATEWAY_ATTR, gateway)
 
+        reservation_held = False
         try:
             execution_costs = dict(
                 protected_opportunity.agent_consensus.get("execution_costs") or {}
@@ -176,12 +318,47 @@ def install_capital_guard() -> None:
                 funding_bps=float(execution_costs.get("funding_bps", 0.0)),
             )
         except (TypeError, ValueError, ArithmeticError) as exc:
-            return _rejected_trade(protected_opportunity, f"capital_objective: {exc}")
+            reason = f"capital_objective: {exc}"
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=reason,
+            )
+            return _rejected_trade(protected_opportunity, reason)
 
         if not decision.eligible or allocation is None:
-            return _rejected_trade(protected_opportunity, _capital_reason(decision))
+            reason = _capital_reason(decision)
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=reason,
+                details={
+                    "expected_net_edge_pct": decision.expected_net_edge_pct,
+                    "total_cost_pct": decision.total_cost_pct,
+                },
+            )
+            return _rejected_trade(protected_opportunity, reason)
+        await record_gate(
+            symbol=opportunity.symbol,
+            side=opportunity.side.value,
+            stage="capital_gate",
+            accepted=True,
+            reason="capital_authorized",
+            details={
+                "expected_net_edge_pct": decision.expected_net_edge_pct,
+                "total_cost_pct": decision.total_cost_pct,
+                "risk_budget_usd": allocation.risk_budget_usd,
+            },
+        )
 
         consensus = dict(protected_opportunity.agent_consensus)
+        # Historical returns are an input to this one decision, not trade
+        # metadata; keeping them on every position would inflate the ledger.
+        consensus.pop("return_observations", None)
         consecutive_losses = max(
             0, int(protected_opportunity.agent_consensus.get("consecutive_losses", 0))
         )
@@ -190,10 +367,19 @@ def install_capital_guard() -> None:
             if consecutive_losses >= gateway.controls.risk_reduction_after_losses
             else 1.0
         )
+        raw_loss_probability = protected_opportunity.agent_consensus.get(
+            "loss_probability"
+        )
+        if raw_loss_probability is None:
+            raw_loss_probability = 1.0 - float(protected_opportunity.confidence)
+        predicted_loss_probability = gateway.calibrator.calibrate(
+            float(raw_loss_probability)
+        )
         consensus["capital_objective"] = {
             "eligible": True,
             "composite_score": decision.composite_score,
             "expected_net_edge_pct": decision.expected_net_edge_pct,
+            "predicted_loss_probability": predicted_loss_probability,
             "risk_budget_usd": allocation.risk_budget_usd,
             "capital_usd": allocation.capital_usd,
             "risk_budget_pct": (allocation.risk_budget_usd / equity) * 100.0,
@@ -201,11 +387,44 @@ def install_capital_guard() -> None:
         }
         authorized = replace(protected_opportunity, agent_consensus=consensus)
         try:
-            return await original(self, authorized, portfolio, *args, **kwargs)
+            trade = await original(self, authorized, portfolio, *args, **kwargs)
+        except Exception:
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="lifecycle_open",
+                accepted=False,
+                reason="lifecycle_exception",
+            )
+            raise
+        else:
+            accepted = trade.state == TradeLifecycleState.POSITION_OPENED
+            rejection_reason = str(trade.rejection_reason or trade.state.value)
+            stage = (
+                "risk_engine_gate"
+                if "risk veto" in rejection_reason
+                or "hard limit breach" in rejection_reason
+                else (
+                    "governance_gate"
+                    if "governance denied" in rejection_reason
+                    else "lifecycle_open"
+                )
+            )
+            await record_gate(
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage=stage,
+                accepted=accepted,
+                reason="position_opened" if accepted else rejection_reason,
+                details={"trade_id": trade.trade_id},
+            )
+            reservation_held = accepted
+            return trade
         finally:
-            # Reservations cover only the authorization/execution window. The
-            # live portfolio is the source of truth after lifecycle processing.
-            gateway.release(opportunity.symbol)
+            # An open position retains its capital lease until close. Failed
+            # authorization/submission releases the temporary reservation.
+            if not reservation_held:
+                gateway.release(opportunity.symbol)
 
     TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
 

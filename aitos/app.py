@@ -532,7 +532,14 @@ class PaperPortfolioTracker:
         )
         positions = tuple(
             PositionExposure(
-                symbol=t.symbol, notional_usd=t.position_size_usd, leverage=t.leverage
+                symbol=t.symbol,
+                notional_usd=t.position_size_usd,
+                leverage=t.leverage,
+                side=t.side.value,
+                risk_amount_usd=abs(
+                    t.entry_price - float(t.emergency_sl_price or t.sl_price)
+                )
+                * t.quantity,
             )
             for t in open_trades
         )

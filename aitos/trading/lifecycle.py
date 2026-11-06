@@ -37,6 +37,7 @@ partial-reduce or tighten protection.
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -304,6 +305,18 @@ class TradeLifecycle(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        funnel_store = getattr(self, "_aitos_directional_funnel", None)
+        if funnel_store is not None:
+            funnel_store.close()
+            delattr(self, "_aitos_directional_funnel")
+        gateway = getattr(self, "_aitos_capital_gateway", None)
+        if gateway is not None:
+            close_calibrator = getattr(gateway.calibrator, "close", None)
+            if callable(close_calibrator):
+                close_calibrator()
+            close_reservation = getattr(gateway.reservation, "close", None)
+            if callable(close_reservation):
+                close_reservation()
         logger.info(
             "TradeLifecycle shut down",
             extra={"aitos_extra": {"open_trades": len(self._open_trades)}},
@@ -511,6 +524,12 @@ class TradeLifecycle(AITOSModule):
             raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
         if trade.state != TradeLifecycleState.POSITION_OPENED:
             return trade
+        capital_gateway = getattr(self, "_aitos_capital_gateway", None)
+        if capital_gateway is not None and not capital_gateway.renew(trade.symbol):
+            logger.error(
+                "open-position capital reservation lease could not be renewed",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
 
         # Record every valid market observation before evaluating exits so
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
@@ -938,6 +957,27 @@ class TradeLifecycle(AITOSModule):
                 if initial_notional > 0
                 else 0.0
             )
+        if trade.state == TradeLifecycleState.POSITION_CLOSED:
+            gateway = getattr(self, "_aitos_capital_gateway", None)
+            capital_objective = trade.agent_consensus.get("capital_objective", {})
+            predicted_loss_probability = (
+                capital_objective.get("predicted_loss_probability")
+                if isinstance(capital_objective, dict)
+                else None
+            )
+            if gateway is not None and predicted_loss_probability is not None:
+                try:
+                    await asyncio.to_thread(
+                        gateway.calibrator.revise,
+                        float(predicted_loss_probability),
+                        trade.pnl <= 0.0,
+                        observation_id=trade.trade_id,
+                    )
+                except Exception:
+                    logger.exception(
+                        "capital probability calibration revision failed",
+                        extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                    )
         trade.updated_at = utc_now_iso()
         await self._event_bus.publish(
             Event(
@@ -1032,7 +1072,62 @@ class TradeLifecycle(AITOSModule):
         trade.exit_reason = reason
         trade.state = TradeLifecycleState.POSITION_CLOSED
         trade.updated_at = trade.exit_time
+        ere_observations = trade.agent_consensus.get("ere_observations", [])
+        if isinstance(ere_observations, list):
+            for observation in ere_observations:
+                if not isinstance(observation, dict):
+                    continue
+                try:
+                    decision_price = float(observation["price"])
+                    decision_at = datetime.fromisoformat(
+                        str(observation["decision_at"]).replace("Z", "+00:00")
+                    )
+                    exit_at = datetime.fromisoformat(
+                        str(trade.exit_time).replace("Z", "+00:00")
+                    )
+                    if (
+                        decision_price <= 0
+                        or decision_at.tzinfo is None
+                        or exit_at <= decision_at
+                    ):
+                        continue
+                    realized_move_pct = (
+                        (exit_price / decision_price - 1.0) * direction * 100.0
+                    )
+                    observation["realized_remaining_edge_pct"] = (
+                        realized_move_pct
+                        - float(observation.get("estimated_cost_pct", 0.0))
+                    )
+                    observation["outcome_at"] = trade.exit_time
+                except (KeyError, TypeError, ValueError, ArithmeticError):
+                    continue
         self._closed_trades.append(trade)
+        gateway = getattr(self, "_aitos_capital_gateway", None)
+        if gateway is not None:
+            try:
+                gateway.release(trade.symbol)
+            except Exception:
+                logger.exception(
+                    "capital reservation release failed after position close",
+                    extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                )
+        capital_objective = trade.agent_consensus.get("capital_objective", {})
+        if not isinstance(capital_objective, dict):
+            capital_objective = {}
+        predicted_loss_probability = capital_objective.get("predicted_loss_probability")
+        if gateway is not None and predicted_loss_probability is not None:
+            try:
+                await asyncio.to_thread(
+                    gateway.calibrator.observe,
+                    float(predicted_loss_probability),
+                    trade.pnl <= 0.0,
+                    observation_id=trade.trade_id,
+                )
+            except Exception:
+                logger.exception(
+                    "capital probability calibration update failed",
+                    extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                )
         if self._position_manager is not None:
             self._position_manager.clear_trade(trade.trade_id, symbol=trade.symbol)
         self._last_intensive_analysis_at.pop(trade.trade_id, None)
@@ -1208,6 +1303,8 @@ class TradeLifecycle(AITOSModule):
             symbol=opportunity.symbol,
             notional_usd=sizing.position_size_usd,
             leverage=sizing.leverage,
+            side=opportunity.side.value,
+            risk_amount_usd=sizing.risk_amount_usd,
         )
         return PortfolioState(
             equity_usd=portfolio.equity_usd,

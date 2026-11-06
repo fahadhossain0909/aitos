@@ -56,6 +56,10 @@ async def test_journal_auto_records_pre_trade_entry_on_position_opened(
 
     trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
 
+    # The capital gate must authorize a valid legacy lifecycle opportunity so
+    # journal publication can observe the opened-position event.
+    assert trade.state.value == "position_opened"
+    assert trade.agent_consensus["capital_objective"]["eligible"] is True
     assert await _wait_for(lambda: journal.get_explanation(trade.trade_id) is not None)
 
     explanation = journal.get_explanation(trade.trade_id)

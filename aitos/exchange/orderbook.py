@@ -215,6 +215,7 @@ class LocalOrderBook:
         mid = (best_bid + best_ask) / 2.0 if best_bid and best_ask else 0.0
         weighted_ofi = 0.0
         bid_add = bid_reduce = ask_add = ask_reduce = replenished = 0.0
+        bid_replenished = ask_replenished = 0.0
         reduction_levels: list[dict[str, Any]] = []
         now_ms = update.event_time_ms or int(time.time() * 1000)
         horizon_ms = 5000
@@ -243,6 +244,10 @@ class LocalOrderBook:
                     if prior is not None and now_ms - prior[0] <= horizon_ms:
                         restored = min(change, prior[1])
                         replenished += restored
+                        if side == "bid":
+                            bid_replenished += restored
+                        else:
+                            ask_replenished += restored
                         remaining = prior[1] - restored
                         if remaining > 1e-12:
                             self._recent_reductions[key] = (prior[0], remaining)
@@ -286,6 +291,8 @@ class LocalOrderBook:
             "ask_reduce_qty": ask_reduce,
             "inferred_cancel_qty": reductions,
             "replenishment_qty": replenished,
+            "bid_replenishment_qty": bid_replenished,
+            "ask_replenishment_qty": ask_replenished,
             "addition_qty": bid_add + ask_add,
             "reduction_qty": reductions,
             "replenishment_ratio": replenished / max(reductions, 1e-12),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextvars import ContextVar
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -50,6 +51,7 @@ from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.open_interest import oi_trend_score
 from aitos.intelligence.opportunity_outcomes import (
     CandidateOutcomeStore,
+    DirectionalFunnelStore,
     RankingHysteresis,
 )
 from aitos.intelligence.order_flow_engine import OrderFlowEngine
@@ -61,6 +63,7 @@ from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeSide
 
 logger = get_logger("aitos.intelligence.scanner")
+_ACTIVE_SCAN_TRACE_ID: ContextVar[str] = ContextVar("aitos_scan_trace_id", default="")
 TOPIC_SCAN_COMPLETE = "market.opportunity_scanned"
 DEFAULT_WEIGHTS: dict[str, float] = {
     "trend_strength": 0.10,
@@ -199,6 +202,7 @@ class ScanCandidate:
     regime: str
     scanned_at: str = field(default_factory=_utc_now_iso)
     htf_adx: float = 0.0
+    trace_id: str | None = None
 
 
 def _volatility_fitness(
@@ -299,7 +303,11 @@ class OpportunityScanner(AITOSModule):
         self._amt_ib_minutes = amt_ib_minutes
         self._initialized = False
         self._last_oi = {}
-        self._htf_cache = HigherTimeframeCandleCache()
+        self._htf_cache = HigherTimeframeCandleCache(
+            max_requests=self._tuning.scanner.htf_request_budget_per_minute,
+            window_seconds=60.0,
+            max_concurrent_fetches=self._tuning.scanner.htf_fetch_concurrency,
+        )
         self._last_order_books = {}
         self._last_order_book_sources = {}
         self._last_amt_profile = {}
@@ -323,6 +331,9 @@ class OpportunityScanner(AITOSModule):
         self._lightweight_fingerprints: dict[str, str] = {}
         self._candidate_outcomes = CandidateOutcomeStore(
             get_model_data_dir() / "candidate_outcomes.sqlite3"
+        )
+        self._directional_funnel = DirectionalFunnelStore(
+            get_model_data_dir() / "directional_funnel.sqlite3"
         )
         self._ranking_hysteresis = RankingHysteresis(
             margin_points=self._tuning.analysis.ranking_hysteresis_points
@@ -411,6 +422,7 @@ class OpportunityScanner(AITOSModule):
                 ),
                 "candidate_rotation": self._candidate_rotation.snapshot(),
                 "candidate_outcomes": self._candidate_outcomes.snapshot(),
+                "directional_funnel": self._directional_funnel.snapshot(),
                 "ranking_hysteresis": self._ranking_hysteresis.snapshot(),
             },
         )
@@ -418,6 +430,7 @@ class OpportunityScanner(AITOSModule):
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         await self._live_cache.shutdown()
         self._candidate_outcomes.close()
+        self._directional_funnel.close()
         await self._exchange.close()
 
     async def emit_events(self) -> AsyncIterator[Event]:
@@ -447,6 +460,26 @@ class OpportunityScanner(AITOSModule):
 
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
+
+    async def _record_funnel(self, **event: Any) -> None:
+        """Persist diagnostics off-loop; telemetry must not change trade decisions."""
+        trace_id = _ACTIVE_SCAN_TRACE_ID.get()
+        if trace_id:
+            details = dict(event.get("details") or {})
+            details.setdefault("trace_id", trace_id)
+            event["details"] = details
+        try:
+            await asyncio.to_thread(self._directional_funnel.record, **event)
+        except Exception:
+            logger.exception(
+                "directional funnel persistence failed",
+                extra={
+                    "aitos_extra": {
+                        "symbol": event.get("symbol"),
+                        "stage": event.get("stage"),
+                    }
+                },
+            )
 
     def _footprint_tick_size(self, symbol: str) -> float | None:
         tick = self._footprint_tick_sizes.get(symbol)
@@ -492,6 +525,7 @@ class OpportunityScanner(AITOSModule):
         import time
 
         started = time.perf_counter()
+        trace_token = None
         try:
             from aitos.forensics.data_flow_hooks import (
                 note_trace,
@@ -515,6 +549,7 @@ class OpportunityScanner(AITOSModule):
             )
             if not trace_id:
                 trace_id = f"scan:{symbol.upper()}:{time.time_ns()}"
+            trace_token = _ACTIVE_SCAN_TRACE_ID.set(trace_id)
             note_trace(
                 trace_id=trace_id,
                 stage=PipelineStage.SCANNER.value,
@@ -526,7 +561,7 @@ class OpportunityScanner(AITOSModule):
             pass
         try:
             result = await self._scan_symbol_impl(symbol, reference_klines)
-        except Exception:
+        except Exception as exc:
             try:
                 record_error(
                     PipelineStage.SCANNER.value,
@@ -535,7 +570,21 @@ class OpportunityScanner(AITOSModule):
                 )
             except Exception:
                 pass
+            try:
+                await self._record_funnel(
+                    symbol=symbol,
+                    side="UNKNOWN",
+                    stage="scanner_error",
+                    accepted=False,
+                    reason=type(exc).__name__,
+                    details={"error": str(exc)[:500]},
+                )
+            except Exception:
+                pass
             raise
+        finally:
+            if trace_token is not None:
+                _ACTIVE_SCAN_TRACE_ID.reset(trace_token)
         try:
             latency_ms = (time.perf_counter() - started) * 1000.0
             record_output(
@@ -569,6 +618,22 @@ class OpportunityScanner(AITOSModule):
         # must be evaluated only on completed bars, irrespective of source.
         klines = [k for k in klines if getattr(k, "is_closed", True)]
         if len(klines) < 20:
+            await self._record_funnel(
+                symbol=symbol,
+                side="LONG",
+                stage="market_data_gate",
+                accepted=False,
+                reason="insufficient_klines",
+                details={"kline_count": len(klines), "minimum": 20},
+            )
+            await self._record_funnel(
+                symbol=symbol,
+                side="SHORT",
+                stage="market_data_gate",
+                accepted=False,
+                reason="insufficient_klines",
+                details={"kline_count": len(klines), "minimum": 20},
+            )
             logger.info(
                 "paper signal diagnostics",
                 extra={
@@ -582,6 +647,14 @@ class OpportunityScanner(AITOSModule):
             return None
         live_trades, live_book, live_fresh = self._live_market_data(symbol)
         if self._tuning.mode == "live" and not live_fresh:
+            for rejected_side in ("LONG", "SHORT"):
+                await self._record_funnel(
+                    symbol=symbol,
+                    side=rejected_side,
+                    stage="market_data_gate",
+                    accepted=False,
+                    reason="live_market_data_stale_or_unavailable",
+                )
             logger.warning(
                 "entry blocked: live market data is stale or unavailable",
                 extra={
@@ -662,6 +735,78 @@ class OpportunityScanner(AITOSModule):
             structure_bias=market_structure.bias,
             structure_event=market_structure.event,
         )
+        from aitos.intelligence.adaptive_mtf import directional_diagnostics
+
+        directional_funnel = directional_diagnostics(
+            structure_direction,
+            flow_score,
+            structure_bias=market_structure.bias,
+            structure_event=market_structure.event,
+        )
+        selected_side = (
+            directional_funnel["long"]
+            if direction == TradeSide.LONG
+            else directional_funnel["short"] if direction == TradeSide.SHORT else None
+        )
+        candidate_rejection_reasons = (
+            list(selected_side["rejection_reasons"])
+            if selected_side is not None
+            else sorted(
+                set(
+                    directional_funnel["long"]["rejection_reasons"]
+                    + directional_funnel["short"]["rejection_reasons"]
+                )
+            )
+        )
+        try:
+            for side_key in ("long", "short"):
+                side_diagnostic = directional_funnel[side_key]
+                await self._record_funnel(
+                    symbol=symbol,
+                    side=side_key,
+                    stage="directional_gate",
+                    accepted=side_diagnostic["accepted_by_diagnostic"],
+                    reason=(
+                        "accepted"
+                        if side_diagnostic["accepted_by_diagnostic"]
+                        else ",".join(side_diagnostic["rejection_reasons"])
+                    ),
+                    details={
+                        "structure_direction": structure_direction,
+                        "structure_bias": market_structure.bias,
+                        "structure_event": market_structure.event,
+                        "cvd_score": round(flow_score, 4),
+                    },
+                )
+            await self._record_funnel(
+                symbol=symbol,
+                side=direction.value if direction else "UNKNOWN",
+                stage="direction_selection",
+                accepted=direction is not None,
+                reason="selected" if direction is not None else "no_directional_setup",
+                details={"cvd_score": round(flow_score, 4)},
+            )
+        except Exception:
+            logger.exception(
+                "could not persist directional funnel event",
+                extra={"aitos_extra": {"symbol": symbol}},
+            )
+        logger.info(
+            "directional signal funnel",
+            extra={
+                "aitos_extra": {
+                    "symbol": symbol,
+                    "structure_direction": structure_direction,
+                    "structure_bias": market_structure.bias,
+                    "structure_event": market_structure.event,
+                    "cvd_score": round(flow_score, 4),
+                    "selected_direction": direction.value if direction else "none",
+                    "selected_rejection_reasons": candidate_rejection_reasons,
+                    "long": directional_funnel["long"],
+                    "short": directional_funnel["short"],
+                }
+            },
+        )
         # Keep the OI baseline fresh even when the HTF gate rejects this entry.
         self._last_oi[symbol] = oi_current
         htf_alignment_score = 5.0
@@ -672,57 +817,81 @@ class OpportunityScanner(AITOSModule):
         }
         if direction is not None and self._tuning.scanner.htf_filter_enabled:
             try:
-                htf_timeframe = resolve_higher_timeframe(
-                    self._timeframe, self._tuning.scanner.htf_timeframe
+                from aitos.intelligence.multi_timeframe import MultiTimeframeAnalyzer
+
+                mtf = MultiTimeframeAnalyzer(
+                    self._htf_cache,
+                    lookback=self._tuning.scanner.htf_lookback,
+                    freshness_grace_seconds=self._tuning.scanner.htf_freshness_grace_seconds,
                 )
-                htf_klines, htf_cache_diagnostics = await self._htf_cache.get(
+                mtf_result = await mtf.analyze(
+                    self._exchange,
                     symbol,
-                    htf_timeframe,
-                    self._tuning.scanner.htf_lookback,
-                    lambda: self._exchange.fetch_klines(
-                        symbol,
-                        htf_timeframe,
-                        limit=self._tuning.scanner.htf_lookback,
-                    ),
-                )
-                if htf_cache_diagnostics.get("stale"):
-                    logger.warning(
-                        "entry blocked: higher-timeframe cache has not advanced after candle close",
-                        extra={
-                            "aitos_extra": {
-                                "symbol": symbol,
-                                "timeframe": htf_timeframe,
-                                "cache": htf_cache_diagnostics,
-                            }
-                        },
-                    )
-                    return None
-                htf_aligned, htf_diagnostics = higher_timeframe_alignment(
-                    htf_klines,
                     direction,
-                    min_adx=self._tuning.scanner.htf_min_adx,
-                    min_di_gap=self._tuning.scanner.htf_min_di_gap,
+                    klines,
+                    flow_score=flow_score,
+                    structure_bias=market_structure.bias,
+                    allow_neutral=self._tuning.scanner.htf_allow_neutral,
+                    neutral_min_score=self._tuning.scanner.htf_neutral_min_ltf_score,
+                    countertrend_min_score=self._tuning.scanner.htf_countertrend_min_ltf_score,
+                    alignment_balance_threshold=self._tuning.scanner.htf_alignment_balance_threshold,
                 )
-                htf_diagnostics["timeframe"] = htf_timeframe
-                htf_diagnostics["cache"] = htf_cache_diagnostics
-                htf_available = len(htf_klines) >= 30
-                if not htf_aligned:
+                htf_diagnostics = dict(mtf_result.diagnostics)
+                htf_available = bool(mtf_result.diagnostics["available_timeframes"])
+                await self._record_funnel(
+                    symbol=symbol,
+                    side=direction.value,
+                    stage="mtf_gate",
+                    accepted=mtf_result.accepted,
+                    reason=mtf_result.decision.reason,
+                    details=htf_diagnostics,
+                )
+                if not mtf_result.accepted:
+                    await self._record_funnel(
+                        symbol=symbol,
+                        side=direction.value,
+                        stage="scanner_terminal",
+                        accepted=False,
+                        reason="mtf_rejected",
+                        details={"mtf_reason": mtf_result.decision.reason},
+                    )
                     logger.info(
-                        "entry rejected: lower-timeframe signal lacks HTF trend confirmation",
+                        "entry rejected by six-timeframe adaptive policy",
                         extra={
                             "aitos_extra": {
                                 "symbol": symbol,
                                 "direction": direction.value,
                                 "entry_timeframe": self._timeframe,
-                                "htf": htf_diagnostics,
+                                "mtf": htf_diagnostics,
                             }
                         },
                     )
                     return None
-                htf_alignment_score = 10.0
+                mode = mtf_result.decision.mode
+                htf_alignment_score = (
+                    10.0
+                    if mode == "aligned"
+                    else 7.0 if mode == "neutral_or_mixed" else 6.0
+                )
             except Exception as exc:
+                await self._record_funnel(
+                    symbol=symbol,
+                    side=direction.value,
+                    stage="mtf_gate",
+                    accepted=False,
+                    reason="mtf_analysis_error",
+                    details={"error": str(exc)[:500]},
+                )
+                await self._record_funnel(
+                    symbol=symbol,
+                    side=direction.value,
+                    stage="scanner_terminal",
+                    accepted=False,
+                    reason="mtf_analysis_error",
+                )
                 logger.warning(
-                    "entry blocked: higher-timeframe confirmation unavailable",
+                    "entry blocked: multi-timeframe confirmation unavailable: %s",
+                    str(exc),
                     extra={
                         "aitos_extra": {
                             "symbol": symbol,
@@ -751,6 +920,14 @@ class OpportunityScanner(AITOSModule):
         if direction is not None and adverse_flow_without_progress(
             trades, direction.value
         ):
+            await self._record_funnel(
+                symbol=symbol,
+                side=direction.value,
+                stage="execution_quality_gate",
+                accepted=False,
+                reason="adverse_flow_without_price_progress",
+                details={"market_source": market_source},
+            )
             logger.info(
                 "entry rejected: aggressive flow failed to produce price progress",
                 extra={
@@ -761,7 +938,24 @@ class OpportunityScanner(AITOSModule):
                     }
                 },
             )
+            await self._record_funnel(
+                symbol=symbol,
+                side=direction.value,
+                stage="scanner_terminal",
+                accepted=False,
+                reason="adverse_flow_without_price_progress",
+                details={"market_source": market_source},
+            )
             return None
+        if direction is not None:
+            await self._record_funnel(
+                symbol=symbol,
+                side=direction.value,
+                stage="execution_quality_gate",
+                accepted=True,
+                reason="flow_progress_confirmed",
+                details={"market_source": market_source},
+            )
 
         liquidity_quality = liquidity_quality_score(order_book)
         depth_imbalance = depth_imbalance_score(order_book)
@@ -841,6 +1035,18 @@ class OpportunityScanner(AITOSModule):
                         "cancellation_proxy_qty"
                     ],
                     "depth_replenishment_qty": depth_analysis["replenishment_qty"],
+                    "depth_bid_replenishment_qty": depth_analysis[
+                        "bid_replenishment_qty"
+                    ],
+                    "depth_ask_replenishment_qty": depth_analysis[
+                        "ask_replenishment_qty"
+                    ],
+                    "depth_bid_replenishment_ratio": depth_analysis[
+                        "bid_replenishment_ratio"
+                    ],
+                    "depth_ask_replenishment_ratio": depth_analysis[
+                        "ask_replenishment_ratio"
+                    ],
                     "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
                     "depth_inferred_cancel_pressure": depth_analysis[
                         "inferred_cancel_pressure"
@@ -853,6 +1059,18 @@ class OpportunityScanner(AITOSModule):
             },
         )
         if direction is None:
+            await self._record_funnel(
+                symbol=symbol,
+                side="UNKNOWN",
+                stage="scanner_terminal",
+                accepted=False,
+                reason="no_direction_selected",
+                details={
+                    "structure_direction": structure_direction,
+                    "structure_bias": market_structure.bias,
+                    "cvd_score": round(flow_score, 4),
+                },
+            )
             return None
         adx_score = min(10.0, indicators.adx(klines) / 10.0)
         structure_boost = min(2.0, structure_strength * 0.2)
@@ -1016,6 +1234,10 @@ class OpportunityScanner(AITOSModule):
             "depth_matched_trade_count": depth_analysis["matched_trade_count"],
             "depth_cancellation_proxy_qty": depth_analysis["cancellation_proxy_qty"],
             "depth_replenishment_ratio": depth_analysis["replenishment_ratio"],
+            "depth_bid_replenishment_qty": depth_analysis["bid_replenishment_qty"],
+            "depth_ask_replenishment_qty": depth_analysis["ask_replenishment_qty"],
+            "depth_bid_replenishment_ratio": depth_analysis["bid_replenishment_ratio"],
+            "depth_ask_replenishment_ratio": depth_analysis["ask_replenishment_ratio"],
             "entry_timing": entry_timing_score,
             "breakout_acceptance": breakout_acceptance,
             "relative_strength": relative_strength,
@@ -1153,7 +1375,7 @@ class OpportunityScanner(AITOSModule):
                 f"confidence={a_stat_result.probability_confidence:.3f}, "
                 f"advanced_stack={a_stat_result.advanced is not None}"
             )
-        return ScanCandidate(
+        candidate = ScanCandidate(
             symbol=symbol,
             direction=direction,
             composite_score=round(composite, 2),
@@ -1164,7 +1386,21 @@ class OpportunityScanner(AITOSModule):
             atr=atr,
             regime=regime,
             htf_adx=float(htf_diagnostics.get("adx", 0.0)),
+            trace_id=_ACTIVE_SCAN_TRACE_ID.get() or None,
         )
+        await self._record_funnel(
+            symbol=symbol,
+            side=direction.value,
+            stage="scanner_candidate",
+            accepted=True,
+            reason="candidate_scored",
+            details={
+                "composite_score": candidate.composite_score,
+                "component_availability": candidate.component_availability,
+                "regime": candidate.regime,
+            },
+        )
+        return candidate
 
     async def _lightweight_rank_symbols(self, limit: int | None = None) -> list[str]:
         """Rank the configured universe cheaply before invoking full intelligence.
@@ -1353,6 +1589,19 @@ class OpportunityScanner(AITOSModule):
                             timeout=cfg.timeout_seconds,
                         )
                     except Exception as exc:
+                        for rejected_side in ("LONG", "SHORT"):
+                            await self._record_funnel(
+                                symbol=symbol,
+                                side=rejected_side,
+                                stage="scanner_batch",
+                                accepted=False,
+                                reason=(
+                                    "scan_timeout"
+                                    if isinstance(exc, asyncio.TimeoutError)
+                                    else "scan_exception"
+                                ),
+                                details={"error": str(exc)[:500]},
+                            )
                         logger.error(
                             "candidate batch scan failed",
                             extra={
@@ -1396,7 +1645,46 @@ class OpportunityScanner(AITOSModule):
         eligible = [
             c for c in candidates if c.composite_score >= self._min_score_threshold
         ]
-        return self._ranking_hysteresis.rank(eligible, n)
+        eligible_symbols = {candidate.symbol for candidate in eligible}
+        for candidate in candidates:
+            accepted = candidate.symbol in eligible_symbols
+            await self._record_funnel(
+                symbol=candidate.symbol,
+                side=candidate.direction.value,
+                stage="scanner_score_gate",
+                accepted=accepted,
+                reason=(
+                    "score_above_threshold"
+                    if accepted
+                    else "composite_score_below_threshold"
+                ),
+                details={
+                    "composite_score": candidate.composite_score,
+                    "minimum_score": self._min_score_threshold,
+                    "trace_id": candidate.trace_id,
+                },
+            )
+        ranked = self._ranking_hysteresis.rank(eligible, n)
+        ranked_symbols = {candidate.symbol for candidate in ranked}
+        for candidate in eligible:
+            accepted = candidate.symbol in ranked_symbols
+            await self._record_funnel(
+                symbol=candidate.symbol,
+                side=candidate.direction.value,
+                stage="ranking_gate",
+                accepted=accepted,
+                reason=(
+                    "selected_for_execution_queue"
+                    if accepted
+                    else "excluded_by_top_n_or_hysteresis"
+                ),
+                details={
+                    "composite_score": candidate.composite_score,
+                    "top_n": n,
+                    "trace_id": candidate.trace_id,
+                },
+            )
+        return ranked
 
     async def decide_with_kernel(self, candidate: ScanCandidate, kernel: Any) -> Any:
         from aitos.kernel.ai_kernel import DecisionContext
@@ -1454,7 +1742,10 @@ class OpportunityScanner(AITOSModule):
             confidence=round(candidate.composite_score / 100.0, 4),
             strategy_id=strategy_id,
             rationale="; ".join(candidate.rationale),
-            agent_consensus=dict(candidate.component_scores),
+            agent_consensus={
+                **dict(candidate.component_scores),
+                "trace_id": candidate.trace_id,
+            },
             is_production=is_production,
             approved_by=approved_by,
             trailing_sl_enabled=True,

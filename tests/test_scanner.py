@@ -7,6 +7,7 @@ import pytest
 
 from aitos.config.tuning import TuningSettings
 from aitos.exchange.base import ExchangeAdapter
+from aitos.intelligence.htf_cache import timeframe_delta
 from aitos.intelligence.scanner import (
     OpportunityScanner,
     ScanCandidate,
@@ -46,11 +47,23 @@ class FakeScannerExchange(ExchangeAdapter):
 
     async def fetch_klines(self, symbol, timeframe, limit=500) -> list[Kline]:
         if symbol == "ETHUSDT":
-            return make_klines(
+            candles = make_klines(
                 [100.0 + (0.3 if i % 2 == 0 else -0.3) for i in range(40)],
                 taker_buy_ratio=0.5,
             )
-        return make_trending_up_klines(n=40, start=100.0, step=2.0)
+        else:
+            candles = make_trending_up_klines(n=40, start=100.0, step=2.0)
+        interval = timeframe_delta(timeframe)
+        latest_close = datetime.now(timezone.utc) - interval / 2
+        return [
+            replace(
+                candle,
+                timeframe=timeframe,
+                open_time=latest_close - interval * (len(candles) - index),
+                close_time=latest_close - interval * (len(candles) - index - 1),
+            )
+            for index, candle in enumerate(candles)
+        ]
 
     async def fetch_order_book(self, symbol, limit=50) -> OrderBookSnapshot:
         return OrderBookSnapshot(
@@ -305,8 +318,14 @@ async def test_scanner_ignores_in_progress_rest_candle(event_bus):
     class FormingCandleExchange(FakeScannerExchange):
         async def fetch_klines(self, symbol, timeframe, limit=500):
             candles = await super().fetch_klines(symbol, timeframe, limit)
-            candles[-1] = replace(candles[-1], is_closed=False)
-            return candles
+            interval = timeframe_delta(timeframe)
+            forming = replace(
+                candles[-1],
+                open_time=candles[-1].close_time,
+                close_time=candles[-1].close_time + interval,
+                is_closed=False,
+            )
+            return [*candles, forming]
 
     exchange = FormingCandleExchange()
     scanner = OpportunityScanner(

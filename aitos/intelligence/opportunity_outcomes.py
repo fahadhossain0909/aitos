@@ -218,6 +218,119 @@ class CandidateOutcomeStore:
             self._conn.close()
 
 
+class DirectionalFunnelStore:
+    """Durable, bounded event ledger for directional and downstream gate decisions."""
+
+    def __init__(self, path: str | Path, max_events: int = 100_000) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.max_events = max(1_000, int(max_events))
+        self._lock = threading.RLock()
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS directional_funnel_events (
+                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL,
+                symbol TEXT NOT NULL,
+                side TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                accepted INTEGER NOT NULL,
+                reason TEXT NOT NULL,
+                details_json TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_directional_funnel_stage_time
+            ON directional_funnel_events(stage, created_at);
+            """
+        )
+        self._conn.commit()
+
+    def record(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        stage: str,
+        accepted: bool,
+        reason: str = "",
+        details: dict[str, Any] | None = None,
+        timestamp: Any = None,
+    ) -> None:
+        normalized_side = str(side).upper()
+        if normalized_side not in {"LONG", "SHORT", "UNKNOWN"}:
+            raise ValueError("side must be LONG, SHORT or UNKNOWN")
+        if not symbol or not stage:
+            raise ValueError("symbol and stage are required")
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO directional_funnel_events
+                (created_at, symbol, side, stage, accepted, reason, details_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    CandidateOutcomeStore._epoch(timestamp),
+                    symbol.upper(),
+                    normalized_side,
+                    stage,
+                    int(bool(accepted)),
+                    str(reason),
+                    json.dumps(details or {}, sort_keys=True, default=str),
+                ),
+            )
+            self._conn.execute(
+                """
+                DELETE FROM directional_funnel_events
+                WHERE event_id <= (
+                    SELECT COALESCE(MAX(event_id), 0) - ? 
+                    FROM directional_funnel_events
+                )
+                """,
+                (self.max_events,),
+            )
+            self._conn.commit()
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            total = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM directional_funnel_events"
+                ).fetchone()[0]
+            )
+            rows = self._conn.execute(
+                """
+                SELECT stage, side, accepted, reason, COUNT(*) AS events
+                FROM directional_funnel_events
+                GROUP BY stage, side, accepted, reason
+                ORDER BY stage, side, accepted, reason
+                """
+            ).fetchall()
+        stages: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            stage = str(row["stage"])
+            stage_data = stages.setdefault(
+                stage, {"events": 0, "by_side": {}, "reasons": {}}
+            )
+            count = int(row["events"])
+            side = str(row["side"])
+            side_data = stage_data["by_side"].setdefault(
+                side, {"accepted": 0, "rejected": 0}
+            )
+            outcome = "accepted" if row["accepted"] else "rejected"
+            side_data[outcome] += count
+            stage_data["events"] += count
+            reason_key = f"{side}:{outcome}:{row['reason']}"
+            stage_data["reasons"][reason_key] = count
+        return {"events_retained": total, "stages": stages}
+
+    def close(self) -> None:
+        with self._lock:
+            self._conn.close()
+
+
 class RankingHysteresis:
     """Retain a small incumbent-order advantage; raw scores remain untouched."""
 

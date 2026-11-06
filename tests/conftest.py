@@ -31,6 +31,17 @@ from aitos.kernel.ai_kernel import AIKernel
 from aitos.risk.risk_engine import RiskEngine
 
 
+@pytest.fixture(autouse=True)
+def isolate_model_data_dir_per_test(tmp_path, monkeypatch):
+    """Keep durable runtime ledgers isolated between independent test cases.
+
+    Multi-process durability is tested explicitly with a shared tmp_path inside
+    each test; unrelated lifecycle tests must not inherit another test's open
+    position reservations or calibration observations.
+    """
+    monkeypatch.setenv("MODEL_DATA_DIR", str(tmp_path / "model-data"))
+
+
 @pytest_asyncio.fixture
 async def fake_redis():
     client = fake_aioredis.FakeRedis(decode_responses=False)

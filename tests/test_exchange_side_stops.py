@@ -143,6 +143,10 @@ async def test_opening_position_places_resting_sl_and_tp_orders(event_bus, risk_
 
     trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
 
+    # Capital authorization must not pre-empt the lifecycle/exchange-stop
+    # contract for a valid legacy opportunity with no capital metadata.
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    assert trade.agent_consensus["capital_objective"]["eligible"] is True
     assert trade.sl_order_id is not None
     assert len(trade.tp_order_ids) == 1
     assert executor.placed_orders[trade.sl_order_id]["kind"] == "sl"

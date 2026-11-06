@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from math import isfinite
 from typing import Any
 
@@ -20,6 +21,7 @@ from aitos.intelligence.capital_objective import (
     CapitalObjective,
     OpportunityEstimate,
 )
+from aitos.intelligence.point_in_time_risk import PointInTimeCorrelationEstimator
 from aitos.intelligence.capital_protection import (
     CapitalReservation,
     PortfolioProtection,
@@ -112,13 +114,20 @@ class CapitalGateway:
             metadata={
                 "opportunity_id": opportunity.opportunity_id,
                 "detected_at": opportunity.detected_at,
+                "side": opportunity.side.value,
                 "regime": opportunity.regime or consensus.get("runtime_regime"),
                 "volatility_score": volatility,
                 "equity_peak_usd": consensus.get("equity_peak_usd"),
                 "position_risk_pct": consensus.get("position_risk_pct", {}),
+                "position_sides": consensus.get("position_sides", {}),
                 "correlations": consensus.get("correlations", {}),
                 "daily_pnl_pct": consensus.get("daily_pnl_pct", 0.0),
                 "consecutive_losses": consensus.get("consecutive_losses", 0),
+                "leverage": consensus.get("leverage", 1.0),
+                "liquidation_buffer_pct": consensus.get("liquidation_buffer_pct"),
+                "return_observations": consensus.get("return_observations", ()),
+                "decision_at": consensus.get("decision_at") or opportunity.detected_at,
+                "funding_bps": float(funding_bps),
             },
         )
 
@@ -139,7 +148,26 @@ class CapitalGateway:
             elif isinstance(key, str) and ":" in key:
                 a, b = key.split(":", 1)
                 correlations[(a, b)] = float(value)
-        return PortfolioRiskSnapshot(equity_usd, peak, positions, correlations)
+        position_sides = {
+            str(k): str(v).upper()
+            for k, v in dict(metadata.get("position_sides") or {}).items()
+        }
+        if not correlations and metadata.get("return_observations"):
+            decision_at = metadata.get("decision_at")
+            if decision_at is not None:
+                cutoff = (
+                    decision_at
+                    if isinstance(decision_at, datetime)
+                    else datetime.fromisoformat(str(decision_at).replace("Z", "+00:00"))
+                )
+                if cutoff.tzinfo is None:
+                    raise ValueError("decision_at must be timezone-aware")
+                correlations = PointInTimeCorrelationEstimator().estimate(
+                    metadata["return_observations"], as_of=cutoff
+                )
+        return PortfolioRiskSnapshot(
+            equity_usd, peak, positions, correlations, position_sides
+        )
 
     def evaluate(
         self,
@@ -241,8 +269,14 @@ class CapitalGateway:
                 symbol=allocation.symbol,
                 requested_risk_pct=requested_pct,
                 snapshot=snapshot,
+                side=str(metadata.get("side") or "LONG"),
                 regime=str(metadata.get("regime") or ""),
                 volatility_score=metadata.get("volatility_score"),
+                adverse_funding_pct=max(
+                    0.0, float(metadata.get("funding_bps", 0.0)) / 100.0
+                ),
+                liquidation_buffer_pct=metadata.get("liquidation_buffer_pct"),
+                leverage=float(metadata.get("leverage", 1.0)),
             )
             if not protection.allowed:
                 continue
@@ -270,6 +304,10 @@ class CapitalGateway:
                 ),
                 available_capital_usd=available_capital,
                 available_risk_usd=available_risk,
+                capital_limit_usd=equity_usd,
+                risk_limit_usd=(
+                    equity_usd * self.objective.config.max_portfolio_risk_pct / 100.0
+                ),
             ):
                 protected.append(candidate)
         return CapitalGatewayResult(tuple(decisions), tuple(protected))
@@ -296,6 +334,10 @@ class CapitalGateway:
         if decision is None:
             decision = self.objective.evaluate(estimate)
         return decision, result.allocation_for(opportunity.symbol)
+
+    def renew(self, symbol: str) -> bool:
+        """Renew an open-position capital reservation lease."""
+        return self.reservation.renew(symbol)
 
     def release(self, symbol: str) -> Reservation | None:
         """Release a reservation after cancellation/close."""

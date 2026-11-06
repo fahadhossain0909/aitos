@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 import clickhouse_connect
@@ -55,6 +56,14 @@ CREATE_FUNDING_RATES = """
 CREATE TABLE IF NOT EXISTS funding_rates (
     time DateTime64(3, 'UTC'), symbol String, funding_rate Float64, mark_price Float64
 ) ENGINE = MergeTree() PARTITION BY toYYYYMM(time) ORDER BY (symbol, time)
+"""
+CREATE_DEPTH_EVENTS = """
+CREATE TABLE IF NOT EXISTS depth_events (
+    event_time DateTime64(3, 'UTC'), symbol LowCardinality(String),
+    final_update_id UInt64, previous_update_id UInt64, payload_json String
+) ENGINE = MergeTree()
+PARTITION BY toYYYYMM(event_time)
+ORDER BY (symbol, event_time, final_update_id)
 """
 CREATE_OPEN_INTEREST = """
 CREATE TABLE IF NOT EXISTS open_interest (
@@ -111,6 +120,7 @@ CREATE TABLE IF NOT EXISTS portfolio_drawdown_state (
 ALL_DDL = [
     CREATE_MARKET_OHLCV,
     CREATE_ORDER_BOOK_SNAPSHOTS,
+    CREATE_DEPTH_EVENTS,
     CREATE_TRADE_TICKS,
     CREATE_FUNDING_RATES,
     CREATE_OPEN_INTEREST,
@@ -372,6 +382,73 @@ class MarketDataRepository(AITOSModule):
                 "last_update_id",
             ],
         )
+        depth_rows = []
+        for book in books:
+            event = book.depth_event
+            if not isinstance(event, dict) or not event:
+                continue
+            event_time_ms = int(event.get("event_time_ms", 0))
+            if event_time_ms <= 0:
+                continue
+            depth_rows.append(
+                [
+                    datetime.fromtimestamp(event_time_ms / 1000, tz=timezone.utc),
+                    book.symbol,
+                    int(event.get("final_update_id", book.last_update_id)),
+                    int(event.get("previous_update_id", max(0, book.last_update_id - 1))),
+                    json.dumps(event, sort_keys=True, separators=(",", ":")),
+                ]
+            )
+        if depth_rows:
+            await self._insert_rows(
+                "depth_events",
+                depth_rows,
+                column_names=[
+                    "event_time",
+                    "symbol",
+                    "final_update_id",
+                    "previous_update_id",
+                    "payload_json",
+                ],
+            )
+
+    async def save_depth_events(self, events: list[dict[str, Any]]) -> None:
+        """Persist raw sequenced exchange depth deltas for deterministic replay."""
+        self._require_initialized()
+        rows = []
+        for event in events:
+            payload = dict(event.get("payload") or {})
+            final_update_id = payload.get("final_update_id", payload.get("u"))
+            if final_update_id is None:
+                continue
+            first_update_id = payload.get("first_update_id", payload.get("U", 0))
+            previous_update_id = payload.get(
+                "previous_update_id", payload.get("pu", max(0, int(first_update_id) - 1))
+            )
+            event_time = event.get("event_time")
+            if event_time is None:
+                continue
+            rows.append(
+                [
+                    event_time,
+                    str(event["symbol"]).upper(),
+                    int(final_update_id),
+                    int(previous_update_id or 0),
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                ]
+            )
+        if rows:
+            await self._insert_rows(
+                "depth_events",
+                rows,
+                column_names=[
+                    "event_time",
+                    "symbol",
+                    "final_update_id",
+                    "previous_update_id",
+                    "payload_json",
+                ],
+            )
 
     async def save_trade_tick(self, trade: TradeTick) -> None:
         await self.save_trade_ticks([trade])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
@@ -76,7 +77,7 @@ class WalkForwardValidator:
             if test_events:
                 result = BacktestEngine(
                     self.initial_cash, self.fee_rate, self.slippage_bps
-                ).run(test_events, strategy, mark_price)
+                ).run(test_events, copy.deepcopy(strategy), mark_price)
                 windows.append(
                     WindowResult(
                         train_start, train_end, cursor, current_test_end, result
@@ -87,7 +88,7 @@ class WalkForwardValidator:
         holdout_events = self._window(ordered, holdout_start, end)
         holdout = (
             BacktestEngine(self.initial_cash, self.fee_rate, self.slippage_bps).run(
-                holdout_events, strategy, mark_price
+                holdout_events, copy.deepcopy(strategy), mark_price
             )
             if holdout_events
             else None

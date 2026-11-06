@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+import aitos.intelligence.capital_runtime as capital_runtime
 from aitos.app import (
     PaperPortfolioTracker,
     build_system,
@@ -13,6 +14,15 @@ from aitos.app import (
 from aitos.execution.order_executor import SimulatedOrderExecutor
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from tests.test_scanner import FakeScannerExchange
+
+
+@pytest.fixture(autouse=True)
+def isolate_app_wiring_capital_ledger(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        capital_runtime,
+        "get_model_data_dir",
+        lambda: tmp_path,
+    )
 
 
 async def _wait_for(predicate, timeout=3.0, interval=0.05):

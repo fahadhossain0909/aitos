@@ -10,6 +10,10 @@ class FakeRepository:
     def __init__(self):
         self.trades = []
         self.books = []
+        self.depth_events = []
+
+    async def save_depth_events(self, events):
+        self.depth_events.extend(events)
 
     async def save_trade_ticks(self, trades):
         self.trades.extend(trades)
@@ -195,3 +199,28 @@ async def test_persistence_capacity_telemetry_tracks_rejected_history():
     assert capacity["enqueued"] == 1
     assert capacity["rejected"] == 1
     assert capacity["max_queue_depth"] == 1
+
+
+@pytest.mark.asyncio
+async def test_book_delta_is_persisted_without_snapshot_sampling():
+    repo = FakeRepository()
+    sink = make_sink(repo)
+    delta = event(
+        MarketEventType.BOOK_DELTA,
+        {
+            "first_update_id": 101,
+            "final_update_id": 101,
+            "previous_update_id": 100,
+            "bids": [[100.0, 3.0]],
+            "asks": [[101.0, 4.0]],
+        },
+    )
+    await sink._enqueue(delta)
+    assert sink.snapshot()["queue_depth"] == 1
+    assert sink.snapshot()["filtered"] == 0
+
+    await sink._persist_batch([delta])
+
+    assert len(repo.depth_events) == 1
+    assert repo.depth_events[0]["symbol"] == "BTCUSDT"
+    assert repo.depth_events[0]["payload"]["final_update_id"] == 101

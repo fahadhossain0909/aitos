@@ -144,10 +144,11 @@ class ExitIntelligenceEngine:
         if market_state.structure == StructureBias.BROKEN:
             hard_invalidation = True
 
-        ere, path_reasons = self._path_and_ere(
+        ere, path_reasons, path_ev = self._path_and_ere(
             side, current_price, path_plan, transaction_cost_pct
         )
         reasons.extend(path_reasons)
+        features.update(path_ev)
         features["expected_remaining_edge"] = ere
 
         if structural_stop is not None:
@@ -334,10 +335,20 @@ class ExitIntelligenceEngine:
         current_price: float,
         plan: PathPlan | None,
         cost_pct: float,
-    ) -> tuple[float, list[ExitReason]]:
+    ) -> tuple[float, list[ExitReason], dict[str, float]]:
         reasons: list[ExitReason] = []
         if plan is None or current_price <= 0:
-            return 0.0, reasons
+            return (
+                0.0,
+                reasons,
+                {
+                    "path_expected_gain_fraction": 0.0,
+                    "path_expected_loss_fraction": 0.0,
+                    "path_upside_probability_mass": 0.0,
+                    "path_downside_probability_mass": 0.0,
+                    "path_transaction_cost_fraction": max(0.0, cost_pct),
+                },
+            )
         if side == "LONG":
             upside_dests, downside_dests = plan.upside, plan.downside
         else:
@@ -385,7 +396,14 @@ class ExitIntelligenceEngine:
             reasons.append(
                 ExitReason("negative_ere", f"Heuristic remaining edge={ere:.4f}", +0.15)
             )
-        return ere, reasons
+        diagnostics = {
+            "path_expected_gain_fraction": expected_gain,
+            "path_expected_loss_fraction": expected_loss,
+            "path_upside_probability_mass": total_up,
+            "path_downside_probability_mass": total_down,
+            "path_transaction_cost_fraction": max(0.0, cost_pct),
+        }
+        return ere, reasons, diagnostics
 
     def _decide(
         self,
