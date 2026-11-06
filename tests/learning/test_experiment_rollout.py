@@ -212,7 +212,6 @@ def test_experiment_plan_rejects_unsupported_or_weak_diagnostics():
         )
 
 
-
 def test_healthy_canary_requires_approval_then_supports_rollback(tmp_path):
     registry = FakeRegistry()
     routed = []
@@ -260,7 +259,9 @@ def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(tmp_path
         FakeRegistry(),
         canary_router=lambda *args: None,
         production_router=lambda *args: None,
-        rollback_router=lambda *args: (_ for _ in ()).throw(RuntimeError("router unavailable")),
+        rollback_router=lambda *args: (_ for _ in ()).throw(
+            RuntimeError("router unavailable")
+        ),
         minimum_canary_samples=1,
         minimum_canary_observations=1,
     )

@@ -34,7 +34,9 @@ class RolloutCoordinator:
         minimum_return_delta: float = -0.02,
     ) -> None:
         if minimum_canary_samples < 1 or minimum_canary_observations < 1:
-            raise ValueError("canary sample and observation thresholds must be positive")
+            raise ValueError(
+                "canary sample and observation thresholds must be positive"
+            )
         if not 0 <= maximum_error_rate <= 1 or not 0 <= maximum_drawdown <= 1:
             raise ValueError("canary thresholds must be in [0, 1]")
         self.path, self.registry = path, registry
@@ -216,18 +218,17 @@ class RolloutCoordinator:
                 except Exception as exc:
                     row["state"] = "rollback_pending"
                     row["rollback_reason"] = "canary_rollback_route_failed"
-                    row["rollback_error"] = str(exc)
-                row["audit"].append(
-                    {
-                        "state": row["state"],
-                        "at": now,
                         "reason": row["rollback_reason"],
                     }
                 )
             elif (
                 sample_count >= self.minimum_canary_samples
-                and len(row["canary_observations"])
-                >= self.minimum_canary_observations
+                and len(row["canary_observations"]) >= self.minimum_canary_observations
+            ):
+                row["state"] = "canary_healthy"
+                row["audit"].append({"state": "canary_healthy", "at": now})
+            self._write(rows)
+            return dict(row)
             ):
                 row["state"] = "canary_healthy"
                 row["audit"].append({"state": "canary_healthy", "at": now})
