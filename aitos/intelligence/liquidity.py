@@ -209,6 +209,10 @@ def depth_event_flow_analysis(
             "attribution_pending_qty": 0.0,
             "execution_attributed_ratio": 0.0,
             "replenishment_qty": 0.0,
+            "bid_replenishment_qty": 0.0,
+            "ask_replenishment_qty": 0.0,
+            "bid_replenishment_ratio": 0.0,
+            "ask_replenishment_ratio": 0.0,
             "replenishment_ratio": 0.0,
             "inferred_cancel_pressure": 0.0,
             "addition_qty": 0.0,
@@ -267,6 +271,8 @@ def depth_event_flow_analysis(
             "ask_add_qty",
             "ask_reduce_qty",
             "replenishment_qty",
+            "bid_replenishment_qty",
+            "ask_replenishment_qty",
             "addition_qty",
             "matched_execution_qty",
             "matched_bid_execution_qty",
@@ -321,6 +327,16 @@ def depth_event_flow_analysis(
             "timestamped_event_count": float(len(timestamped)),
             "replenishment_ratio": round(
                 totals["replenishment_qty"] / max(reduction_total, 1e-12), 4
+            ),
+            "bid_replenishment_ratio": round(
+                totals["bid_replenishment_qty"]
+                / max(totals["bid_reduce_qty"], 1e-12),
+                4,
+            ),
+            "ask_replenishment_ratio": round(
+                totals["ask_replenishment_qty"]
+                / max(totals["ask_reduce_qty"], 1e-12),
+                4,
             ),
             "inferred_cancel_pressure": round(
                 cancellation_proxy
