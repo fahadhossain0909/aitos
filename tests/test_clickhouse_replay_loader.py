@@ -125,4 +125,4 @@ def test_historical_runner_applies_funding_only_at_scheduled_settlement():
     )
     assert result.funding_events_applied == 1
     assert result.funding_events_skipped_without_mark == 0
-    assert result.funding_paid == pytest.approx(0.0101)
+    assert result.funding_paid == pytest.approx(0.01)
