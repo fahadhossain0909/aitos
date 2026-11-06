@@ -426,12 +426,11 @@ class CapitalReservation:
             )
         if self._conn is None:
             with self._lock:
-                previous = self._reservations.get(reservation.symbol)
-                released_capital = previous.capital_usd if previous else 0.0
-                released_risk = previous.risk_budget_usd if previous else 0.0
-                if reservation.capital_usd > available_capital_usd + released_capital:
+                if reservation.symbol in self._reservations:
                     return False
-                if reservation.risk_budget_usd > available_risk_usd + released_risk:
+                if reservation.capital_usd > available_capital_usd:
+                    return False
+                if reservation.risk_budget_usd > available_risk_usd:
                     return False
                 self._reservations[reservation.symbol] = reservation
                 return True
@@ -460,7 +459,7 @@ class CapitalReservation:
                     "FROM capital_reservations WHERE symbol = ?",
                     (reservation.symbol.upper(),),
                 ).fetchone()
-                if existing is not None and existing[0] != self._owner_id:
+                if existing is not None:
                     self._conn.rollback()
                     return False
                 totals = self._conn.execute(
