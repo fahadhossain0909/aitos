@@ -199,3 +199,22 @@ def test_portfolio_consensus_keeps_explicit_side_and_risk_overrides():
     result = _portfolio_consensus(portfolio, opportunity)
     assert result["position_risk_pct"]["BTCUSDT"] == 2.0
     assert result["position_sides"]["BTCUSDT"] == "SHORT"
+
+
+
+def test_capital_gateway_snapshot_preserves_candidate_and_existing_position_sides():
+    opportunity = make_opportunity(
+        symbol="ETHUSDT",
+        side=TradeSide.SHORT,
+        agent_consensus={
+            "position_risk_pct": {"BTCUSDT": 1.5},
+            "position_sides": {"BTCUSDT": "LONG"},
+            "correlations": {"BTCUSDT:ETHUSDT": 0.9},
+        },
+    )
+    gateway = CapitalGateway()
+    estimate = gateway.estimate_opportunity(opportunity)
+    snapshot = gateway._snapshot(10_000.0, estimate)
+    assert estimate.metadata["side"] == "SHORT"
+    assert snapshot.position_sides == {"BTCUSDT": "LONG"}
+    assert snapshot.correlation("BTCUSDT", "ETHUSDT", 0.75) == pytest.approx(0.9)
