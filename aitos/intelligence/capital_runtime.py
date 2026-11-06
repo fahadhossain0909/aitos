@@ -9,12 +9,16 @@ capital gate by skipping the scanner/application helper.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import replace
 from datetime import datetime, timezone
 from functools import wraps
+from threading import RLock
 from typing import TYPE_CHECKING, Any
 
+from aitos.config.paths import get_model_data_dir
 from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.opportunity_outcomes import DirectionalFunnelStore
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 
 if TYPE_CHECKING:
@@ -34,6 +38,44 @@ if TYPE_CHECKING:
 
 _ORIGINAL_ATTR = "_aitos_capital_original_submit_opportunity"
 _GATEWAY_ATTR = "_aitos_capital_gateway"
+_FUNNEL_ATTR = "_aitos_directional_funnel"
+_FUNNEL_LOCK = RLock()
+
+
+def _funnel_store(self: TradeLifecycle) -> DirectionalFunnelStore:
+    with _FUNNEL_LOCK:
+        store = getattr(self, _FUNNEL_ATTR, None)
+        if store is None:
+            store = DirectionalFunnelStore(
+                get_model_data_dir() / "directional_funnel.sqlite3"
+            )
+            setattr(self, _FUNNEL_ATTR, store)
+        return store
+
+
+async def _record_funnel(
+    self: TradeLifecycle,
+    *,
+    symbol: str,
+    side: str,
+    stage: str,
+    accepted: bool,
+    reason: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    try:
+        await asyncio.to_thread(
+            _funnel_store(self).record,
+            symbol=symbol,
+            side=side,
+            stage=stage,
+            accepted=accepted,
+            reason=reason,
+            details=details,
+        )
+    except Exception:
+        # The ledger is diagnostic only; it must never veto or delay a trade.
+        return
 
 
 def _rejected_trade(opportunity: Opportunity, reason: str) -> Trade:
@@ -161,13 +203,36 @@ def install_capital_guard() -> None:
     ) -> Trade:
         hard_limit_reason = await _hard_limit_reason(self, portfolio)
         if hard_limit_reason is not None:
+            await _record_funnel(
+                self,
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="risk_gate",
+                accepted=False,
+                reason=hard_limit_reason,
+            )
             return _rejected_trade(opportunity, hard_limit_reason)
+        await _record_funnel(
+            self,
+            symbol=opportunity.symbol,
+            side=opportunity.side.value,
+            stage="risk_gate",
+            accepted=True,
+            reason="hard_limits_clear",
+        )
 
         equity = float(getattr(portfolio, "equity_usd", 0.0) or 0.0)
         if equity <= 0:
-            return _rejected_trade(
-                opportunity, "capital_objective: invalid or unavailable equity"
+            reason = "capital_objective: invalid or unavailable equity"
+            await _record_funnel(
+                self,
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=reason,
             )
+            return _rejected_trade(opportunity, reason)
 
         protected_opportunity = replace(
             opportunity,
@@ -190,10 +255,45 @@ def install_capital_guard() -> None:
                 funding_bps=float(execution_costs.get("funding_bps", 0.0)),
             )
         except (TypeError, ValueError, ArithmeticError) as exc:
-            return _rejected_trade(protected_opportunity, f"capital_objective: {exc}")
+            reason = f"capital_objective: {exc}"
+            await _record_funnel(
+                self,
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=reason,
+            )
+            return _rejected_trade(protected_opportunity, reason)
 
         if not decision.eligible or allocation is None:
-            return _rejected_trade(protected_opportunity, _capital_reason(decision))
+            reason = _capital_reason(decision)
+            await _record_funnel(
+                self,
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="capital_gate",
+                accepted=False,
+                reason=reason,
+                details={
+                    "expected_net_edge_pct": decision.expected_net_edge_pct,
+                    "total_cost_pct": decision.total_cost_pct,
+                },
+            )
+            return _rejected_trade(protected_opportunity, reason)
+        await _record_funnel(
+            self,
+            symbol=opportunity.symbol,
+            side=opportunity.side.value,
+            stage="capital_gate",
+            accepted=True,
+            reason="capital_authorized",
+            details={
+                "expected_net_edge_pct": decision.expected_net_edge_pct,
+                "total_cost_pct": decision.total_cost_pct,
+                "risk_budget_usd": allocation.risk_budget_usd,
+            },
+        )
 
         consensus = dict(protected_opportunity.agent_consensus)
         consecutive_losses = max(
@@ -215,7 +315,31 @@ def install_capital_guard() -> None:
         }
         authorized = replace(protected_opportunity, agent_consensus=consensus)
         try:
-            return await original(self, authorized, portfolio, *args, **kwargs)
+            trade = await original(self, authorized, portfolio, *args, **kwargs)
+        except Exception:
+            await _record_funnel(
+                self,
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="lifecycle_open",
+                accepted=False,
+                reason="lifecycle_exception",
+            )
+            raise
+        else:
+            accepted = trade.state == TradeLifecycleState.POSITION_OPENED
+            await _record_funnel(
+                self,
+                symbol=opportunity.symbol,
+                side=opportunity.side.value,
+                stage="lifecycle_open",
+                accepted=accepted,
+                reason="position_opened"
+                if accepted
+                else str(trade.rejection_reason or trade.state.value),
+                details={"trade_id": trade.trade_id},
+            )
+            return trade
         finally:
             # Reservations cover only the authorization/execution window. The
             # live portfolio is the source of truth after lifecycle processing.
