@@ -93,7 +93,7 @@ class LifecycleEventReplay:
                         payload=dict(payload),
                     )
                 )
-            except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
                 raise ValueError(
                     f"invalid lifecycle replay row {line_no}: {exc}"
                 ) from exc
