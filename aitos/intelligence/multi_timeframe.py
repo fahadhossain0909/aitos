@@ -46,7 +46,13 @@ TIMEFRAME_EVIDENCE_FIELDS = {
     "4h": ("structure", "liquidity", "participation", "displacement_atr"),
     "1h": ("structure", "momentum", "location", "displacement_atr"),
     "15m": ("momentum", "order_flow", "participation", "displacement_atr"),
-    "5m": ("liquidity", "participation", "lower_sweep_reclaim", "upper_sweep_reclaim", "displacement_atr"),
+    "5m": (
+        "liquidity",
+        "participation",
+        "lower_sweep_reclaim",
+        "upper_sweep_reclaim",
+        "displacement_atr",
+    ),
     "1m": ("momentum", "liquidity", "location", "displacement_atr"),
 }
 
