@@ -80,7 +80,6 @@ def test_capital_gateway_uses_point_in_time_return_history():
     )
 
 
-
 def test_correlation_uses_identical_return_intervals_when_one_asset_has_gaps():
     start = datetime(2026, 2, 1, tzinfo=timezone.utc)
     rows = []
@@ -98,7 +97,6 @@ def test_correlation_uses_identical_return_intervals_when_one_asset_has_gaps():
     )
     result = estimator.estimate(rows, as_of=start + timedelta(days=34))
     assert result[("AAA", "BBB")] == pytest.approx(1.0)
-
 
 
 def test_point_in_time_covariance_is_symmetric_and_bounded_by_cutoff():
@@ -119,9 +117,7 @@ def test_point_in_time_covariance_is_symmetric_and_bounded_by_cutoff():
     estimator = PointInTimeCorrelationEstimator(
         min_observations=10, shrinkage_observations=20
     )
-    covariance = estimator.estimate_covariance(
-        rows, as_of=start + timedelta(days=29)
-    )
+    covariance = estimator.estimate_covariance(rows, as_of=start + timedelta(days=29))
     assert covariance[("AAA", "BBB")] == covariance[("BBB", "AAA")]
     assert covariance[("AAA", "AAA")] > 0.0
     assert covariance[("AAA", "BBB")] > 0.0
