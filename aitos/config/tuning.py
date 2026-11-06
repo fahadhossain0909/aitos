@@ -57,6 +57,9 @@ class ScannerTuning(BaseModel):
     htf_lookback: int = Field(default=80, ge=30, le=1000)
     htf_min_adx: float = Field(default=25.0, ge=0, le=100)
     htf_min_di_gap: float = Field(default=5.0, ge=0, le=100)
+    htf_neutral_min_ltf_score: float = Field(default=6.0, ge=0, le=10)
+    htf_countertrend_min_ltf_score: float = Field(default=7.0, ge=0, le=10)
+    htf_allow_neutral: bool = True
 
 
 class AnalysisTuning(BaseModel):
@@ -265,6 +268,21 @@ def _env_overrides() -> dict[str, Any]:
             "scanner",
             "htf_min_di_gap",
             float,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_NEUTRAL_MIN_LTF_SCORE": (
+            "scanner",
+            "htf_neutral_min_ltf_score",
+            float,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_COUNTERTREND_MIN_LTF_SCORE": (
+            "scanner",
+            "htf_countertrend_min_ltf_score",
+            float,
+        ),
+        "AITOS_TUNING_SCANNER_HTF_ALLOW_NEUTRAL": (
+            "scanner",
+            "htf_allow_neutral",
+            _parse_bool,
         ),
         "AITOS_TUNING_SCANNER_CORE_SYMBOLS": (
             "scanner",
