@@ -75,6 +75,43 @@ class HTFDecision:
     diagnostics: Mapping[str, Any]
 
 
+def _role_directional_score(context: TimeframeContext, side: TradeSide) -> float | None:
+    """Score only the evidence assigned to this timeframe's market role."""
+    raw = context.diagnostics.get("role_evidence", {})
+    if not isinstance(raw, Mapping) or not raw:
+        return None
+    values = []
+    for key in ("structure", "order_flow", "momentum", "liquidity", "location", "participation"):
+        value = raw.get(key)
+        if value is None:
+            continue
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            continue
+        if isfinite(score) and 0.0 <= score <= 10.0:
+            values.append(score if side == TradeSide.LONG else 10.0 - score)
+    if not values:
+        values = [5.0]
+    adjustment = 0.0
+    lower_sweep = bool(raw.get("lower_sweep_reclaim", False))
+    upper_sweep = bool(raw.get("upper_sweep_reclaim", False))
+    bullish_displacement = bool(raw.get("bullish_sweep_displacement", False))
+    bearish_displacement = bool(raw.get("bearish_sweep_displacement", False))
+    if not (lower_sweep and upper_sweep):
+        if side == TradeSide.LONG:
+            adjustment += 1.5 if lower_sweep else 0.0
+            adjustment -= 1.5 if upper_sweep else 0.0
+            adjustment += 1.0 if bullish_displacement else 0.0
+            adjustment -= 1.0 if bearish_displacement else 0.0
+        else:
+            adjustment += 1.5 if upper_sweep else 0.0
+            adjustment -= 1.5 if lower_sweep else 0.0
+            adjustment += 1.0 if bearish_displacement else 0.0
+            adjustment -= 1.0 if bullish_displacement else 0.0
+    return round(max(0.0, min(10.0, sum(values) / len(values) + adjustment)), 4)
+
+
 def evaluate_adaptive_htf(
     side: TradeSide,
     contexts: Iterable[TimeframeContext],
@@ -118,7 +155,21 @@ def evaluate_adaptive_htf(
     ]
     opposed = [c for c in directional if c not in aligned]
     neutral = [c for c in valid if c.bias in {"neutral", "unknown"}]
-    weights = [max(0.25, c.strength / 10.0) * c.weight for c in directional]
+    role_scores = {
+        c.timeframe: score
+        for c in valid
+        if (score := _role_directional_score(c, side)) is not None
+    }
+    role_weight_factors = {
+        timeframe: round(0.5 + score / 20.0, 4)
+        for timeframe, score in role_scores.items()
+    }
+    weights = [
+        max(0.25, c.strength / 10.0)
+        * c.weight
+        * role_weight_factors.get(c.timeframe, 1.0)
+        for c in directional
+    ]
     signed = [(1.0 if c in aligned else -1.0) * w for c, w in zip(directional, weights)]
     trend_balance = sum(signed) / sum(weights) if weights else 0.0
     ltf_score = ltf.score_for(side)
@@ -132,6 +183,8 @@ def evaluate_adaptive_htf(
         "aligned": [c.timeframe for c in aligned],
         "opposed": [c.timeframe for c in opposed],
         "timeframe_weights": {c.timeframe: c.weight for c in directional},
+        "role_directional_scores": role_scores,
+        "role_weight_factors": role_weight_factors,
         "neutral": [c.timeframe for c in neutral],
         "ltf_score": ltf_score,
         "invalid_timeframes": list(invalid),
