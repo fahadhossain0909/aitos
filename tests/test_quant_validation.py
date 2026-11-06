@@ -6,6 +6,8 @@ from aitos.evaluation.quant_validation import (
     chronological_walk_forward_splits,
     comparative_report,
     evaluate_fold_results,
+    execution_cost_sensitivity,
+    expected_remaining_edge_calibration,
     expectancy_confidence_interval,
     probability_calibration,
     rejected_opportunity_counterfactual,
@@ -146,3 +148,31 @@ def test_validation_rejects_ambiguous_rejected_opportunity_labels():
     rows[0]["rejected_opportunity"] = "false"
     with pytest.raises(ValueError, match="rejected_opportunity"):
         validate_observations(rows)
+
+
+
+def test_expected_remaining_edge_calibration_reports_out_of_sample_error():
+    rows = [
+        {"predicted_remaining_edge_pct": 0.5, "realized_remaining_edge_pct": 0.4},
+        {"predicted_remaining_edge_pct": 0.2, "realized_remaining_edge_pct": -0.1},
+    ]
+    result = expected_remaining_edge_calibration(rows)
+    assert result["available"] is True
+    assert result["samples"] == 2
+    assert result["mean_absolute_error_pct"] == pytest.approx(0.2)
+    assert result["positive_prediction_realization_rate"] == pytest.approx(0.5)
+
+
+def test_execution_cost_sensitivity_stresses_fees_slippage_and_funding():
+    rows = [
+        {
+            "gross_pnl_usd": 10.0,
+            "fees_usd": 1.0,
+            "slippage_cost_usd": 0.5,
+            "funding_usd": 0.5,
+        }
+    ]
+    result = execution_cost_sensitivity(rows, cost_multipliers=(1.0, 2.0))
+    assert result["available"] is True
+    assert [item["net_pnl_usd"] for item in result["scenarios"]] == [8.0, 6.0]
+    assert execution_cost_sensitivity([{"gross_pnl_usd": 1.0}])["available"] is False
