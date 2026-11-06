@@ -210,7 +210,6 @@ def test_role_specific_evidence_adjusts_timeframe_weight_and_is_auditable():
     )
 
 
-
 def test_choch_directional_attribution_matches_reversal_entry_policy():
     bullish_flip = directional_diagnostics(
         "bullish_bos",
