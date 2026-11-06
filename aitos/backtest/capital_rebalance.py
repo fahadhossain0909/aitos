@@ -157,20 +157,25 @@ class CapitalRebalanceReplay:
                 active_symbol = candidate_symbol
                 switches += 1
                 switch_log.append(
-                    (frame.timestamp, old_symbol, active_symbol, decision.net_advantage_pct)
+                    (
+                        frame.timestamp,
+                        old_symbol,
+                        active_symbol,
+                        decision.net_advantage_pct,
+                    )
                 )
 
             active_return = float(returns[active_symbol])
             if not isfinite(active_return) or active_return <= -100.0:
-                raise ValueError("active realized return must be finite and above -100%")
+                raise ValueError(
+                    "active realized return must be finite and above -100%"
+                )
             if baseline_return <= -100.0:
                 raise ValueError("hold-only realized return must be above -100%")
             rebalanced_equity *= 1.0 + active_return / 100.0
             rebalanced_curve.append(rebalanced_equity)
 
-        final_cost_pct = (
-            final_exit_fee_bps + final_exit_slippage_bps
-        ) * 0.01
+        final_cost_pct = (final_exit_fee_bps + final_exit_slippage_bps) * 0.01
         if final_cost_pct >= 100.0:
             raise ValueError("final exit cost would consume equity")
         hold_equity *= 1.0 - final_cost_pct / 100.0
@@ -196,6 +201,7 @@ class CapitalRebalanceReplay:
             incremental_return_pct=(
                 rebalanced_metrics.net_return_pct - hold_metrics.net_return_pct
             ),
-            incremental_equity=rebalanced_metrics.final_equity - hold_metrics.final_equity,
+            incremental_equity=rebalanced_metrics.final_equity
+            - hold_metrics.final_equity,
             switch_log=tuple(switch_log),
         )
