@@ -328,15 +328,21 @@ def install_capital_guard() -> None:
             raise
         else:
             accepted = trade.state == TradeLifecycleState.POSITION_OPENED
+            rejection_reason = str(trade.rejection_reason or trade.state.value)
+            stage = (
+                "risk_engine_gate"
+                if "risk veto" in rejection_reason or "hard limit breach" in rejection_reason
+                else "governance_gate"
+                if "governance denied" in rejection_reason
+                else "lifecycle_open"
+            )
             await _record_funnel(
                 self,
                 symbol=opportunity.symbol,
                 side=opportunity.side.value,
-                stage="lifecycle_open",
+                stage=stage,
                 accepted=accepted,
-                reason="position_opened"
-                if accepted
-                else str(trade.rejection_reason or trade.state.value),
+                reason="position_opened" if accepted else rejection_reason,
                 details={"trade_id": trade.trade_id},
             )
             return trade
