@@ -93,6 +93,7 @@ def _write_event_file(path):
     )
     return path
 
+
 def test_lifecycle_replay_normalizes_raw_binance_user_stream_events(tmp_path):
     path = tmp_path / "binance-user-stream.jsonl"
     raw_order = {
