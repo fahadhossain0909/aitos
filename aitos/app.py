@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from aitos.config.paths import get_model_data_dir
 from aitos.config.settings import get_settings
@@ -37,7 +37,7 @@ from aitos.kernel.ai_kernel import AIKernel
 from aitos.knowledge_graph.correlation_updater import SymbolCorrelationUpdater
 from aitos.knowledge_graph.writer import GraphDriver, KnowledgeGraphWriter
 from aitos.logging_setup import get_logger
-from aitos.models.trade import TradeLifecycleState
+from aitos.models.trade import Opportunity, TradeLifecycleState
 from aitos.risk.models import PortfolioState, PositionExposure, RiskLimits
 from aitos.risk.risk_engine import RiskEngine
 from aitos.trading.lifecycle import TradeLifecycle
@@ -47,6 +47,10 @@ from aitos.xai.attention_explainer import AttentionExplainer
 from aitos.xai.attention_feedback import AttentionFeedbackLoop
 from aitos.xai.ml_explainer import TradeOutcomeClassifier
 from aitos.xai.ml_feedback import MLExplainerFeedbackLoop
+
+PositionSwitchingFactory = Callable[
+    [TradeLifecycle, PositionManager | None, ExchangeAdapter, OrderExecutor], Any
+]
 
 logger = get_logger("aitos.app")
 
@@ -158,6 +162,7 @@ async def build_system(
     min_score_threshold: float = 60.0,
     top_n: int | None = None,
     enable_exit_intelligence: bool = False,
+    position_switching_factory: PositionSwitchingFactory | None = None,
 ) -> SystemComponents:
     settings = get_settings()
     tuning = settings.tuning
@@ -309,6 +314,15 @@ async def build_system(
             object.__setattr__(trade_lifecycle, "handle_event", _handle_with_context)
             object.__setattr__(trade_lifecycle, "close_trade", _close_with_clear)
         logger.info("LiveStateContextProvider wired into TradeLifecycle")
+    if position_switching_factory is not None:
+        coordinator = position_switching_factory(
+            trade_lifecycle, position_manager, exchange, order_executor
+        )
+        if inspect.isawaitable(coordinator):
+            coordinator = await coordinator
+        trade_lifecycle.configure_position_switching(coordinator)
+        logger.info("Durable position-switching coordinator explicitly configured")
+
     decision_journal = decision_journal_repository or DecisionJournalRepository()
     journal = JournalSystem(
         event_bus=event_bus,
@@ -611,8 +625,105 @@ async def run_scan_and_trade_cycle(
     target_opportunities = components.scanner.target_opportunities
     stop_cycle = False
 
-    async for ranked_batch in components.scanner.iter_candidate_batches():
+    ranked_batches = [
+        batch async for batch in components.scanner.iter_candidate_batches()
+    ]
+    prevalidated: dict[int, tuple[Any, Opportunity]] = {}
+    rebalance_opportunities: list[Opportunity] = []
+    for batch in ranked_batches:
+        for candidate in batch:
+            if open_symbol_counts.get(candidate.symbol, 0) >= max_per_symbol:
+                continue
+            kernel_decision = await components.scanner.decide_with_kernel(
+                candidate, components.kernel
+            )
+            if (
+                kernel_decision.direction != candidate.direction.value.lower()
+                or kernel_decision.confidence < components.kernel.fusion_min_confidence
+            ):
+                components.scanner.record_candidate_rejection(
+                    candidate, "kernel_rejection"
+                )
+                prevalidated[id(candidate)] = (None, None)
+                continue
+            opportunity = components.scanner.to_opportunity(
+                candidate, is_production=is_production, approved_by=approved_by
+            )
+            decision_id = opportunity.opportunity_id
+            opportunity = replace(
+                opportunity,
+                confidence=min(opportunity.confidence, kernel_decision.confidence),
+                rationale=f"kernel_confidence={kernel_decision.confidence:.4f}; "
+                + opportunity.rationale,
+                agent_consensus={
+                    **opportunity.agent_consensus,
+                    "kernel_fusion_confidence": kernel_decision.confidence,
+                    "decision_id": decision_id,
+                },
+            )
+            prevalidated[id(candidate)] = (kernel_decision, opportunity)
+            rebalance_opportunities.append(opportunity)
+
+    switch_attempted_ids: set[str] = set()
+    if not is_production and rebalance_opportunities:
+        switch_rankings = (
+            await components.trade_lifecycle.evaluate_rebalance_scan_cycle(
+                rebalance_opportunities
+            )
+        )
+        if switch_rankings:
+            incumbent, replacement, rebalance_decision = switch_rankings[0]
+            switch_attempted_ids.add(replacement.opportunity_id)
+            try:
+                switched_trade = await components.trade_lifecycle.switch_position(
+                    incumbent, replacement, rebalance_decision
+                )
+                if (
+                    switched_trade is not None
+                    and switched_trade.state == TradeLifecycleState.POSITION_OPENED
+                ):
+                    submitted += 1
+                    accepted_opportunities += 1
+                    components.scanner.clear_candidate_cooldown(replacement.symbol)
+                    open_symbol_counts[incumbent.symbol] = max(
+                        0, open_symbol_counts.get(incumbent.symbol, 0) - 1
+                    )
+                    open_symbol_counts[replacement.symbol] = (
+                        open_symbol_counts.get(replacement.symbol, 0) + 1
+                    )
+            except Exception:
+                logger.exception(
+                    "safe position switch did not complete; replacement will not be "
+                    "submitted again in this scan cycle",
+                    extra={
+                        "aitos_extra": {
+                            "incumbent_trade_id": incumbent.trade_id,
+                            "incumbent_symbol": incumbent.symbol,
+                            "candidate_symbol": replacement.symbol,
+                            "switch_id": (
+                                f"switch:{incumbent.trade_id}:{replacement.opportunity_id}"
+                            ),
+                        }
+                    },
+                )
+                rejected_candidate = next(
+                    (
+                        item
+                        for batch in ranked_batches
+                        for item in batch
+                        if item.symbol == replacement.symbol
+                    ),
+                    None,
+                )
+                if rejected_candidate is not None:
+                    components.scanner.record_candidate_rejection(
+                        rejected_candidate, "rebalance_switch_requires_reconciliation"
+                    )
+
+    for ranked_batch in ranked_batches:
         for candidate in ranked_batch:
+            if accepted_opportunities >= target_opportunities:
+                break
             logger.info(
                 "scanner candidate ranked",
                 extra={
@@ -640,54 +751,12 @@ async def run_scan_and_trade_cycle(
                 )
                 continue
 
-            decision = await components.scanner.decide_with_kernel(
-                candidate, components.kernel
-            )
-            if (
-                decision.direction != candidate.direction.value.lower()
-                or decision.confidence < components.kernel.fusion_min_confidence
-            ):
-                components.scanner.record_candidate_rejection(
-                    candidate, "kernel_rejection"
-                )
-                logger.info(
-                    "trade candidate rejected by kernel",
-                    extra={
-                        "aitos_extra": {
-                            "symbol": candidate.symbol,
-                            "score": candidate.composite_score,
-                            "candidate_direction": candidate.direction.value.lower(),
-                            "kernel_direction": decision.direction,
-                            "kernel_confidence": decision.confidence,
-                            "kernel_min_confidence": components.kernel.fusion_min_confidence,
-                            "direction_match": (
-                                decision.direction == candidate.direction.value.lower()
-                            ),
-                            "confidence_pass": (
-                                decision.confidence
-                                >= components.kernel.fusion_min_confidence
-                            ),
-                            "cooldown_recorded": True,
-                        }
-                    },
-                )
+            decision, opportunity = prevalidated.get(id(candidate), (None, None))
+            if decision is None or opportunity is None:
                 continue
-
-            opportunity = components.scanner.to_opportunity(
-                candidate, is_production=is_production, approved_by=approved_by
-            )
+            if opportunity.opportunity_id in switch_attempted_ids:
+                continue
             decision_id = opportunity.opportunity_id
-            opportunity = replace(
-                opportunity,
-                confidence=min(opportunity.confidence, decision.confidence),
-                rationale=f"kernel_confidence={decision.confidence:.4f}; "
-                + opportunity.rationale,
-                agent_consensus={
-                    **opportunity.agent_consensus,
-                    "kernel_fusion_confidence": decision.confidence,
-                    "decision_id": decision_id,
-                },
-            )
             await components.event_bus.publish(
                 Event(
                     topic="decision.snapshot",

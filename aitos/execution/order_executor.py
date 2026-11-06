@@ -34,6 +34,8 @@ class OrderRequest:
     reference_price: float
     order_type: str = "MARKET"
     client_order_id: str | None = None
+    # Executors must fail closed if venue reduce-only semantics are unavailable.
+    reduce_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,10 @@ class OrderResult:
 class OrderExecutor(ABC):
     @abstractmethod
     async def submit_order(self, request: OrderRequest) -> OrderResult: ...
+
+    async def get_order_status(self, symbol: str, order_id: str) -> dict | None:
+        """Return authoritative venue order state, or None when unsupported."""
+        return None
 
     @property
     def supports_exchange_side_stops(self) -> bool:
@@ -92,6 +98,8 @@ class SimulatedOrderExecutor(OrderExecutor):
     def __init__(self, slippage_bps: float = 0.0) -> None:
         self._slippage_bps = slippage_bps
         self._order_counter = 0
+        self._orders: dict[str, dict] = {}
+        self._client_orders: dict[str, str] = {}
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
         self._order_counter += 1
@@ -99,10 +107,33 @@ class SimulatedOrderExecutor(OrderExecutor):
             1 if request.side == TradeSide.LONG else -1
         )
         fill_price = request.reference_price * slippage_factor
-        return OrderResult(
-            order_id=f"sim-{self._order_counter}",
+        order_id = f"sim-{self._order_counter}"
+        result = OrderResult(
+            order_id=order_id,
             symbol=request.symbol,
             side=request.side,
             filled_quantity=request.quantity,
             fill_price=round(fill_price, 8),
         )
+        status = {
+            "orderId": order_id,
+            "clientOrderId": request.client_order_id,
+            "symbol": request.symbol,
+            "status": "FILLED",
+            "executedQty": str(request.quantity),
+            "avgPrice": str(result.fill_price),
+            "reduceOnly": request.reduce_only,
+        }
+        self._orders[order_id] = status
+        if request.client_order_id:
+            self._client_orders[request.client_order_id] = order_id
+        return result
+
+    async def get_order_status(self, symbol: str, order_id: str) -> dict | None:
+        return self._orders.get(order_id)
+
+    async def get_order_by_client_id(
+        self, symbol: str, client_order_id: str
+    ) -> dict | None:
+        order_id = self._client_orders.get(client_order_id)
+        return self._orders.get(order_id) if order_id else None

@@ -103,7 +103,7 @@ class CapitalGateway:
             loss_probability=max(0.0, min(1.0, probability)),
             fee_bps=max(0.0, float(fee_bps)),
             slippage_bps=max(0.0, effective_slippage),
-            funding_bps=max(0.0, float(funding_bps)),
+            funding_bps=float(funding_bps),
             liquidity_score=liquidity,
             confidence=max(0.0, min(1.0, float(opportunity.confidence))),
             regime_fit=max(

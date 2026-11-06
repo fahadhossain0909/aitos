@@ -143,6 +143,7 @@ class TradeLifecycle(AITOSModule):
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
         self._closed_trades: list[Trade] = []
+        self._position_switch_coordinator: Any | None = None
         self._last_event_time: str | None = None
 
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
@@ -222,15 +223,66 @@ class TradeLifecycle(AITOSModule):
     def market_context_provider(self, provider: MarketContextProvider | None) -> None:
         self._market_context_provider = provider
 
+    async def recover_position_switches(
+        self,
+        *,
+        trades_hydrated: bool,
+        venue_positions_reconciled: bool,
+    ) -> Any:
+        """Recover switch intents only after both local and venue state are ready."""
+        if not trades_hydrated or not venue_positions_reconciled:
+            raise RuntimeError(
+                "position-switch recovery requires hydrated trades and reconciled venue positions"
+            )
+        coordinator = self._position_switch_coordinator
+        if coordinator is None:
+            raise RuntimeError(
+                "position-switch recovery requested without a configured coordinator"
+            )
+        from aitos.trading.switch_recovery import PositionSwitchRecoveryWorker
+
+        self._switch_recovery_report = await PositionSwitchRecoveryWorker(
+            coordinator
+        ).recover_pending()
+        logger.info(
+            "Position-switch startup recovery completed",
+            extra={
+                "aitos_extra": {
+                    "scanned": self._switch_recovery_report.scanned,
+                    "resumed": self._switch_recovery_report.resumed,
+                    "pending": self._switch_recovery_report.pending,
+                    "manual_reconciliation": self._switch_recovery_report.manual_reconciliation,
+                }
+            },
+        )
+        return self._switch_recovery_report
+
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
+        # Recovery uses normal lifecycle close/open methods, which require the
+        # module to be initialized. Roll back the flag if recovery fails so the
+        # caller can correct the startup dependency and retry initialization.
         self._initialized = True
+        try:
+            if config.get("recover_position_switches", False):
+                await self.recover_position_switches(
+                    trades_hydrated=bool(config.get("trades_hydrated", False)),
+                    venue_positions_reconciled=bool(
+                        config.get("venue_positions_reconciled", False)
+                    ),
+                )
+        except Exception:
+            self._initialized = False
+            raise
         logger.info(
             "TradeLifecycle initialized",
             extra={
                 "aitos_extra": {
                     "exit_intelligence": self._position_manager is not None,
+                    "position_switch_recovery": (
+                        getattr(self, "_switch_recovery_report", None) is not None
+                    ),
                 }
             },
         )
@@ -1534,6 +1586,44 @@ class TradeLifecycle(AITOSModule):
                 },
                 source_module=self.module_id,
             )
+        )
+
+    def configure_position_switching(self, coordinator: Any) -> None:
+        """Attach the durable, fail-closed position-switch coordinator.
+
+        Switching remains unavailable until the caller supplies a persistent
+        journal, an idempotent reduce-only close adapter and venue-flat check.
+        """
+        if coordinator is None:
+            raise ValueError("position switch coordinator is required")
+        if getattr(coordinator, "lifecycle", None) is not self:
+            raise ValueError("coordinator must be bound to this TradeLifecycle")
+        self._position_switch_coordinator = coordinator
+        self._switch_recovery_report = None
+        # The switching coordinator and the final submit guard must share one
+        # reservation ledger so incumbent release and candidate authorization
+        # reconcile against the same source of truth.
+        setattr(self, "_aitos_capital_gateway", coordinator.gateway)
+
+    async def evaluate_rebalance_scan_cycle(
+        self, opportunities: list[Opportunity]
+    ) -> list[tuple[Trade, Opportunity, Any]]:
+        """Rank all scanner-approved opportunities against current open positions."""
+        coordinator = self._position_switch_coordinator
+        if coordinator is None:
+            return []
+        return await coordinator.evaluate_scan_cycle(opportunities)
+
+    async def switch_position(
+        self, incumbent: Trade, candidate: Opportunity, decision: Any
+    ) -> Trade | None:
+        """Execute one approved replacement through the durable switch state machine."""
+        self._require_initialized()
+        coordinator = self._position_switch_coordinator
+        if coordinator is None:
+            raise RuntimeError("safe position switching is not configured")
+        return await coordinator.switch(
+            incumbent=incumbent, candidate=candidate, decision=decision
         )
 
     def _require_initialized(self) -> None:

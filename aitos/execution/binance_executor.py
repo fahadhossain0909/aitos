@@ -159,7 +159,9 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             "quantity": quantity,
             "newClientOrderId": client_order_id,
         }
-        params.update(self._position_params(request.side, is_closing_order=False))
+        params.update(
+            self._position_params(request.side, is_closing_order=request.reduce_only)
+        )
 
         try:
             response = await self._signed_request("POST", "/fapi/v1/order", params)
@@ -203,6 +205,20 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         return await self._signed_request(
             "GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
         )
+
+    async def get_order_by_client_id(
+        self, symbol: str, client_order_id: str
+    ) -> dict[str, Any] | None:
+        try:
+            return await self._signed_request(
+                "GET",
+                "/fapi/v1/order",
+                {"symbol": symbol, "origClientOrderId": client_order_id},
+            )
+        except BinanceAPIError as exc:
+            if "-2013" in str(exc):
+                return None
+            raise
 
     async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
         return await self._signed_request(
