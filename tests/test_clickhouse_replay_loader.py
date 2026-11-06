@@ -3,7 +3,10 @@ import json
 
 import pytest
 
-from aitos.backtest.clickhouse_replay import ClickHouseReplayLoader
+from aitos.backtest.clickhouse_replay import (
+    ClickHouseReplayLoader,
+    replay_depth_flow,
+)
 from aitos.backtest.aitos_runner import AITOSHistoricalRunner, HistoricalDecision
 from aitos.models.market import OrderBookSnapshot, TradeTick
 
