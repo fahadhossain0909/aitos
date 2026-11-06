@@ -127,3 +127,60 @@ def test_historical_runner_applies_funding_only_at_scheduled_settlement():
     assert result.funding_events_applied == 1
     assert result.funding_events_skipped_without_mark == 0
     assert result.funding_paid == pytest.approx(0.01)
+
+
+
+class _RawDepthRepository:
+    async def _query(self, sql, parameters):
+        start = parameters["start"]
+        if "FROM order_book_snapshots" in sql and "time <" in sql:
+            return [
+                {
+                    "time": start - timedelta(seconds=1),
+                    "symbol": "BTCUSDT",
+                    "bid_levels": json.dumps([[100.0, 5.0]]),
+                    "ask_levels": json.dumps([[101.0, 5.0]]),
+                    "last_update_id": 100,
+                }
+            ]
+        if "FROM trade_ticks" in sql or (
+            "FROM order_book_snapshots" in sql and "time >=" in sql
+        ):
+            return []
+        if "FROM depth_events" in sql:
+            return [
+                {
+                    "event_time": start + timedelta(seconds=1),
+                    "final_update_id": 101,
+                    "payload_json": json.dumps(
+                        {
+                            "first_update_id": 101,
+                            "final_update_id": 101,
+                            "previous_update_id": 100,
+                            "bids": [[100.0, 3.0]],
+                            "asks": [[101.0, 4.0]],
+                        }
+                    ),
+                }
+            ]
+        if "FROM funding_rates" in sql:
+            return []
+        raise AssertionError("unexpected replay query")
+
+
+@pytest.mark.asyncio
+async def test_clickhouse_loader_replays_raw_depth_deltas_from_pre_window_bootstrap():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    dataset = await ClickHouseReplayLoader(_RawDepthRepository()).load(
+        "BTCUSDT", start, start + timedelta(days=1)
+    )
+    depth_events = [
+        event.depth_event
+        for event in dataset.events
+        if isinstance(event, OrderBookSnapshot) and event.depth_event
+    ]
+    assert len(depth_events) == 1
+    assert depth_events[0]["bid_reduce_qty"] == pytest.approx(2.0)
+    assert depth_events[0]["ask_reduce_qty"] == pytest.approx(1.0)
+    assert dataset.provenance["raw_depth_events_replayed"] == 1
+    assert dataset.provenance["depth_event_history_available"] is True
