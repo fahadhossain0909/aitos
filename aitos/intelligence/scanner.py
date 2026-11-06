@@ -50,6 +50,7 @@ from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.intelligence.open_interest import oi_trend_score
 from aitos.intelligence.opportunity_outcomes import (
     CandidateOutcomeStore,
+    DirectionalFunnelStore,
     RankingHysteresis,
 )
 from aitos.intelligence.order_flow_engine import OrderFlowEngine
@@ -328,6 +329,9 @@ class OpportunityScanner(AITOSModule):
         self._candidate_outcomes = CandidateOutcomeStore(
             get_model_data_dir() / "candidate_outcomes.sqlite3"
         )
+        self._directional_funnel = DirectionalFunnelStore(
+            get_model_data_dir() / "directional_funnel.sqlite3"
+        )
         self._ranking_hysteresis = RankingHysteresis(
             margin_points=self._tuning.analysis.ranking_hysteresis_points
         )
@@ -415,6 +419,7 @@ class OpportunityScanner(AITOSModule):
                 ),
                 "candidate_rotation": self._candidate_rotation.snapshot(),
                 "candidate_outcomes": self._candidate_outcomes.snapshot(),
+                "directional_funnel": self._directional_funnel.snapshot(),
                 "ranking_hysteresis": self._ranking_hysteresis.snapshot(),
             },
         )
@@ -422,6 +427,7 @@ class OpportunityScanner(AITOSModule):
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         await self._live_cache.shutdown()
         self._candidate_outcomes.close()
+        self._directional_funnel.close()
         await self._exchange.close()
 
     async def emit_events(self) -> AsyncIterator[Event]:
