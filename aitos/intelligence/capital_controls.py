@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite
+from pathlib import Path
+import sqlite3
+from threading import RLock
 
 
 @dataclass(frozen=True)
@@ -101,32 +104,84 @@ def execution_cost_bps(
 
 
 class ProbabilityCalibrator:
-    """Online reliability calibration for probability-like model outputs."""
+    """Online reliability calibration with optional durable bin counts."""
 
-    def __init__(self, config: CapitalControlConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: CapitalControlConfig | None = None,
+        path: str | Path | None = None,
+    ) -> None:
         self.config = config or CapitalControlConfig()
         self._bins: dict[int, list[int]] = {}
+        self._lock = RLock()
+        self._conn: sqlite3.Connection | None = None
+        if path is not None:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            self._conn = sqlite3.connect(str(target), check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS probability_calibration_bins (
+                    bin INTEGER PRIMARY KEY,
+                    samples INTEGER NOT NULL,
+                    losses INTEGER NOT NULL
+                )
+                """
+            )
+            self._conn.commit()
+            for row in self._conn.execute(
+                "SELECT bin, samples, losses FROM probability_calibration_bins"
+            ):
+                self._bins[int(row[0])] = [int(row[1]), int(row[2])]
 
     @staticmethod
     def _bin(probability: float) -> int:
         return max(0, min(9, int(max(0.0, min(0.999999, probability)) * 10)))
 
     def observe(self, predicted_loss_probability: float, realized_loss: bool) -> None:
-        key = self._bin(float(predicted_loss_probability))
-        bucket = self._bins.setdefault(key, [0, 0])
-        bucket[0] += 1
-        bucket[1] += int(bool(realized_loss))
+        probability = float(predicted_loss_probability)
+        if not isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError("predicted_loss_probability must be within [0, 1]")
+        if not isinstance(realized_loss, bool):
+            raise ValueError("realized_loss must be boolean")
+        key = self._bin(probability)
+        with self._lock:
+            bucket = self._bins.setdefault(key, [0, 0])
+            bucket[0] += 1
+            bucket[1] += int(realized_loss)
+            if self._conn is not None:
+                self._conn.execute(
+                    """
+                    INSERT INTO probability_calibration_bins(bin, samples, losses)
+                    VALUES (?, 1, ?)
+                    ON CONFLICT(bin) DO UPDATE SET
+                        samples = samples + 1,
+                        losses = losses + excluded.losses
+                    """,
+                    (key, int(realized_loss)),
+                )
+                self._conn.commit()
 
     @property
     def samples(self) -> int:
-        return sum(bucket[0] for bucket in self._bins.values())
+        with self._lock:
+            return sum(bucket[0] for bucket in self._bins.values())
 
     def calibrate(self, probability: float) -> float:
         raw = max(0.0, min(1.0, float(probability)))
-        if self.samples < self.config.calibration_min_samples:
-            return raw
-        bucket = self._bins.get(self._bin(raw))
-        if not bucket or bucket[0] == 0:
-            return raw
-        empirical = bucket[1] / bucket[0]
-        return max(0.0, min(1.0, empirical))
+        with self._lock:
+            if sum(bucket[0] for bucket in self._bins.values()) < self.config.calibration_min_samples:
+                return raw
+            bucket = self._bins.get(self._bin(raw))
+            if not bucket or bucket[0] == 0:
+                return raw
+            empirical = bucket[1] / bucket[0]
+            return max(0.0, min(1.0, empirical))
+
+    def close(self) -> None:
+        with self._lock:
+            if self._conn is not None:
+                self._conn.close()
+                self._conn = None
+
