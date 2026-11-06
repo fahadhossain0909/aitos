@@ -53,6 +53,26 @@ def _funnel_store(self: TradeLifecycle) -> DirectionalFunnelStore:
         return store
 
 
+def _record_funnel_sync(
+    self: TradeLifecycle,
+    *,
+    symbol: str,
+    side: str,
+    stage: str,
+    accepted: bool,
+    reason: str,
+    details: dict[str, Any] | None = None,
+) -> None:
+    _funnel_store(self).record(
+        symbol=symbol,
+        side=side,
+        stage=stage,
+        accepted=accepted,
+        reason=reason,
+        details=details,
+    )
+
+
 async def _record_funnel(
     self: TradeLifecycle,
     *,
@@ -65,7 +85,8 @@ async def _record_funnel(
 ) -> None:
     try:
         await asyncio.to_thread(
-            _funnel_store(self).record,
+            _record_funnel_sync,
+            self,
             symbol=symbol,
             side=side,
             stage=stage,
