@@ -159,7 +159,7 @@ class _RawDepthRepository:
         if "FROM order_book_snapshots" in sql and "time <" in sql:
             return [
                 {
-                    "time": start - timedelta(seconds=1),
+                    "time": start - timedelta(seconds=3),
                     "symbol": "BTCUSDT",
                     "bid_levels": json.dumps([[100.0, 5.0]]),
                     "ask_levels": json.dumps([[101.0, 5.0]]),
@@ -175,18 +175,31 @@ class _RawDepthRepository:
         if "FROM depth_events" in sql:
             return [
                 {
-                    "event_time": start + timedelta(seconds=1),
+                    "event_time": start - timedelta(seconds=2),
                     "final_update_id": 101,
                     "payload_json": json.dumps(
                         {
                             "first_update_id": 101,
                             "final_update_id": 101,
                             "previous_update_id": 100,
-                            "bids": [[100.0, 3.0]],
+                            "bids": [[100.0, 4.0]],
                             "asks": [[101.0, 4.0]],
                         }
                     ),
-                }
+                },
+                {
+                    "event_time": start + timedelta(seconds=1),
+                    "final_update_id": 102,
+                    "payload_json": json.dumps(
+                        {
+                            "first_update_id": 102,
+                            "final_update_id": 102,
+                            "previous_update_id": 101,
+                            "bids": [[100.0, 3.0]],
+                            "asks": [[101.0, 3.0]],
+                        }
+                    ),
+                },
             ]
         if "FROM funding_rates" in sql:
             return []
@@ -205,8 +218,9 @@ async def test_clickhouse_loader_replays_raw_depth_deltas_from_pre_window_bootst
         if isinstance(event, OrderBookSnapshot) and event.depth_event
     ]
     assert len(depth_events) == 1
-    assert depth_events[0]["bid_reduce_qty"] == pytest.approx(2.0)
+    assert depth_events[0]["bid_reduce_qty"] == pytest.approx(1.0)
     assert depth_events[0]["ask_reduce_qty"] == pytest.approx(1.0)
+    assert dataset.provenance["depth_event_rows"] == 2
     assert dataset.provenance["raw_depth_events_replayed"] == 1
     assert dataset.provenance["raw_depth_event_replay_available"] is True
     assert dataset.provenance["depth_event_history_available"] is True
