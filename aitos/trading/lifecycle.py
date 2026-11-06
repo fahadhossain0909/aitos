@@ -1066,6 +1066,35 @@ class TradeLifecycle(AITOSModule):
         trade.exit_reason = reason
         trade.state = TradeLifecycleState.POSITION_CLOSED
         trade.updated_at = trade.exit_time
+        ere_observations = trade.agent_consensus.get("ere_observations", [])
+        if isinstance(ere_observations, list):
+            for observation in ere_observations:
+                if not isinstance(observation, dict):
+                    continue
+                try:
+                    decision_price = float(observation["price"])
+                    decision_at = datetime.fromisoformat(
+                        str(observation["decision_at"]).replace("Z", "+00:00")
+                    )
+                    exit_at = datetime.fromisoformat(
+                        str(trade.exit_time).replace("Z", "+00:00")
+                    )
+                    if (
+                        decision_price <= 0
+                        or decision_at.tzinfo is None
+                        or exit_at <= decision_at
+                    ):
+                        continue
+                    realized_move_pct = (
+                        (exit_price / decision_price - 1.0) * direction * 100.0
+                    )
+                    observation["realized_remaining_edge_pct"] = (
+                        realized_move_pct
+                        - float(observation.get("estimated_cost_pct", 0.0))
+                    )
+                    observation["outcome_at"] = trade.exit_time
+                except (KeyError, TypeError, ValueError, ArithmeticError):
+                    continue
         self._closed_trades.append(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
         capital_objective = trade.agent_consensus.get("capital_objective", {})
