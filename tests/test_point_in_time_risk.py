@@ -98,3 +98,30 @@ def test_correlation_uses_identical_return_intervals_when_one_asset_has_gaps():
     )
     result = estimator.estimate(rows, as_of=start + timedelta(days=34))
     assert result[("AAA", "BBB")] == pytest.approx(1.0)
+
+
+
+def test_point_in_time_covariance_is_symmetric_and_bounded_by_cutoff():
+    start = datetime(2026, 3, 1, tzinfo=timezone.utc)
+    rows = []
+    left = right = 100.0
+    for index in range(30):
+        stamp = start + timedelta(days=index)
+        move = 0.005 if index % 2 else -0.005
+        left *= 1.0 + move
+        right *= 1.0 + move
+        rows.extend(
+            [
+                {"symbol": "AAA", "timestamp": stamp, "price": left},
+                {"symbol": "BBB", "timestamp": stamp, "price": right},
+            ]
+        )
+    estimator = PointInTimeCorrelationEstimator(
+        min_observations=10, shrinkage_observations=20
+    )
+    covariance = estimator.estimate_covariance(
+        rows, as_of=start + timedelta(days=29)
+    )
+    assert covariance[("AAA", "BBB")] == covariance[("BBB", "AAA")]
+    assert covariance[("AAA", "AAA")] > 0.0
+    assert covariance[("AAA", "BBB")] > 0.0
