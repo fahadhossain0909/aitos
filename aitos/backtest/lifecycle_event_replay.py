@@ -81,19 +81,40 @@ class LifecycleEventReplay:
                 continue
             try:
                 raw = json.loads(line)
+                if not isinstance(raw, dict):
+                    raise ValueError("event row must be a JSON object")
                 payload = raw.get("payload", raw)
+                if not isinstance(payload, dict):
+                    raise ValueError("event payload must be a JSON object")
+                order_payload = payload.get("o") or {}
+                if not isinstance(order_payload, dict):
+                    order_payload = {}
+                event_id = str(raw.get("event_id") or "").strip()
+                if not event_id:
+                    canonical = json.dumps(raw, sort_keys=True, separators=(",", ":"))
+                    event_id = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
                 events.append(
                     LifecycleReplayEvent(
-                        event_id=str(raw["event_id"]),
-                        timestamp_ms=int(raw["timestamp_ms"]),
-                        event_type=str(raw["event_type"]),
+                        event_id=event_id,
+                        timestamp_ms=int(raw.get("timestamp_ms", raw.get("E", -1))),
+                        event_type=str(raw.get("event_type", raw.get("e", ""))),
                         symbol=str(
-                            raw.get("symbol", payload.get("symbol", ""))
+                            raw.get("symbol")
+                            or raw.get("s")
+                            or payload.get("symbol", "")
+                            or payload.get("s", "")
+                            or order_payload.get("s", "")
                         ).upper(),
                         payload=dict(payload),
                     )
                 )
-            except (AttributeError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            except (
+                AttributeError,
+                KeyError,
+                TypeError,
+                ValueError,
+                json.JSONDecodeError,
+            ) as exc:
                 raise ValueError(
                     f"invalid lifecycle replay row {line_no}: {exc}"
                 ) from exc
