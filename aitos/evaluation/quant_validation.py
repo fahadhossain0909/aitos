@@ -80,7 +80,10 @@ def validate_observations(
                         f"row {index}: predicted_win_probability must be within [0, 1]"
                     )
         if "realized_win" in row:
-            row["realized_win"] = bool(row["realized_win"])
+            realized_win = row["realized_win"]
+            if not isinstance(realized_win, bool) and realized_win not in (0, 1):
+                raise ValueError(f"row {index}: realized_win must be boolean or 0/1")
+            row["realized_win"] = bool(realized_win)
         row["regime"] = str(row.get("regime") or "unknown")
         row["rejected_opportunity"] = bool(row.get("rejected_opportunity", False))
         validated.append(row)
