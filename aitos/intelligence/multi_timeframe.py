@@ -110,15 +110,15 @@ def _candle_evidence(candles: list[Any]) -> dict[str, float]:
     sweep_pressure = (
         0.0
         if lower_sweep and upper_sweep
-        else 4.0
-        if bullish_sweep_displacement
-        else -4.0
-        if bearish_sweep_displacement
-        else 3.0
-        if lower_sweep
-        else -3.0
-        if upper_sweep
-        else 0.0
+        else (
+            4.0
+            if bullish_sweep_displacement
+            else (
+                -4.0
+                if bearish_sweep_displacement
+                else 3.0 if lower_sweep else -3.0 if upper_sweep else 0.0
+            )
+        )
     )
     liquidity = _clamp_score(5.0 + sweep_pressure + 2.0 * (lower_wick - upper_wick))
     return {
