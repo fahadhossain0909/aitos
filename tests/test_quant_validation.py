@@ -139,3 +139,11 @@ def test_validation_rejects_non_boolean_realized_outcome_labels():
     rows[0]["realized_win"] = "false"
     with pytest.raises(ValueError, match="realized_win"):
         validate_observations(rows)
+
+
+
+def test_validation_rejects_ambiguous_rejected_opportunity_labels():
+    rows = observations(2)
+    rows[0]["rejected_opportunity"] = "false"
+    with pytest.raises(ValueError, match="rejected_opportunity"):
+        validate_observations(rows)
