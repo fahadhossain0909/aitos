@@ -426,8 +426,9 @@ class CapitalReservation:
             )
         if self._conn is None:
             with self._lock:
-                if reservation.symbol in self._reservations:
-                    return False
+                existing = self._reservations.get(reservation.symbol)
+                if existing is not None:
+                    return existing == reservation
                 if reservation.capital_usd > available_capital_usd:
                     return False
                 if reservation.risk_budget_usd > available_risk_usd:
@@ -461,7 +462,11 @@ class CapitalReservation:
                 ).fetchone()
                 if existing is not None:
                     self._conn.rollback()
-                    return False
+                    return (
+                        existing[0] == self._owner_id
+                        and float(existing[1]) == reservation.capital_usd
+                        and float(existing[2]) == reservation.risk_budget_usd
+                    )
                 totals = self._conn.execute(
                     """
                     SELECT COALESCE(SUM(capital_usd), 0),
