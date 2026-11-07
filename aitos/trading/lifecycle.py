@@ -218,7 +218,7 @@ class TradeLifecycle(AITOSModule):
                 outcome={
                     "net_pnl_usd": float(trade.pnl),
                     "pnl_percent": float(trade.pnl_percent),
-                    "close_reason": str(trade.close_reason or ""),
+                    "close_reason": str(getattr(trade, "close_reason", "") or ""),
                     "fees_paid_usd": float(trade.fees_paid_usd),
                     "funding_pnl_usd": float(trade.funding_pnl_usd),
                 },
