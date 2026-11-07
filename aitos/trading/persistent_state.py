@@ -399,6 +399,11 @@ def _trade_from_dict(data: dict[str, Any]) -> Trade:
         ),
         mae_r=(float(data["mae_r"]) if data.get("mae_r") is not None else None),
         mfe_r=(float(data["mfe_r"]) if data.get("mfe_r") is not None else None),
+        last_marked_at=(
+            str(data["last_marked_at"])
+            if data.get("last_marked_at") is not None
+            else None
+        ),
         updated_at=str(data.get("updated_at") or data["entry_time"]),
     )
 

@@ -69,31 +69,61 @@ class SQLiteSwitchJournal:
         # Multiple worker processes may construct the journal simultaneously.
         # A bounded busy timeout lets WAL/DDL setup and writes serialize at the
         # database boundary instead of leaking SQLITE_BUSY to callers.
-        for attempt in range(50):
+        with self._connect() as db:
+            self._enable_wal_with_retry(db)
+            self._execute_with_busy_retry(db, "PRAGMA synchronous=NORMAL")
+            self._execute_with_busy_retry(
+                db,
+                """CREATE TABLE IF NOT EXISTS position_switch_intents (
+                    switch_id TEXT PRIMARY KEY,
+                    incumbent_trade_id TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )""",
+            )
+            self._execute_with_busy_retry(
+                db,
+                """CREATE UNIQUE INDEX IF NOT EXISTS one_active_switch_per_incumbent
+                ON position_switch_intents(incumbent_trade_id)
+                WHERE state NOT IN ('completed', 'failed')""",
+            )
+
+    def _execute_with_busy_retry(self, db, statement, parameters=()):
+        deadline = time.monotonic() + self.SQLITE_BUSY_TIMEOUT_MS / 1000
+        delay = 0.01
+        while True:
             try:
-                with self._connect() as db:
-                    db.execute("PRAGMA journal_mode=WAL")
-                    db.execute("PRAGMA synchronous=NORMAL")
-                    db.execute(
-                        """CREATE TABLE IF NOT EXISTS position_switch_intents (
-                            switch_id TEXT PRIMARY KEY,
-                            incumbent_trade_id TEXT NOT NULL,
-                            state TEXT NOT NULL,
-                            payload TEXT NOT NULL,
-                            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-                        )"""
-                    )
-                    db.execute(
-                        """CREATE UNIQUE INDEX IF NOT EXISTS one_active_switch_per_incumbent
-                        ON position_switch_intents(incumbent_trade_id)
-                        WHERE state NOT IN ('completed', 'failed')"""
-                    )
-                break
+                return db.execute(statement, parameters)
             except sqlite3.OperationalError as exc:
-                if "locked" in str(exc) and attempt < 49:
-                    time.sleep(0.05)
-                    continue
-                raise
+                message = str(exc).lower()
+                if not any(token in message for token in ("locked", "busy")):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 2, 0.25)
+
+    def _enable_wal_with_retry(self, db):
+        deadline = time.monotonic() + self.SQLITE_BUSY_TIMEOUT_MS / 1000
+        delay = 0.01
+        while True:
+            try:
+                mode = db.execute("PRAGMA journal_mode").fetchone()
+                if mode and str(mode[0]).lower() == "wal":
+                    return
+                db.execute("PRAGMA journal_mode=WAL").fetchone()
+                return
+            except sqlite3.OperationalError as exc:
+                message = str(exc).lower()
+                if not any(token in message for token in ("locked", "busy")):
+                    raise
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise
+                time.sleep(min(delay, remaining))
+                delay = min(delay * 2, 0.25)
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(

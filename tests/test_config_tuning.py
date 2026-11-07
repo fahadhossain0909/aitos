@@ -15,6 +15,26 @@ def test_balanced_profile_defaults_are_loaded():
     assert settings.positions.max_open_positions == 3
 
 
+def test_dead_candle_and_liquidity_guard_defaults_and_env_overrides(monkeypatch):
+    defaults = load_tuning_settings(profile="balanced", mode="paper")
+    assert defaults.scanner.min_liquidity_quality == 5.0
+    assert defaults.scanner.max_directional_cancel_pressure == 0.6
+    assert defaults.positions.dead_candle_exit_bars == 16
+    assert defaults.positions.dead_candle_max_progress_r == 0.10
+    assert defaults.positions.dead_candle_entry_band_pct == 0.002
+    assert defaults.positions.stale_position_max_hours == 6.0
+
+    monkeypatch.setenv("AITOS_TUNING_SCANNER_MIN_LIQUIDITY_QUALITY", "5.5")
+    monkeypatch.setenv("AITOS_TUNING_SCANNER_MAX_DIRECTIONAL_CANCEL_PRESSURE", "0.55")
+    monkeypatch.setenv("AITOS_TUNING_POSITIONS_DEAD_CANDLE_EXIT_BARS", "12")
+    monkeypatch.setenv("AITOS_TUNING_POSITIONS_STALE_POSITION_MAX_HOURS", "4.0")
+    settings = load_tuning_settings(profile="balanced", mode="paper")
+    assert settings.scanner.min_liquidity_quality == 5.5
+    assert settings.scanner.max_directional_cancel_pressure == 0.55
+    assert settings.positions.dead_candle_exit_bars == 12
+    assert settings.positions.stale_position_max_hours == 4.0
+
+
 def test_low_resource_profile_reduces_workload():
     low = load_tuning_settings(profile="low_resource", mode="paper")
     balanced = load_tuning_settings(profile="balanced", mode="paper")
@@ -145,6 +165,17 @@ def test_hardware_storage_and_telemetry_profiles_are_resolved():
         < high.storage.historical_backfill_concurrency
     )
     assert low.telemetry.trace_sample_rate < high.telemetry.trace_sample_rate
+
+
+def test_liquidity_and_dead_candle_thresholds_reject_invalid_values(monkeypatch):
+    monkeypatch.setenv("AITOS_TUNING_SCANNER_MIN_LIQUIDITY_QUALITY", "10.1")
+    with pytest.raises(ValidationError):
+        load_tuning_settings(profile="balanced", mode="paper")
+
+    monkeypatch.delenv("AITOS_TUNING_SCANNER_MIN_LIQUIDITY_QUALITY")
+    monkeypatch.setenv("AITOS_TUNING_POSITIONS_STALE_POSITION_MAX_HOURS", "0")
+    with pytest.raises(ValidationError):
+        load_tuning_settings(profile="balanced", mode="paper")
 
 
 def test_hardware_and_storage_environment_overrides_are_validated(monkeypatch):

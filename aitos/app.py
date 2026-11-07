@@ -95,13 +95,12 @@ class SystemComponents:
             or current.hardware != updated.hardware
             or current.storage != updated.storage
             or current.telemetry != updated.telemetry
-            or current.positions.max_open_positions
-            != updated.positions.max_open_positions
+            or current.positions != updated.positions
         )
         if restart_required:
             raise ValueError(
                 "Runtime reload changed mode, infrastructure, hardware, storage, "
-                "telemetry, risk ceilings or the hard position limit; restart AITOS "
+                "telemetry, risk ceilings or position-management tuning; restart AITOS "
                 "to apply this profile safely"
             )
         self.scanner.apply_tuning_settings(updated)
@@ -250,7 +249,23 @@ async def build_system(
     attention_feedback = AttentionFeedbackLoop(
         event_bus=event_bus, explainer=attention_explainer
     )
-    position_manager = PositionManager() if enable_exit_intelligence else None
+    position_manager = (
+        PositionManager(
+            config={
+                "adaptive_exit_policy": {
+                    "stagnation_bars": tuning.positions.dead_candle_exit_bars,
+                    "stagnation_min_progress_r": (
+                        tuning.positions.dead_candle_max_progress_r
+                    ),
+                    "stagnation_entry_band_pct": (
+                        tuning.positions.dead_candle_entry_band_pct
+                    ),
+                }
+            }
+        )
+        if enable_exit_intelligence
+        else None
+    )
     if position_manager is not None:
         logger.info("Exit Intelligence (PositionManager) enabled for TradeLifecycle")
     trade_lifecycle = TradeLifecycle(
@@ -785,6 +800,14 @@ async def run_scan_and_trade_cycle(
                         "approved_by": opportunity.approved_by,
                         "kernel_direction": decision.direction,
                         "kernel_confidence": decision.confidence,
+                        "candidate_score": candidate.composite_score,
+                        "candidate_component_scores": dict(candidate.component_scores),
+                        "candidate_component_availability": dict(
+                            candidate.component_availability or {}
+                        ),
+                        "candidate_weights": dict(components.scanner._weights),
+                        "candidate_threshold": components.scanner._min_score_threshold,
+                        "candidate_rationale": list(candidate.rationale or []),
                     },
                     source_module="aitos.app",
                 )

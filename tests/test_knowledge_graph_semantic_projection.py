@@ -83,6 +83,42 @@ async def test_semantic_event_projects_decision_lineage(event_bus):
 
 
 @pytest.mark.asyncio
+async def test_journal_outcome_links_decision_trade_and_outcome_nodes(event_bus):
+    driver = FakeDriver()
+    writer = KnowledgeGraphWriter(event_bus=event_bus, driver=driver)
+    await writer.initialize({})
+
+    await event_bus.publish(
+        Event(
+            topic="journal.outcome_attributed",
+            payload={
+                "trade_id": "trade-55",
+                "decision_id": "decision-55",
+                "symbol": "BTCUSDT",
+                "strategy_id": "momentum-v3",
+                "regime": "trending",
+                "outcome": "closed",
+                "pnl": 12.5,
+                "root_cause_tags": ["premature_exit"],
+            },
+            source_module="journal-system",
+        )
+    )
+
+    assert await _wait_for(lambda: len(driver.calls) == 1)
+    query, params = driver.calls[0]
+    assert params["trade_id"] == "trade-55"
+    assert params["decision_id"] == "decision-55"
+    assert params["outcome_id"] == "trade-55:outcome"
+    assert params["outcome_label"] == "closed"
+    assert params["outcome_pnl"] == 12.5
+    assert "RESULTED_IN" in query
+    assert "OUTCOME_OF" in query
+
+    await writer.shutdown()
+
+
+@pytest.mark.asyncio
 async def test_semantic_subscriptions_are_live_only(event_bus):
     driver = FakeDriver()
     writer = KnowledgeGraphWriter(event_bus=event_bus, driver=driver)

@@ -175,6 +175,119 @@ class ClickHouseExperienceStore:
             )
         return rows
 
+    def query_closed_experiences(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        sources: Iterable[str] | None = None,
+        limit: int = 100_000,
+    ) -> list[dict]:
+        """Read a bounded, point-in-time window of closed experiences.
+
+        The method is read-only and intentionally separate from the paper/live
+        write path. Malformed JSON is an error, not silently discarded evidence.
+        """
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("experience query boundaries must be timezone-aware")
+        if end <= start:
+            raise ValueError("experience query end must be after start")
+        if not 1 <= int(limit) <= 1_000_000:
+            raise ValueError("experience query limit must be between 1 and 1000000")
+
+        normalized_sources = tuple(sorted({str(item) for item in (sources or ())}))
+        allowed_sources = {"backtest", "paper", "live"}
+        if any(item not in allowed_sources for item in normalized_sources):
+            raise ValueError("experience sources must be backtest, paper or live")
+
+        query = (
+            f"SELECT toString(experience_id), timestamp, source, symbol, decision, "
+            f"outcome, reward, features_json, market_state_json, risk_state_json, "
+            f"strategy_version, model_version, metadata_json "
+            f"FROM {self.database}.learning_experiences "  # nosec B608 - trusted database config; values are parameterized
+            "WHERE outcome = 'closed' "
+            "AND timestamp >= {start:DateTime64(3, 'UTC')} "
+            "AND timestamp < {end:DateTime64(3, 'UTC')} "
+        )
+        parameters = {
+            "start": start.astimezone(timezone.utc),
+            "end": end.astimezone(timezone.utc),
+            "limit": int(limit),
+        }
+        if normalized_sources:
+            query += "AND source IN {sources:Array(String)} "
+            parameters["sources"] = list(normalized_sources)
+        query += "ORDER BY timestamp, experience_id LIMIT {limit:UInt32}"
+
+        try:
+            rows = self.client.query(query, parameters=parameters).result_rows
+        except Exception:
+            logger.exception(
+                "learning experience closed-window query failed",
+                extra={
+                    "aitos_extra": {
+                        "start": start.isoformat(),
+                        "end": end.isoformat(),
+                        "sources": normalized_sources,
+                        "limit": limit,
+                    }
+                },
+            )
+            raise
+
+        import json
+
+        def decode_object(value, column: str) -> dict:
+            try:
+                decoded = json.loads(value or "{}")
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"invalid {column} JSON in learning_experiences"
+                ) from exc
+            if not isinstance(decoded, dict):
+                raise ValueError(
+                    f"{column} must decode to a JSON object in learning_experiences"
+                )
+            return decoded
+
+        records = []
+        for row in rows:
+            if len(row) != 13:
+                raise ValueError("unexpected learning_experiences query row shape")
+            (
+                experience_id,
+                timestamp,
+                source,
+                symbol,
+                decision,
+                outcome,
+                reward,
+                features_json,
+                market_state_json,
+                risk_state_json,
+                strategy_version,
+                model_version,
+                metadata_json,
+            ) = row
+            records.append(
+                {
+                    "experience_id": str(experience_id),
+                    "timestamp": timestamp,
+                    "source": str(source),
+                    "symbol": str(symbol),
+                    "decision": str(decision),
+                    "outcome": outcome,
+                    "reward": float(reward),
+                    "features": decode_object(features_json, "features"),
+                    "market_state": decode_object(market_state_json, "market_state"),
+                    "risk_state": decode_object(risk_state_json, "risk_state"),
+                    "strategy_version": str(strategy_version),
+                    "model_version": str(model_version),
+                    "metadata": decode_object(metadata_json, "metadata"),
+                }
+            )
+        return records
+
 
 def _json(value: dict) -> str:
     import json

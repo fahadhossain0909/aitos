@@ -52,6 +52,8 @@ class ScannerTuning(BaseModel):
     min_trade_count: int = Field(default=10_000, ge=0)
     min_contract_age_days: int = Field(default=30, ge=0, le=3650)
     dynamic_universe_limit: int = Field(default=35, ge=0, le=5000)
+    min_liquidity_quality: float = Field(default=5.0, ge=0, le=10)
+    max_directional_cancel_pressure: float = Field(default=0.6, ge=0, le=1)
     htf_filter_enabled: bool = True
     htf_timeframe: str = "auto"
     htf_lookback: int = Field(default=80, ge=30, le=1000)
@@ -100,6 +102,10 @@ class PositionTuning(BaseModel):
     max_partial_exit_count: int = Field(default=3, ge=0, le=20)
     partial_exit_cooldown_seconds: float = Field(default=60.0, ge=0, le=86400)
     min_remaining_position_usd: float = Field(default=1.0, ge=0, le=1_000_000)
+    dead_candle_exit_bars: int = Field(default=16, ge=1, le=96)
+    dead_candle_max_progress_r: float = Field(default=0.10, ge=0, le=1)
+    dead_candle_entry_band_pct: float = Field(default=0.002, ge=0, le=0.05)
+    stale_position_max_hours: float = Field(default=6.0, gt=0, le=72)
 
 
 class RiskTuning(BaseModel):
@@ -247,6 +253,16 @@ def _env_overrides() -> dict[str, Any]:
             "scanner",
             "dynamic_universe_limit",
             int,
+        ),
+        "AITOS_TUNING_SCANNER_MIN_LIQUIDITY_QUALITY": (
+            "scanner",
+            "min_liquidity_quality",
+            float,
+        ),
+        "AITOS_TUNING_SCANNER_MAX_DIRECTIONAL_CANCEL_PRESSURE": (
+            "scanner",
+            "max_directional_cancel_pressure",
+            float,
         ),
         "AITOS_TUNING_SCANNER_HTF_FILTER_ENABLED": (
             "scanner",
@@ -426,6 +442,26 @@ def _env_overrides() -> dict[str, Any]:
         "AITOS_TUNING_POSITIONS_MIN_REMAINING_POSITION_USD": (
             "positions",
             "min_remaining_position_usd",
+            float,
+        ),
+        "AITOS_TUNING_POSITIONS_DEAD_CANDLE_EXIT_BARS": (
+            "positions",
+            "dead_candle_exit_bars",
+            int,
+        ),
+        "AITOS_TUNING_POSITIONS_DEAD_CANDLE_MAX_PROGRESS_R": (
+            "positions",
+            "dead_candle_max_progress_r",
+            float,
+        ),
+        "AITOS_TUNING_POSITIONS_DEAD_CANDLE_ENTRY_BAND_PCT": (
+            "positions",
+            "dead_candle_entry_band_pct",
+            float,
+        ),
+        "AITOS_TUNING_POSITIONS_STALE_POSITION_MAX_HOURS": (
+            "positions",
+            "stale_position_max_hours",
             float,
         ),
         "AITOS_TUNING_RISK_MAX_RISK_PER_TRADE_PCT": (

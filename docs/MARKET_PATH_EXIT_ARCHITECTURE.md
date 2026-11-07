@@ -42,8 +42,9 @@ The Journey layer does **not** replace EIE. EIE remains the authoritative exit/t
 2. **Urgent EIE evaluation on soft-stop/TP contact** — a touch or breach of the scanner's initial `sl_price` forces an immediate thesis/path evaluation. HOLD or MANAGE may retain the position beyond this soft boundary; EXIT closes it. If EIE fails while the soft stop is breached, lifecycle fails closed and exits.
 3. **Regular per-position EIE evaluation** — each open position has its own monitoring cadence. A busy symbol/position cannot consume a shared global allowance and starve other positions.
 4. **Market/Trade Journey + PositionManager** — evaluate the original entry thesis, path, health, risk and management state on every scheduled full evaluation. The tiered monitor remains useful for priority/telemetry but never suppresses the authoritative evaluation.
-5. **Protection** — approved structural stop tightening, break-even and trailing protection can tighten the emergency exchange stop; HOLD does not move it to the soft-stop boundary.
-6. **Hedge intent** — cost-aware hedge analysis remains an advisory decision until a venue/account-mode-aware hedge execution contract is implemented. A generic opposite-side market order is deliberately not treated as safe hedge execution.
+5. **Dead-candle time decay** — after 16 unique completed 15m bars by default, request `time_decay_scratch` only when recorded MFE is below `0.10R` and both the complete recorded excursion and current mark remain within `±0.2%` of entry. This is a capital-efficiency scratch, not a thesis invalidation or a blanket holding-period close.
+6. **Protection** — approved structural stop tightening, break-even and trailing protection can tighten the emergency exchange stop; HOLD does not move it to the soft-stop boundary.
+7. **Hedge intent** — cost-aware hedge analysis remains an advisory decision until a venue/account-mode-aware hedge execution contract is implemented. A generic opposite-side market order is deliberately not treated as safe hedge execution.
 
 Without EIE, the original static SL and exchange-side TP behavior remain authoritative. With EIE, the soft stop is a decision checkpoint and the emergency stop is the final safety boundary. Resting exchange TP orders are not placed for EIE-managed positions because they could bypass HOLD. Every configured TP level is an advisory checkpoint: touching it forces an EIE evaluation, then the level is consumed so the next target can trigger a later evaluation. No TP level automatically closes or partially reduces an EIE-managed position. Only an explicit EIE EXIT closes it, and only an explicit EIE MANAGE may reduce exposure. Without EIE, legacy static TP behavior remains unchanged.
 
@@ -86,6 +87,12 @@ UNCERTAIN
 ```
 
 The existing hedge engine continues to enforce benefit/cost and ratio limits.
+
+## Dead-candle / capital-efficiency guard
+
+The default 15m position policy counts unique completed candle identities, persisted on the Trade record. A flatline scratch can trigger only after 16 completed bars (4 hours) with MFE below `0.10R` and the full recorded MAE/MFE excursion plus current mark inside `±0.2%` of entry. The paper runtime has a separate six-hour maximum-age backstop for the same verified flatline condition; it refuses to close when the current mark or excursion history is unavailable, and requires the persisted mark-receipt timestamp to be no older than five minutes. The mark timestamp is restored with the Trade record; after a restart, an old or absent mark cannot be used for an automatic close. A healthy or previously moving position is not closed merely because it is old.
+
+The scanner has a hard `5.0/10` execution-liquidity floor. With fresh sequenced L2 depth evidence, LONG setups additionally require bid-side cancellation pressure `≤0.60`, while SHORT setups require ask-side cancellation pressure `≤0.60`. An unavailable or stale depth window is recorded as unavailable rather than being mislabelled as spoofing; it does not make a zero-confidence cancellation score look like a pass.
 
 ## Entry thesis and recovery
 
