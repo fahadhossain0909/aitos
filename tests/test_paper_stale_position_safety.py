@@ -55,6 +55,7 @@ def make_components(
     )
     if last_marked_price is not ...:
         trade.last_marked_price = last_marked_price
+        trade.last_marked_at = datetime.now(timezone.utc).isoformat()
     lifecycle = FakeLifecycle(trade)
     return SimpleNamespace(trade_lifecycle=lifecycle), lifecycle
 
@@ -94,6 +95,18 @@ async def test_active_or_previously_moved_position_is_not_scratch_closed():
         100.1, mae_price=0.1, mfe_price=0.5, mfe_r=0.25
     )
     await _close_stale_positions(components)
+    assert lifecycle.closed == []
+
+
+@pytest.mark.asyncio
+async def test_dead_candle_fallback_does_not_close_with_stale_market_mark():
+    components, lifecycle = make_components(100.1, mae_price=0.0, mfe_price=0.0)
+    components.trade_lifecycle.trade.last_marked_at = (
+        datetime.now(timezone.utc) - timedelta(minutes=10)
+    ).isoformat()
+
+    await _close_stale_positions(components)
+
     assert lifecycle.closed == []
 
 
