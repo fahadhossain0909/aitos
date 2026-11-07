@@ -161,15 +161,14 @@ class BootstrapTest:
     block_length: int
 
 
-def _circular_block_sample(
-    values: Sequence[float], block_length: int, rng: random.Random
-) -> list[float]:
-    n = len(values)
-    out: list[float] = []
-    while len(out) < n:
-        start = rng.randrange(n)
-        out.extend(values[(start + i) % n] for i in range(block_length))
-    return out[:n]
+def _circular_block_indices(
+    length: int, block_length: int, rng: random.Random
+) -> list[int]:
+    indices: list[int] = []
+    while len(indices) < length:
+        start = rng.randrange(length)
+        indices.extend((start + offset) % length for offset in range(block_length))
+    return indices[:length]
 
 
 def white_reality_check(
@@ -179,7 +178,7 @@ def white_reality_check(
     block_length: int = 5,
     seed: int = 0,
 ) -> BootstrapTest:
-    """White's Reality Check using centered circular-block bootstrap maxima."""
+    """White's Reality Check with synchronized circular-block resampling."""
     if len(strategy_returns) < 1 or resamples < 100:
         raise ValueError("at least one strategy and 100 resamples are required")
     names = tuple(sorted(strategy_returns))
@@ -188,14 +187,13 @@ def white_reality_check(
     if any(len(row) != n for row in matrix) or not 1 <= block_length <= n:
         raise ValueError("strategy returns must align and block length be valid")
     observed = max(mean(row) for row in matrix)
-    centered = tuple(tuple(x - mean(row) for x in row) for row in matrix)
+    centered = tuple(tuple(value - mean(row) for value in row) for row in matrix)
     rng = random.Random(seed)
     exceed = 0
     for _ in range(resamples):
-        maxima = [
-            mean(_circular_block_sample(row, block_length, rng)) for row in centered
-        ]
-        if max(maxima) >= observed:
+        indices = _circular_block_indices(n, block_length, rng)
+        maximum = max(mean(row[index] for index in indices) for row in centered)
+        if maximum >= observed:
             exceed += 1
     return BootstrapTest(
         observed, (exceed + 1) / (resamples + 1), n, resamples, block_length
@@ -219,11 +217,11 @@ def model_confidence_set(
     block_length: int = 5,
     seed: int = 0,
 ) -> ModelConfidenceSet:
-    """Range-based block-bootstrap MCS elimination with step-down p-values.
+    """Step-down Hansen-Lunde-Nason-style MCS using a block-bootstrap T-max test.
 
-    This compact implementation is intended for research screening. It returns
-    the surviving set and per-elimination bootstrap p-values, not a substitute
-    for a full Hansen-Lunde-Nason implementation with studentized T_max/T_R.
+    One shared block-index sequence is applied to every model in each
+    resample, preserving cross-model dependence. The least accurate model is
+    eliminated only when equal predictive ability is rejected.
     """
     if len(losses) < 2 or not 0.5 < confidence < 1.0 or resamples < 100:
         raise ValueError("invalid MCS configuration")
@@ -239,22 +237,50 @@ def model_confidence_set(
     while len(active) > 1:
         means = {name: mean(matrix[name]) for name in active}
         worst = max(active, key=means.__getitem__)
-        observed = means[worst] - min(means.values())
+        pair_scales: dict[tuple[str, str], float] = {}
+        observed = 0.0
+        for left_index, left in enumerate(active):
+            for right in active[left_index + 1 :]:
+                differences = [
+                    a - b for a, b in zip(matrix[left], matrix[right])
+                ]
+                difference_mean = mean(differences)
+                variance = sum(
+                    (value - difference_mean) ** 2 for value in differences
+                ) / max(1, n - 1)
+                standard_error = math.sqrt(max(0.0, variance) / n)
+                pair_scales[(left, right)] = standard_error
+                if standard_error <= 1e-15:
+                    statistic = math.inf if abs(difference_mean) > 1e-15 else 0.0
+                else:
+                    statistic = abs(difference_mean) / standard_error
+                observed = max(observed, statistic)
         exceed = 0
-        for _ in range(resamples):
-            samples = {
-                name: _circular_block_sample(
-                    [x - means[name] for x in matrix[name]], block_length, rng
-                )
+        if observed == 0.0:
+            p_value = 1.0
+        else:
+            centered = {
+                name: tuple(value - means[name] for value in matrix[name])
                 for name in active
             }
-            max_stat = max(
-                mean(samples[name]) - min(mean(samples[x]) for x in active)
-                for name in active
-            )
-            if max_stat >= observed:
-                exceed += 1
-        p_value = (exceed + 1) / (resamples + 1)
+            for _ in range(resamples):
+                indices = _circular_block_indices(n, block_length, rng)
+                bootstrap_max = 0.0
+                for left_index, left in enumerate(active):
+                    for right in active[left_index + 1 :]:
+                        standard_error = pair_scales[(left, right)]
+                        if standard_error <= 1e-15:
+                            continue
+                        sampled_difference = mean(
+                            centered[left][index] - centered[right][index]
+                            for index in indices
+                        )
+                        bootstrap_max = max(
+                            bootstrap_max, abs(sampled_difference) / standard_error
+                        )
+                if bootstrap_max >= observed:
+                    exceed += 1
+            p_value = (exceed + 1) / (resamples + 1)
         p_values[worst] = p_value
         if p_value > alpha:
             break
