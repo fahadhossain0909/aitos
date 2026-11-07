@@ -6,6 +6,7 @@ import pytest
 from aitos.core.contracts import Event
 from aitos.core.exceptions import TradeNotFoundError
 from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
+from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.risk.models import PortfolioState, PositionExposure
 from aitos.trading.lifecycle import TradeLifecycle
 
@@ -806,3 +807,66 @@ async def test_statistical_forecast_mismatch_or_staleness_fails_closed(
     )
     assert mismatch_trade.state == TradeLifecycleState.REJECTED
     assert "symbol, side or horizon mismatch" in mismatch_trade.rejection_reason
+
+
+
+@pytest.mark.asyncio
+async def test_statistical_shadow_ledger_resolves_trade_outcome(
+    event_bus, risk_engine, tmp_path
+):
+    ledger = StatisticalShadowLedger(tmp_path / "statistical-shadow.sqlite3")
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        statistical_shadow_ledger=ledger,
+    )
+    await lifecycle.initialize({})
+    now = datetime.now(timezone.utc)
+    forecast = {
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "horizon": "15m",
+        "model_id": "aitos-contract-statistical-stack",
+        "model_version": "1",
+        "as_of": now.isoformat(),
+        "window_start": (now - timedelta(hours=1)).isoformat(),
+        "feature_snapshot_id": "snapshot-lifecycle-1",
+        "sample_size": 256,
+        "predicted_up": 0.8,
+        "downside_probability": 0.2,
+        "forecast_volatility": 0.02,
+        "reference_volatility": 0.01,
+        "tail_probability": 0.1,
+        "expected_shortfall": 0.03,
+        "expected_return": 0.01,
+        "probability_confidence": 0.8,
+    }
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            timeframe="15m",
+            agent_consensus={"statistical_forecast": forecast, "a_stat": 8.0},
+        ),
+        make_portfolio(),
+    )
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    pending = ledger.metrics(
+        symbol="BTCUSDT",
+        horizon="15m",
+        model_id="aitos-contract-statistical-stack",
+        model_version="1",
+    )
+    assert pending.observations == 0
+
+    closed = await lifecycle.close_trade(
+        trade.trade_id, trade.entry_price * 1.01, "shadow_outcome_test"
+    )
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    resolved = ledger.metrics(
+        symbol="BTCUSDT",
+        horizon="15m",
+        model_id="aitos-contract-statistical-stack",
+        model_version="1",
+    )
+    assert resolved.observations == 1
+    assert resolved.directional_hit_rate == 1.0
+    assert resolved.brier == pytest.approx(0.04)
