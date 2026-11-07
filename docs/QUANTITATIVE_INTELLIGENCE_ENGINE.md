@@ -169,15 +169,23 @@ controls remain authoritative.
 
 ## Synthetic validation suite
 
-A deterministic, seeded pytest suite is maintained at
-`tests/statistics/test_synthetic_market_validation.py`. It exercises the
-HSMM posterior, marked Hawkes stationarity, correlated multi-asset DCC and
-portfolio tail aggregation, L1 execution-cost accounting, chronological
-purged/CPCV splits, calibration metrics, paired block bootstrap and PBO
-diagnostics. It uses synthetic observations only and is not evidence of
-profitability or a substitute for exchange-data replay.
+Deterministic, seeded pytest coverage is distributed across
+`tests/statistics/test_synthetic_market_validation.py`,
+`test_hsmm_hawkes_dependence_replay.py`, `test_tail_calibration.py`,
+`test_selection_diagnostics.py`, `test_symbol_regime_experiments.py`,
+`test_depth_replay.py`, `test_engine_drift_lifecycle.py`,
+`test_advanced_volatility_estimators.py`, and execution/attribution tests.
+It exercises leakage-free HSMM fit/filter and multiclass calibration, marked
+Hawkes MLE/online updates, DCC plus Student-t copula and VaR/ES backtests,
+GJR/EGARCH/HAR estimation, L1/L2 fills and queue priority, purged
+symbol/regime OOS orchestration, PSR/DSR/MCS/DM/Reality Check and
+multiple-testing corrections, drift scheduling, decision lifecycle and
+cross-adapter attribution. All synthetic suites use generated data only; they
+are not evidence of profitability or a substitute for historical exchange
+execution replay.
 
-The suite must pass in the repository CI matrix before this branch can be
-considered code-validated. A successful unit-test run still does not establish
-paper-runtime integration, production calibration, full-depth market impact,
-or real-world execution quality.
+The full repository CI matrix and regression suite must pass on the latest PR
+head before code validation can be declared. Even a green CI run does not
+establish production calibration, venue-specific market-impact coefficients,
+live event-consumer wiring, paper-runtime reconciliation or real-world
+execution quality.
