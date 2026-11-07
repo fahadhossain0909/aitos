@@ -1,7 +1,7 @@
 import hashlib
 
 from aitos.statistics.governance import PromotionEvidence, PromotionPolicy
-from aitos.statistics.governance_runtime import StatisticalGovernanceRuntime
+from aitos.statistics.governance_runtime import (\n    DriftMonitorScheduler,\n    StatisticalGovernanceRuntime,\n)
 from aitos.statistics.registry import StatisticalModelRegistry
 
 
@@ -72,3 +72,31 @@ def test_challenger_requires_explicit_runtime_operator_approval(tmp_path):
     )
     assert promoted.eligible
     assert registry.get_champion("a-stat").model_version == "2.0.0"
+
+
+
+def test_drift_scheduler_respects_cadence_and_deduplicates_alerts(tmp_path):
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    registry = StatisticalModelRegistry(tmp_path / "registry.sqlite3")
+    runtime = StatisticalGovernanceRuntime(registry)
+    alerts = []
+    scheduler = DriftMonitorScheduler(
+        runtime, interval_seconds=60, alert_callback=alerts.append
+    )
+    reference = {"volatility": [float(i) for i in range(100)]}
+    shifted = {"volatility": [float(i + 1000) for i in range(100)]}
+    start = datetime(2026, 11, 7, tzinfo=timezone.utc)
+
+    first = asyncio.run(scheduler.run_once(reference, shifted, now=start))
+    skipped = asyncio.run(
+        scheduler.run_once(reference, shifted, now=start + timedelta(seconds=20))
+    )
+    second = asyncio.run(
+        scheduler.run_once(reference, shifted, now=start + timedelta(seconds=61))
+    )
+    assert first.status in {"WARNING", "CRITICAL"}
+    assert skipped is None
+    assert second.status == first.status
+    assert len(alerts) == 1
