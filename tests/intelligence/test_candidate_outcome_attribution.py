@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from aitos.intelligence.opportunity_outcomes import CandidateOutcomeStore
 from aitos.models.trade import TradeSide
 from aitos.statistics.decision_ledger import DecisionOutcomeLedger
