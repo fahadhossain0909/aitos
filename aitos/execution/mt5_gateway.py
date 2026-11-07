@@ -71,12 +71,16 @@ class MT5GatewayOrderExecutor(OrderExecutor):
                     error=(
                         body.get("error")
                         or (
-                            "MT5 fill price missing; reference-price fallback requires reconciliation"
-                            if price_fallback
+                            "MT5 gateway reported unsuccessful status despite a confirmed fill; reconciliation required"
+                            if not accepted and filled
                             else (
-                                None
-                                if filled and fill_price > 0.0
-                                else "MT5 gateway returned no confirmed execution fill"
+                                "MT5 fill price missing; reference-price fallback requires reconciliation"
+                                if price_fallback
+                                else (
+                                    None
+                                    if filled and fill_price > 0.0
+                                    else "MT5 gateway returned no confirmed execution fill"
+                                )
                             )
                         )
                     ),
