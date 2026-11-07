@@ -56,9 +56,13 @@ def test_registry_requires_evidence_and_operator_approval_for_promotion(tmp_path
     assert not blocked.eligible
     assert "explicit_operator_approval_required" in blocked.reasons
     assert registry.get_champion("a-stat") is None
+    history = registry.promotion_history("a-stat")
+    assert history[-1]["action"] == "PROMOTION_BLOCKED"
+    assert "explicit_operator_approval_required" in history[-1]["decision"]["reasons"]
 
     promoted = registry.promote(evidence("1.0.0"))
     assert promoted.eligible
+    assert registry.promotion_history("a-stat")[-1]["action"] == "PROMOTED"
     champion = registry.get_champion("a-stat")
     assert champion is not None
     assert champion.model_version == "1.0.0"
@@ -79,8 +83,10 @@ def test_registry_champion_replacement_and_manual_rollback(tmp_path):
 
     with pytest.raises(PermissionError):
         registry.rollback("a-stat", "1.0.0")
+    assert registry.promotion_history("a-stat")[-1]["action"] == "ROLLBACK_BLOCKED"
     restored = registry.rollback("a-stat", "1.0.0", operator_approved=True)
     assert restored.model_version == "1.0.0"
+    assert registry.promotion_history("a-stat")[-1]["action"] == "ROLLBACK"
     assert registry.get_champion("a-stat").model_version == "1.0.0"
 
 
