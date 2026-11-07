@@ -123,6 +123,8 @@ class DCCGARCH:
                         break
                     q=[[ (1-alpha-beta)*qbar[i][j]+alpha*z[i]*z[j]+beta*q[i][j] for j in range(len(symbols))] for i in range(len(symbols))]
                 if best is None or loss<best[0]: best=(loss,alpha,beta)
+        if best is None or not math.isfinite(best[0]):
+            raise ValueError("DCC correlation dynamics could not be estimated")
         _,alpha,beta=best
         q=[row[:] for row in qbar]
         for t in range(n):
