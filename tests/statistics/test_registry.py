@@ -72,7 +72,9 @@ def test_registry_champion_replacement_and_manual_rollback(tmp_path):
     registry.promote(evidence("1.0.0"))
     registry.promote(evidence("2.0.0"))
     assert registry.get_champion("a-stat").model_version == "2.0.0"
-    versions = {item.model_version: item.status for item in registry.list_artifacts("a-stat")}
+    versions = {
+        item.model_version: item.status for item in registry.list_artifacts("a-stat")
+    }
     assert versions == {"1.0.0": "ARCHIVED", "2.0.0": "CHAMPION"}
 
     with pytest.raises(PermissionError):
