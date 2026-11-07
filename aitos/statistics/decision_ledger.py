@@ -128,6 +128,7 @@ class DecisionOutcomeLedger:
         outcome: Mapping[str, Any] | None = None,
     ) -> int:
         import math
+
         value = float(outcome_value)
         if not math.isfinite(value):
             raise ValueError("outcome_value must be finite")
