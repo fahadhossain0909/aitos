@@ -113,7 +113,7 @@ class AttributedOrderExecutor(OrderExecutor):
             symbol=request.symbol,
             side=request.side,
             decision_type=kind,
-            accepted=result.success,
+            accepted=result.success or result.filled_quantity > 0.0,
             payload=payload,
         )
         if not result.success or result.error:
