@@ -296,3 +296,93 @@ class GJRGARCH11:
             beta,
             persistence,
         )
+
+
+@dataclass(frozen=True)
+class EGARCHForecast:
+    variance: float
+    volatility: float
+    long_run_variance: float
+    omega: float
+    alpha: float
+    gamma: float
+    beta: float
+    observations: int
+    negative_log_likelihood: float
+
+
+class EGARCH11:
+    """EGARCH(1,1) Gaussian QML with constrained deterministic refinement."""
+
+    _E_ABS_STANDARD_NORMAL = math.sqrt(2.0 / math.pi)
+
+    def __init__(self, *, max_refinements: int = 80) -> None:
+        if max_refinements <= 0:
+            raise ValueError("max_refinements must be positive")
+        self.max_refinements = max_refinements
+
+    @staticmethod
+    def _evaluate(
+        centered: Sequence[float], alpha: float, gamma: float, beta: float
+    ) -> tuple[float, float, float]:
+        sample_variance = max(mean(value * value for value in centered), _EPS)
+        if not 0.0 <= alpha <= 1.0 or abs(gamma) > 1.0 or abs(beta) >= 0.995:
+            return float("inf"), sample_variance, math.log(sample_variance)
+        omega = (1.0 - beta) * math.log(sample_variance)
+        log_variance = math.log(sample_variance)
+        loss = 0.0
+        for value in centered:
+            log_variance = max(-40.0, min(40.0, log_variance))
+            variance = math.exp(log_variance)
+            loss += log_variance + value * value / variance
+            z = value / math.sqrt(variance)
+            log_variance = (
+                omega + beta * log_variance
+                + alpha * (abs(z) - EGARCH11._E_ABS_STANDARD_NORMAL)
+                + gamma * z
+            )
+        return loss, math.exp(max(-40.0, min(40.0, log_variance))), omega
+
+    def fit_forecast(self, returns: Iterable[float]) -> EGARCHForecast:
+        xs = _finite_series(returns, minimum=30)
+        mu = mean(xs)
+        centered = tuple(value - mu for value in xs)
+        candidates = [
+            (alpha, gamma, beta)
+            for alpha in (0.05, 0.10, 0.20, 0.35, 0.50)
+            for gamma in (-0.30, -0.15, 0.0, 0.15, 0.30)
+            for beta in (0.50, 0.70, 0.85, 0.92, 0.97)
+        ]
+        best = min(
+            ((self._evaluate(centered, *params)[0], params) for params in candidates),
+            key=lambda item: item[0],
+        )
+        loss, (alpha, gamma, beta) = best
+        steps = [(0.05, 0.05, 0.02), (0.02, 0.02, 0.01), (0.005, 0.005, 0.002)]
+        refinements = 0
+        for step in steps:
+            improved = True
+            while improved and refinements < self.max_refinements:
+                improved = False
+                for index, direction in ((0, -1), (0, 1), (1, -1), (1, 1),
+                                         (2, -1), (2, 1)):
+                    values = [alpha, gamma, beta]
+                    values[index] += direction * step[index]
+                    candidate = (max(0.0, min(1.0, values[0])),
+                                 max(-1.0, min(1.0, values[1])),
+                                 max(-0.994, min(0.994, values[2])))
+                    candidate_loss = self._evaluate(centered, *candidate)[0]
+                    refinements += 1
+                    if candidate_loss + 1e-12 < loss:
+                        alpha, gamma, beta = candidate
+                        loss = candidate_loss
+                        improved = True
+                        break
+                    if refinements >= self.max_refinements:
+                        break
+        loss, variance, omega = self._evaluate(centered, alpha, gamma, beta)
+        long_run = math.exp(max(-40.0, min(40.0, omega / max(1.0-beta, 1e-8))))
+        return EGARCHForecast(
+            variance, math.sqrt(variance), long_run, omega, alpha, gamma, beta,
+            len(xs), loss,
+        )
