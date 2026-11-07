@@ -128,9 +128,7 @@ def fit_marked_hawkes_mle(
             radius = _spectral_radius_2x2(candidate_a)
             if radius >= 0.95:
                 scale = 0.949 / radius
-                candidate_a = [
-                [value * scale for value in row] for row in candidate_a
-            ]
+                candidate_a = [[value * scale for value in row] for row in candidate_a]
             mu, excitation = candidate_mu, candidate_a
             if abs(ll - last_ll) < 1e-10:
                 break
