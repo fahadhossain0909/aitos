@@ -774,8 +774,6 @@ async def test_statistical_forecast_reduces_size_and_is_persisted(
 async def test_statistical_forecast_mismatch_or_staleness_fails_closed(
     event_bus, risk_engine
 ):
-    from datetime import timedelta
-
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})
     stale = {
@@ -811,7 +809,6 @@ async def test_statistical_forecast_mismatch_or_staleness_fails_closed(
     )
     assert mismatch_trade.state == TradeLifecycleState.REJECTED
     assert "symbol, side or horizon mismatch" in mismatch_trade.rejection_reason
-
 
 
 @pytest.mark.asyncio
