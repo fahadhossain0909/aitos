@@ -68,6 +68,9 @@ from .risk_overlay import (
     assess_statistical_risk_forecast,
 )
 from .validation import (
+    ExecutionCostScenario,
+    ExecutionCostSensitivity,
+    execution_cost_sensitivity,
     BootstrapInterval,
     DriftReport,
     FeatureDriftResult,
