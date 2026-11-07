@@ -49,7 +49,8 @@ class StatisticalShadowLedger:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """
@@ -77,6 +78,8 @@ class StatisticalShadowLedger:
                 ON statistical_shadow_forecasts(symbol, horizon, created_at)
                 """
             )
+        finally:
+            connection.close()
 
     @staticmethod
     def _timestamp(value: str | None = None) -> str:
@@ -116,12 +119,12 @@ class StatisticalShadowLedger:
             row = connection.execute(
                 "SELECT symbol, horizon, model_id, model_version, as_of, "
                 "feature_snapshot_id, predicted_up, predicted_variance, "
-                "expected_return, created_at FROM statistical_shadow_forecasts "
+                "expected_return FROM statistical_shadow_forecasts "
                 "WHERE forecast_id=?",
                 (forecast_id,),
             ).fetchone()
             if row is not None:
-                if tuple(row) != values:
+                if tuple(row) != values[:-1]:
                     raise ValueError("forecast_id already exists with different content")
                 connection.execute("COMMIT")
                 return False
@@ -209,8 +212,11 @@ class StatisticalShadowLedger:
             "actual_return, realised_variance FROM statistical_shadow_forecasts "
             "WHERE " + " AND ".join(clauses)
         )
-        with self._connect() as connection:
+        connection = self._connect()
+        try:
             rows = connection.execute(query, parameters).fetchall()
+        finally:
+            connection.close()
         if not rows:
             return ShadowMetrics(0, 0.0, 0.0, 0.0, 0.0, 0.0)
         probabilities = [float(row["predicted_up"]) for row in rows]
