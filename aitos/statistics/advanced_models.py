@@ -90,8 +90,14 @@ def fit_har_rv_forecast(
     targets = squares[start + 1:]
     if len(rows) < 8:
         fallback = mean(squares[-min(long_window, len(squares)):])
-        return HARForecast(fallback, math.sqrt(max(0.0, fallback)),
-                           (0.0, 1 / 3, 1 / 3, 1 / 3), len(rows), False, 0.0)
+        return HARForecast(
+            fallback,
+            math.sqrt(max(0.0, fallback)),
+            (0.0, 1 / 3, 1 / 3, 1 / 3),
+            len(rows),
+            False,
+            0.0,
+        )
 
     xtx = [[sum(row[i] * row[j] for row in rows) for j in range(4)] for i in range(4)]
     xty = [sum(row[i] * y for row, y in zip(rows, targets)) for i in range(4)]
@@ -101,19 +107,35 @@ def fit_har_rv_forecast(
         coefficients = _solve_linear(xtx, xty)
     except ValueError:
         fallback = mean(squares[-long_window:])
-        return HARForecast(fallback, math.sqrt(max(0.0, fallback)),
-                           (0.0, 1 / 3, 1 / 3, 1 / 3), len(rows), False, 0.0)
+        return HARForecast(
+            fallback,
+            math.sqrt(max(0.0, fallback)),
+            (0.0, 1 / 3, 1 / 3, 1 / 3),
+            len(rows),
+            False,
+            0.0,
+        )
 
     predicted = [sum(c * x for c, x in zip(coefficients, row)) for row in rows]
     target_mean = mean(targets)
     residual = sum((y - p) ** 2 for y, p in zip(targets, predicted))
     total = sum((y - target_mean) ** 2 for y in targets)
     r_squared = 1.0 - residual / total if total > _EPS else 0.0
-    next_variance = max(0.0, sum(c * x for c, x in zip(
-        coefficients, (1.0, *features(len(xs) - 1))
-    )))
-    return HARForecast(next_variance, math.sqrt(next_variance),
-                       tuple(coefficients), len(rows), True, r_squared)
+    next_variance = max(
+        0.0,
+        sum(
+            c * x
+            for c, x in zip(coefficients, (1.0, *features(len(xs) - 1)))
+        ),
+    )
+    return HARForecast(
+        next_variance,
+        math.sqrt(next_variance),
+        tuple(coefficients),
+        len(rows),
+        True,
+        r_squared,
+    )
 
 
 @dataclass(frozen=True)
@@ -175,17 +197,27 @@ def bocpd_change_point(
             scale = math.sqrt(beta * (kappa + 1.0) / (alpha * kappa))
             predictive = _student_t_density(value, mu, scale, df)
             cp_mass += probability * predictive * hazard
-            growth.append((probability * predictive * (1.0 - hazard),
-                           (kappa * mu + value) / (kappa + 1.0),
-                           kappa + 1.0, alpha + 0.5,
-                           beta + (kappa * (value - mu) ** 2) / (2.0 * (kappa + 1.0))))
+            growth.append(
+                (
+                    probability * predictive * (1.0 - hazard),
+                    (kappa * mu + value) / (kappa + 1.0),
+                    kappa + 1.0,
+                    alpha + 0.5,
+                    beta
+                    + (kappa * (value - mu) ** 2) / (2.0 * (kappa + 1.0)),
+                )
+            )
         prior_predictive = _student_t_density(
-            value, prior_mean,
-            math.sqrt(prior_beta * (prior_kappa + 1.0) / (prior_alpha * prior_kappa)),
+            value,
+            prior_mean,
+            math.sqrt(
+                prior_beta * (prior_kappa + 1.0) / (prior_alpha * prior_kappa)
+            ),
             2.0 * prior_alpha,
         )
-        new_states = [(prior_predictive * hazard, prior_mean, prior_kappa,
-                       prior_alpha, prior_beta)] + growth[:max_run_length - 1]
+        new_states = [
+            (prior_predictive * hazard, prior_mean, prior_kappa, prior_alpha, prior_beta)
+        ] + growth[:max_run_length - 1]
         total = sum(item[0] for item in new_states)
         if total <= _EPS or not math.isfinite(total):
             raise ArithmeticError("BOCPD posterior normalization failed")
@@ -251,5 +283,13 @@ class GJRGARCH11:
                 1e-12,
             )
         long_run = omega / max(1.0 - persistence, 1e-8)
-        return GJRGARCHForecast(variance, math.sqrt(variance), long_run,
-                                omega, alpha, gamma, beta, persistence)
+        return GJRGARCHForecast(
+            variance,
+            math.sqrt(variance),
+            long_run,
+            omega,
+            alpha,
+            gamma,
+            beta,
+            persistence,
+        )
