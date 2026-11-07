@@ -75,6 +75,7 @@ def assess_statistical_risk_forecast(
     forecast: Mapping[str, object],
     *,
     symbol: str,
+    side: str,
     horizon: str,
     now: datetime | None = None,
     max_age_seconds: float = 30.0,
@@ -89,8 +90,12 @@ def assess_statistical_risk_forecast(
         raise ValueError("statistical forecast must be a mapping")
     if not math.isfinite(max_age_seconds) or max_age_seconds <= 0:
         raise ValueError("max_age_seconds must be finite and positive")
-    if forecast.get("symbol") != symbol or forecast.get("horizon") != horizon:
-        raise ValueError("statistical forecast symbol or horizon mismatch")
+    if (
+        forecast.get("symbol") != symbol
+        or forecast.get("side") != side
+        or forecast.get("horizon") != horizon
+    ):
+        raise ValueError("statistical forecast symbol, side or horizon mismatch")
     if not forecast.get("model_id") or not forecast.get("model_version"):
         raise ValueError("statistical forecast model identity is required")
     try:
