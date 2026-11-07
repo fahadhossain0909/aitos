@@ -98,10 +98,15 @@ def distribution_features(returns: Iterable[float]) -> DistributionFeatures:
         skew = kurt = 0.0
     downside = math.sqrt(mean(min(0.0, x) ** 2 for x in xs))
     return DistributionFeatures(
-        count=len(xs), mean=mu, volatility=sigma,
-        downside_semivolatility=downside, skewness=skew,
-        excess_kurtosis=kurt, q05=_quantile(xs, 0.05),
-        median=_quantile(xs, 0.5), q95=_quantile(xs, 0.95),
+        count=len(xs),
+        mean=mu,
+        volatility=sigma,
+        downside_semivolatility=downside,
+        skewness=skew,
+        excess_kurtosis=kurt,
+        q05=_quantile(xs, 0.05),
+        median=_quantile(xs, 0.5),
+        q95=_quantile(xs, 0.95),
         signal_to_noise=mu / max(sigma, _EPS),
     )
 
@@ -139,8 +144,9 @@ def har_rv_forecast(
     return VolatilityForecast(short, medium, long, forecast, downside, jump_ratio)
 
 
-def cusum_change_point(values: Iterable[float], *, threshold: float = 5.0,
-                       drift: float = 0.5) -> ChangePointDiagnostic:
+def cusum_change_point(
+    values: Iterable[float], *, threshold: float = 5.0, drift: float = 0.5
+) -> ChangePointDiagnostic:
     """Two-sided standardized CUSUM diagnostic on a finite observation window."""
     xs = _clean(values, minimum=5)
     if threshold <= 0 or drift < 0:
@@ -156,8 +162,9 @@ def cusum_change_point(values: Iterable[float], *, threshold: float = 5.0,
     return ChangePointDiagnostic(score, score >= threshold, pos, neg)
 
 
-def permutation_entropy(values: Iterable[float], *, order: int = 3,
-                        delay: int = 1) -> float:
+def permutation_entropy(
+    values: Iterable[float], *, order: int = 3, delay: int = 1
+) -> float:
     """Normalized Bandt-Pompe permutation entropy in [0, 1]."""
     xs = _clean(values, minimum=order * delay + 1)
     if order < 2 or delay < 1:
@@ -175,8 +182,9 @@ def permutation_entropy(values: Iterable[float], *, order: int = 3,
     return _clamp(entropy / maximum, 0.0, 1.0)
 
 
-def hurst_exponent(values: Iterable[float], *, min_lag: int = 2,
-                   max_lag: int = 20) -> float:
+def hurst_exponent(
+    values: Iterable[float], *, min_lag: int = 2, max_lag: int = 20
+) -> float:
     """Coarse log(RMS-difference)-log(lag) slope diagnostic.
 
     This is a screening estimate, not a statistically calibrated Hurst test.
@@ -200,9 +208,9 @@ def hurst_exponent(values: Iterable[float], *, min_lag: int = 2,
     return _clamp(slope, 0.0, 1.0)
 
 
-def exponential_hawkes_intensity(event_signs: Iterable[int], *,
-                                 decay: float = 0.2,
-                                 baseline: float = 0.1) -> HawkesIntensity:
+def exponential_hawkes_intensity(
+    event_signs: Iterable[int], *, decay: float = 0.2, baseline: float = 0.1
+) -> HawkesIntensity:
     """Discrete event-time exponential excitation proxy.
 
     event_signs must be +1 (buy), -1 (sell), or 0 (no classified event).
@@ -227,13 +235,22 @@ def exponential_hawkes_intensity(event_signs: Iterable[int], *,
             sell_exc += decay
     buy = baseline + buy_count / len(signs) + buy_exc
     sell = baseline + sell_count / len(signs) + sell_exc
-    return HawkesIntensity(buy, sell, buy_exc, sell_exc,
-                           (buy - sell) / max(buy + sell, _EPS))
+    return HawkesIntensity(
+        buy,
+        sell,
+        buy_exc,
+        sell_exc,
+        (buy - sell) / max(buy + sell, _EPS),
+    )
 
 
-def kalman_beta(y: Iterable[float], x: Iterable[float], *,
-                observation_variance: float = 1e-4,
-                process_variance: float = 1e-6) -> float:
+def kalman_beta(
+    y: Iterable[float],
+    x: Iterable[float],
+    *,
+    observation_variance: float = 1e-4,
+    process_variance: float = 1e-6,
+) -> float:
     """Scalar random-walk Kalman estimate of a time-varying hedge beta."""
     ys, xs = _clean(y, minimum=3), _clean(x, minimum=3)
     if len(ys) != len(xs):
