@@ -571,18 +571,25 @@ class TradeLifecycle(AITOSModule):
             pass
         try:
             trade = await self._submit_opportunity_impl(opportunity, portfolio)
-        except Exception:
-            if trade is not None:
-                await self._record_decision(
-                    f"{trade_id}:EXECUTION_FAILURE:{time.time_ns()}",
-                    entity_id=self._trade_attribution_id(trade),
-                    symbol=symbol or "UNKNOWN",
-                    side=str(getattr(getattr(trade, "side", None), "value", "UNKNOWN")),
-                    decision_type="EXECUTION_FAILURE",
-                    accepted=False,
-                    reason="close_or_exchange_execution_failed",
-                    payload={"error_type": "close_trade_exception"},
-                )
+        except Exception as exc:
+            trace_id = opportunity.agent_consensus.get("trace_id")
+            await self._record_decision(
+                f"{opportunity.opportunity_id}:EXECUTION_FAILURE:{time.time_ns()}",
+                entity_id=(
+                    f"{str(trace_id).strip()}:{opportunity.side.value}"
+                    if trace_id
+                    else opportunity.opportunity_id
+                ),
+                symbol=symbol or "UNKNOWN",
+                side=opportunity.side.value,
+                decision_type="EXECUTION_FAILURE",
+                accepted=False,
+                reason=f"opportunity_submission_failed:{type(exc).__name__}",
+                payload={
+                    "opportunity_id": opportunity.opportunity_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
             try:
                 record_error(
                     PipelineStage.TRADE_LIFECYCLE.value,
