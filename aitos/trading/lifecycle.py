@@ -169,6 +169,11 @@ class TradeLifecycle(AITOSModule):
             )
         return self._decision_outcome_ledger
 
+    @staticmethod
+    def _trade_attribution_id(trade: Trade) -> str:
+        trace_id = trade.agent_consensus.get("trace_id")
+        return str(trace_id).strip() if trace_id else trade.trade_id
+
     async def _record_decision(
         self,
         decision_id: str,
@@ -207,7 +212,7 @@ class TradeLifecycle(AITOSModule):
         try:
             await asyncio.to_thread(
                 self._decision_ledger().resolve_entity,
-                trade.trade_id,
+                self._trade_attribution_id(trade),
                 outcome_value=float(trade.pnl_percent) / 100.0,
                 outcome_at=str(trade.exit_time or utc_now_iso()),
                 outcome={
@@ -567,7 +572,7 @@ class TradeLifecycle(AITOSModule):
             if trade is not None:
                 await self._record_decision(
                     f"{trade_id}:EXECUTION_FAILURE:{time.time_ns()}",
-                    entity_id=trade_id,
+                    entity_id=self._trade_attribution_id(trade),
                     symbol=symbol or "UNKNOWN",
                     side=str(getattr(getattr(trade, "side", None), "value", "UNKNOWN")),
                     decision_type="EXECUTION_FAILURE",
@@ -984,7 +989,7 @@ class TradeLifecycle(AITOSModule):
         action_type = str(pos_action.action.value).upper()
         await self._record_decision(
             f"{trade.trade_id}:EIE:{time.time_ns()}",
-            entity_id=trade.trade_id,
+            entity_id=self._trade_attribution_id(trade),
             symbol=trade.symbol,
             side=trade.side.value,
             decision_type=action_type,
@@ -1766,7 +1771,7 @@ class TradeLifecycle(AITOSModule):
         self._open_trades[trade.trade_id] = trade
         await self._record_decision(
             f"{trade.trade_id}:ENTRY",
-            entity_id=trade.trade_id,
+            entity_id=self._trade_attribution_id(trade),
             symbol=trade.symbol,
             side=trade.side.value,
             decision_type="ENTRY",
@@ -1872,7 +1877,7 @@ class TradeLifecycle(AITOSModule):
         )
         await self._record_decision(
             f"{trade.trade_id}:{failure_type}",
-            entity_id=trade.trade_id,
+            entity_id=self._trade_attribution_id(trade),
             symbol=trade.symbol,
             side=trade.side.value,
             decision_type=failure_type,
