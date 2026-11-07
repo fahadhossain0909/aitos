@@ -86,9 +86,7 @@ def test_clustered_event_simulation_hawkes_fit_is_stationary_and_finite():
     assert 0.0 <= fit.branching_ratio < 0.95
     assert all(math.isfinite(x) and x > 0 for x in fit.baseline_intensities)
     assert all(
-        math.isfinite(x) and x >= 0
-        for row in fit.excitation_matrix
-        for x in row
+        math.isfinite(x) and x >= 0 for row in fit.excitation_matrix for x in row
     )
 
 
