@@ -1,4 +1,5 @@
 """Durable decision-to-outcome attribution for entries, gates, HOLD and exits."""
+
 from __future__ import annotations
 
 import json
