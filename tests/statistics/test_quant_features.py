@@ -12,7 +12,12 @@ from aitos.statistics.quant_features import (
     permutation_entropy,
 )
 from aitos.statistics.risk_overlay import assess_statistical_risk
-from aitos.statistics.validation import brier_score, log_loss, purged_walk_forward_folds, qlike_loss
+from aitos.statistics.validation import (
+    brier_score,
+    log_loss,
+    purged_walk_forward_folds,
+    qlike_loss,
+)
 
 
 def test_distribution_and_volatility_features_are_finite():
