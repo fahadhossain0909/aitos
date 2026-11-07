@@ -60,6 +60,7 @@ class StatisticalShadowLedger:
                 CREATE TABLE IF NOT EXISTS statistical_shadow_forecasts (
                     forecast_id TEXT PRIMARY KEY,
                     symbol TEXT NOT NULL,
+                    side TEXT NOT NULL DEFAULT 'BOTH',
                     horizon TEXT NOT NULL,
                     model_id TEXT NOT NULL,
                     model_version TEXT NOT NULL,
@@ -86,6 +87,11 @@ class StatisticalShadowLedger:
                 connection.execute(
                     "ALTER TABLE statistical_shadow_forecasts "
                     "ADD COLUMN feature_snapshot_json TEXT"
+                )
+            if "side" not in columns:
+                connection.execute(
+                    "ALTER TABLE statistical_shadow_forecasts "
+                    "ADD COLUMN side TEXT NOT NULL DEFAULT 'BOTH'"
                 )
             connection.execute(
                 """
@@ -138,6 +144,7 @@ class StatisticalShadowLedger:
             )
         values = (
             envelope.symbol,
+            envelope.side,
             envelope.horizon,
             envelope.model_id,
             envelope.model_version,
@@ -153,7 +160,7 @@ class StatisticalShadowLedger:
         try:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT symbol, horizon, model_id, model_version, as_of, "
+                "SELECT symbol, side, horizon, model_id, model_version, as_of, "
                 "feature_snapshot_id, predicted_up, predicted_variance, "
                 "expected_return, feature_snapshot_json "
                 "FROM statistical_shadow_forecasts "
@@ -170,10 +177,10 @@ class StatisticalShadowLedger:
             connection.execute(
                 """
                 INSERT INTO statistical_shadow_forecasts (
-                    forecast_id, symbol, horizon, model_id, model_version, as_of,
+                    forecast_id, symbol, side, horizon, model_id, model_version, as_of,
                     feature_snapshot_id, predicted_up, predicted_variance,
                     expected_return, feature_snapshot_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (forecast_id, *values),
             )
@@ -242,6 +249,7 @@ class StatisticalShadowLedger:
         horizon: str | None = None,
         model_id: str | None = None,
         model_version: str | None = None,
+        side: str | None = None,
     ) -> ShadowMetrics:
         """Return strictly outcome-resolved shadow metrics for a cohort."""
         clauses = [
@@ -261,6 +269,9 @@ class StatisticalShadowLedger:
         if model_version is not None:
             clauses.append("model_version=?")
             parameters.append(model_version)
+        if side is not None:
+            clauses.append("side=?")
+            parameters.append(side)
         query = (
             "SELECT predicted_up, predicted_variance, expected_return, "
             "actual_return, realised_variance FROM statistical_shadow_forecasts "
