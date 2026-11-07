@@ -135,3 +135,19 @@ stale or mismatched supplied forecasts fail closed. This integration still
 requires calibration and paper-runtime/historical-replay evidence before
 production use. Hard limits, circuit breakers, liquidity checks and execution
 controls remain authoritative.
+
+
+## Synthetic validation suite
+
+A deterministic, seeded pytest suite is maintained at
+`tests/statistics/test_synthetic_market_validation.py`. It exercises the
+HSMM posterior, marked Hawkes stationarity, correlated multi-asset DCC and
+portfolio tail aggregation, L1 execution-cost accounting, chronological
+purged/CPCV splits, calibration metrics, paired block bootstrap and PBO
+diagnostics. It uses synthetic observations only and is not evidence of
+profitability or a substitute for exchange-data replay.
+
+The suite must pass in the repository CI matrix before this branch can be
+considered code-validated. A successful unit-test run still does not establish
+paper-runtime integration, production calibration, full-depth market impact,
+or real-world execution quality.
