@@ -93,8 +93,9 @@ def test_dead_candle_exit_does_not_fire_after_meaningful_progress():
     )
     trade = _trade()
     trade.initial_r_distance = 1.0
-    policy.evaluate(trade, 100.3, completed_bar_id="bar-1")
+    policy.evaluate(trade, 100.45, completed_bar_id="bar-1")
     result = policy.evaluate(trade, 100.1, completed_bar_id="bar-2")
+    assert trade.mfe_r >= 0.4
     assert not result.stagnation_exit
 
 
