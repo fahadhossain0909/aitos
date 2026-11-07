@@ -57,7 +57,11 @@ from .quant_features import (
     kalman_beta,
     permutation_entropy,
 )
-from .risk_overlay import StatisticalRiskAssessment, assess_statistical_risk
+from .risk_overlay import (
+    StatisticalRiskAssessment,
+    assess_statistical_risk,
+    assess_statistical_risk_forecast,
+)
 from .validation import (
     brier_score,
     combinatorial_purged_folds,
@@ -94,6 +98,7 @@ __all__ = [
     "StatisticalRiskAssessment",
     "VolatilityForecast",
     "assess_statistical_risk",
+    "assess_statistical_risk_forecast",
     "brier_score",
     "combinatorial_purged_folds",
     "expected_calibration_error",
