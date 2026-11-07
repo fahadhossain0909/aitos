@@ -162,5 +162,8 @@ def test_bridge_ingests_new_closed_candles_with_fixed_length_windows() -> None:
 
     # A repeated scan of the updated window is idempotent as well.
     _, repeated_updated_result = evaluate(updated)
-    assert repeated_updated_result is not None and repeated_updated_result.advanced is not None
+    assert (
+        repeated_updated_result is not None
+        and repeated_updated_result.advanced is not None
+    )
     assert len(history) == 120
