@@ -30,6 +30,11 @@ class MT5GatewayOrderExecutor(OrderExecutor):
         self._session_factory = session_factory
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
+        if request.order_type != "MARKET":
+            raise ValueError(
+                "MT5 gateway resting orders are disabled until status polling "
+                "and cancellation are part of the execution lifecycle"
+            )
         payload = {
             "symbol": request.symbol,
             "side": request.side.value,
