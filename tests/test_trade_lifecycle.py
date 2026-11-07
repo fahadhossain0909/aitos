@@ -880,9 +880,11 @@ async def test_statistical_shadow_ledger_resolves_trade_outcome(
 
 
 class _PartialFillExecutor(OrderExecutor):
-    def __init__(self, fraction=0.4, fill_price_multiplier=1.001):
+    def __init__(self, fraction=0.4, fill_price_multiplier=1.001, success=True, error=None):
         self.fraction = fraction
         self.fill_price_multiplier = fill_price_multiplier
+        self.success = success
+        self.error = error
         self.request = None
 
     async def submit_order(self, request):
@@ -893,7 +895,8 @@ class _PartialFillExecutor(OrderExecutor):
             side=request.side,
             filled_quantity=request.quantity * self.fraction,
             fill_price=request.reference_price * self.fill_price_multiplier,
-            success=True,
+            success=self.success,
+            error=self.error,
         )
 
 
@@ -945,3 +948,27 @@ async def test_lifecycle_never_opens_zero_quantity_position_on_unfilled_order(
     assert trade.quantity == 0.0
     assert not lifecycle.get_open_trades()
     assert "confirmed fill" in trade.rejection_reason
+
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_keeps_confirmed_partial_fill_when_adapter_reports_status_error(
+    event_bus, risk_engine
+):
+    executor = _PartialFillExecutor(
+        fraction=0.25,
+        success=False,
+        error="venue order cancelled after partial execution",
+    )
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    assert trade.quantity == pytest.approx(executor.request.quantity * 0.25)
+    assert trade.position_size_usd == pytest.approx(
+        trade.quantity * executor.request.reference_price * 1.001
+    )
