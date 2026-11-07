@@ -5,6 +5,7 @@ import pytest
 from aioresponses import aioresponses
 
 from aitos.execution.attributed_executor import (
+    AttributionPersistenceError,
     AttributedOrderExecutor,
     OrderAttributionContext,
 )
@@ -180,3 +181,53 @@ async def test_attribution_decorator_wraps_ctrader_executor_contract(tmp_path):
     assert result.success
     rows = ledger.list_decisions(entity_id="scan-trace-42")
     assert rows[0]["payload"]["venue_order_id"] == "ctrader-91"
+
+
+
+class _RaisingExecutor(OrderExecutor):
+    async def submit_order(self, request):
+        raise TimeoutError("venue response timed out")
+
+
+@pytest.mark.asyncio
+async def test_attributed_executor_records_ambiguous_transport_failure_before_reraising(
+    tmp_path,
+):
+    ledger = DecisionOutcomeLedger(tmp_path / "timeout-decisions.sqlite3")
+    executor = AttributedOrderExecutor(_RaisingExecutor(), ledger, _context)
+    with pytest.raises(TimeoutError):
+        await executor.submit_order(
+            OrderRequest(
+                symbol="BTCUSDT",
+                side=TradeSide.LONG,
+                quantity=0.1,
+                reference_price=100.0,
+                client_order_id="timeout-client",
+            )
+        )
+    rows = ledger.list_decisions(entity_id="scan-trace-42")
+    assert {row["decision_type"] for row in rows} == {"ENTRY", "EXECUTION_FAILURE"}
+    assert any("TimeoutError" in row["payload"]["execution_error"] for row in rows)
+
+
+class _BrokenLedger:
+    def record_decision(self, *args, **kwargs):
+        raise OSError("journal unavailable")
+
+
+@pytest.mark.asyncio
+async def test_attributed_executor_exposes_venue_result_when_ledger_persistence_fails():
+    executor = AttributedOrderExecutor(SimulatedOrderExecutor(), _BrokenLedger(), _context)
+    with pytest.raises(AttributionPersistenceError) as error:
+        await executor.submit_order(
+            OrderRequest(
+                symbol="BTCUSDT",
+                side=TradeSide.LONG,
+                quantity=0.1,
+                reference_price=100.0,
+                client_order_id="ledger-failure-client",
+            )
+        )
+    assert error.value.may_have_executed
+    assert error.value.order_result.success
+    assert error.value.order_result.order_id.startswith("sim-")
