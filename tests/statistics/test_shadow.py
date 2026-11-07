@@ -98,7 +98,6 @@ def test_shadow_ledger_rejects_invalid_forecast_probabilities(tmp_path):
         )
 
 
-
 def test_shadow_ledger_persists_matching_feature_snapshot(tmp_path):
     ledger = StatisticalShadowLedger(tmp_path / "shadow.sqlite3")
     envelope = make_envelope()
