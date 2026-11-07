@@ -123,7 +123,13 @@ from .risk_overlay import (
     assess_statistical_risk,
     assess_statistical_risk_forecast,
 )
-from .tail_calibration import (\n    StudentTCopulaFit,\n    VaRESBacktest,\n    backtest_var_es,\n    fit_student_t_copula,\n)\nfrom .validation import (
+from .tail_calibration import (
+    StudentTCopulaFit,
+    VaRESBacktest,
+    backtest_var_es,
+    fit_student_t_copula,
+)
+from .validation import (
     CohortValidationMetric,
     ExecutionCostScenario,
     ExecutionCostSensitivity,
@@ -197,7 +203,11 @@ __all__ = [
     "HARForecast",
     "bocpd_change_point",
     "fit_har_rv_forecast",
-    "StudentTCopulaFit",\n    "VaRESBacktest",\n    "backtest_var_es",\n    "fit_student_t_copula",\n    "FeatureSnapshot",
+    "StudentTCopulaFit",
+    "VaRESBacktest",
+    "backtest_var_es",
+    "fit_student_t_copula",
+    "FeatureSnapshot",
     "ForecastEnvelope",
     "GARCH11",
     "EnsembleForecast",
