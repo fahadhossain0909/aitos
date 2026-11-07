@@ -227,7 +227,7 @@ def exponential_hawkes_intensity(
     buy_count = sell_count = 0
     for sign in signs:
         buy_exc *= 1.0 - decay
-        sell_exc *= (1.0 - decay)
+        sell_exc *= 1.0 - decay
         if sign > 0:
             buy_count += 1
             buy_exc += decay
