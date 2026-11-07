@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 import random
-from statistics import mean
 
 import pytest
 
@@ -44,7 +43,7 @@ def synthetic_market(seed: int = 20261107, observations: int = 960):
 
 
 def clustered_marked_events(seed: int = 20261107, count: int = 240):
-    """Deterministic self-exciting-like event stream with two event marks."""
+    """Generate a deterministic self-exciting-like event stream."""
     rng = random.Random(seed)
     times = []
     marks = []
@@ -56,7 +55,8 @@ def clustered_marked_events(seed: int = 20261107, count: int = 240):
         mark = 0 if rng.random() < 0.53 else 1
         times.append(clock)
         marks.append(mark)
-        excitation = [value * math.exp(-0.35 * (times[-1] - (times[-2] if len(times) > 1 else 0.0))) for value in excitation]
+        elapsed = times[-1] - (times[-2] if len(times) > 1 else 0.0)
+        excitation = [value * math.exp(-0.35 * elapsed) for value in excitation]
         excitation[mark] += 0.35
     return times, marks, clock + 2.0
 
@@ -74,8 +74,11 @@ def test_seeded_regime_simulation_produces_stable_hsmm_posterior():
 def test_clustered_event_simulation_hawkes_fit_is_stationary_and_finite():
     times, marks, horizon = clustered_marked_events()
     fit = fit_marked_hawkes_mle(
-        times, marks, horizon=horizon,
-        decay_grid=(0.15, 0.35, 0.7), max_iterations=250,
+        times,
+        marks,
+        horizon=horizon,
+        decay_grid=(0.15, 0.35, 0.7),
+        max_iterations=250,
     )
     assert fit.events == len(times)
     assert fit.horizon == pytest.approx(horizon)
@@ -84,7 +87,8 @@ def test_clustered_event_simulation_hawkes_fit_is_stationary_and_finite():
     assert all(math.isfinite(x) and x > 0 for x in fit.baseline_intensities)
     assert all(
         math.isfinite(x) and x >= 0
-        for row in fit.excitation_matrix for x in row
+        for row in fit.excitation_matrix
+        for x in row
     )
 
 
@@ -108,22 +112,37 @@ def test_correlated_regime_market_dcc_and_portfolio_tail_risk():
 
 def test_synthetic_execution_replay_accounts_for_latency_partial_fills_and_costs():
     snapshots = [
-        BookSnapshot(1_000 + i * 100, 100.0 + i * 0.01, 100.2 + i * 0.01,
-                     0.4, 0.35)
+        BookSnapshot(
+            1_000 + i * 100,
+            100.0 + i * 0.01,
+            100.2 + i * 0.01,
+            0.4,
+            0.35,
+        )
         for i in range(12)
     ]
     replay = replay_historical_order(
-        snapshots, side="BUY", quantity=2.0, submitted_at_ms=1_000,
-        latency_ms=200, taker_fee_bps=5.0, slippage_bps=1.5,
-        funding_bps=2.0, borrow_bps=0.5, holding_hours=12.0,
+        snapshots,
+        side="BUY",
+        quantity=2.0,
+        submitted_at_ms=1_000,
+        latency_ms=200,
+        taker_fee_bps=5.0,
+        slippage_bps=1.5,
+        funding_bps=2.0,
+        borrow_bps=0.5,
+        holding_hours=12.0,
     )
     assert replay.complete
     assert replay.filled_quantity == pytest.approx(2.0)
     assert replay.remaining_quantity == pytest.approx(0.0)
     assert len(replay.fills) > 1
     assert replay.total_cost == pytest.approx(
-        replay.fees + replay.spread_cost + replay.slippage_cost
-        + replay.funding_cost + replay.borrow_cost
+        replay.fees
+        + replay.spread_cost
+        + replay.slippage_cost
+        + replay.funding_cost
+        + replay.borrow_cost
     )
     assert replay.average_fill_price is not None
 
@@ -136,7 +155,7 @@ def test_validation_metrics_and_resampling_on_synthetic_oos_predictions():
     assert 0.0 <= expected_calibration_error(probabilities, outcomes) <= 1.0
 
     folds = purged_walk_forward_folds(
-        400, n_splits=4, test_size=50, label_horizon=5, embargo=3,
+        400, n_splits=4, test_size=50, label_horizon=5, embargo=3
     )
     assert len(folds) == 4
     for fold in folds:
@@ -144,7 +163,7 @@ def test_validation_metrics_and_resampling_on_synthetic_oos_predictions():
         assert min(fold.test_indices) - max(fold.train_indices) >= 5
 
     cpcv = combinatorial_purged_folds(
-        400, n_groups=8, n_test_groups=2, purge=2, embargo=2,
+        400, n_groups=8, n_test_groups=2, purge=2, embargo=2
     )
     assert len(cpcv) == 28
     assert all(set(f.train_indices).isdisjoint(f.test_indices) for f in cpcv)
@@ -152,7 +171,7 @@ def test_validation_metrics_and_resampling_on_synthetic_oos_predictions():
     incumbent = [rng.gauss(0.0001, 0.001) for _ in range(400)]
     candidate = [value + 0.00015 for value in incumbent]
     interval = paired_block_bootstrap_difference(
-        candidate, incumbent, block_length=8, n_resamples=500, seed=73,
+        candidate, incumbent, block_length=8, n_resamples=500, seed=73
     )
     assert interval.estimate == pytest.approx(0.00015)
     assert interval.lower <= interval.estimate <= interval.upper
