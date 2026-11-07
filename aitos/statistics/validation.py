@@ -503,7 +503,6 @@ def execution_cost_sensitivity(
     )
 
 
-
 @dataclass(frozen=True)
 class CohortValidationMetric:
     cohort_type: str
