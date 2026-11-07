@@ -37,6 +37,24 @@ def _corr(x, y):
     return 0.0 if denom <= 1e-15 else sum(a*b for a,b in zip(dx,dy)) / denom
 
 
+
+
+def _logdet_positive_definite(matrix):
+    """Stable log determinant via Cholesky decomposition."""
+    n = len(matrix)
+    lower = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1):
+            value = matrix[i][j] - sum(lower[i][k] * lower[j][k] for k in range(j))
+            if i == j:
+                if value <= 1e-12:
+                    raise ArithmeticError("DCC correlation matrix is not positive definite")
+                lower[i][j] = math.sqrt(value)
+            else:
+                lower[i][j] = value / lower[j][j]
+    return 2.0 * sum(math.log(lower[i][i]) for i in range(n))
+
+
 def _normal_score_ranks(values):
     ordered = sorted(range(len(values)), key=lambda i: values[i])
     scores = [0.0] * len(values)
@@ -93,15 +111,17 @@ class DCCGARCH:
                 loss=0.0
                 for t in range(n):
                     z=[standardized[k][t] for k in range(len(symbols))]
-                    q=[[ (1-alpha-beta)*qbar[i][j]+alpha*z[i]*z[j]+beta*q[i][j] for j in range(len(symbols))] for i in range(len(symbols))]
                     diag=[math.sqrt(max(q[i][i],1e-12)) for i in range(len(symbols))]
                     corr=[[q[i][j]/(diag[i]*diag[j]) for j in range(len(symbols))] for i in range(len(symbols))]
-                    # DCC Gaussian quasi-likelihood, determinant approximated
-                    # with a stable Cholesky-free log determinant guard.
-                    det=1.0
-                    for i in range(len(symbols)):
-                        det*=max(1.0e-8,1.0-sum(corr[i][j]**2 for j in range(i)))
-                    loss += math.log(det)+sum(z[i]*sum(corr[i][j]*z[j] for j in range(len(symbols))) for i in range(len(symbols)))
+                    try:
+                        loss += _logdet_positive_definite(corr) + sum(
+                            z[i]*sum(corr[i][j]*z[j] for j in range(len(symbols)))
+                            for i in range(len(symbols))
+                        )
+                    except ArithmeticError:
+                        loss = float("inf")
+                        break
+                    q=[[ (1-alpha-beta)*qbar[i][j]+alpha*z[i]*z[j]+beta*q[i][j] for j in range(len(symbols))] for i in range(len(symbols))]
                 if best is None or loss<best[0]: best=(loss,alpha,beta)
         _,alpha,beta=best
         q=[row[:] for row in qbar]
