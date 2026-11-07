@@ -216,7 +216,13 @@ def bocpd_change_point(
             2.0 * prior_alpha,
         )
         new_states = [
-            (prior_predictive * hazard, prior_mean, prior_kappa, prior_alpha, prior_beta)
+            (
+                prior_predictive * hazard,
+                prior_mean,
+                prior_kappa,
+                prior_alpha,
+                prior_beta,
+            )
         ] + growth[:max_run_length - 1]
         total = sum(item[0] for item in new_states)
         if total <= _EPS or not math.isfinite(total):
