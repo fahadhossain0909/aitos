@@ -20,6 +20,11 @@ def _evidence(version="2.0.0", approved=True):
         max_drawdown=0.05,
         drift_score=0.02,
         paired_oos_improvement_lower_bound=0.01,
+        dsr_probability=0.99,
+        mcs_included=True,
+        reality_check_p_value=0.01,
+        dm_p_value=0.01,
+        multiple_testing_adjusted_p_value=0.02,
         operator_approved=approved,
     )
 
