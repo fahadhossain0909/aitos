@@ -9,6 +9,7 @@ def forecast_payload(**overrides):
     values = {
         "symbol": "BTCUSDT",
         "horizon": "15m",
+        "side": "LONG",
         "model_id": "a-stat",
         "model_version": "1",
         "as_of": "2026-11-07T05:00:00+00:00",
@@ -27,6 +28,7 @@ def test_forecast_assessment_requires_matching_identity_and_freshness():
     result = assess_statistical_risk_forecast(
         forecast_payload(),
         symbol="BTCUSDT",
+        side="LONG",
         horizon="15m",
         now=now,
     )
@@ -37,6 +39,7 @@ def test_forecast_assessment_requires_matching_identity_and_freshness():
         assess_statistical_risk_forecast(
             forecast_payload(),
             symbol="ETHUSDT",
+            side="LONG",
             horizon="15m",
             now=now,
         )
@@ -82,6 +85,7 @@ def test_forecast_assessment_rejects_naive_timestamps():
         assess_statistical_risk_forecast(
             forecast_payload(as_of="2026-11-07T05:00:00"),
             symbol="BTCUSDT",
+            side="LONG",
             horizon="15m",
             now=datetime(2026, 11, 7, 5, 0, 10, tzinfo=timezone.utc),
         )
