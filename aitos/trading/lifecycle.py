@@ -535,6 +535,7 @@ class TradeLifecycle(AITOSModule):
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
         trade.record_excursion(float(current_price))
         trade.last_marked_price = current_price
+        trade.last_marked_at = datetime.now(timezone.utc).isoformat()
         is_long = trade.side == TradeSide.LONG
 
         # The scanner's initial SL is a soft risk boundary while EIE is active.
