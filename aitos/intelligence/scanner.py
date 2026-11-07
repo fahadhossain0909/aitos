@@ -1919,6 +1919,7 @@ class OpportunityScanner(AITOSModule):
             approved_by=approved_by,
             trailing_sl_enabled=True,
             regime=candidate.regime,
+            timeframe=self._timeframe,
         )
 
     def _require_initialized(self) -> None:
