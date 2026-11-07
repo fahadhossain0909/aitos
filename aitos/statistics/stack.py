@@ -27,6 +27,12 @@ class ContractStatisticalStack:
         self.evt = POTGPD()
         self.bayes = HierarchicalBayes()
 
+    def has_history(self, symbol: str, *, minimum_observations: int = 1) -> bool:
+        """Return whether this contract has enough accumulated return history."""
+        if minimum_observations <= 0:
+            raise ValueError("minimum_observations must be positive")
+        return len(self._returns.get(symbol, ())) >= minimum_observations
+
     def update(self, symbol: str, returns: Sequence[float] | float) -> None:
         values = (returns,) if isinstance(returns, (int, float)) else returns
         for value in values:
