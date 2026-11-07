@@ -35,7 +35,7 @@ def test_forecast_assessment_requires_matching_identity_and_freshness():
     assert 0.0 < result.size_multiplier < 1.0
     assert result.volatility_ratio == pytest.approx(2.0)
 
-    with pytest.raises(ValueError, match="symbol or horizon mismatch"):
+    with pytest.raises(ValueError, match="symbol, side or horizon mismatch"):
         assess_statistical_risk_forecast(
             forecast_payload(),
             symbol="ETHUSDT",
@@ -75,6 +75,7 @@ def test_forecast_assessment_fails_closed(overrides, now, message):
         assess_statistical_risk_forecast(
             forecast_payload(**overrides),
             symbol="BTCUSDT",
+            side="LONG",
             horizon="15m",
             now=now,
         )
