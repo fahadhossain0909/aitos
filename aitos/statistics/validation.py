@@ -17,7 +17,7 @@ def brier_score(probabilities: Iterable[float], outcomes: Iterable[int]) -> floa
     ps, ys = tuple(probabilities), tuple(outcomes)
     if not ps or len(ps) != len(ys):
         raise ValueError("probabilities and outcomes must have equal non-zero length")
-    if any(int(y) not in (0, 1) for y in ys):
+    if any(y not in (0, 1) for y in ys):
         raise ValueError("outcomes must be binary")
     return sum(
         (_probability(p) - int(y)) ** 2 for p, y in zip(ps, ys)
@@ -36,7 +36,7 @@ def log_loss(
     loss = 0.0
     for p, y in zip(ps, ys):
         p = min(1.0 - epsilon, max(epsilon, _probability(p)))
-        if int(y) not in (0, 1):
+        if y not in (0, 1):
             raise ValueError("outcomes must be binary")
         loss -= int(y) * math.log(p) + (1 - int(y)) * math.log(1.0 - p)
     return loss / len(ps)
@@ -82,6 +82,8 @@ def purged_walk_forward_folds(
     """
     if length <= 0 or n_splits <= 0 or label_horizon < 0 or embargo < 0:
         raise ValueError("invalid fold parameters")
+    if test_size is not None and test_size <= 0:
+        raise ValueError("test_size must be positive")
     size = test_size or max(1, length // (n_splits + 1))
     first_test = length - n_splits * size
     if first_test <= 0:
@@ -208,3 +210,33 @@ def probability_of_backtest_overfitting(
             below_median += 1
         total += 1
     return below_median / total if total else 0.0
+
+
+
+def expected_calibration_error(
+    probabilities: Iterable[float],
+    outcomes: Iterable[int],
+    *,
+    n_bins: int = 10,
+) -> float:
+    """Return equal-width expected calibration error for binary forecasts."""
+    ps, ys = tuple(probabilities), tuple(outcomes)
+    if not ps or len(ps) != len(ys) or n_bins <= 0:
+        raise ValueError("invalid calibration inputs")
+    if any(y not in (0, 1) for y in ys):
+        raise ValueError("outcomes must be binary")
+    bins: list[list[tuple[float, int]]] = [[] for _ in range(n_bins)]
+    for probability, outcome in zip(ps, ys):
+        p = _probability(probability)
+        index = min(n_bins - 1, int(p * n_bins))
+        bins[index].append((p, int(outcome)))
+    total = len(ps)
+    return sum(
+        len(bucket) / total
+        * abs(
+            sum(p for p, _ in bucket) / len(bucket)
+            - sum(y for _, y in bucket) / len(bucket)
+        )
+        for bucket in bins
+        if bucket
+    )
