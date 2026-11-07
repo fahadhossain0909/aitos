@@ -171,26 +171,29 @@ class DecisionOutcomeLedger:
     ) -> tuple[dict[str, Any], ...]:
         if limit <= 0:
             raise ValueError("limit must be positive")
-        clauses = []
-        params = []
-        if entity_id is not None:
-            clauses.append("entity_id=?")
-            params.append(entity_id)
-        if symbol is not None:
-            clauses.append("symbol=?")
-            params.append(symbol.upper())
-        if decision_type is not None:
-            clauses.append("decision_type=?")
-            params.append(decision_type.upper())
-        if unresolved_only:
-            clauses.append("outcome_value IS NULL")
-        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        normalized_symbol = symbol.upper() if symbol is not None else None
+        normalized_type = decision_type.upper() if decision_type is not None else None
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM decision_outcomes"
-                + where
-                + " ORDER BY decision_at ASC LIMIT ?",
-                (*params, limit),
+                """
+                SELECT * FROM decision_outcomes
+                WHERE (? IS NULL OR entity_id = ?)
+                  AND (? IS NULL OR symbol = ?)
+                  AND (? IS NULL OR decision_type = ?)
+                  AND (? = 0 OR outcome_value IS NULL)
+                ORDER BY decision_at ASC
+                LIMIT ?
+                """,
+                (
+                    entity_id,
+                    entity_id,
+                    normalized_symbol,
+                    normalized_symbol,
+                    normalized_type,
+                    normalized_type,
+                    int(unresolved_only),
+                    limit,
+                ),
             ).fetchall()
         return tuple(
             {
