@@ -108,6 +108,21 @@ def assess_statistical_risk_forecast(
         ) from exc
     if sample_size < 30:
         raise ValueError("statistical forecast has insufficient observations")
+    try:
+        predicted_up = float(forecast["predicted_up"])
+        downside_probability = float(forecast["downside_probability"])
+        expected_return = float(forecast["expected_return"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("statistical forecast directional metrics are invalid") from exc
+    if any(
+        not math.isfinite(value)
+        for value in (predicted_up, downside_probability, expected_return)
+    ):
+        raise ValueError("statistical forecast directional metrics must be finite")
+    if not 0.0 <= predicted_up <= 1.0:
+        raise ValueError("predicted_up must be in [0, 1]")
+    if not 0.0 <= downside_probability <= 1.0:
+        raise ValueError("downside_probability must be in [0, 1]")
     if as_of.tzinfo is None:
         raise ValueError("statistical forecast timestamp must be timezone-aware")
     current = now or datetime.now(timezone.utc)
