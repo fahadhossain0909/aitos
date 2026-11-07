@@ -73,6 +73,7 @@ from aitos.models.trade import (
 )
 from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResult
 from aitos.risk.risk_engine import RiskEngine
+from aitos.statistics.risk_overlay import assess_statistical_risk_forecast
 from aitos.trading.tp_contract import TakeProfitExecutionContract
 
 if TYPE_CHECKING:
@@ -1423,6 +1424,44 @@ class TradeLifecycle(AITOSModule):
                         f"({approved_risk_budget:.8f} USD)"
                     ),
                 )
+
+        statistical_risk_assessment = None
+        statistical_forecast = opportunity.agent_consensus.get(
+            "statistical_forecast"
+        )
+        if statistical_forecast is not None:
+            try:
+                statistical_risk_assessment = assess_statistical_risk_forecast(
+                    statistical_forecast,
+                    symbol=opportunity.symbol,
+                    horizon=str(statistical_forecast.get("horizon", "")),
+                )
+            except (TypeError, ValueError) as exc:
+                return await self._reject(
+                    opportunity, f"statistical_risk_overlay: {exc}"
+                )
+            if statistical_risk_assessment.size_multiplier < 1.0:
+                stop_risk_rate = (
+                    abs(opportunity.entry_price - sizing_stop_price)
+                    / opportunity.entry_price
+                )
+                reduced_notional = (
+                    math.floor(
+                        sizing.position_size_usd
+                        * statistical_risk_assessment.size_multiplier
+                        * 100.0
+                    )
+                    / 100.0
+                )
+                sizing = PositionSizeResult(
+                    position_size_usd=reduced_notional,
+                    leverage=sizing.leverage,
+                    risk_amount_usd=round(reduced_notional * stop_risk_rate, 2),
+                    rationale=(
+                        f"{sizing.rationale}; statistical risk multiplier="
+                        f"{statistical_risk_assessment.size_multiplier:.4f}"
+                    ),
+                )
         if sizing.position_size_usd <= 0.0:
             return await self._reject(
                 opportunity, f"sector exposure cap exhausted for {candidate_sector}"
@@ -1493,7 +1532,22 @@ class TradeLifecycle(AITOSModule):
             position_size_usd=sizing.position_size_usd,
             risk_amount_usd=sizing.risk_amount_usd,
             strategy_id=opportunity.strategy_id,
-            agent_consensus=opportunity.agent_consensus,
+            agent_consensus={
+                **opportunity.agent_consensus,
+                **(
+                    {
+                        "statistical_risk_assessment": {
+                            "size_multiplier": statistical_risk_assessment.size_multiplier,
+                            "volatility_ratio": statistical_risk_assessment.volatility_ratio,
+                            "tail_probability": statistical_risk_assessment.tail_probability,
+                            "expected_shortfall": statistical_risk_assessment.expected_shortfall,
+                            "reasons": list(statistical_risk_assessment.reasons),
+                        }
+                    }
+                    if statistical_risk_assessment is not None
+                    else {}
+                ),
+            },
             explanation=opportunity.rationale,
             sl_price=opportunity.stop_loss_price,
             tp_price=(
