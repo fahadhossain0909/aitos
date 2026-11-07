@@ -1207,7 +1207,21 @@ class TradeLifecycle(AITOSModule):
             pass
         try:
             result = await self._close_trade_impl(trade_id, exit_price, reason)
-        except Exception:
+        except Exception as exc:
+            if trade is not None:
+                await self._record_decision(
+                    f"{trade_id}:CLOSE_EXECUTION_FAILURE:{time.time_ns()}",
+                    entity_id=self._trade_attribution_id(trade),
+                    symbol=symbol or "UNKNOWN",
+                    side=trade.side.value,
+                    decision_type="EXECUTION_FAILURE",
+                    accepted=False,
+                    reason=f"close_execution_failed:{type(exc).__name__}",
+                    payload={
+                        "trade_id": trade_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
             try:
                 record_error(
                     PipelineStage.TRADE_LIFECYCLE.value,
