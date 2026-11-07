@@ -15,6 +15,12 @@ from .advanced_models import (
 )
 from .contracts import FeatureSnapshot, ForecastEnvelope
 from .engine import AStatEngine
+from .governance import (
+    PromotionDecision,
+    PromotionEvidence,
+    PromotionPolicy,
+    evaluate_promotion,
+)
 from .evt import POTGPD
 from .garch import GARCH11
 from .hierarchical_bayes import HierarchicalBayes
@@ -71,6 +77,10 @@ __all__ = [
     "FeatureSnapshot",
     "ForecastEnvelope",
     "GARCH11",
+    "PromotionDecision",
+    "PromotionEvidence",
+    "PromotionPolicy",
+    "evaluate_promotion",
     "ShadowMetrics",
     "StatisticalShadowLedger",
     "ChangePointDiagnostic",
