@@ -94,7 +94,16 @@ class GaussianHSMM:
             for t, value in enumerate(xs, 1):
                 z = (value - means[state]) / sigmas[state]
                 log_emission[state][t] = log_emission[state][t - 1] - 0.5 * z * z - math.log(sigmas[state]) - 0.5 * math.log(2 * math.pi)
-        alpha = [[0.0] * self.states for _ in range(n + 1)]
+        negative_infinity = float("-inf")
+
+        def logsumexp(values):
+            finite = [value for value in values if value != negative_infinity]
+            if not finite:
+                return negative_infinity
+            maximum = max(finite)
+            return maximum + math.log(sum(math.exp(value - maximum) for value in finite))
+
+        log_alpha = [[negative_infinity] * self.states for _ in range(n + 1)]
         for end in range(1, n + 1):
             for state in range(self.states):
                 terms = []
@@ -104,21 +113,23 @@ class GaussianHSMM:
                     if probability <= 0:
                         continue
                     segment_log = log_emission[state][end] - log_emission[state][start_index]
-                    segment_weight = probability * math.exp(max(-700.0, min(50.0, segment_log)))
                     if start_index == 0:
-                        prior = 1.0 / self.states
+                        log_prior = -math.log(self.states)
                     else:
-                        prior = sum(
-                            alpha[start_index][previous] * transitions[previous][state]
-                            for previous in range(self.states) if previous != state
+                        log_prior = logsumexp(
+                            log_alpha[start_index][previous]
+                            + math.log(max(transitions[previous][state], 1e-300))
+                            for previous in range(self.states)
+                            if previous != state
                         )
-                    terms.append(segment_weight * prior)
-                alpha[end][state] = sum(terms)
-        posterior = alpha[n]
-        total = sum(posterior)
-        if not math.isfinite(total) or total <= 0:
+                    terms.append(math.log(probability) + segment_log + log_prior)
+                log_alpha[end][state] = logsumexp(terms)
+        final_normalizer = logsumexp(log_alpha[n])
+        if not math.isfinite(final_normalizer):
             raise ArithmeticError("HSMM forward posterior collapsed")
-        probs = tuple(value / total for value in posterior)
+        probs = tuple(
+            math.exp(value - final_normalizer) for value in log_alpha[n]
+        )
         return HSMMResult(
             probabilities=probs,
             most_likely_state=max(range(self.states), key=probs.__getitem__),
