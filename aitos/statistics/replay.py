@@ -62,6 +62,7 @@ def replay_historical_order(
     funding_bps: float = 0.0,
     borrow_bps: float = 0.0,
     holding_hours: float = 0.0,
+    funding_interval_hours: float = 8.0,
 ) -> ExecutionReplayResult:
     """Replay a marketable order against time-ordered historical L1 liquidity.
 
@@ -74,9 +75,11 @@ def replay_historical_order(
     direction=side.upper()
     if direction not in {"BUY","SELL"}:
         raise ValueError("side must be BUY or SELL")
-    numeric=(quantity,taker_fee_bps,slippage_bps,funding_bps,borrow_bps,holding_hours)
+    numeric=(quantity,taker_fee_bps,slippage_bps,funding_bps,borrow_bps,holding_hours,funding_interval_hours)
     if any(not math.isfinite(float(x)) for x in numeric) or quantity<=0 or any(x<0 for x in numeric[1:]):
         raise ValueError("quantity and cost inputs must be finite and non-negative")
+    if funding_interval_hours <= 0:
+        raise ValueError("funding_interval_hours must be positive")
     if submitted_at_ms<0 or latency_ms<0:
         raise ValueError("timestamps and latency must be non-negative")
     ordered=tuple(snapshots)
@@ -106,8 +109,8 @@ def replay_historical_order(
     filled=quantity-remaining
     notional=sum(fill.quantity*fill.fill_price for fill in fills)
     avg=notional/filled if filled>0 else None
-    funding=notional*funding_bps/10000.0
-    borrow=notional*borrow_bps/10000.0
+    funding=notional*funding_bps/10000.0*holding_hours/funding_interval_hours
+    borrow=notional*borrow_bps/10000.0*holding_hours/24.0
     total=fees+slippage+spread+funding+borrow
     return ExecutionReplayResult(
         direction,quantity,filled,remaining,avg,fees,slippage,spread,
