@@ -1,4 +1,5 @@
 """Explicit, evidence-gated statistical model promotion policy."""
+
 from __future__ import annotations
 
 import math
@@ -83,12 +84,15 @@ def evaluate_promotion(
         raise ValueError("pbo must be in [0, 1]")
     if not 0.0 <= evidence.brier <= 1.0:
         raise ValueError("brier must be in [0, 1]")
-    if min(
-        evidence.brier,
-        evidence.qlike,
-        evidence.max_drawdown,
-        evidence.drift_score,
-    ) < 0:
+    if (
+        min(
+            evidence.brier,
+            evidence.qlike,
+            evidence.max_drawdown,
+            evidence.drift_score,
+        )
+        < 0
+    ):
         raise ValueError("loss, drawdown and drift metrics must be non-negative")
 
     reasons = []
