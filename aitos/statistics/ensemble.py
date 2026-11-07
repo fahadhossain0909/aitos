@@ -1,4 +1,5 @@
 """Uncertainty-aware ensemble of heterogeneous statistical forecasts."""
+
 from __future__ import annotations
 
 import math
