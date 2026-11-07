@@ -22,6 +22,7 @@ from aitos.logging_setup import get_logger
 from aitos.models.trade import TradeSide
 from aitos.statistics.engine import AStatEngine
 from aitos.statistics.models import AStatObservation, AStatResult
+from aitos.statistics.router import StatisticalStrategyRouter
 
 logger = get_logger("aitos.intelligence.a_stat")
 
@@ -41,6 +42,7 @@ class AStatBridge:
 
     def __init__(self, calibration_window: int = 256) -> None:
         self._engine = AStatEngine(calibration_window=calibration_window)
+        self._strategy_router = StatisticalStrategyRouter()
         self._last_kline_count: dict[str, int] = {}
 
     @property
@@ -137,6 +139,7 @@ class AStatBridge:
             else result.direction.down
         )
         component = round(10.0 * agree, 2)
+        strategy_scores = self._strategy_router.rank(result)
         logger.info(
             "a_stat evaluation",
             extra={
@@ -156,6 +159,11 @@ class AStatBridge:
                     "regime_high_vol": round(result.regime.high_volatility, 4),
                     "confidence": round(result.probability_confidence, 4),
                     "advanced_stack": result.advanced is not None,
+                    "statistical_strategy_ranking": [
+                        {"strategy_id": item.strategy_id, "score": round(item.score, 4),
+                         "rationale": list(item.rationale)}
+                        for item in strategy_scores
+                    ],
                 }
             },
         )
