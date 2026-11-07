@@ -26,5 +26,7 @@ def test_gjr_and_har_estimators_produce_finite_forecasts():
     har = fit_har_rv_forecast(values)
     assert gjr.variance > 0.0
     assert gjr.persistence < 0.995
+    assert gjr.gamma >= 0.0
     assert har.variance >= 0.0
+    assert all(coefficient >= 0.0 for coefficient in har.coefficients)
     assert math.isfinite(har.volatility)
