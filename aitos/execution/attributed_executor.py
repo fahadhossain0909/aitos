@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.models.trade import TradeSide
+
 if TYPE_CHECKING:
     from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 

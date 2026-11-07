@@ -880,7 +880,9 @@ async def test_statistical_shadow_ledger_resolves_trade_outcome(
 
 
 class _PartialFillExecutor(OrderExecutor):
-    def __init__(self, fraction=0.4, fill_price_multiplier=1.001, success=True, error=None):
+    def __init__(
+        self, fraction=0.4, fill_price_multiplier=1.001, success=True, error=None
+    ):
         self.fraction = fraction
         self.fill_price_multiplier = fill_price_multiplier
         self.success = success
@@ -948,7 +950,6 @@ async def test_lifecycle_never_opens_zero_quantity_position_on_unfilled_order(
     assert trade.quantity == 0.0
     assert not lifecycle.get_open_trades()
     assert "confirmed fill" in trade.rejection_reason
-
 
 
 @pytest.mark.asyncio
