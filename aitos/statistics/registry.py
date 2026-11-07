@@ -1,4 +1,5 @@
 """Durable artifact registry with explicit champion promotion and rollback."""
+
 from __future__ import annotations
 
 import json
@@ -137,7 +138,9 @@ class StatisticalModelRegistry:
         if any(not isinstance(value, str) or not value.strip() for value in required):
             raise ValueError("model artifact identity and hashes are required")
         if not re.fullmatch(r"[0-9a-fA-F]{64}", artifact_sha256):
-            raise ValueError("artifact_sha256 must be a 64-character SHA-256 hex digest")
+            raise ValueError(
+                "artifact_sha256 must be a 64-character SHA-256 hex digest"
+            )
         if not re.fullmatch(r"[0-9a-fA-F]{64}", config_hash):
             raise ValueError("config_hash must be a 64-character SHA-256 hex digest")
         metadata_json = json.dumps(
