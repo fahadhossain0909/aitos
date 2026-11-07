@@ -57,6 +57,7 @@ from .quant_features import (
     kalman_beta,
     permutation_entropy,
 )
+from .registry import ModelArtifact, StatisticalModelRegistry
 from .risk_overlay import (
     StatisticalRiskAssessment,
     assess_statistical_risk,
@@ -96,6 +97,8 @@ __all__ = [
     "PromotionPolicy",
     "evaluate_promotion",
     "ShadowMetrics",
+    "ModelArtifact",
+    "StatisticalModelRegistry",
     "StatisticalShadowLedger",
     "ChangePointDiagnostic",
     "DistributionFeatures",
