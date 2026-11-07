@@ -172,7 +172,7 @@ class TradeLifecycle(AITOSModule):
     @staticmethod
     def _trade_attribution_id(trade: Trade) -> str:
         trace_id = trade.agent_consensus.get("trace_id")
-        return str(trace_id).strip() if trace_id else trade.trade_id
+        return f"{str(trace_id).strip()}:{trade.side.value}" if trace_id else trade.trade_id
 
     async def _record_decision(
         self,
