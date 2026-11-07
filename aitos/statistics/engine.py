@@ -148,4 +148,14 @@ class AStatEngine:
             sample_size=max(observation.sample_size, len(self._returns)),
             evidence=tuple(item.name for item in evidence),
             advanced=advanced,
+            upside_tail_probability=(
+                advanced.upside_evt.tail_probability
+                if advanced is not None and advanced.upside_evt is not None
+                else 0.0
+            ),
+            upside_expected_shortfall=(
+                advanced.upside_evt.expected_shortfall
+                if advanced is not None and advanced.upside_evt is not None
+                else None
+            ),
         )
