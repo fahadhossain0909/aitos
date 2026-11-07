@@ -76,6 +76,7 @@ from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResu
 from aitos.risk.risk_engine import RiskEngine
 from aitos.statistics.contracts import FeatureSnapshot, ForecastEnvelope
 from aitos.statistics.risk_overlay import assess_statistical_risk_forecast
+from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.trading.tp_contract import TakeProfitExecutionContract
 
@@ -159,6 +160,69 @@ class TradeLifecycle(AITOSModule):
                 get_model_data_dir() / "statistical_shadow.sqlite3"
             )
         return self._statistical_shadow_ledger
+
+
+    def _decision_ledger(self) -> DecisionOutcomeLedger:
+        if not hasattr(self, "_decision_outcome_ledger"):
+            self._decision_outcome_ledger = DecisionOutcomeLedger(
+                get_model_data_dir() / "decision_outcomes.sqlite3"
+            )
+        return self._decision_outcome_ledger
+
+    async def _record_decision(
+        self,
+        decision_id: str,
+        *,
+        entity_id: str,
+        symbol: str,
+        side: str,
+        decision_type: str,
+        accepted: bool,
+        reason: str,
+        payload: Mapping[str, Any] | None = None,
+        decision_at: str | None = None,
+    ) -> None:
+        try:
+            await asyncio.to_thread(
+                self._decision_ledger().record_decision,
+                decision_id,
+                entity_id=entity_id,
+                symbol=symbol,
+                side=side,
+                decision_type=decision_type,
+                accepted=accepted,
+                reason=reason,
+                payload=payload,
+                decision_at=decision_at,
+            )
+        except Exception:
+            logger.exception(
+                "decision attribution persistence failed",
+                extra={"aitos_extra": {"decision_id": decision_id, "symbol": symbol}},
+            )
+
+    async def _resolve_decision_outcomes(self, trade: Trade) -> None:
+        if trade.pnl_percent is None:
+            return
+        try:
+            await asyncio.to_thread(
+                self._decision_ledger().resolve_entity,
+                trade.trade_id,
+                outcome_value=float(trade.pnl_percent) / 100.0,
+                outcome_at=str(trade.exit_time or utc_now_iso()),
+                outcome={
+                    "net_pnl_usd": float(trade.pnl),
+                    "pnl_percent": float(trade.pnl_percent),
+                    "close_reason": str(trade.close_reason or ""),
+                    "fees_paid_usd": float(trade.fees_paid_usd),
+                    "funding_pnl_usd": float(trade.funding_pnl_usd),
+                },
+            )
+        except Exception:
+            logger.exception(
+                "decision outcome reconciliation failed",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
 
     def _record_statistical_forecast(self, trade: Trade) -> bool:
         forecast = trade.agent_consensus.get("statistical_forecast")
@@ -500,6 +564,17 @@ class TradeLifecycle(AITOSModule):
         try:
             trade = await self._submit_opportunity_impl(opportunity, portfolio)
         except Exception:
+            if trade is not None:
+                await self._record_decision(
+                    f"{trade_id}:EXECUTION_FAILURE:{time.time_ns()}",
+                    entity_id=trade_id,
+                    symbol=symbol or "UNKNOWN",
+                    side=str(getattr(getattr(trade, "side", None), "value", "UNKNOWN")),
+                    decision_type="EXECUTION_FAILURE",
+                    accepted=False,
+                    reason="close_or_exchange_execution_failed",
+                    payload={"error_type": "close_trade_exception"},
+                )
             try:
                 record_error(
                     PipelineStage.TRADE_LIFECYCLE.value,
@@ -906,6 +981,17 @@ class TradeLifecycle(AITOSModule):
                 source_module=self.module_id,
             )
         )
+        action_type = str(pos_action.action.value).upper()
+        await self._record_decision(
+            f"{trade.trade_id}:EIE:{time.time_ns()}",
+            entity_id=trade.trade_id,
+            symbol=trade.symbol,
+            side=trade.side.value,
+            decision_type=action_type,
+            accepted=action_type != "HOLD",
+            reason=str(pos_action.reason),
+            payload=pos_action.to_dict(),
+        )
 
         if pos_action.action == ExitAction.EXIT:
             return await self._trigger_exit(
@@ -1195,6 +1281,7 @@ class TradeLifecycle(AITOSModule):
                 except (KeyError, TypeError, ValueError, ArithmeticError):
                     continue
         self._closed_trades.append(trade)
+        await self._resolve_decision_outcomes(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
         if gateway is not None:
             try:
@@ -1677,6 +1764,26 @@ class TradeLifecycle(AITOSModule):
             ),
         )
         self._open_trades[trade.trade_id] = trade
+        await self._record_decision(
+            f"{trade.trade_id}:ENTRY",
+            entity_id=trade.trade_id,
+            symbol=trade.symbol,
+            side=trade.side.value,
+            decision_type="ENTRY",
+            accepted=True,
+            reason="entry_order_filled_and_position_opened",
+            payload={
+                "entry_price": trade.entry_price,
+                "quantity": trade.quantity,
+                "position_size_usd": trade.position_size_usd,
+                "risk_amount_usd": trade.risk_amount_usd,
+                "strategy_id": trade.strategy_id,
+                "statistical_risk_assessment": trade.agent_consensus.get(
+                    "statistical_risk_assessment"
+                ),
+            },
+            decision_at=trade.entry_time,
+        )
         if self._position_manager is not None:
             register_entry_thesis = getattr(
                 self._position_manager, "register_entry_thesis", None
@@ -1757,6 +1864,26 @@ class TradeLifecycle(AITOSModule):
             state=TradeLifecycleState.REJECTED,
             entry_time=utc_now_iso(),
             rejection_reason=reason,
+        )
+        failure_type = (
+            "EXECUTION_FAILURE"
+            if reason.startswith("order submission failed:")
+            else "REJECTION"
+        )
+        await self._record_decision(
+            f"{trade.trade_id}:{failure_type}",
+            entity_id=trade.trade_id,
+            symbol=trade.symbol,
+            side=trade.side.value,
+            decision_type=failure_type,
+            accepted=False,
+            reason=reason,
+            payload={
+                "strategy_id": trade.strategy_id,
+                "entry_price": trade.entry_price,
+                "rationale": trade.explanation,
+            },
+            decision_at=trade.entry_time,
         )
         await self._event_bus.publish(
             Event(
