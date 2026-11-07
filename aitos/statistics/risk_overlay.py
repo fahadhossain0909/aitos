@@ -98,7 +98,9 @@ def assess_statistical_risk_forecast(
         as_of_value = str(forecast["as_of"])
         as_of = datetime.fromisoformat(as_of_value.replace("Z", "+00:00"))
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("statistical forecast sample size or timestamp is invalid") from exc
+        raise ValueError(
+            "statistical forecast sample size or timestamp is invalid"
+        ) from exc
     if sample_size < 30:
         raise ValueError("statistical forecast has insufficient observations")
     if as_of.tzinfo is None:
@@ -106,7 +108,9 @@ def assess_statistical_risk_forecast(
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    age = (current.astimezone(timezone.utc) - as_of.astimezone(timezone.utc)).total_seconds()
+    age = (
+        current.astimezone(timezone.utc) - as_of.astimezone(timezone.utc)
+    ).total_seconds()
     if age < 0:
         raise ValueError("statistical forecast timestamp is in the future")
     if age > max_age_seconds:
