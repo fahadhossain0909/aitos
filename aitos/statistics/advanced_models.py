@@ -4,6 +4,7 @@ The implementations are deliberately dependency-light. They expose forecasts
 and diagnostics only; callers must validate them out of sample before using
 them in risk or execution decisions.
 """
+
 from __future__ import annotations
 
 import math
@@ -81,15 +82,15 @@ def fit_har_rv_forecast(
 
     def features(end: int) -> tuple[float, float, float]:
         return tuple(
-            mean(squares[max(0, end - window + 1):end + 1])
+            mean(squares[max(0, end - window + 1) : end + 1])
             for window in (short_window, medium_window, long_window)
         )
 
     start = long_window - 1
     rows = [(1.0, *features(i)) for i in range(start, len(xs) - 1)]
-    targets = squares[start + 1:]
+    targets = squares[start + 1 :]
     if len(rows) < 8:
-        fallback = mean(squares[-min(long_window, len(squares)):])
+        fallback = mean(squares[-min(long_window, len(squares)) :])
         return HARForecast(
             fallback,
             math.sqrt(max(0.0, fallback)),
@@ -123,10 +124,7 @@ def fit_har_rv_forecast(
     r_squared = 1.0 - residual / total if total > _EPS else 0.0
     next_variance = max(
         0.0,
-        sum(
-            c * x
-            for c, x in zip(coefficients, (1.0, *features(len(xs) - 1)))
-        ),
+        sum(c * x for c, x in zip(coefficients, (1.0, *features(len(xs) - 1)))),
     )
     return HARForecast(
         next_variance,
@@ -152,8 +150,10 @@ def _student_t_density(
     scale = max(scale, 1e-10)
     z = (value - mean_value) / scale
     log_density = (
-        math.lgamma((df + 1.0) / 2.0) - math.lgamma(df / 2.0)
-        - 0.5 * math.log(df * math.pi) - math.log(scale)
+        math.lgamma((df + 1.0) / 2.0)
+        - math.lgamma(df / 2.0)
+        - 0.5 * math.log(df * math.pi)
+        - math.log(scale)
         - ((df + 1.0) / 2.0) * math.log1p((z * z) / df)
     )
     return math.exp(max(-745.0, min(100.0, log_density)))
@@ -201,16 +201,13 @@ def bocpd_change_point(
                     (kappa * mu + value) / (kappa + 1.0),
                     kappa + 1.0,
                     alpha + 0.5,
-                    beta
-                    + (kappa * (value - mu) ** 2) / (2.0 * (kappa + 1.0)),
+                    beta + (kappa * (value - mu) ** 2) / (2.0 * (kappa + 1.0)),
                 )
             )
         prior_predictive = _student_t_density(
             value,
             prior_mean,
-            math.sqrt(
-                prior_beta * (prior_kappa + 1.0) / (prior_alpha * prior_kappa)
-            ),
+            math.sqrt(prior_beta * (prior_kappa + 1.0) / (prior_alpha * prior_kappa)),
             2.0 * prior_alpha,
         )
         new_states = [
@@ -221,7 +218,7 @@ def bocpd_change_point(
                 prior_alpha,
                 prior_beta,
             )
-        ] + growth[:max_run_length - 1]
+        ] + growth[: max_run_length - 1]
         total = sum(item[0] for item in new_states)
         if total <= _EPS or not math.isfinite(total):
             raise ArithmeticError("BOCPD posterior normalization failed")
@@ -267,7 +264,8 @@ class GJRGARCH11:
                     loss = 0.0
                     for value in centered:
                         variance = max(
-                            omega + alpha * value * value
+                            omega
+                            + alpha * value * value
                             + gamma * value * value * (value < 0.0)
                             + beta * variance,
                             1e-12,
@@ -281,7 +279,8 @@ class GJRGARCH11:
         variance = sample_var
         for value in centered:
             variance = max(
-                omega + alpha * value * value
+                omega
+                + alpha * value * value
                 + gamma * value * value * (value < 0.0)
                 + beta * variance,
                 1e-12,
