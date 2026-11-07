@@ -512,7 +512,6 @@ async def test_paper_main_closes_redis_if_clickhouse_startup_fails(monkeypatch):
     assert event_bus.closed is True
 
 
-
 @pytest.mark.asyncio
 async def test_restart_reconciles_shadow_ledger_from_open_and_closed_trades(
     event_bus, risk_engine, paper_trade, tmp_path
@@ -522,9 +521,10 @@ async def test_restart_reconciles_shadow_ledger_from_open_and_closed_trades(
     def attach_forecast(trade, snapshot_id):
         as_of = trade.entry_time
         window_start = (
-            datetime.fromisoformat(as_of.replace("Z", "+00:00"))
-            - timedelta(hours=1)
-        ).astimezone(timezone.utc).isoformat()
+            (datetime.fromisoformat(as_of.replace("Z", "+00:00")) - timedelta(hours=1))
+            .astimezone(timezone.utc)
+            .isoformat()
+        )
         trade.agent_consensus = {
             "a_stat": 8.0,
             "statistical_forecast": {
