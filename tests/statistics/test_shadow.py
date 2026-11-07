@@ -1,6 +1,6 @@
 import pytest
 
-from aitos.statistics.contracts import ForecastEnvelope
+from aitos.statistics.contracts import FeatureSnapshot, ForecastEnvelope
 from aitos.statistics.shadow import StatisticalShadowLedger
 
 
@@ -95,4 +95,48 @@ def test_shadow_ledger_rejects_invalid_forecast_probabilities(tmp_path):
             make_envelope(),
             predicted_up=1.1,
             predicted_variance=0.0001,
+        )
+
+
+
+def test_shadow_ledger_persists_matching_feature_snapshot(tmp_path):
+    ledger = StatisticalShadowLedger(tmp_path / "shadow.sqlite3")
+    envelope = make_envelope()
+    snapshot = FeatureSnapshot(
+        symbol=envelope.symbol,
+        horizon=envelope.horizon,
+        as_of=envelope.as_of,
+        window_start="2026-11-07T09:00:00Z",
+        values={"a_stat": 7.5, "order_flow": 6.0},
+        source_watermarks={"scanner": envelope.as_of},
+        sample_count=envelope.sample_count,
+    )
+    assert ledger.record_forecast(
+        "forecast-with-snapshot",
+        envelope,
+        predicted_up=0.7,
+        predicted_variance=0.0001,
+        feature_snapshot=snapshot,
+    )
+    assert not ledger.record_forecast(
+        "forecast-with-snapshot",
+        envelope,
+        predicted_up=0.7,
+        predicted_variance=0.0001,
+        feature_snapshot=snapshot,
+    )
+    with pytest.raises(ValueError, match="does not match"):
+        ledger.record_forecast(
+            "mismatched-snapshot",
+            envelope,
+            predicted_up=0.7,
+            predicted_variance=0.0001,
+            feature_snapshot=FeatureSnapshot(
+                symbol="ETHUSDT",
+                horizon=envelope.horizon,
+                as_of=envelope.as_of,
+                window_start="2026-11-07T09:00:00Z",
+                values={"a_stat": 7.5},
+                sample_count=envelope.sample_count,
+            ),
         )
