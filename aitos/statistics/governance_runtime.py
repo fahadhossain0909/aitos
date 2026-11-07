@@ -98,12 +98,17 @@ class StatisticalGovernanceRuntime:
         approved = bool(operator_approved and evidence.operator_approved)
         candidate = replace(evidence, operator_approved=approved)
         decision = self.evaluate_challenger(candidate)
-        if not decision.eligible:
-            # Persist the blocked decision through the registry's normal audit
-            # path, even when the caller has not approved the operation.
-            return self.registry.promote(candidate, policy=self.policy)
-        artifact = self.registry.promote(candidate, policy=self.policy)
-        return artifact
+        if not decision.eligible and self._last_drift is not None and self._last_drift.promotion_blocked:
+            candidate = replace(
+                candidate,
+                drift_score=max(
+                    candidate.drift_score,
+                    self.policy.max_drift_score + 1e-6,
+                ),
+            )
+        # The registry independently re-evaluates the evidence and persists
+        # both approved and blocked promotion attempts.
+        return self.registry.promote(candidate, policy=self.policy)
 
     def rollback(
         self, model_id: str, target_version: str, *, operator_approved: bool = False
