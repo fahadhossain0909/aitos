@@ -83,8 +83,10 @@ walk-forward and a realistic deployment simulation.
 2. **Estimator validation:** expanding walk-forward and CPCV/PBO where
    appropriate; threshold/model stability; calibration curves; regime-wise
    and symbol-wise metrics; bootstrap confidence intervals.
-3. **Execution realism:** maker/taker fees, spread, market impact, funding,
-   borrow where relevant, partial fills, latency and rejected/cancelled orders.
+3. **Execution realism:** gross-to-net cost sensitivity is implemented, but it
+   is not yet wired to historical fill/market-impact replay. Maker/taker fee
+   schedules, spread, slippage, funding, borrow, partial fills, latency and
+   rejected/cancelled orders still require data-backed end-to-end replay.
 4. **Risk integration:** apply any validated statistical multiplier only after
    base sizing and before projected-portfolio hard-limit checks. Preserve
    capital budgets, leverage caps, concentration limits, circuit breakers and
