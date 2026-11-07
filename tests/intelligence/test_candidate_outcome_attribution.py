@@ -64,3 +64,24 @@ def test_rejected_candidate_15m_markout_resolves_trace_linked_decisions(tmp_path
     rows = ledger.list_decisions(entity_id=attribution_id)
     assert len(rows) == 2
     assert all(row["outcome"]["counterfactual"] for row in rows)
+
+
+
+def test_rejected_candidate_records_all_forward_markout_horizons(tmp_path):
+    store = CandidateOutcomeStore(tmp_path / "candidate-outcomes.sqlite3")
+    candidate = SimpleNamespace(
+        entry_price=100.0,
+        direction=TradeSide.SHORT,
+        component_scores={"flow": -4.0},
+        component_availability={"flow": True},
+        regime="volatile",
+        rationale=["sell pressure"],
+        symbol="ETHUSDT",
+        composite_score=61.0,
+        trace_id="scan-xyz",
+    )
+    rejection_id = store.record_rejection(candidate, "entry_gate", timestamp=1000)
+    store.update_price("ETHUSDT", 99.0, timestamp=1901)
+    markouts = store.completed_markouts(rejection_id=rejection_id)
+    assert [row["horizon_seconds"] for row in markouts] == [60, 300, 900]
+    assert all(row["signed_return_pct"] == pytest.approx(1.0) for row in markouts)
