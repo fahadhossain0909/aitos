@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Mapping
 
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.models.trade import TradeSide
-from aitos.statistics.decision_ledger import DecisionOutcomeLedger
+if TYPE_CHECKING:
+    from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 
 
 @dataclass(frozen=True)
