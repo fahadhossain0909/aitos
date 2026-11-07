@@ -426,3 +426,79 @@ def assess_feature_drift(
         max_psi=max(item.psi for item in ordered),
         drifted_features=tuple(item.feature for item in ordered if item.drifted),
     )
+
+
+
+@dataclass(frozen=True)
+class ExecutionCostScenario:
+    cost_multiplier: float
+    total_cost_bps: float
+    net_expected_return: float
+    gross_to_cost_ratio: float | None
+
+
+@dataclass(frozen=True)
+class ExecutionCostSensitivity:
+    gross_expected_return: float
+    base_cost_bps: float
+    scenarios: tuple[ExecutionCostScenario, ...]
+
+
+def execution_cost_sensitivity(
+    expected_gross_return: float,
+    *,
+    entry_fee_bps: float,
+    exit_fee_bps: float,
+    spread_bps: float,
+    slippage_bps: float,
+    funding_bps: float = 0.0,
+    borrow_bps: float = 0.0,
+    stress_multipliers: Iterable[float] = (1.0, 1.5, 2.0),
+) -> ExecutionCostSensitivity:
+    """Evaluate gross-to-net edge under explicit execution-cost stress.
+
+    All cost inputs are non-negative basis points. Spread, slippage, funding
+    and borrow are supplied as total round-trip costs for the forecast horizon;
+    callers must not double-count entry/exit components. Expected return is a
+    decimal return aligned to the proposed position side. The result is a
+    research diagnostic and does not submit orders or alter hard risk limits.
+    """
+    gross = float(expected_gross_return)
+    components = (
+        entry_fee_bps,
+        exit_fee_bps,
+        spread_bps,
+        slippage_bps,
+        funding_bps,
+        borrow_bps,
+    )
+    costs = tuple(float(value) for value in components)
+    if not math.isfinite(gross):
+        raise ValueError("expected_gross_return must be finite")
+    if any(not math.isfinite(value) or value < 0.0 for value in costs):
+        raise ValueError("execution costs must be finite and non-negative")
+    multipliers = tuple(float(value) for value in stress_multipliers)
+    if not multipliers or any(
+        not math.isfinite(value) or value < 1.0 for value in multipliers
+    ):
+        raise ValueError("stress multipliers must be finite and >= 1")
+    base_cost_bps = sum(costs)
+    scenarios = []
+    for multiplier in multipliers:
+        total_cost_bps = base_cost_bps * multiplier
+        cost_return = total_cost_bps / 10_000.0
+        scenarios.append(
+            ExecutionCostScenario(
+                cost_multiplier=multiplier,
+                total_cost_bps=total_cost_bps,
+                net_expected_return=gross - cost_return,
+                gross_to_cost_ratio=(
+                    None if cost_return == 0.0 else gross / cost_return
+                ),
+            )
+        )
+    return ExecutionCostSensitivity(
+        gross_expected_return=gross,
+        base_cost_bps=base_cost_bps,
+        scenarios=tuple(scenarios),
+    )
