@@ -1,9 +1,16 @@
+import re
+from unittest.mock import AsyncMock
+
 import pytest
+from aioresponses import aioresponses
 
 from aitos.execution.attributed_executor import (
     AttributedOrderExecutor,
     OrderAttributionContext,
 )
+from aitos.execution.binance_executor import TESTNET_URL, BinanceFuturesOrderExecutor
+from aitos.execution.ctrader_executor import CTraderOrderExecutor
+from aitos.execution.mt5_gateway import MT5GatewayOrderExecutor
 from aitos.execution.order_executor import (
     OrderExecutor,
     OrderRequest,
@@ -82,3 +89,94 @@ async def test_attributed_executor_records_rejection_and_execution_failure(tmp_p
     assert not result.success
     assert {row["decision_type"] for row in rows} == {"ENTRY", "EXECUTION_FAILURE"}
     assert all(not row["accepted"] for row in rows)
+
+
+
+@pytest.mark.asyncio
+async def test_attribution_decorator_wraps_binance_testnet_adapter(tmp_path):
+    ledger = DecisionOutcomeLedger(tmp_path / "binance-decisions.sqlite3")
+    adapter = BinanceFuturesOrderExecutor(api_key="test-key", api_secret="test-secret")
+    await adapter.connect()
+    executor = AttributedOrderExecutor(adapter, ledger, _context)
+    with aioresponses() as mocked:
+        mocked.post(
+            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+            payload={
+                "orderId": 731,
+                "status": "FILLED",
+                "executedQty": "0.5",
+                "avgPrice": "100.25",
+            },
+        )
+        result = await executor.submit_order(
+            OrderRequest(
+                symbol="BTCUSDT",
+                side=TradeSide.LONG,
+                quantity=0.5,
+                reference_price=100.0,
+                client_order_id="binance-client-731",
+            )
+        )
+    assert result.success
+    rows = ledger.list_decisions(entity_id="scan-trace-42")
+    assert rows[0]["payload"]["venue_order_id"] == "731"
+    await adapter.close()
+
+
+@pytest.mark.asyncio
+async def test_attribution_decorator_wraps_mt5_gateway_adapter(tmp_path):
+    ledger = DecisionOutcomeLedger(tmp_path / "mt5-decisions.sqlite3")
+    adapter = MT5GatewayOrderExecutor("http://mt5.test", "test-token")
+    executor = AttributedOrderExecutor(adapter, ledger, _context)
+    with aioresponses() as mocked:
+        mocked.post(
+            "http://mt5.test/v1/orders",
+            payload={
+                "order_id": "mt5-44",
+                "filled_quantity": 0.2,
+                "fill_price": 2000.5,
+                "success": True,
+            },
+        )
+        result = await executor.submit_order(
+            OrderRequest(
+                symbol="XAUUSD",
+                side=TradeSide.SHORT,
+                quantity=0.2,
+                reference_price=2001.0,
+                client_order_id="mt5-client-44",
+            )
+        )
+    assert result.success
+    rows = ledger.list_decisions(entity_id="scan-trace-42")
+    assert rows[0]["payload"]["venue_order_id"] == "mt5-44"
+
+
+@pytest.mark.asyncio
+async def test_attribution_decorator_wraps_ctrader_executor_contract(tmp_path):
+    pytest.importorskip("ctrader_open_api")
+    ledger = DecisionOutcomeLedger(tmp_path / "ctrader-decisions.sqlite3")
+    adapter = object.__new__(CTraderOrderExecutor)
+    adapter.submit_order = AsyncMock(
+        return_value=OrderResult(
+            order_id="ctrader-91",
+            symbol="EURUSD",
+            side=TradeSide.LONG,
+            filled_quantity=0.1,
+            fill_price=1.085,
+            success=True,
+        )
+    )
+    executor = AttributedOrderExecutor(adapter, ledger, _context)
+    result = await executor.submit_order(
+        OrderRequest(
+            symbol="EURUSD",
+            side=TradeSide.LONG,
+            quantity=0.1,
+            reference_price=1.084,
+            client_order_id="ctrader-client-91",
+        )
+    )
+    assert result.success
+    rows = ledger.list_decisions(entity_id="scan-trace-42")
+    assert rows[0]["payload"]["venue_order_id"] == "ctrader-91"
