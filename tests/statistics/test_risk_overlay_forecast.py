@@ -90,3 +90,16 @@ def test_forecast_assessment_rejects_naive_timestamps():
             horizon="15m",
             now=datetime(2026, 11, 7, 5, 0, 10, tzinfo=timezone.utc),
         )
+
+
+
+def test_forecast_assessment_rejects_opposite_position_side():
+    now = datetime(2026, 11, 7, 5, 0, 10, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="symbol, side or horizon mismatch"):
+        assess_statistical_risk_forecast(
+            forecast_payload(side="SHORT"),
+            symbol="BTCUSDT",
+            side="LONG",
+            horizon="15m",
+            now=now,
+        )
