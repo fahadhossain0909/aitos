@@ -39,6 +39,10 @@ Anecdotes and working papers are not proof of profitability. The implementation 
 - `AITOS_TUNING_SCANNER_MIN_CONTRACT_AGE_DAYS`: default 30 days for non-core listings; core contracts are exempt from the age floor but still pass live 24h liquidity checks.
 - `AITOS_TUNING_SCANNER_DYNAMIC_UNIVERSE_LIMIT`: default 35 additional contracts.
 - `AITOS_TUNING_SCANNER_UNIVERSE_LIMIT`: existing overall scanner subscription cap.
+- `AITOS_TUNING_SCANNER_MIN_LIQUIDITY_QUALITY`: hard execution-quality floor, default `5.0/10`.
+- `AITOS_TUNING_SCANNER_MAX_DIRECTIONAL_CANCEL_PRESSURE`: default `0.60`; LONG checks fresh bid-side cancellation pressure, SHORT checks fresh ask-side pressure. Stale/unavailable L2 evidence is not interpreted as spoofing and does not independently veto an otherwise liquid setup.
+
+The existing 24h universe gate also requires quote volume (default 10,000,000 USDT) and trade count (default 10,000) and enforces contract metadata/age for dynamic listings. The scanner-level liquidity floor is a separate near-touch spread/depth quality test; it does not replace 24h activity screening.
 
 These defaults should be reviewed against the observed AITOS paper-trading universe and order sizes before production use.
 

@@ -53,7 +53,10 @@ KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 1_000.0
 HEALTH_SERVER_PORT = 8090
 PAPER_MIN_SCORE_THRESHOLD = 50.0
-STALE_POSITION_MAX_HOURS = 72
+STALE_POSITION_MAX_MARK_AGE_SECONDS = 300.0
+STALE_POSITION_MAX_HOURS = get_settings().tuning.positions.stale_position_max_hours
+DEAD_CANDLE_MAX_PROGRESS_R = get_settings().tuning.positions.dead_candle_max_progress_r
+DEAD_CANDLE_ENTRY_BAND_PCT = get_settings().tuning.positions.dead_candle_entry_band_pct
 
 
 async def _close_stale_positions(components) -> None:
@@ -72,10 +75,9 @@ async def _close_stale_positions(components) -> None:
                 entry_dt = entry_dt.replace(tzinfo=timezone.utc)
             age_hours = (now - entry_dt).total_seconds() / 3600
             if age_hours >= STALE_POSITION_MAX_HOURS:
-                # Never synthesize a close price from entry price: doing so
-                # fabricates a zero-PnL close when the market feed is stale or
-                # the process has just recovered a position. Keep the position
-                # open and observable until a valid mark is available.
+                # This paper-runtime backstop is deliberately limited to a
+                # verified flatline. Active positions and recovered positions
+                # without excursion evidence must remain under EIE monitoring.
                 last_price = getattr(trade, "last_marked_price", None)
                 if (
                     not isinstance(last_price, (int, float))
@@ -83,7 +85,7 @@ async def _close_stale_positions(components) -> None:
                     or last_price <= 0
                 ):
                     logger.warning(
-                        "stale position close deferred: no valid marked price",
+                        "dead-candle timeout deferred: no valid marked price",
                         extra={
                             "aitos_extra": {
                                 "trade_id": trade.trade_id,
@@ -93,16 +95,94 @@ async def _close_stale_positions(components) -> None:
                         },
                     )
                     continue
+
+                last_marked_at = getattr(trade, "last_marked_at", None)
+                try:
+                    mark_dt = datetime.fromisoformat(
+                        str(last_marked_at).replace("Z", "+00:00")
+                    )
+                    if mark_dt.tzinfo is None:
+                        mark_dt = mark_dt.replace(tzinfo=timezone.utc)
+                    mark_age_seconds = (now - mark_dt).total_seconds()
+                except (TypeError, ValueError):
+                    mark_age_seconds = float("inf")
+                if (
+                    not math.isfinite(mark_age_seconds)
+                    or mark_age_seconds < 0
+                    or mark_age_seconds > STALE_POSITION_MAX_MARK_AGE_SECONDS
+                ):
+                    logger.warning(
+                        "dead-candle timeout deferred: market mark is stale",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                                "mark_age_seconds": (
+                                    round(mark_age_seconds, 1)
+                                    if math.isfinite(mark_age_seconds)
+                                    else None
+                                ),
+                            }
+                        },
+                    )
+                    continue
+
+                entry_price = float(getattr(trade, "entry_price", 0.0) or 0.0)
+                mae_price = getattr(trade, "mae_price", None)
+                mfe_price = getattr(trade, "mfe_price", None)
+                mfe_r = getattr(trade, "mfe_r", None)
+                # Missing path telemetry is not proof of a flatline.
+                if (
+                    not math.isfinite(entry_price)
+                    or entry_price <= 0
+                    or not isinstance(mfe_r, (int, float))
+                    or not math.isfinite(mfe_r)
+                    or not isinstance(mae_price, (int, float))
+                    or not math.isfinite(mae_price)
+                    or not isinstance(mfe_price, (int, float))
+                    or not math.isfinite(mfe_price)
+                ):
+                    logger.warning(
+                        "dead-candle timeout deferred: excursion evidence unavailable",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                                "age_hours": round(age_hours, 1),
+                            }
+                        },
+                    )
+                    continue
+
+                max_excursion_pct = (
+                    max(float(mae_price), float(mfe_price)) / entry_price
+                )
+                current_deviation_pct = (
+                    abs(float(last_price) - entry_price) / entry_price
+                )
+                progress_r = float(mfe_r)
+                if (
+                    max_excursion_pct > DEAD_CANDLE_ENTRY_BAND_PCT
+                    or current_deviation_pct > DEAD_CANDLE_ENTRY_BAND_PCT
+                    or progress_r >= DEAD_CANDLE_MAX_PROGRESS_R
+                ):
+                    continue
+
                 await components.trade_lifecycle.close_trade(
-                    trade.trade_id, float(last_price), "stale_position_timeout"
+                    trade.trade_id, float(last_price), "time_decay_scratch"
                 )
                 logger.warning(
-                    "stale position auto-closed",
+                    "dead flatline position scratch-closed",
                     extra={
                         "aitos_extra": {
                             "trade_id": trade.trade_id,
                             "symbol": trade.symbol,
                             "age_hours": round(age_hours, 1),
+                            "max_excursion_pct": round(max_excursion_pct * 100.0, 4),
+                            "current_deviation_pct": round(
+                                current_deviation_pct * 100.0, 4
+                            ),
+                            "mfe_r": round(progress_r, 4),
                         }
                     },
                 )

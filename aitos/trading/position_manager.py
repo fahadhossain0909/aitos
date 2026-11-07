@@ -614,6 +614,8 @@ class PositionManager:
                 f" bars={adaptive_result.bars_observed}"
                 f" progress_r={adaptive_result.progress_r:.3f}"
             )
+            if adaptive_result.stagnation_exit and effective_action == ExitAction.EXIT:
+                reason += " exit_reason=time_decay_scratch"
         notes = tuple(
             dict.fromkeys(
                 (
