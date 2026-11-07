@@ -48,7 +48,7 @@ def make_components(
         state=TradeLifecycleState.POSITION_OPENED,
         entry_time=(
             datetime.now(timezone.utc) - timedelta(hours=age_hours)
-        ).isoformat()
+        ).isoformat(),
         mae_price=mae_price,
         mfe_price=mfe_price,
         mfe_r=mfe_r,
