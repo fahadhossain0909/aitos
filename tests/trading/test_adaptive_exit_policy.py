@@ -53,7 +53,7 @@ def test_stagnation_requires_configured_number_of_observations():
     trade = _trade()
     # Repeated ticks within one completed candle count only once.
     assert not policy.evaluate(trade, 100.1, completed_bar_id="bar-1").stagnation_exit
-    assert not policy.evaluate(trade, 100.2, completed_bar_id="bar-1").stagnation_exit
+    assert not policy.evaluate(trade, 100.15, completed_bar_id="bar-1").stagnation_exit
     assert not policy.evaluate(trade, 100.1, completed_bar_id="bar-2").stagnation_exit
     result = policy.evaluate(trade, 100.1, completed_bar_id="bar-3")
     assert result.stagnation_exit
@@ -71,9 +71,7 @@ def test_dead_candle_exit_requires_sixteen_unique_completed_bars_near_entry():
     )
     trade = _trade()
     for index in range(1, 16):
-        result = policy.evaluate(
-            trade, 100.1, completed_bar_id=f"900:{index * 900}"
-        )
+        result = policy.evaluate(trade, 100.1, completed_bar_id=f"900:{index * 900}")
         assert not result.stagnation_exit
     result = policy.evaluate(trade, 100.1, completed_bar_id="900:14400")
     assert result.stagnation_exit
