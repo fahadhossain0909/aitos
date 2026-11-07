@@ -33,6 +33,7 @@ from .models import (
     StrategyStatContext,
 )
 from .router import StatisticalStrategyRouter, StrategyScore, strategy_contexts
+from .shadow import ShadowMetrics, StatisticalShadowLedger
 from .stack import ContractStatisticalStack
 from .quant_features import (
     ChangePointDiagnostic,
@@ -69,6 +70,8 @@ __all__ = [
     "FeatureSnapshot",
     "ForecastEnvelope",
     "GARCH11",
+    "ShadowMetrics",
+    "StatisticalShadowLedger",
     "ChangePointDiagnostic",
     "DistributionFeatures",
     "HawkesIntensity",
