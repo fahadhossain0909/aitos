@@ -22,10 +22,16 @@ def test_feature_snapshot_validates_lineage_and_freshness():
 
 def test_feature_snapshot_rejects_naive_and_future_timestamps():
     with pytest.raises(ValueError):
-        FeatureSnapshot("BTCUSDT", "1m", "2026-11-07T10:00:00",
-                        "2026-11-07T09:00:00Z")
+        FeatureSnapshot(
+            "BTCUSDT",
+            "1m",
+            "2026-11-07T10:00:00",
+            "2026-11-07T09:00:00Z",
+        )
     future = FeatureSnapshot(
-        "BTCUSDT", "1m", "2026-11-07T10:01:00Z",
+        "BTCUSDT",
+        "1m",
+        "2026-11-07T10:01:00Z",
         "2026-11-07T09:00:00Z",
     )
     now = datetime(2026, 11, 7, 10, 0, tzinfo=timezone.utc)
@@ -35,8 +41,11 @@ def test_feature_snapshot_rejects_naive_and_future_timestamps():
 def test_feature_snapshot_rejects_non_finite_features():
     with pytest.raises(ValueError):
         FeatureSnapshot(
-            "BTCUSDT", "1m", "2026-11-07T10:00:00Z",
-            "2026-11-07T09:00:00Z", values={"bad": float("nan")},
+            "BTCUSDT",
+            "1m",
+            "2026-11-07T10:00:00Z",
+            "2026-11-07T09:00:00Z",
+            values={"bad": float("nan")},
         )
 
 
@@ -60,9 +69,15 @@ def test_forecast_envelope_requires_probability_and_identity_contracts():
     )
     with pytest.raises(ValueError):
         ForecastEnvelope(
-            symbol="BTCUSDT", horizon="15m", model_id="a-stat",
-            model_version="1", as_of="2026-11-07T10:00:00Z",
-            feature_snapshot_id="snapshot-1", sample_count=20,
-            expected_return=0.0, expected_volatility=0.1,
-            downside_probability=1.2, tail_probability=0.1,
+            symbol="BTCUSDT",
+            horizon="15m",
+            model_id="a-stat",
+            model_version="1",
+            as_of="2026-11-07T10:00:00Z",
+            feature_snapshot_id="snapshot-1",
+            sample_count=20,
+            expected_return=0.0,
+            expected_volatility=0.1,
+            downside_probability=1.2,
+            tail_probability=0.1,
         )
