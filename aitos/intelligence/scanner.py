@@ -573,9 +573,7 @@ class OpportunityScanner(AITOSModule):
                 },
             )
         if event.get("symbol") and event.get("stage"):
-            attribution_id = trace_id or (
-                f"scan:{event['symbol']}:{time.time_ns()}"
-            )
+            attribution_id = trace_id or (f"scan:{event['symbol']}:{time.time_ns()}")
             try:
                 await asyncio.to_thread(
                     self._decision_outcome_ledger.record_decision,
@@ -1814,7 +1812,12 @@ class OpportunityScanner(AITOSModule):
             except Exception:
                 logger.exception(
                     "candidate rejection attribution persistence failed",
-                    extra={"aitos_extra": {"symbol": candidate.symbol, "trace_id": candidate.trace_id}},
+                    extra={
+                        "aitos_extra": {
+                            "symbol": candidate.symbol,
+                            "trace_id": candidate.trace_id,
+                        }
+                    },
                 )
         self._candidate_rotation.record_rejection(
             candidate.symbol,
