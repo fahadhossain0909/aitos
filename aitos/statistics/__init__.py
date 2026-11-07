@@ -31,7 +31,7 @@ from .selection import (\n    AdjustedPValues,\n    BootstrapTest,\n    Comparis
 )
 from .engine import AStatEngine
 from .ensemble import EnsembleForecast, ForecastMember, combine_forecasts
-from .governance_runtime import DriftAction, StatisticalGovernanceRuntime
+from .governance_runtime import (\n    DriftAction,\n    DriftMonitorScheduler,\n    StatisticalGovernanceRuntime,\n)
 from .governance import (
     PromotionDecision,
     PromotionEvidence,
@@ -107,7 +107,7 @@ from .validation import (
 __all__ = [
     "BOCPDResult",\n    "EGARCH11",\n    "EGARCHForecast",
     "DecisionOutcomeLedger",\n    "DepthBookSnapshot",\n    "DepthFill",\n    "DepthReplayResult",\n    "LimitQueueEvent",\n    "QueueReplayResult",\n    "replay_l2_market_order",\n    "replay_passive_limit_queue",
-    "DriftAction",
+    "DriftAction",\n    "DriftMonitorScheduler",
     "StatisticalGovernanceRuntime",
     "DCCForecast",
     "DCCGARCH",
