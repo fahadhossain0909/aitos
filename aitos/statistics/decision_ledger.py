@@ -11,7 +11,7 @@ from typing import Any, Mapping
 class DecisionOutcomeLedger:
     """Append-only decision journal with idempotent outcome reconciliation."""
 
-    DECISION_TYPES = {"ENTRY", "REJECTION", "HOLD", "MANAGE", "EXIT", "EXECUTION_FAILURE"}
+    DECISION_TYPES = {"GATE", "ENTRY", "REJECTION", "HOLD", "MANAGE", "EXIT", "EXECUTION_FAILURE"}
 
     def __init__(self, database_path: str | Path, *, busy_timeout_ms: int = 10000):
         self.database_path = str(database_path)
