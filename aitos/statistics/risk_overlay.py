@@ -132,4 +132,6 @@ def assess_statistical_risk_forecast(
             ),
         )
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("statistical forecast risk metrics are invalid") from exc
+        raise ValueError(
+            f"statistical forecast risk metrics are invalid: {exc}"
+        ) from exc
