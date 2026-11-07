@@ -84,6 +84,9 @@ def test_clustered_event_simulation_hawkes_fit_is_stationary_and_finite():
     assert fit.events == len(times)
     assert fit.horizon == pytest.approx(horizon)
     assert math.isfinite(fit.log_likelihood)
+    assert fit.iterations > 0
+    assert math.isfinite(fit.gradient_norm)
+    assert isinstance(fit.converged, bool)
     assert 0.0 <= fit.branching_ratio < 0.95
     assert all(math.isfinite(x) and x > 0 for x in fit.baseline_intensities)
     assert all(
