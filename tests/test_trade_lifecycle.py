@@ -855,6 +855,7 @@ async def test_statistical_shadow_ledger_resolves_trade_outcome(
         horizon="15m",
         model_id="aitos-contract-statistical-stack",
         model_version="1",
+        side="LONG",
     )
     assert pending.observations == 0
 
