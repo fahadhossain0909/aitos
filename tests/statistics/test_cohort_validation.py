@@ -19,10 +19,6 @@ def test_regime_symbol_validation_reports_under_sampled_cohorts():
 
 def test_regime_symbol_validation_rejects_misaligned_or_invalid_inputs():
     with pytest.raises(ValueError):
-        regime_symbol_validation(
-            [0.8], [1, 0], symbols=["BTCUSDT"], regimes=["trend"]
-        )
+        regime_symbol_validation([0.8], [1, 0], symbols=["BTCUSDT"], regimes=["trend"])
     with pytest.raises(ValueError):
-        regime_symbol_validation(
-            [0.8], [2], symbols=["BTCUSDT"], regimes=["trend"]
-        )
+        regime_symbol_validation([0.8], [2], symbols=["BTCUSDT"], regimes=["trend"])
