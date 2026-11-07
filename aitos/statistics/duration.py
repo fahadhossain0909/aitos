@@ -4,6 +4,7 @@ This module estimates Gaussian emissions and empirical state-duration
 distributions, then performs explicit-duration filtering. It is a research
 estimator: use chronological out-of-sample calibration before deployment.
 """
+
 from __future__ import annotations
 
 import math
@@ -39,7 +40,10 @@ class GaussianHSMM:
         if len(xs) < max(30, self.states * 8) or any(not math.isfinite(x) for x in xs):
             raise ValueError("HSMM requires enough finite chronological observations")
         ordered = sorted(xs)
-        centers = [ordered[round((len(xs) - 1) * i / (self.states - 1))] for i in range(self.states)]
+        centers = [
+            ordered[round((len(xs) - 1) * i / (self.states - 1))]
+            for i in range(self.states)
+        ]
         for _ in range(40):
             groups = [[] for _ in range(self.states)]
             labels = []
@@ -61,10 +65,18 @@ class GaussianHSMM:
             groups[label].append(value)
         means = tuple(mean(group) if group else 0.0 for group in groups)
         global_sigma = max(pstdev(xs), 1e-8)
-        sigmas = tuple(max(pstdev(group), global_sigma * 0.05, 1e-8) if group else global_sigma for group in groups)
+        sigmas = tuple(
+            max(pstdev(group), global_sigma * 0.05, 1e-8) if group else global_sigma
+            for group in groups
+        )
 
-        transitions = [[self.smoothing for _ in range(self.states)] for _ in range(self.states)]
-        durations = [[self.smoothing for _ in range(self.max_duration + 1)] for _ in range(self.states)]
+        transitions = [
+            [self.smoothing for _ in range(self.states)] for _ in range(self.states)
+        ]
+        durations = [
+            [self.smoothing for _ in range(self.max_duration + 1)]
+            for _ in range(self.states)
+        ]
         runs = []
         start = 0
         for i in range(1, len(labels) + 1):
@@ -82,9 +94,7 @@ class GaussianHSMM:
             total_duration = sum(durations[i][1:])
             durations[i][0] = 0.0
             durations[i] = [0.0] + [v / total_duration for v in durations[i][1:]]
-        expected = tuple(
-            sum(d * p for d, p in enumerate(row)) for row in durations
-        )
+        expected = tuple(sum(d * p for d, p in enumerate(row)) for row in durations)
 
         # Explicit-duration forward recursion. alpha[t][s] is the likelihood
         # of observations through t ending in a completed segment of state s.
@@ -93,7 +103,12 @@ class GaussianHSMM:
         for state in range(self.states):
             for t, value in enumerate(xs, 1):
                 z = (value - means[state]) / sigmas[state]
-                log_emission[state][t] = log_emission[state][t - 1] - 0.5 * z * z - math.log(sigmas[state]) - 0.5 * math.log(2 * math.pi)
+                log_emission[state][t] = (
+                    log_emission[state][t - 1]
+                    - 0.5 * z * z
+                    - math.log(sigmas[state])
+                    - 0.5 * math.log(2 * math.pi)
+                )
         negative_infinity = float("-inf")
 
         def logsumexp(values):
@@ -101,7 +116,9 @@ class GaussianHSMM:
             if not finite:
                 return negative_infinity
             maximum = max(finite)
-            return maximum + math.log(sum(math.exp(value - maximum) for value in finite))
+            return maximum + math.log(
+                sum(math.exp(value - maximum) for value in finite)
+            )
 
         log_alpha = [[negative_infinity] * self.states for _ in range(n + 1)]
         for end in range(1, n + 1):
@@ -112,7 +129,9 @@ class GaussianHSMM:
                     probability = durations[state][duration_value]
                     if probability <= 0:
                         continue
-                    segment_log = log_emission[state][end] - log_emission[state][start_index]
+                    segment_log = (
+                        log_emission[state][end] - log_emission[state][start_index]
+                    )
                     if start_index == 0:
                         log_prior = -math.log(self.states)
                     else:
@@ -127,9 +146,7 @@ class GaussianHSMM:
         final_normalizer = logsumexp(log_alpha[n])
         if not math.isfinite(final_normalizer):
             raise ArithmeticError("HSMM forward posterior collapsed")
-        probs = tuple(
-            math.exp(value - final_normalizer) for value in log_alpha[n]
-        )
+        probs = tuple(math.exp(value - final_normalizer) for value in log_alpha[n])
         return HSMMResult(
             probabilities=probs,
             most_likely_state=max(range(self.states), key=probs.__getitem__),
