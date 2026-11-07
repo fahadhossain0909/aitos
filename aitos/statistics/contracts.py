@@ -58,16 +58,15 @@ class FeatureSnapshot:
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise ValueError("now must be timezone-aware")
-        return max(
-            0.0,
-            (current.astimezone(timezone.utc)
-             - _utc_datetime(self.as_of, "as_of")).total_seconds(),
-        )
+        return (
+            current.astimezone(timezone.utc)
+            - _utc_datetime(self.as_of, "as_of")
+        ).total_seconds()
 
     def is_fresh(self, max_age_seconds: float, *, now: datetime | None = None) -> bool:
         if not math.isfinite(max_age_seconds) or max_age_seconds < 0:
             raise ValueError("max_age_seconds must be finite and non-negative")
-        return self.age_seconds(now=now) <= max_age_seconds
+        return 0.0 <= self.age_seconds(now=now) <= max_age_seconds
 
     def to_dict(self) -> dict[str, Any]:
         return {
