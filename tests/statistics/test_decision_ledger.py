@@ -10,7 +10,10 @@ def test_decision_ledger_links_gate_entry_hold_exit_to_net_outcome(tmp_path):
         ("gate-1", "GATE", False),
         ("entry-1", "ENTRY", True),
         ("hold-1", "HOLD", False),
-        ("manage-1", "MANAGE", True),\n        ("exit-1", "EXIT", True),\n        ("execution-failure-1", "EXECUTION_FAILURE", False),\n        ("rejection-1", "REJECTION", False),
+        ("manage-1", "MANAGE", True),
+        ("exit-1", "EXIT", True),
+        ("execution-failure-1", "EXECUTION_FAILURE", False),
+        ("rejection-1", "REJECTION", False),
     ):
         assert ledger.record_decision(
             decision_id,
