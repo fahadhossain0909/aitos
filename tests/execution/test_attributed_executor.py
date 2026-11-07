@@ -291,3 +291,44 @@ async def test_ctrader_fails_closed_for_unmonitored_resting_orders():
                 order_type="STOP",
             )
         )
+
+
+
+class _PartialStatusErrorExecutor(OrderExecutor):
+    async def submit_order(self, request):
+        return OrderResult(
+            order_id="venue-partial-1",
+            symbol=request.symbol,
+            side=request.side,
+            filled_quantity=0.2,
+            fill_price=request.reference_price,
+            success=False,
+            error="venue reported cancellation after partial fill",
+        )
+
+
+@pytest.mark.asyncio
+async def test_attribution_marks_confirmed_partial_fill_accepted_and_failure_separately(
+    tmp_path,
+):
+    ledger = DecisionOutcomeLedger(tmp_path / "partial-status-decisions.sqlite3")
+    executor = AttributedOrderExecutor(
+        _PartialStatusErrorExecutor(), ledger, _context
+    )
+    result = await executor.submit_order(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=0.5,
+            reference_price=100.0,
+            client_order_id="partial-status-client",
+        )
+    )
+    rows = ledger.list_decisions(entity_id="scan-trace-42")
+    entry = next(row for row in rows if row["decision_type"] == "ENTRY")
+    failure = next(
+        row for row in rows if row["decision_type"] == "EXECUTION_FAILURE"
+    )
+    assert not result.success
+    assert entry["accepted"] is True
+    assert failure["accepted"] is False
