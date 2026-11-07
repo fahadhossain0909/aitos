@@ -19,7 +19,9 @@ def test_rejected_candidate_15m_markout_resolves_trace_linked_decisions(tmp_path
         composite_score=82.0,
         trace_id="scan-abc",
     )
-    rejection_id = candidate_store.record_rejection(candidate, "risk_gate", timestamp=1000)
+    rejection_id = candidate_store.record_rejection(
+        candidate, "risk_gate", timestamp=1000
+    )
     attribution_id = f"{candidate.trace_id}:{candidate.direction.value}"
     ledger.record_decision(
         "scan-abc:BTCUSDT:LONG:liquidity_gate",
@@ -48,12 +50,15 @@ def test_rejected_candidate_15m_markout_resolves_trace_linked_decisions(tmp_path
     assert markouts[0]["attribution_id"] == attribution_id
     assert markouts[0]["signed_return_pct"] == 1.0
 
-    assert ledger.resolve_entity(
-        attribution_id,
-        outcome_value=markouts[0]["signed_return_pct"] / 100.0,
-        outcome_at="2026-11-07T00:15:01+00:00",
-        outcome={"counterfactual": True, "horizon_seconds": 900},
-    ) == 2
+    assert (
+        ledger.resolve_entity(
+            attribution_id,
+            outcome_value=markouts[0]["signed_return_pct"] / 100.0,
+            outcome_at="2026-11-07T00:15:01+00:00",
+            outcome={"counterfactual": True, "horizon_seconds": 900},
+        )
+        == 2
+    )
     rows = ledger.list_decisions(entity_id=attribution_id)
     assert len(rows) == 2
     assert all(row["outcome"]["counterfactual"] for row in rows)
