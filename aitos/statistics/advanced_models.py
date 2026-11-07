@@ -69,7 +69,11 @@ def fit_har_rv_forecast(
     intraday realized variance; it is not a substitute for high-frequency RV.
     """
     xs = _finite_series(returns, minimum=3)
-    if min(short_window, medium_window, long_window) <= 0 or ridge < 0:
+    if (
+        min(short_window, medium_window, long_window) <= 0
+        or not math.isfinite(ridge)
+        or ridge < 0
+    ):
         raise ValueError("windows must be positive and ridge non-negative")
     if short_window > medium_window or medium_window > long_window:
         raise ValueError("HAR windows must be ordered short <= medium <= long")
@@ -150,7 +154,10 @@ def bocpd_change_point(
     xs = _finite_series(values, minimum=1)
     if not 0.0 < hazard < 1.0 or max_run_length < 2:
         raise ValueError("hazard must be in (0, 1) and max_run_length >= 2")
-    if prior_kappa <= 0 or prior_alpha <= 0 or prior_beta <= 0:
+    if any(
+        not math.isfinite(value) or value <= 0
+        for value in (prior_kappa, prior_alpha, prior_beta)
+    ):
         raise ValueError("Normal-Inverse-Gamma prior parameters must be positive")
     if not math.isfinite(prior_mean):
         raise ValueError("prior_mean must be finite")
