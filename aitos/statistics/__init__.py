@@ -14,6 +14,15 @@ from .advanced_models import (
     fit_har_rv_forecast,
 )
 from .contracts import FeatureSnapshot, ForecastEnvelope
+from .dependence import DCCForecast, DCCGARCH, PortfolioTailRisk, aggregate_portfolio_tail_risk
+from .duration import GaussianHSMM, HSMMResult
+from .hawkes import HawkesMLEFit, fit_marked_hawkes_mle
+from .replay import (
+    BookSnapshot,
+    ExecutionReplayResult,
+    ReplayFill,
+    replay_historical_order,
+)
 from .engine import AStatEngine
 from .ensemble import EnsembleForecast, ForecastMember, combine_forecasts
 from .governance import (
@@ -68,8 +77,10 @@ from .risk_overlay import (
     assess_statistical_risk_forecast,
 )
 from .validation import (
+    CohortValidationMetric,
     ExecutionCostScenario,
     ExecutionCostSensitivity,
+    regime_symbol_validation,
     execution_cost_sensitivity,
     BootstrapInterval,
     DriftReport,
@@ -88,6 +99,20 @@ from .validation import (
 
 __all__ = [
     "BOCPDResult",
+    "DCCForecast",
+    "DCCGARCH",
+    "PortfolioTailRisk",
+    "aggregate_portfolio_tail_risk",
+    "GaussianHSMM",
+    "HSMMResult",
+    "HawkesMLEFit",
+    "fit_marked_hawkes_mle",
+    "BookSnapshot",
+    "ExecutionReplayResult",
+    "ReplayFill",
+    "replay_historical_order",
+    "CohortValidationMetric",
+    "regime_symbol_validation",
     "GJRGARCH11",
     "GJRGARCHForecast",
     "HARForecast",
