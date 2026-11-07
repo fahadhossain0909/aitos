@@ -11,7 +11,7 @@ from aitos.statistics.replay import BookSnapshot, replay_historical_order
 def test_hsmm_estimates_duration_distribution_and_normalized_posterior():
     values = []
     for block in range(12):
-        state = (0.001 if block % 2 == 0 else -0.001)
+        state = 0.001 if block % 2 == 0 else -0.001
         values.extend([state + 0.0001 * math.sin(i) for i in range(8)])
     result = GaussianHSMM(states=2, max_duration=24).fit_filter(values)
     assert sum(result.probabilities) == pytest.approx(1.0)
@@ -53,7 +53,9 @@ def test_dcc_garch_and_gaussian_copula_are_valid_correlations():
     result = DCCGARCH().fit_forecast({"BTCUSDT": first, "ETHUSDT": second})
     assert result.observations == 120
     assert result.persistence < 0.995
-    assert result.correlation_matrix[0][1] == pytest.approx(result.correlation_matrix[1][0])
+    assert result.correlation_matrix[0][1] == pytest.approx(
+        result.correlation_matrix[1][0]
+    )
     assert -1.0 <= result.gaussian_copula_correlation[0][1] <= 1.0
 
 
@@ -92,8 +94,11 @@ def test_l1_replay_models_latency_partial_fills_and_all_cost_components():
     assert len(result.fills) == 2
     assert result.average_fill_price > 102.0
     assert result.total_cost == pytest.approx(
-        result.fees + result.spread_cost + result.slippage_cost
-        + result.funding_cost + result.borrow_cost
+        result.fees
+        + result.spread_cost
+        + result.slippage_cost
+        + result.funding_cost
+        + result.borrow_cost
     )
 
 
