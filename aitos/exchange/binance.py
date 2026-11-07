@@ -32,6 +32,8 @@ from aitos.exchange.rate_limiter import TokenBucketRateLimiter
 from aitos.exchange.symbol_filters import SymbolFilters, parse_exchange_info
 from aitos.logging_setup import get_logger
 from aitos.market_data.endpoints import (
+    BINANCE_USDM_TESTNET_WS_COMBINED,
+    BINANCE_USDM_TESTNET_WS_RAW,
     BINANCE_USDM_WS_COMBINED,
     BINANCE_USDM_WS_MAX_LIFETIME_SECONDS,
     BINANCE_USDM_WS_RAW,
@@ -46,8 +48,11 @@ from aitos.models.market import (
 
 logger = get_logger("aitos.exchange.binance")
 REST_BASE_URL = "https://fapi.binance.com"
+TESTNET_REST_BASE_URL = "https://testnet.binancefuture.com"
 WS_MARKET_BASE_URL = BINANCE_USDM_WS_COMBINED
 WS_MARKET_RAW_BASE_URL = BINANCE_USDM_WS_RAW
+WS_MARKET_TESTNET_BASE_URL = BINANCE_USDM_TESTNET_WS_COMBINED
+WS_MARKET_TESTNET_RAW_BASE_URL = BINANCE_USDM_TESTNET_WS_RAW
 WS_PUBLIC_BASE_URL = WS_MARKET_BASE_URL
 WS_PUBLIC_RAW_BASE_URL = WS_MARKET_RAW_BASE_URL
 DEFAULT_RATE_LIMIT_CAPACITY = 2000
@@ -74,10 +79,13 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         rate_limiter: TokenBucketRateLimiter | None = None,
         api_key: str | None = None,
         api_secret: str | None = None,
+        testnet: bool = False,
     ) -> None:
         self._session_factory = session_factory
         self._api_key = api_key or os.getenv("BINANCE_API_KEY")
         self._api_secret = api_secret or os.getenv("BINANCE_API_SECRET")
+        self._testnet = testnet
+        self._rest_base_url = TESTNET_REST_BASE_URL if self._testnet else REST_BASE_URL
         self._session: aiohttp.ClientSession | None = None
         self._ws_transport: dict[str, Any] = {
             "state": "idle",
@@ -228,8 +236,9 @@ class BinanceFuturesAdapter(ExchangeAdapter):
                 await self._rate_limiter.acquire(30)
                 await self.connect()
                 assert self._session is not None
+                base = getattr(self, "_rest_base_url", REST_BASE_URL)
                 async with self._session.get(
-                    f"{REST_BASE_URL}/fapi/v1/income?{query}&signature={signature}",
+                    f"{base}/fapi/v1/income?{query}&signature={signature}",
                     headers={"X-MBX-APIKEY": self._api_key},
                 ) as response:
                     response.raise_for_status()
@@ -388,19 +397,23 @@ class BinanceFuturesAdapter(ExchangeAdapter):
         """Route all Binance USDⓈ-M public streams through the market path."""
         return WS_MARKET_BASE_URL, WS_MARKET_RAW_BASE_URL
 
+    def _resolve_ws_base_url(self, streams: list[str]) -> tuple[str, str]:
+        if getattr(self, "_testnet", False):
+            return WS_MARKET_TESTNET_BASE_URL, WS_MARKET_TESTNET_RAW_BASE_URL
+        return self._get_ws_base_url(streams)
+
     async def _get(self, path: str, params: dict[str, Any], weight: int) -> Any:
         await self._rate_limiter.acquire(weight)
         await self.connect()
         assert self._session is not None
-        async with self._session.get(
-            f"{REST_BASE_URL}{path}", params=params
-        ) as response:
+        base = getattr(self, "_rest_base_url", REST_BASE_URL)
+        async with self._session.get(f"{base}{path}", params=params) as response:
             response.raise_for_status()
             return await response.json()
 
-    @staticmethod
-    def _ws_base_url(streams: list[str]) -> str:
-        return BinanceFuturesAdapter._get_ws_base_url(streams)[0]
+    @classmethod
+    def _ws_base_url(cls, streams: list[str]) -> str:
+        return cls._get_ws_base_url(streams)[0]
 
     async def _raw_stream(
         self, streams: list[str], emit_reconnect: bool = False
@@ -409,7 +422,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
             return
         shards = self._partition_streams(streams)
         if len(shards) == 1:
-            base_url, _ = self._get_ws_base_url(shards[0])
+            base_url, _ = self._resolve_ws_base_url(shards[0])
             url = f"{base_url}?streams={'/'.join(shards[0])}"
             async for item in self._connect_raw(url, None, emit_reconnect, shards[0]):
                 yield item
@@ -417,7 +430,7 @@ class BinanceFuturesAdapter(ExchangeAdapter):
 
         iterators = []
         for shard in shards:
-            base_url, _ = self._get_ws_base_url(shard)
+            base_url, _ = self._resolve_ws_base_url(shard)
             iterators.append(
                 self._connect_raw(
                     f"{base_url}?streams={'/'.join(shard)}",

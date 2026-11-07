@@ -264,7 +264,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     graph_driver = await try_connect_neo4j(settings, logger=logger)
     if graph_driver is not None:
         cleanup.push_async_callback(graph_driver.close)
-    exchange = BinanceFuturesAdapter()
+    exchange = BinanceFuturesAdapter(testnet=settings.binance.testnet)
     cleanup.push_async_callback(exchange.close)
     symbols = await resolve_live_universe(
         exchange,
