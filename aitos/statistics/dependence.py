@@ -8,6 +8,7 @@ from statistics import mean, pstdev
 from typing import Mapping, Sequence
 
 from .garch import GARCH11
+from .tail_calibration import StudentTCopulaFit, fit_student_t_copula
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class DCCForecast:
     persistence: float
     observations: int
     gaussian_copula_correlation: tuple[tuple[float, ...], ...]
+    student_t_copula: StudentTCopulaFit | None = None
 
 
 @dataclass(frozen=True)
@@ -230,8 +232,19 @@ class DCCGARCH:
             tuple(_corr(rank_scores[i], rank_scores[j]) for j in range(len(symbols)))
             for i in range(len(symbols))
         )
+        student_t_copula = fit_student_t_copula(
+            {symbol: returns[symbol] for symbol in symbols}
+        )
         return DCCForecast(
-            symbols, tuple(vol_forecasts), corr, alpha, beta, alpha + beta, n, copula
+            symbols,
+            tuple(vol_forecasts),
+            corr,
+            alpha,
+            beta,
+            alpha + beta,
+            n,
+            copula,
+            student_t_copula,
         )
 
 

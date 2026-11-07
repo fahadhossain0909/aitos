@@ -56,6 +56,7 @@ def test_dcc_garch_and_gaussian_copula_are_valid_correlations():
     result = DCCGARCH().fit_forecast({"BTCUSDT": first, "ETHUSDT": second})
     assert result.observations == 120
     assert result.persistence < 0.995
+    assert result.student_t_copula is not None
     assert result.correlation_matrix[0][1] == pytest.approx(
         result.correlation_matrix[1][0]
     )

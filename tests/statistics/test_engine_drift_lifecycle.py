@@ -3,7 +3,6 @@ import asyncio
 import pytest
 
 from aitos.statistics.engine import AStatEngine
-from aitos.statistics.governance import PromotionPolicy
 from aitos.statistics.governance_runtime import StatisticalGovernanceRuntime
 from aitos.statistics.registry import StatisticalModelRegistry
 
@@ -11,9 +10,7 @@ from aitos.statistics.registry import StatisticalModelRegistry
 @pytest.mark.asyncio
 async def test_a_stat_engine_starts_and_stops_managed_drift_monitor(tmp_path):
     registry = StatisticalModelRegistry(tmp_path / "models.sqlite3")
-    runtime = StatisticalGovernanceRuntime(
-        registry, policy=PromotionPolicy(min_observations=1)
-    )
+    runtime = StatisticalGovernanceRuntime(registry)
     engine = AStatEngine()
     alerted = asyncio.Event()
     reference = {"volatility": [float(i) for i in range(100)]}

@@ -75,8 +75,15 @@ def fit_marked_hawkes_mle(
         raise ValueError("max_iterations must be positive")
 
     counts = [labels.count(mark) for mark in range(2)]
+    decay_candidates = set(float(value) for value in decay_grid)
+    for _ in range(2):
+        ordered_decays = sorted(decay_candidates)
+        decay_candidates.update(
+            math.sqrt(left * right)
+            for left, right in zip(ordered_decays, ordered_decays[1:])
+        )
     best = None
-    for decay in sorted(set(decay_grid)):
+    for decay in sorted(decay_candidates):
         histories = []
         state = [0.0, 0.0]
         for index, event_time in enumerate(times):

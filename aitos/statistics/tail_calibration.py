@@ -30,7 +30,11 @@ def fit_student_t_copula(
         raise RuntimeError("Student-t copula fitting requires scipy and numpy") from exc
 
     symbols = tuple(sorted(returns))
-    if len(symbols) < 2 or not 0.0 <= shrinkage < 1.0:
+    if (
+        len(symbols) < 2
+        or not degrees_of_freedom_grid
+        or not 0.0 <= shrinkage < 1.0
+    ):
         raise ValueError("copula requires >=2 assets and shrinkage in [0, 1)")
     matrix = [np.asarray(returns[symbol], dtype=float) for symbol in symbols]
     n = len(matrix[0])
@@ -38,6 +42,8 @@ def fit_student_t_copula(
         raise ValueError("copula requires >=50 aligned observations per asset")
     if any(not np.isfinite(row).all() for row in matrix):
         raise ValueError("copula returns must be finite")
+    if any(float(np.std(row)) <= 1e-12 for row in matrix):
+        raise ValueError("copula returns must have non-zero variance")
     if any(not math.isfinite(float(df)) or float(df) <= 2.0 for df in degrees_of_freedom_grid):
         raise ValueError("degrees of freedom candidates must be finite and >2")
 
@@ -175,6 +181,8 @@ def backtest_var_es(
     tail_forecasts = [es[i] for i, hit in enumerate(exceptions) if hit]
     realized_tail = sum(tail_losses) / len(tail_losses) if tail_losses else None
     forecast_tail = sum(tail_forecasts) / len(tail_forecasts) if tail_forecasts else None
+    if tail_forecasts and forecast_tail <= 0.0:
+        raise ValueError("ES forecasts must be positive when VaR exceptions occur")
     ratio = realized_tail / forecast_tail if realized_tail is not None and forecast_tail else None
     return VaRESBacktest(
         n,
