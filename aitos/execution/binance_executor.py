@@ -195,7 +195,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             order_id=str(response.get("orderId", client_order_id)),
             symbol=request.symbol,
             side=request.side,
-            filled_quantity=filled_qty if filled_qty > 0 else quantity,
+            filled_quantity=filled_qty,
             fill_price=avg_price,
             success=success,
             error=None if success else f"unexpected order status: {status}",
