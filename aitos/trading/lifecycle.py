@@ -1004,7 +1004,7 @@ class TradeLifecycle(AITOSModule):
             side=trade.side.value,
             decision_type=action_type,
             accepted=action_type != "HOLD",
-            reason=str(pos_action.reason),
+            reason=str(getattr(pos_action, "reason", action_type.lower())),
             payload=pos_action.to_dict(),
         )
 
