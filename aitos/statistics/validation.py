@@ -242,7 +242,6 @@ def expected_calibration_error(
     )
 
 
-
 @dataclass(frozen=True)
 class BootstrapInterval:
     """Paired block-bootstrap confidence interval for mean return improvement."""
@@ -287,9 +286,7 @@ def paired_block_bootstrap_difference(
     incumbent = tuple(float(value) for value in incumbent_returns)
     if not candidate or len(candidate) != len(incumbent):
         raise ValueError("paired return samples must be non-empty and equal length")
-    if any(
-        not math.isfinite(value) for value in (*candidate, *incumbent)
-    ):
+    if any(not math.isfinite(value) for value in (*candidate, *incumbent)):
         raise ValueError("paired return samples must be finite")
     if block_length <= 0 or block_length > len(candidate):
         raise ValueError("block_length must be in [1, sample_count]")
@@ -355,8 +352,7 @@ def population_stability_index(
     if not reference_values or not current_values:
         raise ValueError("reference and current samples must be non-empty")
     if any(
-        not math.isfinite(value)
-        for value in (*reference_values, *current_values)
+        not math.isfinite(value) for value in (*reference_values, *current_values)
     ):
         raise ValueError("drift samples must be finite")
     if bins < 2:
@@ -395,9 +391,7 @@ def population_stability_index(
     current_proportions = [p / current_norm for p in current_proportions]
     return sum(
         (current_p - reference_p) * math.log(current_p / reference_p)
-        for reference_p, current_p in zip(
-            reference_proportions, current_proportions
-        )
+        for reference_p, current_p in zip(reference_proportions, current_proportions)
     )
 
 
@@ -417,9 +411,7 @@ def assess_feature_drift(
     for feature in sorted(reference):
         reference_values = tuple(reference[feature])
         current_values = tuple(current[feature])
-        psi = population_stability_index(
-            reference_values, current_values, bins=bins
-        )
+        psi = population_stability_index(reference_values, current_values, bins=bins)
         results.append(
             FeatureDriftResult(
                 feature=feature,
