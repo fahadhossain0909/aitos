@@ -530,13 +530,14 @@ def regime_symbol_validation(
     leakage; it preserves small cohorts but marks them under-sampled.
     """
     ps = tuple(_probability(value) for value in probabilities)
-    ys = tuple(int(value) for value in outcomes)
+    raw_outcomes = tuple(outcomes)
+    if any(value not in (0, 1) for value in raw_outcomes):
+        raise ValueError("outcomes must be binary")
+    ys = tuple(int(value) for value in raw_outcomes)
     symbol_values = tuple(str(value) for value in symbols)
     regime_values = tuple(str(value) for value in regimes)
     if not ps or len({len(ps), len(ys), len(symbol_values), len(regime_values)}) != 1:
         raise ValueError("probabilities, outcomes, symbols and regimes must align")
-    if any(value not in (0, 1) for value in ys):
-        raise ValueError("outcomes must be binary")
     if any(not value for value in symbol_values + regime_values):
         raise ValueError("symbol and regime labels must be non-empty")
     if minimum_observations <= 0:
