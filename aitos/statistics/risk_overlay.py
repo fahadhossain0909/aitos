@@ -71,7 +71,6 @@ def assess_statistical_risk(
     )
 
 
-
 def assess_statistical_risk_forecast(
     forecast: Mapping[str, object],
     *,
