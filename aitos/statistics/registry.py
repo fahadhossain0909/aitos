@@ -148,7 +148,9 @@ class StatisticalModelRegistry:
             config_hash,
             feature_schema_version,
         )
-        if any(not isinstance(value, str) or not value.strip() for value in required):
+        if any(
+            not isinstance(value, str) or not value.strip() for value in required
+        ):
             raise ValueError("model artifact identity and hashes are required")
         if not re.fullmatch(r"[0-9a-fA-F]{64}", artifact_sha256):
             raise ValueError(
