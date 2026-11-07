@@ -100,22 +100,33 @@ def fit_har_rv_forecast(
             0.0,
         )
 
-    xtx = [[sum(row[i] * row[j] for row in rows) for j in range(4)] for i in range(4)]
-    xty = [sum(row[i] * y for row, y in zip(rows, targets)) for i in range(4)]
-    for i in range(1, 4):
-        xtx[i][i] += ridge
-    try:
-        coefficients = _solve_linear(xtx, xty)
-    except ValueError:
-        fallback = mean(squares[-long_window:])
-        return HARForecast(
-            fallback,
-            math.sqrt(max(0.0, fallback)),
-            (0.0, 1 / 3, 1 / 3, 1 / 3),
-            len(rows),
-            False,
-            0.0,
-        )
+    # Cyclic non-negative least squares keeps RV coefficients admissible and
+    # avoids unstable unconstrained normal-equation inversion.
+    coefficients = [0.0, 0.0, 0.0, 0.0]
+    column_norms = [
+        sum(row[index] * row[index] for row in rows) + (ridge if index else 0.0)
+        for index in range(4)
+    ]
+    for _ in range(2000):
+        largest_change = 0.0
+        for index in range(4):
+            numerator = sum(
+                row[index]
+                * (
+                    target
+                    - sum(
+                        coefficients[j] * row[j]
+                        for j in range(4)
+                        if j != index
+                    )
+                )
+                for row, target in zip(rows, targets)
+            )
+            updated = max(0.0, numerator / max(column_norms[index], _EPS))
+            largest_change = max(largest_change, abs(updated - coefficients[index]))
+            coefficients[index] = updated
+        if largest_change < 1e-12:
+            break
 
     predicted = [sum(c * x for c, x in zip(coefficients, row)) for row in rows]
     target_mean = mean(targets)
@@ -245,46 +256,75 @@ class GJRGARCHForecast:
 
 
 class GJRGARCH11:
-    """Asymmetric GJR-GARCH(1,1) QML baseline with constrained grid search."""
+    """Asymmetric GJR-GARCH(1,1) Gaussian QML with constrained refinement."""
 
     def fit_forecast(self, returns: Sequence[float]) -> GJRGARCHForecast:
-        xs = _finite_series(returns, minimum=20)
-        mu = mean(xs)
-        centered = [value - mu for value in xs]
+        xs = _finite_series(returns, minimum=30)
+        centered = [value - mean(xs) for value in xs]
         sample_var = max(mean(value * value for value in centered), 1e-12)
-        best = (float("inf"), 0.05, 0.05, 0.85)
-        for alpha in (0.03, 0.06, 0.10, 0.15):
-            for gamma in (0.0, 0.05, 0.10, 0.20):
-                for beta in (0.70, 0.80, 0.88, 0.92, 0.95):
-                    persistence = alpha + beta + 0.5 * gamma
-                    if persistence >= 0.995:
-                        continue
-                    omega = sample_var * (1.0 - persistence)
-                    variance = sample_var
-                    loss = 0.0
-                    for value in centered:
-                        variance = max(
-                            omega
-                            + alpha * value * value
-                            + gamma * value * value * (value < 0.0)
-                            + beta * variance,
-                            1e-12,
-                        )
-                        loss += math.log(variance) + value * value / variance
-                    if loss < best[0]:
-                        best = (loss, alpha, gamma, beta)
-        _, alpha, gamma, beta = best
-        persistence = alpha + beta + 0.5 * gamma
+
+        def evaluate(alpha: float, gamma: float, beta: float):
+            persistence = alpha + beta + 0.5 * gamma
+            if (
+                alpha < 0.0
+                or gamma < 0.0
+                or beta < 0.0
+                or persistence >= 0.995
+            ):
+                return float("inf"), sample_var, persistence
+            omega = sample_var * (1.0 - persistence)
+            variance = sample_var
+            loss = 0.0
+            for value in centered:
+                loss += math.log(variance) + value * value / variance
+                variance = max(
+                    omega
+                    + alpha * value * value
+                    + gamma * value * value * (value < 0.0)
+                    + beta * variance,
+                    1e-12,
+                )
+            return loss, variance, persistence
+
+        candidates = [
+            (alpha, gamma, beta)
+            for alpha in (0.02, 0.05, 0.10, 0.20, 0.35)
+            for gamma in (0.0, 0.05, 0.10, 0.20, 0.35)
+            for beta in (0.50, 0.70, 0.82, 0.90, 0.95, 0.97)
+            if alpha + beta + 0.5 * gamma < 0.995
+        ]
+        loss, params = min(
+            ((evaluate(*params)[0], params) for params in candidates),
+            key=lambda item: item[0],
+        )
+        alpha, gamma, beta = params
+        for step in (0.05, 0.02, 0.005, 0.001):
+            improved = True
+            while improved:
+                improved = False
+                for index, direction in (
+                    (0, -1),
+                    (0, 1),
+                    (1, -1),
+                    (1, 1),
+                    (2, -1),
+                    (2, 1),
+                ):
+                    candidate = [alpha, gamma, beta]
+                    candidate[index] += direction * step
+                    candidate = [
+                        max(0.0, min(0.98, candidate[0])),
+                        max(0.0, min(0.98, candidate[1])),
+                        max(0.0, min(0.994, candidate[2])),
+                    ]
+                    candidate_loss = evaluate(*candidate)[0]
+                    if candidate_loss + 1e-10 < loss:
+                        alpha, gamma, beta = candidate
+                        loss = candidate_loss
+                        improved = True
+                        break
+        loss, variance, persistence = evaluate(alpha, gamma, beta)
         omega = sample_var * (1.0 - persistence)
-        variance = sample_var
-        for value in centered:
-            variance = max(
-                omega
-                + alpha * value * value
-                + gamma * value * value * (value < 0.0)
-                + beta * variance,
-                1e-12,
-            )
         long_run = omega / max(1.0 - persistence, 1e-8)
         return GJRGARCHForecast(
             variance,
