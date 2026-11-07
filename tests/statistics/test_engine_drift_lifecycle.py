@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from aitos.statistics.engine import AStatEngine
+from aitos.statistics.hawkes import fit_marked_hawkes_mle
 from aitos.statistics.governance_runtime import StatisticalGovernanceRuntime
 from aitos.statistics.registry import StatisticalModelRegistry
 
@@ -33,3 +34,22 @@ async def test_a_stat_engine_starts_and_stops_managed_drift_monitor(tmp_path):
     await engine.stop_drift_monitor()
     assert task.done()
     await engine.stop_drift_monitor()
+
+
+
+def test_a_stat_engine_routes_live_marked_events_to_registered_hawkes_filter():
+    engine = AStatEngine()
+    fit = fit_marked_hawkes_mle(
+        [float(index) for index in range(60)],
+        [index % 2 for index in range(60)],
+        horizon=65.0,
+        decay_grid=(0.1, 0.5),
+        max_iterations=120,
+    )
+    engine.register_hawkes_model("BTCUSDT", fit)
+    first = engine.observe_marked_event("btcusdt", 100.0, 1)
+    second = engine.observe_marked_event("BTCUSDT", 101.0, 0)
+    assert first.intensities == pytest.approx(fit.baseline_intensities)
+    assert second.timestamp == 101.0
+    with pytest.raises(KeyError):
+        engine.observe_marked_event("ETHUSDT", 102.0, 0)
