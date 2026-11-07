@@ -35,11 +35,7 @@ def _corr(x, y):
     mx, my = mean(x), mean(y)
     dx, dy = [a - mx for a in x], [b - my for b in y]
     denom = math.sqrt(sum(a * a for a in dx) * sum(b * b for b in dy))
-    return (
-        0.0
-        if denom <= 1e-15
-        else sum(a * b for a, b in zip(dx, dy)) / denom
-    )
+    return 0.0 if denom <= 1e-15 else sum(a * b for a, b in zip(dx, dy)) / denom
 
 
 def _inverse_positive_definite(matrix):
