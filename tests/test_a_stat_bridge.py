@@ -153,8 +153,8 @@ def test_bridge_ingests_new_closed_candles_with_fixed_length_windows() -> None:
 
     # The exchange returns a fixed-size rolling window; its length is unchanged
     # even though one new closed candle has arrived.
-    updated = _klines(121)
-    assert len(updated) == len(initial) + 1
+    updated = _klines(121)[1:]
+    assert len(updated) == len(initial)
     evaluate(updated)
     assert len(history) == 120
 
