@@ -49,7 +49,14 @@ from .quant_features import (
     permutation_entropy,
 )
 from .risk_overlay import StatisticalRiskAssessment, assess_statistical_risk
-from .validation import brier_score, log_loss, purged_walk_forward_folds, qlike_loss
+from .validation import (
+    brier_score,
+    combinatorial_purged_folds,
+    log_loss,
+    probability_of_backtest_overfitting,
+    purged_walk_forward_folds,
+    qlike_loss,
+)
 
 __all__ = [
     "BOCPDResult",
@@ -67,6 +74,8 @@ __all__ = [
     "VolatilityForecast",
     "assess_statistical_risk",
     "brier_score",
+    "combinatorial_purged_folds",
+    "probability_of_backtest_overfitting",
     "cusum_change_point",
     "diagnose",
     "distribution_features",
