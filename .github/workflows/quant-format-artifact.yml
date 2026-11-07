@@ -1,0 +1,73 @@
+name: Quantitative Format Artifact
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/quant-format-artifact.yml"
+      - "aitos/statistics/advanced_models.py"
+      - "aitos/statistics/dependence.py"
+      - "aitos/statistics/duration.py"
+      - "aitos/statistics/engine.py"
+      - "aitos/statistics/experiments.py"
+      - "aitos/statistics/governance.py"
+      - "aitos/statistics/governance_runtime.py"
+      - "aitos/statistics/hawkes.py"
+      - "aitos/statistics/selection.py"
+      - "aitos/statistics/tail_calibration.py"
+      - "aitos/statistics/validation.py"
+      - "aitos/statistics/depth_replay.py"
+      - "aitos/statistics/__init__.py"
+      - "aitos/execution/attributed_executor.py"
+      - "aitos/execution/binance_executor.py"
+      - "aitos/execution/ctrader_executor.py"
+      - "aitos/execution/mt5_gateway.py"
+      - "aitos/execution/__init__.py"
+      - "aitos/trading/lifecycle.py"
+      - "tests/execution/test_attributed_executor.py"
+      - "tests/statistics/test_advanced_volatility_estimators.py"
+      - "tests/statistics/test_depth_replay.py"
+      - "tests/statistics/test_decision_ledger.py"
+      - "tests/statistics/test_engine_drift_lifecycle.py"
+      - "tests/statistics/test_governance.py"
+      - "tests/statistics/test_governance_runtime.py"
+      - "tests/statistics/test_hsmm_hawkes_dependence_replay.py"
+      - "tests/statistics/test_registry.py"
+      - "tests/statistics/test_selection_diagnostics.py"
+      - "tests/statistics/test_symbol_regime_experiments.py"
+      - "tests/statistics/test_tail_calibration.py"
+      - "tests/statistics/test_synthetic_market_validation.py"
+      - "tests/intelligence/test_candidate_outcome_attribution.py"
+      - "tests/test_binance_executor.py"
+      - "tests/test_trade_lifecycle.py"
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.11"
+      - name: Format quantitative implementation and tests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install black==25.12.0
+          black aitos/statistics/advanced_models.py aitos/statistics/dependence.py aitos/statistics/duration.py aitos/statistics/engine.py aitos/statistics/experiments.py aitos/statistics/governance.py aitos/statistics/governance_runtime.py aitos/statistics/hawkes.py aitos/statistics/selection.py aitos/statistics/tail_calibration.py aitos/statistics/validation.py aitos/statistics/depth_replay.py aitos/statistics/__init__.py aitos/execution/attributed_executor.py aitos/execution/binance_executor.py aitos/execution/ctrader_executor.py aitos/execution/mt5_gateway.py aitos/execution/__init__.py aitos/trading/lifecycle.py tests/execution/test_attributed_executor.py tests/statistics/test_advanced_volatility_estimators.py tests/statistics/test_depth_replay.py tests/statistics/test_decision_ledger.py tests/statistics/test_engine_drift_lifecycle.py tests/statistics/test_governance.py tests/statistics/test_governance_runtime.py tests/statistics/test_hsmm_hawkes_dependence_replay.py tests/statistics/test_registry.py tests/statistics/test_selection_diagnostics.py tests/statistics/test_symbol_regime_experiments.py tests/statistics/test_tail_calibration.py tests/statistics/test_synthetic_market_validation.py tests/intelligence/test_candidate_outcome_attribution.py tests/test_binance_executor.py tests/test_trade_lifecycle.py
+      - name: Commit formatting corrections to the same PR branch
+        run: |
+          if git diff --quiet; then
+            echo "All target files are already formatted."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add aitos/statistics/advanced_models.py aitos/statistics/dependence.py aitos/statistics/duration.py aitos/statistics/engine.py aitos/statistics/experiments.py aitos/statistics/governance.py aitos/statistics/governance_runtime.py aitos/statistics/hawkes.py aitos/statistics/selection.py aitos/statistics/tail_calibration.py aitos/statistics/validation.py aitos/statistics/depth_replay.py aitos/statistics/__init__.py aitos/execution/attributed_executor.py aitos/execution/binance_executor.py aitos/execution/ctrader_executor.py aitos/execution/mt5_gateway.py aitos/execution/__init__.py aitos/trading/lifecycle.py tests/execution/test_attributed_executor.py tests/statistics/test_advanced_volatility_estimators.py tests/statistics/test_depth_replay.py tests/statistics/test_decision_ledger.py tests/statistics/test_engine_drift_lifecycle.py tests/statistics/test_governance.py tests/statistics/test_governance_runtime.py tests/statistics/test_hsmm_hawkes_dependence_replay.py tests/statistics/test_registry.py tests/statistics/test_selection_diagnostics.py tests/statistics/test_symbol_regime_experiments.py tests/statistics/test_tail_calibration.py tests/statistics/test_synthetic_market_validation.py tests/intelligence/test_candidate_outcome_attribution.py tests/test_binance_executor.py tests/test_trade_lifecycle.py
+          git commit -m "style(quant): format statistical engine and execution regression suite"
+          git push origin "HEAD:${GITHUB_HEAD_REF}"
