@@ -1,4 +1,5 @@
 """Leakage-aware statistical forecast validation utilities."""
+
 from __future__ import annotations
 
 import math
@@ -19,9 +20,7 @@ def brier_score(probabilities: Iterable[float], outcomes: Iterable[int]) -> floa
         raise ValueError("probabilities and outcomes must have equal non-zero length")
     if any(y not in (0, 1) for y in ys):
         raise ValueError("outcomes must be binary")
-    return sum(
-        (_probability(p) - int(y)) ** 2 for p, y in zip(ps, ys)
-    ) / len(ps)
+    return sum((_probability(p) - int(y)) ** 2 for p, y in zip(ps, ys)) / len(ps)
 
 
 def log_loss(
@@ -183,8 +182,7 @@ def probability_of_backtest_overfitting(
 
     slice_width = width // n_slices
     slices = [
-        tuple(range(i * slice_width, (i + 1) * slice_width))
-        for i in range(n_slices)
+        tuple(range(i * slice_width, (i + 1) * slice_width)) for i in range(n_slices)
     ]
     half = n_slices // 2
     if n_slices % 2:
@@ -200,8 +198,7 @@ def probability_of_backtest_overfitting(
         in_scores = [mean(matrix[s][i] for i in in_indices) for s in range(len(matrix))]
         selected = max(range(len(matrix)), key=in_scores.__getitem__)
         out_scores = [
-            mean(matrix[s][i] for i in out_indices)
-            for s in range(len(matrix))
+            mean(matrix[s][i] for i in out_indices) for s in range(len(matrix))
         ]
         selected_score = out_scores[selected]
         rank = sum(score <= selected_score for score in out_scores)
@@ -210,7 +207,6 @@ def probability_of_backtest_overfitting(
             below_median += 1
         total += 1
     return below_median / total if total else 0.0
-
 
 
 def expected_calibration_error(
@@ -232,7 +228,8 @@ def expected_calibration_error(
         bins[index].append((p, int(outcome)))
     total = len(ps)
     return sum(
-        len(bucket) / total
+        len(bucket)
+        / total
         * abs(
             sum(p for p, _ in bucket) / len(bucket)
             - sum(y for _, y in bucket) / len(bucket)
