@@ -85,6 +85,11 @@ class CandidateOutcomeStore:
             "regime": candidate.regime,
             "rationale": list(candidate.rationale),
             "trace_id": getattr(candidate, "trace_id", None),
+            "attribution_id": (
+                f"{candidate.trace_id}:{side}"
+                if getattr(candidate, "trace_id", None)
+                else rejection_id
+            ),
         }
         with self._lock:
             self._conn.execute(
@@ -200,6 +205,7 @@ class CandidateOutcomeStore:
                     "side": row["side"],
                     "reason": row["reason"],
                     "trace_id": features.get("trace_id"),
+                    "attribution_id": features.get("attribution_id") or row["rejection_id"],
                     "horizon_seconds": row["horizon_seconds"],
                     "observed_at": row["observed_at"],
                     "price": row["price"],
