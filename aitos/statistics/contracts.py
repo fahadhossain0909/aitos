@@ -72,6 +72,7 @@ class FeatureSnapshot:
         return {
             "schema_version": self.schema_version,
             "symbol": self.symbol,
+            "side": self.side,
             "horizon": self.horizon,
             "as_of": self.as_of,
             "window_start": self.window_start,
@@ -97,6 +98,7 @@ class ForecastEnvelope:
     downside_probability: float
     tail_probability: float
     expected_shortfall: float | None = None
+    side: str = "BOTH"
 
     def __post_init__(self) -> None:
         if not all(
@@ -109,6 +111,8 @@ class ForecastEnvelope:
             )
         ):
             raise ValueError("forecast identity fields are required")
+        if self.side not in {"LONG", "SHORT", "BOTH"}:
+            raise ValueError("forecast side must be LONG, SHORT or BOTH")
         _utc_datetime(self.as_of, "as_of")
         if self.sample_count < 0:
             raise ValueError("sample_count must be non-negative")
