@@ -48,14 +48,24 @@ class MT5GatewayOrderExecutor(OrderExecutor):
                 body = await response.json(content_type=None)
                 if response.status >= 400:
                     raise MT5GatewayError(f"MT5 gateway {response.status}: {body}")
+                filled_quantity = float(body["filled_quantity"])
+                accepted = bool(body.get("success", True))
+                filled = filled_quantity > 0.0
                 return OrderResult(
                     order_id=str(body["order_id"]),
                     symbol=request.symbol,
                     side=request.side,
-                    filled_quantity=float(body["filled_quantity"]),
+                    filled_quantity=filled_quantity,
                     fill_price=float(body["fill_price"]),
-                    success=bool(body.get("success", True)),
-                    error=body.get("error"),
+                    success=accepted and filled,
+                    error=(
+                        body.get("error")
+                        or (
+                            None
+                            if accepted and filled
+                            else "MT5 gateway returned no confirmed execution fill"
+                        )
+                    ),
                 )
 
     async def account(self) -> dict:
