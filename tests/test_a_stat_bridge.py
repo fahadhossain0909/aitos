@@ -123,7 +123,6 @@ def test_bridge_updates_calibration() -> None:
     assert bridge.engine is not None
 
 
-
 def test_bridge_ingests_new_closed_candles_with_fixed_length_windows() -> None:
     bridge = AStatBridge()
 
