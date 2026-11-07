@@ -7,7 +7,7 @@ import random
 from bisect import bisect_right
 from dataclasses import dataclass
 from statistics import mean
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 
 def _probability(value: float) -> float:
