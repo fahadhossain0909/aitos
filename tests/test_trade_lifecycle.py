@@ -729,9 +729,7 @@ async def test_statistical_forecast_reduces_size_and_is_persisted(
 ):
     lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
     await lifecycle.initialize({})
-    baseline = await lifecycle.submit_opportunity(
-        make_opportunity(), make_portfolio()
-    )
+    baseline = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
     assert baseline.state == TradeLifecycleState.POSITION_OPENED
     await lifecycle.close_trade(
         baseline.trade_id, baseline.entry_price, "statistical_overlay_baseline"
