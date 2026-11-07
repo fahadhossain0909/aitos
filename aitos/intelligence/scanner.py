@@ -1560,9 +1560,7 @@ class OpportunityScanner(AITOSModule):
                     ),
                     "sample_size": int(a_stat_result.sample_size),
                     "predicted_up": float(
-                        a_stat_result.direction.up
-                        if is_long
-                        else a_stat_result.direction.down
+                        a_stat_result.direction.up if is_long else a_stat_result.direction.down
                     ),
                     "downside_probability": float(
                         a_stat_result.downside_probability
