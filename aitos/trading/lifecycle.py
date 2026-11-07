@@ -44,6 +44,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from aitos.config.paths import get_model_data_dir
 from aitos.config.tuning import TuningSettings, load_tuning_settings
 from aitos.core.contracts import (
     AITOSModule,
@@ -73,7 +74,9 @@ from aitos.models.trade import (
 )
 from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResult
 from aitos.risk.risk_engine import RiskEngine
+from aitos.statistics.contracts import FeatureSnapshot, ForecastEnvelope
 from aitos.statistics.risk_overlay import assess_statistical_risk_forecast
+from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.trading.tp_contract import TakeProfitExecutionContract
 
 if TYPE_CHECKING:
@@ -122,6 +125,7 @@ class TradeLifecycle(AITOSModule):
         use_exchange_side_stops: bool = False,
         position_manager: PositionManager | None = None,
         market_context_provider: MarketContextProvider | None = None,
+        statistical_shadow_ledger: StatisticalShadowLedger | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._risk_engine = risk_engine
@@ -135,6 +139,7 @@ class TradeLifecycle(AITOSModule):
         # identical to the pre-Phase-E lifecycle.
         self._position_manager = position_manager
         self._market_context_provider = market_context_provider
+        self._statistical_shadow_ledger = statistical_shadow_ledger
         self._tuning = load_tuning_settings()
         # Fair, per-position cadence: one busy symbol must not consume another
         # position's exit-analysis allowance.
@@ -147,6 +152,91 @@ class TradeLifecycle(AITOSModule):
         self._closed_trades: list[Trade] = []
         self._position_switch_coordinator: Any | None = None
         self._last_event_time: str | None = None
+
+    def _shadow_ledger(self) -> StatisticalShadowLedger:
+        if self._statistical_shadow_ledger is None:
+            self._statistical_shadow_ledger = StatisticalShadowLedger(
+                get_model_data_dir() / "statistical_shadow.sqlite3"
+            )
+        return self._statistical_shadow_ledger
+
+    def _record_statistical_forecast(self, trade: Trade) -> bool:
+        forecast = trade.agent_consensus.get("statistical_forecast")
+        if not isinstance(forecast, Mapping):
+            return False
+        as_of = str(forecast["as_of"])
+        sample_count = int(forecast["sample_size"])
+        feature_values = {
+            str(key): float(value)
+            for key, value in trade.agent_consensus.items()
+            if isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        }
+        feature_values.update(
+            {
+                f"statistical_{key}": float(value)
+                for key, value in forecast.items()
+                if isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+            }
+        )
+        feature_snapshot_id = str(
+            forecast.get("feature_snapshot_id")
+            or f"{trade.symbol}:{forecast['horizon']}:{as_of}"
+        )
+        snapshot = FeatureSnapshot(
+            symbol=trade.symbol,
+            horizon=str(forecast["horizon"]),
+            as_of=as_of,
+            window_start=str(forecast.get("window_start") or as_of),
+            values=feature_values,
+            source_watermarks={"scanner": as_of},
+            sample_count=sample_count,
+        )
+        envelope = ForecastEnvelope(
+            symbol=trade.symbol,
+            horizon=str(forecast["horizon"]),
+            model_id=str(forecast["model_id"]),
+            model_version=str(forecast["model_version"]),
+            as_of=as_of,
+            feature_snapshot_id=feature_snapshot_id,
+            sample_count=sample_count,
+            expected_return=float(forecast["expected_return"]),
+            expected_volatility=float(forecast["forecast_volatility"]),
+            downside_probability=float(forecast["downside_probability"]),
+            tail_probability=float(forecast["tail_probability"]),
+            expected_shortfall=(
+                None
+                if forecast.get("expected_shortfall") is None
+                else float(forecast["expected_shortfall"])
+            ),
+        )
+        return self._shadow_ledger().record_forecast(
+            trade.trade_id,
+            envelope,
+            predicted_up=float(forecast["predicted_up"]),
+            predicted_variance=max(envelope.expected_volatility**2, 1e-12),
+            created_at=trade.entry_time,
+            feature_snapshot=snapshot,
+        )
+
+    def _record_statistical_outcome(self, trade: Trade) -> bool:
+        if not isinstance(trade.agent_consensus.get("statistical_forecast"), Mapping):
+            return False
+        if trade.pnl_percent is None:
+            return False
+        actual_return = float(trade.pnl_percent) / 100.0
+        # A single trade's squared net return is a low-frequency variance
+        # proxy, not high-frequency realised variance. Keep that limitation
+        # explicit in the ledger documentation and validation interpretation.
+        return self._shadow_ledger().record_outcome(
+            trade.trade_id,
+            actual_return=actual_return,
+            realised_variance=actual_return * actual_return,
+            resolved_at=trade.exit_time,
+        )
 
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
         """Apply an explicitly reloaded tuning snapshot to position monitoring."""
@@ -1071,6 +1161,13 @@ class TradeLifecycle(AITOSModule):
         )
         trade.exit_price = exit_price
         trade.exit_time = utc_now_iso()
+        try:
+            await asyncio.to_thread(self._record_statistical_outcome, trade)
+        except Exception:
+            logger.exception(
+                "statistical shadow outcome persistence failed",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
         trade.exit_reason = reason
         trade.state = TradeLifecycleState.POSITION_CLOSED
         trade.updated_at = trade.exit_time
@@ -1579,6 +1676,14 @@ class TradeLifecycle(AITOSModule):
             ),
         )
         self._open_trades[trade.trade_id] = trade
+        if statistical_risk_assessment is not None:
+            try:
+                await asyncio.to_thread(self._record_statistical_forecast, trade)
+            except Exception:
+                logger.exception(
+                    "statistical shadow forecast persistence failed",
+                    extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                )
         if self._position_manager is not None:
             register_entry_thesis = getattr(
                 self._position_manager, "register_entry_thesis", None
