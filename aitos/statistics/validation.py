@@ -351,9 +351,7 @@ def population_stability_index(
     current_values = tuple(float(value) for value in current)
     if not reference_values or not current_values:
         raise ValueError("reference and current samples must be non-empty")
-    if any(
-        not math.isfinite(value) for value in (*reference_values, *current_values)
-    ):
+    if any(not math.isfinite(value) for value in (*reference_values, *current_values)):
         raise ValueError("drift samples must be finite")
     if bins < 2:
         raise ValueError("bins must be at least 2")
