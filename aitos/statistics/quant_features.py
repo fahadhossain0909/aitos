@@ -106,8 +106,13 @@ def distribution_features(returns: Iterable[float]) -> DistributionFeatures:
     )
 
 
-def har_rv_forecast(returns: Iterable[float], *, short_window: int = 5,
-                    medium_window: int = 22, long_window: int = 66) -> VolatilityForecast:
+def har_rv_forecast(
+    returns: Iterable[float],
+    *,
+    short_window: int = 5,
+    medium_window: int = 22,
+    long_window: int = 66,
+) -> VolatilityForecast:
     """HAR-style multi-horizon realized-volatility baseline.
 
     The forecast is a transparent equal-weight blend of available horizon RVs,
@@ -128,7 +133,9 @@ def har_rv_forecast(returns: Iterable[float], *, short_window: int = 5,
     baseline = max(mean(x * x for x in xs), _EPS)
     # Large one-step returns relative to the sample's second moment are a
     # descriptive jump proxy, not a formal bipower-variation jump test.
-    jump_ratio = _clamp(max((x * x for x in xs), default=0.0) / (len(xs) * baseline), 0.0, 1.0)
+    jump_ratio = _clamp(
+        max((x * x for x in xs), default=0.0) / (len(xs) * baseline), 0.0, 1.0
+    )
     return VolatilityForecast(short, medium, long, forecast, downside, jump_ratio)
 
 
@@ -243,7 +250,9 @@ def kalman_beta(y: Iterable[float], x: Iterable[float], *,
     return beta
 
 
-def diagnose(returns: Iterable[float], event_signs: Iterable[int] = ()) -> StatisticalDiagnostics:
+def diagnose(
+    returns: Iterable[float], event_signs: Iterable[int] = ()
+) -> StatisticalDiagnostics:
     """Build a consistent diagnostic snapshot from one chronological window."""
     xs = _clean(returns, minimum=66)
     signs = tuple(event_signs) or tuple(0 for _ in xs)
