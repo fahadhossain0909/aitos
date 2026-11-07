@@ -68,63 +68,93 @@ sizer, portfolio risk gate or paper-trading runtime.
   outcomes.
 - Event-time L1 execution replay with submission latency, displayed-size-limited
   partial fills, bid/ask spread, adverse slippage, taker fees, prorated funding
-  and borrow costs. It deliberately does not model full-depth market impact or
-  queue priority.
-- Opt-in governance runtime that consumes reference/current feature batches,
-  marks NORMAL/WARNING/CRITICAL drift, blocks challenger promotion on drift,
-  and requires explicit approval at the promotion call. It does not autonomously
-  switch production models or disable trading.
+  and borrow costs. The separate L2 replay walks every supplied price level,
+  applies a configurable square-root participation impact curve, and supports
+  passive queue-ahead replay from side-classified trades/cancellations/additions.
+- Cross-adapter attribution decorator for the shared OrderExecutor contract.
+  It records ENTRY/EXIT/MANAGE and EXECUTION_FAILURE outcomes for simulated,
+  Binance, cTrader and MT5 adapters. TradeLifecycle rejects zero-fill positions
+  and reconciles actual partial-fill quantity/notional/risk before opening a
+  position. Binance cancels unfilled market-order remainders; cTrader and MT5
+  resting LIMIT/STOP requests fail closed until status/cancel lifecycle support
+  is available.
+- Opt-in governance runtime with a managed A-Stat async drift worker. It consumes
+  reference/current feature batches, emits NORMAL/WARNING/CRITICAL state,
+  deduplicates alert callbacks, blocks challenger promotion on drift, and
+  requires explicit operator approval. The worker is started/stopped through
+  the A-Stat engine lifecycle; it is not silently started at import time.
+- Multiple-testing-aware promotion evidence: DSR probability, MCS inclusion,
+  White Reality Check, Diebold-Mariano and adjusted p-values are required by
+  the default champion-promotion policy.
 
 ## Estimator limitations
 
-The fitted HAR-RV target is next-observation squared return, not high-frequency
-realized variance. GJR-GARCH uses a deterministic constrained grid search,
-not a full maximum-likelihood optimizer. BOCPD uses a constant hazard and a
-truncated run-length posterior; it is not an HSMM. The HMM is a lightweight
-Gaussian implementation and is not a production-calibrated duration model.
-The downside/upside EVT estimator is a method-of-moments POT baseline and
-requires threshold stability diagnostics. Shadow-ledger realised variance is
-currently a trade-level squared net-return proxy, not high-frequency realised
-variance; QLIKE results must be interpreted accordingly. The event-excitation estimator is not continuous-time
-Hawkes maximum likelihood. The HSMM initializes Gaussian emissions by one-dimensional clustering and
-estimates explicit duration distributions from observed state runs; duration
-stability and state-count selection remain out-of-sample research tasks. DCC
-uses a constrained parameter grid and Gaussian quasi-likelihood; the copula is
-an empirical Gaussian rank transform, not a tail-dependent copula family.
-Portfolio VaR/ES is historical simulation and requires representative joint
-market scenarios. The L1 replay consumes supplied top-of-book snapshots and
-cannot infer hidden liquidity, queue position, or market impact beyond
-displayed size. The Hurst estimate is a coarse screening statistic.
-CPCV/PBO are research diagnostics, not substitutes for chronological
-walk-forward and a realistic deployment simulation.
+The Gaussian HSMM separates training-only `fit()` from causal `filter()` and
+returns the full posterior history for multiclass OOS calibration. Its Gaussian
+emissions are initialized by one-dimensional clustering and its duration laws
+are empirical run-length estimates, not a fully optimized EM posterior; state
+count and duration stability still require broad OOS study. The marked
+continuous-time exponential Hawkes estimator now uses constrained projected
+gradient MLE with a monotone backtracking line search, a profiled/refined decay
+grid and a subcritical branching constraint. The online event filter is exposed
+through A-Stat, but the application event consumer must register a fitted model
+and forward timestamped marked events.
+
+GJR-GARCH uses constrained QML grid initialization plus coordinate refinement;
+EGARCH(1,1) uses constrained Gaussian QML refinement. HAR-RV uses non-negative
+least squares. Its target remains next-observation squared return, not
+high-frequency realized variance. BOCPD uses a constant hazard and truncated
+run-length posterior; it is not an HSMM. The downside/upside EVT estimator is
+a method-of-moments POT baseline and still requires threshold stability
+diagnostics. Shadow-ledger realised variance is a trade-level squared net-return
+proxy, not high-frequency realised variance.
+
+DCC-GARCH still uses a constrained parameter grid; the Student-t copula is a
+rank pseudo-likelihood fit with a finite degrees-of-freedom profile grid and
+pairwise tail-dependence estimates. Portfolio VaR/ES remains historical
+simulation, now accompanied by Kupiec coverage, Christoffersen independence
+and realised-to-forecast ES severity diagnostics. These tests require
+representative joint scenarios and adequate exception counts.
+
+The L2 replay consumes supplied snapshots and cannot infer hidden liquidity.
+Its impact coefficient must be calibrated by venue/symbol/volatility from
+historical fills. Passive queue replay requires side-specific queue-ahead
+cancellation/replenishment attribution; aggregate depth deltas alone are not
+enough. The MCS implementation uses a step-down T-max block bootstrap with
+synchronized cross-model resampling; DM uses a HAC variance and normal
+approximation. PSR/DSR, Reality Check, MCS, DM and Holm/BH are research
+diagnostics, not proof of profitability. The OOS orchestrator supplies
+purged symbol/regime fold isolation and accepts a model-specific fit/predict
+callback; it does not choose or train a strategy on its own.
 
 ## Production acceptance gates
 
 1. **Data contract:** immutable source timestamps, symbol/horizon identity,
    deduplication, event-time ordering, stale-data rejection and feature
    lineage from source to decision.
-2. **Estimator validation:** expanding walk-forward and CPCV/PBO where
-   appropriate; threshold/model stability; calibration curves; regime-wise
-   and symbol-wise metrics; bootstrap confidence intervals.
-3. **Execution realism:** gross-to-net cost sensitivity is implemented, but it
-   is not yet wired to historical fill/market-impact replay. Maker/taker fee
-   schedules, spread, slippage, funding, borrow, partial fills, latency and
-   rejected/cancelled orders still require data-backed end-to-end replay.
+2. **Estimator validation:** run the new seeded synthetic tests, then expanding
+   walk-forward and CPCV/PBO where appropriate; validate threshold/model
+   stability, multiclass and probability calibration, symbol/regime metrics,
+   bootstrap confidence intervals and selection diagnostics.
+3. **Execution realism:** L1/L2 replay primitives now account for latency,
+   partial fills, fees, spread, funding/borrow, participation impact and
+   queue-ahead events. Venue-specific impact/queue coefficients and event
+   classification still require historical execution data and adapter-level
+   replay before paper/live claims.
 4. **Risk integration:** apply any validated statistical multiplier only after
    base sizing and before projected-portfolio hard-limit checks. Preserve
    capital budgets, leverage caps, concentration limits, circuit breakers and
    exchange protection as authoritative.
 5. **Shadow operation:** compare forecasts with realised outcomes without
-   changing orders; the current trade-level squared-return variance proxy is
-   explicitly not a high-frequency realised-variance series. Measure
-   Brier/log-loss/QLIKE, calibration drift, model disagreement, feature
-   freshness, latency and failure rates.
-6. **Governed promotion:** persist model/version/config/data lineage, require
-   minimum effective sample size and confidence intervals, use champion/
-   challenger comparison, support immediate rollback, and require explicit
-   approval before changing production policy. The opt-in governance controller
-   currently accepts reference/current feature batches; it still needs a
-   production scheduler, alert sink, and authenticated operator approval path.
+   changing orders; trade-level squared-return variance remains a proxy, not
+   high-frequency realised variance. Measure Brier/log-loss/QLIKE, multiclass
+   calibration, VaR/ES exceptions, drift, freshness, latency and failures.
+6. **Governed promotion:** persist model/version/config/data lineage; require
+   minimum effective sample size, DSR/MCS/Reality-Check/DM/multiple-testing
+   evidence, OOS improvement bounds, stable drift and explicit operator
+   approval. The drift worker and alert callback are available but require
+   deployment-specific feature-batch providers, alert sinks and authenticated
+   operator identity. No automatic production promotion is enabled.
 
 ## Safety
 
