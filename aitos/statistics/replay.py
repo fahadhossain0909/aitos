@@ -110,7 +110,7 @@ def replay_historical_order(
     if any(
         ordered[i].timestamp_ms >= ordered[i + 1].timestamp_ms
         for i in range(len(ordered) - 1)
-    ): 
+    ):
         raise ValueError("book snapshots must be strictly chronological")
     eligible_at = submitted_at_ms + latency_ms
     remaining = float(quantity)
