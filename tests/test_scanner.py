@@ -426,6 +426,7 @@ async def test_to_opportunity_preserves_statistical_forecast_identity(event_bus)
     forecast = {
         "symbol": "BTCUSDT",
         "horizon": "15m",
+        "side": "LONG",
         "model_id": "aitos-contract-statistical-stack",
         "model_version": "1",
         "as_of": "2026-11-07T10:00:00+00:00",
