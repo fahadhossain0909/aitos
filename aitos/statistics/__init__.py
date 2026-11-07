@@ -131,6 +131,8 @@ from .tail_calibration import (
 )
 from .validation import (
     CohortValidationMetric,
+    MulticlassCalibrationReport,
+    multiclass_calibration_report,
     ExecutionCostScenario,
     ExecutionCostSensitivity,
     regime_symbol_validation,
@@ -197,6 +199,8 @@ __all__ = [
     "ReplayFill",
     "replay_historical_order",
     "CohortValidationMetric",
+    "MulticlassCalibrationReport",
+    "multiclass_calibration_report",
     "regime_symbol_validation",
     "GJRGARCH11",
     "GJRGARCHForecast",
