@@ -5,6 +5,14 @@ probabilities, regimes, volatility, tail risk and strategy context without
 owning execution decisions.
 """
 
+from .advanced_models import (
+    BOCPDResult,
+    GJRGARCH11,
+    GJRGARCHForecast,
+    HARForecast,
+    bocpd_change_point,
+    fit_har_rv_forecast,
+)
 from .engine import AStatEngine
 from .evt import POTGPD
 from .garch import GARCH11
