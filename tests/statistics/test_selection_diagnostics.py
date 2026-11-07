@@ -58,7 +58,6 @@ def test_multiple_testing_holm_and_bh_are_monotone_and_validated():
         correct_multiple_testing({"bad": 1.2})
 
 
-
 def test_diebold_mariano_handles_identical_deterministic_losses():
     result = diebold_mariano_test([1.0] * 100, [1.0] * 100)
     assert result.statistic == 0.0
