@@ -8,6 +8,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Mapping
 
 from .contracts import FeatureSnapshot, ForecastEnvelope
 from .validation import brier_score, log_loss, qlike_loss
@@ -21,6 +22,26 @@ class ShadowMetrics:
     qlike: float
     directional_hit_rate: float
     mean_absolute_return_error: float
+
+
+@dataclass(frozen=True)
+class ShadowForecastRecord:
+    forecast_id: str
+    symbol: str
+    side: str
+    horizon: str
+    model_id: str
+    model_version: str
+    as_of: str
+    feature_snapshot_id: str
+    predicted_up: float
+    predicted_variance: float
+    expected_return: float
+    actual_return: float | None
+    realised_variance: float | None
+    created_at: str
+    resolved_at: str | None
+    feature_snapshot: Mapping[str, Any] | None
 
 
 class StatisticalShadowLedger:
@@ -239,6 +260,87 @@ class StatisticalShadowLedger:
             if connection.in_transaction:
                 connection.execute("ROLLBACK")
             raise
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _forecast_record(row: sqlite3.Row) -> ShadowForecastRecord:
+        snapshot = (
+            None
+            if row["feature_snapshot_json"] is None
+            else json.loads(row["feature_snapshot_json"])
+        )
+        return ShadowForecastRecord(
+            forecast_id=row["forecast_id"],
+            symbol=row["symbol"],
+            side=row["side"],
+            horizon=row["horizon"],
+            model_id=row["model_id"],
+            model_version=row["model_version"],
+            as_of=row["as_of"],
+            feature_snapshot_id=row["feature_snapshot_id"],
+            predicted_up=row["predicted_up"],
+            predicted_variance=row["predicted_variance"],
+            expected_return=row["expected_return"],
+            actual_return=row["actual_return"],
+            realised_variance=row["realised_variance"],
+            created_at=row["created_at"],
+            resolved_at=row["resolved_at"],
+            feature_snapshot=snapshot,
+        )
+
+    def get_forecast(self, forecast_id: str) -> ShadowForecastRecord | None:
+        connection = self._connect()
+        try:
+            row = connection.execute(
+                """
+                SELECT * FROM statistical_shadow_forecasts
+                WHERE forecast_id=?
+                """,
+                (forecast_id,),
+            ).fetchone()
+            return None if row is None else self._forecast_record(row)
+        finally:
+            connection.close()
+
+    def unresolved_forecasts(
+        self,
+        *,
+        limit: int = 1000,
+        symbol: str | None = None,
+        horizon: str | None = None,
+        model_id: str | None = None,
+        side: str | None = None,
+    ) -> tuple[ShadowForecastRecord, ...]:
+        """Return pending forecasts for restart reconciliation workers."""
+        if limit <= 0 or limit > 10000:
+            raise ValueError("limit must be in [1, 10000]")
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT * FROM statistical_shadow_forecasts
+                WHERE actual_return IS NULL
+                  AND (? IS NULL OR symbol=?)
+                  AND (? IS NULL OR horizon=?)
+                  AND (? IS NULL OR model_id=?)
+                  AND (? IS NULL OR side=?)
+                ORDER BY created_at ASC
+                LIMIT ?
+                """,
+                (
+                    symbol,
+                    symbol,
+                    horizon,
+                    horizon,
+                    model_id,
+                    model_id,
+                    side,
+                    side,
+                    limit,
+                ),
+            ).fetchall()
+            return tuple(self._forecast_record(row) for row in rows)
         finally:
             connection.close()
 
