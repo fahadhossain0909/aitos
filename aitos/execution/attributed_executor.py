@@ -1,4 +1,5 @@
 """Cross-venue order execution attribution decorator."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

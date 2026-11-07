@@ -565,7 +565,6 @@ def regime_symbol_validation(
     return tuple(reports)
 
 
-
 @dataclass(frozen=True)
 class MulticlassCalibrationReport:
     observations: int
@@ -623,9 +622,5 @@ def multiclass_calibration_report(
         if indices:
             average_confidence = mean(confidence[index] for index in indices)
             average_accuracy = mean(correct[index] for index in indices)
-            ece += len(indices) / len(rows) * abs(
-                average_confidence - average_accuracy
-            )
-    return MulticlassCalibrationReport(
-        len(rows), classes, brier, logloss, ece
-    )
+            ece += len(indices) / len(rows) * abs(average_confidence - average_accuracy)
+    return MulticlassCalibrationReport(len(rows), classes, brier, logloss, ece)

@@ -1,11 +1,16 @@
 """Chronological symbol/regime OOS experiment orchestration."""
+
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass
 from typing import Callable, Iterable, Sequence
 
-from .validation import CohortValidationMetric, purged_walk_forward_folds, regime_symbol_validation
+from .validation import (
+    CohortValidationMetric,
+    purged_walk_forward_folds,
+    regime_symbol_validation,
+)
 
 
 @dataclass(frozen=True)
@@ -99,14 +104,11 @@ def run_symbol_regime_walk_forward(
     for (symbol, regime), cohort in sorted(cohorts.items()):
         cohort.sort(key=lambda row: row.timestamp)
         if any(
-            left.timestamp >= right.timestamp
-            for left, right in zip(cohort, cohort[1:])
+            left.timestamp >= right.timestamp for left, right in zip(cohort, cohort[1:])
         ):
             raise ValueError(f"duplicate or unordered timestamps in {symbol}/{regime}")
         if len(cohort) < minimum_cohort_observations:
-            summaries.append(
-                ExperimentCohortSummary(symbol, regime, len(cohort), 0, 0)
-            )
+            summaries.append(ExperimentCohortSummary(symbol, regime, len(cohort), 0, 0))
             continue
         folds = purged_walk_forward_folds(
             len(cohort),
@@ -133,13 +135,16 @@ def run_symbol_regime_walk_forward(
                 skipped_folds += 1
                 continue
             probabilities = tuple(
-                float(value) for value in predictor(train_rows, test_rows, symbol, regime)
+                float(value)
+                for value in predictor(train_rows, test_rows, symbol, regime)
             )
             if len(probabilities) != len(test_rows) or any(
                 not math.isfinite(value) or not 0.0 <= value <= 1.0
                 for value in probabilities
             ):
-                raise ValueError("predictor must return aligned probabilities in [0, 1]")
+                raise ValueError(
+                    "predictor must return aligned probabilities in [0, 1]"
+                )
             predictions.extend(
                 OOSPrediction(
                     timestamp=row.timestamp,
@@ -165,7 +170,9 @@ def run_symbol_regime_walk_forward(
         minimum_observations=minimum_cohort_observations,
     )
     return SymbolRegimeExperimentResult(
-        tuple(sorted(predictions, key=lambda row: (row.timestamp, row.symbol, row.regime))),
+        tuple(
+            sorted(predictions, key=lambda row: (row.timestamp, row.symbol, row.regime))
+        ),
         tuple(summaries),
         metrics,
         total_folds,

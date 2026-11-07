@@ -241,9 +241,7 @@ def model_confidence_set(
         observed = 0.0
         for left_index, left in enumerate(active):
             for right in active[left_index + 1 :]:
-                differences = [
-                    a - b for a, b in zip(matrix[left], matrix[right])
-                ]
+                differences = [a - b for a, b in zip(matrix[left], matrix[right])]
                 difference_mean = mean(differences)
                 variance = sum(
                     (value - difference_mean) ** 2 for value in differences

@@ -36,7 +36,6 @@ async def test_a_stat_engine_starts_and_stops_managed_drift_monitor(tmp_path):
     await engine.stop_drift_monitor()
 
 
-
 def test_a_stat_engine_routes_live_marked_events_to_registered_hawkes_filter():
     engine = AStatEngine()
     fit = fit_marked_hawkes_mle(

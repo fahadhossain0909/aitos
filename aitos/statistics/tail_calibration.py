@@ -1,4 +1,5 @@
 """Student-t copula fitting and portfolio VaR/ES backtesting diagnostics."""
+
 from __future__ import annotations
 
 import math
@@ -30,11 +31,7 @@ def fit_student_t_copula(
         raise RuntimeError("Student-t copula fitting requires scipy and numpy") from exc
 
     symbols = tuple(sorted(returns))
-    if (
-        len(symbols) < 2
-        or not degrees_of_freedom_grid
-        or not 0.0 <= shrinkage < 1.0
-    ):
+    if len(symbols) < 2 or not degrees_of_freedom_grid or not 0.0 <= shrinkage < 1.0:
         raise ValueError("copula requires >=2 assets and shrinkage in [0, 1)")
     matrix = [np.asarray(returns[symbol], dtype=float) for symbol in symbols]
     n = len(matrix[0])
@@ -44,7 +41,10 @@ def fit_student_t_copula(
         raise ValueError("copula returns must be finite")
     if any(float(np.std(row)) <= 1e-12 for row in matrix):
         raise ValueError("copula returns must have non-zero variance")
-    if any(not math.isfinite(float(df)) or float(df) <= 2.0 for df in degrees_of_freedom_grid):
+    if any(
+        not math.isfinite(float(df)) or float(df) <= 2.0
+        for df in degrees_of_freedom_grid
+    ):
         raise ValueError("degrees of freedom candidates must be finite and >2")
 
     uniforms = np.column_stack(
@@ -105,7 +105,9 @@ class VaRESBacktest:
     expected_shortfall_ratio: float | None
 
 
-def _bernoulli_log_likelihood(successes: int, failures: int, probability: float) -> float:
+def _bernoulli_log_likelihood(
+    successes: int, failures: int, probability: float
+) -> float:
     value = 0.0
     if successes:
         if probability <= 0.0:
@@ -144,7 +146,9 @@ def backtest_var_es(
         expected < threshold for expected, threshold in zip(es, var)
     ):
         raise ValueError("loss forecasts require ES >= VaR >= 0")
-    exceptions = tuple(int(-value > threshold) for value, threshold in zip(returns, var))
+    exceptions = tuple(
+        int(-value > threshold) for value, threshold in zip(returns, var)
+    )
     n = len(exceptions)
     count = sum(exceptions)
     tail_probability = 1.0 - confidence
@@ -180,10 +184,16 @@ def backtest_var_es(
     tail_losses = [-returns[i] for i, hit in enumerate(exceptions) if hit]
     tail_forecasts = [es[i] for i, hit in enumerate(exceptions) if hit]
     realized_tail = sum(tail_losses) / len(tail_losses) if tail_losses else None
-    forecast_tail = sum(tail_forecasts) / len(tail_forecasts) if tail_forecasts else None
+    forecast_tail = (
+        sum(tail_forecasts) / len(tail_forecasts) if tail_forecasts else None
+    )
     if tail_forecasts and forecast_tail <= 0.0:
         raise ValueError("ES forecasts must be positive when VaR exceptions occur")
-    ratio = realized_tail / forecast_tail if realized_tail is not None and forecast_tail else None
+    ratio = (
+        realized_tail / forecast_tail
+        if realized_tail is not None and forecast_tail
+        else None
+    )
     return VaRESBacktest(
         n,
         count,

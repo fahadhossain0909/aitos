@@ -41,12 +41,15 @@ async def test_attributed_executor_records_successful_entry_and_final_outcome(tm
     assert len(rows) == 1
     assert rows[0]["decision_type"] == "ENTRY"
     assert rows[0]["payload"]["venue_order_id"] == result.order_id
-    assert ledger.resolve_entity(
-        "scan-trace-42",
-        outcome_value=0.012,
-        outcome_at="2026-11-07T12:00:00+00:00",
-        outcome={"net_pnl_usd": 1.2},
-    ) == 1
+    assert (
+        ledger.resolve_entity(
+            "scan-trace-42",
+            outcome_value=0.012,
+            outcome_at="2026-11-07T12:00:00+00:00",
+            outcome={"net_pnl_usd": 1.2},
+        )
+        == 1
+    )
 
 
 class _RejectingExecutor(OrderExecutor):

@@ -160,13 +160,11 @@ def test_hawkes_online_filter_is_causal_and_requires_monotonic_events():
         online.observe(101.0, 1)
 
 
-
 def test_hsmm_causal_oos_posterior_history_supports_multiclass_calibration():
     training = []
     for state, center in enumerate((-0.01, 0.0, 0.01)):
         training.extend(
-            center + 0.0002 * math.sin(index * 0.31)
-            for index in range(100)
+            center + 0.0002 * math.sin(index * 0.31) for index in range(100)
         )
     holdout = []
     labels = []

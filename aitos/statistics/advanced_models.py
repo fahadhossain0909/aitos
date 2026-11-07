@@ -114,11 +114,7 @@ def fit_har_rv_forecast(
                 row[index]
                 * (
                     target
-                    - sum(
-                        coefficients[j] * row[j]
-                        for j in range(4)
-                        if j != index
-                    )
+                    - sum(coefficients[j] * row[j] for j in range(4) if j != index)
                 )
                 for row, target in zip(rows, targets)
             )
@@ -265,12 +261,7 @@ class GJRGARCH11:
 
         def evaluate(alpha: float, gamma: float, beta: float):
             persistence = alpha + beta + 0.5 * gamma
-            if (
-                alpha < 0.0
-                or gamma < 0.0
-                or beta < 0.0
-                or persistence >= 0.995
-            ):
+            if alpha < 0.0 or gamma < 0.0 or beta < 0.0 or persistence >= 0.995:
                 return float("inf"), sample_var, persistence
             omega = sample_var * (1.0 - persistence)
             variance = sample_var
