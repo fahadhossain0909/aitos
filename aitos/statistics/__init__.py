@@ -14,6 +14,7 @@ from .advanced_models import (
     fit_har_rv_forecast,
 )
 from .contracts import FeatureSnapshot, ForecastEnvelope
+from .decision_ledger import DecisionOutcomeLedger
 from .dependence import DCCForecast, DCCGARCH, PortfolioTailRisk, aggregate_portfolio_tail_risk
 from .duration import GaussianHSMM, HSMMResult
 from .hawkes import HawkesMLEFit, fit_marked_hawkes_mle
@@ -100,6 +101,7 @@ from .validation import (
 
 __all__ = [
     "BOCPDResult",
+    "DecisionOutcomeLedger",
     "DriftAction",
     "StatisticalGovernanceRuntime",
     "DCCForecast",
