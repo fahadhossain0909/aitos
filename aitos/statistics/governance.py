@@ -28,8 +28,8 @@ class PromotionPolicy:
         )
         if any(not math.isfinite(value) or value < 0 for value in limits):
             raise ValueError("promotion limits must be finite and non-negative")
-        if self.max_pbo > 1.0:
-            raise ValueError("max_pbo must be in [0, 1]")
+        if self.max_pbo > 1.0 or self.max_brier > 1.0:
+            raise ValueError("max_pbo and max_brier must be in [0, 1]")
 
 
 @dataclass(frozen=True)
@@ -81,6 +81,8 @@ def evaluate_promotion(
         raise ValueError("promotion evidence must contain finite metrics")
     if not 0.0 <= evidence.pbo <= 1.0:
         raise ValueError("pbo must be in [0, 1]")
+    if not 0.0 <= evidence.brier <= 1.0:
+        raise ValueError("brier must be in [0, 1]")
     if min(
         evidence.brier,
         evidence.qlike,
