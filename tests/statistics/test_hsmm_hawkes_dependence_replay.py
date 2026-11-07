@@ -114,3 +114,23 @@ def test_l1_replay_preserves_unfilled_quantity_when_book_liquidity_is_missing():
     assert result.filled_quantity == pytest.approx(0.25)
     assert result.remaining_quantity == pytest.approx(0.75)
     assert not result.complete
+
+
+
+def test_hsmm_fit_filter_separation_does_not_refit_on_oos_observations():
+    training = []
+    for block in range(20):
+        center = (0.001, -0.001, 0.002)[block % 3]
+        training.extend(center + 0.0001 * math.sin(i * 0.7) for i in range(12))
+    estimator = GaussianHSMM(states=3, max_duration=32)
+    fitted = estimator.fit(training)
+    holdout_a = [0.001 + 0.0002 * math.sin(i) for i in range(50)]
+    holdout_b = [-0.004 + 0.0001 * math.cos(i) for i in range(50)]
+    result_a = estimator.filter(holdout_a, fitted)
+    result_b = estimator.filter(holdout_b, fitted)
+    assert fitted.training_observations == len(training)
+    assert result_a.state_means == result_b.state_means == fitted.state_means
+    assert result_a.state_sigmas == result_b.state_sigmas == fitted.state_sigmas
+    assert sum(result_a.probabilities) == pytest.approx(1.0)
+    assert sum(result_b.probabilities) == pytest.approx(1.0)
+    assert result_a.probabilities != result_b.probabilities
