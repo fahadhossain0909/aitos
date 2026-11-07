@@ -1162,13 +1162,6 @@ class TradeLifecycle(AITOSModule):
         )
         trade.exit_price = exit_price
         trade.exit_time = utc_now_iso()
-        try:
-            await asyncio.to_thread(self._record_statistical_outcome, trade)
-        except Exception:
-            logger.exception(
-                "statistical shadow outcome persistence failed",
-                extra={"aitos_extra": {"trade_id": trade.trade_id}},
-            )
         trade.exit_reason = reason
         trade.state = TradeLifecycleState.POSITION_CLOSED
         trade.updated_at = trade.exit_time
@@ -1241,6 +1234,13 @@ class TradeLifecycle(AITOSModule):
                 source_module=self.module_id,
             )
         )
+        try:
+            await asyncio.to_thread(self._record_statistical_outcome, trade)
+        except Exception:
+            logger.exception(
+                "statistical shadow outcome persistence failed",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
         self._last_event_time = trade.updated_at
         return trade
 
@@ -1677,14 +1677,6 @@ class TradeLifecycle(AITOSModule):
             ),
         )
         self._open_trades[trade.trade_id] = trade
-        if statistical_risk_assessment is not None:
-            try:
-                await asyncio.to_thread(self._record_statistical_forecast, trade)
-            except Exception:
-                logger.exception(
-                    "statistical shadow forecast persistence failed",
-                    extra={"aitos_extra": {"trade_id": trade.trade_id}},
-                )
         if self._position_manager is not None:
             register_entry_thesis = getattr(
                 self._position_manager, "register_entry_thesis", None
@@ -1732,6 +1724,14 @@ class TradeLifecycle(AITOSModule):
         self._last_event_time = trade.entry_time
         if self._use_exchange_side_stops:
             await self._place_exchange_side_stops(trade)
+        if statistical_risk_assessment is not None:
+            try:
+                await asyncio.to_thread(self._record_statistical_forecast, trade)
+            except Exception:
+                logger.exception(
+                    "statistical shadow forecast persistence failed",
+                    extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                )
         return trade
 
     async def _reject(self, opportunity: Opportunity, reason: str) -> Trade:
