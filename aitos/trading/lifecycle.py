@@ -1426,9 +1426,7 @@ class TradeLifecycle(AITOSModule):
                 )
 
         statistical_risk_assessment = None
-        statistical_forecast = opportunity.agent_consensus.get(
-            "statistical_forecast"
-        )
+        statistical_forecast = opportunity.agent_consensus.get("statistical_forecast")
         if statistical_forecast is not None:
             try:
                 statistical_risk_assessment = assess_statistical_risk_forecast(
