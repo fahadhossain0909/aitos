@@ -95,8 +95,7 @@ class SystemComponents:
             or current.hardware != updated.hardware
             or current.storage != updated.storage
             or current.telemetry != updated.telemetry
-            or current.positions.max_open_positions
-            != updated.positions.max_open_positions
+            or current.positions != updated.positions
         )
         if restart_required:
             raise ValueError(
@@ -250,7 +249,23 @@ async def build_system(
     attention_feedback = AttentionFeedbackLoop(
         event_bus=event_bus, explainer=attention_explainer
     )
-    position_manager = PositionManager() if enable_exit_intelligence else None
+    position_manager = (
+        PositionManager(
+            config={
+                "adaptive_exit_policy": {
+                    "stagnation_bars": tuning.positions.dead_candle_exit_bars,
+                    "stagnation_min_progress_r": (
+                        tuning.positions.dead_candle_max_progress_r
+                    ),
+                    "stagnation_entry_band_pct": (
+                        tuning.positions.dead_candle_entry_band_pct
+                    ),
+                }
+            }
+        )
+        if enable_exit_intelligence
+        else None
+    )
     if position_manager is not None:
         logger.info("Exit Intelligence (PositionManager) enabled for TradeLifecycle")
     trade_lifecycle = TradeLifecycle(
