@@ -1,12 +1,12 @@
 from datetime import datetime, timezone
 
-from aitos.intelligence.scanner import entry_liquidity_depth_rejection
 from aitos.intelligence.liquidity import (
     adverse_flow_without_progress,
     liquidity_intelligence_score,
     liquidity_quality_score,
     order_book_flow_imbalance,
 )
+from aitos.intelligence.scanner import entry_liquidity_depth_rejection
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 from aitos.models.trade import TradeSide as PositionSide
 

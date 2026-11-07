@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from math import isfinite
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Any
 
 from aitos.config.paths import get_model_data_dir
