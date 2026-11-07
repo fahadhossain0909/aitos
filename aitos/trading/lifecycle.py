@@ -94,6 +94,7 @@ TOPIC_ENTRY_SIGNAL = "decision.entry"
 TOPIC_REJECTED = "trade.rejected"
 TOPIC_ORDER_SUBMITTED = "trade.order_submitted"
 TOPIC_ORDER_FILLED = "trade.order_filled"
+TOPIC_EXECUTION_RECONCILIATION_REQUIRED = "trade.execution_reconciliation_required"
 TOPIC_POSITION_OPENED = "trade.position_opened"
 TOPIC_POSITION_UPDATED = "trade.position_updated"
 TOPIC_COST_ADJUSTMENT = "trade.cost_adjustment"
@@ -1849,6 +1850,35 @@ class TradeLifecycle(AITOSModule):
             },
             decision_at=trade.entry_time,
         )
+        if order_result.error:
+            await self._record_decision(
+                f"{trade.trade_id}:EXECUTION_FAILURE",
+                entity_id=self._trade_attribution_id(trade),
+                symbol=trade.symbol,
+                side=trade.side.value,
+                decision_type="EXECUTION_FAILURE",
+                accepted=False,
+                reason="partial_fill_or_order_state_requires_reconciliation",
+                payload={
+                    "order_id": order_result.order_id,
+                    "filled_quantity": order_result.filled_quantity,
+                    "fill_price": order_result.fill_price,
+                    "execution_error": order_result.error,
+                },
+            )
+            await self._event_bus.publish(
+                Event(
+                    topic=TOPIC_EXECUTION_RECONCILIATION_REQUIRED,
+                    payload={
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "order_id": order_result.order_id,
+                        "filled_quantity": order_result.filled_quantity,
+                        "error": order_result.error,
+                    },
+                    source_module=self.module_id,
+                )
+            )
         if self._position_manager is not None:
             register_entry_thesis = getattr(
                 self._position_manager, "register_entry_thesis", None
