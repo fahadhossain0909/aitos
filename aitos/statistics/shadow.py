@@ -252,30 +252,28 @@ class StatisticalShadowLedger:
         side: str | None = None,
     ) -> ShadowMetrics:
         """Return strictly outcome-resolved shadow metrics for a cohort."""
-        clauses = [
-            "actual_return IS NOT NULL",
-            "realised_variance IS NOT NULL",
-        ]
-        parameters: list[str] = []
-        if symbol is not None:
-            clauses.append("symbol=?")
-            parameters.append(symbol)
-        if horizon is not None:
-            clauses.append("horizon=?")
-            parameters.append(horizon)
-        if model_id is not None:
-            clauses.append("model_id=?")
-            parameters.append(model_id)
-        if model_version is not None:
-            clauses.append("model_version=?")
-            parameters.append(model_version)
-        if side is not None:
-            clauses.append("side=?")
-            parameters.append(side)
         query = (
             "SELECT predicted_up, predicted_variance, expected_return, "
             "actual_return, realised_variance FROM statistical_shadow_forecasts "
-            "WHERE " + " AND ".join(clauses)
+            "WHERE actual_return IS NOT NULL "
+            "AND realised_variance IS NOT NULL "
+            "AND (? IS NULL OR symbol=?) "
+            "AND (? IS NULL OR horizon=?) "
+            "AND (? IS NULL OR model_id=?) "
+            "AND (? IS NULL OR model_version=?) "
+            "AND (? IS NULL OR side=?)"
+        )
+        parameters = (
+            symbol,
+            symbol,
+            horizon,
+            horizon,
+            model_id,
+            model_id,
+            model_version,
+            model_version,
+            side,
+            side,
         )
         connection = self._connect()
         try:
