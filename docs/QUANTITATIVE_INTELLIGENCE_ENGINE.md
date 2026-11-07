@@ -56,7 +56,9 @@ sizer, portfolio risk gate or paper-trading runtime.
   one-champion-per-model enforcement, persisted decision/evidence audit events,
   evidence-gated promotion and explicit operator-approved rollback; no artifact
   is loaded or promoted automatically.
-- Paired block-bootstrap OOS confidence intervals and PSI feature-drift reports.
+- Paired block-bootstrap OOS confidence intervals, PSI feature-drift reports,
+  and gross-to-net execution-cost sensitivity across fee, spread, slippage,
+  funding, borrow and stressed-cost assumptions.
 
 ## Estimator limitations
 
