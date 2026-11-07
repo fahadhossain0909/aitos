@@ -415,7 +415,6 @@ async def test_scanner_blocks_ltf_long_when_htf_is_bearish(event_bus):
     await scanner.shutdown()
 
 
-
 @pytest.mark.asyncio
 async def test_to_opportunity_preserves_statistical_forecast_identity(event_bus):
     scanner = OpportunityScanner(
