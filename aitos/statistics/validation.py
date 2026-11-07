@@ -563,3 +563,69 @@ def regime_symbol_validation(
                 )
             )
     return tuple(reports)
+
+
+
+@dataclass(frozen=True)
+class MulticlassCalibrationReport:
+    observations: int
+    classes: int
+    brier_score: float
+    log_loss: float
+    expected_calibration_error: float
+
+
+def multiclass_calibration_report(
+    probabilities: Sequence[Sequence[float]],
+    outcomes: Sequence[int],
+    *,
+    bins: int = 10,
+) -> MulticlassCalibrationReport:
+    """Evaluate causal OOS multiclass posterior calibration."""
+    rows = tuple(tuple(float(value) for value in row) for row in probabilities)
+    labels = tuple(int(value) for value in outcomes)
+    if not rows or len(rows) != len(labels) or bins < 2:
+        raise ValueError("probabilities/outcomes must align and bins must be >=2")
+    classes = len(rows[0])
+    if classes < 2 or any(len(row) != classes for row in rows):
+        raise ValueError("posterior rows must have a consistent class count >=2")
+    if any(
+        not math.isfinite(value) or not 0.0 <= value <= 1.0
+        for row in rows
+        for value in row
+    ):
+        raise ValueError("posterior probabilities must be finite and in [0,1]")
+    if any(abs(sum(row) - 1.0) > 1e-6 for row in rows):
+        raise ValueError("each posterior row must sum to one")
+    if any(label < 0 or label >= classes for label in labels):
+        raise ValueError("outcome class is outside posterior dimensions")
+    brier = sum(
+        sum((value - float(index == label)) ** 2 for index, value in enumerate(row))
+        for row, label in zip(rows, labels)
+    ) / len(rows)
+    logloss = -sum(
+        math.log(max(1e-15, row[label])) for row, label in zip(rows, labels)
+    ) / len(rows)
+    confidence = [max(row) for row in rows]
+    correct = [
+        int(max(range(classes), key=row.__getitem__) == label)
+        for row, label in zip(rows, labels)
+    ]
+    ece = 0.0
+    for bin_index in range(bins):
+        lower = bin_index / bins
+        upper = (bin_index + 1) / bins
+        indices = [
+            index
+            for index, value in enumerate(confidence)
+            if lower <= value < upper or (bin_index == bins - 1 and value == 1.0)
+        ]
+        if indices:
+            average_confidence = mean(confidence[index] for index in indices)
+            average_accuracy = mean(correct[index] for index in indices)
+            ece += len(indices) / len(rows) * abs(
+                average_confidence - average_accuracy
+            )
+    return MulticlassCalibrationReport(
+        len(rows), classes, brier, logloss, ece
+    )
