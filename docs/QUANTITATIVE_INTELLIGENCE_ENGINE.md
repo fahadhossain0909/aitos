@@ -18,7 +18,7 @@ degrade to the existing conservative policy, never to a permissive default.
 | 3 — Tail, dependence and portfolio risk | EVT severity, asymmetric volatility, cross-asset dependence, risk sizing and drawdown controls | Partial: downside and upside POT-GPD tails, GARCH/GJR-GARCH and a side-matched freshness-gated reduce-only scanner-to-lifecycle overlay; DCC-GARCH/copulas, portfolio ES aggregation and replay calibration remain |
 | 4 — Research validation | Purged walk-forward, CPCV, PBO, calibration, regime splits and execution-cost sensitivity | Partial: walk-forward, CPCV, Brier, log-loss, QLIKE and PBO diagnostics; full experiment ledger, bootstrap confidence intervals and end-to-end fee/funding/slippage replay remain |
 | 5 — Strategy and risk integration | Strategy-family suitability, model disagreement, risk gate integration and decision attribution | Partial: A-Stat ranking is diagnostic only; fresh matched statistical forecasts reduce base size before final hard-limit checks; strategy execution remains in the existing StrategyEngine/Risk Engine |
-| 6 — Shadow deployment and governance | Shadow inference, drift monitoring, model registry, champion/challenger, rollback and controlled promotion | Partial: SQLite shadow forecasts and FeatureSnapshots are persisted at trade entry and resolved against net trade outcomes at close; no production shadow rollout, durable model registry, automated drift gates or champion/challenger workflow is claimed |
+| 6 — Shadow deployment and governance | Shadow inference, drift monitoring, model registry, champion/challenger, rollback and controlled promotion | Partial: SQLite shadow forecasts and FeatureSnapshots are persisted at trade entry and resolved against net trade outcomes at close; durable artifact registry and explicit champion/rollback APIs are implemented, but live drift orchestration and automatic promotion are not enabled |
 
 This status table is intentionally conservative. A module existing in the
 repository is not evidence that it is connected to the live scanner, position
@@ -49,6 +49,10 @@ sizer, portfolio risk gate or paper-trading runtime.
   retained in the opened trade's decision metadata.
 - Trade-entry/close shadow ledger wiring with idempotent forecast IDs, persisted
   FeatureSnapshot payloads, resolved-only calibration metrics and SQLite WAL.
+- Durable model-artifact registry with immutable SHA-256/config-hash registration,
+  one-champion-per-model enforcement, evidence-gated promotion and explicit
+  operator-approved rollback; no artifact is loaded or promoted automatically.
+- Paired block-bootstrap OOS confidence intervals and PSI feature-drift reports.
 
 ## Estimator limitations
 
