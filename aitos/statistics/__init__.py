@@ -22,7 +22,7 @@ from .dependence import (
     aggregate_portfolio_tail_risk,
 )
 from .duration import GaussianHSMM, HSMMParameters, HSMMResult
-from .hawkes import HawkesMLEFit, fit_marked_hawkes_mle
+from .hawkes import (\n    HawkesIntensitySnapshot,\n    HawkesMLEFit,\n    MarkedHawkesOnlineFilter,\n    fit_marked_hawkes_mle,\n)
 from .selection import (\n    AdjustedPValues,\n    BootstrapTest,\n    ComparisonTest,\n    ModelConfidenceSet,\n    SharpeSignificance,\n    correct_multiple_testing,\n    deflated_sharpe_ratio,\n    diebold_mariano_test,\n    model_confidence_set,\n    probabilistic_sharpe_ratio,\n    white_reality_check,\n)\nfrom .replay import (
     BookSnapshot,
     ExecutionReplayResult,
@@ -115,7 +115,7 @@ __all__ = [
     "aggregate_portfolio_tail_risk",
     "GaussianHSMM",\n    "HSMMParameters",
     "HSMMResult",
-    "HawkesMLEFit",
+    "HawkesIntensitySnapshot",\n    "HawkesMLEFit",\n    "MarkedHawkesOnlineFilter",
     "fit_marked_hawkes_mle",
     "AdjustedPValues",\n    "BootstrapTest",\n    "ComparisonTest",\n    "ModelConfidenceSet",\n    "SharpeSignificance",\n    "correct_multiple_testing",\n    "deflated_sharpe_ratio",\n    "diebold_mariano_test",\n    "model_confidence_set",\n    "probabilistic_sharpe_ratio",\n    "white_reality_check",\n    "BookSnapshot",
     "ExecutionReplayResult",
