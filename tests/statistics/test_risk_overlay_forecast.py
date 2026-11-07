@@ -14,6 +14,9 @@ def forecast_payload(**overrides):
         "model_version": "1",
         "as_of": "2026-11-07T05:00:00+00:00",
         "sample_size": 256,
+        "predicted_up": 0.7,
+        "downside_probability": 0.2,
+        "expected_return": 0.01,
         "forecast_volatility": 0.04,
         "reference_volatility": 0.02,
         "tail_probability": 0.2,
@@ -67,6 +70,11 @@ def test_forecast_assessment_requires_matching_identity_and_freshness():
             {"forecast_volatility": float("nan")},
             datetime(2026, 11, 7, 5, 0, 10, tzinfo=timezone.utc),
             "finite",
+        ),
+        (
+            {"predicted_up": 1.2},
+            datetime(2026, 11, 7, 5, 0, 10, tzinfo=timezone.utc),
+            "predicted_up must be in",
         ),
     ],
 )
