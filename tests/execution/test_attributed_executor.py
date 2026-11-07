@@ -231,3 +231,34 @@ async def test_attributed_executor_exposes_venue_result_when_ledger_persistence_
     assert error.value.may_have_executed
     assert error.value.order_result.success
     assert error.value.order_result.order_id.startswith("sim-")
+
+
+
+class _ManagedSimulatedExecutor(SimulatedOrderExecutor):
+    @property
+    def supports_exchange_side_stops(self):
+        return True
+
+    async def cancel_resting_order(self, symbol, order_id):
+        self.cancelled_order = (symbol, order_id)
+
+
+@pytest.mark.asyncio
+async def test_attributed_executor_records_resting_order_cancellation(tmp_path):
+    ledger = DecisionOutcomeLedger(tmp_path / "cancel-decisions.sqlite3")
+    adapter = _ManagedSimulatedExecutor()
+    executor = AttributedOrderExecutor(adapter, ledger, _context)
+    result = await executor.submit_order(
+        OrderRequest(
+            symbol="BTCUSDT",
+            side=TradeSide.LONG,
+            quantity=0.1,
+            reference_price=100.0,
+            client_order_id="managed-client",
+        )
+    )
+    await executor.cancel_resting_order("BTCUSDT", result.order_id)
+    rows = ledger.list_decisions(entity_id="scan-trace-42")
+    assert adapter.cancelled_order == ("BTCUSDT", result.order_id)
+    assert {row["decision_type"] for row in rows} == {"ENTRY", "MANAGE"}
+    assert any(row["payload"].get("action") == "CANCEL" for row in rows)
