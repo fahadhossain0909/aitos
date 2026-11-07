@@ -152,9 +152,7 @@ def test_shadow_ledger_persists_matching_feature_snapshot(tmp_path):
 
 def _record_forecast_worker(args):
     database_path, forecast_id = args
-    worker_ledger = StatisticalShadowLedger(
-        database_path, busy_timeout_ms=10000
-    )
+    worker_ledger = StatisticalShadowLedger(database_path, busy_timeout_ms=10000)
     return worker_ledger.record_forecast(
         forecast_id,
         make_envelope(),
