@@ -72,7 +72,6 @@ class FeatureSnapshot:
         return {
             "schema_version": self.schema_version,
             "symbol": self.symbol,
-            "side": self.side,
             "horizon": self.horizon,
             "as_of": self.as_of,
             "window_start": self.window_start,
@@ -151,6 +150,7 @@ class ForecastEnvelope:
     def to_dict(self) -> dict[str, Any]:
         return {
             "symbol": self.symbol,
+            "side": self.side,
             "horizon": self.horizon,
             "model_id": self.model_id,
             "model_version": self.model_version,
