@@ -4,7 +4,7 @@ import pytest
 
 from aitos.statistics.dependence import DCCGARCH, aggregate_portfolio_tail_risk
 from aitos.statistics.duration import GaussianHSMM
-from aitos.statistics.hawkes import fit_marked_hawkes_mle
+from aitos.statistics.hawkes import (\n    MarkedHawkesOnlineFilter,\n    fit_marked_hawkes_mle,\n)
 from aitos.statistics.replay import BookSnapshot, replay_historical_order
 
 
@@ -134,3 +134,22 @@ def test_hsmm_fit_filter_separation_does_not_refit_on_oos_observations():
     assert sum(result_a.probabilities) == pytest.approx(1.0)
     assert sum(result_b.probabilities) == pytest.approx(1.0)
     assert result_a.probabilities != result_b.probabilities
+
+
+
+def test_hawkes_online_filter_is_causal_and_requires_monotonic_events():
+    fit = fit_marked_hawkes_mle(
+        [float(i) for i in range(60)],
+        [i % 2 for i in range(60)],
+        horizon=65.0,
+        decay_grid=(0.1, 0.5),
+        max_iterations=120,
+    )
+    online = MarkedHawkesOnlineFilter(fit)
+    first = online.observe(100.0, 1)
+    second = online.observe(101.0, 0)
+    assert first.intensities == pytest.approx(fit.baseline_intensities)
+    assert second.intensities[1] > fit.baseline_intensities[1]
+    assert online.last_timestamp == 101.0
+    with pytest.raises(ValueError):
+        online.observe(101.0, 1)
