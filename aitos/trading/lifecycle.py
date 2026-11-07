@@ -1711,7 +1711,7 @@ class TradeLifecycle(AITOSModule):
                 reference_price=opportunity.entry_price,
             )
         )
-        if not order_result.success:
+        if not order_result.success and order_result.filled_quantity <= 0.0:
             return await self._reject(
                 opportunity, f"order submission failed: {order_result.error}"
             )
@@ -1735,6 +1735,12 @@ class TradeLifecycle(AITOSModule):
             return await self._reject(
                 opportunity,
                 "venue fill produced an invalid actual position notional",
+            )
+        execution_error = order_result.error
+        if not order_result.success and not execution_error:
+            execution_error = (
+                "adapter reported failure despite a confirmed venue fill; "
+                "manual execution reconciliation required"
             )
         sizing = PositionSizeResult(
             position_size_usd=actual_filled_notional,
@@ -1848,7 +1854,7 @@ class TradeLifecycle(AITOSModule):
             },
             decision_at=trade.entry_time,
         )
-        if order_result.error:
+        if execution_error:
             await self._record_decision(
                 f"{trade.trade_id}:EXECUTION_FAILURE",
                 entity_id=self._trade_attribution_id(trade),
@@ -1861,7 +1867,7 @@ class TradeLifecycle(AITOSModule):
                     "order_id": order_result.order_id,
                     "filled_quantity": order_result.filled_quantity,
                     "fill_price": order_result.fill_price,
-                    "execution_error": order_result.error,
+                    "execution_error": execution_error,
                 },
             )
             await self._event_bus.publish(
@@ -1872,7 +1878,7 @@ class TradeLifecycle(AITOSModule):
                         "symbol": trade.symbol,
                         "order_id": order_result.order_id,
                         "filled_quantity": order_result.filled_quantity,
-                        "error": order_result.error,
+                        "error": execution_error,
                     },
                     source_module=self.module_id,
                 )
