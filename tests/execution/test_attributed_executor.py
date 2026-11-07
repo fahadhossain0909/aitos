@@ -262,3 +262,34 @@ async def test_attributed_executor_records_resting_order_cancellation(tmp_path):
     assert adapter.cancelled_order == ("BTCUSDT", result.order_id)
     assert {row["decision_type"] for row in rows} == {"ENTRY", "MANAGE"}
     assert any(row["payload"].get("action") == "CANCEL" for row in rows)
+
+
+
+@pytest.mark.asyncio
+async def test_mt5_gateway_fails_closed_for_unmonitored_resting_orders():
+    adapter = MT5GatewayOrderExecutor("http://mt5.test", "test-token")
+    with pytest.raises(ValueError, match="status polling"):
+        await adapter.submit_order(
+            OrderRequest(
+                symbol="EURUSD",
+                side=TradeSide.LONG,
+                quantity=1.0,
+                reference_price=1.08,
+                order_type="LIMIT",
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_ctrader_fails_closed_for_unmonitored_resting_orders():
+    adapter = object.__new__(CTraderOrderExecutor)
+    with pytest.raises(ValueError, match="status polling"):
+        await adapter.submit_order(
+            OrderRequest(
+                symbol="EURUSD",
+                side=TradeSide.LONG,
+                quantity=1.0,
+                reference_price=1.08,
+                order_type="STOP",
+            )
+        )
