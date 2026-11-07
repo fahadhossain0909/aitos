@@ -34,12 +34,15 @@ def test_decision_ledger_links_gate_entry_hold_exit_to_net_outcome(tmp_path):
         payload={"trace_id": entity},
         decision_at="2026-11-07T10:00:00+00:00",
     )
-    assert ledger.resolve_entity(
-        entity,
-        outcome_value=0.012,
-        outcome_at="2026-11-07T11:00:00+00:00",
-        outcome={"net_pnl_usd": 1.2},
-    ) == 4
+    assert (
+        ledger.resolve_entity(
+            entity,
+            outcome_value=0.012,
+            outcome_at="2026-11-07T11:00:00+00:00",
+            outcome={"net_pnl_usd": 1.2},
+        )
+        == 4
+    )
     rows = ledger.list_decisions(entity_id=entity)
     assert len(rows) == 4
     assert all(row["outcome_value"] == pytest.approx(0.012) for row in rows)
@@ -59,17 +62,26 @@ def test_decision_ledger_detects_conflicting_ids_and_outcomes(tmp_path):
     ledger.record_decision("decision-1", **args)
     with pytest.raises(ValueError):
         ledger.record_decision("decision-1", **{**args, "reason": "different"})
-    ledger.resolve_entity("trade-1", outcome_value=-0.01, outcome_at="2026-11-07T11:00:00Z")
+    ledger.resolve_entity(
+        "trade-1", outcome_value=-0.01, outcome_at="2026-11-07T11:00:00Z"
+    )
     with pytest.raises(ValueError):
-        ledger.resolve_entity("trade-1", outcome_value=0.01, outcome_at="2026-11-07T12:00:00Z")
+        ledger.resolve_entity(
+            "trade-1", outcome_value=0.01, outcome_at="2026-11-07T12:00:00Z"
+        )
 
 
 def test_decision_ledger_validates_types_and_limits(tmp_path):
     ledger = DecisionOutcomeLedger(tmp_path / "decisions.sqlite3")
     with pytest.raises(ValueError):
         ledger.record_decision(
-            "x", entity_id="e", symbol="BTC", side="LONG",
-            decision_type="UNKNOWN", accepted=False, reason="bad"
+            "x",
+            entity_id="e",
+            symbol="BTC",
+            side="LONG",
+            decision_type="UNKNOWN",
+            accepted=False,
+            reason="bad"
         )
     with pytest.raises(ValueError):
         ledger.list_decisions(limit=0)
