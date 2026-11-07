@@ -44,6 +44,7 @@ class ContractStatisticalStack:
         hmm = self.hmm.fit_predict(xs)
         garch = self.garch.fit_forecast(xs)
         evt = self.evt.fit(xs)
+        upside_evt = self.evt.fit(tuple(-value for value in xs))
         bayes = self.bayes.fit(xs, tuple(self._global))
         # HMM state mean supplies the directional component; Bayes supplies shrinkage.
         hmm_mean = sum(p * m for p, m in zip(hmm.probabilities, hmm.state_means))
@@ -67,6 +68,7 @@ class ContractStatisticalStack:
             downside_probability=max(0.0, min(1.0, downside)),
             tail_probability=max(0.0, min(1.0, tail)),
             confidence=max(0.0, min(1.0, confidence)),
+            upside_evt=upside_evt,
         )
 
     def evaluate_many(
