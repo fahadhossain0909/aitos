@@ -188,7 +188,12 @@ class CTraderOrderExecutor(OrderExecutor):
             filled_quantity=executed_volume,
             fill_price=execution_price,
             filled_at=datetime.now(timezone.utc).isoformat(),
-            success=True,
+            success=executed_volume > 0.0,
+            error=(
+                None
+                if executed_volume > 0.0
+                else "cTrader accepted the request without a confirmed execution fill"
+            ),
         )
 
     @property
