@@ -80,6 +80,8 @@ def replay_historical_order(
         raise ValueError("quantity and cost inputs must be finite and non-negative")
     if funding_interval_hours <= 0:
         raise ValueError("funding_interval_hours must be positive")
+    if slippage_bps >= 10000:
+        raise ValueError("slippage_bps must be below 10000 to preserve positive fill prices")
     if submitted_at_ms<0 or latency_ms<0:
         raise ValueError("timestamps and latency must be non-negative")
     ordered=tuple(snapshots)
