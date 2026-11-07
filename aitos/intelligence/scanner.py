@@ -268,6 +268,7 @@ class ScanCandidate:
     scanned_at: str = field(default_factory=_utc_now_iso)
     htf_adx: float = 0.0
     trace_id: str | None = None
+    statistical_forecast: dict[str, Any] | None = None
 
 
 def _volatility_fitness(
@@ -1508,6 +1509,34 @@ class OpportunityScanner(AITOSModule):
                 f"confidence={a_stat_result.probability_confidence:.3f}, "
                 f"advanced_stack={a_stat_result.advanced is not None}"
             )
+        scanned_at = _utc_now_iso()
+        statistical_forecast = None
+        if a_stat_result is not None and a_stat_result.advanced is not None:
+            advanced = a_stat_result.advanced
+            reference_variance = float(advanced.garch.long_run_variance)
+            forecast_volatility = float(a_stat_result.expected_volatility)
+            if (
+                isfinite(reference_variance)
+                and reference_variance > 0.0
+                and isfinite(forecast_volatility)
+                and forecast_volatility >= 0.0
+            ):
+                statistical_forecast = {
+                    "symbol": symbol,
+                    "horizon": self._timeframe,
+                    "model_id": "aitos-contract-statistical-stack",
+                    "model_version": "1",
+                    "as_of": scanned_at,
+                    "sample_size": int(a_stat_result.sample_size),
+                    "forecast_volatility": forecast_volatility,
+                    "reference_volatility": reference_variance**0.5,
+                    "tail_probability": float(a_stat_result.tail_loss_probability),
+                    "expected_shortfall": float(advanced.evt.expected_shortfall),
+                    "expected_return": float(a_stat_result.expected_return),
+                    "probability_confidence": float(
+                        a_stat_result.probability_confidence
+                    ),
+                }
         candidate = ScanCandidate(
             symbol=symbol,
             direction=direction,
@@ -1518,8 +1547,10 @@ class OpportunityScanner(AITOSModule):
             entry_price=klines[-1].close,
             atr=atr,
             regime=regime,
+            scanned_at=scanned_at,
             htf_adx=float(htf_diagnostics.get("adx", 0.0)),
             trace_id=_ACTIVE_SCAN_TRACE_ID.get() or None,
+            statistical_forecast=statistical_forecast,
         )
         await self._record_funnel(
             symbol=symbol,
@@ -1878,6 +1909,11 @@ class OpportunityScanner(AITOSModule):
             agent_consensus={
                 **dict(candidate.component_scores),
                 "trace_id": candidate.trace_id,
+                **(
+                    {"statistical_forecast": dict(candidate.statistical_forecast)}
+                    if candidate.statistical_forecast is not None
+                    else {}
+                ),
             },
             is_production=is_production,
             approved_by=approved_by,
