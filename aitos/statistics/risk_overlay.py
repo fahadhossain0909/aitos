@@ -113,7 +113,9 @@ def assess_statistical_risk_forecast(
         downside_probability = float(forecast["downside_probability"])
         expected_return = float(forecast["expected_return"])
     except (KeyError, TypeError, ValueError) as exc:
-        raise ValueError("statistical forecast directional metrics are invalid") from exc
+        raise ValueError(
+            "statistical forecast directional metrics are invalid"
+        ) from exc
     if any(
         not math.isfinite(value)
         for value in (predicted_up, downside_probability, expected_return)
