@@ -1,4 +1,5 @@
 """Durable shadow-forecast ledger for statistical model validation."""
+
 from __future__ import annotations
 
 import math
@@ -188,9 +189,7 @@ class StatisticalShadowLedger:
                     row["actual_return"] != actual_return
                     or row["realised_variance"] != realised_variance
                 ):
-                    raise ValueError(
-                        "forecast outcome is already resolved differently"
-                    )
+                    raise ValueError("forecast outcome is already resolved differently")
                 connection.execute("COMMIT")
                 return False
             connection.execute(
@@ -259,14 +258,20 @@ class StatisticalShadowLedger:
             brier=brier_score(probabilities, outcomes),
             log_loss=log_loss(probabilities, outcomes),
             qlike=qlike,
-            directional_hit_rate=sum(
-                (probability >= 0.5) == bool(outcome)
-                for probability, outcome in zip(probabilities, outcomes)
-            ) / len(rows),
-            mean_absolute_return_error=sum(
-                abs(prediction - realised)
-                for prediction, realised in zip(expected, actual)
-            ) / len(rows),
+            directional_hit_rate=(
+                sum(
+                    (probability >= 0.5) == bool(outcome)
+                    for probability, outcome in zip(probabilities, outcomes)
+                )
+                / len(rows)
+            ),
+            mean_absolute_return_error=(
+                sum(
+                    abs(prediction - realised)
+                    for prediction, realised in zip(expected, actual)
+                )
+                / len(rows)
+            ),
         )
 
     def close(self) -> None:
