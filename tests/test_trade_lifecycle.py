@@ -737,6 +737,7 @@ async def test_statistical_forecast_reduces_size_and_is_persisted(
     forecast = {
         "symbol": "BTCUSDT",
         "horizon": "15m",
+        "side": "LONG",
         "model_id": "aitos-contract-statistical-stack",
         "model_version": "1",
         "as_of": datetime.now(timezone.utc).isoformat(),
@@ -803,4 +804,4 @@ async def test_statistical_forecast_mismatch_or_staleness_fails_closed(
         make_portfolio(),
     )
     assert mismatch_trade.state == TradeLifecycleState.REJECTED
-    assert "symbol or horizon mismatch" in mismatch_trade.rejection_reason
+    assert "symbol, side or horizon mismatch" in mismatch_trade.rejection_reason
