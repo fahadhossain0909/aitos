@@ -62,7 +62,8 @@ def fit_marked_hawkes_mle(
             if i:
                 factor = math.exp(-decay * (t - times[i - 1]))
                 history[i] = [history[i - 1][m] * factor for m in range(2)]
-            history[i][labels[i]] += decay
+            # Intensity at t_i is predictable: the event at t_i itself must
+            # not excite its own likelihood contribution.
         tails = [
             sum(1.0 - math.exp(-decay * (horizon - t)) for t, mark in zip(times, labels) if mark == m)
             for m in range(2)
