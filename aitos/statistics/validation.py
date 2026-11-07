@@ -45,7 +45,9 @@ def qlike_loss(forecast_variance: Iterable[float],
     for f, r in zip(forecasts, realised):
         f, r = float(f), float(r)
         if not math.isfinite(f) or not math.isfinite(r) or f <= 0 or r < 0:
-            raise ValueError("variance forecasts must be positive; realised proxy non-negative")
+            raise ValueError(
+                "variance forecasts must be positive; realised proxy non-negative"
+            )
         ratio = r / f
         losses.append(ratio - math.log(max(ratio, 1e-15)) - 1.0)
     return sum(losses) / len(losses)
@@ -185,7 +187,10 @@ def probability_of_backtest_overfitting(
         )
         in_scores = [mean(matrix[s][i] for i in in_indices) for s in range(len(matrix))]
         selected = max(range(len(matrix)), key=in_scores.__getitem__)
-        out_scores = [mean(matrix[s][i] for i in out_indices) for s in range(len(matrix))]
+        out_scores = [
+            mean(matrix[s][i] for i in out_indices)
+            for s in range(len(matrix))
+        ]
         selected_score = out_scores[selected]
         rank = sum(score <= selected_score for score in out_scores)
         normalized_rank = rank / (len(out_scores) + 1.0)
