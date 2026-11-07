@@ -54,12 +54,8 @@ STARTING_EQUITY_USD = 1_000.0
 HEALTH_SERVER_PORT = 8090
 PAPER_MIN_SCORE_THRESHOLD = 50.0
 STALE_POSITION_MAX_HOURS = get_settings().tuning.positions.stale_position_max_hours
-DEAD_CANDLE_MAX_PROGRESS_R = (
-    get_settings().tuning.positions.dead_candle_max_progress_r
-)
-DEAD_CANDLE_ENTRY_BAND_PCT = (
-    get_settings().tuning.positions.dead_candle_entry_band_pct
-)
+DEAD_CANDLE_MAX_PROGRESS_R = get_settings().tuning.positions.dead_candle_max_progress_r
+DEAD_CANDLE_ENTRY_BAND_PCT = get_settings().tuning.positions.dead_candle_entry_band_pct
 
 
 async def _close_stale_positions(components) -> None:
@@ -126,8 +122,12 @@ async def _close_stale_positions(components) -> None:
                     )
                     continue
 
-                max_excursion_pct = max(float(mae_price), float(mfe_price)) / entry_price
-                current_deviation_pct = abs(float(last_price) - entry_price) / entry_price
+                max_excursion_pct = (
+                    max(float(mae_price), float(mfe_price)) / entry_price
+                )
+                current_deviation_pct = (
+                    abs(float(last_price) - entry_price) / entry_price
+                )
                 progress_r = float(mfe_r)
                 if (
                     max_excursion_pct > DEAD_CANDLE_ENTRY_BAND_PCT
