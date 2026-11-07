@@ -124,7 +124,9 @@ class BOCPDResult:
     observations: int
 
 
-def _student_t_density(value: float, mean_value: float, scale: float, df: float) -> float:
+def _student_t_density(
+    value: float, mean_value: float, scale: float, df: float
+) -> float:
     scale = max(scale, 1e-10)
     z = (value - mean_value) / scale
     log_density = (
@@ -183,7 +185,7 @@ def bocpd_change_point(
             2.0 * prior_alpha,
         )
         new_states = [(prior_predictive * hazard, prior_mean, prior_kappa,
-                       prior_alpha, prior_beta)] + [item for item in growth[:max_run_length - 1]]
+                       prior_alpha, prior_beta)] + growth[:max_run_length - 1]
         total = sum(item[0] for item in new_states)
         if total <= _EPS or not math.isfinite(total):
             raise ArithmeticError("BOCPD posterior normalization failed")
