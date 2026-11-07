@@ -198,6 +198,7 @@ class TradeLifecycle(AITOSModule):
         envelope = ForecastEnvelope(
             symbol=trade.symbol,
             horizon=str(forecast["horizon"]),
+            side=str(forecast["side"]),
             model_id=str(forecast["model_id"]),
             model_version=str(forecast["model_version"]),
             as_of=as_of,
