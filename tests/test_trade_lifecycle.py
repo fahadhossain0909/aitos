@@ -776,6 +776,7 @@ async def test_statistical_forecast_mismatch_or_staleness_fails_closed(
     stale = {
         "symbol": "BTCUSDT",
         "horizon": "15m",
+        "side": "LONG",
         "model_id": "aitos-contract-statistical-stack",
         "model_version": "1",
         "as_of": (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat(),
