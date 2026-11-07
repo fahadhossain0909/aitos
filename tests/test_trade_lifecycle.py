@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 
@@ -720,3 +721,84 @@ async def test_lifecycle_routes_external_funding_adjustment_events(
 
     assert trade.funding_pnl_usd == pytest.approx(0.08)
     assert "funding-event-42" in trade.cost_adjustments
+
+
+@pytest.mark.asyncio
+async def test_statistical_forecast_reduces_size_and_is_persisted(
+    event_bus, risk_engine
+):
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    baseline = await lifecycle.submit_opportunity(
+        make_opportunity(), make_portfolio()
+    )
+    forecast = {
+        "symbol": "BTCUSDT",
+        "horizon": "15m",
+        "model_id": "aitos-contract-statistical-stack",
+        "model_version": "1",
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "sample_size": 256,
+        "forecast_volatility": 0.04,
+        "reference_volatility": 0.02,
+        "tail_probability": 0.20,
+        "expected_shortfall": 0.05,
+        "expected_return": 0.01,
+        "probability_confidence": 0.8,
+    }
+    reduced = await lifecycle.submit_opportunity(
+        make_opportunity(
+            timeframe="15m",
+            agent_consensus={"statistical_forecast": forecast},
+        ),
+        make_portfolio(),
+    )
+    assessment = reduced.agent_consensus["statistical_risk_assessment"]
+    assert reduced.state == TradeLifecycleState.POSITION_OPENED
+    assert 0.0 < assessment["size_multiplier"] < 1.0
+    assert reduced.position_size_usd < baseline.position_size_usd
+    assert reduced.risk_amount_usd < baseline.risk_amount_usd
+    assert reduced.agent_consensus["statistical_forecast"] == forecast
+    assert "forecast_volatility_above_reference" in assessment["reasons"]
+
+
+@pytest.mark.asyncio
+async def test_statistical_forecast_mismatch_or_staleness_fails_closed(
+    event_bus, risk_engine
+):
+    from datetime import timedelta
+
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    stale = {
+        "symbol": "BTCUSDT",
+        "horizon": "15m",
+        "model_id": "aitos-contract-statistical-stack",
+        "model_version": "1",
+        "as_of": (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat(),
+        "sample_size": 256,
+        "forecast_volatility": 0.04,
+        "reference_volatility": 0.02,
+        "tail_probability": 0.20,
+        "expected_shortfall": 0.05,
+    }
+    stale_trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            timeframe="15m",
+            agent_consensus={"statistical_forecast": stale},
+        ),
+        make_portfolio(),
+    )
+    assert stale_trade.state == TradeLifecycleState.REJECTED
+    assert "statistical forecast is stale" in stale_trade.rejection_reason
+
+    fresh = dict(stale, as_of=datetime.now(timezone.utc).isoformat())
+    mismatch_trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            timeframe="1h",
+            agent_consensus={"statistical_forecast": fresh},
+        ),
+        make_portfolio(),
+    )
+    assert mismatch_trade.state == TradeLifecycleState.REJECTED
+    assert "symbol or horizon mismatch" in mismatch_trade.rejection_reason
