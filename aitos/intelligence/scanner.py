@@ -548,6 +548,7 @@ class OpportunityScanner(AITOSModule):
             self._candidate_outcomes.update_price(
                 trade.symbol, trade.price, getattr(trade, "timestamp", None)
             )
+            await asyncio.to_thread(self._reconcile_candidate_markouts)
 
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
@@ -579,7 +580,7 @@ class OpportunityScanner(AITOSModule):
                 await asyncio.to_thread(
                     self._decision_outcome_ledger.record_decision,
                     f"{attribution_id}:{event.get('symbol')}:{event.get('side', 'UNKNOWN')}:{event['stage']}",
-                    entity_id=attribution_id,
+                    entity_id=f"{attribution_id}:{str(event.get('side') or 'UNKNOWN').upper()}",
                     symbol=str(event["symbol"]),
                     side=str(event.get("side") or "UNKNOWN"),
                     decision_type="GATE",
@@ -1787,7 +1788,34 @@ class OpportunityScanner(AITOSModule):
         return self._top_n
 
     def record_candidate_rejection(self, candidate: ScanCandidate, reason: str) -> None:
-        self._candidate_outcomes.record_rejection(candidate, reason)
+        rejection_id = self._candidate_outcomes.record_rejection(candidate, reason)
+        attribution_id = (
+            f"{candidate.trace_id}:{candidate.direction.value}"
+            if candidate.trace_id
+            else rejection_id
+        )
+        if rejection_id:
+            try:
+                self._decision_outcome_ledger.record_decision(
+                    f"{rejection_id}:REJECTION",
+                    entity_id=attribution_id,
+                    symbol=candidate.symbol,
+                    side=candidate.direction.value,
+                    decision_type="REJECTION",
+                    accepted=False,
+                    reason=reason,
+                    payload={
+                        "rejection_id": rejection_id,
+                        "trace_id": candidate.trace_id,
+                        "composite_score": candidate.composite_score,
+                        "regime": candidate.regime,
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "candidate rejection attribution persistence failed",
+                    extra={"aitos_extra": {"symbol": candidate.symbol, "trace_id": candidate.trace_id}},
+                )
         self._candidate_rotation.record_rejection(
             candidate.symbol,
             reason,
@@ -1796,6 +1824,42 @@ class OpportunityScanner(AITOSModule):
                 f"{candidate.direction.value}:{candidate.regime}:{candidate.composite_score:.2f}",
             ),
         )
+
+    def _reconcile_candidate_markouts(self) -> int:
+        """Resolve rejected-candidate decisions from the final 15-minute markout."""
+        resolved = 0
+        for markout in self._candidate_outcomes.completed_markouts(horizon_seconds=900):
+            attribution_id = str(markout.get("attribution_id") or "")
+            if not attribution_id:
+                continue
+            observed_at = datetime.fromtimestamp(
+                float(markout["observed_at"]), tz=timezone.utc
+            ).isoformat()
+            try:
+                resolved += self._decision_outcome_ledger.resolve_entity(
+                    attribution_id,
+                    outcome_value=float(markout["signed_return_pct"]) / 100.0,
+                    outcome_at=observed_at,
+                    outcome={
+                        "counterfactual": True,
+                        "horizon_seconds": 900,
+                        "markout_price": float(markout["price"]),
+                        "mae_pct": float(markout["mae_pct"]),
+                        "mfe_pct": float(markout["mfe_pct"]),
+                        "rejection_reason": str(markout["reason"]),
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "rejected-candidate outcome reconciliation failed",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": markout.get("symbol"),
+                            "rejection_id": markout.get("rejection_id"),
+                        }
+                    },
+                )
+        return resolved
 
     def clear_candidate_cooldown(self, symbol: str) -> None:
         self._candidate_rotation.force_recheck(symbol)
