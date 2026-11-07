@@ -107,7 +107,8 @@ class AStatBridge:
                             kline.open_time.isoformat()
                             if hasattr(getattr(kline, "open_time", None), "isoformat")
                             else str(getattr(kline, "open_time", None))
-                        ) == previous_state[0]
+                        )
+                        == previous_state[0]
                     ),
                     None,
                 )
