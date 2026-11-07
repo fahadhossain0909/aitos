@@ -125,7 +125,9 @@ class StatisticalShadowLedger:
             ).fetchone()
             if row is not None:
                 if tuple(row) != values[:-1]:
-                    raise ValueError("forecast_id already exists with different content")
+                    raise ValueError(
+                        "forecast_id already exists with different content"
+                    )
                 connection.execute("COMMIT")
                 return False
             connection.execute(
@@ -196,8 +198,9 @@ class StatisticalShadowLedger:
         finally:
             connection.close()
 
-    def metrics(self, *, symbol: str | None = None,
-                horizon: str | None = None) -> ShadowMetrics:
+    def metrics(
+        self, *, symbol: str | None = None, horizon: str | None = None
+    ) -> ShadowMetrics:
         """Return strictly outcome-resolved shadow metrics for a cohort."""
         clauses = ["actual_return IS NOT NULL", "realised_variance IS NOT NULL"]
         parameters: list[str] = []
