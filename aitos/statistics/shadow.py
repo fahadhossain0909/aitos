@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import math
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .contracts import ForecastEnvelope
+from .contracts import FeatureSnapshot, ForecastEnvelope
 from .validation import brier_score, log_loss, qlike_loss
 
 
@@ -67,6 +68,7 @@ class StatisticalShadowLedger:
                     predicted_up REAL NOT NULL,
                     predicted_variance REAL NOT NULL,
                     expected_return REAL NOT NULL,
+                    feature_snapshot_json TEXT,
                     actual_return REAL,
                     realised_variance REAL,
                     created_at TEXT NOT NULL,
@@ -74,6 +76,17 @@ class StatisticalShadowLedger:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute(
+                    "PRAGMA table_info(statistical_shadow_forecasts)"
+                ).fetchall()
+            }
+            if "feature_snapshot_json" not in columns:
+                connection.execute(
+                    "ALTER TABLE statistical_shadow_forecasts "
+                    "ADD COLUMN feature_snapshot_json TEXT"
+                )
             connection.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_shadow_symbol_horizon_created
@@ -99,6 +112,7 @@ class StatisticalShadowLedger:
         predicted_up: float,
         predicted_variance: float,
         created_at: str | None = None,
+        feature_snapshot: FeatureSnapshot | None = None,
     ) -> bool:
         """Insert a forecast; return False for an identical idempotent replay."""
         if not forecast_id or not forecast_id.strip():
@@ -110,6 +124,18 @@ class StatisticalShadowLedger:
         if not math.isfinite(predicted_variance) or predicted_variance <= 0:
             raise ValueError("predicted_variance must be finite and positive")
         created = self._timestamp(created_at)
+        snapshot_json = None
+        if feature_snapshot is not None:
+            if (
+                feature_snapshot.symbol != envelope.symbol
+                or feature_snapshot.horizon != envelope.horizon
+                or feature_snapshot.as_of != envelope.as_of
+                or feature_snapshot.sample_count != envelope.sample_count
+            ):
+                raise ValueError("feature snapshot does not match forecast envelope")
+            snapshot_json = json.dumps(
+                feature_snapshot.to_dict(), sort_keys=True, separators=(",", ":")
+            )
         values = (
             envelope.symbol,
             envelope.horizon,
@@ -120,6 +146,7 @@ class StatisticalShadowLedger:
             predicted_up,
             predicted_variance,
             envelope.expected_return,
+            snapshot_json,
             created,
         )
         connection = self._connect()
@@ -128,7 +155,8 @@ class StatisticalShadowLedger:
             row = connection.execute(
                 "SELECT symbol, horizon, model_id, model_version, as_of, "
                 "feature_snapshot_id, predicted_up, predicted_variance, "
-                "expected_return FROM statistical_shadow_forecasts "
+                "expected_return, feature_snapshot_json "
+                "FROM statistical_shadow_forecasts "
                 "WHERE forecast_id=?",
                 (forecast_id,),
             ).fetchone()
@@ -144,8 +172,8 @@ class StatisticalShadowLedger:
                 INSERT INTO statistical_shadow_forecasts (
                     forecast_id, symbol, horizon, model_id, model_version, as_of,
                     feature_snapshot_id, predicted_up, predicted_variance,
-                    expected_return, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    expected_return, feature_snapshot_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (forecast_id, *values),
             )
