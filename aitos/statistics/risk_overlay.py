@@ -14,12 +14,15 @@ class StatisticalRiskAssessment:
     reasons: tuple[str, ...]
 
 
-def assess_statistical_risk(*, forecast_volatility: float,
-                            reference_volatility: float,
-                            tail_probability: float,
-                            expected_shortfall: float | None = None,
-                            min_multiplier: float = 0.20,
-                            max_multiplier: float = 1.0) -> StatisticalRiskAssessment:
+def assess_statistical_risk(
+    *,
+    forecast_volatility: float,
+    reference_volatility: float,
+    tail_probability: float,
+    expected_shortfall: float | None = None,
+    min_multiplier: float = 0.20,
+    max_multiplier: float = 1.0,
+) -> StatisticalRiskAssessment:
     """Conservative sizing multiplier from volatility and tail-risk forecasts.
 
     The multiplier only reduces a separately calculated base size. It cannot
@@ -27,8 +30,13 @@ def assess_statistical_risk(*, forecast_volatility: float,
     still enforce RiskLimits, freshness, liquidity, leverage and circuit
     breakers. Forecasts must be calibrated for the same symbol/horizon.
     """
-    values = (forecast_volatility, reference_volatility, tail_probability,
-              min_multiplier, max_multiplier)
+    values = (
+        forecast_volatility,
+        reference_volatility,
+        tail_probability,
+        min_multiplier,
+        max_multiplier,
+    )
     if any(not math.isfinite(float(v)) for v in values):
         raise ValueError("risk inputs must be finite")
     if forecast_volatility < 0 or reference_volatility <= 0:
