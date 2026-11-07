@@ -1,4 +1,5 @@
 """Statistical risk overlay contracts; never replaces hard risk controls."""
+
 from __future__ import annotations
 
 import math
