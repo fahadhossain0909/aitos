@@ -13,7 +13,7 @@ def test_feature_snapshot_validates_lineage_and_freshness():
         as_of=(now - timedelta(seconds=5)).isoformat(),
         window_start=(now - timedelta(minutes=30)).isoformat(),
         values={"rv": 0.002, "imbalance": -0.2},
-        source_watermarks={"trades": (now - timedelta(seconds=4)).isoformat()},
+        source_watermarks={"trades": (now - timedelta(seconds=6)).isoformat()},
         sample_count=120,
     )
     assert snapshot.is_fresh(10, now=now)
