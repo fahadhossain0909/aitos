@@ -732,6 +732,10 @@ async def test_statistical_forecast_reduces_size_and_is_persisted(
     baseline = await lifecycle.submit_opportunity(
         make_opportunity(), make_portfolio()
     )
+    assert baseline.state == TradeLifecycleState.POSITION_OPENED
+    await lifecycle.close_trade(
+        baseline.trade_id, baseline.entry_price, "statistical_overlay_baseline"
+    )
     forecast = {
         "symbol": "BTCUSDT",
         "horizon": "15m",
