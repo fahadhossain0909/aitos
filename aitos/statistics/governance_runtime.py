@@ -123,3 +123,83 @@ class StatisticalGovernanceRuntime:
         return self.registry.rollback(
             model_id, target_version, operator_approved=operator_approved
         )
+
+
+
+class DriftMonitorScheduler:
+    """Async periodic drift orchestration with deduplicated operator alerts.
+
+    The application must start run_forever from its managed service lifecycle.
+    The scheduler never starts a hidden background thread at import/construct
+    time, and it never changes execution policy or promotes models itself.
+    """
+
+    def __init__(
+        self,
+        runtime: StatisticalGovernanceRuntime,
+        *,
+        interval_seconds: float,
+        alert_callback=None,
+    ) -> None:
+        import math
+
+        if not math.isfinite(interval_seconds) or interval_seconds < 1.0:
+            raise ValueError("drift interval_seconds must be finite and >= 1")
+        self.runtime = runtime
+        self.interval_seconds = float(interval_seconds)
+        self.alert_callback = alert_callback
+        self._last_alert_fingerprint: tuple | None = None
+        self.last_run_at = None
+
+    async def run_once(self, reference, current, *, now=None):
+        """Run one due check; return None when cadence has not elapsed."""
+        import inspect
+        from datetime import datetime, timezone
+
+        current_time = now or datetime.now(timezone.utc)
+        if current_time.tzinfo is None:
+            raise ValueError("scheduler time must be timezone-aware")
+        if self.last_run_at is not None:
+            elapsed = (current_time - self.last_run_at).total_seconds()
+            if elapsed < self.interval_seconds:
+                return None
+        action = self.runtime.observe_live_features(reference, current)
+        self.last_run_at = current_time
+        if action.status == "NORMAL":
+            self._last_alert_fingerprint = None
+        else:
+            fingerprint = (
+                action.status,
+                tuple(action.report.drifted_features),
+                round(action.report.max_psi, 6),
+            )
+            if fingerprint != self._last_alert_fingerprint and self.alert_callback:
+                result = self.alert_callback(action)
+                if inspect.isawaitable(result):
+                    await result
+            self._last_alert_fingerprint = fingerprint
+        return action
+
+    async def run_forever(self, stop_event, batch_provider) -> None:
+        """Run on an application-owned asyncio task until stop_event is set.
+
+        batch_provider may be synchronous or async and returns (reference,
+        current) feature mappings. The callback receives each changed warning
+        or critical drift state. Shutdown is cooperative via asyncio.Event.
+        """
+        import asyncio
+        import inspect
+        from datetime import datetime, timezone
+
+        while not stop_event.is_set():
+            batches = batch_provider()
+            if inspect.isawaitable(batches):
+                batches = await batches
+            reference, current = batches
+            await self.run_once(reference, current, now=datetime.now(timezone.utc))
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(), timeout=self.interval_seconds
+                )
+            except asyncio.TimeoutError:
+                continue
