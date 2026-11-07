@@ -34,7 +34,7 @@ def test_marked_continuous_time_hawkes_mle_is_stationary():
         times, marks, horizon=65.0, decay_grid=(0.1, 0.5, 1.0), max_iterations=100
     )
     assert result.events == 60
-    assert result.log_likelihood == pytest.approx(result.log_likelihood)
+    assert math.isfinite(result.log_likelihood)
     assert result.branching_ratio < 0.95
     assert all(value > 0 for value in result.baseline_intensities)
     assert len(result.excitation_matrix) == 2
