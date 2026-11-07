@@ -14,11 +14,11 @@ degrade to the existing conservative policy, never to a permissive default.
 |---|---|---|
 | 0 — Contracts and data quality | Finite chronological observations, explicit horizons, bounded windows, leakage controls and serialisable outputs | Partial: input validation and serialisable contracts exist; a common timestamped feature-store contract and live freshness enforcement remain |
 | 1 — Statistical foundations | Distribution, volatility, Bayesian, HMM, GARCH, EVT and hedge-beta estimates | Partial: existing HMM/GARCH/EVT/Bayes stack plus distribution, Kalman and fitted HAR-RV/GJR-GARCH estimators |
-| 2 — Regime and event dynamics | Regime posterior, change-point detection, duration-aware regimes, order-flow event intensity | Partial: Gaussian HMM, CUSUM, BOCPD and a discrete Hawkes-inspired proxy; HSMM and calibrated event-time Hawkes estimation remain |
-| 3 — Tail, dependence and portfolio risk | EVT severity, asymmetric volatility, cross-asset dependence, risk sizing and drawdown controls | Partial: downside and upside POT-GPD tails, GARCH/GJR-GARCH and a side-matched freshness-gated reduce-only scanner-to-lifecycle overlay; DCC-GARCH/copulas, portfolio ES aggregation and replay calibration remain |
-| 4 — Research validation | Purged walk-forward, CPCV, PBO, calibration, regime splits and execution-cost sensitivity | Partial: walk-forward, CPCV, Brier, log-loss, QLIKE and PBO diagnostics; full experiment ledger, bootstrap confidence intervals and end-to-end fee/funding/slippage replay remain |
-| 5 — Strategy and risk integration | Strategy-family suitability, model disagreement, risk gate integration and decision attribution | Partial: A-Stat ranking is diagnostic only; fresh matched statistical forecasts reduce base size before final hard-limit checks; strategy execution remains in the existing StrategyEngine/Risk Engine |
-| 6 — Shadow deployment and governance | Shadow inference, drift monitoring, model registry, champion/challenger, rollback and controlled promotion | Partial: SQLite shadow forecasts and FeatureSnapshots are persisted at trade entry and resolved against net trade outcomes at close; multi-process idempotency, legacy-schema migration, pending-forecast queries and startup reconciliation from durable open/closed trade state are implemented. Durable artifact registry, persisted promotion/rollback audit events and explicit champion/rollback APIs are implemented, but live drift orchestration and automatic promotion are not enabled |
+| 2 — Regime and event dynamics | Regime posterior, change-point detection, duration-aware regimes, order-flow event intensity | Partial: Gaussian HMM, CUSUM, BOCPD, explicit-duration Gaussian HSMM and marked continuous-time exponential Hawkes profile-MLE; out-of-sample duration/intensity calibration and production feed wiring remain |
+| 3 — Tail, dependence and portfolio risk | EVT severity, asymmetric volatility, cross-asset dependence, risk sizing and drawdown controls | Partial: downside/upside POT-GPD, GARCH/GJR-GARCH, DCC(1,1)-GARCH, empirical Gaussian-copula dependence, historical portfolio VaR/ES and reduce-only risk overlay; market-regime calibration and full portfolio replay remain |
+| 4 — Research validation | Purged walk-forward, CPCV, PBO, calibration, regime splits and execution-cost sensitivity | Partial: walk-forward, CPCV, PBO, Brier/log-loss/QLIKE, symbol/regime cohort reports and event-time L1 execution replay with fees, spread, slippage, latency, partial fills, funding and borrow; full-depth impact, queue position, venue-specific fee/funding schedules and market-data-backed replay remain |
+| 5 — Strategy and risk integration | Strategy-family suitability, model disagreement, risk gate integration and decision attribution | Partial: fresh matched forecasts reduce base size before hard limits; scanner gate decisions, entries, rejections, HOLD/MANAGE/EXIT and execution failures persist under trace identity and reconcile to net close outcomes; end-to-end completeness across every execution adapter and non-trade candidate lifecycle still requires runtime audit |
+| 6 — Shadow deployment and governance | Shadow inference, drift monitoring, model registry, champion/challenger, rollback and controlled promotion | Partial: SQLite shadow forecasts and decision ledger reconcile to outcomes; durable registry and audit events exist; opt-in runtime drift controller blocks promotion on drift and requires explicit operator approval. Continuous live feature-batch scheduling, alert routing and operator-facing approval workflow remain |
 
 This status table is intentionally conservative. A module existing in the
 repository is not evidence that it is connected to the live scanner, position
@@ -32,8 +32,13 @@ sizer, portfolio risk gate or paper-trading runtime.
   between-model forecast disagreement.
 - Equal-weight multi-horizon realized-volatility baseline and fitted
   one-step HAR-RV regression over squared-return proxies.
-- Gaussian HMM regime posterior, GARCH(1,1), asymmetric GJR-GARCH(1,1),
-  peaks-over-threshold GPD tail estimate and hierarchical Bayesian shrinkage.
+- Gaussian HMM and explicit-duration Gaussian HSMM regime posteriors,
+  marked continuous-time exponential Hawkes profile-MLE, GARCH(1,1),
+  asymmetric GJR-GARCH(1,1), peaks-over-threshold GPD tail estimate and
+  hierarchical Bayesian shrinkage.
+- DCC(1,1)-GARCH conditional correlation, empirical Gaussian-copula
+  rank-dependence, and aligned historical-simulation portfolio VaR/expected
+  shortfall aggregation.
 - Two-sided CUSUM and Student-t predictive Bayesian online change-point
   detection (BOCPD) with a bounded run-length posterior.
 - Normalized permutation entropy, coarse Hurst screening, scalar Kalman beta,
@@ -57,8 +62,18 @@ sizer, portfolio risk gate or paper-trading runtime.
   evidence-gated promotion and explicit operator-approved rollback; no artifact
   is loaded or promoted automatically.
 - Paired block-bootstrap OOS confidence intervals, PSI feature-drift reports,
-  and gross-to-net execution-cost sensitivity across fee, spread, slippage,
-  funding, borrow and stressed-cost assumptions.
+  gross-to-net execution-cost sensitivity, and symbol/regime cohort metrics.
+- Trace-linked decision ledger for scanner GATEs, accepted ENTRYs, REJECTIONs,
+  HOLD/MANAGE/EXIT actions and execution failures, reconciled against net trade
+  outcomes.
+- Event-time L1 execution replay with submission latency, displayed-size-limited
+  partial fills, bid/ask spread, adverse slippage, taker fees, prorated funding
+  and borrow costs. It deliberately does not model full-depth market impact or
+  queue priority.
+- Opt-in governance runtime that consumes reference/current feature batches,
+  marks NORMAL/WARNING/CRITICAL drift, blocks challenger promotion on drift,
+  and requires explicit approval at the promotion call. It does not autonomously
+  switch production models or disable trading.
 
 ## Estimator limitations
 
@@ -71,7 +86,15 @@ The downside/upside EVT estimator is a method-of-moments POT baseline and
 requires threshold stability diagnostics. Shadow-ledger realised variance is
 currently a trade-level squared net-return proxy, not high-frequency realised
 variance; QLIKE results must be interpreted accordingly. The event-excitation estimator is not continuous-time
-Hawkes maximum likelihood. The Hurst estimate is a coarse screening statistic.
+Hawkes maximum likelihood. The HSMM initializes Gaussian emissions by one-dimensional clustering and
+estimates explicit duration distributions from observed state runs; duration
+stability and state-count selection remain out-of-sample research tasks. DCC
+uses a constrained parameter grid and Gaussian quasi-likelihood; the copula is
+an empirical Gaussian rank transform, not a tail-dependent copula family.
+Portfolio VaR/ES is historical simulation and requires representative joint
+market scenarios. The L1 replay consumes supplied top-of-book snapshots and
+cannot infer hidden liquidity, queue position, or market impact beyond
+displayed size. The Hurst estimate is a coarse screening statistic.
 CPCV/PBO are research diagnostics, not substitutes for chronological
 walk-forward and a realistic deployment simulation.
 
@@ -99,7 +122,9 @@ walk-forward and a realistic deployment simulation.
 6. **Governed promotion:** persist model/version/config/data lineage, require
    minimum effective sample size and confidence intervals, use champion/
    challenger comparison, support immediate rollback, and require explicit
-   approval before changing production policy.
+   approval before changing production policy. The opt-in governance controller
+   currently accepts reference/current feature batches; it still needs a
+   production scheduler, alert sink, and authenticated operator approval path.
 
 ## Safety
 
