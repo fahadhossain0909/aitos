@@ -39,6 +39,32 @@ def _corr(x, y):
 
 
 
+def _inverse_positive_definite(matrix):
+    """Invert a small positive-definite matrix with pivoted elimination."""
+    n = len(matrix)
+    augmented = [
+        [float(matrix[i][j]) for j in range(n)]
+        + [1.0 if i == j else 0.0 for j in range(n)]
+        for i in range(n)
+    ]
+    for column in range(n):
+        pivot = max(range(column, n), key=lambda row: abs(augmented[row][column]))
+        if abs(augmented[pivot][column]) <= 1e-12:
+            raise ArithmeticError("DCC correlation matrix is singular")
+        augmented[column], augmented[pivot] = augmented[pivot], augmented[column]
+        scale = augmented[column][column]
+        augmented[column] = [value / scale for value in augmented[column]]
+        for row in range(n):
+            if row == column:
+                continue
+            factor = augmented[row][column]
+            augmented[row] = [
+                value - factor * pivot_value
+                for value, pivot_value in zip(augmented[row], augmented[column])
+            ]
+    return [row[n:] for row in augmented]
+
+
 def _logdet_positive_definite(matrix):
     """Stable log determinant via Cholesky decomposition."""
     n = len(matrix)
@@ -114,8 +140,13 @@ class DCCGARCH:
                     diag=[math.sqrt(max(q[i][i],1e-12)) for i in range(len(symbols))]
                     corr=[[q[i][j]/(diag[i]*diag[j]) for j in range(len(symbols))] for i in range(len(symbols))]
                     try:
+                        inverse_corr = _inverse_positive_definite(corr)
                         loss += _logdet_positive_definite(corr) + sum(
-                            z[i]*sum(corr[i][j]*z[j] for j in range(len(symbols)))
+                            z[i]
+                            * sum(
+                                inverse_corr[i][j] * z[j]
+                                for j in range(len(symbols))
+                            )
                             for i in range(len(symbols))
                         )
                     except ArithmeticError:
