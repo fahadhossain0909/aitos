@@ -48,7 +48,7 @@ def test_rejected_candidate_15m_markout_resolves_trace_linked_decisions(tmp_path
     markouts = candidate_store.completed_markouts(horizon_seconds=900)
     assert len(markouts) == 1
     assert markouts[0]["attribution_id"] == attribution_id
-    assert markouts[0]["signed_return_pct"] == 1.0
+    assert markouts[0]["signed_return_pct"] == pytest.approx(1.0)
 
     assert (
         ledger.resolve_entity(
