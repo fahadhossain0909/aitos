@@ -33,6 +33,13 @@ from .dependence import (
     aggregate_portfolio_tail_risk,
 )
 from .duration import GaussianHSMM, HSMMParameters, HSMMResult
+from .experiments import (
+    ExperimentCohortSummary,
+    ExperimentObservation,
+    OOSPrediction,
+    SymbolRegimeExperimentResult,
+    run_symbol_regime_walk_forward,
+)
 from .hawkes import (
     HawkesIntensitySnapshot,
     HawkesMLEFit,
@@ -156,6 +163,11 @@ __all__ = [
     "DCCGARCH",
     "PortfolioTailRisk",
     "aggregate_portfolio_tail_risk",
+    "ExperimentCohortSummary",
+    "ExperimentObservation",
+    "OOSPrediction",
+    "SymbolRegimeExperimentResult",
+    "run_symbol_regime_walk_forward",
     "GaussianHSMM",
     "HSMMParameters",
     "HSMMResult",
