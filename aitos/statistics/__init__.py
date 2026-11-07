@@ -54,6 +54,7 @@ from .risk_overlay import StatisticalRiskAssessment, assess_statistical_risk
 from .validation import (
     brier_score,
     combinatorial_purged_folds,
+    expected_calibration_error,
     log_loss,
     probability_of_backtest_overfitting,
     purged_walk_forward_folds,
@@ -81,6 +82,7 @@ __all__ = [
     "assess_statistical_risk",
     "brier_score",
     "combinatorial_purged_folds",
+    "expected_calibration_error",
     "probability_of_backtest_overfitting",
     "cusum_change_point",
     "diagnose",
