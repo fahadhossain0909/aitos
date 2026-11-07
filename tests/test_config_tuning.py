@@ -25,9 +25,7 @@ def test_dead_candle_and_liquidity_guard_defaults_and_env_overrides(monkeypatch)
     assert defaults.positions.stale_position_max_hours == 6.0
 
     monkeypatch.setenv("AITOS_TUNING_SCANNER_MIN_LIQUIDITY_QUALITY", "5.5")
-    monkeypatch.setenv(
-        "AITOS_TUNING_SCANNER_MAX_DIRECTIONAL_CANCEL_PRESSURE", "0.55"
-    )
+    monkeypatch.setenv("AITOS_TUNING_SCANNER_MAX_DIRECTIONAL_CANCEL_PRESSURE", "0.55")
     monkeypatch.setenv("AITOS_TUNING_POSITIONS_DEAD_CANDLE_EXIT_BARS", "12")
     monkeypatch.setenv("AITOS_TUNING_POSITIONS_STALE_POSITION_MAX_HOURS", "4.0")
     settings = load_tuning_settings(profile="balanced", mode="paper")
