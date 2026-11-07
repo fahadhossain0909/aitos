@@ -100,7 +100,7 @@ class SystemComponents:
         if restart_required:
             raise ValueError(
                 "Runtime reload changed mode, infrastructure, hardware, storage, "
-                "telemetry, risk ceilings or the hard position limit; restart AITOS "
+                "telemetry, risk ceilings or position-management tuning; restart AITOS "
                 "to apply this profile safely"
             )
         self.scanner.apply_tuning_settings(updated)
