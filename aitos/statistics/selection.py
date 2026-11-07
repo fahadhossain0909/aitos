@@ -145,10 +145,14 @@ def diebold_mariano_test(
         covariance = sum((d[t] - center) * (d[t - k] - center) for t in range(k, n)) / n
         long_run += 2.0 * (1.0 - k / (lag + 1.0)) * covariance
     if long_run <= 1e-18:
-        raise ValueError("DM long-run variance is zero")
-    statistic = center / math.sqrt(long_run / n)
-    # Normal approximation is conservative for moderate/large samples.
-    p = 2.0 * (1.0 - _normal_cdf(abs(statistic)))
+        if abs(center) <= 1e-15:
+            statistic, p = 0.0, 1.0
+        else:
+            statistic, p = math.copysign(math.inf, center), 0.0
+    else:
+        statistic = center / math.sqrt(long_run / n)
+        # Normal approximation is conservative for moderate/large samples.
+        p = 2.0 * (1.0 - _normal_cdf(abs(statistic)))
     return ComparisonTest(statistic, min(1.0, max(0.0, p)), n, "diebold_mariano_hac")
 
 
