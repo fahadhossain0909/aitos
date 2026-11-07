@@ -4,7 +4,10 @@ import pytest
 
 from aitos.statistics.dependence import DCCGARCH, aggregate_portfolio_tail_risk
 from aitos.statistics.duration import GaussianHSMM
-from aitos.statistics.hawkes import (\n    MarkedHawkesOnlineFilter,\n    fit_marked_hawkes_mle,\n)
+from aitos.statistics.hawkes import (
+    MarkedHawkesOnlineFilter,
+    fit_marked_hawkes_mle,
+)
 from aitos.statistics.replay import BookSnapshot, replay_historical_order
 
 
