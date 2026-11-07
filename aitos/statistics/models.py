@@ -296,7 +296,9 @@ class AStatResult:
             not math.isfinite(float(self.upside_expected_shortfall))
             or self.upside_expected_shortfall < 0
         ):
-            raise ValueError("upside_expected_shortfall must be finite and non-negative")
+            raise ValueError(
+                "upside_expected_shortfall must be finite and non-negative"
+            )
 
     def for_strategy(self, strategy_id: str) -> StrategyStatContext:
         return StrategyStatContext(
