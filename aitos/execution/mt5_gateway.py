@@ -55,7 +55,7 @@ class MT5GatewayOrderExecutor(OrderExecutor):
                     raise MT5GatewayError(f"MT5 gateway {response.status}: {body}")
                 filled_quantity = float(body["filled_quantity"])
                 accepted = bool(body.get("success", True))
-                reported_price = float(body["fill_price"])
+                reported_price = float(body.get("fill_price", 0.0) or 0.0)
                 fill_price = (
                     reported_price if reported_price > 0.0 else request.reference_price
                 )
@@ -67,7 +67,7 @@ class MT5GatewayOrderExecutor(OrderExecutor):
                     side=request.side,
                     filled_quantity=filled_quantity,
                     fill_price=fill_price,
-                    success=accepted and filled and fill_price > 0.0,
+                    success=filled and fill_price > 0.0,
                     error=(
                         body.get("error")
                         or (
@@ -75,7 +75,7 @@ class MT5GatewayOrderExecutor(OrderExecutor):
                             if price_fallback
                             else (
                                 None
-                                if accepted and filled and fill_price > 0.0
+                                if filled and fill_price > 0.0
                                 else "MT5 gateway returned no confirmed execution fill"
                             )
                         )
