@@ -19,11 +19,17 @@ def brier_score(probabilities: Iterable[float], outcomes: Iterable[int]) -> floa
         raise ValueError("probabilities and outcomes must have equal non-zero length")
     if any(int(y) not in (0, 1) for y in ys):
         raise ValueError("outcomes must be binary")
-    return sum((_probability(p) - int(y)) ** 2 for p, y in zip(ps, ys)) / len(ps)
+    return sum(
+        (_probability(p) - int(y)) ** 2 for p, y in zip(ps, ys)
+    ) / len(ps)
 
 
-def log_loss(probabilities: Iterable[float], outcomes: Iterable[int],
-             *, epsilon: float = 1e-15) -> float:
+def log_loss(
+    probabilities: Iterable[float],
+    outcomes: Iterable[int],
+    *,
+    epsilon: float = 1e-15,
+) -> float:
     ps, ys = tuple(probabilities), tuple(outcomes)
     if not ps or len(ps) != len(ys) or not 0 < epsilon < 0.5:
         raise ValueError("invalid inputs")
@@ -36,8 +42,9 @@ def log_loss(probabilities: Iterable[float], outcomes: Iterable[int],
     return loss / len(ps)
 
 
-def qlike_loss(forecast_variance: Iterable[float],
-               realised_proxy: Iterable[float]) -> float:
+def qlike_loss(
+    forecast_variance: Iterable[float], realised_proxy: Iterable[float]
+) -> float:
     forecasts, realised = tuple(forecast_variance), tuple(realised_proxy)
     if not forecasts or len(forecasts) != len(realised):
         raise ValueError("forecast and realised arrays must have equal non-zero length")
@@ -59,10 +66,14 @@ class TimeSeriesFold:
     test_indices: tuple[int, ...]
 
 
-def purged_walk_forward_folds(length: int, *, n_splits: int = 5,
-                              test_size: int | None = None,
-                              label_horizon: int = 1,
-                              embargo: int = 0) -> tuple[TimeSeriesFold, ...]:
+def purged_walk_forward_folds(
+    length: int,
+    *,
+    n_splits: int = 5,
+    test_size: int | None = None,
+    label_horizon: int = 1,
+    embargo: int = 0,
+) -> tuple[TimeSeriesFold, ...]:
     """Expanding-window folds with a conservative pre-test purge gap.
 
     Indices are positional. For each test block, training is strictly earlier;
@@ -87,7 +98,6 @@ def purged_walk_forward_folds(length: int, *, n_splits: int = 5,
             continue
         folds.append(TimeSeriesFold(train, tuple(range(start, end))))
     return tuple(folds)
-
 
 
 @dataclass(frozen=True)
