@@ -1714,6 +1714,39 @@ class TradeLifecycle(AITOSModule):
             return await self._reject(
                 opportunity, f"order submission failed: {order_result.error}"
             )
+        if (
+            not math.isfinite(order_result.filled_quantity)
+            or order_result.filled_quantity <= 0.0
+            or not _valid_market_price(order_result.fill_price)
+        ):
+            return await self._reject(
+                opportunity,
+                "order accepted without a valid confirmed fill; venue reconciliation required",
+            )
+        if order_result.filled_quantity > quantity * (1.0 + 1e-6):
+            return await self._reject(
+                opportunity,
+                "venue reported fill quantity above submitted quantity; manual reconciliation required",
+            )
+        actual_filled_notional = (
+            order_result.filled_quantity * order_result.fill_price
+        )
+        fill_ratio = actual_filled_notional / sizing.position_size_usd
+        if not math.isfinite(fill_ratio) or fill_ratio <= 0.0:
+            return await self._reject(
+                opportunity,
+                "venue fill produced an invalid actual position notional",
+            )
+        sizing = PositionSizeResult(
+            position_size_usd=actual_filled_notional,
+            leverage=sizing.leverage,
+            risk_amount_usd=round(sizing.risk_amount_usd * fill_ratio, 2),
+            rationale=(
+                f"{sizing.rationale}; reconciled to actual venue fill "
+                f"({order_result.filled_quantity:.12g} @ "
+                f"{order_result.fill_price:.12g})"
+            ),
+        )
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_ORDER_SUBMITTED,
@@ -1731,6 +1764,9 @@ class TradeLifecycle(AITOSModule):
                 payload={
                     "order_id": order_result.order_id,
                     "fill_price": order_result.fill_price,
+                    "requested_quantity": quantity,
+                    "filled_quantity": order_result.filled_quantity,
+                    "actual_filled_notional": actual_filled_notional,
                 },
                 source_module=self.module_id,
             )
