@@ -79,6 +79,11 @@ def test_shadow_ledger_rejects_conflicting_replay_and_unknown_outcome(tmp_path):
             actual_return=0.0,
             realised_variance=0.0,
         )
+    assert ledger.record_outcome(
+        "forecast-1",
+        actual_return=0.0,
+        realised_variance=0.0,
+    )
     with pytest.raises(ValueError):
         ledger.record_outcome(
             "forecast-1",
