@@ -184,18 +184,24 @@ class CTraderOrderExecutor(OrderExecutor):
             raise RuntimeError("cTrader execution response did not contain an order")
         execution_price = float(getattr(order_result, "executionPrice", 0.0))
         executed_volume = float(getattr(order_result, "executedVolume", 0)) / 100.0
+        fill_price = execution_price if execution_price > 0.0 else request.reference_price
+        price_fallback = execution_price <= 0.0 and executed_volume > 0.0
         return OrderResult(
             order_id=str(getattr(order_result, "orderId", "")),
             symbol=request.symbol,
             side=request.side,
             filled_quantity=executed_volume,
-            fill_price=execution_price,
+            fill_price=fill_price,
             filled_at=datetime.now(timezone.utc).isoformat(),
-            success=executed_volume > 0.0,
+            success=executed_volume > 0.0 and fill_price > 0.0,
             error=(
-                None
-                if executed_volume > 0.0
-                else "cTrader accepted the request without a confirmed execution fill"
+                "cTrader fill price missing; reference-price fallback requires reconciliation"
+                if price_fallback
+                else (
+                    None
+                    if executed_volume > 0.0 and fill_price > 0.0
+                    else "cTrader accepted the request without a confirmed execution fill"
+                )
             ),
         )
 
