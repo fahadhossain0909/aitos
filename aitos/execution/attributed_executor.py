@@ -54,7 +54,9 @@ class AttributedOrderExecutor(OrderExecutor):
         self.delegate = delegate
         self.ledger = ledger
         self.context_resolver = context_resolver
-        self._order_contexts: dict[str, tuple[OrderRequest, OrderAttributionContext]] = {}
+        self._order_contexts: dict[
+            str, tuple[OrderRequest, OrderAttributionContext]
+        ] = {}
 
     @property
     def supports_exchange_side_stops(self) -> bool:

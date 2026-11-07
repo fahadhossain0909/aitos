@@ -62,7 +62,6 @@ def test_promotion_policy_and_evidence_reject_invalid_metrics():
         evaluate_promotion(valid_evidence(brier=float("nan")))
 
 
-
 def test_promotion_fails_closed_without_selection_diagnostics():
     evidence = valid_evidence(
         dsr_probability=None,

@@ -196,19 +196,13 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 response = await self.cancel_order(request.symbol, order_id)
                 status = response.get("status", status)
                 filled_qty = float(response.get("executedQty", filled_qty) or 0.0)
-                avg_price = (
-                    float(response.get("avgPrice", 0.0) or 0.0) or avg_price
-                )
+                avg_price = float(response.get("avgPrice", 0.0) or 0.0) or avg_price
             except Exception as cancel_error:
                 try:
                     response = await self.get_order_status(request.symbol, order_id)
                     status = response.get("status", status)
-                    filled_qty = float(
-                        response.get("executedQty", filled_qty) or 0.0
-                    )
-                    avg_price = (
-                        float(response.get("avgPrice", 0.0) or 0.0) or avg_price
-                    )
+                    filled_qty = float(response.get("executedQty", filled_qty) or 0.0)
+                    avg_price = float(response.get("avgPrice", 0.0) or 0.0) or avg_price
                 except Exception as exc:
                     reconciliation_error = (
                         "order state is ambiguous after cancel attempt; "

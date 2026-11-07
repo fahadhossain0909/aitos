@@ -630,7 +630,6 @@ def _order_request(side=TradeSide.LONG, quantity=1.0):
     )
 
 
-
 @pytest.mark.asyncio
 async def test_new_order_is_accepted_without_falsely_reporting_a_full_fill():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")

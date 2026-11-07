@@ -1729,9 +1729,7 @@ class TradeLifecycle(AITOSModule):
                 opportunity,
                 "venue reported fill quantity above submitted quantity; manual reconciliation required",
             )
-        actual_filled_notional = (
-            order_result.filled_quantity * order_result.fill_price
-        )
+        actual_filled_notional = order_result.filled_quantity * order_result.fill_price
         fill_ratio = actual_filled_notional / sizing.position_size_usd
         if not math.isfinite(fill_ratio) or fill_ratio <= 0.0:
             return await self._reject(

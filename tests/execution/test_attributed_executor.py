@@ -92,7 +92,6 @@ async def test_attributed_executor_records_rejection_and_execution_failure(tmp_p
     assert all(not row["accepted"] for row in rows)
 
 
-
 @pytest.mark.asyncio
 async def test_attribution_decorator_wraps_binance_testnet_adapter(tmp_path):
     ledger = DecisionOutcomeLedger(tmp_path / "binance-decisions.sqlite3")
@@ -183,7 +182,6 @@ async def test_attribution_decorator_wraps_ctrader_executor_contract(tmp_path):
     assert rows[0]["payload"]["venue_order_id"] == "ctrader-91"
 
 
-
 class _RaisingExecutor(OrderExecutor):
     async def submit_order(self, request):
         raise TimeoutError("venue response timed out")
@@ -217,7 +215,9 @@ class _BrokenLedger:
 
 @pytest.mark.asyncio
 async def test_attributed_executor_exposes_venue_result_when_ledger_persistence_fails():
-    executor = AttributedOrderExecutor(SimulatedOrderExecutor(), _BrokenLedger(), _context)
+    executor = AttributedOrderExecutor(
+        SimulatedOrderExecutor(), _BrokenLedger(), _context
+    )
     with pytest.raises(AttributionPersistenceError) as error:
         await executor.submit_order(
             OrderRequest(
@@ -231,7 +231,6 @@ async def test_attributed_executor_exposes_venue_result_when_ledger_persistence_
     assert error.value.may_have_executed
     assert error.value.order_result.success
     assert error.value.order_result.order_id.startswith("sim-")
-
 
 
 class _ManagedSimulatedExecutor(SimulatedOrderExecutor):
@@ -262,7 +261,6 @@ async def test_attributed_executor_records_resting_order_cancellation(tmp_path):
     assert adapter.cancelled_order == ("BTCUSDT", result.order_id)
     assert {row["decision_type"] for row in rows} == {"ENTRY", "MANAGE"}
     assert any(row["payload"].get("action") == "CANCEL" for row in rows)
-
 
 
 @pytest.mark.asyncio

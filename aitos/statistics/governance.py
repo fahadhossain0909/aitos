@@ -34,7 +34,10 @@ class PromotionPolicy:
         )
         if any(not math.isfinite(value) or value < 0 for value in limits):
             raise ValueError("promotion limits must be finite and non-negative")
-        if not 0.0 <= self.min_dsr_probability <= 1.0 or not 0.0 <= self.max_selection_p_value <= 1.0:
+        if (
+            not 0.0 <= self.min_dsr_probability <= 1.0
+            or not 0.0 <= self.max_selection_p_value <= 1.0
+        ):
             raise ValueError("selection probability limits must be in [0, 1]")
         if self.max_pbo > 1.0 or self.max_brier > 1.0:
             raise ValueError("max_pbo and max_brier must be in [0, 1]")
@@ -115,7 +118,9 @@ def evaluate_promotion(
         evidence.multiple_testing_adjusted_p_value,
     )
     if policy.require_selection_diagnostics:
-        if evidence.mcs_included is None or any(value is None for value in selection_values):
+        if evidence.mcs_included is None or any(
+            value is None for value in selection_values
+        ):
             reasons.append("missing_multiple_testing_aware_selection_evidence")
         else:
             if not 0.0 <= evidence.dsr_probability <= 1.0:
@@ -131,7 +136,10 @@ def evaluate_promotion(
                 reasons.append("white_reality_check_not_significant")
             if evidence.dm_p_value > policy.max_selection_p_value:
                 reasons.append("diebold_mariano_not_significant")
-            if evidence.multiple_testing_adjusted_p_value > policy.max_selection_p_value:
+            if (
+                evidence.multiple_testing_adjusted_p_value
+                > policy.max_selection_p_value
+            ):
                 reasons.append("multiple_testing_adjusted_p_value_above_limit")
     if evidence.observations < policy.min_observations:
         reasons.append("insufficient_out_of_sample_observations")

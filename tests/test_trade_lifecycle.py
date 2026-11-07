@@ -879,7 +879,6 @@ async def test_statistical_shadow_ledger_resolves_trade_outcome(
     assert resolved.brier == pytest.approx(0.04)
 
 
-
 class _PartialFillExecutor(OrderExecutor):
     def __init__(self, fraction=0.4, fill_price_multiplier=1.001):
         self.fraction = fraction
