@@ -628,3 +628,25 @@ def _order_request(side=TradeSide.LONG, quantity=1.0):
     return OrderRequest(
         symbol="BTCUSDT", side=side, quantity=quantity, reference_price=100.0
     )
+
+
+
+@pytest.mark.asyncio
+async def test_new_order_is_accepted_without_falsely_reporting_a_full_fill():
+    executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
+    await executor.connect()
+    with aioresponses() as mocked:
+        mocked.post(
+            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+            payload={
+                "orderId": 123,
+                "status": "NEW",
+                "executedQty": "0",
+                "avgPrice": "0",
+            },
+        )
+        result = await executor.submit_order(_order_request(quantity=2.0))
+    assert result.success is True
+    assert result.filled_quantity == 0.0
+    assert result.fill_price == 100.0
+    await executor.close()
