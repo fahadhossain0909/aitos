@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import random
+from bisect import bisect_right
 from dataclasses import dataclass
 from statistics import mean
 from typing import Iterable, Sequence
@@ -237,4 +239,200 @@ def expected_calibration_error(
         )
         for bucket in bins
         if bucket
+    )
+
+
+
+@dataclass(frozen=True)
+class BootstrapInterval:
+    """Paired block-bootstrap confidence interval for mean return improvement."""
+
+    estimate: float
+    lower: float
+    upper: float
+    confidence: float
+    resamples: int
+    block_length: int
+    sample_count: int
+
+
+def _linear_quantile(values: Sequence[float], probability: float) -> float:
+    ordered = sorted(values)
+    position = probability * (len(ordered) - 1)
+    lower_index = int(position)
+    upper_index = min(lower_index + 1, len(ordered) - 1)
+    fraction = position - lower_index
+    return ordered[lower_index] + fraction * (
+        ordered[upper_index] - ordered[lower_index]
+    )
+
+
+def paired_block_bootstrap_difference(
+    candidate_returns: Iterable[float],
+    incumbent_returns: Iterable[float],
+    *,
+    block_length: int = 5,
+    n_resamples: int = 2000,
+    confidence: float = 0.95,
+    seed: int = 0,
+) -> BootstrapInterval:
+    """Estimate candidate-minus-incumbent OOS return using paired time blocks.
+
+    Resampling paired differences in contiguous blocks preserves short-range
+    serial dependence better than an IID bootstrap. It does not correct
+    strategy-selection bias; use purged folds/PBO and a truly untouched OOS
+    period before feeding the lower bound into model-promotion governance.
+    """
+    candidate = tuple(float(value) for value in candidate_returns)
+    incumbent = tuple(float(value) for value in incumbent_returns)
+    if not candidate or len(candidate) != len(incumbent):
+        raise ValueError("paired return samples must be non-empty and equal length")
+    if any(
+        not math.isfinite(value) for value in (*candidate, *incumbent)
+    ):
+        raise ValueError("paired return samples must be finite")
+    if block_length <= 0 or block_length > len(candidate):
+        raise ValueError("block_length must be in [1, sample_count]")
+    if n_resamples < 100:
+        raise ValueError("n_resamples must be at least 100")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be in (0, 1)")
+    differences = tuple(a - b for a, b in zip(candidate, incumbent))
+    estimate = mean(differences)
+    rng = random.Random(seed)
+    block_count = math.ceil(len(differences) / block_length)
+    samples = []
+    max_start = len(differences) - block_length
+    for _ in range(n_resamples):
+        resampled = []
+        for _ in range(block_count):
+            start = rng.randrange(max_start + 1)
+            resampled.extend(differences[start : start + block_length])
+        samples.append(mean(resampled[: len(differences)]))
+    tail_probability = (1.0 - confidence) / 2.0
+    return BootstrapInterval(
+        estimate=estimate,
+        lower=_linear_quantile(samples, tail_probability),
+        upper=_linear_quantile(samples, 1.0 - tail_probability),
+        confidence=confidence,
+        resamples=n_resamples,
+        block_length=block_length,
+        sample_count=len(differences),
+    )
+
+
+@dataclass(frozen=True)
+class FeatureDriftResult:
+    feature: str
+    psi: float
+    threshold: float
+    drifted: bool
+    reference_count: int
+    current_count: int
+
+
+@dataclass(frozen=True)
+class DriftReport:
+    features: tuple[FeatureDriftResult, ...]
+    max_psi: float
+    drifted_features: tuple[str, ...]
+
+    @property
+    def drifted(self) -> bool:
+        return bool(self.drifted_features)
+
+
+def population_stability_index(
+    reference: Iterable[float],
+    current: Iterable[float],
+    *,
+    bins: int = 10,
+    epsilon: float = 1e-6,
+) -> float:
+    """Compute PSI using reference-quantile bins with smoothed proportions."""
+    reference_values = tuple(float(value) for value in reference)
+    current_values = tuple(float(value) for value in current)
+    if not reference_values or not current_values:
+        raise ValueError("reference and current samples must be non-empty")
+    if any(
+        not math.isfinite(value)
+        for value in (*reference_values, *current_values)
+    ):
+        raise ValueError("drift samples must be finite")
+    if bins < 2:
+        raise ValueError("bins must be at least 2")
+    if not math.isfinite(epsilon) or not 0.0 < epsilon < 0.1:
+        raise ValueError("epsilon must be finite and in (0, 0.1)")
+    ordered = sorted(reference_values)
+    edges = sorted(
+        {
+            ordered[min(len(ordered) - 1, math.ceil(i * len(ordered) / bins) - 1)]
+            for i in range(1, bins)
+        }
+    )
+    if len(edges) == 1:
+        center = edges[0]
+        width = max(abs(center) * 1e-6, 1e-6)
+        edges = [center - width, center + width]
+    bucket_count = len(edges) + 1
+    reference_counts = [0] * bucket_count
+    current_counts = [0] * bucket_count
+    for value in reference_values:
+        reference_counts[bisect_right(edges, value)] += 1
+    for value in current_values:
+        current_counts[bisect_right(edges, value)] += 1
+    reference_total = len(reference_values)
+    current_total = len(current_values)
+    reference_proportions = [
+        max(epsilon, count / reference_total) for count in reference_counts
+    ]
+    current_proportions = [
+        max(epsilon, count / current_total) for count in current_counts
+    ]
+    reference_norm = sum(reference_proportions)
+    current_norm = sum(current_proportions)
+    reference_proportions = [p / reference_norm for p in reference_proportions]
+    current_proportions = [p / current_norm for p in current_proportions]
+    return sum(
+        (current_p - reference_p) * math.log(current_p / reference_p)
+        for reference_p, current_p in zip(
+            reference_proportions, current_proportions
+        )
+    )
+
+
+def assess_feature_drift(
+    reference: Mapping[str, Iterable[float]],
+    current: Mapping[str, Iterable[float]],
+    *,
+    threshold: float = 0.2,
+    bins: int = 10,
+) -> DriftReport:
+    """Return per-feature PSI and a max-PSI drift score."""
+    if not reference or set(reference) != set(current):
+        raise ValueError("reference and current feature names must match")
+    if not math.isfinite(threshold) or threshold <= 0:
+        raise ValueError("drift threshold must be finite and positive")
+    results = []
+    for feature in sorted(reference):
+        reference_values = tuple(reference[feature])
+        current_values = tuple(current[feature])
+        psi = population_stability_index(
+            reference_values, current_values, bins=bins
+        )
+        results.append(
+            FeatureDriftResult(
+                feature=feature,
+                psi=psi,
+                threshold=threshold,
+                drifted=psi >= threshold,
+                reference_count=len(reference_values),
+                current_count=len(current_values),
+            )
+        )
+    ordered = tuple(sorted(results, key=lambda item: item.psi, reverse=True))
+    return DriftReport(
+        features=ordered,
+        max_psi=max(item.psi for item in ordered),
+        drifted_features=tuple(item.feature for item in ordered if item.drifted),
     )
