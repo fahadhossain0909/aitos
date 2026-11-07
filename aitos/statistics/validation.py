@@ -428,7 +428,6 @@ def assess_feature_drift(
     )
 
 
-
 @dataclass(frozen=True)
 class ExecutionCostScenario:
     cost_multiplier: float
