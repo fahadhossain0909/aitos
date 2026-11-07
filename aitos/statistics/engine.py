@@ -16,6 +16,7 @@ from .models import (
 )
 from .stack import ContractStatisticalStack
 from .governance_runtime import DriftMonitorScheduler, StatisticalGovernanceRuntime
+from .hawkes import HawkesMLEFit, MarkedHawkesOnlineFilter
 
 
 class AStatEngine:
@@ -50,6 +51,21 @@ class AStatEngine:
         self._drift_monitor_task: asyncio.Task | None = None
         self._drift_monitor_stop: asyncio.Event | None = None
         self._drift_monitor_scheduler: DriftMonitorScheduler | None = None
+        self._hawkes_filters: dict[str, MarkedHawkesOnlineFilter] = {}
+
+    def register_hawkes_model(self, symbol: str, fit: HawkesMLEFit) -> None:
+        """Install a previously fitted marked-Hawkes model for live event updates."""
+        normalized = symbol.strip().upper()
+        if not normalized:
+            raise ValueError("symbol is required for Hawkes event registration")
+        self._hawkes_filters[normalized] = MarkedHawkesOnlineFilter(fit)
+
+    def observe_marked_event(self, symbol: str, timestamp: float, mark: int):
+        """Update the registered online Hawkes filter from a live event consumer."""
+        normalized = symbol.strip().upper()
+        if normalized not in self._hawkes_filters:
+            raise KeyError(f"no fitted Hawkes model registered for {normalized}")
+        return self._hawkes_filters[normalized].observe(timestamp, mark)
 
     async def start_drift_monitor(
         self,
