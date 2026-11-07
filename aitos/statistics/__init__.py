@@ -25,6 +25,7 @@ from .replay import (
 )
 from .engine import AStatEngine
 from .ensemble import EnsembleForecast, ForecastMember, combine_forecasts
+from .governance_runtime import DriftAction, StatisticalGovernanceRuntime
 from .governance import (
     PromotionDecision,
     PromotionEvidence,
@@ -99,6 +100,8 @@ from .validation import (
 
 __all__ = [
     "BOCPDResult",
+    "DriftAction",
+    "StatisticalGovernanceRuntime",
     "DCCForecast",
     "DCCGARCH",
     "PortfolioTailRisk",
