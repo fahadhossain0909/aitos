@@ -13,6 +13,7 @@ from .advanced_models import (
     bocpd_change_point,
     fit_har_rv_forecast,
 )
+from .contracts import FeatureSnapshot, ForecastEnvelope
 from .engine import AStatEngine
 from .evt import POTGPD
 from .garch import GARCH11
@@ -65,6 +66,8 @@ __all__ = [
     "HARForecast",
     "bocpd_change_point",
     "fit_har_rv_forecast",
+    "FeatureSnapshot",
+    "ForecastEnvelope",
     "GARCH11",
     "ChangePointDiagnostic",
     "DistributionFeatures",
