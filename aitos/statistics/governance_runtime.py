@@ -1,4 +1,5 @@
 """Opt-in live drift and champion/challenger governance controller."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -79,12 +80,14 @@ class StatisticalGovernanceRuntime:
         self._last_drift = action
         return action
 
-    def evaluate_challenger(
-        self, evidence: PromotionEvidence
-    ) -> PromotionDecision:
+    def evaluate_challenger(self, evidence: PromotionEvidence) -> PromotionDecision:
         decision = evaluate_promotion(evidence, self.policy)
         if self._last_drift is not None and self._last_drift.promotion_blocked:
-            reasons = tuple(dict.fromkeys(decision.reasons + ("live_feature_drift_blocks_promotion",)))
+            reasons = tuple(
+                dict.fromkeys(
+                    decision.reasons + ("live_feature_drift_blocks_promotion",)
+                )
+            )
             return PromotionDecision(False, reasons)
         return decision
 
@@ -98,7 +101,11 @@ class StatisticalGovernanceRuntime:
         approved = bool(operator_approved and evidence.operator_approved)
         candidate = replace(evidence, operator_approved=approved)
         decision = self.evaluate_challenger(candidate)
-        if not decision.eligible and self._last_drift is not None and self._last_drift.promotion_blocked:
+        if (
+            not decision.eligible
+            and self._last_drift is not None
+            and self._last_drift.promotion_blocked
+        ):
             candidate = replace(
                 candidate,
                 drift_score=max(
