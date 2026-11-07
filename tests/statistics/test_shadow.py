@@ -1,3 +1,6 @@
+import sqlite3
+from concurrent.futures import ProcessPoolExecutor
+
 import pytest
 
 from aitos.statistics.contracts import FeatureSnapshot, ForecastEnvelope
@@ -144,3 +147,97 @@ def test_shadow_ledger_persists_matching_feature_snapshot(tmp_path):
                 sample_count=envelope.sample_count,
             ),
         )
+
+
+
+def _record_forecast_worker(args):
+    database_path, forecast_id = args
+    worker_ledger = StatisticalShadowLedger(
+        database_path, busy_timeout_ms=10000
+    )
+    return worker_ledger.record_forecast(
+        forecast_id,
+        make_envelope(),
+        predicted_up=0.7,
+        predicted_variance=0.0001,
+    )
+
+
+def test_shadow_ledger_is_idempotent_under_multiprocess_writes(tmp_path):
+    database_path = str(tmp_path / "concurrent-shadow.sqlite3")
+    ledger = StatisticalShadowLedger(database_path, busy_timeout_ms=10000)
+    with ProcessPoolExecutor(max_workers=4) as executor:
+        results = list(
+            executor.map(
+                _record_forecast_worker,
+                [(database_path, "shared-forecast") for _ in range(8)],
+            )
+        )
+    assert sum(results) == 1
+    assert ledger.get_forecast("shared-forecast") is not None
+
+
+def test_shadow_ledger_migrates_legacy_schema(tmp_path):
+    database_path = tmp_path / "legacy-shadow.sqlite3"
+    connection = sqlite3.connect(database_path)
+    connection.execute(
+        """
+        CREATE TABLE statistical_shadow_forecasts (
+            forecast_id TEXT PRIMARY KEY,
+            symbol TEXT NOT NULL,
+            horizon TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            model_version TEXT NOT NULL,
+            as_of TEXT NOT NULL,
+            feature_snapshot_id TEXT NOT NULL,
+            predicted_up REAL NOT NULL,
+            predicted_variance REAL NOT NULL,
+            expected_return REAL NOT NULL,
+            actual_return REAL,
+            realised_variance REAL,
+            created_at TEXT NOT NULL,
+            resolved_at TEXT
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    ledger = StatisticalShadowLedger(database_path)
+    record = ledger.get_forecast("missing")
+    assert record is None
+    connection = sqlite3.connect(database_path)
+    columns = {
+        row[1]
+        for row in connection.execute(
+            "PRAGMA table_info(statistical_shadow_forecasts)"
+        ).fetchall()
+    }
+    connection.close()
+    assert "side" in columns
+    assert "feature_snapshot_json" in columns
+
+
+def test_shadow_ledger_exposes_pending_records_for_reconciliation(tmp_path):
+    ledger = StatisticalShadowLedger(tmp_path / "pending-shadow.sqlite3")
+    envelope = make_envelope()
+    ledger.record_forecast(
+        "pending-forecast",
+        envelope,
+        predicted_up=0.7,
+        predicted_variance=0.0001,
+    )
+    pending = ledger.unresolved_forecasts(
+        symbol=envelope.symbol,
+        horizon=envelope.horizon,
+        side=envelope.side,
+    )
+    assert len(pending) == 1
+    assert pending[0].forecast_id == "pending-forecast"
+    assert pending[0].feature_snapshot is None
+    assert ledger.record_outcome(
+        "pending-forecast",
+        actual_return=0.01,
+        realised_variance=0.0001,
+    )
+    assert ledger.unresolved_forecasts() == ()
