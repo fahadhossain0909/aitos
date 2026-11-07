@@ -205,7 +205,8 @@ class CandidateOutcomeStore:
                     "side": row["side"],
                     "reason": row["reason"],
                     "trace_id": features.get("trace_id"),
-                    "attribution_id": features.get("attribution_id") or row["rejection_id"],
+                    "attribution_id": features.get("attribution_id")
+                    or row["rejection_id"],
                     "horizon_seconds": row["horizon_seconds"],
                     "observed_at": row["observed_at"],
                     "price": row["price"],
