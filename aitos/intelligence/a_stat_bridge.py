@@ -160,8 +160,11 @@ class AStatBridge:
                     "confidence": round(result.probability_confidence, 4),
                     "advanced_stack": result.advanced is not None,
                     "statistical_strategy_ranking": [
-                        {"strategy_id": item.strategy_id, "score": round(item.score, 4),
-                         "rationale": list(item.rationale)}
+                        {
+                            "strategy_id": item.strategy_id,
+                            "score": round(item.score, 4),
+                            "rationale": list(item.rationale),
+                        }
                         for item in strategy_scores
                     ],
                 }
