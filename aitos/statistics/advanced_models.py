@@ -191,12 +191,10 @@ def bocpd_change_point(
     cp_probability = 0.0
     for value in xs:
         growth: list[tuple[float, float, float, float, float]] = []
-        cp_mass = 0.0
         for probability, mu, kappa, alpha, beta in states:
             df = 2.0 * alpha
             scale = math.sqrt(beta * (kappa + 1.0) / (alpha * kappa))
             predictive = _student_t_density(value, mu, scale, df)
-            cp_mass += probability * predictive * hazard
             growth.append(
                 (
                     probability * predictive * (1.0 - hazard),
