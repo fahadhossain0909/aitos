@@ -15,9 +15,9 @@ degrade to the existing conservative policy, never to a permissive default.
 | 0 — Contracts and data quality | Finite chronological observations, explicit horizons, bounded windows, leakage controls and serialisable outputs | Partial: input validation and serialisable contracts exist; a common timestamped feature-store contract and live freshness enforcement remain |
 | 1 — Statistical foundations | Distribution, volatility, Bayesian, HMM, GARCH, EVT and hedge-beta estimates | Partial: existing HMM/GARCH/EVT/Bayes stack plus distribution, Kalman and fitted HAR-RV/GJR-GARCH estimators |
 | 2 — Regime and event dynamics | Regime posterior, change-point detection, duration-aware regimes, order-flow event intensity | Partial: Gaussian HMM, CUSUM, BOCPD and a discrete Hawkes-inspired proxy; HSMM and calibrated event-time Hawkes estimation remain |
-| 3 — Tail, dependence and portfolio risk | EVT severity, asymmetric volatility, cross-asset dependence, risk sizing and drawdown controls | Partial: POT-GPD, GARCH/GJR-GARCH and a conservative overlay contract; DCC-GARCH/copulas, portfolio ES aggregation and validated live sizing integration remain |
+| 3 — Tail, dependence and portfolio risk | EVT severity, asymmetric volatility, cross-asset dependence, risk sizing and drawdown controls | Partial: POT-GPD, GARCH/GJR-GARCH and a freshness-gated reduce-only scanner-to-lifecycle overlay; DCC-GARCH/copulas, portfolio ES aggregation and replay calibration remain |
 | 4 — Research validation | Purged walk-forward, CPCV, PBO, calibration, regime splits and execution-cost sensitivity | Partial: walk-forward, CPCV, Brier, log-loss, QLIKE and PBO diagnostics; full experiment ledger, bootstrap confidence intervals and end-to-end fee/funding/slippage replay remain |
-| 5 — Strategy and risk integration | Strategy-family suitability, model disagreement, risk gate integration and decision attribution | Partial: A-Stat ranking is diagnostic only; strategy execution remains in the existing StrategyEngine/Risk Engine; live statistical risk overlay is not wired |
+| 5 — Strategy and risk integration | Strategy-family suitability, model disagreement, risk gate integration and decision attribution | Partial: A-Stat ranking is diagnostic only; fresh matched statistical forecasts reduce base size before final hard-limit checks; strategy execution remains in the existing StrategyEngine/Risk Engine |
 | 6 — Shadow deployment and governance | Shadow inference, drift monitoring, model registry, champion/challenger, rollback and controlled promotion | Not complete: no production shadow rollout, durable model registry, automated drift gates or governed promotion workflow is claimed |
 
 This status table is intentionally conservative. A module existing in the
@@ -43,6 +43,9 @@ sizer, portfolio risk gate or paper-trading runtime.
   overfitting diagnostic.
 - Conservative statistical risk multiplier contract that can only reduce a
   separately calculated base size and cannot override hard limits.
+- Scanner-to-lifecycle forecast handoff with explicit symbol/timeframe/model
+  identity, sample-size and 30-second freshness checks; the risk assessment is
+  retained in the opened trade's decision metadata.
 
 ## Estimator limitations
 
@@ -82,8 +85,9 @@ walk-forward and a realistic deployment simulation.
 ## Safety
 
 No estimator in this package is evidence of profitability. No automatic
-strategy promotion or live sizing change is enabled by this PR. The risk
-overlay is a contract and must be calibrated for the same symbol and horizon.
-Hard limits, circuit breakers, liquidity checks and execution controls remain
-authoritative. Paper-runtime and historical replay evidence are required
-before any production wiring is enabled.
+strategy promotion is enabled. On this branch, a fresh, matched statistical
+forecast can only reduce the already calculated base position size; malformed,
+stale or mismatched supplied forecasts fail closed. This integration still
+requires calibration and paper-runtime/historical-replay evidence before
+production use. Hard limits, circuit breakers, liquidity checks and execution
+controls remain authoritative.
