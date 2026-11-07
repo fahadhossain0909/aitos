@@ -37,4 +37,4 @@ The following requested work remains gated on dedicated implementation and valid
 
 ## Activation
 
-Adaptive exit is enabled by default. Set adaptive_exit_enabled: false to roll back. The default guardrails now apply wherever EIE/PositionManager is enabled. The stricter live deployment should remain behind the project's paper/replay acceptance gate: verify unique-bar recovery, fees/slippage, exchange close confirmation and out-of-sample impact before enabling or relying on them in live execution.
+Adaptive exit is enabled by default. Set adaptive_exit_enabled: false to roll back. The default guardrails now apply wherever EIE/PositionManager is enabled. The paper-only six-hour backstop additionally requires a valid market mark received within the prior five minutes and persisted Trade excursion telemetry; stale or missing mark timestamps fail closed. The stricter live deployment should remain behind the project's paper/replay acceptance gate: verify unique-bar recovery, mark freshness, fees/slippage, exchange close confirmation and out-of-sample impact before enabling or relying on them in live execution.
