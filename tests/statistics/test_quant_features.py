@@ -64,19 +64,36 @@ def test_walk_forward_is_temporally_ordered_and_purged():
 
 def test_risk_overlay_only_reduces_size_and_respects_floor():
     result = assess_statistical_risk(
-        forecast_volatility=0.04, reference_volatility=0.02,
-        tail_probability=0.2, expected_shortfall=0.05,
+        forecast_volatility=0.04,
+        reference_volatility=0.02,
+        tail_probability=0.2,
+        expected_shortfall=0.05,
     )
     assert 0.2 <= result.size_multiplier <= 1.0
     assert result.size_multiplier < 1.0
     assert "elevated_tail_probability" in result.reasons
 
 
-@pytest.mark.parametrize("kwargs", [
-    {"forecast_volatility": -1, "reference_volatility": 1, "tail_probability": 0.1},
-    {"forecast_volatility": 1, "reference_volatility": 0, "tail_probability": 0.1},
-    {"forecast_volatility": 1, "reference_volatility": 1, "tail_probability": 1.1},
-])
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {
+            "forecast_volatility": -1,
+            "reference_volatility": 1,
+            "tail_probability": 0.1,
+        },
+        {
+            "forecast_volatility": 1,
+            "reference_volatility": 0,
+            "tail_probability": 0.1,
+        },
+        {
+            "forecast_volatility": 1,
+            "reference_volatility": 1,
+            "tail_probability": 1.1,
+        },
+    ],
+)
 def test_risk_overlay_rejects_invalid_inputs(kwargs):
     with pytest.raises(ValueError):
         assess_statistical_risk(**kwargs)
