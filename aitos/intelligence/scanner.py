@@ -1513,26 +1513,42 @@ class OpportunityScanner(AITOSModule):
         statistical_forecast = None
         if a_stat_result is not None and a_stat_result.advanced is not None:
             advanced = a_stat_result.advanced
+            is_long = direction == TradeSide.LONG
+            loss_tail = advanced.evt if is_long else advanced.upside_evt
             reference_variance = float(advanced.garch.long_run_variance)
             forecast_volatility = float(a_stat_result.expected_volatility)
             if (
-                isfinite(reference_variance)
+                loss_tail is not None
+                and isfinite(reference_variance)
                 and reference_variance > 0.0
                 and isfinite(forecast_volatility)
                 and forecast_volatility >= 0.0
             ):
                 statistical_forecast = {
                     "symbol": symbol,
+                    "side": direction.value,
                     "horizon": self._timeframe,
                     "model_id": "aitos-contract-statistical-stack",
                     "model_version": "1",
                     "as_of": scanned_at,
                     "sample_size": int(a_stat_result.sample_size),
+                    "predicted_up": float(
+                        a_stat_result.direction.up
+                        if is_long
+                        else a_stat_result.direction.down
+                    ),
+                    "downside_probability": float(
+                        a_stat_result.downside_probability
+                        if is_long
+                        else a_stat_result.direction.up
+                    ),
                     "forecast_volatility": forecast_volatility,
                     "reference_volatility": reference_variance**0.5,
-                    "tail_probability": float(a_stat_result.tail_loss_probability),
-                    "expected_shortfall": float(advanced.evt.expected_shortfall),
-                    "expected_return": float(a_stat_result.expected_return),
+                    "tail_probability": float(loss_tail.tail_probability),
+                    "expected_shortfall": float(loss_tail.expected_shortfall),
+                    "expected_return": float(
+                        a_stat_result.expected_return * (1.0 if is_long else -1.0)
+                    ),
                     "probability_confidence": float(
                         a_stat_result.probability_confidence
                     ),
