@@ -311,9 +311,7 @@ async def test_attribution_marks_confirmed_partial_fill_accepted_and_failure_sep
     tmp_path,
 ):
     ledger = DecisionOutcomeLedger(tmp_path / "partial-status-decisions.sqlite3")
-    executor = AttributedOrderExecutor(
-        _PartialStatusErrorExecutor(), ledger, _context
-    )
+    executor = AttributedOrderExecutor(_PartialStatusErrorExecutor(), ledger, _context)
     result = await executor.submit_order(
         OrderRequest(
             symbol="BTCUSDT",
