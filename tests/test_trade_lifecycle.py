@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -742,7 +742,11 @@ async def test_statistical_forecast_reduces_size_and_is_persisted(
         "model_id": "aitos-contract-statistical-stack",
         "model_version": "1",
         "as_of": datetime.now(timezone.utc).isoformat(),
+        "window_start": "2026-11-07T04:00:00+00:00",
+        "feature_snapshot_id": "snapshot-risk-overlay-test",
         "sample_size": 256,
+        "predicted_up": 0.8,
+        "downside_probability": 0.2,
         "forecast_volatility": 0.04,
         "reference_volatility": 0.02,
         "tail_probability": 0.20,
