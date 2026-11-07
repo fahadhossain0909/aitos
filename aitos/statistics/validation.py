@@ -558,7 +558,8 @@ def regime_symbol_validation(
                     directional_hit_rate=sum(
                         (probability >= 0.5) == bool(outcome)
                         for probability, outcome in zip(cohort_ps, cohort_ys)
-                    ) / len(indices),
+                    )
+                    / len(indices),
                     sufficiently_sampled=len(indices) >= minimum_observations,
                 )
             )
