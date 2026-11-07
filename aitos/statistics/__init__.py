@@ -23,7 +23,7 @@ from .dependence import (
 )
 from .duration import GaussianHSMM, HSMMResult
 from .hawkes import HawkesMLEFit, fit_marked_hawkes_mle
-from .replay import (
+from .selection import (\n    AdjustedPValues,\n    BootstrapTest,\n    ComparisonTest,\n    ModelConfidenceSet,\n    SharpeSignificance,\n    correct_multiple_testing,\n    deflated_sharpe_ratio,\n    diebold_mariano_test,\n    model_confidence_set,\n    probabilistic_sharpe_ratio,\n    white_reality_check,\n)\nfrom .replay import (
     BookSnapshot,
     ExecutionReplayResult,
     ReplayFill,
@@ -117,7 +117,7 @@ __all__ = [
     "HSMMResult",
     "HawkesMLEFit",
     "fit_marked_hawkes_mle",
-    "BookSnapshot",
+    "AdjustedPValues",\n    "BootstrapTest",\n    "ComparisonTest",\n    "ModelConfidenceSet",\n    "SharpeSignificance",\n    "correct_multiple_testing",\n    "deflated_sharpe_ratio",\n    "diebold_mariano_test",\n    "model_confidence_set",\n    "probabilistic_sharpe_ratio",\n    "white_reality_check",\n    "BookSnapshot",
     "ExecutionReplayResult",
     "ReplayFill",
     "replay_historical_order",
