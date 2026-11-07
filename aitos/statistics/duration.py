@@ -34,6 +34,7 @@ class HSMMResult:
     duration_probabilities: tuple[tuple[float, ...], ...]
     transition_matrix: tuple[tuple[float, ...], ...]
     observations: int
+    posterior_history: tuple[tuple[float, ...], ...] = ()
 
 
 def _logsumexp(values: Iterable[float]) -> float:
@@ -163,6 +164,7 @@ class GaussianHSMM:
         # completed segment of state s at t (exact duration probability).
         alpha = [[-math.inf] * self.states for _ in range(n + 1)]
         filtered = (0.0,) * self.states
+        posterior_history = []
         for end in range(1, n + 1):
             completed = []
             current_state_terms = [[] for _ in range(self.states)]
@@ -206,6 +208,7 @@ class GaussianHSMM:
             )
             total = sum(probabilities)
             filtered = tuple(value / total for value in probabilities)
+            posterior_history.append(filtered)
         return HSMMResult(
             filtered,
             max(range(self.states), key=filtered.__getitem__),
@@ -215,6 +218,7 @@ class GaussianHSMM:
             parameters.duration_probabilities,
             parameters.transition_matrix,
             n,
+            tuple(posterior_history),
         )
 
     def fit_filter(self, observations: Iterable[float]) -> HSMMResult:
