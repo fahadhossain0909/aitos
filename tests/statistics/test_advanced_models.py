@@ -43,7 +43,10 @@ def test_har_fallback_and_window_validation():
 
 
 def test_gjr_garch_forecast_is_positive_and_stationary():
-    values = [(-1 if i % 7 == 0 else 1) * (0.001 + (i % 5) * 0.0002) for i in range(120)]
+    values = [
+        (-1 if i % 7 == 0 else 1) * (0.001 + (i % 5) * 0.0002)
+        for i in range(120)
+    ]
     result = GJRGARCH11().fit_forecast(values)
     assert result.variance > 0.0
     assert result.volatility > 0.0
