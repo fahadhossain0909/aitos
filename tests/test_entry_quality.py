@@ -8,6 +8,7 @@ from aitos.intelligence.liquidity import (
     order_book_flow_imbalance,
 )
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
+from aitos.models.trade import TradeSide as PositionSide
 
 
 def _book(bid_price, bid_qty, ask_price, ask_qty):
@@ -48,7 +49,7 @@ def test_liquidity_composite_excludes_directional_and_sweep_risk_scores():
 
 def test_liquidity_floor_is_a_hard_entry_gate():
     result = entry_liquidity_depth_rejection(
-        direction=TradeSide.LONG,
+        direction=PositionSide.LONG,
         liquidity_quality=4.99,
         depth_analysis={"ofi_available": False},
     )
@@ -65,10 +66,10 @@ def test_cancel_pressure_veto_is_direction_aware_and_requires_fresh_depth():
         "freshness_ms": 100.0,
     }
     long_result = entry_liquidity_depth_rejection(
-        direction=TradeSide.LONG, liquidity_quality=5.0, depth_analysis=depth
+        direction=PositionSide.LONG, liquidity_quality=5.0, depth_analysis=depth
     )
     short_result = entry_liquidity_depth_rejection(
-        direction=TradeSide.SHORT, liquidity_quality=5.0, depth_analysis=depth
+        direction=PositionSide.SHORT, liquidity_quality=5.0, depth_analysis=depth
     )
     assert long_result is not None
     assert long_result[0] == "directional_cancel_pressure_too_high"
@@ -82,13 +83,13 @@ def test_short_cancel_pressure_uses_ask_side_and_stale_depth_does_not_veto():
         "ask_inferred_cancel_pressure": 0.75,
     }
     short_result = entry_liquidity_depth_rejection(
-        direction=TradeSide.SHORT, liquidity_quality=6.0, depth_analysis=depth
+        direction=PositionSide.SHORT, liquidity_quality=6.0, depth_analysis=depth
     )
     assert short_result is not None
     assert short_result[1]["cancel_pressure_side"] == "ask"
 
     stale_result = entry_liquidity_depth_rejection(
-        direction=TradeSide.LONG,
+        direction=PositionSide.LONG,
         liquidity_quality=6.0,
         depth_analysis={
             "ofi_available": False,
