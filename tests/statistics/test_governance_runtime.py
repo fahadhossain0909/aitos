@@ -62,9 +62,13 @@ def test_challenger_requires_explicit_runtime_operator_approval(tmp_path):
     )
     reference = {"volatility": [float(i) for i in range(100)]}
     runtime.observe_live_features(reference, reference)
-    blocked = runtime.promote_challenger(_evidence(approved=True), operator_approved=False)
+    blocked = runtime.promote_challenger(
+        _evidence(approved=True), operator_approved=False
+    )
     assert not blocked.eligible
     assert registry.get_champion("a-stat") is None
-    promoted = runtime.promote_challenger(_evidence(approved=True), operator_approved=True)
+    promoted = runtime.promote_challenger(
+        _evidence(approved=True), operator_approved=True
+    )
     assert promoted.eligible
     assert registry.get_champion("a-stat").model_version == "2.0.0"
