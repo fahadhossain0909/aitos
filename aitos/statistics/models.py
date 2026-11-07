@@ -210,6 +210,7 @@ class StatisticalModelResult:
     downside_probability: float
     tail_probability: float
     confidence: float
+    upside_evt: EVTTail | None = None
 
     def __post_init__(self) -> None:
         if not self.symbol:
@@ -282,6 +283,8 @@ class AStatResult:
     sample_size: int
     evidence: tuple[str, ...] = ()
     advanced: Any | None = None
+    upside_tail_probability: float = 0.0
+    upside_expected_shortfall: float | None = None
 
     def for_strategy(self, strategy_id: str) -> StrategyStatContext:
         return StrategyStatContext(
