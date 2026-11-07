@@ -215,11 +215,14 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                         f"manual venue reconciliation required: {exc}"
                     )
 
+        if status in ("NEW", "PARTIALLY_FILLED") and reconciliation_error is None:
+            reconciliation_error = (
+                "order remains open after cancellation attempt; "
+                "manual venue reconciliation required"
+            )
         success = filled_qty > 0.0
-        error = (
-            None
-            if success
-            else reconciliation_error or f"order was not filled (status: {status})"
+        error = reconciliation_error or (
+            None if success else f"order was not filled (status: {status})"
         )
         return OrderResult(
             order_id=order_id,
