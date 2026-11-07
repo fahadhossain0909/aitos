@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 
 @dataclass(frozen=True)
@@ -67,3 +69,59 @@ def assess_statistical_risk(
     return StatisticalRiskAssessment(
         multiplier, ratio, tail_probability, expected_shortfall, tuple(reasons)
     )
+
+
+
+def assess_statistical_risk_forecast(
+    forecast: Mapping[str, object],
+    *,
+    symbol: str,
+    horizon: str,
+    now: datetime | None = None,
+    max_age_seconds: float = 30.0,
+) -> StatisticalRiskAssessment:
+    """Validate a scanner forecast's identity/freshness before sizing use.
+
+    The caller must provide an explicit, timestamped forecast from the same
+    symbol and timeframe. Missing forecasts are handled by the caller; a
+    supplied but malformed, stale, or mismatched forecast fails closed.
+    """
+    if not isinstance(forecast, Mapping):
+        raise ValueError("statistical forecast must be a mapping")
+    if not math.isfinite(max_age_seconds) or max_age_seconds <= 0:
+        raise ValueError("max_age_seconds must be finite and positive")
+    if forecast.get("symbol") != symbol or forecast.get("horizon") != horizon:
+        raise ValueError("statistical forecast symbol or horizon mismatch")
+    if not forecast.get("model_id") or not forecast.get("model_version"):
+        raise ValueError("statistical forecast model identity is required")
+    try:
+        sample_size = int(forecast["sample_size"])
+        as_of_value = str(forecast["as_of"])
+        as_of = datetime.fromisoformat(as_of_value.replace("Z", "+00:00"))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("statistical forecast sample size or timestamp is invalid") from exc
+    if sample_size < 30:
+        raise ValueError("statistical forecast has insufficient observations")
+    if as_of.tzinfo is None:
+        raise ValueError("statistical forecast timestamp must be timezone-aware")
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        raise ValueError("now must be timezone-aware")
+    age = (current.astimezone(timezone.utc) - as_of.astimezone(timezone.utc)).total_seconds()
+    if age < 0:
+        raise ValueError("statistical forecast timestamp is in the future")
+    if age > max_age_seconds:
+        raise ValueError("statistical forecast is stale")
+    try:
+        return assess_statistical_risk(
+            forecast_volatility=float(forecast["forecast_volatility"]),
+            reference_volatility=float(forecast["reference_volatility"]),
+            tail_probability=float(forecast["tail_probability"]),
+            expected_shortfall=(
+                None
+                if forecast.get("expected_shortfall") is None
+                else float(forecast["expected_shortfall"])
+            ),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError("statistical forecast risk metrics are invalid") from exc
