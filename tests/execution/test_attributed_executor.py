@@ -293,7 +293,6 @@ async def test_ctrader_fails_closed_for_unmonitored_resting_orders():
         )
 
 
-
 class _PartialStatusErrorExecutor(OrderExecutor):
     async def submit_order(self, request):
         return OrderResult(
