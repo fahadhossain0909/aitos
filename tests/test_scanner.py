@@ -413,3 +413,41 @@ async def test_scanner_blocks_ltf_long_when_htf_is_bearish(event_bus):
     await scanner.initialize({})
     assert await scanner.scan_symbol("BTCUSDT") is None
     await scanner.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_to_opportunity_preserves_statistical_forecast_identity(event_bus):
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=FakeScannerExchange(),
+        symbols=["BTCUSDT"],
+        reference_symbol="",
+    )
+    forecast = {
+        "symbol": "BTCUSDT",
+        "horizon": "15m",
+        "side": "LONG",
+        "model_id": "aitos-contract-statistical-stack",
+        "model_version": "1",
+        "as_of": "2026-11-07T10:00:00+00:00",
+        "sample_size": 256,
+        "forecast_volatility": 0.04,
+        "reference_volatility": 0.02,
+        "tail_probability": 0.2,
+        "expected_shortfall": 0.05,
+    }
+    candidate = ScanCandidate(
+        symbol="BTCUSDT",
+        direction=TradeSide.LONG,
+        composite_score=80.0,
+        component_scores={"a_stat": 8.0},
+        component_availability={"a_stat": True},
+        rationale=["statistical forecast available"],
+        entry_price=100.0,
+        atr=1.0,
+        regime="trending",
+        statistical_forecast=forecast,
+    )
+    opportunity = scanner.to_opportunity(candidate)
+    assert opportunity.timeframe == scanner._timeframe
+    assert opportunity.agent_consensus["statistical_forecast"] == forecast

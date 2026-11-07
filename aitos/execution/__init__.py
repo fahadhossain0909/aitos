@@ -1,3 +1,8 @@
+from .attributed_executor import (
+    AttributionPersistenceError,
+    AttributedOrderExecutor,
+    OrderAttributionContext,
+)
 from .binance_executor import BinanceAPIError, BinanceFuturesOrderExecutor, round_step
 from .order_executor import (
     OrderExecutor,
@@ -7,6 +12,9 @@ from .order_executor import (
 )
 
 __all__ = [
+    "AttributionPersistenceError",
+    "AttributedOrderExecutor",
+    "OrderAttributionContext",
     "BinanceAPIError",
     "BinanceFuturesOrderExecutor",
     "OrderExecutor",

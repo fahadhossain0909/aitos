@@ -121,3 +121,49 @@ def test_bridge_updates_calibration() -> None:
     bridge.update(realised_return=-0.01, predicted_up=0.7)
     # No crash; engine holds outcomes for Brier-based calibration.
     assert bridge.engine is not None
+
+
+def test_bridge_ingests_new_closed_candles_with_fixed_length_windows() -> None:
+    bridge = AStatBridge()
+
+    def evaluate(klines):
+        return bridge.evaluate(
+            symbol="TESTUSDT",
+            direction=TradeSide.LONG,
+            klines=klines,
+            flow_score=5.0,
+            candle_cvd=5.0,
+            orderflow_vwap=0.0,
+            depth_imbalance=5.0,
+            funding_score=5.0,
+            oi_score=5.0,
+            lead_lag=5.0,
+            last_close=klines[-1].close,
+        )
+
+    initial = _klines(120)
+    _, initial_result = evaluate(initial)
+    assert initial_result is not None and initial_result.advanced is not None
+    history = bridge.engine._stack._returns["TESTUSDT"]
+    assert len(history) == 119
+
+    # Re-scanning the same closed candle must reuse history without duplicating it.
+    _, repeated_result = evaluate(initial)
+    assert repeated_result is not None and repeated_result.advanced is not None
+    assert len(history) == 119
+
+    # The exchange returns a fixed-size rolling window; its length is unchanged
+    # even though one new closed candle has arrived.
+    updated = _klines(121)[1:]
+    assert len(updated) == len(initial)
+    _, updated_result = evaluate(updated)
+    assert updated_result is not None and updated_result.advanced is not None
+    assert len(history) == 120
+
+    # A repeated scan of the updated window is idempotent as well.
+    _, repeated_updated_result = evaluate(updated)
+    assert (
+        repeated_updated_result is not None
+        and repeated_updated_result.advanced is not None
+    )
+    assert len(history) == 120

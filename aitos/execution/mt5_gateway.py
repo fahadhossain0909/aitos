@@ -30,6 +30,11 @@ class MT5GatewayOrderExecutor(OrderExecutor):
         self._session_factory = session_factory
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
+        if request.order_type != "MARKET":
+            raise ValueError(
+                "MT5 gateway resting orders are disabled until status polling "
+                "and cancellation are part of the execution lifecycle"
+            )
         payload = {
             "symbol": request.symbol,
             "side": request.side.value,
@@ -48,14 +53,37 @@ class MT5GatewayOrderExecutor(OrderExecutor):
                 body = await response.json(content_type=None)
                 if response.status >= 400:
                     raise MT5GatewayError(f"MT5 gateway {response.status}: {body}")
+                filled_quantity = float(body["filled_quantity"])
+                accepted = bool(body.get("success", True))
+                reported_price = float(body.get("fill_price", 0.0) or 0.0)
+                fill_price = (
+                    reported_price if reported_price > 0.0 else request.reference_price
+                )
+                filled = filled_quantity > 0.0
+                price_fallback = filled and reported_price <= 0.0
                 return OrderResult(
                     order_id=str(body["order_id"]),
                     symbol=request.symbol,
                     side=request.side,
-                    filled_quantity=float(body["filled_quantity"]),
-                    fill_price=float(body["fill_price"]),
-                    success=bool(body.get("success", True)),
-                    error=body.get("error"),
+                    filled_quantity=filled_quantity,
+                    fill_price=fill_price,
+                    success=filled and fill_price > 0.0,
+                    error=(
+                        body.get("error")
+                        or (
+                            "MT5 gateway reported unsuccessful status despite a confirmed fill; reconciliation required"
+                            if not accepted and filled
+                            else (
+                                "MT5 fill price missing; reference-price fallback requires reconciliation"
+                                if price_fallback
+                                else (
+                                    None
+                                    if filled and fill_price > 0.0
+                                    else "MT5 gateway returned no confirmed execution fill"
+                                )
+                            )
+                        )
+                    ),
                 )
 
     async def account(self) -> dict:

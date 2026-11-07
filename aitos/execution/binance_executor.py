@@ -180,25 +180,53 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 error=str(exc),
             )
 
+        order_id = str(response.get("orderId", client_order_id))
         filled_qty = float(response.get("executedQty", 0.0) or 0.0)
         avg_price = (
             float(response.get("avgPrice", 0.0) or 0.0) or request.reference_price
         )
         status = response.get("status", "UNKNOWN")
-        success = status in (
-            "FILLED",
-            "PARTIALLY_FILLED",
-            "NEW",
-        )  # NEW: accepted, fill confirmation may lag
+        reconciliation_error = None
 
+        # The lifecycle contract opens a position only from confirmed fills.
+        # This adapter has no pending-limit-order monitor, so cancel any
+        # remainder rather than returning an untracked NEW order as a fill.
+        if status in ("NEW", "PARTIALLY_FILLED"):
+            try:
+                response = await self.cancel_order(request.symbol, order_id)
+                status = response.get("status", status)
+                filled_qty = float(response.get("executedQty", filled_qty) or 0.0)
+                avg_price = float(response.get("avgPrice", 0.0) or 0.0) or avg_price
+            except Exception as cancel_error:
+                try:
+                    response = await self.get_order_status(request.symbol, order_id)
+                    status = response.get("status", status)
+                    filled_qty = float(response.get("executedQty", filled_qty) or 0.0)
+                    avg_price = float(response.get("avgPrice", 0.0) or 0.0) or avg_price
+                except Exception as exc:
+                    reconciliation_error = (
+                        "order state is ambiguous after cancel attempt; "
+                        f"cancel error={cancel_error}; status error={exc}; "
+                        "manual venue reconciliation required"
+                    )
+
+        if status in ("NEW", "PARTIALLY_FILLED") and reconciliation_error is None:
+            reconciliation_error = (
+                "order remains open after cancellation attempt; "
+                "manual venue reconciliation required"
+            )
+        success = filled_qty > 0.0
+        error = reconciliation_error or (
+            None if success else f"order was not filled (status: {status})"
+        )
         return OrderResult(
-            order_id=str(response.get("orderId", client_order_id)),
+            order_id=order_id,
             symbol=request.symbol,
             side=request.side,
-            filled_quantity=filled_qty if filled_qty > 0 else quantity,
+            filled_quantity=filled_qty,
             fill_price=avg_price,
             success=success,
-            error=None if success else f"unexpected order status: {status}",
+            error=error,
         )
 
     async def get_order_status(self, symbol: str, order_id: str) -> dict[str, Any]:
