@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 import pytest
 
 from aitos.statistics.contracts import ForecastEnvelope
@@ -33,16 +31,22 @@ def test_shadow_ledger_persists_and_resolves_forecast_idempotently(tmp_path):
         created_at="2026-11-07T10:00:00Z",
     )
     assert not ledger.record_forecast(
-        "forecast-1", make_envelope(), predicted_up=0.7,
+        "forecast-1",
+        make_envelope(),
+        predicted_up=0.7,
         predicted_variance=0.0001,
         created_at="2026-11-07T10:01:00Z",
     )
     assert ledger.record_outcome(
-        "forecast-1", actual_return=0.003, realised_variance=0.00012,
+        "forecast-1",
+        actual_return=0.003,
+        realised_variance=0.00012,
         resolved_at="2026-11-07T10:05:00Z",
     )
     assert not ledger.record_outcome(
-        "forecast-1", actual_return=0.003, realised_variance=0.00012,
+        "forecast-1",
+        actual_return=0.003,
+        realised_variance=0.00012,
     )
     ledger.close()
 
@@ -57,12 +61,14 @@ def test_shadow_ledger_persists_and_resolves_forecast_idempotently(tmp_path):
 def test_shadow_ledger_rejects_conflicting_replay_and_unknown_outcome(tmp_path):
     ledger = StatisticalShadowLedger(tmp_path / "shadow.sqlite3")
     ledger.record_forecast(
-        "forecast-1", make_envelope(), predicted_up=0.7,
+        "forecast-1",
+        make_envelope(),
+        predicted_up=0.7,
         predicted_variance=0.0001,
     )
     with pytest.raises(ValueError):
         ledger.record_forecast(
-                "forecast-1",
+            "forecast-1",
             make_envelope(),
             predicted_up=0.6,
             predicted_variance=0.0001,
