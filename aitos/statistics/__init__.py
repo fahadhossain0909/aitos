@@ -6,7 +6,9 @@ owning execution decisions.
 """
 
 from .advanced_models import (
-    BOCPDResult,\n    EGARCH11,\n    EGARCHForecast,
+    BOCPDResult,
+    EGARCH11,
+    EGARCHForecast,
     GJRGARCH11,
     GJRGARCHForecast,
     HARForecast,
@@ -14,7 +16,16 @@ from .advanced_models import (
     fit_har_rv_forecast,
 )
 from .contracts import FeatureSnapshot, ForecastEnvelope
-from .decision_ledger import DecisionOutcomeLedger\nfrom .depth_replay import (\n    DepthBookSnapshot,\n    DepthFill,\n    DepthReplayResult,\n    LimitQueueEvent,\n    QueueReplayResult,\n    replay_l2_market_order,\n    replay_passive_limit_queue,\n)
+from .decision_ledger import DecisionOutcomeLedger
+from .depth_replay import (
+    DepthBookSnapshot,
+    DepthFill,
+    DepthReplayResult,
+    LimitQueueEvent,
+    QueueReplayResult,
+    replay_l2_market_order,
+    replay_passive_limit_queue,
+)
 from .dependence import (
     DCCForecast,
     DCCGARCH,
@@ -22,8 +33,26 @@ from .dependence import (
     aggregate_portfolio_tail_risk,
 )
 from .duration import GaussianHSMM, HSMMParameters, HSMMResult
-from .hawkes import (\n    HawkesIntensitySnapshot,\n    HawkesMLEFit,\n    MarkedHawkesOnlineFilter,\n    fit_marked_hawkes_mle,\n)
-from .selection import (\n    AdjustedPValues,\n    BootstrapTest,\n    ComparisonTest,\n    ModelConfidenceSet,\n    SharpeSignificance,\n    correct_multiple_testing,\n    deflated_sharpe_ratio,\n    diebold_mariano_test,\n    model_confidence_set,\n    probabilistic_sharpe_ratio,\n    white_reality_check,\n)\nfrom .replay import (
+from .hawkes import (
+    HawkesIntensitySnapshot,
+    HawkesMLEFit,
+    MarkedHawkesOnlineFilter,
+    fit_marked_hawkes_mle,
+)
+from .selection import (
+    AdjustedPValues,
+    BootstrapTest,
+    ComparisonTest,
+    ModelConfidenceSet,
+    SharpeSignificance,
+    correct_multiple_testing,
+    deflated_sharpe_ratio,
+    diebold_mariano_test,
+    model_confidence_set,
+    probabilistic_sharpe_ratio,
+    white_reality_check,
+)
+from .replay import (
     BookSnapshot,
     ExecutionReplayResult,
     ReplayFill,
@@ -31,7 +60,11 @@ from .selection import (\n    AdjustedPValues,\n    BootstrapTest,\n    Comparis
 )
 from .engine import AStatEngine
 from .ensemble import EnsembleForecast, ForecastMember, combine_forecasts
-from .governance_runtime import (\n    DriftAction,\n    DriftMonitorScheduler,\n    StatisticalGovernanceRuntime,\n)
+from .governance_runtime import (
+    DriftAction,
+    DriftMonitorScheduler,
+    StatisticalGovernanceRuntime,
+)
 from .governance import (
     PromotionDecision,
     PromotionEvidence,
@@ -105,19 +138,43 @@ from .validation import (
 )
 
 __all__ = [
-    "BOCPDResult",\n    "EGARCH11",\n    "EGARCHForecast",
-    "DecisionOutcomeLedger",\n    "DepthBookSnapshot",\n    "DepthFill",\n    "DepthReplayResult",\n    "LimitQueueEvent",\n    "QueueReplayResult",\n    "replay_l2_market_order",\n    "replay_passive_limit_queue",
-    "DriftAction",\n    "DriftMonitorScheduler",
+    "BOCPDResult",
+    "EGARCH11",
+    "EGARCHForecast",
+    "DecisionOutcomeLedger",
+    "DepthBookSnapshot",
+    "DepthFill",
+    "DepthReplayResult",
+    "LimitQueueEvent",
+    "QueueReplayResult",
+    "replay_l2_market_order",
+    "replay_passive_limit_queue",
+    "DriftAction",
+    "DriftMonitorScheduler",
     "StatisticalGovernanceRuntime",
     "DCCForecast",
     "DCCGARCH",
     "PortfolioTailRisk",
     "aggregate_portfolio_tail_risk",
-    "GaussianHSMM",\n    "HSMMParameters",
+    "GaussianHSMM",
+    "HSMMParameters",
     "HSMMResult",
-    "HawkesIntensitySnapshot",\n    "HawkesMLEFit",\n    "MarkedHawkesOnlineFilter",
+    "HawkesIntensitySnapshot",
+    "HawkesMLEFit",
+    "MarkedHawkesOnlineFilter",
     "fit_marked_hawkes_mle",
-    "AdjustedPValues",\n    "BootstrapTest",\n    "ComparisonTest",\n    "ModelConfidenceSet",\n    "SharpeSignificance",\n    "correct_multiple_testing",\n    "deflated_sharpe_ratio",\n    "diebold_mariano_test",\n    "model_confidence_set",\n    "probabilistic_sharpe_ratio",\n    "white_reality_check",\n    "BookSnapshot",
+    "AdjustedPValues",
+    "BootstrapTest",
+    "ComparisonTest",
+    "ModelConfidenceSet",
+    "SharpeSignificance",
+    "correct_multiple_testing",
+    "deflated_sharpe_ratio",
+    "diebold_mariano_test",
+    "model_confidence_set",
+    "probabilistic_sharpe_ratio",
+    "white_reality_check",
+    "BookSnapshot",
     "ExecutionReplayResult",
     "ReplayFill",
     "replay_historical_order",
