@@ -6,7 +6,7 @@ owning execution decisions.
 """
 
 from .advanced_models import (
-    BOCPDResult,
+    BOCPDResult,\n    EGARCH11,\n    EGARCHForecast,
     GJRGARCH11,
     GJRGARCHForecast,
     HARForecast,
@@ -105,7 +105,7 @@ from .validation import (
 )
 
 __all__ = [
-    "BOCPDResult",
+    "BOCPDResult",\n    "EGARCH11",\n    "EGARCHForecast",
     "DecisionOutcomeLedger",\n    "DepthBookSnapshot",\n    "DepthFill",\n    "DepthReplayResult",\n    "LimitQueueEvent",\n    "QueueReplayResult",\n    "replay_l2_market_order",\n    "replay_passive_limit_queue",
     "DriftAction",
     "StatisticalGovernanceRuntime",
