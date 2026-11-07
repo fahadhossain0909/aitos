@@ -209,7 +209,12 @@ class StatisticalShadowLedger:
             connection.close()
 
     def metrics(
-        self, *, symbol: str | None = None, horizon: str | None = None
+        self,
+        *,
+        symbol: str | None = None,
+        horizon: str | None = None,
+        model_id: str | None = None,
+        model_version: str | None = None,
     ) -> ShadowMetrics:
         """Return strictly outcome-resolved shadow metrics for a cohort."""
         clauses = [
@@ -223,6 +228,12 @@ class StatisticalShadowLedger:
         if horizon is not None:
             clauses.append("horizon=?")
             parameters.append(horizon)
+        if model_id is not None:
+            clauses.append("model_id=?")
+            parameters.append(model_id)
+        if model_version is not None:
+            clauses.append("model_version=?")
+            parameters.append(model_version)
         query = (
             "SELECT predicted_up, predicted_variance, expected_return, "
             "actual_return, realised_variance FROM statistical_shadow_forecasts "
