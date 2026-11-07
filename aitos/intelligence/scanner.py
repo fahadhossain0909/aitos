@@ -254,6 +254,27 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _timestamp_iso(value: Any, fallback: str) -> str:
+    """Normalize exchange candle timestamps to timezone-aware ISO-8601."""
+    try:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, (int, float)) and isfinite(float(value)):
+            timestamp = float(value)
+            if abs(timestamp) > 100_000_000_000:
+                timestamp /= 1000.0
+            parsed = datetime.fromtimestamp(timestamp, timezone.utc)
+        elif isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            return fallback
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
+    except (OverflowError, OSError, TypeError, ValueError):
+        return fallback
+
+
 @dataclass(frozen=True)
 class ScanCandidate:
     symbol: str
@@ -1531,6 +1552,12 @@ class OpportunityScanner(AITOSModule):
                     "model_id": "aitos-contract-statistical-stack",
                     "model_version": "1",
                     "as_of": scanned_at,
+                    "window_start": _timestamp_iso(
+                        getattr(klines[0], "open_time", None), scanned_at
+                    ),
+                    "feature_snapshot_id": (
+                        f"{symbol}:{self._timeframe}:{scanned_at}"
+                    ),
                     "sample_size": int(a_stat_result.sample_size),
                     "predicted_up": float(
                         a_stat_result.direction.up
