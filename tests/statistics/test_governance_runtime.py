@@ -1,7 +1,10 @@
 import hashlib
 
 from aitos.statistics.governance import PromotionEvidence, PromotionPolicy
-from aitos.statistics.governance_runtime import (\n    DriftMonitorScheduler,\n    StatisticalGovernanceRuntime,\n)
+from aitos.statistics.governance_runtime import (
+    DriftMonitorScheduler,
+    StatisticalGovernanceRuntime,
+)
 from aitos.statistics.registry import StatisticalModelRegistry
 
 
