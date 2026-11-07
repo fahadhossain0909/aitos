@@ -25,6 +25,7 @@ from aitos.eventbus.redis_bus import EventBus
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence import indicators
 from aitos.intelligence.a_stat_bridge import AStatBridge
+from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.candidate_rotation import CandidateRotationManager
@@ -422,6 +423,9 @@ class OpportunityScanner(AITOSModule):
         self._directional_funnel = DirectionalFunnelStore(
             get_model_data_dir() / "directional_funnel.sqlite3"
         )
+        self._decision_outcome_ledger = DecisionOutcomeLedger(
+            get_model_data_dir() / "decision_outcomes.sqlite3"
+        )
         self._ranking_hysteresis = RankingHysteresis(
             margin_points=self._tuning.analysis.ranking_hysteresis_points
         )
@@ -567,6 +571,36 @@ class OpportunityScanner(AITOSModule):
                     }
                 },
             )
+        if event.get("symbol") and event.get("stage"):
+            attribution_id = trace_id or (
+                f"scan:{event['symbol']}:{time.time_ns()}"
+            )
+            try:
+                await asyncio.to_thread(
+                    self._decision_outcome_ledger.record_decision,
+                    f"{attribution_id}:{event.get('symbol')}:{event.get('side', 'UNKNOWN')}:{event['stage']}",
+                    entity_id=attribution_id,
+                    symbol=str(event["symbol"]),
+                    side=str(event.get("side") or "UNKNOWN"),
+                    decision_type="GATE",
+                    accepted=bool(event.get("accepted", False)),
+                    reason=str(event.get("reason") or event["stage"]),
+                    payload={
+                        "stage": str(event["stage"]),
+                        "details": dict(event.get("details") or {}),
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "scanner decision attribution persistence failed",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": event.get("symbol"),
+                            "stage": event.get("stage"),
+                            "trace_id": attribution_id,
+                        }
+                    },
+                )
 
     def _footprint_tick_size(self, symbol: str) -> float | None:
         tick = self._footprint_tick_sizes.get(symbol)
