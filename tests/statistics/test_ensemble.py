@@ -30,10 +30,6 @@ def test_ensemble_normalizes_weights_and_validates_members():
     with pytest.raises(ValueError):
         combine_forecasts([])
     with pytest.raises(ValueError):
-        combine_forecasts(
-            [ForecastMember("model-a", 0.0, 0.0, 0.1, 0.5)]
-        )
+        combine_forecasts([ForecastMember("model-a", 0.0, 0.0, 0.1, 0.5)])
     with pytest.raises(ValueError):
-        combine_forecasts(
-            [ForecastMember("model-a", 1.0, 0.0, -0.1, 0.5)]
-        )
+        combine_forecasts([ForecastMember("model-a", 1.0, 0.0, -0.1, 0.5)])
