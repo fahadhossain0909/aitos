@@ -99,14 +99,25 @@ class ForecastEnvelope:
     expected_shortfall: float | None = None
 
     def __post_init__(self) -> None:
-        if not all((self.symbol, self.horizon, self.model_id,
-                    self.model_version, self.feature_snapshot_id)):
+        if not all(
+            (
+                self.symbol,
+                self.horizon,
+                self.model_id,
+                self.model_version,
+                self.feature_snapshot_id,
+            )
+        ):
             raise ValueError("forecast identity fields are required")
         _utc_datetime(self.as_of, "as_of")
         if self.sample_count < 0:
             raise ValueError("sample_count must be non-negative")
-        for name in ("expected_return", "expected_volatility",
-                     "downside_probability", "tail_probability"):
+        for name in (
+            "expected_return",
+            "expected_volatility",
+            "downside_probability",
+            "tail_probability",
+        ):
             value = float(getattr(self, name))
             if not math.isfinite(value):
                 raise ValueError(f"{name} must be finite")
@@ -128,8 +139,10 @@ class ForecastEnvelope:
         current = now or datetime.now(timezone.utc)
         if current.tzinfo is None:
             raise ValueError("now must be timezone-aware")
-        age = (current.astimezone(timezone.utc)
-               - _utc_datetime(self.as_of, "as_of")).total_seconds()
+        age = (
+            current.astimezone(timezone.utc)
+            - _utc_datetime(self.as_of, "as_of")
+        ).total_seconds()
         return 0.0 <= age <= max_age_seconds
 
     def to_dict(self) -> dict[str, Any]:
