@@ -4,12 +4,8 @@ from aitos.statistics.stack import ContractStatisticalStack
 
 
 def asymmetric_returns():
-    return [
-        -0.0005 - (index % 4) * 0.0001
-        for index in range(100)
-    ] + [
-        0.004 + index * 0.0005
-        for index in range(20)
+    return [-0.0005 - (index % 4) * 0.0001 for index in range(100)] + [
+        0.004 + index * 0.0005 for index in range(20)
     ]
 
 
@@ -31,4 +27,7 @@ def test_a_stat_exposes_upside_tail_probability_for_short_risk():
     )
     assert result.advanced is not None
     assert result.upside_tail_probability > 0.0
-    assert result.upside_expected_shortfall == result.advanced.upside_evt.expected_shortfall
+    assert (
+        result.upside_expected_shortfall
+        == result.advanced.upside_evt.expected_shortfall
+    )
