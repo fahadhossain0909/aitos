@@ -105,7 +105,10 @@ async def _close_stale_positions(components) -> None:
                 mfe_r = getattr(trade, "mfe_r", None)
                 # Missing path telemetry is not proof of a flatline.
                 if (
-                    entry_price <= 0
+                    not math.isfinite(entry_price)
+                    or entry_price <= 0
+                    or not isinstance(mfe_r, (int, float))
+                    or not math.isfinite(mfe_r)
                     or not isinstance(mae_price, (int, float))
                     or not math.isfinite(mae_price)
                     or not isinstance(mfe_price, (int, float))
@@ -125,7 +128,7 @@ async def _close_stale_positions(components) -> None:
 
                 max_excursion_pct = max(float(mae_price), float(mfe_price)) / entry_price
                 current_deviation_pct = abs(float(last_price) - entry_price) / entry_price
-                progress_r = float(mfe_r or 0.0)
+                progress_r = float(mfe_r)
                 if (
                     max_excursion_pct > DEAD_CANDLE_ENTRY_BAND_PCT
                     or current_deviation_pct > DEAD_CANDLE_ENTRY_BAND_PCT
