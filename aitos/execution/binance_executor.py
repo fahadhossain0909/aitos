@@ -199,7 +199,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 avg_price = (
                     float(response.get("avgPrice", 0.0) or 0.0) or avg_price
                 )
-            except BinanceAPIError:
+            except Exception as cancel_error:
                 try:
                     response = await self.get_order_status(request.symbol, order_id)
                     status = response.get("status", status)
@@ -212,7 +212,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 except Exception as exc:
                     reconciliation_error = (
                         "order state is ambiguous after cancel attempt; "
-                        f"manual venue reconciliation required: {exc}"
+                        f"cancel error={cancel_error}; status error={exc}; "
+                        "manual venue reconciliation required"
                     )
 
         if status in ("NEW", "PARTIALLY_FILLED") and reconciliation_error is None:
