@@ -46,7 +46,9 @@ def make_components(
         sl_price=98.0,
         tp_price=104.0,
         state=TradeLifecycleState.POSITION_OPENED,
-        entry_time=(datetime.now(timezone.utc) - timedelta(hours=age_hours)).isoformat(),
+        entry_time=(
+            datetime.now(timezone.utc) - timedelta(hours=age_hours)
+        ).isoformat()
         mae_price=mae_price,
         mfe_price=mfe_price,
         mfe_r=mfe_r,
@@ -61,9 +63,7 @@ def make_components(
 async def test_dead_flatline_closes_only_at_valid_mark_after_six_hour_timeout():
     components, lifecycle = make_components(100.1, mae_price=0.1, mfe_price=0.1)
     await _close_stale_positions(components)
-    assert lifecycle.closed == [
-        ("stale-paper-trade", 100.1, "time_decay_scratch")
-    ]
+    assert lifecycle.closed == [("stale-paper-trade", 100.1, "time_decay_scratch")]
 
 
 @pytest.mark.asyncio
@@ -74,13 +74,9 @@ async def test_dead_candle_fallback_does_not_close_without_valid_mark():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "invalid_price", [None, 0.0, -1.0, float("nan"), float("inf")]
-)
+@pytest.mark.parametrize("invalid_price", [None, 0.0, -1.0, float("nan"), float("inf")])
 async def test_dead_candle_fallback_does_not_close_with_invalid_mark(invalid_price):
-    components, lifecycle = make_components(
-        invalid_price, mae_price=0.0, mfe_price=0.0
-    )
+    components, lifecycle = make_components(invalid_price, mae_price=0.0, mfe_price=0.0)
     await _close_stale_positions(components)
     assert lifecycle.closed == []
 
