@@ -70,7 +70,6 @@ def test_feature_drift_report_identifies_shifted_features():
         assess_feature_drift(reference, {"other": [1.0]})
 
 
-
 def test_execution_cost_sensitivity_includes_fees_funding_and_stress():
     from aitos.statistics.validation import execution_cost_sensitivity
 
@@ -85,8 +84,14 @@ def test_execution_cost_sensitivity_includes_fees_funding_and_stress():
     )
     assert result.base_cost_bps == pytest.approx(14.0)
     assert result.scenarios[0].net_expected_return == pytest.approx(0.0026)
-    assert result.scenarios[1].net_expected_return < result.scenarios[0].net_expected_return
-    assert result.scenarios[2].net_expected_return < result.scenarios[1].net_expected_return
+    assert (
+        result.scenarios[1].net_expected_return
+        < result.scenarios[0].net_expected_return
+    )
+    assert (
+        result.scenarios[2].net_expected_return
+        < result.scenarios[1].net_expected_return
+    )
 
 
 def test_execution_cost_sensitivity_rejects_invalid_inputs():
