@@ -40,7 +40,11 @@ from .models import (
     StrategyStatContext,
 )
 from .router import StatisticalStrategyRouter, StrategyScore, strategy_contexts
-from .shadow import ShadowMetrics, StatisticalShadowLedger
+from .shadow import (
+    ShadowForecastRecord,
+    ShadowMetrics,
+    StatisticalShadowLedger,
+)
 from .stack import ContractStatisticalStack
 from .quant_features import (
     ChangePointDiagnostic,
@@ -97,6 +101,7 @@ __all__ = [
     "PromotionPolicy",
     "evaluate_promotion",
     "ShadowMetrics",
+    "ShadowForecastRecord",
     "ModelArtifact",
     "StatisticalModelRegistry",
     "StatisticalShadowLedger",
