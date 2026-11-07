@@ -54,6 +54,7 @@ class AttributedOrderExecutor(OrderExecutor):
         self.delegate = delegate
         self.ledger = ledger
         self.context_resolver = context_resolver
+        self._order_contexts: dict[str, tuple[OrderRequest, OrderAttributionContext]] = {}
 
     @property
     def supports_exchange_side_stops(self) -> bool:
@@ -121,6 +122,7 @@ class AttributedOrderExecutor(OrderExecutor):
                 payload=payload,
                 decision_id=f"{context.decision_id}:execution-failure",
             )
+        self._order_contexts[result.order_id] = (request, context)
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
         context = self.context_resolver(request)
@@ -205,7 +207,56 @@ class AttributedOrderExecutor(OrderExecutor):
         return result
 
     async def cancel_resting_order(self, symbol: str, order_id: str) -> None:
-        await self.delegate.cancel_resting_order(symbol, order_id)
+        context_entry = self._order_contexts.get(order_id)
+        try:
+            await self.delegate.cancel_resting_order(symbol, order_id)
+        except Exception as exc:
+            if context_entry is not None:
+                request, context = context_entry
+                failure = OrderResult(
+                    order_id=order_id,
+                    symbol=symbol,
+                    side=request.side,
+                    filled_quantity=0.0,
+                    fill_price=request.reference_price,
+                    success=False,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                try:
+                    self._record_result(
+                        request, context, failure, decision_type="MANAGE"
+                    )
+                except Exception as ledger_error:
+                    raise AttributionPersistenceError(
+                        f"cancel failed and its attribution could not be persisted: {ledger_error}",
+                        failure,
+                    ) from exc
+            raise
+        if context_entry is not None:
+            request, context = context_entry
+            try:
+                self._record(
+                    context,
+                    symbol=symbol,
+                    side=request.side,
+                    decision_type="MANAGE",
+                    accepted=True,
+                    payload={"action": "CANCEL", "venue_order_id": order_id},
+                    decision_id=f"{context.decision_id}:cancel",
+                )
+            except Exception as exc:
+                result = OrderResult(
+                    order_id=order_id,
+                    symbol=symbol,
+                    side=request.side,
+                    filled_quantity=0.0,
+                    fill_price=request.reference_price,
+                    success=True,
+                )
+                raise AttributionPersistenceError(
+                    f"cancel of {order_id} succeeded but attribution persistence failed: {exc}",
+                    result,
+                ) from exc
 
     async def get_resting_order_status(self, symbol: str, order_id: str) -> str | None:
         return await self.delegate.get_resting_order_status(symbol, order_id)
