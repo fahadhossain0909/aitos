@@ -1,5 +1,6 @@
 import sqlite3
 from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context
 
 import pytest
 
@@ -163,7 +164,9 @@ def _record_forecast_worker(args):
 def test_shadow_ledger_is_idempotent_under_multiprocess_writes(tmp_path):
     database_path = str(tmp_path / "concurrent-shadow.sqlite3")
     ledger = StatisticalShadowLedger(database_path, busy_timeout_ms=10000)
-    with ProcessPoolExecutor(max_workers=4) as executor:
+    with ProcessPoolExecutor(
+        max_workers=4, mp_context=get_context("spawn")
+    ) as executor:
         results = list(
             executor.map(
                 _record_forecast_worker,
