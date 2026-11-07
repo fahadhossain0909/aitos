@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections import deque
 from collections.abc import Iterable
@@ -14,6 +15,7 @@ from .models import (
     RegimeProbability,
 )
 from .stack import ContractStatisticalStack
+from .governance_runtime import DriftMonitorScheduler, StatisticalGovernanceRuntime
 
 
 class AStatEngine:
@@ -45,6 +47,45 @@ class AStatEngine:
         self._stack = ContractStatisticalStack(
             max_history=max(1024, calibration_window * 8)
         )
+        self._drift_monitor_task: asyncio.Task | None = None
+        self._drift_monitor_stop: asyncio.Event | None = None
+        self._drift_monitor_scheduler: DriftMonitorScheduler | None = None
+
+    async def start_drift_monitor(
+        self,
+        governance_runtime: StatisticalGovernanceRuntime,
+        batch_provider,
+        *,
+        interval_seconds: float = 300.0,
+        alert_callback=None,
+    ) -> asyncio.Task:
+        """Start the opt-in drift worker under the engine's async lifecycle."""
+        if self._drift_monitor_task is not None and not self._drift_monitor_task.done():
+            raise RuntimeError("A-Stat drift monitor is already running")
+        scheduler = DriftMonitorScheduler(
+            governance_runtime,
+            interval_seconds=interval_seconds,
+            alert_callback=alert_callback,
+        )
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(
+            scheduler.run_forever(stop_event, batch_provider),
+            name="aitos-statistical-drift-monitor",
+        )
+        self._drift_monitor_scheduler = scheduler
+        self._drift_monitor_stop = stop_event
+        self._drift_monitor_task = task
+        return task
+
+    async def stop_drift_monitor(self) -> None:
+        """Cooperatively stop and await the managed drift-monitor task."""
+        if self._drift_monitor_stop is None or self._drift_monitor_task is None:
+            return
+        self._drift_monitor_stop.set()
+        await self._drift_monitor_task
+        self._drift_monitor_stop = None
+        self._drift_monitor_task = None
+        self._drift_monitor_scheduler = None
 
     def update(self, realised_return: float, predicted_up: float) -> None:
         r = float(realised_return)
