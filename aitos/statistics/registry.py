@@ -453,7 +453,11 @@ class StatisticalModelRegistry:
                 connection,
                 model_id=model_id,
                 model_version=target_version,
-                action="ROLLBACK" if target["status"] != "CHAMPION" else "ROLLBACK_NOOP",
+                action=(
+                    "ROLLBACK"
+                    if target["status"] != "CHAMPION"
+                    else "ROLLBACK_NOOP"
+                ),
                 decision=decision,
                 evidence={
                     "operator_approved": True,
