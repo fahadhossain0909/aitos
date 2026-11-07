@@ -81,7 +81,7 @@ def test_decision_ledger_validates_types_and_limits(tmp_path):
             side="LONG",
             decision_type="UNKNOWN",
             accepted=False,
-            reason="bad"
+            reason="bad",
         )
     with pytest.raises(ValueError):
         ledger.list_decisions(limit=0)
