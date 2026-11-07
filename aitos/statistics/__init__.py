@@ -15,6 +15,7 @@ from .advanced_models import (
 )
 from .contracts import FeatureSnapshot, ForecastEnvelope
 from .engine import AStatEngine
+from .ensemble import EnsembleForecast, ForecastMember, combine_forecasts
 from .governance import (
     PromotionDecision,
     PromotionEvidence,
@@ -77,6 +78,9 @@ __all__ = [
     "FeatureSnapshot",
     "ForecastEnvelope",
     "GARCH11",
+    "EnsembleForecast",
+    "ForecastMember",
+    "combine_forecasts",
     "PromotionDecision",
     "PromotionEvidence",
     "PromotionPolicy",
