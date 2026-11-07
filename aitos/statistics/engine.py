@@ -103,11 +103,12 @@ class AStatEngine:
         scale = up + down + flat
         direction = DirectionProbability(up / scale, down / scale, flat / scale)
         returns = observation.features.get("returns", ())
-        advanced = (
-            self._stack.evaluate(observation.symbol, returns)
-            if isinstance(returns, (tuple, list)) and returns
-            else None
-        )
+        advanced = None
+        if isinstance(returns, (tuple, list)):
+            if returns:
+                advanced = self._stack.evaluate(observation.symbol, returns)
+            elif self._stack.has_history(observation.symbol, minimum_observations=20):
+                advanced = self._stack.evaluate(observation.symbol)
         if advanced is not None:
             expected_return = advanced.expected_return
             volatility = advanced.garch.volatility
