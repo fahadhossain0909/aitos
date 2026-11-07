@@ -61,7 +61,7 @@ def purged_walk_forward_folds(length: int, *, n_splits: int = 5,
                               test_size: int | None = None,
                               label_horizon: int = 1,
                               embargo: int = 0) -> tuple[TimeSeriesFold, ...]:
-    """Expanding-window folds with a label-overlap purge and post-test embargo.
+    """Expanding-window folds with a conservative pre-test purge gap.
 
     Indices are positional. For each test block, training is strictly earlier;
     label_horizon removes observations whose forward label could overlap the
@@ -77,7 +77,7 @@ def purged_walk_forward_folds(length: int, *, n_splits: int = 5,
     for split in range(n_splits):
         start = first_test + split * size
         end = min(length, start + size)
-        train_end = max(0, start - label_horizon)
+        train_end = max(0, start - max(label_horizon, embargo))
         train = tuple(range(train_end))
         # Embargo is applied to the immediately following observations; these
         # are not included in this fold's training set in any case.
