@@ -582,7 +582,10 @@ def multiclass_calibration_report(
 ) -> MulticlassCalibrationReport:
     """Evaluate causal OOS multiclass posterior calibration."""
     rows = tuple(tuple(float(value) for value in row) for row in probabilities)
-    labels = tuple(int(value) for value in outcomes)
+    raw_labels = tuple(outcomes)
+    labels = tuple(int(value) for value in raw_labels)
+    if any(raw != label for raw, label in zip(raw_labels, labels)):
+        raise ValueError("outcome labels must be integers")
     if not rows or len(rows) != len(labels) or bins < 2:
         raise ValueError("probabilities/outcomes must align and bins must be >=2")
     classes = len(rows[0])
