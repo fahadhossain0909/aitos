@@ -9,6 +9,7 @@ from aitos.statistics.hawkes import (
     fit_marked_hawkes_mle,
 )
 from aitos.statistics.replay import BookSnapshot, replay_historical_order
+from aitos.statistics.validation import multiclass_calibration_report
 
 
 def test_hsmm_estimates_duration_distribution_and_normalized_posterior():
@@ -157,3 +158,29 @@ def test_hawkes_online_filter_is_causal_and_requires_monotonic_events():
     assert online.last_timestamp == 101.0
     with pytest.raises(ValueError):
         online.observe(101.0, 1)
+
+
+
+def test_hsmm_causal_oos_posterior_history_supports_multiclass_calibration():
+    training = []
+    for state, center in enumerate((-0.01, 0.0, 0.01)):
+        training.extend(
+            center + 0.0002 * math.sin(index * 0.31)
+            for index in range(100)
+        )
+    holdout = []
+    labels = []
+    for index in range(90):
+        state = (index // 10) % 3
+        center = (-0.01, 0.0, 0.01)[state]
+        holdout.append(center + 0.0002 * math.cos(index * 0.27))
+        labels.append(state)
+    estimator = GaussianHSMM(states=3, max_duration=40)
+    parameters = estimator.fit(training)
+    filtered = estimator.filter(holdout, parameters)
+    report = multiclass_calibration_report(filtered.posterior_history, labels)
+    assert report.observations == len(holdout)
+    assert report.classes == 3
+    assert 0.0 <= report.brier_score <= 2.0
+    assert report.log_loss >= 0.0
+    assert 0.0 <= report.expected_calibration_error <= 1.0
