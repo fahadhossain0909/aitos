@@ -1434,7 +1434,7 @@ class TradeLifecycle(AITOSModule):
                 statistical_risk_assessment = assess_statistical_risk_forecast(
                     statistical_forecast,
                     symbol=opportunity.symbol,
-                    horizon=str(statistical_forecast.get("horizon", "")),
+                    horizon=opportunity.timeframe,
                 )
             except (TypeError, ValueError) as exc:
                 return await self._reject(
