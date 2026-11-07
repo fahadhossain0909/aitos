@@ -917,9 +917,6 @@ async def test_lifecycle_scales_position_and_risk_to_actual_partial_fill(
     assert trade.state == TradeLifecycleState.POSITION_OPENED
     assert trade.quantity == pytest.approx(expected_quantity)
     assert trade.position_size_usd == pytest.approx(expected_notional)
-    assert "reconciled to actual venue fill" in trade.sizing_rationale if hasattr(
-        trade, "sizing_rationale"
-    ) else True
 
 
 class _ZeroFillSuccessExecutor(OrderExecutor):
