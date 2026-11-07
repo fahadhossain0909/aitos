@@ -224,9 +224,17 @@ def entry_liquidity_depth_rejection(
     try:
         pressure = float(depth_analysis.get(pressure_key))
     except (TypeError, ValueError):
-        return None
+        pressure = float("nan")
     if not isfinite(pressure):
-        return None
+        return (
+            "directional_cancel_pressure_unavailable",
+            {
+                "direction": direction.value,
+                "required_depth_metric": pressure_key,
+                "ofi_confidence": depth_analysis.get("ofi_confidence", 0.0),
+                "depth_freshness_ms": depth_analysis.get("freshness_ms", -1.0),
+            },
+        )
     if pressure > max_directional_cancel_pressure:
         return (
             "directional_cancel_pressure_too_high",
