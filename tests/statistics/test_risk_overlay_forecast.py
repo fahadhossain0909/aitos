@@ -92,7 +92,6 @@ def test_forecast_assessment_rejects_naive_timestamps():
         )
 
 
-
 def test_forecast_assessment_rejects_opposite_position_side():
     now = datetime(2026, 11, 7, 5, 0, 10, tzinfo=timezone.utc)
     with pytest.raises(ValueError, match="symbol, side or horizon mismatch"):
