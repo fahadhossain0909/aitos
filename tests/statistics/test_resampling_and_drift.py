@@ -68,3 +68,44 @@ def test_feature_drift_report_identifies_shifted_features():
     assert report.max_psi > 0.2
     with pytest.raises(ValueError):
         assess_feature_drift(reference, {"other": [1.0]})
+
+
+
+def test_execution_cost_sensitivity_includes_fees_funding_and_stress():
+    from aitos.statistics.validation import execution_cost_sensitivity
+
+    result = execution_cost_sensitivity(
+        0.004,
+        entry_fee_bps=4.0,
+        exit_fee_bps=4.0,
+        spread_bps=2.0,
+        slippage_bps=3.0,
+        funding_bps=1.0,
+        borrow_bps=0.0,
+    )
+    assert result.base_cost_bps == pytest.approx(14.0)
+    assert result.scenarios[0].net_expected_return == pytest.approx(0.0026)
+    assert result.scenarios[1].net_expected_return < result.scenarios[0].net_expected_return
+    assert result.scenarios[2].net_expected_return < result.scenarios[1].net_expected_return
+
+
+def test_execution_cost_sensitivity_rejects_invalid_inputs():
+    from aitos.statistics.validation import execution_cost_sensitivity
+
+    with pytest.raises(ValueError):
+        execution_cost_sensitivity(
+            0.01,
+            entry_fee_bps=-1.0,
+            exit_fee_bps=0.0,
+            spread_bps=0.0,
+            slippage_bps=0.0,
+        )
+    with pytest.raises(ValueError):
+        execution_cost_sensitivity(
+            0.01,
+            entry_fee_bps=1.0,
+            exit_fee_bps=1.0,
+            spread_bps=1.0,
+            slippage_bps=1.0,
+            stress_multipliers=(0.5,),
+        )
