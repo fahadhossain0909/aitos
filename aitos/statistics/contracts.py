@@ -1,4 +1,5 @@
 """Timestamped contracts for reproducible statistical feature and forecast data."""
+
 from __future__ import annotations
 
 import math
@@ -59,8 +60,7 @@ class FeatureSnapshot:
         if current.tzinfo is None:
             raise ValueError("now must be timezone-aware")
         return (
-            current.astimezone(timezone.utc)
-            - _utc_datetime(self.as_of, "as_of")
+            current.astimezone(timezone.utc) - _utc_datetime(self.as_of, "as_of")
         ).total_seconds()
 
     def is_fresh(self, max_age_seconds: float, *, now: datetime | None = None) -> bool:
