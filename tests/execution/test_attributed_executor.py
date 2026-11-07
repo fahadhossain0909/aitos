@@ -323,9 +323,7 @@ async def test_attribution_marks_confirmed_partial_fill_accepted_and_failure_sep
     )
     rows = ledger.list_decisions(entity_id="scan-trace-42")
     entry = next(row for row in rows if row["decision_type"] == "ENTRY")
-    failure = next(
-        row for row in rows if row["decision_type"] == "EXECUTION_FAILURE"
-    )
+    failure = next(row for row in rows if row["decision_type"] == "EXECUTION_FAILURE")
     assert not result.success
     assert entry["accepted"] is True
     assert failure["accepted"] is False
