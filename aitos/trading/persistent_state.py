@@ -479,17 +479,11 @@ class TradeStatePersistence:
 
         # Rebuild the statistical shadow ledger from durable trade state after
         # a crash between position persistence and the shadow SQLite write.
-        record_forecast = getattr(
-            self._lifecycle, "_record_statistical_forecast", None
-        )
-        record_outcome = getattr(
-            self._lifecycle, "_record_statistical_outcome", None
-        )
+        record_forecast = getattr(self._lifecycle, "_record_statistical_forecast", None)
+        record_outcome = getattr(self._lifecycle, "_record_statistical_outcome", None)
         if callable(record_forecast):
             recovery_trades = {trade.trade_id: trade for trade in trades}
-            recovery_trades.update(
-                {trade.trade_id: trade for trade in closed_trades}
-            )
+            recovery_trades.update({trade.trade_id: trade for trade in closed_trades})
             for trade in recovery_trades.values():
                 consensus = getattr(trade, "agent_consensus", None)
                 forecast = (
@@ -501,9 +495,8 @@ class TradeStatePersistence:
                     continue
                 try:
                     await asyncio.to_thread(record_forecast, trade)
-                    if (
-                        trade.state == TradeLifecycleState.POSITION_CLOSED
-                        and callable(record_outcome)
+                    if trade.state == TradeLifecycleState.POSITION_CLOSED and callable(
+                        record_outcome
                     ):
                         await asyncio.to_thread(record_outcome, trade)
                 except Exception:
