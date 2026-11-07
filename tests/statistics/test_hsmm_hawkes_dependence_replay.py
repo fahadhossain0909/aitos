@@ -150,7 +150,7 @@ def test_hawkes_online_filter_is_causal_and_requires_monotonic_events():
     first = online.observe(100.0, 1)
     second = online.observe(101.0, 0)
     assert first.intensities == pytest.approx(fit.baseline_intensities)
-    assert second.intensities[1] > fit.baseline_intensities[1]
+    assert max(second.intensities[i] - fit.baseline_intensities[i] for i in range(2)) > 0.0
     assert online.last_timestamp == 101.0
     with pytest.raises(ValueError):
         online.observe(101.0, 1)

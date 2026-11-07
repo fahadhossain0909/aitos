@@ -44,7 +44,7 @@ def test_decision_ledger_links_gate_entry_hold_exit_to_net_outcome(tmp_path):
             outcome_at="2026-11-07T11:00:00+00:00",
             outcome={"net_pnl_usd": 1.2},
         )
-        == 4
+        == 7
     )
     rows = ledger.list_decisions(entity_id=entity)
     assert len(rows) == 7

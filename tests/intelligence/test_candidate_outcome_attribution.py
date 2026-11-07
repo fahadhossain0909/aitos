@@ -81,6 +81,12 @@ def test_rejected_candidate_records_all_forward_markout_horizons(tmp_path):
     )
     rejection_id = store.record_rejection(candidate, "entry_gate", timestamp=1000)
     store.update_price("ETHUSDT", 99.0, timestamp=1901)
-    markouts = store.completed_markouts(rejection_id=rejection_id)
+    markouts = [
+        row
+        for horizon in store.HORIZONS_SECONDS
+        for row in store.completed_markouts(horizon_seconds=horizon)
+        if row["rejection_id"] == rejection_id
+    ]
+    markouts.sort(key=lambda row: row["horizon_seconds"])
     assert [row["horizon_seconds"] for row in markouts] == [60, 300, 900]
     assert all(row["signed_return_pct"] == pytest.approx(1.0) for row in markouts)

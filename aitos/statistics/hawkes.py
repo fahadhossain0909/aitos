@@ -173,7 +173,6 @@ def fit_marked_hawkes_mle(
                     break
                 trial_step *= 0.5
             if not accepted or converged:
-                converged = True
                 break
         if best is None or current > best[0]:
             best = (
