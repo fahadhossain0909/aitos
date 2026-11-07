@@ -28,6 +28,8 @@ sizer, portfolio risk gate or paper-trading runtime.
 
 - Return distribution: downside semivolatility, skew, excess kurtosis,
   quantiles and signal-to-noise.
+- Uncertainty-aware forecast ensemble using the law of total variance to retain
+  between-model forecast disagreement.
 - Equal-weight multi-horizon realized-volatility baseline and fitted
   one-step HAR-RV regression over squared-return proxies.
 - Gaussian HMM regime posterior, GARCH(1,1), asymmetric GJR-GARCH(1,1),
