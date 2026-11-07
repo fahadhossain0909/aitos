@@ -119,7 +119,6 @@ def test_l1_replay_preserves_unfilled_quantity_when_book_liquidity_is_missing():
     assert not result.complete
 
 
-
 def test_hsmm_fit_filter_separation_does_not_refit_on_oos_observations():
     training = []
     for block in range(20):
@@ -137,7 +136,6 @@ def test_hsmm_fit_filter_separation_does_not_refit_on_oos_observations():
     assert sum(result_a.probabilities) == pytest.approx(1.0)
     assert sum(result_b.probabilities) == pytest.approx(1.0)
     assert result_a.probabilities != result_b.probabilities
-
 
 
 def test_hawkes_online_filter_is_causal_and_requires_monotonic_events():

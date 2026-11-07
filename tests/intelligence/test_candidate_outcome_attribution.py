@@ -66,7 +66,6 @@ def test_rejected_candidate_15m_markout_resolves_trace_linked_decisions(tmp_path
     assert all(row["outcome"]["counterfactual"] for row in rows)
 
 
-
 def test_rejected_candidate_records_all_forward_markout_horizons(tmp_path):
     store = CandidateOutcomeStore(tmp_path / "candidate-outcomes.sqlite3")
     candidate = SimpleNamespace(

@@ -19,7 +19,9 @@ def test_egarch_estimation_returns_finite_stationary_forecast():
 
 
 def test_gjr_and_har_estimators_produce_finite_forecasts():
-    values = [0.001 * math.sin(i * 0.23) + 0.0004 * math.cos(i * 0.11) for i in range(300)]
+    values = [
+        0.001 * math.sin(i * 0.23) + 0.0004 * math.cos(i * 0.11) for i in range(300)
+    ]
     gjr = GJRGARCH11().fit_forecast(values)
     har = fit_har_rv_forecast(values)
     assert gjr.variance > 0.0

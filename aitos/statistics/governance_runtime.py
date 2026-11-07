@@ -125,7 +125,6 @@ class StatisticalGovernanceRuntime:
         )
 
 
-
 class DriftMonitorScheduler:
     """Async periodic drift orchestration with deduplicated operator alerts.
 
@@ -198,8 +197,6 @@ class DriftMonitorScheduler:
             reference, current = batches
             await self.run_once(reference, current, now=datetime.now(timezone.utc))
             try:
-                await asyncio.wait_for(
-                    stop_event.wait(), timeout=self.interval_seconds
-                )
+                await asyncio.wait_for(stop_event.wait(), timeout=self.interval_seconds)
             except asyncio.TimeoutError:
                 continue

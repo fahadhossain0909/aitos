@@ -77,7 +77,6 @@ def test_challenger_requires_explicit_runtime_operator_approval(tmp_path):
     assert registry.get_champion("a-stat").model_version == "2.0.0"
 
 
-
 def test_drift_scheduler_respects_cadence_and_deduplicates_alerts(tmp_path):
     import asyncio
     from datetime import datetime, timedelta, timezone

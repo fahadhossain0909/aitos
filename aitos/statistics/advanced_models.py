@@ -337,7 +337,8 @@ class EGARCH11:
             loss += log_variance + value * value / variance
             z = value / math.sqrt(variance)
             log_variance = (
-                omega + beta * log_variance
+                omega
+                + beta * log_variance
                 + alpha * (abs(z) - EGARCH11._E_ABS_STANDARD_NORMAL)
                 + gamma * z
             )
@@ -364,13 +365,21 @@ class EGARCH11:
             improved = True
             while improved and refinements < self.max_refinements:
                 improved = False
-                for index, direction in ((0, -1), (0, 1), (1, -1), (1, 1),
-                                         (2, -1), (2, 1)):
+                for index, direction in (
+                    (0, -1),
+                    (0, 1),
+                    (1, -1),
+                    (1, 1),
+                    (2, -1),
+                    (2, 1),
+                ):
                     values = [alpha, gamma, beta]
                     values[index] += direction * step[index]
-                    candidate = (max(0.0, min(1.0, values[0])),
-                                 max(-1.0, min(1.0, values[1])),
-                                 max(-0.994, min(0.994, values[2])))
+                    candidate = (
+                        max(0.0, min(1.0, values[0])),
+                        max(-1.0, min(1.0, values[1])),
+                        max(-0.994, min(0.994, values[2])),
+                    )
                     candidate_loss = self._evaluate(centered, *candidate)[0]
                     refinements += 1
                     if candidate_loss + 1e-12 < loss:
@@ -381,8 +390,15 @@ class EGARCH11:
                     if refinements >= self.max_refinements:
                         break
         loss, variance, omega = self._evaluate(centered, alpha, gamma, beta)
-        long_run = math.exp(max(-40.0, min(40.0, omega / max(1.0-beta, 1e-8))))
+        long_run = math.exp(max(-40.0, min(40.0, omega / max(1.0 - beta, 1e-8))))
         return EGARCHForecast(
-            variance, math.sqrt(variance), long_run, omega, alpha, gamma, beta,
-            len(xs), loss,
+            variance,
+            math.sqrt(variance),
+            long_run,
+            omega,
+            alpha,
+            gamma,
+            beta,
+            len(xs),
+            loss,
         )

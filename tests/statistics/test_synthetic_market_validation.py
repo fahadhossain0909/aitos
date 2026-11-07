@@ -4,6 +4,7 @@ These tests do not claim profitability. They verify numerical behavior, regime
 sensitivity, dependence, event clustering, cost accounting and chronological
 validation on seeded synthetic data before paper-trading evaluation.
 """
+
 from __future__ import annotations
 
 import math
