@@ -1,9 +1,7 @@
 """Durable artifact registry with explicit champion promotion and rollback."""
 from __future__ import annotations
 
-import hashlib
 import json
-import math
 import re
 import sqlite3
 from dataclasses import dataclass
@@ -55,7 +53,7 @@ class StatisticalModelRegistry:
             isolation_level=None,
         )
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = ?", (self.busy_timeout_ms,))
+        connection.execute(f"PRAGMA busy_timeout={self.busy_timeout_ms}")
         connection.execute("PRAGMA journal_mode=WAL")
         connection.execute("PRAGMA synchronous=NORMAL")
         return connection
