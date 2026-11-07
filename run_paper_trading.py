@@ -53,6 +53,7 @@ KLINE_TIMEFRAME = "15m"
 STARTING_EQUITY_USD = 1_000.0
 HEALTH_SERVER_PORT = 8090
 PAPER_MIN_SCORE_THRESHOLD = 50.0
+STALE_POSITION_MAX_MARK_AGE_SECONDS = 300.0
 STALE_POSITION_MAX_HOURS = get_settings().tuning.positions.stale_position_max_hours
 DEAD_CANDLE_MAX_PROGRESS_R = get_settings().tuning.positions.dead_candle_max_progress_r
 DEAD_CANDLE_ENTRY_BAND_PCT = get_settings().tuning.positions.dead_candle_entry_band_pct
@@ -90,6 +91,37 @@ async def _close_stale_positions(components) -> None:
                                 "trade_id": trade.trade_id,
                                 "symbol": trade.symbol,
                                 "age_hours": round(age_hours, 1),
+                            }
+                        },
+                    )
+                    continue
+
+                last_marked_at = getattr(trade, "last_marked_at", None)
+                try:
+                    mark_dt = datetime.fromisoformat(
+                        str(last_marked_at).replace("Z", "+00:00")
+                    )
+                    if mark_dt.tzinfo is None:
+                        mark_dt = mark_dt.replace(tzinfo=timezone.utc)
+                    mark_age_seconds = (now - mark_dt).total_seconds()
+                except (TypeError, ValueError):
+                    mark_age_seconds = float("inf")
+                if (
+                    not math.isfinite(mark_age_seconds)
+                    or mark_age_seconds < 0
+                    or mark_age_seconds > STALE_POSITION_MAX_MARK_AGE_SECONDS
+                ):
+                    logger.warning(
+                        "dead-candle timeout deferred: market mark is stale",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": trade.trade_id,
+                                "symbol": trade.symbol,
+                                "mark_age_seconds": (
+                                    round(mark_age_seconds, 1)
+                                    if math.isfinite(mark_age_seconds)
+                                    else None
+                                ),
                             }
                         },
                     )
