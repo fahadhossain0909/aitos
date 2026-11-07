@@ -15,6 +15,9 @@ class PromotionPolicy:
     max_pbo: float = 0.20
     max_drawdown: float = 0.10
     max_drift_score: float = 0.10
+    min_dsr_probability: float = 0.95
+    max_selection_p_value: float = 0.05
+    require_selection_diagnostics: bool = True
     require_operator_approval: bool = True
 
     def __post_init__(self) -> None:
@@ -26,9 +29,13 @@ class PromotionPolicy:
             self.max_pbo,
             self.max_drawdown,
             self.max_drift_score,
+            self.min_dsr_probability,
+            self.max_selection_p_value,
         )
         if any(not math.isfinite(value) or value < 0 for value in limits):
             raise ValueError("promotion limits must be finite and non-negative")
+        if not 0.0 <= self.min_dsr_probability <= 1.0 or not 0.0 <= self.max_selection_p_value <= 1.0:
+            raise ValueError("selection probability limits must be in [0, 1]")
         if self.max_pbo > 1.0 or self.max_brier > 1.0:
             raise ValueError("max_pbo and max_brier must be in [0, 1]")
 
@@ -45,6 +52,11 @@ class PromotionEvidence:
     max_drawdown: float
     drift_score: float
     paired_oos_improvement_lower_bound: float
+    dsr_probability: float | None = None
+    mcs_included: bool | None = None
+    reality_check_p_value: float | None = None
+    dm_p_value: float | None = None
+    multiple_testing_adjusted_p_value: float | None = None
     operator_approved: bool = False
 
 
@@ -96,6 +108,31 @@ def evaluate_promotion(
         raise ValueError("loss, drawdown and drift metrics must be non-negative")
 
     reasons = []
+    selection_values = (
+        evidence.dsr_probability,
+        evidence.reality_check_p_value,
+        evidence.dm_p_value,
+        evidence.multiple_testing_adjusted_p_value,
+    )
+    if policy.require_selection_diagnostics:
+        if evidence.mcs_included is None or any(value is None for value in selection_values):
+            reasons.append("missing_multiple_testing_aware_selection_evidence")
+        else:
+            if not 0.0 <= evidence.dsr_probability <= 1.0:
+                raise ValueError("dsr_probability must be in [0, 1]")
+            for value in selection_values[1:]:
+                if not 0.0 <= value <= 1.0:
+                    raise ValueError("selection p-values must be in [0, 1]")
+            if evidence.dsr_probability < policy.min_dsr_probability:
+                reasons.append("deflated_sharpe_probability_below_policy_limit")
+            if not evidence.mcs_included:
+                reasons.append("candidate_excluded_from_model_confidence_set")
+            if evidence.reality_check_p_value > policy.max_selection_p_value:
+                reasons.append("white_reality_check_not_significant")
+            if evidence.dm_p_value > policy.max_selection_p_value:
+                reasons.append("diebold_mariano_not_significant")
+            if evidence.multiple_testing_adjusted_p_value > policy.max_selection_p_value:
+                reasons.append("multiple_testing_adjusted_p_value_above_limit")
     if evidence.observations < policy.min_observations:
         reasons.append("insufficient_out_of_sample_observations")
     if evidence.shadow_days < policy.min_shadow_days:
