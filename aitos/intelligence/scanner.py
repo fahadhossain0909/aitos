@@ -1555,12 +1555,12 @@ class OpportunityScanner(AITOSModule):
                     "window_start": _timestamp_iso(
                         getattr(klines[0], "open_time", None), scanned_at
                     ),
-                    "feature_snapshot_id": (
-                        f"{symbol}:{self._timeframe}:{scanned_at}"
-                    ),
+                    "feature_snapshot_id": (f"{symbol}:{self._timeframe}:{scanned_at}"),
                     "sample_size": int(a_stat_result.sample_size),
                     "predicted_up": float(
-                        a_stat_result.direction.up if is_long else a_stat_result.direction.down
+                        a_stat_result.direction.up
+                        if is_long
+                        else a_stat_result.direction.down
                     ),
                     "downside_probability": float(
                         a_stat_result.downside_probability
