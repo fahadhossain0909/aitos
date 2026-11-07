@@ -163,3 +163,56 @@ def fit_marked_hawkes_mle(
         _spectral_radius_2x2(excitation),ll,iterations,len(times),horizon,
         converged,gradient_norm,
     )
+
+
+
+@dataclass(frozen=True)
+class HawkesIntensitySnapshot:
+    timestamp: float
+    intensities: tuple[float, float]
+    excitation_state: tuple[float, float]
+
+
+class MarkedHawkesOnlineFilter:
+    """Causal two-mark event-time filter initialized from a fitted Hawkes MLE.
+
+    mark 0 and mark 1 are application-defined event classes (for example,
+    aggressive sell and buy). Intensities are evaluated immediately before
+    processing the event at timestamp; the event then excites future events.
+    """
+
+    def __init__(self, fit: HawkesMLEFit) -> None:
+        if len(fit.baseline_intensities) != 2 or len(fit.excitation_matrix) != 2:
+            raise ValueError("online filter requires a two-mark Hawkes fit")
+        if fit.decay <= 0 or not math.isfinite(fit.decay):
+            raise ValueError("fit decay must be positive and finite")
+        if fit.branching_ratio >= 0.95:
+            raise ValueError("online filter refuses a non-stationary Hawkes fit")
+        self.fit = fit
+        self._state = [0.0, 0.0]
+        self._last_timestamp: float | None = None
+
+    def observe(self, timestamp: float, mark: int) -> HawkesIntensitySnapshot:
+        """Return pre-event intensities and then apply the observed event."""
+        timestamp = float(timestamp)
+        if not math.isfinite(timestamp) or timestamp < 0 or mark not in (0, 1):
+            raise ValueError("timestamp must be finite/non-negative and mark 0 or 1")
+        if self._last_timestamp is not None and timestamp <= self._last_timestamp:
+            raise ValueError("online Hawkes events must be strictly chronological")
+        if self._last_timestamp is not None:
+            decay = math.exp(-self.fit.decay * (timestamp - self._last_timestamp))
+            self._state = [value * decay for value in self._state]
+        intensities = tuple(
+            self.fit.baseline_intensities[target]
+            + sum(self.fit.excitation_matrix[target][source] * self._state[source]
+                  for source in range(2))
+            for target in range(2)
+        )
+        snapshot = HawkesIntensitySnapshot(timestamp, intensities, tuple(self._state))
+        self._state[mark] += self.fit.decay
+        self._last_timestamp = timestamp
+        return snapshot
+
+    @property
+    def last_timestamp(self) -> float | None:
+        return self._last_timestamp
