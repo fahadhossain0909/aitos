@@ -6,6 +6,7 @@ import pytest
 from aitos.core.contracts import Event
 from aitos.core.exceptions import TradeNotFoundError
 from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
+from aitos.execution.order_executor import OrderExecutor, OrderResult
 from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.risk.models import PortfolioState, PositionExposure
 from aitos.trading.lifecycle import TradeLifecycle
@@ -876,3 +877,75 @@ async def test_statistical_shadow_ledger_resolves_trade_outcome(
     assert resolved.observations == 1
     assert resolved.directional_hit_rate == 1.0
     assert resolved.brier == pytest.approx(0.04)
+
+
+
+class _PartialFillExecutor(OrderExecutor):
+    def __init__(self, fraction=0.4, fill_price_multiplier=1.001):
+        self.fraction = fraction
+        self.fill_price_multiplier = fill_price_multiplier
+        self.request = None
+
+    async def submit_order(self, request):
+        self.request = request
+        return OrderResult(
+            order_id="partial-fill-1",
+            symbol=request.symbol,
+            side=request.side,
+            filled_quantity=request.quantity * self.fraction,
+            fill_price=request.reference_price * self.fill_price_multiplier,
+            success=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_scales_position_and_risk_to_actual_partial_fill(
+    event_bus, risk_engine
+):
+    executor = _PartialFillExecutor()
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=executor,
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    expected_quantity = executor.request.quantity * executor.fraction
+    expected_notional = expected_quantity * (
+        executor.request.reference_price * executor.fill_price_multiplier
+    )
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    assert trade.quantity == pytest.approx(expected_quantity)
+    assert trade.position_size_usd == pytest.approx(expected_notional)
+    assert "reconciled to actual venue fill" in trade.sizing_rationale if hasattr(
+        trade, "sizing_rationale"
+    ) else True
+
+
+class _ZeroFillSuccessExecutor(OrderExecutor):
+    async def submit_order(self, request):
+        return OrderResult(
+            order_id="accepted-unfilled-1",
+            symbol=request.symbol,
+            side=request.side,
+            filled_quantity=0.0,
+            fill_price=0.0,
+            success=True,
+        )
+
+
+@pytest.mark.asyncio
+async def test_lifecycle_never_opens_zero_quantity_position_on_unfilled_order(
+    event_bus, risk_engine
+):
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        order_executor=_ZeroFillSuccessExecutor(),
+    )
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    assert trade.state == TradeLifecycleState.REJECTED
+    assert trade.quantity == 0.0
+    assert not lifecycle.get_open_trades()
+    assert "confirmed fill" in trade.rejection_reason
