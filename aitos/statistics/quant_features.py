@@ -4,6 +4,7 @@ These estimators are diagnostic/forecast primitives, not trade signals. Inputs
 must be chronological, finite, and expressed in decimal returns unless stated.
 No function in this module submits orders or overrides hard risk limits.
 """
+
 from __future__ import annotations
 
 import math
@@ -129,7 +130,7 @@ def har_rv_forecast(
         raise ValueError("windows must be positive")
 
     def rv(window: int) -> float:
-        sample = xs[-min(window, len(xs)):]
+        sample = xs[-min(window, len(xs)) :]
         return math.sqrt(mean(x * x for x in sample))
 
     short, medium, long = rv(short_window), rv(medium_window), rv(long_window)
@@ -171,7 +172,7 @@ def permutation_entropy(
         raise ValueError("order must be >= 2 and delay >= 1")
     patterns: dict[tuple[int, ...], int] = {}
     for start in range(len(xs) - (order - 1) * delay):
-        window = xs[start:start + order * delay:delay]
+        window = xs[start : start + order * delay : delay]
         # Stable index tie-break makes tied observations deterministic.
         pattern = tuple(sorted(range(order), key=lambda i: (window[i], i)))
         patterns[pattern] = patterns.get(pattern, 0) + 1
@@ -225,7 +226,7 @@ def exponential_hawkes_intensity(
     buy_exc = sell_exc = 0.0
     buy_count = sell_count = 0
     for sign in signs:
-        buy_exc *= (1.0 - decay)
+        buy_exc *= 1.0 - decay
         sell_exc *= (1.0 - decay)
         if sign > 0:
             buy_count += 1
