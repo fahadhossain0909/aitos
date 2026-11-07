@@ -58,12 +58,14 @@ def fit_marked_hawkes_mle(
     best = None
     for decay in decay_grid:
         history = [[0.0, 0.0] for _ in times]
+        state = [0.0, 0.0]
         for i, t in enumerate(times):
             if i:
                 factor = math.exp(-decay * (t - times[i - 1]))
-                history[i] = [history[i - 1][m] * factor for m in range(2)]
-            # Intensity at t_i is predictable: the event at t_i itself must
-            # not excite its own likelihood contribution.
+                state = [state[m] * factor for m in range(2)]
+            # Store pre-event excitation: an event cannot excite itself.
+            history[i] = state[:]
+            state[labels[i]] += decay
         tails = [
             sum(1.0 - math.exp(-decay * (horizon - t)) for t, mark in zip(times, labels) if mark == m)
             for m in range(2)
