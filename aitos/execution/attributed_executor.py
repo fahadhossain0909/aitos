@@ -112,7 +112,7 @@ class AttributedOrderExecutor(OrderExecutor):
             accepted=result.success,
             payload=payload,
         )
-        if not result.success:
+        if not result.success or result.error:
             self._record(
                 context,
                 symbol=request.symbol,
