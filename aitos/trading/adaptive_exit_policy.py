@@ -103,8 +103,8 @@ class AdaptiveExitPolicy:
             float(trade.mae_price or 0.0), float(trade.mfe_price or 0.0)
         )
         max_excursion_pct = max_excursion_price / float(trade.entry_price)
-        current_deviation_pct = (
-            abs(current_price - float(trade.entry_price)) / float(trade.entry_price)
+        current_deviation_pct = abs(current_price - float(trade.entry_price)) / float(
+            trade.entry_price
         )
         remained_near_entry = (
             max_excursion_pct <= self._stagnation_entry_band_pct
