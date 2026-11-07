@@ -40,7 +40,8 @@ class StatisticalShadowLedger:
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
-            self.path, timeout=self.busy_timeout_ms / 1000.0,
+            self.path,
+            timeout=self.busy_timeout_ms / 1000.0,
             isolation_level=None,
         )
         connection.row_factory = sqlite3.Row
@@ -109,9 +110,16 @@ class StatisticalShadowLedger:
             raise ValueError("predicted_variance must be finite and positive")
         created = self._timestamp(created_at)
         values = (
-            envelope.symbol, envelope.horizon, envelope.model_id,
-            envelope.model_version, envelope.as_of, envelope.feature_snapshot_id,
-            predicted_up, predicted_variance, envelope.expected_return, created,
+            envelope.symbol,
+            envelope.horizon,
+            envelope.model_id,
+            envelope.model_version,
+            envelope.as_of,
+            envelope.feature_snapshot_id,
+            predicted_up,
+            predicted_variance,
+            envelope.expected_return,
+            created,
         )
         connection = self._connect()
         try:
@@ -180,7 +188,9 @@ class StatisticalShadowLedger:
                     row["actual_return"] != actual_return
                     or row["realised_variance"] != realised_variance
                 ):
-                    raise ValueError("forecast outcome is already resolved differently")
+                    raise ValueError(
+                        "forecast outcome is already resolved differently"
+                    )
                 connection.execute("COMMIT")
                 return False
             connection.execute(
@@ -202,7 +212,10 @@ class StatisticalShadowLedger:
         self, *, symbol: str | None = None, horizon: str | None = None
     ) -> ShadowMetrics:
         """Return strictly outcome-resolved shadow metrics for a cohort."""
-        clauses = ["actual_return IS NOT NULL", "realised_variance IS NOT NULL"]
+        clauses = [
+            "actual_return IS NOT NULL",
+            "realised_variance IS NOT NULL",
+        ]
         parameters: list[str] = []
         if symbol is not None:
             clauses.append("symbol=?")
