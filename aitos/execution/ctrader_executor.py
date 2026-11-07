@@ -149,8 +149,11 @@ class CTraderOrderExecutor(OrderExecutor):
         return await asyncio.wait_for(future, timeout=self._timeout)
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
-        if request.order_type not in {"MARKET", "LIMIT", "STOP"}:
-            raise ValueError(f"unsupported cTrader order type: {request.order_type}")
+        if request.order_type != "MARKET":
+            raise ValueError(
+                "cTrader resting LIMIT/STOP orders are disabled until order "
+                "status polling and cancellation are wired into TradeLifecycle"
+            )
         symbol_id = self._symbol_ids.get(request.symbol.upper())
         if symbol_id is None:
             raise ValueError(f"missing cTrader symbol id for {request.symbol}")
