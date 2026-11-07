@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
@@ -85,6 +85,19 @@ class StatisticalModelRegistry:
                 CREATE UNIQUE INDEX IF NOT EXISTS idx_model_registry_champion
                 ON statistical_model_artifacts(model_id)
                 WHERE status='CHAMPION'
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS statistical_model_promotion_events (
+                    event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    model_id TEXT NOT NULL,
+                    model_version TEXT NOT NULL,
+                    action TEXT NOT NULL,
+                    decision_json TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
                 """
             )
         finally:
@@ -230,16 +243,69 @@ class StatisticalModelRegistry:
         finally:
             connection.close()
 
+    @staticmethod
+    def _insert_event(
+        connection: sqlite3.Connection,
+        *,
+        model_id: str,
+        model_version: str,
+        action: str,
+        decision: PromotionDecision,
+        evidence: Mapping[str, Any],
+    ) -> None:
+        connection.execute(
+            """
+            INSERT INTO statistical_model_promotion_events (
+                model_id, model_version, action, decision_json,
+                evidence_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                model_id,
+                model_version,
+                action,
+                json.dumps(asdict(decision), sort_keys=True, allow_nan=False),
+                json.dumps(dict(evidence), sort_keys=True, allow_nan=False),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+    def promotion_history(self, model_id: str) -> tuple[Mapping[str, Any], ...]:
+        connection = self._connect()
+        try:
+            rows = connection.execute(
+                """
+                SELECT event_id, model_id, model_version, action,
+                       decision_json, evidence_json, created_at
+                FROM statistical_model_promotion_events
+                WHERE model_id=?
+                ORDER BY event_id ASC
+                """,
+                (model_id,),
+            ).fetchall()
+            return tuple(
+                {
+                    "event_id": row["event_id"],
+                    "model_id": row["model_id"],
+                    "model_version": row["model_version"],
+                    "action": row["action"],
+                    "decision": json.loads(row["decision_json"]),
+                    "evidence": json.loads(row["evidence_json"]),
+                    "created_at": row["created_at"],
+                }
+                for row in rows
+            )
+        finally:
+            connection.close()
+
     def promote(
         self,
         evidence: PromotionEvidence,
         *,
         policy: PromotionPolicy = PromotionPolicy(),
     ) -> PromotionDecision:
-        """Promote only an already-registered artifact with complete evidence."""
+        """Promote an artifact and durably record the evidence/decision."""
         decision = evaluate_promotion(evidence, policy)
-        if not decision.eligible:
-            return decision
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -255,9 +321,35 @@ class StatisticalModelRegistry:
                     f"unregistered model artifact: "
                     f"{evidence.model_id}@{evidence.model_version}"
                 )
-            if candidate["status"] == "CHAMPION":
+            if not decision.eligible:
+                self._insert_event(
+                    connection,
+                    model_id=evidence.model_id,
+                    model_version=evidence.model_version,
+                    action="PROMOTION_BLOCKED",
+                    decision=decision,
+                    evidence=asdict(evidence),
+                )
                 connection.execute("COMMIT")
                 return decision
+            if candidate["status"] == "CHAMPION":
+                self._insert_event(
+                    connection,
+                    model_id=evidence.model_id,
+                    model_version=evidence.model_version,
+                    action="PROMOTION_NOOP",
+                    decision=decision,
+                    evidence=asdict(evidence),
+                )
+                connection.execute("COMMIT")
+                return decision
+            previous = connection.execute(
+                """
+                SELECT model_version FROM statistical_model_artifacts
+                WHERE model_id=? AND status='CHAMPION'
+                """,
+                (evidence.model_id,),
+            ).fetchone()
             connection.execute(
                 """
                 UPDATE statistical_model_artifacts
@@ -273,6 +365,18 @@ class StatisticalModelRegistry:
                 WHERE model_id=? AND model_version=?
                 """,
                 (evidence.model_id, evidence.model_version),
+            )
+            event_evidence = asdict(evidence)
+            event_evidence["previous_champion"] = (
+                None if previous is None else previous["model_version"]
+            )
+            self._insert_event(
+                connection,
+                model_id=evidence.model_id,
+                model_version=evidence.model_version,
+                action="PROMOTED",
+                decision=decision,
+                evidence=event_evidence,
             )
             connection.execute("COMMIT")
             return decision
@@ -291,8 +395,6 @@ class StatisticalModelRegistry:
         operator_approved: bool = False,
     ) -> ModelArtifact:
         """Restore a previous artifact only after explicit operator approval."""
-        if not operator_approved:
-            raise PermissionError("explicit operator approval is required for rollback")
         connection = self._connect()
         try:
             connection.execute("BEGIN IMMEDIATE")
@@ -305,21 +407,60 @@ class StatisticalModelRegistry:
             ).fetchone()
             if target is None:
                 raise KeyError(f"unknown model artifact: {model_id}@{target_version}")
-            connection.execute(
+            if not operator_approved:
+                decision = PromotionDecision(
+                    eligible=False,
+                    reasons=("explicit_operator_approval_required",),
+                )
+                self._insert_event(
+                    connection,
+                    model_id=model_id,
+                    model_version=target_version,
+                    action="ROLLBACK_BLOCKED",
+                    decision=decision,
+                    evidence={"operator_approved": False},
+                )
+                connection.execute("COMMIT")
+                raise PermissionError(
+                    "explicit operator approval is required for rollback"
+                )
+            previous = connection.execute(
                 """
-                UPDATE statistical_model_artifacts
-                SET status='ARCHIVED'
+                SELECT model_version FROM statistical_model_artifacts
                 WHERE model_id=? AND status='CHAMPION'
                 """,
                 (model_id,),
-            )
-            connection.execute(
-                """
-                UPDATE statistical_model_artifacts
-                SET status='CHAMPION'
-                WHERE model_id=? AND model_version=?
-                """,
-                (model_id, target_version),
+            ).fetchone()
+            if target["status"] != "CHAMPION":
+                connection.execute(
+                    """
+                    UPDATE statistical_model_artifacts
+                    SET status='ARCHIVED'
+                    WHERE model_id=? AND status='CHAMPION'
+                    """,
+                    (model_id,),
+                )
+                connection.execute(
+                    """
+                    UPDATE statistical_model_artifacts
+                    SET status='CHAMPION'
+                    WHERE model_id=? AND model_version=?
+                    """,
+                    (model_id, target_version),
+                )
+            decision = PromotionDecision(eligible=True, reasons=())
+            self._insert_event(
+                connection,
+                model_id=model_id,
+                model_version=target_version,
+                action="ROLLBACK" if target["status"] != "CHAMPION" else "ROLLBACK_NOOP",
+                decision=decision,
+                evidence={
+                    "operator_approved": True,
+                    "previous_champion": (
+                        None if previous is None else previous["model_version"]
+                    ),
+                },
             )
             promoted = connection.execute(
                 """
