@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from itertools import chain
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
