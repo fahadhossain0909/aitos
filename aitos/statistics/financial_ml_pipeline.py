@@ -221,11 +221,6 @@ class FinancialMLPipeline:
             ON financial_ml_candidates(symbol, status, created_at);
             CREATE INDEX IF NOT EXISTS idx_financial_ml_resolved
             ON financial_ml_candidates(status, label_resolution_time);
-            CREATE TRIGGER IF NOT EXISTS financial_ml_candidate_snapshot_immutable
-            BEFORE UPDATE OF symbol,side,created_at,entry_price,volatility,
-                take_price,stop_price,expires_at,features_json,trace_id
-            ON financial_ml_candidates
-            BEGIN SELECT RAISE(ABORT, 'financial ML candidate snapshots are immutable'); END;
             CREATE TABLE IF NOT EXISTS financial_ml_event_bars (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
@@ -304,6 +299,13 @@ class FinancialMLPipeline:
                 "UPDATE financial_ml_candidates SET expires_at=? WHERE candidate_id=?",
                 (_iso(float(legacy["expires_at"])), legacy["candidate_id"]),
             )
+        self._conn.execute(
+            """CREATE TRIGGER IF NOT EXISTS financial_ml_candidate_snapshot_immutable
+            BEFORE UPDATE OF symbol,side,created_at,entry_price,volatility,
+                take_price,stop_price,expires_at,features_json,trace_id
+            ON financial_ml_candidates
+            BEGIN SELECT RAISE(ABORT, 'financial ML candidate snapshots are immutable'); END"""
+        )
         self._conn.commit()
         self._load_latest_artifact()
 
