@@ -342,7 +342,9 @@ def test_candidate_feature_snapshot_is_immutable_after_registration(tmp_path):
         volatility=0.01,
         features=_features(5),
     )
-    with pytest.raises(sqlite3.IntegrityError, match="candidate snapshots are immutable"):
+    with pytest.raises(
+        sqlite3.IntegrityError, match="candidate snapshots are immutable"
+    ):
         pipeline._conn.execute(
             "UPDATE financial_ml_candidates SET features_json='{}' "
             "WHERE candidate_id=?",
