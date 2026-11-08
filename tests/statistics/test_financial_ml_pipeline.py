@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 from aitos.statistics.financial_ml import MarketEvent
 from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
 
@@ -212,4 +213,49 @@ def test_counterfactual_labels_are_available_for_exact_ledger_sync(tmp_path):
     assert labels[0]["outcome_provenance"] == "COUNTERFACTUAL_LIVE_MARKOUT"
     assert pipeline.mark_ledger_synced(candidate_id)
     assert pipeline.pending_counterfactual_labels() == ()
+    pipeline.close()
+
+
+def test_counterfactual_barrier_resolution_syncs_candidate_ledger_exactly(tmp_path):
+    database = tmp_path / "financial-ml.sqlite3"
+    pipeline = FinancialMLPipeline(database)
+    ledger = DecisionOutcomeLedger(tmp_path / "decision-ledger.sqlite3")
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    candidate_id = "candidate-exact-ledger-001"
+    pipeline.register_candidate(
+        candidate_id=candidate_id,
+        symbol="BNBUSDT",
+        side="SHORT",
+        entry_price=100,
+        volatility=0.01,
+        features=_features(9),
+        created_at=created,
+    )
+    ledger.record_decision(
+        "candidate-gate",
+        entity_id=candidate_id,
+        symbol="BNBUSDT",
+        side="SHORT",
+        decision_type="GATE",
+        accepted=False,
+        reason="meta_shadow_rejection",
+        candidate_id=candidate_id,
+    )
+    pipeline.reject_candidate(candidate_id, "meta_shadow_rejection")
+    resolution_time = created + timedelta(seconds=17)
+    pipeline.observe_price("BNBUSDT", 97.5, resolution_time)
+    label = pipeline.pending_counterfactual_labels()[0]
+    assert ledger.resolve_entity(
+        candidate_id,
+        outcome_value=label["net_return"],
+        outcome_at=label["label_resolution_time"],
+        outcome=label["outcome"],
+        candidate_id=candidate_id,
+        outcome_provenance=label["outcome_provenance"],
+    ) == 1
+    assert pipeline.mark_ledger_synced(candidate_id)
+    decision = ledger.list_decisions(entity_id=candidate_id)[0]
+    assert decision["label_resolution_time"] == resolution_time.isoformat()
+    assert decision["outcome_provenance"] == "COUNTERFACTUAL_LIVE_MARKOUT"
+    assert decision["candidate_id"] == candidate_id
     pipeline.close()
