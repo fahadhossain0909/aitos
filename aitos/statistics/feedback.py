@@ -165,9 +165,7 @@ class AStatFeedbackLoop(AITOSModule):
             ]
             self._initialized = True
 
-    async def _on_position_closed(
-        self, event: Event
-    ) -> EventResponse | None:
+    async def _on_position_closed(self, event: Event) -> EventResponse | None:
         payload = event.payload
         if not isinstance(payload, Mapping):
             return None
