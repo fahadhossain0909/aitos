@@ -630,7 +630,10 @@ class OpportunityScanner(AITOSModule):
             try:
                 await asyncio.to_thread(
                     self._decision_outcome_ledger.record_decision,
-                    f"{attribution_id}:{event.get('symbol')}:{event.get('side', 'UNKNOWN')}:{event['stage']}",
+                    (
+                        f"{attribution_id}:{event.get('symbol')}:"
+                        f"{event.get('side', 'UNKNOWN')}:{event['stage']}:{time.time_ns()}"
+                    ),
                     entity_id=attribution_id,
                     symbol=str(event["symbol"]),
                     side=str(event.get("side") or "UNKNOWN"),
