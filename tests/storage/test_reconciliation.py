@@ -1,4 +1,10 @@
-from aitos.storage.reconciliation import compare_fingerprints, compare_records
+from datetime import datetime, timezone
+
+from aitos.storage.reconciliation import (
+    canonical_record_fingerprint,
+    compare_fingerprints,
+    compare_records,
+)
 
 
 def test_reconciliation_reports_missing_records_in_both_directions():
@@ -58,3 +64,26 @@ def test_matching_duplicates_are_still_a_reconciliation_anomaly():
     assert result.source_duplicate_fingerprints == (duplicate,)
     assert result.target_duplicate_fingerprints == (duplicate,)
     assert not result.clean
+
+
+
+def test_reconciliation_normalizes_database_timestamp_precision_and_zones():
+    postgres_payload = {
+        "event_time": "2026-11-08T10:20:30.123456+00:00",
+        "schema_version": "1.0",
+        "price": 12.5,
+    }
+    clickhouse_payload = {
+        "event_time": datetime(
+            2026, 11, 8, 10, 20, 30, 123000, tzinfo=timezone.utc
+        ),
+        "schema_version": 1,
+        "price": 12.5,
+    }
+
+    source = canonical_record_fingerprint("MARKET_EVENT", "BTCUSDT", postgres_payload)
+    target = canonical_record_fingerprint(
+        "MARKET_EVENT", "BTCUSDT", clickhouse_payload
+    )
+
+    assert source == target
