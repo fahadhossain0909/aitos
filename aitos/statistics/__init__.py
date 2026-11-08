@@ -40,6 +40,12 @@ from .experiments import (
     SymbolRegimeExperimentResult,
     run_symbol_regime_walk_forward,
 )
+from .financial_ml_validation import (
+    MonteCarloStressReport,
+    StrategyFamilyValidation,
+    monte_carlo_stress_test,
+    validate_strategy_family,
+)
 from .financial_volatility import (
     JumpDiffusionEstimate,
     RoughVolatilityEstimate,
@@ -217,6 +223,10 @@ __all__ = [
     "GaussianHSMM",
     "HSMMParameters",
     "HSMMResult",
+    "MonteCarloStressReport",
+    "StrategyFamilyValidation",
+    "monte_carlo_stress_test",
+    "validate_strategy_family",
     "JumpDiffusionEstimate",
     "RoughVolatilityEstimate",
     "StochasticVolatilityEstimate",
