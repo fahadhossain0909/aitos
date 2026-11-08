@@ -60,9 +60,9 @@ def test_rejected_candidate_gets_counterfactual_barrier_label_and_provenance(tmp
     assert pipeline.reject_candidate(
         "candidate-counterfactual-001", "scanner_top_n_rejection"
     )
-    assert pipeline.observe_price(
-        "BTCUSDT", 102.5, created + timedelta(seconds=10)
-    ) == 1
+    assert (
+        pipeline.observe_price("BTCUSDT", 102.5, created + timedelta(seconds=10)) == 1
+    )
     row = pipeline._conn.execute(
         "SELECT status,label,label_resolution_time,outcome_provenance,outcome_json "
         "FROM financial_ml_candidates WHERE candidate_id=?",
@@ -90,9 +90,7 @@ def test_executed_candidate_is_not_resolved_from_counterfactual_ticks(tmp_path):
         created_at=created,
     )
     assert pipeline.mark_executed(candidate_id, "trade-paper-1")
-    assert pipeline.observe_price(
-        "ETHUSDT", 97, created + timedelta(seconds=30)
-    ) == 0
+    assert pipeline.observe_price("ETHUSDT", 97, created + timedelta(seconds=30)) == 0
     assert pipeline.resolve_executed(
         candidate_id,
         net_return=0.012,
@@ -113,7 +111,9 @@ def test_executed_candidate_is_not_resolved_from_counterfactual_ticks(tmp_path):
     pipeline.close()
 
 
-def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(tmp_path):
+def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(
+    tmp_path,
+):
     pipeline = FinancialMLPipeline(
         tmp_path / "financial-ml.sqlite3",
         min_training_samples=50,
@@ -207,9 +207,10 @@ def test_counterfactual_labels_are_available_for_exact_ledger_sync(tmp_path):
     labels = pipeline.pending_counterfactual_labels()
     assert len(labels) == 1
     assert labels[0]["candidate_id"] == candidate_id
-    assert labels[0]["label_resolution_time"] == (
-        created + timedelta(seconds=9)
-    ).isoformat()
+    assert (
+        labels[0]["label_resolution_time"]
+        == (created + timedelta(seconds=9)).isoformat()
+    )
     assert labels[0]["outcome_provenance"] == "COUNTERFACTUAL_LIVE_MARKOUT"
     assert pipeline.mark_ledger_synced(candidate_id)
     assert pipeline.pending_counterfactual_labels() == ()
@@ -245,14 +246,17 @@ def test_counterfactual_barrier_resolution_syncs_candidate_ledger_exactly(tmp_pa
     resolution_time = created + timedelta(seconds=17)
     pipeline.observe_price("BNBUSDT", 97.5, resolution_time)
     label = pipeline.pending_counterfactual_labels()[0]
-    assert ledger.resolve_entity(
-        candidate_id,
-        outcome_value=label["net_return"],
-        outcome_at=label["label_resolution_time"],
-        outcome=label["outcome"],
-        candidate_id=candidate_id,
-        outcome_provenance=label["outcome_provenance"],
-    ) == 1
+    assert (
+        ledger.resolve_entity(
+            candidate_id,
+            outcome_value=label["net_return"],
+            outcome_at=label["label_resolution_time"],
+            outcome=label["outcome"],
+            candidate_id=candidate_id,
+            outcome_provenance=label["outcome_provenance"],
+        )
+        == 1
+    )
     assert pipeline.mark_ledger_synced(candidate_id)
     decision = ledger.list_decisions(entity_id=candidate_id)[0]
     assert decision["label_resolution_time"] == resolution_time.isoformat()
@@ -261,7 +265,9 @@ def test_counterfactual_barrier_resolution_syncs_candidate_ledger_exactly(tmp_pa
     pipeline.close()
 
 
-def test_executed_fill_supersedes_unresolved_rejection_before_label_resolution(tmp_path):
+def test_executed_fill_supersedes_unresolved_rejection_before_label_resolution(
+    tmp_path,
+):
     pipeline = FinancialMLPipeline(tmp_path / "financial-ml.sqlite3")
     created = datetime(2026, 1, 1, tzinfo=timezone.utc)
     candidate_id = "candidate-retry-execution-001"
@@ -276,9 +282,7 @@ def test_executed_fill_supersedes_unresolved_rejection_before_label_resolution(t
     )
     assert pipeline.reject_candidate(candidate_id, "temporary_prevalidation_reject")
     assert pipeline.mark_executed(candidate_id, "trade-after-reconcile")
-    assert pipeline.observe_price(
-        "XRPUSDT", 1.03, created + timedelta(seconds=10)
-    ) == 0
+    assert pipeline.observe_price("XRPUSDT", 1.03, created + timedelta(seconds=10)) == 0
     row = pipeline._conn.execute(
         "SELECT status,trade_id FROM financial_ml_candidates WHERE candidate_id=?",
         (candidate_id,),
