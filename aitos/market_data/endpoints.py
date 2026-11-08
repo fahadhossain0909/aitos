@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 
-BINANCE_USDM_WS_BASE = "wss://fstream.binance.com"
+BINANCE_USDM_WS_BASE = os.getenv(
+    "AITOS_BINANCE_FUTURES_WS_BASE_URL", "wss://fstream.binance.com"
+).rstrip("/")
 # Binance's current USDⓈ-M WebSocket Streams SDK connects to the market
 # routing path and then sends SUBSCRIBE requests over that connection.
 BINANCE_USDM_WS_COMBINED = f"{BINANCE_USDM_WS_BASE}/stream"
