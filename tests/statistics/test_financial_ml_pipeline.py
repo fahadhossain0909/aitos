@@ -101,6 +101,13 @@ def test_executed_candidate_is_not_resolved_from_counterfactual_ticks(tmp_path):
         trade_id="trade-paper-1",
         outcome={"fees_paid_usd": 0.02, "funding_pnl_usd": -0.001},
     )
+    assert pipeline.resolve_executed(
+        candidate_id,
+        net_return=0.012,
+        resolved_at=created + timedelta(minutes=5),
+        trade_id="trade-paper-1",
+        outcome={"fees_paid_usd": 0.02, "funding_pnl_usd": -0.001},
+    )
     row = pipeline._conn.execute(
         "SELECT status,net_return,outcome_provenance,label_resolution_time,outcome_json "
         "FROM financial_ml_candidates WHERE candidate_id=?",
