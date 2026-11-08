@@ -159,3 +159,35 @@ def test_decision_ledger_migrates_legacy_schema_without_data_loss(tmp_path):
     assert row["decision_id"] == "legacy-1"
     assert row["candidate_id"] is None
     assert row["label_resolution_time"] is None
+
+
+def test_decision_ledger_snapshot_reports_resolution_and_provenance_counts(tmp_path):
+    ledger = DecisionOutcomeLedger(tmp_path / "snapshot.sqlite3")
+    for decision_id, kind in (("gate-1", "GATE"), ("reject-1", "REJECTION")):
+        ledger.record_decision(
+            decision_id,
+            entity_id="candidate-1",
+            symbol="BTCUSDT",
+            side="LONG",
+            decision_type=kind,
+            accepted=False,
+            reason="test",
+            candidate_id="candidate-1",
+        )
+    ledger.resolve_entity(
+        "candidate-1",
+        outcome_value=-0.002,
+        outcome_at="2026-11-08T12:15:00+00:00",
+        outcome={"counterfactual": True},
+        candidate_id="candidate-1",
+        outcome_provenance="COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
+    )
+    snapshot = ledger.snapshot()
+    assert snapshot["decisions_total"] == 2
+    assert snapshot["resolved_total"] == 2
+    assert snapshot["unresolved_total"] == 0
+    assert snapshot["by_type"]["GATE"] == {"count": 1, "resolved": 1}
+    assert snapshot["by_type"]["REJECTION"] == {"count": 1, "resolved": 1}
+    assert snapshot["by_provenance"] == {
+        "COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT": 2
+    }
