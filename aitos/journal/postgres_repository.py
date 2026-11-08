@@ -166,9 +166,9 @@ class PostgresJournalRepository:
         )
 
     async def attribute_outcome(self, decision_id: str, trade: dict[str, Any]) -> None:
-        trade_id = str(trade.get("trade_id") or "")
-        if not trade_id:
-            raise ValueError("trade_id is required for outcome attribution")
+        trade_id = str(
+            trade.get("trade_id") or trade.get("candidate_id") or "unlinked"
+        )
         payload = dict(trade)
         pnl = payload.get("pnl")
         risk = payload.get("risk_amount_usd")
