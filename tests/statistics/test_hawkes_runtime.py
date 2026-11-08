@@ -1,5 +1,5 @@
-from datetime import datetime, timedelta, timezone
 import math
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
