@@ -213,6 +213,13 @@ class FinancialMLPipeline:
             );
             CREATE INDEX IF NOT EXISTS idx_financial_ml_bars
             ON financial_ml_event_bars(symbol, bar_type, end_at);
+            CREATE TABLE IF NOT EXISTS financial_ml_approvals (
+                approval_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                artifact_id TEXT NOT NULL,
+                approved_by TEXT NOT NULL,
+                rationale TEXT NOT NULL,
+                approved_at TEXT NOT NULL
+            );
             CREATE TABLE IF NOT EXISTS financial_ml_artifacts (
                 artifact_id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
@@ -378,9 +385,21 @@ class FinancialMLPipeline:
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     candidate_id, symbol.upper(), side, now.isoformat(), entry, vol,
-                    take, stop, (now.timestamp() + self.max_holding_seconds),
+                    take, stop, _iso(now.timestamp() + self.max_holding_seconds),
                     json.dumps(clean, sort_keys=True, allow_nan=False), trace_id,
                 ),
+            )
+            self._conn.commit()
+            return cursor.rowcount == 1
+
+    def reject_candidate(self, candidate_id: str, reason: str) -> bool:
+        if not candidate_id or not reason:
+            return False
+        with self._lock:
+            cursor = self._conn.execute(
+                "UPDATE financial_ml_candidates SET status='REJECTED', outcome_json=? "
+                "WHERE candidate_id=? AND status='PENDING'",
+                (json.dumps({"rejection_reason": str(reason), "counterfactual": True}), candidate_id),
             )
             self._conn.commit()
             return cursor.rowcount == 1
@@ -395,7 +414,7 @@ class FinancialMLPipeline:
         with self._lock:
             rows = self._conn.execute(
                 """SELECT * FROM financial_ml_candidates
-                WHERE symbol=? AND status='PENDING' AND created_at<=?
+                WHERE symbol=? AND status='REJECTED' AND created_at<=?
                 ORDER BY created_at ASC""",
                 (symbol.upper(), now.isoformat()),
             ).fetchall()
@@ -403,7 +422,7 @@ class FinancialMLPipeline:
                 side = 1.0 if row["side"] == "LONG" else -1.0
                 take_hit = value >= row["take_price"] if side > 0 else value <= row["take_price"]
                 stop_hit = value <= row["stop_price"] if side > 0 else value >= row["stop_price"]
-                expired = now.timestamp() >= float(row["expires_at"])
+                expired = now >= _utc(row["expires_at"])
                 if not (take_hit or stop_hit or expired):
                     continue
                 gross = side * (value / float(row["entry_price"]) - 1.0)
@@ -629,16 +648,47 @@ class FinancialMLPipeline:
                 VALUES (?,?,?,?,?)""",
                 (
                     artifact_id, _iso(), json.dumps(artifact, sort_keys=True),
-                    json.dumps(asdict(report), sort_keys=True), int(passed),
+                    json.dumps(asdict(report), sort_keys=True), 0,
                 ),
             )
             self._conn.commit()
-        # A failed OOS report is retained for audit but is not made active.
-        if passed:
-            self._models["meta"] = final_model
-            self._calibrators["platt"] = calibrator
-            self._artifact_version = artifact_id
+        # Training never promotes itself. An operator must explicitly approve
+        # the OOS-passing artifact through approve_artifact().
+        self._pending_artifact_id = artifact_id
         return report
+
+    def approve_artifact(
+        self, artifact_id: str, *, approved_by: str, rationale: str
+    ) -> bool:
+        """Explicit local operator approval; failed OOS artifacts cannot activate."""
+        if not artifact_id or not approved_by.strip() or not 8 <= len(rationale.strip()) <= 500:
+            raise ValueError("artifact, operator and 8-500 character rationale are required")
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT artifact_json,report_json FROM financial_ml_artifacts WHERE artifact_id=?",
+                (artifact_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("unknown financial ML artifact")
+            report = json.loads(row["report_json"])
+            if not report.get("passed_oos"):
+                raise ValueError("artifact did not pass out-of-sample acceptance")
+            self._conn.execute("BEGIN IMMEDIATE")
+            self._conn.execute("UPDATE financial_ml_artifacts SET active=0")
+            self._conn.execute(
+                "UPDATE financial_ml_artifacts SET active=1 WHERE artifact_id=?",
+                (artifact_id,),
+            )
+            self._conn.execute(
+                "INSERT INTO financial_ml_approvals(artifact_id,approved_by,rationale,approved_at) VALUES(?,?,?,?)",
+                (artifact_id, approved_by.strip(), rationale.strip(), _iso()),
+            )
+            self._conn.commit()
+            artifact = json.loads(row["artifact_json"])
+            self._models["meta"] = self._model_from_dict(artifact["model"])
+            self._calibrators["platt"] = self._model_from_dict(artifact["calibrator"])
+            self._artifact_version = artifact_id
+            return True
 
     def predict(self, candidate_id: str, features: Mapping[str, float]) -> FinancialMLPrediction:
         if self.mode == "disabled":
