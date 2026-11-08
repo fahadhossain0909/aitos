@@ -214,6 +214,7 @@ class WebhookDriftAlertSink:
                 "Content-Type": "application/json",
             },
         )
+
         class RejectRedirects(HTTPRedirectHandler):
             def redirect_request(self, req, fp, code, msg, headers, newurl):
                 return None
