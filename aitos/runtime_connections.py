@@ -80,7 +80,8 @@ async def connect_clickhouse_repositories(settings, *, logger):
     allow_fallback = (
         bool(getattr(storage, "allow_fallback", False))
         and backend_mode == "auto"
-        and fallback_name != primary_name
+        and primary_name == "clickhouse"
+        and fallback_name == "postgres"
     )
     postgres_url = getattr(storage, "postgres_url", "") if storage else ""
     require_analytics = bool(getattr(storage, "require_clickhouse_analytics", True))
