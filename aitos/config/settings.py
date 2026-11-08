@@ -85,6 +85,7 @@ class StorageSettings(BaseSettings):
     primary: Literal["clickhouse", "postgres"] = "clickhouse"
     fallback: Literal["clickhouse", "postgres"] = "postgres"
     allow_fallback: bool = True
+    require_clickhouse_analytics: bool = True
     postgres_url: str = ""
 
 
