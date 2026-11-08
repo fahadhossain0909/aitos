@@ -377,7 +377,12 @@ class PostgresMarketDataRepository:
                 timeframe,
                 max(1, int(limit)),
             )
-        return [self._decode_payload(row["payload"]) for row in rows]
+        records = [self._decode_payload(row["payload"]) for row in rows]
+        for record in records:
+            timestamp = record.get("time")
+            if isinstance(timestamp, str):
+                record["time"] = self._as_datetime(timestamp)
+        return records
 
     async def _append(
         self,
