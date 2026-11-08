@@ -59,3 +59,41 @@ independently authenticated endpoint.
 ## Feature configuration example
 
 Choose an explicit allow-list that matches the numeric keys actually written into `learning_experiences.features_json`, for example `("return_1m", "realized_volatility", "spread_bps", "cvd_zscore", "ofi_zscore", "slippage_bps", "fill_ratio")`. Do not enable features until their producer, units, sampling cadence, and missing-value policy have been audited. Tune `window`, `lookback`, `max_staleness`, and `min_observations` from the observed data cadence; defaults are conservative examples, not universal production thresholds.
+
+
+## Paper-runtime drift monitor activation
+
+The paper runtime can start the managed A-Stat drift scheduler, but it is
+**disabled by default**. Enable it only after the deployment owner has chosen
+and validated the feature schema represented by closed learning experiences.
+
+Required configuration:
+
+- `AITOS_STATISTICAL_DRIFT_ENABLED=true`
+- `AITOS_STATISTICAL_DRIFT_FEATURES=feature_a,feature_b` — exact numeric
+  keys present in `learning_experiences.features_json`; there is no inferred
+  or wildcard feature selection.
+- `AITOS_STATISTICAL_DRIFT_SOURCES=paper` — comma-separated
+  `paper,live,backtest` sources; production paper deployments should normally
+  start with `paper` only.
+- Optional `AITOS_STATISTICAL_DRIFT_MIN_OBSERVATIONS=200` and
+  `AITOS_STATISTICAL_DRIFT_INTERVAL_SECONDS=300`.
+
+Alerts use structured application logs by default. To use an operator-owned
+HTTPS endpoint, configure both
+`AITOS_STATISTICAL_DRIFT_WEBHOOK_URL` and
+`AITOS_STATISTICAL_DRIFT_WEBHOOK_TOKEN` as deployment secrets. Redirects are
+rejected and delivery failures are logged; the scheduler retries on the next
+cadence.
+
+The provider queries disjoint reference/current windows and fails closed when
+the feature schema is missing, samples are undersized, values are malformed,
+or the newest current observation is stale. A provider failure does not stop
+the paper scanner or silently report NORMAL; the managed scheduler logs the
+failure and retries. Drift blocks statistical model promotion only. It does
+not close positions, change entry gates, or auto-promote/rollback models.
+
+The scheduler and its dedicated ClickHouse client are stopped during paper
+runtime shutdown. The SQLite model registry is local to the runtime instance;
+it is not a multi-instance coordination service. Use a durable shared registry
+before scaling this lifecycle horizontally.
