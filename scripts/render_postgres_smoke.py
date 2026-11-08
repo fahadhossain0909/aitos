@@ -78,7 +78,10 @@ async def _write_and_read() -> dict[str, Any]:
         entries = await journal.get_journal_entries_for_trade(trade_id)
         records = await journal.get_records(decision_id)
         record_types = {row["record_type"] for row in records}
-        if len(entries) != 1 or not {"DECISION", "TRADE_LINK", "OUTCOME"} <= record_types:
+        if (
+            len(entries) != 1
+            or not {"DECISION", "TRADE_LINK", "OUTCOME"} <= record_types
+        ):
             raise RuntimeError("AITOS operational journal round-trip failed")
 
         async with market._pool.acquire() as conn:
@@ -121,7 +124,7 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:
             print(f"AITOS PostgreSQL adapter smoke failed: {type(exc).__name__}")
             self._respond(503, {"status": "unavailable"})
-    
+
     def log_message(self, format: str, *args: Any) -> None:
         print(
             f"HTTP {self.command} {urlparse(self.path).path} "
