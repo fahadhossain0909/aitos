@@ -183,7 +183,9 @@ class LiveScannerCache:
         timestamp = trade.timestamp.timestamp()
         previous = state.last_hawkes_timestamp
         if previous is None:
-            previous = engine.last_hawkes_timestamp(trade.symbol)
+            last_timestamp = getattr(engine, "last_hawkes_timestamp", None)
+            if callable(last_timestamp):
+                previous = last_timestamp(trade.symbol)
         if previous is not None:
             if timestamp < previous:
                 state.hawkes_event_rejections += 1
