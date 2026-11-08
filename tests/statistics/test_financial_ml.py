@@ -134,3 +134,21 @@ def test_sequential_bootstrap_is_reproducible_and_validates_intervals():
     assert len(first) == 20
     with pytest.raises(ValueError):
         sequential_bootstrap_indices([2], [1])
+
+
+def test_triple_barrier_gap_stop_uses_open_price_not_barrier_price():
+    bars = [
+        BarrierObservation("t0", 100, 100, 100, 100),
+        BarrierObservation("t1", 97, 98, 96, 97),
+    ]
+    label = triple_barrier_labels(
+        bars,
+        event_indices=[0],
+        sides=[1],
+        volatility=[0.01, 0.01],
+        profit_take=2,
+        stop_loss=1,
+        max_holding_bars=1,
+    )[0]
+    assert label.barrier == "stop"
+    assert label.gross_return == pytest.approx(-0.03)
