@@ -395,4 +395,5 @@ class ExperimentEngine:
             deltas,
             passed,
             plan.evidence_ids,
+            statistical_validation=statistical_validation,
         )
