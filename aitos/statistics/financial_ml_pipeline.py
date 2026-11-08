@@ -191,7 +191,8 @@ class FinancialMLPipeline:
                 label_resolution_time TEXT,
                 outcome_provenance TEXT,
                 trade_id TEXT,
-                outcome_json TEXT
+                outcome_json TEXT,
+                ledger_synced INTEGER NOT NULL DEFAULT 0
             );
             CREATE INDEX IF NOT EXISTS idx_financial_ml_pending
             ON financial_ml_candidates(symbol, status, created_at);
@@ -252,6 +253,25 @@ class FinancialMLPipeline:
             );
             """
         )
+        candidate_columns = {
+            row["name"]
+            for row in self._conn.execute(
+                "PRAGMA table_info(financial_ml_candidates)"
+            )
+        }
+        if "ledger_synced" not in candidate_columns:
+            self._conn.execute(
+                "ALTER TABLE financial_ml_candidates ADD COLUMN ledger_synced INTEGER NOT NULL DEFAULT 0"
+            )
+        legacy_expiries = self._conn.execute(
+            "SELECT candidate_id,expires_at FROM financial_ml_candidates "
+            "WHERE typeof(expires_at) IN ('real','integer')"
+        ).fetchall()
+        for legacy in legacy_expiries:
+            self._conn.execute(
+                "UPDATE financial_ml_candidates SET expires_at=? WHERE candidate_id=?",
+                (_iso(float(legacy["expires_at"])), legacy["candidate_id"]),
+            )
         self._conn.commit()
         self._load_latest_artifact()
 
