@@ -84,6 +84,13 @@ class PostgresJournalRepository:
             raise
         self._initialized = True
 
+    async def emit_events(self):
+        return
+        yield  # pragma: no cover
+
+    async def handle_event(self, event: Any):
+        return None
+
     async def health_check(self) -> HealthStatus:
         import time
 
