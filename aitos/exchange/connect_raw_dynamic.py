@@ -106,7 +106,10 @@ async def connect_raw_dynamic(
                 backoff = INITIAL_BACKOFF_SECONDS
                 sub_request_id = 0
                 first_message = True
-                changed.clear()
+                # Do not clear changed here: a universe update can arrive
+                # while the TCP/WebSocket handshake is in progress. Clearing
+                # it after the handshake loses that update and leaves the
+                # connection subscribed to the stale bootstrap cohort.
 
                 async def _recv() -> str:
                     return await ws.recv()
