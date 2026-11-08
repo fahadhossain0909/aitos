@@ -112,6 +112,14 @@ async def apply_postgres_migrations(pool) -> int:
                 f"SELECT version, name, checksum FROM {_MIGRATION_TABLE}"
             )
             applied = {int(row["version"]): row for row in rows}
+            known_versions = {migration.version for migration in MIGRATIONS}
+            unknown_versions = set(applied) - known_versions
+            if unknown_versions:
+                raise RuntimeError(
+                    "PostgreSQL schema is newer than this AITOS build; "
+                    "unknown migration versions: "
+                    + ", ".join(str(version) for version in sorted(unknown_versions))
+                )
 
             for migration in MIGRATIONS:
                 previous = applied.get(migration.version)
