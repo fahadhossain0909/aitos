@@ -214,10 +214,17 @@ class LiveScannerCache:
             if callable(last_timestamp):
                 previous = last_timestamp(trade.symbol)
         if previous is not None:
+            # Exchange timestamps are commonly millisecond-granular. After
+            # separating equal timestamps by one ULP, subsequent prints from
+            # that same millisecond can be a few ULPs behind the adjusted
+            # cursor; treat only that floating-point-sized gap as a tie.
             if timestamp < previous:
-                state.hawkes_event_rejections += 1
-                return
-            if timestamp == previous:
+                if previous - timestamp <= 4.0 * math.ulp(previous):
+                    timestamp = math.nextafter(previous, math.inf)
+                else:
+                    state.hawkes_event_rejections += 1
+                    return
+            elif timestamp == previous:
                 timestamp = math.nextafter(previous, math.inf)
         mark = 1 if trade.side == TradeSide.BUY else 0
         try:
