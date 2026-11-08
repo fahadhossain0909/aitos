@@ -149,14 +149,28 @@ jobs:
           assert not missing, f"live trade subscription missing symbols: {missing}; got {sorted(subscribed)}"
           scanner_details = scanner.get("details", {})
           live_state_count = int(scanner_details.get("live_state_symbols", 0) or 0)
-          # The scanner intentionally retains BTC as a permanent deep-book
-          # anchor and only creates full trade+book cache entries for symbols
-          # selected by the expensive candidate stage. Requiring all Top-50
-          # trade subscriptions to become full live-state entries incorrectly
-          # treats unselected symbols as a transport failure.
-          assert live_state_count >= 2, (
-              f"expected BTC anchor plus at least one selected candidate in live cache; "
-              f"got {live_state_count} states"
+          live_state_symbols = {
+              str(symbol).upper()
+              for symbol in scanner_details.get("live_state_symbols_by_symbol", [])
+          }
+          trade_events_by_symbol = {
+              str(symbol).upper(): int(count)
+              for symbol, count in scanner_details.get("live_trade_events_by_symbol", {}).items()
+          }
+          missing_live_state = sorted(required - live_state_symbols)
+          missing_live_trades = sorted(
+              symbol for symbol in required if trade_events_by_symbol.get(symbol, 0) <= 0
+          )
+          assert not missing_live_state, (
+              f"symbols missing from live scanner state: {missing_live_state}; "
+              f"got {sorted(live_state_symbols)}"
+          )
+          assert not missing_live_trades, (
+              f"symbols missing actual live trade events: {missing_live_trades}; "
+              f"got {trade_events_by_symbol}"
+          )
+          assert live_state_count >= len(required), (
+              f"only {live_state_count}/{len(required)} required symbols reached live state"
           )
 
           canonical = details.get("canonical_market_data", {})
@@ -186,6 +200,7 @@ jobs:
               "status": health["status"],
               "live_trade_symbols": sorted(subscribed),
               "live_state_symbols": live_state_count,
+              "live_trade_events_by_symbol": trade_events_by_symbol,
               "live_kline_symbols": sorted(selected_klines),
               "deep_orderbook_symbols": sorted(deep_symbols),
               "trade_stream_events": trade_stream.get("events"),
