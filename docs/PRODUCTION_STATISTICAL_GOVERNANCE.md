@@ -26,14 +26,21 @@ endpoint to a dedicated approver role and require TLS. Keep
 not in source control. The token is short-lived, HMAC-signed, bound to the
 candidate artifact SHA-256, operator, and required 8–500 character approval
 rationale, and consumed once using a SQLite
-transaction. Use a persistent, backed-up database path shared by all approval
-API replicas; local ephemeral storage is not suitable for production.
+transaction. The SQLite WAL implementation is suitable only when all approval
+requests reach one service instance using the same durable local persistent
+disk. Do not place this file on a network filesystem or share it between
+Render instances. For a multi-instance API, replace the nonce repository with
+a transactional PostgreSQL implementation before scaling out. Render
+ephemeral filesystems are not durable; do not enable production approvals
+there.
 
 The approval service consumes the nonce before attempting promotion. A failed
-promotion therefore requires a fresh approval, preventing replay. Audit rows
-record nonce, approver, candidate digest, expiry, consumption and final
-decision. Rollback remains a separate explicitly authorized operation and must
-be exposed through an independently authenticated endpoint.
+promotion therefore requires a fresh approval, preventing replay. Append-only
+audit events record issuance, approver identity and roles, candidate digest,
+approval rationale, nonce consumption, and the final promotion decision.
+SQLite triggers reject audit-row updates and deletes. Rollback remains a
+separate explicitly authorized operation and must be exposed through an
+independently authenticated endpoint.
 
 ## Safety and deployment
 
