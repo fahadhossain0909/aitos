@@ -115,7 +115,7 @@ class FinancialMLPipeline:
         "side_sign",
         "event_volume_imbalance",
         "event_dollar_activity",
-        "fractional_return",
+        "fractional_log_price",
         "sv_log_variance",
         "sv_persistence",
         "jump_intensity",
@@ -491,25 +491,21 @@ class FinancialMLPipeline:
             return {
                 "event_volume_imbalance": 0.0,
                 "event_dollar_activity": 0.0,
-                "fractional_return": 0.0,
+                "fractional_log_price": 0.0,
             }
         chronological = list(reversed(rows))
         signed = sum(float(row["signed_volume"]) for row in chronological)
         volume = sum(float(row["volume"]) for row in chronological)
         closes = [float(row["close"]) for row in chronological]
-        returns = [
-            closes[index] / closes[index - 1] - 1.0
-            for index in range(1, len(closes))
-            if closes[index - 1] > 0
-        ]
-        diff = fractional_difference(returns, order=0.4, threshold=1e-3)
+        log_prices = [math.log(close) for close in closes if close > 0]
+        diff = fractional_difference(log_prices, order=0.4, threshold=1e-3)
         valid = [value for value in diff if value is not None]
         return {
             "event_volume_imbalance": signed / volume if volume > 0 else 0.0,
             "event_dollar_activity": math.log1p(
                 sum(float(row["dollar_volume"]) for row in chronological)
             ),
-            "fractional_return": float(valid[-1]) if valid else 0.0,
+            "fractional_log_price": float(valid[-1]) if valid else 0.0,
         }
 
     def register_candidate(
