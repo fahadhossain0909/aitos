@@ -55,7 +55,7 @@ def _bars():
         BarrierObservation(f"2026-01-01T00:00:{i:02d}Z", 100, high, low, close)
         for i, (high, low, close) in enumerate([
             (100, 100, 100),
-            (103, 99, 102),
+            (103, 100, 102),
             (102, 100, 101),
             (101, 99, 100),
         ])
