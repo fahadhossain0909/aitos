@@ -328,7 +328,8 @@ class OperatorApprovalService:
         )
         signature = hmac.new(self._secret, encoded.encode(), hashlib.sha256).hexdigest()
         nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
-        with self._connect() as db:
+        db = self._connect()
+        try:
             db.execute(
                 "INSERT INTO operator_approval_nonces "
                 "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,expires_at) "
@@ -343,6 +344,8 @@ class OperatorApprovalService:
                     payload["exp"],
                 ),
             )
+        finally:
+            db.close()
         return f"{encoded}.{signature}"
 
     def approve_and_promote(self, identity: OperatorIdentity, token: str, evidence):
@@ -363,7 +366,7 @@ class OperatorApprovalService:
         if (
             payload.get("iss") != identity.issuer
             or payload.get("sub") != identity.subject
-            or payload.get("exp", 0) < now
+            or payload.get("exp", 0) <= now
             or payload.get("iat", now + 1) > now
         ):
             raise PermissionError(
