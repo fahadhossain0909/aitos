@@ -537,23 +537,15 @@ class OpportunityScanner(AITOSModule):
                     and state.trades
                 },
                 "hawkes_models": self._a_stat_bridge.engine.hawkes_model_status(),
-                "decision_outcome_ledger": self._decision_outcome_ledger.snapshot(),
                 "live_hawkes": {
                     symbol: {
                         "last_event_timestamp": state.last_hawkes_timestamp,
                         "intensities": state.last_hawkes_intensities,
                         "event_rejections": state.hawkes_event_rejections,
-                        "fit_status": state.hawkes_fit_status,
-                        "fit_attempts": state.hawkes_fit_attempts,
-                        "fit_events": state.hawkes_fit_events,
-                        "fit_error": state.hawkes_fit_error,
                     }
                     for symbol in self._symbols
                     if (state := self._live_cache.snapshot(symbol)) is not None
-                    and (
-                        state.last_hawkes_timestamp is not None
-                        or state.hawkes_fit_attempts > 0
-                    )
+                    and state.last_hawkes_timestamp is not None
                 },
                 "candidate_rotation": self._candidate_rotation.snapshot(),
                 "candidate_outcomes": self._candidate_outcomes.snapshot(),
