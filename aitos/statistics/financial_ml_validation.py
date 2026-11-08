@@ -131,6 +131,8 @@ def validate_strategy_family(
     """Run White Reality Check, BH-FDR and optional model-confidence-set tests."""
     if not strategy_returns:
         raise ValueError("strategy_returns must not be empty")
+    if not math.isfinite(alpha) or not 0.0 < alpha < 0.5:
+        raise ValueError("alpha must be finite and in (0,0.5)")
     reality = white_reality_check(
         strategy_returns,
         resamples=resamples,
