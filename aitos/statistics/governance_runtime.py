@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import logging
 from typing import Mapping, Sequence
 
 from .governance import (
@@ -13,6 +14,8 @@ from .governance import (
 )
 from .registry import ModelArtifact, StatisticalModelRegistry
 from .validation import DriftReport, assess_feature_drift
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -191,11 +194,21 @@ class DriftMonitorScheduler:
         from datetime import datetime, timezone
 
         while not stop_event.is_set():
-            batches = batch_provider()
-            if inspect.isawaitable(batches):
-                batches = await batches
-            reference, current = batches
-            await self.run_once(reference, current, now=datetime.now(timezone.utc))
+            try:
+                batches = batch_provider()
+                if inspect.isawaitable(batches):
+                    batches = await batches
+                reference, current = batches
+                await self.run_once(
+                    reference, current, now=datetime.now(timezone.utc)
+                )
+            except Exception:
+                # Missing/stale/undersized data and alert delivery failures are
+                # observable, fail-closed conditions. Keep the managed worker
+                # alive so a transient provider failure can recover next cycle.
+                logger.exception(
+                    "statistical drift check unavailable; promotion remains blocked"
+                )
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=self.interval_seconds)
             except asyncio.TimeoutError:
