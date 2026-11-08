@@ -273,7 +273,9 @@ lifecycle. The integration is additive and remains **shadow-first**.
   net outcome; it cannot generate a side or override Risk, MTF/HTF, kernel or
   execution safeguards.
 - Standardization is fit on each training fold only. Platt scaling is fit on
-  chronological out-of-fold predictions, not on final-model in-sample scores.
+  an early chronological out-of-fold segment; calibration and acceptance metrics
+  are evaluated on a later disjoint OOF segment. The deployable model is trained
+  only on resolved observations before that untouched holdout cutoff.
 - The training report requires resolved samples, at least 20 OOS predictions,
   ECE at most 0.15, precision above the OOS base rate and positive mean net
   return among accepted OOS predictions.
