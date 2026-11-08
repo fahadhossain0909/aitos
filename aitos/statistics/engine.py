@@ -66,6 +66,14 @@ class AStatEngine:
         with self._hawkes_lock:
             self._hawkes_filters[normalized] = online_filter
 
+    def has_hawkes_model(self, symbol: str) -> bool:
+        """Return whether a validated live Hawkes filter is registered."""
+        normalized = symbol.strip().upper()
+        if not normalized:
+            return False
+        with self._hawkes_lock:
+            return normalized in self._hawkes_filters
+
     def observe_marked_event(self, symbol: str, timestamp: float, mark: int):
         """Atomically update the symbol's causal Hawkes filter.
 
