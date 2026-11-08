@@ -596,8 +596,10 @@ class FinancialMLPipeline:
             return False
         with self._lock:
             cursor = self._conn.execute(
-                """UPDATE financial_ml_candidates SET status='EXECUTED',trade_id=?
-                WHERE candidate_id=? AND status='PENDING'""",
+                """UPDATE financial_ml_candidates SET status='EXECUTED',trade_id=?,
+                outcome_json=NULL
+                WHERE candidate_id=? AND status IN ('PENDING','REJECTED')
+                  AND label IS NULL""",
                 (trade_id, candidate_id),
             )
             self._conn.commit()
