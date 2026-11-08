@@ -235,9 +235,14 @@ class PostgresMarketDataRepository:
                 "ORDER_BOOK_SNAPSHOT", book.symbol, key, payload, book.timestamp
             )
             event = book.depth_event
-            if isinstance(event, dict) and event.get("event_time_ms", 0) > 0:
+            event_time_ms = (
+                int(event.get("event_time_ms", 0) or 0)
+                if isinstance(event, dict)
+                else 0
+            )
+            if event_time_ms > 0:
                 event_time = datetime.fromtimestamp(
-                    int(event["event_time_ms"]) / 1000, tz=timezone.utc
+                    event_time_ms / 1000, tz=timezone.utc
                 )
                 final_id = int(event.get("final_update_id", book.last_update_id))
                 previous_id = int(
