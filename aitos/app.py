@@ -339,7 +339,23 @@ async def build_system(
         trade_lifecycle.configure_position_switching(coordinator)
         logger.info("Durable position-switching coordinator explicitly configured")
 
-    decision_journal = decision_journal_repository or DecisionJournalRepository()
+    decision_journal = decision_journal_repository
+    if decision_journal is None and journal_repository is not None and all(
+        hasattr(journal_repository, method)
+        for method in (
+            "save_decision",
+            "link_trade",
+            "attribute_outcome",
+            "get_records",
+            "save_management_decision",
+            "get_trade_records",
+        )
+    ):
+        # The PostgreSQL fallback implements both operational journal
+        # interfaces over one append-only transactional record table.
+        decision_journal = journal_repository
+    if decision_journal is None:
+        decision_journal = DecisionJournalRepository()
     journal = JournalSystem(
         event_bus=event_bus,
         repository=journal_repository,
