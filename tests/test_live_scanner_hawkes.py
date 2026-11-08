@@ -2,6 +2,7 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from aitos.intelligence.live_scanner import LiveScannerCache
 from aitos.models.market import TradeSide, TradeTick
@@ -16,6 +17,7 @@ class RecordingHawkesEngine:
 
     def observe_marked_event(self, symbol, timestamp, mark):
         self.events.append((symbol, timestamp, mark))
+        return SimpleNamespace(intensities=(1.0, 1.0))
 
 
 def trade(trade_id, side, timestamp):
