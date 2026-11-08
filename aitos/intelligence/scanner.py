@@ -407,7 +407,10 @@ class OpportunityScanner(AITOSModule):
         self._interaction_engine = FlowLiquidityInteractionEngine()
         self._a_stat_bridge = AStatBridge()
         self._live_cache = LiveScannerCache(
-            event_bus, self._symbols, max_trades=max(5000, trade_lookback)
+            event_bus,
+            self._symbols,
+            max_trades=max(5000, trade_lookback),
+            hawkes_engine=self._a_stat_bridge.engine,
         )
         self._last_scan_at = None
         self._last_candidate_count = 0
