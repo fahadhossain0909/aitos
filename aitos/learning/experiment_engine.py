@@ -366,9 +366,7 @@ class ExperimentEngine:
                 if float(reality_check["p_value"]) >= 0.05:
                     passed = False
                 adjusted = family_result["adjusted_p_values"]
-                if adjusted is not None and not any(
-                    bool(value) for value in adjusted["rejected"].values()
-                ):
+                if adjusted is not None and not adjusted["rejected"]:
                     passed = False
         dataset_fingerprint = hashlib.sha256(
             json.dumps(
