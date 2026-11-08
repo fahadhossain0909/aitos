@@ -23,7 +23,12 @@ class PostgresJournalRepository:
     """Transactional operational journal adapter backed by asyncpg."""
 
     CAPABILITIES = frozenset(
-        {"trade_snapshots", "journal_entries", "decision_journal", "outcome_attribution"}
+        {
+            "trade_snapshots",
+            "journal_entries",
+            "decision_journal",
+            "outcome_attribution",
+        }
     )
 
     def __init__(self, dsn: str, *, min_size: int = 1, max_size: int = 5) -> None:
@@ -166,9 +171,7 @@ class PostgresJournalRepository:
         )
 
     async def attribute_outcome(self, decision_id: str, trade: dict[str, Any]) -> None:
-        trade_id = str(
-            trade.get("trade_id") or trade.get("candidate_id") or "unlinked"
-        )
+        trade_id = str(trade.get("trade_id") or trade.get("candidate_id") or "unlinked")
         payload = dict(trade)
         pnl = payload.get("pnl")
         risk = payload.get("risk_amount_usd")
