@@ -396,7 +396,9 @@ def test_legacy_candidate_expiry_is_migrated_before_immutability_trigger(tmp_pat
     ).fetchone()
     assert isinstance(row["expires_at"], str)
     assert row["ledger_synced"] == 0
-    with pytest.raises(sqlite3.IntegrityError, match="candidate snapshots are immutable"):
+    with pytest.raises(
+        sqlite3.IntegrityError, match="candidate snapshots are immutable"
+    ):
         pipeline._conn.execute(
             "UPDATE financial_ml_candidates SET expires_at=? WHERE candidate_id=?",
             ("2026-01-01T00:00:00+00:00", "candidate-legacy-expiry"),
