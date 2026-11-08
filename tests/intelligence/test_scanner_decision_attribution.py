@@ -92,9 +92,7 @@ class _AttributionLedger:
         return True
 
     def list_decisions(self, *, entity_id):
-        return [
-            row for row in self.resolutions if row["entity_id"] == entity_id
-        ]
+        return [row for row in self.resolutions if row["entity_id"] == entity_id]
 
     def resolve_entity(self, entity_id, **kwargs):
         self.resolutions.append({"entity_id": entity_id, **kwargs})
