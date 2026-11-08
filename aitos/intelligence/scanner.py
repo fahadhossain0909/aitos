@@ -582,6 +582,7 @@ class OpportunityScanner(AITOSModule):
                 await asyncio.to_thread(
                     self._financial_ml.observe_price, trade.symbol, float(trade.price), timestamp
                 )
+                await asyncio.to_thread(self._reconcile_financial_ml_labels)
             except Exception:
                 logger.exception(
                     "financial ML live event ingestion failed",
@@ -1937,12 +1938,46 @@ class OpportunityScanner(AITOSModule):
             ),
         )
 
+    def _reconcile_financial_ml_labels(self) -> int:
+        """Publish resolved counterfactual barrier labels with their exact resolution time."""
+        resolved = 0
+        for label in self._financial_ml.pending_counterfactual_labels():
+            candidate_id = str(label["candidate_id"])
+            try:
+                updated = self._decision_outcome_ledger.resolve_entity(
+                    candidate_id,
+                    outcome_value=float(label["net_return"]),
+                    outcome_at=str(label["label_resolution_time"]),
+                    outcome={
+                        **dict(label.get("outcome") or {}),
+                        "label": int(label["label"]),
+                        "counterfactual": True,
+                        "provenance": str(label["outcome_provenance"]),
+                    },
+                    candidate_id=candidate_id,
+                    outcome_provenance=str(label["outcome_provenance"]),
+                )
+                if updated:
+                    self._financial_ml.mark_ledger_synced(candidate_id)
+                    resolved += updated
+            except Exception:
+                logger.exception(
+                    "financial ML candidate label could not be synchronized to decision ledger",
+                    extra={"aitos_extra": {"candidate_id": candidate_id}},
+                )
+        return resolved
+
     def _reconcile_candidate_markouts(self) -> int:
         """Resolve rejected-candidate decisions from the final 15-minute markout."""
         resolved = 0
         for markout in self._candidate_outcomes.completed_markouts(horizon_seconds=900):
             attribution_id = str(markout.get("attribution_id") or "")
             if not attribution_id:
+                continue
+            existing = self._decision_outcome_ledger.list_decisions(
+                entity_id=attribution_id
+            )
+            if any(row.get("outcome_value") is not None for row in existing):
                 continue
             observed_at = datetime.fromtimestamp(
                 float(markout["observed_at"]), tz=timezone.utc
