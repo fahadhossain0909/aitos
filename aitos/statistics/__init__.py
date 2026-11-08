@@ -42,7 +42,9 @@ from .experiments import (
 )
 from .financial_ml_validation import (
     MonteCarloStressReport,
+    PortfolioMonteCarloStressReport,
     StrategyFamilyValidation,
+    monte_carlo_portfolio_stress_test,
     monte_carlo_stress_test,
     validate_strategy_family,
 )
@@ -224,7 +226,9 @@ __all__ = [
     "HSMMParameters",
     "HSMMResult",
     "MonteCarloStressReport",
+    "PortfolioMonteCarloStressReport",
     "StrategyFamilyValidation",
+    "monte_carlo_portfolio_stress_test",
     "monte_carlo_stress_test",
     "validate_strategy_family",
     "JumpDiffusionEstimate",
