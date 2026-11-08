@@ -58,26 +58,9 @@ class PostgresJournalRepository:
             dsn=self._dsn, min_size=self._min_size, max_size=self._max_size
         )
         try:
-            async with self._pool.acquire() as conn:
-                await conn.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS aitos_operational_records (
-                        record_id BIGSERIAL PRIMARY KEY,
-                        record_type TEXT NOT NULL,
-                        entity_id TEXT NOT NULL,
-                        idempotency_key TEXT NOT NULL UNIQUE,
-                        recorded_at TIMESTAMPTZ NOT NULL,
-                        payload JSONB NOT NULL
-                    )
-                    """
-                )
-                await conn.execute(
-                    """
-                    CREATE INDEX IF NOT EXISTS
-                    idx_aitos_operational_records_entity
-                    ON aitos_operational_records (record_type, entity_id, recorded_at)
-                    """
-                )
+            from aitos.storage.postgres_migrations import apply_postgres_migrations
+
+            await apply_postgres_migrations(self._pool)
         except Exception:
             await self._pool.close()
             self._pool = None
