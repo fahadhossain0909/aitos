@@ -243,12 +243,16 @@ def triple_barrier_labels(
     All costs are non-negative bps. A neutral vertical-barrier outcome gets
     label 0; labels are intended for offline training, not live decisions.
     """
+    event_indices = tuple(event_indices)
+    sides = tuple(sides)
     if len(event_indices) != len(sides):
         raise ValueError("event_indices and sides must align")
     if len(volatility) != len(bars):
         raise ValueError("volatility must align with bars")
     if not bars or max_holding_bars <= 0:
         raise ValueError("bars and positive max_holding_bars are required")
+    profit_take = _finite(profit_take, "profit_take")
+    stop_loss = _finite(stop_loss, "stop_loss")
     if min(profit_take, stop_loss) <= 0:
         raise ValueError("barrier multiples must be positive")
     costs = tuple(
@@ -279,6 +283,21 @@ def triple_barrier_labels(
         barrier = "vertical"
         for cursor in range(index + 1, end + 1):
             bar = bars[cursor]
+            # Opening gaps are filled at the observed open, not at an
+            # unreachable barrier price. Intrabar double touches remain
+            # conservatively stop-first because OHLC has no path ordering.
+            stop_gap = (
+                bar.open <= lower_price if side == 1 else bar.open >= upper_price
+            )
+            take_gap = (
+                bar.open >= upper_price if side == 1 else bar.open <= lower_price
+            )
+            if stop_gap:
+                exit_price, end, barrier = bar.open, cursor, "stop"
+                break
+            if take_gap:
+                exit_price, end, barrier = bar.open, cursor, "take"
+                break
             stop_hit = bar.low <= lower_price if side == 1 else bar.high >= upper_price
             take_hit = bar.high >= upper_price if side == 1 else bar.low <= lower_price
             if stop_hit:
