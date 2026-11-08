@@ -656,6 +656,9 @@ async def run_scan_and_trade_cycle(
     for batch in ranked_batches:
         for candidate in batch:
             if open_symbol_counts.get(candidate.symbol, 0) >= max_per_symbol:
+                components.scanner.record_candidate_rejection(
+                    candidate, "max_positions_per_symbol"
+                )
                 continue
             kernel_decision = await components.scanner.decide_with_kernel(
                 candidate, components.kernel
