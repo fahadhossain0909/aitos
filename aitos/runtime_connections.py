@@ -91,7 +91,12 @@ async def connect_clickhouse_repositories(settings, *, logger):
     )
     postgres_url = getattr(storage, "postgres_url", "") if storage else ""
     required = frozenset(
-        {"trade_snapshots", "journal_entries", "decision_journal", "outcome_attribution"}
+        {
+            "trade_snapshots",
+            "journal_entries",
+            "decision_journal",
+            "outcome_attribution",
+        }
     )
 
     try:
