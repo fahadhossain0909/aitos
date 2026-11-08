@@ -40,6 +40,14 @@ class StrategyFamilyValidation:
     model_confidence_set: ModelConfidenceSet | None
 
 
+@dataclass(frozen=True)
+class PortfolioMonteCarloStressReport:
+    weights: Mapping[str, float]
+    asset_count: int
+    observations: int
+    stress: MonteCarloStressReport
+
+
 def _finite_series(values: Iterable[float]) -> tuple[float, ...]:
     result = tuple(float(value) for value in values)
     if len(result) < 20 or any(not math.isfinite(value) for value in result):
@@ -117,6 +125,49 @@ def monte_carlo_stress_test(
         max_drawdown_p95=_quantile(tuple(drawdowns), 0.95),
         additional_cost_bps=additional_cost_bps,
         block_length=block_length,
+    )
+
+
+def monte_carlo_portfolio_stress_test(
+    asset_returns: Mapping[str, Iterable[float]],
+    weights: Mapping[str, float],
+    *,
+    paths: int = 1000,
+    horizon: int | None = None,
+    block_length: int = 5,
+    seed: int = 0,
+    additional_cost_bps: float = 0.0,
+) -> PortfolioMonteCarloStressReport:
+    """Stress a weighted portfolio using synchronized cross-asset block draws."""
+    if not asset_returns or set(asset_returns) != set(weights):
+        raise ValueError("asset return series and portfolio weights must align")
+    series = {name: _finite_series(values) for name, values in asset_returns.items()}
+    lengths = {len(values) for values in series.values()}
+    if len(lengths) != 1:
+        raise ValueError("asset return series must have equal lengths")
+    clean_weights = {name: float(value) for name, value in weights.items()}
+    if any(not math.isfinite(value) for value in clean_weights.values()):
+        raise ValueError("portfolio weights must be finite")
+    if sum(abs(value) for value in clean_weights.values()) <= 0:
+        raise ValueError("portfolio must have non-zero absolute exposure")
+    observations = next(iter(lengths))
+    portfolio_returns = tuple(
+        sum(clean_weights[name] * values[index] for name, values in series.items())
+        for index in range(observations)
+    )
+    stress = monte_carlo_stress_test(
+        portfolio_returns,
+        paths=paths,
+        horizon=horizon,
+        block_length=block_length,
+        seed=seed,
+        additional_cost_bps=additional_cost_bps,
+    )
+    return PortfolioMonteCarloStressReport(
+        weights=clean_weights,
+        asset_count=len(series),
+        observations=observations,
+        stress=stress,
     )
 
 
