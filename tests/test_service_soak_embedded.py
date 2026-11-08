@@ -9,8 +9,11 @@ from engineering.tools.paper_service_soak import run
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize(
+    "fast_clock", [False, True], ids=["wall-clock", "125-unique-events"]
+)
 async def test_service_harness_seed_recover_and_soak_against_embedded_sql(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, fast_clock
 ):
     pytest.importorskip("chdb")
     from chdb.session import Session
@@ -64,9 +67,31 @@ async def test_service_harness_seed_recover_and_soak_against_embedded_sql(
         assert json.loads((root / "probe-offline-report.json").read_text())[
             "counts"
         ] == dict(total=10, pending=10, delivered=0)
-        await run("recover-soak", root, 1)
+        # A module-local fake clock reaches >100 iterations without replacing
+        # the event loop's global monotonic clock or claiming wall-clock soak.
+        import engineering.tools.paper_service_soak as harness
+
+        ticks = 0
+
+        async def advance(delay):
+            nonlocal ticks
+            assert delay == 0.1
+            ticks += 1
+
+        with monkeypatch.context() as patch:
+            if fast_clock:
+                patch.setattr(
+                    harness, "time", SimpleNamespace(monotonic=lambda: ticks / 125)
+                )
+                patch.setattr(harness, "asyncio", SimpleNamespace(sleep=advance))
+            await run("recover-soak", root, 1)
         report = json.loads((root / "recover-soak-report.json").read_text())
         assert report["status"] == "recovered_and_soaked" and report["iterations"] > 0
-        assert report["remote_rows"] == 10 + min(report["iterations"], 100)
+        assert report["remote_rows"] == 10 + report["iterations"]
+        assert report["workload"] == "continuous_unique_events"
+        if fast_clock:
+            assert report["iterations"] == 125
+        assert report["live_authorized"] is False
+        assert report["production_certified"] is False
     finally:
         engine.close()

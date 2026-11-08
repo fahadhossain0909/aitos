@@ -178,7 +178,9 @@ async def run(phase, root, seconds):
             started = time.monotonic()
             iterations = 0
             while time.monotonic() - started < seconds:
-                i = iterations % 100
+                # Keep exercising new remote writes for the entire window. Cycling
+                # IDs here turns every iteration after 100 into a local replay.
+                i = iterations
                 journal.append(
                     writer,
                     trade_id=f"soak-{i}",
@@ -191,15 +193,21 @@ async def run(phase, root, seconds):
                     },
                 )
                 report = await projector.run_once()
-                require(report["available"] and report["counts"]["pending"] == 0)
+                require(
+                    report["available"]
+                    and report["counts"]["pending"] == 0
+                    and report["last_batch"]
+                    == dict(checked=1, inserted=1, acknowledged=1)
+                )
                 iterations += 1
                 await asyncio.sleep(0.1)
             count = (
                 await client.query("SELECT count() FROM prototype_revision_evidence")
             ).result_rows[0][0]
-            require(count == 10 + min(iterations, 100))
+            require(count == 10 + iterations)
             result = {
                 "status": "recovered_and_soaked",
+                "workload": "continuous_unique_events",
                 "iterations": iterations,
                 "elapsed_seconds": time.monotonic() - started,
                 "remote_rows": count,
