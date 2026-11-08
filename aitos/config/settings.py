@@ -75,8 +75,6 @@ class BinanceSettings(BaseSettings):
     recv_window_ms: int = 5000
     hedge_mode: bool = False
 
-
-
 class StorageSettings(BaseSettings):
     """Runtime storage policy; adapters must prove capability parity before failover."""
 
