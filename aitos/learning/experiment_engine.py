@@ -357,7 +357,7 @@ class ExperimentEngine:
                         name: tuple(-value for value in values)
                         for name, values in family_returns.items()
                     },
-                    resamples=250,
+                    resamples=1000,
                     block_length=min(5, len(cohort_cells[0].net_returns)),
                     seed=0,
                 )
