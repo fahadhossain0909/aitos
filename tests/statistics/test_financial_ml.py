@@ -16,7 +16,7 @@ from aitos.statistics.financial_ml import (
 
 def test_volume_dollar_and_imbalance_bars_close_only_complete_bars():
     events = [
-        MarketEvent("2026-01-01T00:00:00Z", 10, 2, 2),
+        MarketEvent("2026-01-01T00:00:00Z", 10, 2, 1),
         MarketEvent("2026-01-01T00:00:01Z", 11, 3, -3),
         MarketEvent("2026-01-01T00:00:02Z", 12, 1, 1),
     ]
@@ -25,7 +25,7 @@ def test_volume_dollar_and_imbalance_bars_close_only_complete_bars():
     assert volume[0].event_count == 2
     assert volume[0].volume == 5
     assert build_dollar_bars(events, dollar_threshold=50)[0].event_count == 2
-    assert build_imbalance_bars(events, imbalance_threshold=3)[0].event_count == 2
+    assert build_imbalance_bars(events, imbalance_threshold=2)[0].event_count == 2
 
 
 def test_event_bars_reject_bad_order_and_threshold():
@@ -86,7 +86,7 @@ def test_triple_barrier_labels_long_and_short_with_costs():
 def test_triple_barrier_uses_conservative_stop_when_both_hit():
     bars = [
         BarrierObservation("t0", 100, 100, 100, 100),
-        BarrierObservation("t1", 100, 98, 98, 99),
+        BarrierObservation("t1", 100, 102, 98, 99),
     ]
     label = triple_barrier_labels(
         bars,
