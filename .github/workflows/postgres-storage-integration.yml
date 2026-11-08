@@ -30,6 +30,20 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.12-alpine
+        env:
+          CLICKHOUSE_DB: aitos_test
+          CLICKHOUSE_USER: aitos_test
+          CLICKHOUSE_PASSWORD: aitos_test_password
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "clickhouse-client --user aitos_test --password aitos_test_password --query 'SELECT 1' || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
     env:
       AITOS_TEST_POSTGRES_URL: postgresql://aitos_test:aitos_test_password@127.0.0.1:5432/aitos_test
       AITOS_RECONCILE_POSTGRES_URL: postgresql://aitos_test:aitos_test_password@127.0.0.1:5432/aitos_test
