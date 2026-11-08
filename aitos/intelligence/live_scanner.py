@@ -187,7 +187,7 @@ class LiveScannerCache:
                 return
             if timestamp == previous:
                 timestamp = math.nextafter(previous, math.inf)
-        mark = 1 if trade.side is TradeSide.BUY else 0
+        mark = 1 if trade.side == TradeSide.BUY else 0
         try:
             engine.observe_marked_event(trade.symbol, timestamp, mark)
         except (KeyError, ValueError):
