@@ -642,7 +642,11 @@ class FinancialMLPipeline:
                 outcome_provenance='EXECUTED_TRADE_NET_OUTCOME',outcome_json=?
                 WHERE candidate_id=?""",
                 (
-                    label, value, value, now.isoformat(),
+                    label, value, (
+                        _finite(body["gross_return"], "gross_return")
+                        if body.get("gross_return") is not None
+                        else None
+                    ), now.isoformat(),
                     json.dumps(body, sort_keys=True, allow_nan=False), candidate_id,
                 ),
             )
