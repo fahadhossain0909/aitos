@@ -615,12 +615,14 @@ class OpportunityScanner(AITOSModule):
                 },
             )
         if event.get("symbol") and event.get("stage"):
-            attribution_id = trace_id or (f"scan:{event['symbol']}:{time.time_ns()}")
+            details = dict(event.get("details") or {})
+            candidate_id = details.get("candidate_id")
+            attribution_id = str(candidate_id or trace_id or f"scan:{event['symbol']}:{time.time_ns()}")
             try:
                 await asyncio.to_thread(
                     self._decision_outcome_ledger.record_decision,
                     f"{attribution_id}:{event.get('symbol')}:{event.get('side', 'UNKNOWN')}:{event['stage']}",
-                    entity_id=f"{attribution_id}:{str(event.get('side') or 'UNKNOWN').upper()}",
+                    entity_id=attribution_id,
                     symbol=str(event["symbol"]),
                     side=str(event.get("side") or "UNKNOWN"),
                     decision_type="GATE",
@@ -628,8 +630,10 @@ class OpportunityScanner(AITOSModule):
                     reason=str(event.get("reason") or event["stage"]),
                     payload={
                         "stage": str(event["stage"]),
-                        "details": dict(event.get("details") or {}),
+                        "details": details,
+                        "candidate_id": candidate_id,
                     },
+                    candidate_id=str(candidate_id) if candidate_id else None,
                 )
             except Exception:
                 logger.exception(
@@ -1880,12 +1884,9 @@ class OpportunityScanner(AITOSModule):
         return self._top_n
 
     def record_candidate_rejection(self, candidate: ScanCandidate, reason: str) -> None:
+        self._financial_ml.reject_candidate(candidate.candidate_id, reason)
         rejection_id = self._candidate_outcomes.record_rejection(candidate, reason)
-        attribution_id = (
-            f"{candidate.trace_id}:{candidate.direction.value}"
-            if candidate.trace_id
-            else rejection_id
-        )
+        attribution_id = candidate.candidate_id or rejection_id
         if rejection_id:
             try:
                 self._decision_outcome_ledger.record_decision(
@@ -1901,7 +1902,9 @@ class OpportunityScanner(AITOSModule):
                         "trace_id": candidate.trace_id,
                         "composite_score": candidate.composite_score,
                         "regime": candidate.regime,
+                        "candidate_id": candidate.candidate_id,
                     },
+                    candidate_id=candidate.candidate_id,
                 )
             except Exception:
                 logger.exception(
@@ -1939,12 +1942,15 @@ class OpportunityScanner(AITOSModule):
                     outcome_at=observed_at,
                     outcome={
                         "counterfactual": True,
+                        "provenance": "COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
                         "horizon_seconds": 900,
                         "markout_price": float(markout["price"]),
                         "mae_pct": float(markout["mae_pct"]),
                         "mfe_pct": float(markout["mfe_pct"]),
                         "rejection_reason": str(markout["reason"]),
                     },
+                    candidate_id=str(markout.get("candidate_id") or attribution_id),
+                    outcome_provenance="COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
                 )
             except Exception:
                 logger.exception(
@@ -2203,6 +2209,15 @@ class OpportunityScanner(AITOSModule):
             agent_consensus={
                 **dict(candidate.component_scores),
                 "trace_id": candidate.trace_id,
+                "candidate_id": candidate.candidate_id,
+                "financial_ml_meta": {
+                    "raw_probability": candidate.meta_raw_probability,
+                    "calibrated_probability": candidate.meta_probability,
+                    "accepted": candidate.meta_accepted,
+                    "reason": candidate.meta_reason,
+                    "mode": self._financial_ml.mode,
+                    "features": dict(candidate.financial_ml_features),
+                },
                 **(
                     {"statistical_forecast": dict(candidate.statistical_forecast)}
                     if candidate.statistical_forecast is not None
