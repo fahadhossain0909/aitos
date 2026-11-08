@@ -923,7 +923,7 @@ class FinancialMLPipeline:
             try:
                 monte_carlo = monte_carlo_stress_test(
                     selected_returns,
-                    paths=250,
+                    paths=1000,
                     horizon=max(20, len(selected_returns)),
                     block_length=min(5, len(selected_returns)),
                     seed=17,
