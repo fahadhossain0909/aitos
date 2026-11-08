@@ -367,3 +367,22 @@ paper canary; without an approved artifact it rejects candidates closed.
 - Training is deliberately manual; no background auto-training or auto-
   promotion is enabled. Trusted approval middleware must be provided before
   any production artifact activation workflow is exposed.
+
+
+### Runtime storage and deployment boundary
+
+The Financial ML candidate journal, event-bar accumulators, model artifacts and
+DecisionOutcomeLedger currently use local SQLite databases. WAL mode and
+transactions protect process-level durability on a single persistent local
+filesystem; they do not make SQLite a distributed database.
+
+- On Render Free, the service filesystem is ephemeral unless a supported
+  persistent storage option is provisioned. A restart/redeploy can therefore
+  erase pending candidates, event-bar tails and labels. Do not treat a Render
+  Free ephemeral instance as a durable research journal.
+- Keep this pipeline to one runtime instance on a durable local volume for
+  single-instance paper testing. For horizontally scaled workers or shared
+  Render deployments, migrate both journals and artifact activation to a
+  transactional PostgreSQL repository before enabling enforce mode.
+- No runtime database migration to PostgreSQL, Render deployment or persistent
+  volume provisioning is claimed by this code change.
