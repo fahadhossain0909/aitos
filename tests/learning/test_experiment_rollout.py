@@ -356,7 +356,7 @@ def test_experiment_engine_runs_reality_check_fdr_and_mcs_on_net_returns():
     report = ExperimentEngine().run(plan, events, evaluate)
     family = report.statistical_validation["trend|base"]
     assert family["family_size"] == 2
-    assert family["reality_check"]["resamples"] == 250
+    assert family["reality_check"]["resamples"] == 1000
     assert family["adjusted_p_values"]["method"] == "bh"
     assert family["model_confidence_set"] is not None
     assert "trend|base" in report.to_dict()["statistical_validation"]
