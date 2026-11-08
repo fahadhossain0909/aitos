@@ -68,8 +68,17 @@ async def connect_clickhouse_repositories(settings, *, logger):
         database=settings.clickhouse.database,
     )
     storage = getattr(settings, "storage", None)
-    explicit_postgres = getattr(storage, "backend", "auto") == "postgres"
-    allow_fallback = bool(getattr(storage, "allow_fallback", False)) and getattr(storage, "backend", "auto") != "clickhouse"
+    backend_mode = getattr(storage, "backend", "auto")
+    primary_backend = getattr(storage, "primary", "clickhouse")
+    fallback_backend = getattr(storage, "fallback", "postgres")
+    explicit_postgres = backend_mode == "postgres" or (
+        backend_mode == "auto" and primary_backend == "postgres"
+    )
+    allow_fallback = (
+        bool(getattr(storage, "allow_fallback", False))
+        and backend_mode != "clickhouse"
+        and fallback_backend == "postgres"
+    )
     postgres_url = getattr(storage, "postgres_url", "") if storage else ""
     journal_repo = None
 
