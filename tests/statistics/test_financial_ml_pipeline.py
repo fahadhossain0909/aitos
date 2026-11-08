@@ -124,7 +124,7 @@ def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(
     )
     observer = FinancialMLPipeline(database, mode="shadow")
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    for index in range(80):
+    for index in range(120):
         candidate_id = f"candidate-{index:03d}"
         score = 10.0 if index % 2 else 0.0
         created = start + timedelta(minutes=20 * index)
