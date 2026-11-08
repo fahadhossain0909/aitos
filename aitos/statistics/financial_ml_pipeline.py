@@ -285,6 +285,9 @@ class FinancialMLPipeline:
             "WHERE active=1 ORDER BY created_at DESC LIMIT 1"
         ).fetchone()
         if row is None:
+            self._models.clear()
+            self._calibrators.clear()
+            self._artifact_version = None
             return
         artifact = json.loads(row["artifact_json"])
         self._models["meta"] = self._model_from_dict(artifact["model"])
@@ -884,6 +887,13 @@ class FinancialMLPipeline:
     def predict(self, candidate_id: str, features: Mapping[str, float]) -> FinancialMLPrediction:
         if self.mode == "disabled":
             return FinancialMLPrediction(candidate_id, None, None, True, self.mode, "disabled")
+        active = self._conn.execute(
+            "SELECT artifact_id FROM financial_ml_artifacts WHERE active=1 "
+            "ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        active_id = str(active["artifact_id"]) if active is not None else None
+        if active_id != self._artifact_version:
+            self._load_latest_artifact()
         model = self._models.get("meta")
         calibrator = self._calibrators.get("platt")
         if model is None or calibrator is None:
