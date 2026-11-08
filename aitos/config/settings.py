@@ -6,6 +6,8 @@ workload knobs are provided by the validated tuning profile resolver.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from dotenv import load_dotenv
 
 from aitos.config.paths import get_env_file
@@ -74,6 +76,20 @@ class BinanceSettings(BaseSettings):
     hedge_mode: bool = False
 
 
+
+
+class StorageSettings(BaseSettings):
+    """Runtime storage policy; adapters must prove capability parity before failover."""
+
+    model_config = SettingsConfigDict(env_prefix="AITOS_STORAGE_")
+
+    backend: Literal["auto", "clickhouse", "postgres"] = "auto"
+    primary: Literal["clickhouse", "postgres"] = "clickhouse"
+    fallback: Literal["clickhouse", "postgres"] = "postgres"
+    allow_fallback: bool = True
+    postgres_url: str = ""
+
+
 class AITOSSettings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=str(_ENV_FILE), env_file_encoding="utf-8", extra="ignore"
@@ -87,6 +103,7 @@ class AITOSSettings(BaseSettings):
         description="Symbols to skip in the position price safety-net REST fallback",
     )
 
+    storage: StorageSettings = Field(default_factory=StorageSettings)
     redis: RedisSettings = Field(default_factory=RedisSettings)
     clickhouse: ClickHouseSettings = Field(default_factory=ClickHouseSettings)
     neo4j: Neo4jSettings = Field(default_factory=Neo4jSettings)
