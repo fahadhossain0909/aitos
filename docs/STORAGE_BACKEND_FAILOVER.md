@@ -83,9 +83,10 @@ mirroring.
 
 ## Free hosting acceptance boundary
 
-The Render Free smoke service has verified internal PostgreSQL connectivity
-and a raw idempotent write/read round trip. It does not yet execute the AITOS
-repository adapters or a paper-trading lifecycle. Render Free PostgreSQL is
+The Render Free smoke service now exercises the actual AITOS PostgreSQL
+market-data and operational-journal adapters, versioned schema migration,
+write/read, and repeated idempotent requests. This is adapter acceptance only,
+not a full scanner-to-trade paper lifecycle. Render Free PostgreSQL is
 temporary and must not be treated as production durability. Render Key Value
 without persistence is cache/transport only. Do not expose the database with
 a world-open IP allowlist. Railway is only a fallback test platform after the
@@ -103,11 +104,21 @@ and emits a JSON report. It defaults to a bounded seven-day window; pass
 `AITOS_RECONCILE_POSTGRES_URL` (or `AITOS_STORAGE_POSTGRES_URL`) and the
 standard `CLICKHOUSE_*` variables before running it.
 
+The command also compares every market-record type implemented by the
+PostgreSQL fallback adapter: OHLCV, canonical market events, live analytics,
+order-book snapshots, depth events, trade ticks, funding, open interest and
+learning experiences. It normalizes database timestamp precision and
+schema-version representations, compares both directions, and treats
+duplicates as anomalies.
+
 The command is deliberately read-only. It does not repair, copy, delete, or
-promote data. A clean operational comparison is necessary evidence, not
-sufficient authorization to switch backends. Market OHLCV, depth, ticks,
-funding, learning experiences and analytical feature tables are outside this
-first reconciliation scope and must not be inferred as reconciled.
+promote data. A clean comparison is necessary evidence, not sufficient
+authorization to switch backends. ClickHouse-only analytical/feature tables,
+trade runtime state, portfolio drawdown state and exchange execution
+acknowledgements are outside this reconciliation scope and must not be
+inferred as reconciled. Use `--since` to bound the report to the actual
+fallback/outage interval rather than comparing periods when only one backend
+was authoritative.
 
 ## Not yet accepted
 
@@ -117,11 +128,14 @@ first reconciliation scope and must not be inferred as reconciled.
   schema migration v1, write/read, and repeat-request idempotency against the
   Render-hosted PostgreSQL database. GitHub Actions also tests ephemeral
   PostgreSQL 16. This is not a full scanner-to-trade paper lifecycle test.
-- Full crash-window reconciliation across exchange execution state, operational
-  journal and market records; the current CLI only compares operational
-  journal/trade snapshots between ClickHouse and PostgreSQL.
-- ClickHouse-to-PostgreSQL and PostgreSQL-to-ClickHouse reconciliation with
-  counts, key coverage, checksums and explicit operator approval.
+- Full crash-window reconciliation across exchange execution acknowledgements,
+  position/runtime state, operational journal and market records. The current
+  CLI audits stored market and journal records but does not recover exchange
+  side effects or ClickHouse-only runtime-state tables.
+- A controlled, operator-approved data-copy/switchback procedure. The current
+  tool is a read-only comparison with counts, directional missing-key
+  fingerprints, canonical payload checksums and duplicate detection; it does
+  not perform data migration or backend promotion.
 - Empirical paper-canary acceptance using real market-data flow and complete
   AITOS decision/trade lifecycle.
 
