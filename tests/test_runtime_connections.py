@@ -194,8 +194,8 @@ async def test_connect_clickhouse_repositories_shuts_down_on_retry_exhaustion(
     assert journal_repo.shutdown_count == 0
     assert logger.errors == [
         (
-            "ClickHouse market/analytics storage is mandatory; PostgreSQL "
-            "journal fallback cannot safely replace it: %s",
+            "ClickHouse market/analytics storage unavailable and no configured "
+            "PostgreSQL fallback is eligible: %s",
             failure,
         )
     ]
@@ -282,7 +282,6 @@ async def test_clickhouse_journal_failure_uses_configured_postgres_fallback(
             super().__init__()
             self.dsn = dsn
 
-    postgres_journal = FakePostgresJournalRepository("postgresql://test")
     monkeypatch.setattr(
         data_repository, "MarketDataRepository", lambda **kwargs: market_repo
     )
@@ -313,9 +312,10 @@ async def test_clickhouse_journal_failure_uses_configured_postgres_fallback(
         settings, logger=FakeLogger()
     )
     assert market is market_repo
-    assert journal is postgres_journal
+    assert isinstance(journal, FakePostgresJournalRepository)
+    assert journal.dsn == "postgresql://test"
     assert market_repo.initialized
-    assert postgres_journal.initialized
+    assert journal.initialized
     assert clickhouse_journal.shutdown_count == 1
 
 
@@ -379,7 +379,6 @@ async def test_clickhouse_market_failure_uses_postgres_only_when_analytics_degra
             super().__init__()
             self.dsn = dsn
 
-    postgres_journal = FakePostgresJournalRepository("postgresql://test")
     monkeypatch.setattr(
         data_repository, "MarketDataRepository", lambda **kwargs: clickhouse_market
     )
@@ -420,8 +419,9 @@ async def test_clickhouse_market_failure_uses_postgres_only_when_analytics_degra
         settings, logger=FakeLogger()
     )
     assert market is postgres_market
-    assert journal is postgres_journal
+    assert isinstance(journal, FakePostgresJournalRepository)
+    assert journal.dsn == "postgresql://test"
     assert clickhouse_market.shutdown_count == 1
     assert postgres_market.initialized
-    assert postgres_journal.initialized
+    assert journal.initialized
     assert clickhouse_journal.shutdown_count == 0
