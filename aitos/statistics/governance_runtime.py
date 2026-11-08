@@ -199,9 +199,7 @@ class DriftMonitorScheduler:
                 if inspect.isawaitable(batches):
                     batches = await batches
                 reference, current = batches
-                await self.run_once(
-                    reference, current, now=datetime.now(timezone.utc)
-                )
+                await self.run_once(reference, current, now=datetime.now(timezone.utc))
             except Exception:
                 # Missing/stale/undersized data and alert delivery failures are
                 # observable, fail-closed conditions. Keep the managed worker
