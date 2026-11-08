@@ -81,3 +81,5 @@ async def test_drift_scheduler_retries_after_fail_closed_provider_error(tmp_path
     assert attempts >= 2
     assert runtime.last_drift is not None
     assert runtime.last_drift.status == "NORMAL"
+    assert engine._drift_monitor_task is None
+    assert engine._drift_monitor_scheduler is None
