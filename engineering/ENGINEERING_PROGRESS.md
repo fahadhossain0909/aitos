@@ -430,3 +430,27 @@ No signing dispatch, live/account access, production cutover/migration/deploymen
 orders or risk/strategy/Redis tuning. Source validation is pinned to `15771eb`;
 documentation-only handoff uses `[skip ci]`. Current evidence supersedes earlier
 Windows/service NOT TESTED statements: `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Continuous-write soak coverage correction
+
+Source `6564415`: REPRODUCED / ROOT CAUSE CONFIRMED P2 harness coverage gap.
+Previous soak recycled IDs after 100 events. New 125-event embedded regression
+failed pre-fix (110 vs 135 remote rows); unique IDs, per-iteration checked/inserted/
+ACKed=1 and complete final count now pass. Existing historical one-hour run
+42481976338 PASS covers old bounded/replay workload, not corrected continuous
+writes. Local full backend **2045 passed / 38 deselected, 74.70s**; embedded SQL
+**22 passed, 6.60s**. Hosted corrected-source runs are being checked; see
+`REMOTE_VALIDATION_EVIDENCE.md` for final outcomes. No trading-path/authority/
+risk/Redis/production changes. External reviewer/signing/provider inputs remain
+blocked; actionable handoff: `EXTERNAL_COMPLETION_GATES.md`. Rollback: omit/revert
+only the harness/test change, preserve all data; no deployed runtime needs rollback.
+
+### Corrected-source hosted outcomes
+
+VERIFIED on `6564415`: all seven no-deployment workflows PASS; extra 300-second
+continuous-new-event restart/recovery PASS (42511235316, job 6m9s). Corrected
+3600-second run 42511298412 is IN PROGRESS, not a pass. Archive digest/links and
+workload interpretation are in `REMOTE_VALIDATION_EVIDENCE.md`. Windows signing,
+independent review, real provider/account verification, HA and authority cutover
+remain gated; user-reported signing infrastructure has not been identified/connected.
+Black/Flake8 F-lint/compile/whitespace PASS; Ruff unavailable, no result claimed.

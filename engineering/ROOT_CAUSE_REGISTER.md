@@ -265,3 +265,7 @@ No production incident claimed. Provider schema needs receipt-window/position-mo
 ## Hosted validation handoff
 
 REPRODUCED: thin service environment importing trading/lifecycle/execution required aiohttp absent from its recipe; native host also requires it. First hosted Windows/service runs failed, corrected dependency recipes passed. Raw Windows traceback inaccessible; failing step and matching import reproduction distinguished. No production incident or test bypass claimed. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Sustained-write harness correction
+
+AUD-20261106-54 — P2 validation coverage gap, ROOT CAUSE CONFIRMED: iterations % 100 stopped creating new remote writes after 100 events. Pre-fix deterministic 125-iteration test observed 110 rows, expected 135. Unique IDs + checked/inserted/ACKed=1 + full final count fix; local SQL tests pass. No production incident. Historical hour PASS retained with bounded/replay limitation. Corrected remote evidence tracked separately. See `REMOTE_VALIDATION_EVIDENCE.md`.

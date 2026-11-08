@@ -161,3 +161,7 @@ New offline Binance evidence adapter/CLI, shared strict file loader, additive sc
 ## Hosted validation handoff
 
 Windows vault/manager/installer and real service harness are now exercised on hosted environments, no longer just prepared. Thin environment dependency recipes corrected; actual independent review #247 and trusted signing remain gates. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Sustained-write harness correction
+
+Only engineering/tools/paper_service_soak.py and its embedded regression changed. New deterministic >100-event SQL case complements actual wall-clock case. External-gate handoff lists concrete unmet inputs. See `REMOTE_VALIDATION_EVIDENCE.md`.

@@ -125,3 +125,7 @@ Provider adapter emits sanitized comparison status/counts only. Unknown/duplicat
 ## Hosted validation handoff
 
 Actual remote job/step results and artifact digests now retained via GitHub links. JUnit, synthetic service journals/stage reports, unsigned Windows candidate/install evidence are available. Raw payload/log download redirects are blocked in this sandbox; no claim of independent binary inspection. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Sustained-write harness correction
+
+Corrected service reports add workload=continuous_unique_events; iterations must equal newly inserted soak rows. Historical reports remain identifiable by source SHA and lack this label. No fabricated throughput/percentiles. See `REMOTE_VALIDATION_EVIDENCE.md`.

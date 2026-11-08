@@ -2,7 +2,7 @@
 
 **NOT TESTED: independent review.** This bundle is preparation, not approval.
 No separate reviewer/subagent was available or claimed. Source is now pushed on
-`arena/ed127d35-aitos`, tested SHA `15771ebcf45d01bc88eba75795388da5f07f3159`.
+`arena/ed127d35-aitos`, latest tested source SHA `65644157531a888819e51553c160a4ac149977e2`.
 No merge, deployment, trusted signing or live activation. Review request:
 https://github.com/fahadhossain0909/aitos/issues/247 .
 User selected Windows x64, service harness/CI first, reviewer bundle first.
@@ -10,8 +10,9 @@ User selected Windows x64, service harness/CI first, reviewer bundle first.
 ## Scope and review sequence
 
 1. Review `WINDOWS_PAPER_INTEGRATION_2026-11-06.md` and prior projector evidence.
-2. Inspect accumulated `git status`, tracked diff **and untracked source**. This
-   branch contains substantial earlier work; a tracked diff alone is incomplete.
+2. Inspect accumulated baseline-to-source diff `6f8052b..6564415`, not just the
+   latest two-file commit. Source is now committed. Also inspect `git status` for
+   any subsequent working-tree delta and review the exact selected final SHA.
 3. Review paper runner `configured_shadow` call, lifecycle store wrapper, health
    observer, startup rollback and normal shutdown ordering. Flag off must do
    nothing; no Redis group/subscription/tuning changes; no venue or risk changes.
@@ -33,7 +34,8 @@ User selected Windows x64, service harness/CI first, reviewer bundle first.
    argv/env/browser storage, startup-close races and gateway thread cleanup.
 10. Inspect pinned direct packaging dependencies and audit transitives; run actual
     frozen import/asset smoke, native GUI lifecycle, install/uninstall and Windows
-    user isolation tests. No Windows validation result is claimed yet.
+    user isolation tests. Hosted unsigned Windows validation has passed; physical
+    GUI/compatibility and trusted signing are separate remaining gates.
 11. Verify signing runner isolation, required environment reviewers/source rules,
     private-key provisioning outside Git, SHA selection, SHA-256/timestamp policy,
     signed app/setup/uninstaller and expected-chain verification. SHA input is not
@@ -65,8 +67,9 @@ in `PAPER_NATIVE_HARDENING_2026-11-06.md`. Confirm legacy/mirror dual writes are
 misrepresented as atomic authority. Review shared native host cleanup, installed
 `--gateway-self-test`, bounded temporary installation waits, setup/app/uninstaller
 signer verification, and success evidence only after uninstall. Inspect source and
-version provenance in service reports. Native/PowerShell/service/signing execution
-and independent approval are still pending; do not replace them with Linux mocks.
+version provenance in service reports. Actual unsigned Windows/PowerShell and
+service runs have passed. Trusted signing, physical GUI and independent approval
+remain pending; do not replace them with Linux mocks.
 
 ## Recorded Binance account adapter review
 
@@ -86,3 +89,11 @@ a mock/prepared gate; see `REMOTE_VALIDATION_EVIDENCE.md` and its unsigned candi
 artifact. Independent review and trusted signing remain incomplete. Review the
 source SHA and artifacts directly. No PR was opened because existing PR-triggered
 VPS diagnostics have an unreadable enable flag; do not resume them just for review.
+
+## New review delta: continuous-write harness
+
+Review source `65644157531a888819e51553c160a4ac149977e2`, including the prior
+accumulated source. The old soak recycled IDs at 100, so its historical hour PASS
+is bounded/replay only. New 125-event regression reproduces the gap and verifies
+unique continuous insert/ACK invariants. See current remote evidence and
+`EXTERNAL_COMPLETION_GATES.md`. This author review is not independent approval.

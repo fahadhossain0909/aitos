@@ -104,3 +104,7 @@ Provider-boundary runtime latency/capacity percentiles NOT MEASURED. Regression/
 ## Hosted validation handoff
 
 Actual synthetic 300-second service soak completed, total job 6m5s; 60-second run also passed. This is not a representative production latency/capacity percentile baseline, 24-hour soak or replica HA proof. p50/p95/p99 remain NOT MEASURED. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Sustained-write harness correction
+
+Historical hour PASS was bounded/replay after 100 unique events, not sustained-write capacity. Corrected harness continuously inserts unique events with 0.1s pacing. Accelerated 125-event SQL regression is not wall-clock latency evidence; representative percentiles remain NOT MEASURED. See `REMOTE_VALIDATION_EVIDENCE.md`.

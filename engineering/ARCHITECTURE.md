@@ -111,3 +111,7 @@ Added offline `exchange/binance_account_evidence.py`; no HTTP/client/scheduler/r
 ## Hosted validation handoff
 
 Published source on the required branch with branch-specific no-deployment validation only. Actual hosted Windows and disposable services verified; legacy authority and default-off/read-only boundaries unchanged. No production activation. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Sustained-write harness correction
+
+Disposable harness now exercises unique new events throughout duration; no runtime topology/authority changes. See `REMOTE_VALIDATION_EVIDENCE.md`.

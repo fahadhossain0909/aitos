@@ -1,5 +1,70 @@
 # Published source and actual hosted validation
 
+## Latest source: continuous-write coverage correction
+
+Source `65644157531a888819e51553c160a4ac149977e2` corrects a P2 **test-harness
+coverage gap**, not a production incident. The previous loop used `iterations %
+100`: after 100 unique events it replayed existing events, so its hour-long PASS
+must not be described as sustained new remote writes.
+
+- **REPRODUCED / ROOT CAUSE CONFIRMED:** new deterministic 125-iteration embedded
+  regression failed before the fix: 110 remote rows versus expected 135.
+- **VERIFIED:** use unique IDs throughout the duration, require each projection
+  batch to check/insert/ACK exactly one event, and verify final remote row count
+  equals 10 recovered seed rows plus all soak iterations. New reports explicitly
+  label `workload: continuous_unique_events`.
+- **VERIFIED local:** 2045 backend passed / 38 integration deselected (74.70s);
+  22 embedded SQL tests passed (6.60s), including normal wall-clock and accelerated
+  125-event tests. The accelerated SQL test is not a wall-clock duration claim.
+- **VERIFIED hosted:** all seven no-deployment workflows passed on corrected source
+  `6564415`, and a separate 300-second continuous-write restart/recovery run passed
+  (job 6m9s). See the pinned results below.
+- Static checks: Black, existing Flake8 F-lint, compile and whitespace PASS. Ruff is
+  not installed in the environment; no Ruff result is claimed.
+
+No active trading/runtime path, financial authority, schema, risk policy or
+production setting changed. Only the disposable harness and its test changed.
+
+### Completed historical one-hour run — bounded/replay workload
+
+**VERIFIED: PASS** on source `466b7465073eba8b23e1c7258ed06819278ba054`:
+https://github.com/fahadhossain0909/aitos/actions/runs/42481976338
+
+Total job 61 minutes, requested soak 3600 seconds. Artifact:
+https://github.com/fahadhossain0909/aitos/actions/runs/42481976338/artifacts/13620215209
+Archive digest: `sha256:286b43a401f24de5fe76cf84464d26f74287ea0c210506440b2ef19a18905e27`.
+This passed the old bounded/replay invariants only. The later discovered 100-event
+ceiling limits its interpretation; it is NOT sustained new-write/HA/capacity proof.
+It does not count as an hour-long test of the corrected source.
+
+## Corrected-source hosted validation
+
+All rows below are **PASS**, source `65644157531a888819e51553c160a4ac149977e2`:
+
+| Workflow | Evidence |
+|---|---|
+| Full backend / embedded persistence | https://github.com/fahadhossain0909/aitos/actions/runs/42511235702 |
+| Windows native / build / install / uninstall | https://github.com/fahadhossain0909/aitos/actions/runs/42511235601 |
+| Real ClickHouse restart / 60-second continuous-write soak | https://github.com/fahadhossain0909/aitos/actions/runs/42511235621 |
+| Real Redis recovery | https://github.com/fahadhossain0909/aitos/actions/runs/42511235730 |
+| Frontend | https://github.com/fahadhossain0909/aitos/actions/runs/42511235612 |
+| Operator browser | https://github.com/fahadhossain0909/aitos/actions/runs/42511235642 |
+| Embedded ledger SQL | https://github.com/fahadhossain0909/aitos/actions/runs/42511235584 |
+| Additional 300-second continuous-write restart/recovery | https://github.com/fahadhossain0909/aitos/actions/runs/42511235316 |
+
+[300-second corrected workload evidence](https://github.com/fahadhossain0909/aitos/actions/runs/42511235316/artifacts/13629726544),
+archive size 142761 bytes; archive digest
+`sha256:8a84f36321e7ef8e429199827a20914f016675ba643f0218ff6fefc427c3dea2`.
+Successful hosted step outcomes and artifact metadata were observed, not a downloaded
+payload or independent review. No exact remote iteration count is invented.
+
+A corrected **3600-second continuous-write run is IN PROGRESS**, not a pass:
+https://github.com/fahadhossain0909/aitos/actions/runs/42511298412
+It uses the same source `6564415`; a background `gh run watch --exit-status`
+monitor is running. No automatic future success or notification is promised.
+Single-service synthetic workload is not replicated HA, production capacity,
+representative p50/p95/p99 latency, power-loss or real-account certification.
+
 ## Executive summary
 
 The founder explicitly approved continuing the remaining work. The accumulated
@@ -159,6 +224,14 @@ preserves user datasets/vault entries. No deployed production service needs roll
 ## Documentation-only handoff
 
 The evidence/ledger handoff commit contains Markdown only and uses `[skip ci]`
-to avoid rerunning identical jobs for documentation. All validation claims above
-are pinned to the actual tested source SHA `15771eb...`, not an untested new code
-revision. No failed code validation is hidden by that documentation-only skip.
+to avoid rerunning identical jobs for documentation. Each validation claim above
+is pinned to its stated tested source SHA, not an untested new code revision. No failed code validation is hidden by that documentation-only skip.
+
+## Required external inputs — latest recheck
+
+The founder states a reviewer will be nominated and trusted signing infrastructure
+is available; provider capture is not yet collected. No reviewer username or runner
+location was supplied. Issue #247 still has no assignee or approval; visible
+environments still exclude `windows-signing`. No credential was solicited or used.
+See [actionable external gates](EXTERNAL_COMPLETION_GATES.md) for exact safe next
+steps. Neither review/signing nor provider verification/cutover has been completed.

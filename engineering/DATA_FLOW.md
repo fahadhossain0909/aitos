@@ -111,3 +111,7 @@ Recorded Binance-shaped balances/position risk/income pages → strict normaliza
 ## Hosted validation handoff
 
 Actual ClickHouse insert → lost local ACK → stopped service/offline probe → retained-storage restart → replacement writer → verified no-blind-reinsert ACK → bounded 60/300-second soak passed. Actual Windows native host → gateway → synthetic backend authentication/revocation/install/uninstall also passed. Neither establishes HA/account certification. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Sustained-write harness correction
+
+Each corrected soak iteration appends a unique event → verifies remote evidence → inserts → ACKs exactly one row. Final remote count must equal ten recovered seeds plus every iteration. Old cycling-ID evidence is explicitly limited. See `REMOTE_VALIDATION_EVIDENCE.md`.
