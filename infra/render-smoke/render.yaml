@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: aitos-paper-storage-smoke
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install 'asyncpg>=0.29.0,<1.0.0'
+    startCommand: python scripts/render_postgres_smoke.py
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: aitos-paper-test-postgres
+          property: connectionString
+      - key: SMOKE_TOKEN
+        generateValue: true
