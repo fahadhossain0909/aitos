@@ -376,7 +376,7 @@ class PostgresMarketDataRepository:
                 timeframe,
                 max(1, int(limit)),
             )
-        return [self._decode_payload(row["payload"]) for row in reversed(rows)]
+        return [self._decode_payload(row["payload"]) for row in rows]
 
     async def _append(
         self,
