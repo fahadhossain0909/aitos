@@ -88,3 +88,64 @@ def test_decision_ledger_validates_types_and_limits(tmp_path):
         )
     with pytest.raises(ValueError):
         ledger.list_decisions(limit=0)
+
+
+def test_decision_ledger_persists_candidate_and_resolution_provenance(tmp_path):
+    ledger = DecisionOutcomeLedger(tmp_path / "candidate-decisions.sqlite3")
+    candidate_id = "a" * 32
+    assert ledger.record_decision(
+        "candidate-entry",
+        entity_id=candidate_id,
+        symbol="BTCUSDT",
+        side="LONG",
+        decision_type="ENTRY",
+        accepted=True,
+        reason="paper fill",
+        payload={"candidate_id": candidate_id, "trace_id": "trace-1"},
+        candidate_id=candidate_id,
+    )
+    assert ledger.resolve_entity(
+        candidate_id,
+        outcome_value=0.012,
+        outcome_at="2026-11-08T12:00:00+00:00",
+        outcome={"provenance": "EXECUTED_TRADE_NET_OUTCOME"},
+        candidate_id=candidate_id,
+        outcome_provenance="EXECUTED_TRADE_NET_OUTCOME",
+    ) == 1
+    row = ledger.list_decisions(entity_id=candidate_id)[0]
+    assert row["candidate_id"] == candidate_id
+    assert row["label_resolution_time"] == "2026-11-08T12:00:00+00:00"
+    assert row["outcome_provenance"] == "EXECUTED_TRADE_NET_OUTCOME"
+
+
+def test_decision_ledger_migrates_legacy_schema_without_data_loss(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "legacy.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """CREATE TABLE decision_outcomes (
+            decision_id TEXT PRIMARY KEY, entity_id TEXT NOT NULL,
+            symbol TEXT NOT NULL, side TEXT NOT NULL, decision_type TEXT NOT NULL,
+            decision_at TEXT NOT NULL, accepted INTEGER NOT NULL, reason TEXT NOT NULL,
+            payload_json TEXT NOT NULL, outcome_value REAL, outcome_at TEXT,
+            outcome_json TEXT
+        )"""
+    )
+    connection.execute(
+        """INSERT INTO decision_outcomes
+        (decision_id,entity_id,symbol,side,decision_type,decision_at,accepted,
+         reason,payload_json) VALUES (?,?,?,?,?,?,?,?,?)""",
+        (
+            "legacy-1", "legacy-entity", "ETHUSDT", "SHORT", "REJECTION",
+            "2026-11-01T00:00:00Z", 0, "legacy reason", "{}",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    ledger = DecisionOutcomeLedger(path)
+    row = ledger.list_decisions(entity_id="legacy-entity")[0]
+    assert row["decision_id"] == "legacy-1"
+    assert row["candidate_id"] is None
+    assert row["label_resolution_time"] is None
