@@ -301,7 +301,7 @@ lifecycle. The integration is additive and remains **shadow-first**.
 ### Phase E — statistical validation and multiple testing
 
 - Financial ML OOS reporting includes Brier score, ECE, OOS precision, base
-  rate and accepted-subset mean net return. A 250-path circular-block Monte
+  rate and accepted-subset mean net return. A 1,000-path circular-block Monte
   Carlo stress is also run on accepted OOS returns with an additional 5 bps
   per-observation cost shock; acceptance requires loss probability no greater
   than 50% and 95th-percentile maximum drawdown no greater than 35%.
