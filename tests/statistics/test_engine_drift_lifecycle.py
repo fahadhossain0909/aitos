@@ -54,7 +54,6 @@ def test_a_stat_engine_routes_live_marked_events_to_registered_hawkes_filter():
         engine.observe_marked_event("ETHUSDT", 102.0, 0)
 
 
-
 @pytest.mark.asyncio
 async def test_drift_scheduler_retries_after_fail_closed_provider_error(tmp_path):
     registry = StatisticalModelRegistry(tmp_path / "models.sqlite3")
