@@ -273,6 +273,25 @@ class OperatorApprovalService:
                 expires_at INTEGER NOT NULL, consumed_at INTEGER, decision_json TEXT
             )"""
             )
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS operator_approval_audit (
+                audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nonce_hash TEXT NOT NULL, issuer TEXT NOT NULL, subject TEXT NOT NULL,
+                model_id TEXT NOT NULL, model_version TEXT NOT NULL,
+                artifact_sha256 TEXT NOT NULL, approval_reason TEXT NOT NULL,
+                event TEXT NOT NULL, created_at TEXT NOT NULL, details_json TEXT NOT NULL
+            )"""
+            )
+            db.execute(
+                """CREATE TRIGGER IF NOT EXISTS operator_approval_audit_no_update
+                BEFORE UPDATE ON operator_approval_audit
+                BEGIN SELECT RAISE(ABORT, 'approval audit is append-only'); END"""
+            )
+            db.execute(
+                """CREATE TRIGGER IF NOT EXISTS operator_approval_audit_no_delete
+                BEFORE DELETE ON operator_approval_audit
+                BEGIN SELECT RAISE(ABORT, 'approval audit is append-only'); END"""
+            )
         finally:
             db.close()
 
@@ -339,6 +358,7 @@ class OperatorApprovalService:
         nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
         db = self._connect()
         try:
+            db.execute("BEGIN IMMEDIATE")
             db.execute(
                 "INSERT INTO operator_approval_nonces "
                 "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,"
@@ -354,6 +374,29 @@ class OperatorApprovalService:
                     payload["exp"],
                 ),
             )
+            db.execute(
+                "INSERT INTO operator_approval_audit "
+                "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,"
+                "approval_reason,event,created_at,details_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    nonce_hash,
+                    identity.issuer,
+                    identity.subject,
+                    model_id,
+                    model_version,
+                    artifact.artifact_sha256,
+                    payload["reason"],
+                    "ISSUED",
+                    datetime.now(timezone.utc).isoformat(),
+                    json.dumps({"roles": list(identity.roles)}, sort_keys=True),
+                ),
+            )
+            db.execute("COMMIT")
+        except Exception:
+            if db.in_transaction:
+                db.execute("ROLLBACK")
+            raise
         finally:
             db.close()
         return f"{encoded}.{signature}"
@@ -418,6 +461,24 @@ class OperatorApprovalService:
                 "UPDATE operator_approval_nonces SET consumed_at=? WHERE nonce_hash=?",
                 (now, nonce_hash),
             )
+            db.execute(
+                "INSERT INTO operator_approval_audit "
+                "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,"
+                "approval_reason,event,created_at,details_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    nonce_hash,
+                    identity.issuer,
+                    identity.subject,
+                    payload["model_id"],
+                    payload["model_version"],
+                    artifact.artifact_sha256,
+                    payload["reason"],
+                    "CONSUMED",
+                    datetime.now(timezone.utc).isoformat(),
+                    "{}",
+                ),
+            )
             db.execute("COMMIT")
         except Exception:
             if db.in_transaction:
@@ -432,9 +493,20 @@ class OperatorApprovalService:
         audit_db = self._connect()
         try:
             audit_db.execute(
-                "UPDATE operator_approval_nonces SET decision_json=? "
-                "WHERE nonce_hash=?",
+                "INSERT INTO operator_approval_audit "
+                "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,"
+                "approval_reason,event,created_at,details_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
+                    nonce_hash,
+                    identity.issuer,
+                    identity.subject,
+                    payload["model_id"],
+                    payload["model_version"],
+                    artifact.artifact_sha256,
+                    payload["reason"],
+                    "PROMOTION_DECISION",
+                    datetime.now(timezone.utc).isoformat(),
                     json.dumps(
                         {
                             "eligible": decision.eligible,
@@ -442,9 +514,37 @@ class OperatorApprovalService:
                         },
                         sort_keys=True,
                     ),
-                    nonce_hash,
                 ),
             )
         finally:
             audit_db.close()
         return decision
+
+    def audit_history(self, model_id: str) -> tuple[Mapping[str, Any], ...]:
+        """Return append-only approval events for one model."""
+        db = self._connect()
+        try:
+            rows = db.execute(
+                "SELECT audit_id,nonce_hash,issuer,subject,model_id,model_version,"
+                "artifact_sha256,approval_reason,event,created_at,details_json "
+                "FROM operator_approval_audit WHERE model_id=? ORDER BY audit_id",
+                (model_id,),
+            ).fetchall()
+            return tuple(
+                {
+                    "audit_id": row[0],
+                    "nonce_hash": row[1],
+                    "issuer": row[2],
+                    "subject": row[3],
+                    "model_id": row[4],
+                    "model_version": row[5],
+                    "artifact_sha256": row[6],
+                    "approval_reason": row[7],
+                    "event": row[8],
+                    "created_at": row[9],
+                    "details": json.loads(row[10]),
+                }
+                for row in rows
+            )
+        finally:
+            db.close()
