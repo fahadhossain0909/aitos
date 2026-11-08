@@ -132,18 +132,30 @@ def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(t
             features=_features(score),
             created_at=created,
         )
-        pipeline.mark_executed(candidate_id, f"trade-{index:03d}")
-        pipeline.resolve_executed(
-            candidate_id,
-            net_return=0.01 if score else -0.01,
-            resolved_at=created + timedelta(seconds=5),
-            trade_id=f"trade-{index:03d}",
-        )
+        trade_id = f"trade-{index:03d}"
+        resolved_at = created + timedelta(seconds=5)
+        if index % 4 in (0, 1):
+            pipeline.mark_executed(candidate_id, trade_id)
+            pipeline.resolve_executed(
+                candidate_id,
+                net_return=0.01 if score else -0.01,
+                resolved_at=resolved_at,
+                trade_id=trade_id,
+            )
+        else:
+            pipeline.reject_candidate(candidate_id, "synthetic_counterfactual")
+            pipeline.observe_price(
+                "BTCUSDT",
+                102.5 if score else 98.0,
+                resolved_at,
+            )
 
     report = pipeline.train_walk_forward()
     assert report.trained
     assert report.folds >= 2
     assert report.oos_samples >= 20
+    assert report.executed_oos_samples > 0
+    assert report.counterfactual_oos_samples > 0
     # Even an OOS-passing report is not auto-promoted.
     active = pipeline._conn.execute(
         "SELECT COUNT(*) FROM financial_ml_artifacts WHERE active=1"
