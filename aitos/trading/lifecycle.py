@@ -77,6 +77,7 @@ from aitos.risk.risk_engine import RiskEngine
 from aitos.statistics.contracts import FeatureSnapshot, ForecastEnvelope
 from aitos.statistics.risk_overlay import assess_statistical_risk_forecast
 from aitos.statistics.decision_ledger import DecisionOutcomeLedger
+from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
 from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.trading.tp_contract import TakeProfitExecutionContract
 
@@ -169,8 +170,18 @@ class TradeLifecycle(AITOSModule):
             )
         return self._decision_outcome_ledger
 
+    def _financial_ml_pipeline(self) -> FinancialMLPipeline:
+        if not hasattr(self, "_financial_ml"):
+            self._financial_ml = FinancialMLPipeline(
+                get_model_data_dir() / "financial_ml.sqlite3"
+            )
+        return self._financial_ml
+
     @staticmethod
     def _trade_attribution_id(trade: Trade) -> str:
+        candidate_id = trade.agent_consensus.get("candidate_id")
+        if candidate_id:
+            return str(candidate_id)
         trace_id = trade.agent_consensus.get("trace_id")
         return (
             f"{str(trace_id).strip()}:{trade.side.value}"
@@ -203,6 +214,11 @@ class TradeLifecycle(AITOSModule):
                 reason=reason,
                 payload=payload,
                 decision_at=decision_at,
+                candidate_id=(
+                    str(payload.get("candidate_id"))
+                    if isinstance(payload, Mapping) and payload.get("candidate_id")
+                    else None
+                ),
             )
         except Exception:
             logger.exception(
@@ -220,13 +236,36 @@ class TradeLifecycle(AITOSModule):
                 outcome_value=float(trade.pnl_percent) / 100.0,
                 outcome_at=str(trade.exit_time or utc_now_iso()),
                 outcome={
+                    "provenance": "EXECUTED_TRADE_NET_OUTCOME",
+                    "counterfactual": False,
                     "net_pnl_usd": float(trade.pnl),
                     "pnl_percent": float(trade.pnl_percent),
                     "close_reason": str(getattr(trade, "close_reason", "") or ""),
                     "fees_paid_usd": float(trade.fees_paid_usd),
                     "funding_pnl_usd": float(trade.funding_pnl_usd),
                 },
+                candidate_id=(
+                    str(trade.agent_consensus.get("candidate_id"))
+                    if trade.agent_consensus.get("candidate_id")
+                    else None
+                ),
+                outcome_provenance="EXECUTED_TRADE_NET_OUTCOME",
             )
+            candidate_id = trade.agent_consensus.get("candidate_id")
+            if candidate_id:
+                await asyncio.to_thread(
+                    self._financial_ml_pipeline().resolve_executed,
+                    str(candidate_id),
+                    net_return=float(trade.pnl_percent) / 100.0,
+                    resolved_at=str(trade.exit_time or utc_now_iso()),
+                    trade_id=trade.trade_id,
+                    outcome={
+                        "net_pnl_usd": float(trade.pnl),
+                        "fees_paid_usd": float(trade.fees_paid_usd),
+                        "funding_pnl_usd": float(trade.funding_pnl_usd),
+                        "close_reason": str(getattr(trade, "close_reason", "") or ""),
+                    },
+                )
         except Exception:
             logger.exception(
                 "decision outcome reconciliation failed",
@@ -474,6 +513,10 @@ class TradeLifecycle(AITOSModule):
         if funnel_store is not None:
             funnel_store.close()
             delattr(self, "_aitos_directional_funnel")
+        financial_ml = getattr(self, "_financial_ml", None)
+        if financial_ml is not None:
+            financial_ml.close()
+            delattr(self, "_financial_ml")
         gateway = getattr(self, "_aitos_capital_gateway", None)
         if gateway is not None:
             close_calibrator = getattr(gateway.calibrator, "close", None)
@@ -1834,6 +1877,24 @@ class TradeLifecycle(AITOSModule):
             ),
         )
         self._open_trades[trade.trade_id] = trade
+        candidate_id = trade.agent_consensus.get("candidate_id")
+        if candidate_id:
+            try:
+                await asyncio.to_thread(
+                    self._financial_ml_pipeline().mark_executed,
+                    str(candidate_id),
+                    trade.trade_id,
+                )
+            except Exception:
+                logger.exception(
+                    "financial ML candidate execution binding failed",
+                    extra={
+                        "aitos_extra": {
+                            "candidate_id": candidate_id,
+                            "trade_id": trade.trade_id,
+                        }
+                    },
+                )
         await self._record_decision(
             f"{trade.trade_id}:ENTRY",
             entity_id=self._trade_attribution_id(trade),
@@ -1848,6 +1909,7 @@ class TradeLifecycle(AITOSModule):
                 "position_size_usd": trade.position_size_usd,
                 "risk_amount_usd": trade.risk_amount_usd,
                 "strategy_id": trade.strategy_id,
+                "candidate_id": trade.agent_consensus.get("candidate_id"),
                 "statistical_risk_assessment": trade.agent_consensus.get(
                     "statistical_risk_assessment"
                 ),
@@ -1941,6 +2003,19 @@ class TradeLifecycle(AITOSModule):
         return trade
 
     async def _reject(self, opportunity: Opportunity, reason: str) -> Trade:
+        candidate_id = opportunity.agent_consensus.get("candidate_id")
+        if candidate_id:
+            try:
+                await asyncio.to_thread(
+                    self._financial_ml_pipeline().reject_candidate,
+                    str(candidate_id),
+                    reason,
+                )
+            except Exception:
+                logger.exception(
+                    "financial ML rejected candidate transition failed",
+                    extra={"aitos_extra": {"candidate_id": candidate_id}},
+                )
         trade = Trade(
             trade_id=new_trade_id(),
             symbol=opportunity.symbol,
@@ -1979,6 +2054,7 @@ class TradeLifecycle(AITOSModule):
             reason=reason,
             payload={
                 "strategy_id": trade.strategy_id,
+                "candidate_id": trade.agent_consensus.get("candidate_id"),
                 "entry_price": trade.entry_price,
                 "rationale": trade.explanation,
             },
