@@ -403,19 +403,24 @@ class PostgresMarketDataRepository:
             separators=(",", ":"),
             allow_nan=False,
         )
-        conflict_action = (
-            "DO UPDATE SET event_time = EXCLUDED.event_time, payload = EXCLUDED.payload"
-            if replace
-            else "DO NOTHING"
-        )
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                f"""
+        if replace:
+            query = """
                 INSERT INTO aitos_market_records
                     (record_type, entity_id, idempotency_key, event_time, payload)
                 VALUES ($1, $2, $3, $4, $5::jsonb)
-                ON CONFLICT (idempotency_key) {conflict_action}
-                """,
+                ON CONFLICT (idempotency_key) DO UPDATE
+                SET event_time = EXCLUDED.event_time, payload = EXCLUDED.payload
+            """
+        else:
+            query = """
+                INSERT INTO aitos_market_records
+                    (record_type, entity_id, idempotency_key, event_time, payload)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
+                ON CONFLICT (idempotency_key) DO NOTHING
+            """
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                query,
                 record_type,
                 entity_id,
                 idempotency_key,
