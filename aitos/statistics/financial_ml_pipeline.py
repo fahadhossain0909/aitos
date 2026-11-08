@@ -841,7 +841,7 @@ class FinancialMLPipeline:
                     (
                         j
                         for j in range(index, samples)
-                        if rows[j]["created_at"] >= rows[index]["expires_at"]
+                        if rows[j]["created_at"] >= rows[index]["label_resolution_time"]
                     ),
                     index,
                 ),
