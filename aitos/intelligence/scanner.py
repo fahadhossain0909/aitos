@@ -579,6 +579,7 @@ class OpportunityScanner(AITOSModule):
                     price=float(trade.price),
                     volume=quantity,
                     signed_volume=signed_volume,
+                    event_id=f"{trade.symbol.upper()}:{trade.trade_id}",
                 )
                 await asyncio.to_thread(
                     self._financial_ml.ingest_market_event, trade.symbol, event
