@@ -105,6 +105,11 @@ class FinancialMLPipeline:
         "event_volume_imbalance",
         "event_dollar_activity",
         "fractional_return",
+        "sv_log_variance",
+        "sv_persistence",
+        "jump_intensity",
+        "jump_variance_fraction",
+        "rough_hurst",
     )
 
     def __init__(
