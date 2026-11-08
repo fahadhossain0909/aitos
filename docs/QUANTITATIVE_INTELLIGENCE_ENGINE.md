@@ -354,8 +354,9 @@ Run the manual walk-forward training command after enough labels have resolved:
 
     python scripts/train_financial_ml.py
 
-The command reports OOS evidence and stores an inactive artifact; it never
-approves or promotes it. The runtime defaults to shadow mode. Set
+The command reads at most the latest 1,000 resolved candidate labels to
+bound local CPU/memory use, reports OOS evidence and stores an inactive
+artifact; it never approves or promotes it. The runtime defaults to shadow mode. Set
 AITOS_FINANCIAL_ML_MODE=disabled to turn off feature scoring, or shadow to
 observe without changing scanner eligibility. Enforce must only be enabled
 after OOS acceptance, trusted operator approval, venue-cost review and a
