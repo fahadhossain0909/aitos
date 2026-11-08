@@ -31,7 +31,5 @@ async def test_clickhouse_journal_writer_persists_entry_timestamp():
     table, rows, columns = repository._client.calls[0]
     assert table == "journal_entries"
     assert columns[0] == "created_at"
-    assert rows[0][0] == datetime(
-        2026, 11, 8, 10, 20, 30, 123456, tzinfo=timezone.utc
-    )
+    assert rows[0][0] == datetime(2026, 11, 8, 10, 20, 30, 123456, tzinfo=timezone.utc)
     assert rows[0][1] == entry.entry_id
