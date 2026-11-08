@@ -512,7 +512,7 @@ class FinancialMLPipeline:
             rows = self._conn.execute(
                 """SELECT * FROM financial_ml_candidates
                 WHERE symbol=? AND status='REJECTED' AND created_at<=?
-                ORDER BY created_at ASC""",
+                ORDER BY created_at ASC LIMIT 5000""",
                 (symbol.upper(), now.isoformat()),
             ).fetchall()
             for row in rows:
@@ -890,24 +890,37 @@ class FinancialMLPipeline:
 
     def predict(self, candidate_id: str, features: Mapping[str, float]) -> FinancialMLPrediction:
         if self.mode == "disabled":
-            return FinancialMLPrediction(candidate_id, None, None, True, self.mode, "disabled")
-        active = self._conn.execute(
-            "SELECT artifact_id FROM financial_ml_artifacts WHERE active=1 "
-            "ORDER BY created_at DESC LIMIT 1"
-        ).fetchone()
-        active_id = str(active["artifact_id"]) if active is not None else None
-        if active_id != self._artifact_version:
-            self._load_latest_artifact()
-        model = self._models.get("meta")
-        calibrator = self._calibrators.get("platt")
-        if model is None or calibrator is None:
-            return FinancialMLPrediction(candidate_id, None, None, False, self.mode, "no_oos_approved_model")
-        vector = [[_finite(features.get(name, 0.0), name) for name in self.FEATURE_NAMES]]
-        raw = model.predict_probability(vector)[0]
-        calibrated = calibrator.predict_probability([[self._logit(raw)]])[0]
-        accepted = calibrated >= self.acceptance_threshold
-        reason = "meta_acceptance_threshold_met" if accepted else "meta_probability_below_threshold"
-        return FinancialMLPrediction(candidate_id, raw, calibrated, accepted, self.mode, reason)
+            return FinancialMLPrediction(
+                candidate_id, None, None, True, self.mode, "disabled"
+            )
+        with self._lock:
+            active = self._conn.execute(
+                "SELECT artifact_id FROM financial_ml_artifacts WHERE active=1 "
+                "ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+            active_id = str(active["artifact_id"]) if active is not None else None
+            if active_id != self._artifact_version:
+                self._load_latest_artifact()
+            model = self._models.get("meta")
+            calibrator = self._calibrators.get("platt")
+            if model is None or calibrator is None:
+                return FinancialMLPrediction(
+                    candidate_id, None, None, False, self.mode, "no_oos_approved_model"
+                )
+            vector = [
+                [_finite(features.get(name, 0.0), name) for name in self.FEATURE_NAMES]
+            ]
+            raw = model.predict_probability(vector)[0]
+            calibrated = calibrator.predict_probability([[self._logit(raw)]])[0]
+            accepted = calibrated >= self.acceptance_threshold
+            reason = (
+                "meta_acceptance_threshold_met"
+                if accepted
+                else "meta_probability_below_threshold"
+            )
+            return FinancialMLPrediction(
+                candidate_id, raw, calibrated, accepted, self.mode, reason
+            )
 
     def should_block(self, prediction: FinancialMLPrediction) -> bool:
         # Enforce is opt-in and requires an active artifact that passed OOS
