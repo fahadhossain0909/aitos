@@ -14,9 +14,9 @@ from aitos.statistics.hawkes import (
 def fitted_hawkes(**overrides):
     fit = HawkesMLEFit(
         baseline_intensities=(0.4, 0.5),
-        excitation_matrix=((0.12, 0.03), (0.02, 0.10)),
+        excitation_matrix=((0.12, 0.0), (0.0, 0.10)),
         decay=0.7,
-        branching_ratio=0.16,
+        branching_ratio=0.12,
         log_likelihood=-120.0,
         iterations=42,
         events=240,
