@@ -42,3 +42,25 @@ def test_postgres_outcome_holding_time_handles_utc_timestamps():
         "2026-11-08T10:00:00+00:00", "2026-11-08T10:03:30+00:00"
     )
     assert seconds == 210.0
+
+
+def test_postgres_adapter_exposes_full_operational_decision_journal_contract():
+    repo = PostgresJournalRepository("postgresql://placeholder")
+    required_methods = (
+        "save_trade_snapshot",
+        "save_journal_entry",
+        "get_journal_entries_for_trade",
+        "save_decision",
+        "link_trade",
+        "attribute_outcome",
+        "get_records",
+        "save_management_decision",
+        "get_trade_records",
+    )
+    assert all(callable(getattr(repo, name, None)) for name in required_methods)
+    assert {
+        "trade_snapshots",
+        "journal_entries",
+        "decision_journal",
+        "outcome_attribution",
+    }.issubset(repo.CAPABILITIES)
