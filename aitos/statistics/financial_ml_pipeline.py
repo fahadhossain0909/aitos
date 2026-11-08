@@ -503,7 +503,7 @@ class FinancialMLPipeline:
                     """UPDATE financial_ml_candidates SET status='RESOLVED',
                     label=?,gross_return=?,net_return=?,label_resolution_time=?,
                     outcome_provenance='COUNTERFACTUAL_LIVE_MARKOUT',outcome_json=?
-                    WHERE candidate_id=? AND status='PENDING'""",
+                    WHERE candidate_id=? AND status='REJECTED'""",
                     (
                         label, gross, net, now.isoformat(),
                         json.dumps(outcome, sort_keys=True), row["candidate_id"],
