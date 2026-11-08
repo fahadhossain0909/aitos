@@ -1715,9 +1715,7 @@ class OpportunityScanner(AITOSModule):
                 if candidate.entry_price > 0
                 else 0.0
             ),
-            "side_sign": (
-                1.0 if candidate.direction.value == "LONG" else -1.0
-            ),
+            "side_sign": (1.0 if candidate.direction.value == "LONG" else -1.0),
             **event_features,
             **volatility_features,
         }
