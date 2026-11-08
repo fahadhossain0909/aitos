@@ -4,6 +4,7 @@ No adapter is activated implicitly. Deployments must inject an authenticated
 ClickHouse client, configure an alert endpoint, and keep the approval signing
 key in the platform secret store.
 """
+
 from __future__ import annotations
 
 import base64
@@ -25,7 +26,9 @@ from urllib.request import Request, urlopen
 
 
 class FeatureBatchProvider(Protocol):
-    def __call__(self) -> tuple[Mapping[str, Sequence[float]], Mapping[str, Sequence[float]]]: ...
+    def __call__(
+        self,
+    ) -> tuple[Mapping[str, Sequence[float]], Mapping[str, Sequence[float]]]: ...
 
 
 class ClickHouseDriftFeatureBatchProvider:
@@ -36,10 +39,16 @@ class ClickHouseDriftFeatureBatchProvider:
     silently interpret missing data as NORMAL drift.
     """
     def __init__(
-        self, store, *, lookback: timedelta = timedelta(days=30),
-        window: timedelta = timedelta(days=7), min_observations: int = 200,
+        self,
+        store,
+        *,
+        lookback: timedelta = timedelta(days=30),
+        window: timedelta = timedelta(days=7),
+        min_observations: int = 200,
         sources: Sequence[str] = ("paper", "live"),
-        feature_names: Sequence[str], max_staleness: timedelta = timedelta(days=2), clock=None,
+        feature_names: Sequence[str],
+        max_staleness: timedelta = timedelta(days=2),
+        clock=None,
     ) -> None:
         if lookback <= window or window.total_seconds() <= 0:
             raise ValueError("lookback must exceed a positive window")
@@ -70,10 +79,16 @@ class ClickHouseDriftFeatureBatchProvider:
         # Query non-overlapping windows separately. Ascending LIMIT on a
         # combined query can truncate the newest observations behind backlog.
         reference_rows = self.store.query_closed_experiences(
-            reference_start, current_start, sources=self.sources, limit=1_000_000,
+            reference_start,
+            current_start,
+            sources=self.sources,
+            limit=1_000_000,
         )
         current_rows = self.store.query_closed_experiences(
-            current_start, end, sources=self.sources, limit=1_000_000,
+            current_start,
+            end,
+            sources=self.sources,
+            limit=1_000_000,
         )
         reference: dict[str, list[float]] = {}
         current: dict[str, list[float]] = {}
@@ -101,10 +116,14 @@ class ClickHouseDriftFeatureBatchProvider:
                     raise RuntimeError(f"configured drift feature missing: {name}")
                 value = raw[name]
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    raise RuntimeError(f"configured drift feature is non-numeric: {name}")
+                    raise RuntimeError(
+                        f"configured drift feature is non-numeric: {name}"
+                    )
                 number = float(value)
                 if not math.isfinite(number):
-                    raise RuntimeError(f"configured drift feature is non-finite: {name}")
+                    raise RuntimeError(
+                        f"configured drift feature is non-finite: {name}"
+                    )
                 target.setdefault(str(name), []).append(number)
         if not reference or not current:
             raise RuntimeError("drift feature windows are empty; fail closed")
@@ -114,13 +133,18 @@ class ClickHouseDriftFeatureBatchProvider:
         if not common:
             raise RuntimeError("no common numeric features across drift windows")
         for name in common:
-            if len(reference[name]) < self.min_observations or len(current[name]) < self.min_observations:
+            if (
+                len(reference[name]) < self.min_observations
+                or len(current[name]) < self.min_observations
+            ):
                 raise RuntimeError(f"insufficient drift samples for feature {name}")
         if self.feature_names and set(common) != set(self.feature_names):
             missing = sorted(set(self.feature_names) - set(common))
             raise RuntimeError(f"configured drift features missing: {missing}")
-        return ({name: reference[name] for name in common},
-                {name: current[name] for name in common})
+        return (
+            {name: reference[name] for name in common},
+            {name: current[name] for name in common},
+        )
 
 
 @dataclass(frozen=True)
@@ -139,18 +163,23 @@ class LoggingDriftAlertSink:
         import logging
         logging.getLogger("aitos.statistics.drift").warning(
             "statistical feature drift: %s",
-            json.dumps({
-                "status": action.status,
-                "max_psi": action.report.max_psi,
-                "drifted_features": list(action.report.drifted_features),
-                "reasons": list(action.reasons),
-            }, sort_keys=True),
+            json.dumps(
+                {
+                    "status": action.status,
+                    "max_psi": action.report.max_psi,
+                    "drifted_features": list(action.report.drifted_features),
+                    "reasons": list(action.reasons),
+                },
+                sort_keys=True,
+            ),
         )
 
 
 class WebhookDriftAlertSink:
     """POST a minimal JSON alert to an operator-owned HTTPS endpoint."""
-    def __init__(self, endpoint: str, *, bearer_token: str, timeout_seconds: float = 5.0):
+    def __init__(
+        self, endpoint: str, *, bearer_token: str, timeout_seconds: float = 5.0
+    ):
         if not endpoint.startswith("https://"):
             raise ValueError("alert endpoint must use HTTPS")
         if not bearer_token.strip():
@@ -162,17 +191,25 @@ class WebhookDriftAlertSink:
         self.timeout_seconds = timeout_seconds
 
     def __call__(self, action) -> None:
-        body = json.dumps({
-            "status": action.status,
-            "max_psi": action.report.max_psi,
-            "drifted_features": list(action.report.drifted_features),
-            "reasons": list(action.reasons),
-            "observed_at": datetime.now(timezone.utc).isoformat(),
-        }, allow_nan=False).encode()
-        request = Request(self.endpoint, data=body, method="POST", headers={
-            "Authorization": f"Bearer {self._token}",
-            "Content-Type": "application/json",
-        })
+        body = json.dumps(
+            {
+                "status": action.status,
+                "max_psi": action.report.max_psi,
+                "drifted_features": list(action.report.drifted_features),
+                "reasons": list(action.reasons),
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+            },
+            allow_nan=False,
+        ).encode()
+        request = Request(
+            self.endpoint,
+            data=body,
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {self._token}",
+                "Content-Type": "application/json",
+            },
+        )
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
                 if not 200 <= response.status < 300:
@@ -197,8 +234,13 @@ class OperatorApprovalService:
     OIDC/SAML/mTLS middleware. This class is not an authentication provider.
     """
     def __init__(
-        self, registry, governance_runtime, *, database_path: str | Path,
-        signing_secret: str, allowed_issuers: Sequence[str],
+        self,
+        registry,
+        governance_runtime,
+        *,
+        database_path: str | Path,
+        signing_secret: str,
+        allowed_issuers: Sequence[str],
         approver_roles: Sequence[str] = ("aitos-model-approver",),
         token_ttl_seconds: int = 300,
     ) -> None:
@@ -218,12 +260,14 @@ class OperatorApprovalService:
         self.token_ttl_seconds = token_ttl_seconds
         db = self._connect()
         try:
-            db.execute("""CREATE TABLE IF NOT EXISTS operator_approval_nonces (
+            db.execute(
+                """CREATE TABLE IF NOT EXISTS operator_approval_nonces (
                 nonce_hash TEXT PRIMARY KEY, issuer TEXT NOT NULL, subject TEXT NOT NULL,
                 model_id TEXT NOT NULL, model_version TEXT NOT NULL,
                 artifact_sha256 TEXT NOT NULL, expires_at INTEGER NOT NULL,
                 consumed_at INTEGER, decision_json TEXT
-            )""")
+            )"""
+            )
         finally:
             db.close()
 
@@ -234,78 +278,132 @@ class OperatorApprovalService:
         return db
 
     def _validate_identity(self, identity: OperatorIdentity) -> None:
-        if (not isinstance(identity, OperatorIdentity) or not identity.authenticated
-            or identity.issuer not in self.allowed_issuers or not identity.subject.strip()
-            or not self.approver_roles.intersection(identity.roles)):
+        if (
+            not isinstance(identity, OperatorIdentity)
+            or not identity.authenticated
+            or identity.issuer not in self.allowed_issuers
+            or not identity.subject.strip()
+            or not self.approver_roles.intersection(identity.roles)
+        ):
             raise PermissionError("authenticated model-approver role is required")
 
     def _candidate(self, model_id: str, model_version: str):
-        matches = [a for a in self.registry.list_artifacts(model_id)
-                   if a.model_version == model_version]
+        matches = [
+            a
+            for a in self.registry.list_artifacts(model_id)
+            if a.model_version == model_version
+        ]
         if len(matches) != 1 or matches[0].status == "ARCHIVED":
             raise KeyError("candidate artifact is missing or archived")
         return matches[0]
 
-    def issue_approval(self, identity: OperatorIdentity, *, model_id: str,
-                       model_version: str, now: int | None = None) -> str:
+    def issue_approval(
+        self,
+        identity: OperatorIdentity,
+        *,
+        model_id: str,
+        model_version: str,
+        now: int | None = None,
+    ) -> str:
         self._validate_identity(identity)
         artifact = self._candidate(model_id, model_version)
         issued = int(time.time() if now is None else now)
         nonce = secrets.token_urlsafe(24)
         payload = {
-            "iss": identity.issuer, "sub": identity.subject,
-            "model_id": model_id, "model_version": model_version,
+            "iss": identity.issuer,
+            "sub": identity.subject,
+            "model_id": model_id,
+            "model_version": model_version,
             "artifact_sha256": artifact.artifact_sha256,
-            "iat": issued, "exp": issued + self.token_ttl_seconds,
+            "iat": issued,
+            "exp": issued + self.token_ttl_seconds,
             "nonce": nonce,
         }
-        encoded = base64.urlsafe_b64encode(
-            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        ).rstrip(b"=").decode()
+        encoded = (
+            base64.urlsafe_b64encode(
+                json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+            )
+            .rstrip(b"=")
+            .decode()
+        )
         signature = hmac.new(self._secret, encoded.encode(), hashlib.sha256).hexdigest()
         nonce_hash = hashlib.sha256(nonce.encode()).hexdigest()
         with self._connect() as db:
-            db.execute("INSERT INTO operator_approval_nonces "
-                       "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,expires_at) "
-                       "VALUES (?,?,?,?,?,?,?)",
-                       (nonce_hash, identity.issuer, identity.subject, model_id,
-                        model_version, artifact.artifact_sha256, payload["exp"]))
+            db.execute(
+                "INSERT INTO operator_approval_nonces "
+                "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,expires_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    nonce_hash,
+                    identity.issuer,
+                    identity.subject,
+                    model_id,
+                    model_version,
+                    artifact.artifact_sha256,
+                    payload["exp"],
+                ),
+            )
         return f"{encoded}.{signature}"
 
     def approve_and_promote(self, identity: OperatorIdentity, token: str, evidence):
         self._validate_identity(identity)
         try:
             encoded, supplied_signature = token.split(".", 1)
-            expected = hmac.new(self._secret, encoded.encode(), hashlib.sha256).hexdigest()
+            expected = hmac.new(
+                self._secret, encoded.encode(), hashlib.sha256
+            ).hexdigest()
             if not hmac.compare_digest(expected, supplied_signature):
                 raise ValueError("invalid signature")
-            payload = json.loads(base64.urlsafe_b64decode(
-                encoded + "=" * (-len(encoded) % 4)))
+            payload = json.loads(
+                base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+            )
         except Exception as exc:
             raise PermissionError("invalid operator approval token") from exc
         now = int(time.time())
-        if (payload.get("iss") != identity.issuer or payload.get("sub") != identity.subject
-            or payload.get("exp", 0) < now or payload.get("iat", now + 1) > now):
-            raise PermissionError("approval token is expired or bound to another operator")
+        if (
+            payload.get("iss") != identity.issuer
+            or payload.get("sub") != identity.subject
+            or payload.get("exp", 0) < now
+            or payload.get("iat", now + 1) > now
+        ):
+            raise PermissionError(
+                "approval token is expired or bound to another operator"
+            )
         artifact = self._candidate(payload["model_id"], payload["model_version"])
         if artifact.artifact_sha256 != payload["artifact_sha256"]:
             raise PermissionError("candidate artifact changed after approval")
-        if (evidence.model_id != payload["model_id"]
-            or evidence.model_version != payload["model_version"]):
+        if (
+            evidence.model_id != payload["model_id"]
+            or evidence.model_version != payload["model_version"]
+        ):
             raise PermissionError("approval token does not match promotion evidence")
         nonce_hash = hashlib.sha256(payload["nonce"].encode()).hexdigest()
         db = self._connect()
         try:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT issuer,subject,model_id,model_version,artifact_sha256,"
-                              "expires_at,consumed_at FROM operator_approval_nonces "
-                              "WHERE nonce_hash=?", (nonce_hash,)).fetchone()
-            if (row is None or row[0] != identity.issuer or row[1] != identity.subject
-                or row[2] != payload["model_id"] or row[3] != payload["model_version"]
-                or row[4] != artifact.artifact_sha256 or row[5] < now or row[6] is not None):
-                raise PermissionError("approval nonce is invalid, expired or already consumed")
-            db.execute("UPDATE operator_approval_nonces SET consumed_at=? WHERE nonce_hash=?",
-                       (now, nonce_hash))
+            row = db.execute(
+                "SELECT issuer,subject,model_id,model_version,artifact_sha256,"
+                "expires_at,consumed_at FROM operator_approval_nonces "
+                "WHERE nonce_hash=?",
+                (nonce_hash,),
+            ).fetchone()
+            if (
+                row is None
+                or row[0] != identity.issuer
+                or row[1] != identity.subject
+                or row[2] != payload["model_id"]
+                or row[3] != payload["model_version"]
+                or row[4] != artifact.artifact_sha256
+                or row[5] < now
+                or row[6] is not None
+            ):
+                raise PermissionError(
+                    "approval nonce is invalid, expired or already consumed"
+                )
+            db.execute(
+                "UPDATE operator_approval_nonces SET consumed_at=? WHERE nonce_hash=?",
+                (now, nonce_hash),
+            )
             db.execute("COMMIT")
         except Exception:
             if db.in_transaction:
@@ -316,14 +414,24 @@ class OperatorApprovalService:
         from dataclasses import replace
         approved_evidence = replace(evidence, operator_approved=True)
         decision = self.runtime.promote_challenger(
-            approved_evidence, operator_approved=True)
+            approved_evidence, operator_approved=True
+        )
         audit_db = self._connect()
         try:
-            audit_db.execute("UPDATE operator_approval_nonces SET decision_json=? "
-                             "WHERE nonce_hash=?",
-                             (json.dumps({"eligible": decision.eligible,
-                                          "reasons": list(decision.reasons)}, sort_keys=True),
-                              nonce_hash))
+            audit_db.execute(
+                "UPDATE operator_approval_nonces SET decision_json=? "
+                "WHERE nonce_hash=?",
+                (
+                    json.dumps(
+                        {
+                            "eligible": decision.eligible,
+                            "reasons": list(decision.reasons),
+                        },
+                        sort_keys=True,
+                    ),
+                    nonce_hash,
+                ),
+            )
         finally:
             audit_db.close()
         return decision
