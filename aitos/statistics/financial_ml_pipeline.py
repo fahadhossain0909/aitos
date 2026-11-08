@@ -112,6 +112,7 @@ class FinancialMLPipeline:
         "breakout_acceptance",
         "relative_strength",
         "atr_pct",
+        "side_sign",
         "event_volume_imbalance",
         "event_dollar_activity",
         "fractional_return",
@@ -516,6 +517,7 @@ class FinancialMLPipeline:
         if entry <= 0 or vol <= 0:
             raise ValueError("entry price and volatility must be positive")
         clean = {str(k): _finite(v, str(k)) for k, v in features.items()}
+        clean.setdefault("side_sign", 1.0 if side == "LONG" else -1.0)
         now = _utc(created_at)
         direction = 1.0 if side == "LONG" else -1.0
         take = entry * (1.0 + direction * self.profit_take_multiple * vol)
