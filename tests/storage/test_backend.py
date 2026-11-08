@@ -19,11 +19,13 @@ async def test_clickhouse_is_preferred_when_both_backends_are_healthy():
 
     adapters = {
         StorageBackend.CLICKHOUSE: BackendAdapter(
-            StorageBackend.CLICKHOUSE, frozenset({"analytics", "journal"}),
+            StorageBackend.CLICKHOUSE,
+            frozenset({"analytics", "journal"}),
             lambda: probe("clickhouse"),
         ),
         StorageBackend.POSTGRES: BackendAdapter(
-            StorageBackend.POSTGRES, frozenset({"analytics", "journal"}),
+            StorageBackend.POSTGRES,
+            frozenset({"analytics", "journal"}),
             lambda: probe("postgres"),
         ),
     }
