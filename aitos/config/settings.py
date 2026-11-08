@@ -77,7 +77,6 @@ class BinanceSettings(BaseSettings):
 
 
 
-
 class StorageSettings(BaseSettings):
     """Runtime storage policy; adapters must prove capability parity before failover."""
 
