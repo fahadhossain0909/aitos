@@ -118,6 +118,15 @@ from .quant_features import (
     permutation_entropy,
 )
 from .registry import ModelArtifact, StatisticalModelRegistry
+from .production_drift import (
+    ClickHouseDriftFeatureBatchProvider,
+    DriftAlert,
+    FeatureBatchProvider,
+    LoggingDriftAlertSink,
+    OperatorApprovalService,
+    OperatorIdentity,
+    WebhookDriftAlertSink,
+)
 from .risk_overlay import (
     StatisticalRiskAssessment,
     assess_statistical_risk,
@@ -225,6 +234,13 @@ __all__ = [
     "ShadowForecastRecord",
     "ModelArtifact",
     "StatisticalModelRegistry",
+    "ClickHouseDriftFeatureBatchProvider",
+    "DriftAlert",
+    "FeatureBatchProvider",
+    "LoggingDriftAlertSink",
+    "OperatorApprovalService",
+    "OperatorIdentity",
+    "WebhookDriftAlertSink",
     "StatisticalShadowLedger",
     "ChangePointDiagnostic",
     "DistributionFeatures",
