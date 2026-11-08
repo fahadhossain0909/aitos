@@ -310,9 +310,10 @@ lifecycle. The integration is additive and remains **shadow-first**.
   multiple-hypothesis p-value correction. Apply these to the complete
   experiment/strategy search family; do not select a winner and then test only
   that winner.
-- The financial_ml_validation.validate_strategy_family helper runs
-  synchronized-block White's Reality Check, Benjamini-Hochberg FDR correction
-  and an optional model-confidence set across aligned OOS strategy returns,
+- The financial_ml_validation module provides synchronized multi-asset
+  block-bootstrap portfolio stress, and its validate_strategy_family helper
+  runs White's Reality Check, Benjamini-Hochberg FDR correction and an optional
+  model-confidence set across aligned OOS strategy returns,
   hypothesis p-values and model losses. The learning ExperimentEngine now
   invokes it per regime/cost cohort when its evaluator supplies aligned
   net_returns (and optional hypothesis_p_value values), and retains the
