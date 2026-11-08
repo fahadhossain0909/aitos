@@ -286,9 +286,7 @@ class ExperimentEngine:
                             "net_returns must be finite and align with sample_count"
                         )
                     raw_p_value = raw.get("hypothesis_p_value")
-                    p_value = (
-                        float(raw_p_value) if raw_p_value is not None else None
-                    )
+                    p_value = float(raw_p_value) if raw_p_value is not None else None
                     if p_value is not None and (
                         not isfinite(p_value) or not 0.0 <= p_value <= 1.0
                     ):
@@ -361,9 +359,7 @@ class ExperimentEngine:
                     block_length=min(5, len(cohort_cells[0].net_returns)),
                     seed=0,
                 )
-                statistical_validation[f"{regime}|{cost.name}"] = asdict(
-                    family_report
-                )
+                statistical_validation[f"{regime}|{cost.name}"] = asdict(family_report)
         dataset_fingerprint = hashlib.sha256(
             json.dumps(
                 [self._event_payload(event) for event in ordered],
