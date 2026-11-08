@@ -222,12 +222,35 @@ class MarkedHawkesOnlineFilter:
     """
 
     def __init__(self, fit: HawkesMLEFit) -> None:
+        """Initialize only from a numerically valid, converged stationary fit."""
         if len(fit.baseline_intensities) != 2 or len(fit.excitation_matrix) != 2:
             raise ValueError("online filter requires a two-mark Hawkes fit")
-        if fit.decay <= 0 or not math.isfinite(fit.decay):
-            raise ValueError("fit decay must be positive and finite")
-        if fit.branching_ratio >= 0.95:
+        if any(len(row) != 2 for row in fit.excitation_matrix):
+            raise ValueError("Hawkes excitation matrix must be 2x2")
+        numeric = (
+            *fit.baseline_intensities,
+            *(value for row in fit.excitation_matrix for value in row),
+            fit.decay,
+            fit.branching_ratio,
+            fit.log_likelihood,
+            fit.gradient_norm,
+            fit.horizon,
+        )
+        if any(not math.isfinite(float(value)) for value in numeric):
+            raise ValueError("Hawkes fit parameters must be finite")
+        if any(value <= 0 for value in fit.baseline_intensities):
+            raise ValueError("Hawkes baseline intensities must be positive")
+        if any(value < 0 for row in fit.excitation_matrix for value in row):
+            raise ValueError("Hawkes excitation coefficients must be non-negative")
+        if fit.decay <= 0 or fit.horizon <= 0 or fit.events < 20 or fit.iterations <= 0:
+            raise ValueError("Hawkes fit metadata is invalid")
+        if not fit.converged:
+            raise ValueError("online filter refuses an unconverged Hawkes fit")
+        actual_radius = _spectral_radius_2x2(fit.excitation_matrix)
+        if not 0.0 <= fit.branching_ratio < 0.95 or actual_radius >= 0.95:
             raise ValueError("online filter refuses a non-stationary Hawkes fit")
+        if not math.isclose(fit.branching_ratio, actual_radius, rel_tol=1e-5, abs_tol=1e-8):
+            raise ValueError("Hawkes branching ratio does not match excitation matrix")
         self.fit = fit
         self._state = [0.0, 0.0]
         self._last_timestamp: float | None = None
