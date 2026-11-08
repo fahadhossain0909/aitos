@@ -1971,6 +1971,14 @@ class OpportunityScanner(AITOSModule):
                 if updated:
                     self._financial_ml.mark_ledger_synced(candidate_id)
                     resolved += updated
+                else:
+                    existing = self._decision_outcome_ledger.list_decisions(
+                        entity_id=candidate_id
+                    )
+                    if existing and all(
+                        row.get("outcome_value") is not None for row in existing
+                    ):
+                        self._financial_ml.mark_ledger_synced(candidate_id)
             except Exception:
                 logger.exception(
                     "financial ML candidate label could not be synchronized to decision ledger",
