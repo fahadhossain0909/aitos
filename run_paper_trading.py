@@ -282,7 +282,9 @@ async def _start_optional_statistical_drift_monitor(
         ),
         sources=tuple(
             source.strip()
-            for source in os.getenv("AITOS_STATISTICAL_DRIFT_SOURCES", "paper").split(",")
+            for source in os.getenv("AITOS_STATISTICAL_DRIFT_SOURCES", "paper").split(
+                ","
+            )
             if source.strip()
         ),
     )
