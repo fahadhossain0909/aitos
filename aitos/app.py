@@ -340,15 +340,19 @@ async def build_system(
         logger.info("Durable position-switching coordinator explicitly configured")
 
     decision_journal = decision_journal_repository
-    if decision_journal is None and journal_repository is not None and all(
-        hasattr(journal_repository, method)
-        for method in (
-            "save_decision",
-            "link_trade",
-            "attribute_outcome",
-            "get_records",
-            "save_management_decision",
-            "get_trade_records",
+    if (
+        decision_journal is None
+        and journal_repository is not None
+        and all(
+            hasattr(journal_repository, method)
+            for method in (
+                "save_decision",
+                "link_trade",
+                "attribute_outcome",
+                "get_records",
+                "save_management_decision",
+                "get_trade_records",
+            )
         )
     ):
         # The PostgreSQL fallback implements both operational journal
