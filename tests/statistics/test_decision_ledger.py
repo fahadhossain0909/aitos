@@ -174,6 +174,17 @@ def test_decision_ledger_snapshot_reports_resolution_and_provenance_counts(tmp_p
             reason="test",
             candidate_id="candidate-1",
         )
+    ledger.record_decision(
+        "reject-pending",
+        entity_id="candidate-2:MARKOUT:900",
+        symbol="ETHUSDT",
+        side="SHORT",
+        decision_type="REJECTION",
+        accepted=False,
+        reason="pending markout",
+        candidate_id="candidate-2",
+        outcome_provenance="COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
+    )
     ledger.resolve_entity(
         "candidate-1",
         outcome_value=-0.002,
@@ -183,9 +194,9 @@ def test_decision_ledger_snapshot_reports_resolution_and_provenance_counts(tmp_p
         outcome_provenance="COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
     )
     snapshot = ledger.snapshot()
-    assert snapshot["decisions_total"] == 2
+    assert snapshot["decisions_total"] == 3
     assert snapshot["resolved_total"] == 2
-    assert snapshot["unresolved_total"] == 0
+    assert snapshot["unresolved_total"] == 1
     assert snapshot["by_type"]["GATE"] == {"count": 1, "resolved": 1}
     assert snapshot["by_type"]["REJECTION"] == {"count": 1, "resolved": 1}
     assert snapshot["by_provenance"] == {"COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT": 2}
