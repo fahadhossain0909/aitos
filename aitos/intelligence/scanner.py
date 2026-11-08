@@ -2187,7 +2187,8 @@ class OpportunityScanner(AITOSModule):
                     else (
                         "financial_ml_meta_rejected"
                         if candidate.composite_score >= self._min_score_threshold
-                        and self._financial_ml.enforce
+                        and financial_ml is not None
+                        and financial_ml.enforce
                         else "composite_score_below_threshold"
                     )
                 ),
