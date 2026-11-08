@@ -78,6 +78,10 @@ class FinancialMLTrainingReport:
     base_rate: float | None
     threshold: float
     reason: str
+    executed_oos_samples: int = 0
+    counterfactual_oos_samples: int = 0
+    accepted_executed_mean_return: float | None = None
+    accepted_counterfactual_mean_return: float | None = None
 
 
 class FinancialMLPipeline:
@@ -652,7 +656,7 @@ class FinancialMLPipeline:
         with self._lock:
             rows = self._conn.execute(
                 """SELECT candidate_id,created_at,expires_at,features_json,label,
-                net_return,label_resolution_time FROM financial_ml_candidates
+                net_return,label_resolution_time,outcome_provenance FROM financial_ml_candidates
                 WHERE status='RESOLVED' AND label IS NOT NULL
                 ORDER BY created_at ASC"""
             ).fetchall()
@@ -674,6 +678,7 @@ class FinancialMLPipeline:
         oos_probabilities: list[float] = []
         oos_labels: list[int] = []
         oos_returns: list[float] = []
+        oos_provenance: list[str] = []
         used_folds = 0
         starts = list(range(samples))
         ends = [
@@ -709,6 +714,10 @@ class FinancialMLPipeline:
             oos_probabilities.extend(probabilities)
             oos_labels.extend(labels[index] for index in fold.test_indices)
             oos_returns.extend(float(rows[index]["net_return"] or 0.0) for index in fold.test_indices)
+            oos_provenance.extend(
+                str(rows[index]["outcome_provenance"] or "UNKNOWN")
+                for index in fold.test_indices
+            )
             used_folds += 1
         if len(oos_labels) < self.min_oos_samples or len(set(oos_labels)) < 2:
             return FinancialMLTrainingReport(
@@ -738,11 +747,46 @@ class FinancialMLPipeline:
         mean_selected_return = (
             sum(selected_returns) / len(selected_returns) if selected_returns else -1.0
         )
+        executed_oos_samples = sum(
+            provenance == "EXECUTED_TRADE_NET_OUTCOME"
+            for provenance in oos_provenance
+        )
+        counterfactual_oos_samples = sum(
+            provenance.startswith("COUNTERFACTUAL")
+            for provenance in oos_provenance
+        )
+        accepted_executed = [
+            oos_returns[index]
+            for index in selected
+            if oos_provenance[index] == "EXECUTED_TRADE_NET_OUTCOME"
+        ]
+        accepted_counterfactual = [
+            oos_returns[index]
+            for index in selected
+            if oos_provenance[index].startswith("COUNTERFACTUAL")
+        ]
+        accepted_executed_mean = (
+            sum(accepted_executed) / len(accepted_executed)
+            if accepted_executed
+            else None
+        )
+        accepted_counterfactual_mean = (
+            sum(accepted_counterfactual) / len(accepted_counterfactual)
+            if accepted_counterfactual
+            else None
+        )
+        provenance_floor = max(5, self.min_oos_samples // 4)
         passed = (
             len(oos_labels) >= self.min_oos_samples
             and ece <= 0.15
             and precision > base_rate
             and mean_selected_return > 0.0
+            and executed_oos_samples >= provenance_floor
+            and counterfactual_oos_samples >= provenance_floor
+            and accepted_executed_mean is not None
+            and accepted_executed_mean > 0.0
+            and accepted_counterfactual_mean is not None
+            and accepted_counterfactual_mean > 0.0
             and bool(selected)
         )
         reason = "oos_calibration_and_acceptance_passed" if passed else "oos_acceptance_not_proven"
@@ -755,12 +799,23 @@ class FinancialMLPipeline:
             "feature_names": list(self.FEATURE_NAMES),
             "threshold": self.acceptance_threshold,
             "oos_samples": len(oos_labels),
+            "executed_oos_samples": executed_oos_samples,
+            "counterfactual_oos_samples": counterfactual_oos_samples,
+            "accepted_executed_mean_return": accepted_executed_mean,
+            "accepted_counterfactual_mean_return": accepted_counterfactual_mean,
             "brier": brier,
             "ece": ece,
         }
         report = FinancialMLTrainingReport(
             True, passed, samples, used_folds, len(oos_labels), brier, ece,
-            precision, base_rate, self.acceptance_threshold, reason,
+            precision,
+            base_rate,
+            self.acceptance_threshold,
+            reason,
+            executed_oos_samples,
+            counterfactual_oos_samples,
+            accepted_executed_mean,
+            accepted_counterfactual_mean,
         )
         with self._lock:
             self._conn.execute("UPDATE financial_ml_artifacts SET active=0")
