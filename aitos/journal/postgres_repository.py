@@ -4,6 +4,7 @@ This adapter is intentionally not a replacement for ClickHouse market-data,
 feature-store, or analytical queries. It provides transactional, idempotent
 persistence for trade snapshots and journal entries only.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -168,7 +169,9 @@ class PostgresJournalRepository:
     ) -> None:
         self._require_initialized()
         recorded_at = datetime.now(timezone.utc)
-        encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+        encoded = json.dumps(
+            payload, sort_keys=True, default=str, separators=(",", ":")
+        )
         async with self._pool.acquire() as conn:
             await conn.execute(
                 """
