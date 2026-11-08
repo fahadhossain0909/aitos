@@ -83,9 +83,7 @@ async def test_postgres_market_and_journal_round_trip():
         await journal.save_decision(
             decision_id, {"candidate_id": token, "symbol": symbol}
         )
-        await journal.link_trade(
-            decision_id, {"trade_id": trade_id, "symbol": symbol}
-        )
+        await journal.link_trade(decision_id, {"trade_id": trade_id, "symbol": symbol})
         await journal.attribute_outcome(
             decision_id,
             {
@@ -106,7 +104,9 @@ async def test_postgres_market_and_journal_round_trip():
             "TRADE_LINK",
             "OUTCOME",
         }
-        outcome = next(row for row in decision_records if row["record_type"] == "OUTCOME")
+        outcome = next(
+            row for row in decision_records if row["record_type"] == "OUTCOME"
+        )
         assert outcome["r_multiple"] == 3.0
         assert outcome["holding_seconds"] == 60.0
         assert any(row["record_type"] == "TRADE_LINK" for row in trade_records)
