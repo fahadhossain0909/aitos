@@ -511,31 +511,47 @@ class FinancialMLPipeline:
     def event_features(self, symbol: str) -> dict[str, float]:
         key = symbol.upper()
         with self._lock:
-            rows = self._conn.execute(
-                """SELECT volume,dollar_volume,signed_volume,close
-                FROM financial_ml_event_bars
+            volume_rows = self._conn.execute(
+                """SELECT close FROM financial_ml_event_bars
                 WHERE symbol=? AND bar_type='volume'
                 ORDER BY end_at DESC LIMIT 128""",
                 (key,),
             ).fetchall()
-        if not rows:
+            dollar_rows = self._conn.execute(
+                """SELECT dollar_volume FROM financial_ml_event_bars
+                WHERE symbol=? AND bar_type='dollar'
+                ORDER BY end_at DESC LIMIT 128""",
+                (key,),
+            ).fetchall()
+            imbalance_rows = self._conn.execute(
+                """SELECT volume,signed_volume FROM financial_ml_event_bars
+                WHERE symbol=? AND bar_type='imbalance'
+                ORDER BY end_at DESC LIMIT 128""",
+                (key,),
+            ).fetchall()
+        if not volume_rows and not dollar_rows and not imbalance_rows:
             return {
                 "event_volume_imbalance": 0.0,
                 "event_dollar_activity": 0.0,
                 "fractional_log_price": 0.0,
             }
-        chronological = list(reversed(rows))
-        signed = sum(float(row["signed_volume"]) for row in chronological)
-        volume = sum(float(row["volume"]) for row in chronological)
-        closes = [float(row["close"]) for row in chronological]
-        log_prices = [math.log(close) for close in closes if close > 0]
-        diff = fractional_difference(log_prices, order=0.4, threshold=1e-3)
+        signed = sum(float(row["signed_volume"]) for row in imbalance_rows)
+        volume = sum(float(row["volume"]) for row in imbalance_rows)
+        dollar_activity = sum(float(row["dollar_volume"]) for row in dollar_rows)
+        closes = [
+            float(row["close"])
+            for row in reversed(volume_rows)
+            if float(row["close"]) > 0
+        ]
+        diff = fractional_difference(
+            [math.log(close) for close in closes],
+            order=0.4,
+            threshold=1e-3,
+        )
         valid = [value for value in diff if value is not None]
         return {
             "event_volume_imbalance": signed / volume if volume > 0 else 0.0,
-            "event_dollar_activity": math.log1p(
-                sum(float(row["dollar_volume"]) for row in chronological)
-            ),
+            "event_dollar_activity": math.log1p(dollar_activity),
             "fractional_log_price": float(valid[-1]) if valid else 0.0,
         }
 
