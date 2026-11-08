@@ -124,12 +124,8 @@ def test_meta_labeler_rejects_single_class_and_bad_feature_width():
 
 
 def test_sequential_bootstrap_is_reproducible_and_validates_intervals():
-    first = sequential_bootstrap_indices(
-        [0, 0, 5], [5, 5, 7], sample_count=20, seed=7
-    )
-    second = sequential_bootstrap_indices(
-        [0, 0, 5], [5, 5, 7], sample_count=20, seed=7
-    )
+    first = sequential_bootstrap_indices([0, 0, 5], [5, 5, 7], sample_count=20, seed=7)
+    second = sequential_bootstrap_indices([0, 0, 5], [5, 5, 7], sample_count=20, seed=7)
     assert first == second
     assert len(first) == 20
     with pytest.raises(ValueError):
