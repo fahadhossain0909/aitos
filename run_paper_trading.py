@@ -572,6 +572,10 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
         if graph_driver is not None:
             await graph_driver.close()
         await redis_client.close()
+        logger.info(
+            "paper runtime shutdown complete",
+            extra={"aitos_extra": {"shutdown_status": "complete"}},
+        )
 
 
 async def main() -> None:
