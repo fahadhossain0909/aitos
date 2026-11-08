@@ -16,9 +16,9 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Mapping, Sequence
-from itertools import chain
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from itertools import chain
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
@@ -38,6 +38,7 @@ class ClickHouseDriftFeatureBatchProvider:
     non-finite or undersized batches raise; the scheduler therefore cannot
     silently interpret missing data as NORMAL drift.
     """
+
     def __init__(
         self,
         store,
@@ -159,6 +160,7 @@ class DriftAlert:
 
 class LoggingDriftAlertSink:
     """Safe default sink: structured logging only; never claims external delivery."""
+
     def __call__(self, action) -> None:
         import logging
         logging.getLogger("aitos.statistics.drift").warning(
@@ -177,6 +179,7 @@ class LoggingDriftAlertSink:
 
 class WebhookDriftAlertSink:
     """POST a minimal JSON alert to an operator-owned HTTPS endpoint."""
+
     def __init__(
         self, endpoint: str, *, bearer_token: str, timeout_seconds: float = 5.0
     ):
@@ -221,6 +224,7 @@ class WebhookDriftAlertSink:
 @dataclass(frozen=True)
 class OperatorIdentity:
     """Identity claims created by trusted authentication middleware, not request JSON."""
+
     issuer: str
     subject: str
     roles: tuple[str, ...]
@@ -233,6 +237,7 @@ class OperatorApprovalService:
     The caller must supply an OperatorIdentity verified by the deployment's
     OIDC/SAML/mTLS middleware. This class is not an authentication provider.
     """
+
     def __init__(
         self,
         registry,
@@ -415,6 +420,7 @@ class OperatorApprovalService:
         finally:
             db.close()
         from dataclasses import replace
+
         approved_evidence = replace(evidence, operator_approved=True)
         decision = self.runtime.promote_challenger(
             approved_evidence, operator_approved=True
