@@ -137,7 +137,6 @@ def test_hawkes_warmup_events_make_duplicate_millisecond_times_strictly_ordered(
     assert len(times) == len(marks)
 
 
-
 def test_invalid_hawkes_warmup_does_not_replace_existing_filter():
     engine = AStatEngine()
     fit = _fit(80.0)
