@@ -389,8 +389,12 @@ filesystem; they do not make SQLite a distributed database.
   erase pending candidates, event-bar tails and labels. Do not treat a Render
   Free ephemeral instance as a durable research journal.
 - Keep this pipeline to one runtime instance on a durable local volume for
-  single-instance paper testing. For horizontally scaled workers or shared
-  Render deployments, migrate both journals and artifact activation to a
-  transactional PostgreSQL repository before enabling enforce mode.
+  single-instance paper testing. Candidate/event-ID journals are append-only
+  and currently have no archival/retention worker; long-running deployments
+  must add ClickHouse/PostgreSQL archival and retention before volume growth
+  becomes operationally significant.
+- For horizontally scaled workers or shared Render deployments, migrate both
+  journals and artifact activation to a transactional PostgreSQL repository
+  before enabling enforce mode.
 - No runtime database migration to PostgreSQL, Render deployment or persistent
   volume provisioning is claimed by this code change.
