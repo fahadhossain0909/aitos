@@ -897,7 +897,6 @@ async def test_subscribed_streams_reflected_in_transport():
     await gen.aclose()
 
 
-
 @pytest.mark.asyncio
 async def test_subscription_change_during_handshake_is_not_lost():
     """A rank update during TCP/WebSocket setup is applied after handshake."""
