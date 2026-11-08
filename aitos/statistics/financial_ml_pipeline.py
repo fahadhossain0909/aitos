@@ -294,6 +294,10 @@ class FinancialMLPipeline:
             "SELECT candidate_id,expires_at FROM financial_ml_candidates "
             "WHERE typeof(expires_at) IN ('real','integer')"
         ).fetchall()
+        if legacy_expiries:
+            self._conn.execute(
+                "DROP TRIGGER IF EXISTS financial_ml_candidate_snapshot_immutable"
+            )
         for legacy in legacy_expiries:
             self._conn.execute(
                 "UPDATE financial_ml_candidates SET expires_at=? WHERE candidate_id=?",
