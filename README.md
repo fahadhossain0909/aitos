@@ -651,3 +651,12 @@ for read-only exact comparison of independently prepared expected values against
 recorded Binance-shaped paper/testnet responses. No account requests/credentials
 or financial mutations. See [contract and verification](engineering/BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md)
 for schema, supported subset, pagination limitations and pending real-provider gates.
+
+## Hosted Windows and service validation
+
+Actual hosted Windows vault/build/install/network/uninstall and disposable service
+restart/soak checks have now passed. An **unsigned Windows test candidate** is
+available; it is not a signed production release. Current artifact links, tested
+commit, seven workflow results, 300-second soak, review request and remaining gates:
+[remote validation evidence](engineering/REMOTE_VALIDATION_EVIDENCE.md). No main
+merge, production cutover, trusted signing or live capability was activated.

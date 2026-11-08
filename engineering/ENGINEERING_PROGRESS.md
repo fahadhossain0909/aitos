@@ -410,3 +410,23 @@ service activation, deployment, risk/strategy/Redis change or commit/push. Struc
 pagination is not proof of provider completeness. Details, limits and rollback:
 `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`. Independent review and external service/
 Windows/signing/account verification remain pending.
+
+## Actual hosted validation and publication
+
+User authorized progressing the remaining gates. Source committed/pushed only to
+`arena/ed127d35-aitos`: initial `bad5f03`, CI fix/tested source `15771eb`. Seven
+no-deployment workflows now PASS: full backend/embedded, actual Windows vault/
+build/install/auth-network/uninstall, real Redis recovery, real ClickHouse restart/
+60-second soak, frontend, operator browser and ledger SQL. An additional actual
+300-second ClickHouse restart/replacement-worker soak PASS (job 6m5s). Windows
+**UNSIGNED test installer** artifact is available; not a trusted signed release.
+
+Initial thin-env CI imports failed; fresh local repro showed missing aiohttp in
+transitive imports. Install recipes fixed; retries passed without weakening tests.
+Actual review request #247 created; no independent review asserted. No PR because
+old PR-triggered VPS diagnostics may run and their enable flag is unreadable (403).
+Signing environment absent from visible environment list; runner inventory blocked.
+No signing dispatch, live/account access, production cutover/migration/deployment,
+orders or risk/strategy/Redis tuning. Source validation is pinned to `15771eb`;
+documentation-only handoff uses `[skip ci]`. Current evidence supersedes earlier
+Windows/service NOT TESTED statements: `REMOTE_VALIDATION_EVIDENCE.md`.

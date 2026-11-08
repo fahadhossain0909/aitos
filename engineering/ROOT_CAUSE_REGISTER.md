@@ -261,3 +261,7 @@ Author review only, not independent approval. See
 ## Recorded account boundary — 2026-11-06
 
 No production incident claimed. Provider schema needs receipt-window/position-mode binding and margin-specific signed balances; implemented separately as schema 2, without reinterpreting schema 1 or modifying active financial authority. Strict loader rejects duplicate JSON fields/nonfinite constants. Existing active income cursor already holds unattributed rows in current source; no new cursor fix claimed. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.
+
+## Hosted validation handoff
+
+REPRODUCED: thin service environment importing trading/lifecycle/execution required aiohttp absent from its recipe; native host also requires it. First hosted Windows/service runs failed, corrected dependency recipes passed. Raw Windows traceback inaccessible; failing step and matching import reproduction distinguished. No production incident or test bypass claimed. See `REMOTE_VALIDATION_EVIDENCE.md`.

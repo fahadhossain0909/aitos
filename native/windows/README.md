@@ -69,10 +69,12 @@ are not implied by a valid signature.
 
 ## Current evidence
 
-Linux fake-transport vault tests pass; actual Windows test is skipped on Linux.
-Windows CI, frozen build/install/GUI, real WinCred roundtrip and signing have **NOT
-BEEN EXECUTED** in this session. There is **no signed release binary** to install.
-See `../../engineering/WINDOWS_PAPER_INTEGRATION_2026-11-06.md` and review bundle.
+Actual hosted Windows CI now passes native WinCred, frozen build, temporary
+install, installed self-tests and uninstall on source `15771eb...`:
+https://github.com/fahadhossain0909/aitos/actions/runs/42480562220 . The run provides
+an **UNSIGNED test installer**, not a signed release. Full GUI/end-user compatibility,
+trusted signing and independent review remain gates. See
+`../../engineering/REMOTE_VALIDATION_EVIDENCE.md` and the review bundle.
 
 ## Installed-network validation hardening
 
@@ -86,6 +88,7 @@ owned process waits, frozen import/assets smoke, frozen network/auth smoke, unin
 and removal check. `-RequireSigned` verifies setup, application and uninstaller
 against the configured trusted signer before executing them. JSON success evidence
 contains source SHA, installer hash and explicit non-certification flags; it is
-written only after uninstall succeeds. Actual PowerShell/Windows/signing execution
-remains NOT TESTED in this session. See
-`../../engineering/PAPER_NATIVE_HARDENING_2026-11-06.md`.
+written only after uninstall succeeds. PowerShell/Windows unsigned validation is now VERIFIED by the hosted run above;
+trusted signing remains NOT TESTED. The Linux-only limitation in the earlier
+`PAPER_NATIVE_HARDENING_2026-11-06.md` report is historical; current evidence is in
+`../../engineering/REMOTE_VALIDATION_EVIDENCE.md`.

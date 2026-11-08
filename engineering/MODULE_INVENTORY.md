@@ -157,3 +157,7 @@ Added shared native console host, cross-platform TCP/thread tests, actual-runner
 ## Recorded account boundary — 2026-11-06
 
 New offline Binance evidence adapter/CLI, shared strict file loader, additive schema-2 comparison and 41 regressions. Existing income reconciler and exchange fetcher unchanged; real provider validation pending. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.
+
+## Hosted validation handoff
+
+Windows vault/manager/installer and real service harness are now exercised on hosted environments, no longer just prepared. Thin environment dependency recipes corrected; actual independent review #247 and trusted signing remain gates. See `REMOTE_VALIDATION_EVIDENCE.md`.

@@ -1,8 +1,10 @@
 # Independent review bundle — pending actual reviewer
 
 **NOT TESTED: independent review.** This bundle is preparation, not approval.
-No separate reviewer/subagent was available or claimed. Work stays on
-`arena/ed127d35-aitos`; no push, merge, deployment, signing or live activation.
+No separate reviewer/subagent was available or claimed. Source is now pushed on
+`arena/ed127d35-aitos`, tested SHA `15771ebcf45d01bc88eba75795388da5f07f3159`.
+No merge, deployment, trusted signing or live activation. Review request:
+https://github.com/fahadhossain0909/aitos/issues/247 .
 User selected Windows x64, service harness/CI first, reviewer bundle first.
 
 ## Scope and review sequence
@@ -75,3 +77,12 @@ and strict JSON error sanitization. Structural page validity is NOT authenticate
 provider completeness. Expected snapshot must come from an independent ledger,
 not the observed adapter itself. Active fetcher/cursor/publisher are unchanged.
 Actual provider/account authentication and independent review remain pending.
+
+## Actual hosted results now available
+
+Seven no-deployment workflows and a separate 300-second real-service restart/soak
+passed. Windows native WinCred/build/install/network/uninstall is no longer only
+a mock/prepared gate; see `REMOTE_VALIDATION_EVIDENCE.md` and its unsigned candidate
+artifact. Independent review and trusted signing remain incomplete. Review the
+source SHA and artifacts directly. No PR was opened because existing PR-triggered
+VPS diagnostics have an unreadable enable flag; do not resume them just for review.

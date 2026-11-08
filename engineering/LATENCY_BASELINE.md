@@ -100,3 +100,7 @@ Production/runtime percentiles and representative capacity remain NOT MEASURED. 
 ## Recorded account boundary — 2026-11-06
 
 Provider-boundary runtime latency/capacity percentiles NOT MEASURED. Regression/CLI synthetic durations are not production SLOs; no remote workload or soak executed. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.
+
+## Hosted validation handoff
+
+Actual synthetic 300-second service soak completed, total job 6m5s; 60-second run also passed. This is not a representative production latency/capacity percentile baseline, 24-hour soak or replica HA proof. p50/p95/p99 remain NOT MEASURED. See `REMOTE_VALIDATION_EVIDENCE.md`.

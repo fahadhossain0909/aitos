@@ -121,3 +121,7 @@ Service reports now record synthetic provenance, stage, UTC timestamp, validated
 ## Recorded account boundary — 2026-11-06
 
 Provider adapter emits sanitized comparison status/counts only. Unknown/duplicate/truncated/stale/context-mismatched evidence is unavailable. No account IDs, amounts, raw provider extras, errors or metric labels exported; flags never authorize trading. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.
+
+## Hosted validation handoff
+
+Actual remote job/step results and artifact digests now retained via GitHub links. JUnit, synthetic service journals/stage reports, unsigned Windows candidate/install evidence are available. Raw payload/log download redirects are blocked in this sandbox; no claim of independent binary inspection. See `REMOTE_VALIDATION_EVIDENCE.md`.

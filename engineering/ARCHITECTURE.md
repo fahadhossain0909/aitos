@@ -107,3 +107,7 @@ Shared `native/console_host.py` now owns gateway socket/thread lifecycle for the
 ## Recorded account boundary — 2026-11-06
 
 Added offline `exchange/binance_account_evidence.py`; no HTTP/client/scheduler/runner wiring. Account schema 2 binds window/mode and signed margin data; schema 1 remains compatible. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.
+
+## Hosted validation handoff
+
+Published source on the required branch with branch-specific no-deployment validation only. Actual hosted Windows and disposable services verified; legacy authority and default-off/read-only boundaries unchanged. No production activation. See `REMOTE_VALIDATION_EVIDENCE.md`.

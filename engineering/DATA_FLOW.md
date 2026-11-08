@@ -107,3 +107,7 @@ Shadow captures a detached nested Trade before waiting for lock/thread; event id
 ## Recorded account boundary — 2026-11-06
 
 Recorded Binance-shaped balances/position risk/income pages → strict normalization → schema-2 scope/window/mode validator → exact comparator → sanitized CLI status. No provider request, receipt publication or financial mutation. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.
+
+## Hosted validation handoff
+
+Actual ClickHouse insert → lost local ACK → stopped service/offline probe → retained-storage restart → replacement writer → verified no-blind-reinsert ACK → bounded 60/300-second soak passed. Actual Windows native host → gateway → synthetic backend authentication/revocation/install/uninstall also passed. Neither establishes HA/account certification. See `REMOTE_VALIDATION_EVIDENCE.md`.
