@@ -44,6 +44,7 @@ class LiveSymbolCache:
     duplicate_book_rejections: int = 0
     hawkes_event_rejections: int = 0
     last_hawkes_timestamp: float | None = None
+    last_hawkes_intensities: tuple[float, float] | None = None
     last_stale_trade_source_age_sec: float | None = None
     last_stale_book_source_age_sec: float | None = None
 
@@ -181,6 +182,8 @@ class LiveScannerCache:
             return
         timestamp = trade.timestamp.timestamp()
         previous = state.last_hawkes_timestamp
+        if previous is None:
+            previous = engine.last_hawkes_timestamp(trade.symbol)
         if previous is not None:
             if timestamp < previous:
                 state.hawkes_event_rejections += 1
@@ -189,7 +192,7 @@ class LiveScannerCache:
                 timestamp = math.nextafter(previous, math.inf)
         mark = 1 if trade.side == TradeSide.BUY else 0
         try:
-            engine.observe_marked_event(trade.symbol, timestamp, mark)
+            snapshot = engine.observe_marked_event(trade.symbol, timestamp, mark)
         except (KeyError, ValueError):
             state.hawkes_event_rejections += 1
             logger.warning(
@@ -204,6 +207,7 @@ class LiveScannerCache:
             )
             return
         state.last_hawkes_timestamp = timestamp
+        state.last_hawkes_intensities = snapshot.intensities
 
     async def accept_live_trade(self, trade: TradeTick) -> None:
         if trade.symbol.upper() not in self._symbols:
