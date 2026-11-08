@@ -1,4 +1,5 @@
 import asyncio
+import threading
 
 import pytest
 
@@ -61,9 +62,12 @@ async def test_drift_scheduler_retries_after_fail_closed_provider_error(tmp_path
     engine = AStatEngine()
     observed = asyncio.Event()
     attempts = 0
+    provider_threads = []
+    event_loop_thread = threading.get_ident()
 
     def batch_provider():
         nonlocal attempts
+        provider_threads.append(threading.get_ident())
         attempts += 1
         if attempts == 1:
             raise RuntimeError("current drift window is stale")
@@ -78,6 +82,8 @@ async def test_drift_scheduler_retries_after_fail_closed_provider_error(tmp_path
     await engine.stop_drift_monitor()
     assert task.done()
     assert attempts >= 2
+    assert provider_threads
+    assert all(thread_id != event_loop_thread for thread_id in provider_threads)
     assert runtime.last_drift is not None
     assert runtime.last_drift.status == "NORMAL"
     assert engine._drift_monitor_task is None
