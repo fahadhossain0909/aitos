@@ -128,3 +128,10 @@ scanner scores, entry gates, position sizing, or exits. Decision-path use
 requires a separate calibrated feature contract, walk-forward/OOS acceptance,
 ablation against the no-Hawkes baseline, and operator approval. A rejected or
 undersized model leaves the symbol on the existing A-Stat path.
+
+
+The current bootstrap keeps the accepted fit in process memory and re-fits from
+the bounded public-trade sample on each process start. It does not persist or
+promote a champion artifact, and it is not a multi-instance model registry.
+Persisted signed model artifacts, rolling refit cadence, champion/challenger
+comparison and rollback remain separate governance work.
