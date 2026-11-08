@@ -13,7 +13,6 @@ from typing import Any, Iterable
 from uuid import UUID
 
 
-
 _TIME_FIELDS = frozenset(
     {
         "time",
