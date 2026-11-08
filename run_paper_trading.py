@@ -233,6 +233,88 @@ async def _shutdown_agents(agents) -> None:
             )
 
 
+async def _start_optional_hawkes_bootstrap(components):
+    """Fit and OOS-gate per-symbol Hawkes filters before live event scoring.
+
+    This lifecycle is opt-in and requires an explicit symbol allow-list. Models
+    that fail convergence, stationarity, sample sufficiency or held-out
+    Poisson-baseline comparison are not registered.
+    """
+    enabled = os.getenv("AITOS_HAWKES_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return ()
+
+    symbols = tuple(
+        symbol.strip().upper()
+        for symbol in os.getenv("AITOS_HAWKES_SYMBOLS", "").split(",")
+        if symbol.strip()
+    )
+    if not symbols:
+        raise RuntimeError(
+            "AITOS_HAWKES_ENABLED is true but AITOS_HAWKES_SYMBOLS is empty"
+        )
+    scanner = next(
+        (
+            module
+            for module in components.all_modules()
+            if getattr(module, "module_id", None) == "opportunity-scanner"
+        ),
+        None,
+    )
+    if scanner is None:
+        raise RuntimeError("opportunity-scanner unavailable for Hawkes bootstrap")
+
+    from aitos.statistics.hawkes_runtime import bootstrap_hawkes_models
+
+    decay_grid = tuple(
+        float(value)
+        for value in os.getenv(
+            "AITOS_HAWKES_DECAY_GRID", "0.05,0.1,0.2,0.5,1.0"
+        ).split(",")
+        if value.strip()
+    )
+    results = await bootstrap_hawkes_models(
+        scanner._exchange,
+        scanner._a_stat_bridge.engine,
+        symbols,
+        sample_limit=int(os.getenv("AITOS_HAWKES_SAMPLE_LIMIT", "1000")),
+        min_events=int(os.getenv("AITOS_HAWKES_MIN_EVENTS", "200")),
+        holdout_fraction=float(
+            os.getenv("AITOS_HAWKES_HOLDOUT_FRACTION", "0.2")
+        ),
+        min_mark_events=int(
+            os.getenv("AITOS_HAWKES_MIN_MARK_EVENTS", "20")
+        ),
+        min_oos_gain_per_event=float(
+            os.getenv("AITOS_HAWKES_MIN_OOS_GAIN_PER_EVENT", "0")
+        ),
+        decay_grid=decay_grid,
+        max_iterations=int(os.getenv("AITOS_HAWKES_MAX_ITERATIONS", "120")),
+    )
+    logger.info(
+        "A-Stat Hawkes bootstrap completed",
+        extra={
+            "aitos_extra": {
+                "results": [
+                    {
+                        "symbol": item.symbol,
+                        "status": item.status,
+                        "events": item.events,
+                        "training_events": item.training_events,
+                        "holdout_events": item.holdout_events,
+                        "oos_gain_per_event": item.oos_gain_per_event,
+                        "branching_ratio": item.branching_ratio,
+                        "reason": item.reason,
+                    }
+                    for item in results
+                ],
+                "decision_policy": "telemetry_only_until_separate_strategy_approval",
+            }
+        },
+    )
+    return results
+
+
 async def _start_optional_statistical_drift_monitor(
     components, market_repo, settings, cleanup: AsyncExitStack
 ):
@@ -503,6 +585,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     )
     cleanup.push_async_callback(experience_recorder.shutdown)
     await experience_recorder.initialize({})
+    hawkes_bootstrap_results = await _start_optional_hawkes_bootstrap(components)
     drift_engine, drift_client = await _start_optional_statistical_drift_monitor(
         components, market_repo, settings, cleanup
     )
