@@ -52,3 +52,32 @@ def test_a_stat_engine_routes_live_marked_events_to_registered_hawkes_filter():
     assert second.timestamp == 101.0
     with pytest.raises(KeyError):
         engine.observe_marked_event("ETHUSDT", 102.0, 0)
+
+
+
+@pytest.mark.asyncio
+async def test_drift_scheduler_retries_after_fail_closed_provider_error(tmp_path):
+    registry = StatisticalModelRegistry(tmp_path / "models.sqlite3")
+    runtime = StatisticalGovernanceRuntime(registry)
+    engine = AStatEngine()
+    observed = asyncio.Event()
+    attempts = 0
+
+    def batch_provider():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("current drift window is stale")
+        observed.set()
+        values = [float(index) for index in range(100)]
+        return {"volatility": values}, {"volatility": values}
+
+    task = await engine.start_drift_monitor(
+        runtime, batch_provider, interval_seconds=1.0
+    )
+    await asyncio.wait_for(observed.wait(), timeout=3.0)
+    await engine.stop_drift_monitor()
+    assert task.done()
+    assert attempts >= 2
+    assert runtime.last_drift is not None
+    assert runtime.last_drift.status == "NORMAL"
