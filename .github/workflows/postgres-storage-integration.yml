@@ -32,6 +32,12 @@ jobs:
           --health-retries 20
     env:
       AITOS_TEST_POSTGRES_URL: postgresql://aitos_test:aitos_test_password@127.0.0.1:5432/aitos_test
+      AITOS_RECONCILE_POSTGRES_URL: postgresql://aitos_test:aitos_test_password@127.0.0.1:5432/aitos_test
+      CLICKHOUSE_HOST: 127.0.0.1
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: aitos_test
+      CLICKHOUSE_PASSWORD: aitos_test_password
+      CLICKHOUSE_DATABASE: aitos_test
       PYTHONPATH: .
     steps:
       - uses: actions/checkout@v7.0.1
@@ -44,5 +50,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
-      - name: Run real PostgreSQL adapter round-trip tests
+      - name: Run PostgreSQL adapter and recovery tests
         run: pytest -q tests/storage/test_postgres_integration.py
+      - name: Verify PostgreSQL-to-ClickHouse bidirectional reconciliation
+        run: pytest -q tests/storage/test_postgres_clickhouse_reconciliation.py
