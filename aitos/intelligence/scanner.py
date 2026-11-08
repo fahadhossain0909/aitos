@@ -1955,6 +1955,28 @@ class OpportunityScanner(AITOSModule):
                     },
                     candidate_id=candidate.candidate_id,
                 )
+                # Keep the fixed-horizon rejection markout as a separate
+                # outcome entity from Financial-ML barrier labels. Both share
+                # candidate_id, but their labels have different horizons and
+                # must never overwrite one another.
+                self._decision_outcome_ledger.record_decision(
+                    f"{rejection_id}:MARKOUT:900",
+                    entity_id=f"{attribution_id}:MARKOUT:900",
+                    symbol=candidate.symbol,
+                    side=candidate.direction.value,
+                    decision_type="REJECTION",
+                    accepted=False,
+                    reason=reason,
+                    payload={
+                        "rejection_id": rejection_id,
+                        "candidate_id": candidate.candidate_id,
+                        "trace_id": candidate.trace_id,
+                        "label_horizon_seconds": 900,
+                        "label_kind": "COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
+                    },
+                    candidate_id=candidate.candidate_id,
+                    outcome_provenance="COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
+                )
             except Exception:
                 logger.exception(
                     "candidate rejection attribution persistence failed",
@@ -2018,10 +2040,9 @@ class OpportunityScanner(AITOSModule):
             attribution_id = str(markout.get("attribution_id") or "")
             if not attribution_id:
                 continue
-            if self._financial_ml.has_candidate(str(attribution_id)):
-                continue
+            markout_entity_id = f"{attribution_id}:MARKOUT:900"
             existing = self._decision_outcome_ledger.list_decisions(
-                entity_id=attribution_id
+                entity_id=markout_entity_id
             )
             if any(row.get("outcome_value") is not None for row in existing):
                 continue
@@ -2030,7 +2051,7 @@ class OpportunityScanner(AITOSModule):
             ).isoformat()
             try:
                 resolved += self._decision_outcome_ledger.resolve_entity(
-                    attribution_id,
+                    markout_entity_id,
                     outcome_value=float(markout["signed_return_pct"]) / 100.0,
                     outcome_at=observed_at,
                     outcome={
