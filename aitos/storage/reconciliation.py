@@ -59,6 +59,11 @@ def _normalize_value(value: Any, *, field_name: str | None = None) -> Any:
         except ValueError:
             return value
         return _normalize_datetime(parsed)
+    if isinstance(value, str) and field_name == "schema_version":
+        try:
+            return float(value)
+        except ValueError:
+            return value
     return value
 
 
