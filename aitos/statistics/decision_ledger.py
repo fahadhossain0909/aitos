@@ -263,3 +263,51 @@ class DecisionOutcomeLedger:
             }
             for row in rows
         )
+
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return bounded aggregate counts for runtime health and canary evidence."""
+        with self._connect() as connection:
+            totals = connection.execute(
+                """
+                SELECT COUNT(*) AS decisions_total,
+                       SUM(CASE WHEN outcome_value IS NOT NULL THEN 1 ELSE 0 END)
+                           AS resolved_total
+                FROM decision_outcomes
+                """
+            ).fetchone()
+            by_type = connection.execute(
+                """
+                SELECT decision_type, COUNT(*) AS count,
+                       SUM(CASE WHEN outcome_value IS NOT NULL THEN 1 ELSE 0 END)
+                           AS resolved
+                FROM decision_outcomes
+                GROUP BY decision_type ORDER BY decision_type
+                """
+            ).fetchall()
+            by_provenance = connection.execute(
+                """
+                SELECT outcome_provenance, COUNT(*) AS count
+                FROM decision_outcomes
+                WHERE outcome_provenance IS NOT NULL
+                GROUP BY outcome_provenance ORDER BY outcome_provenance
+                """
+            ).fetchall()
+        decisions_total = int(totals["decisions_total"] or 0)
+        resolved_total = int(totals["resolved_total"] or 0)
+        return {
+            "decisions_total": decisions_total,
+            "resolved_total": resolved_total,
+            "unresolved_total": decisions_total - resolved_total,
+            "by_type": {
+                str(row["decision_type"]): {
+                    "count": int(row["count"]),
+                    "resolved": int(row["resolved"] or 0),
+                }
+                for row in by_type
+            },
+            "by_provenance": {
+                str(row["outcome_provenance"]): int(row["count"])
+                for row in by_provenance
+            },
+        }
