@@ -24,7 +24,8 @@ subject, roles, or `authenticated` from request JSON. Restrict the approval
 endpoint to a dedicated approver role and require TLS. Keep
 `AITOS_APPROVAL_SIGNING_SECRET` (at least 32 random bytes) in Render secrets,
 not in source control. The token is short-lived, HMAC-signed, bound to the
-candidate artifact SHA-256 and operator, and consumed once using a SQLite
+candidate artifact SHA-256, operator, and required 8–500 character approval
+rationale, and consumed once using a SQLite
 transaction. Use a persistent, backed-up database path shared by all approval
 API replicas; local ephemeral storage is not suitable for production.
 
