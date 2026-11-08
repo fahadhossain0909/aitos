@@ -5,6 +5,7 @@ marked-event log likelihood beats a training-rate Poisson baseline. The OOS
 window is then replayed into the live filter so the first live observation
 starts from a causally warmed state.
 """
+
 from __future__ import annotations
 
 import asyncio
