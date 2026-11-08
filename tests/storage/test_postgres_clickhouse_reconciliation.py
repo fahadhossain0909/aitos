@@ -21,7 +21,6 @@ from aitos.models.market import (
     TradeSide,
     TradeTick,
 )
-from aitos.storage.postgres_migrations import apply_postgres_migrations
 from scripts.reconcile_postgres_journal import reconcile
 
 
