@@ -4,6 +4,7 @@ These are causal diagnostics for research features, not full calibrated
 Heston/Bates/rough-Bergomi pricing engines. They are deterministic and use
 only the supplied historical return window.
 """
+
 from __future__ import annotations
 
 import math
@@ -68,10 +69,7 @@ def estimate_stochastic_volatility(
     mean_current = sum(current) / len(current)
     denominator = sum((value - mean_previous) ** 2 for value in previous)
     persistence = (
-        sum(
-            (x - mean_previous) * (y - mean_current)
-            for x, y in zip(previous, current)
-        )
+        sum((x - mean_previous) * (y - mean_current) for x, y in zip(previous, current))
         / denominator
         if denominator > 1e-15
         else 0.0
@@ -117,17 +115,24 @@ def estimate_jump_diffusion(
     center = median(values)
     mad = median(abs(value - center) for value in values)
     robust_sigma = max(1.4826 * mad, 1e-8)
-    jumps = tuple(value for value in values if abs(value - center) > jump_sigma * robust_sigma)
-    diffusion = tuple(value for value in values if abs(value - center) <= jump_sigma * robust_sigma)
+    jumps = tuple(
+        value for value in values if abs(value - center) > jump_sigma * robust_sigma
+    )
+    diffusion = tuple(
+        value for value in values if abs(value - center) <= jump_sigma * robust_sigma
+    )
     diffusion_mean = sum(diffusion) / len(diffusion) if diffusion else 0.0
     diffusion_variance = (
-        sum((value - diffusion_mean) ** 2 for value in diffusion) / max(1, len(diffusion) - 1)
-        if diffusion else 0.0
+        sum((value - diffusion_mean) ** 2 for value in diffusion)
+        / max(1, len(diffusion) - 1)
+        if diffusion
+        else 0.0
     )
     jump_mean = sum(jumps) / len(jumps) if jumps else 0.0
     jump_variance = (
         sum((value - jump_mean) ** 2 for value in jumps) / max(1, len(jumps) - 1)
-        if len(jumps) > 1 else 0.0
+        if len(jumps) > 1
+        else 0.0
     )
     jump_component = (len(jumps) / len(values)) * (
         jump_variance + jump_mean * jump_mean
