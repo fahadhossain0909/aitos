@@ -874,8 +874,11 @@ class FinancialMLPipeline:
             if row is None:
                 raise ValueError("unknown financial ML artifact")
             report = json.loads(row["report_json"])
+            artifact = json.loads(row["artifact_json"])
             if not report.get("passed_oos"):
                 raise ValueError("artifact did not pass out-of-sample acceptance")
+            if artifact.get("feature_names") != list(self.FEATURE_NAMES):
+                raise ValueError("artifact feature schema is incompatible with this runtime")
             self._conn.execute("BEGIN IMMEDIATE")
             self._conn.execute("UPDATE financial_ml_artifacts SET active=0")
             self._conn.execute(
@@ -887,7 +890,6 @@ class FinancialMLPipeline:
                 (artifact_id, approved_by.strip(), rationale.strip(), _iso()),
             )
             self._conn.commit()
-            artifact = json.loads(row["artifact_json"])
             self._models["meta"] = self._model_from_dict(artifact["model"])
             self._calibrators["platt"] = self._model_from_dict(artifact["calibrator"])
             self._artifact_version = artifact_id
