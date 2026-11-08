@@ -32,10 +32,13 @@ class MarketEvent:
     price: float
     volume: float
     signed_volume: float
+    event_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.timestamp:
             raise ValueError("timestamp is required")
+        if self.event_id is not None and not str(self.event_id).strip():
+            raise ValueError("event_id cannot be empty")
         if _finite(self.price, "price") <= 0:
             raise ValueError("price must be positive")
         if _finite(self.volume, "volume") < 0:
