@@ -385,6 +385,11 @@ def test_legacy_candidate_expiry_is_migrated_before_immutability_trigger(tmp_pat
             "PENDING",
         ),
     )
+    connection.execute(
+        """CREATE TRIGGER financial_ml_candidate_snapshot_immutable
+        BEFORE UPDATE OF expires_at ON financial_ml_candidates
+        BEGIN SELECT RAISE(ABORT, 'financial ML candidate snapshots are immutable'); END"""
+    )
     connection.commit()
     connection.close()
 
