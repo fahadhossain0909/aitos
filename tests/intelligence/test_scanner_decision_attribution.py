@@ -27,9 +27,7 @@ async def test_repeated_gate_evaluations_share_entity_but_have_unique_decision_i
     instance._directional_funnel = _Funnel()
     instance._decision_outcome_ledger = _Ledger()
 
-    token = scanner_module._ACTIVE_SCAN_TRACE_ID.set(
-        "md:ETHUSDT:replayed-market-event"
-    )
+    token = scanner_module._ACTIVE_SCAN_TRACE_ID.set("md:ETHUSDT:replayed-market-event")
     try:
         await instance._record_funnel(
             symbol="ETHUSDT",
