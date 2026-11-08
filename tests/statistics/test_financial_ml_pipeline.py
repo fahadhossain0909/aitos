@@ -155,6 +155,11 @@ def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(t
             artifact_id,
             approved_by="test-operator",
             rationale="Approved after reviewing chronological OOS evidence.",
+            approval_verifier=lambda artifact, operator, reason: (
+                artifact == artifact_id
+                and operator == "test-operator"
+                and len(reason) >= 8
+            ),
         )
         assert pipeline.snapshot()["active_oos_approved_artifacts"] == 1
     pipeline.close()
