@@ -484,7 +484,7 @@ class FinancialMLPipeline:
                 """SELECT volume,dollar_volume,signed_volume,close
                 FROM financial_ml_event_bars
                 WHERE symbol=? AND bar_type='volume'
-                ORDER BY end_at DESC LIMIT 20""",
+                ORDER BY end_at DESC LIMIT 128""",
                 (key,),
             ).fetchall()
         if not rows:
