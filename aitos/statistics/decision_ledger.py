@@ -60,13 +60,16 @@ class DecisionOutcomeLedger:
                         f"ALTER TABLE decision_outcomes ADD COLUMN {name} TEXT"
                     )
             connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decision_candidate ON decision_outcomes(candidate_id, decision_at)"
+                "CREATE INDEX IF NOT EXISTS idx_decision_candidate "
+                "ON decision_outcomes(candidate_id, decision_at)"
             )
             connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decision_entity ON decision_outcomes(entity_id, decision_at)"
+                "CREATE INDEX IF NOT EXISTS idx_decision_entity "
+                "ON decision_outcomes(entity_id, decision_at)"
             )
             connection.execute(
-                "CREATE INDEX IF NOT EXISTS idx_decision_cohort ON decision_outcomes(symbol, side, decision_type, decision_at)"
+                "CREATE INDEX IF NOT EXISTS idx_decision_cohort "
+                "ON decision_outcomes(symbol, side, decision_type, decision_at)"
             )
 
     def _connect(self):
