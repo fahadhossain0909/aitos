@@ -23,7 +23,7 @@ def main() -> int:
     try:
         report = pipeline.train_walk_forward()
         print(json.dumps(asdict(report), sort_keys=True, indent=2))
-        return 0 if report.trained else 2
+        return 0 if report.passed_oos else 1 if report.trained else 2
     finally:
         pipeline.close()
 
