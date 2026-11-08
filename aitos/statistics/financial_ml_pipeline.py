@@ -138,6 +138,7 @@ class FinancialMLPipeline:
         round_trip_cost_bps: float = 8.0,
         min_training_samples: int = 50,
         min_oos_samples: int = 20,
+        max_training_samples: int = 1000,
         acceptance_threshold: float = 0.55,
     ) -> None:
         self.path = Path(database_path)
@@ -163,6 +164,9 @@ class FinancialMLPipeline:
         self.round_trip_cost_bps = _finite(round_trip_cost_bps, "round trip costs")
         self.min_training_samples = int(min_training_samples)
         self.min_oos_samples = int(min_oos_samples)
+        self.max_training_samples = int(max_training_samples)
+        if self.max_training_samples < self.min_training_samples:
+            raise ValueError("max_training_samples must be >= min_training_samples")
         self.acceptance_threshold = _finite(
             acceptance_threshold, "acceptance threshold"
         )
