@@ -45,7 +45,9 @@ from aitos.models.market import (
 )
 
 logger = get_logger("aitos.exchange.binance")
-REST_BASE_URL = "https://fapi.binance.com"
+REST_BASE_URL = os.getenv(
+    "AITOS_BINANCE_FUTURES_REST_BASE_URL", "https://fapi.binance.com"
+).rstrip("/")
 WS_MARKET_BASE_URL = BINANCE_USDM_WS_COMBINED
 WS_MARKET_RAW_BASE_URL = BINANCE_USDM_WS_RAW
 WS_PUBLIC_BASE_URL = WS_MARKET_BASE_URL
