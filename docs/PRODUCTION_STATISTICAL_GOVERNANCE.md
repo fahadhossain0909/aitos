@@ -97,3 +97,34 @@ The scheduler and its dedicated ClickHouse client are stopped during paper
 runtime shutdown. The SQLite model registry is local to the runtime instance;
 it is not a multi-instance coordination service. Use a durable shared registry
 before scaling this lifecycle horizontally.
+
+
+## Paper-runtime Hawkes bootstrap
+
+Marked-Hawkes live observation is available behind an explicit deployment
+allow-list and is **disabled by default**. To bootstrap candidate filters:
+
+- `AITOS_HAWKES_ENABLED=true`
+- `AITOS_HAWKES_SYMBOLS=BTCUSDT,ETHUSDT` — explicit symbols only.
+- `AITOS_HAWKES_SAMPLE_LIMIT=1000` — recent public REST trades per symbol
+  (100–1000).
+- `AITOS_HAWKES_MIN_EVENTS=200` and
+  `AITOS_HAWKES_MIN_MARK_EVENTS=20` — minimum sample and each aggressor mark.
+- `AITOS_HAWKES_HOLDOUT_FRACTION=0.2` — chronological holdout, never shuffled.
+- `AITOS_HAWKES_DECAY_GRID=0.05,0.1,0.2,0.5,1.0` and
+  `AITOS_HAWKES_MAX_ITERATIONS=120` — bounded fit budget.
+- `AITOS_HAWKES_MIN_OOS_GAIN_PER_EVENT=0` — require positive held-out
+  log-likelihood gain per event against the training-rate Poisson baseline.
+
+Each symbol is fetched independently. Duplicate millisecond timestamps are
+made strictly chronological using the next representable float; genuinely
+out-of-order live events are rejected. A model is not installed unless the MLE
+converges, its branching ratio is stationary, both marks have adequate samples,
+and the chronological holdout beats the Poisson baseline. Accepted history is
+replayed into the online filter before the filter is atomically registered.
+
+Hawkes intensities are currently **telemetry/state only**. They do not alter
+scanner scores, entry gates, position sizing, or exits. Decision-path use
+requires a separate calibrated feature contract, walk-forward/OOS acceptance,
+ablation against the no-Hawkes baseline, and operator approval. A rejected or
+undersized model leaves the symbol on the existing A-Stat path.
