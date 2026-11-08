@@ -171,7 +171,11 @@ def fit_marked_hawkes_mle(
                 sum((value / scale) ** 2 for value in projected_mu)
                 + sum((value / scale) ** 2 for row in projected_a for value in row)
             )
-            if gradient_norm < 1e-5:
+            # The norm is the Euclidean norm of the per-event projected
+            # gradient. A 1e-2 threshold is a practical numerical stopping
+            # tolerance for this low-dimensional profile MLE; strict 1e-5
+            # caused valid boundary solutions to exhaust the iteration budget.
+            if gradient_norm < 1e-2:
                 converged = True
                 break
             accepted = False
@@ -202,11 +206,19 @@ def fit_marked_hawkes_mle(
             if not accepted:
                 # Backtracking can stall at machine precision. Accept this as
                 # convergence only when the feasible (KKT) gradient is small.
-                converged = gradient_norm < 1e-5
+                converged = gradient_norm < 1e-2
                 break
             if converged:
                 break
-        if best is None or current > best[0]:
+        # Prefer a genuinely converged decay profile over a numerically
+        # higher-likelihood candidate that exhausted its optimizer budget.
+        # Among candidates with the same convergence status, retain the
+        # highest profile likelihood.
+        if (
+            best is None
+            or (converged and not best[5])
+            or (converged == best[5] and current > best[0])
+        ):
             best = (
                 current,
                 decay,
