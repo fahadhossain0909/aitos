@@ -249,7 +249,9 @@ class MarkedHawkesOnlineFilter:
         actual_radius = _spectral_radius_2x2(fit.excitation_matrix)
         if not 0.0 <= fit.branching_ratio < 0.95 or actual_radius >= 0.95:
             raise ValueError("online filter refuses a non-stationary Hawkes fit")
-        if not math.isclose(fit.branching_ratio, actual_radius, rel_tol=1e-5, abs_tol=1e-8):
+        if not math.isclose(
+            fit.branching_ratio, actual_radius, rel_tol=1e-5, abs_tol=1e-8
+        ):
             raise ValueError("Hawkes branching ratio does not match excitation matrix")
         self.fit = fit
         self._state = [0.0, 0.0]
