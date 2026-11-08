@@ -22,7 +22,7 @@ from itertools import chain
 from pathlib import Path
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 class FeatureBatchProvider(Protocol):
@@ -213,8 +213,13 @@ class WebhookDriftAlertSink:
                 "Content-Type": "application/json",
             },
         )
+        class RejectRedirects(HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            opener = build_opener(RejectRedirects)
+            with opener.open(request, timeout=self.timeout_seconds) as response:
                 if not 200 <= response.status < 300:
                     raise RuntimeError(f"alert sink returned HTTP {response.status}")
         except (HTTPError, URLError, TimeoutError) as exc:
