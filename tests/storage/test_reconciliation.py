@@ -48,7 +48,6 @@ def test_reconciliation_can_ignore_only_explicit_volatile_fields():
     assert result.matched_count == 1
 
 
-
 def test_matching_duplicates_are_still_a_reconciliation_anomaly():
     duplicate = "same-fingerprint"
 
