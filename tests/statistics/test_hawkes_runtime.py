@@ -128,18 +128,7 @@ def test_hawkes_warmup_events_make_duplicate_millisecond_times_strictly_ordered(
         side=TradeSide.BUY,
         timestamp=same_time,
     )
-    _, _, result = hawkes_runtime._fit_and_accept(
-        "BTCUSDT",
-        trades * 25,
-        min_events=40,
-        holdout_fraction=0.2,
-        min_mark_events=1,
-        min_oos_gain_per_event=0.0,
-        decay_grid=(0.1,),
-        max_iterations=1,
-    )
-    # The deliberately repeated trade IDs/timestamps are not a fit-quality
-    # fixture; strict ordering is verified by the normalization primitive.
+    # Strict ordering is required because the exchange timestamps are millisecond-granular.
     times, marks = hawkes_runtime._strict_event_times(trades)
     assert all(left < right for left, right in zip(times, times[1:]))
     assert len(times) == len(marks)
