@@ -44,6 +44,7 @@ jobs:
           --health-retries 30
     env:
       AITOS_MODE: paper
+      BINANCE_TESTNET: "false"
       TESTING: "false"
       MODEL_DATA_DIR: ${{ github.workspace }}/.paper-canary-models
       REDIS_HOST: 127.0.0.1
