@@ -4,9 +4,62 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections import Counter
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
+from enum import Enum
 from typing import Any, Iterable
+from uuid import UUID
+
+
+
+_TIME_FIELDS = frozenset(
+    {
+        "time",
+        "event_time",
+        "ingest_time",
+        "timestamp",
+        "open_time",
+        "close_time",
+        "funding_time",
+        "created_at",
+        "recorded_at",
+        "entry_time",
+        "exit_time",
+    }
+)
+
+
+def _normalize_datetime(value: datetime) -> str:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc).isoformat(timespec="milliseconds")
+
+
+def _normalize_value(value: Any, *, field_name: str | None = None) -> Any:
+    if isinstance(value, datetime):
+        return _normalize_datetime(value)
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, Enum):
+        return _normalize_value(value.value, field_name=field_name)
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_value(item, field_name=str(key))
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [_normalize_value(item) for item in value]
+    if isinstance(value, str) and field_name in _TIME_FIELDS:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+        return _normalize_datetime(parsed)
+    return value
 
 
 def canonical_record_fingerprint(
@@ -17,11 +70,13 @@ def canonical_record_fingerprint(
     excluded_payload_fields: frozenset[str] = frozenset(),
 ) -> str:
     """Hash stable record identity and payload, excluding volatile metadata."""
-    stable_payload = {
-        key: value
-        for key, value in payload.items()
-        if key not in excluded_payload_fields
-    }
+    stable_payload = _normalize_value(
+        {
+            key: value
+            for key, value in payload.items()
+            if key not in excluded_payload_fields
+        }
+    )
     canonical = json.dumps(
         {
             "record_type": str(record_type),
