@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from math import isfinite
 from typing import Any
@@ -127,6 +127,8 @@ class ExperimentCell:
     variant: str
     metrics: Mapping[str, float]
     sample_count: int
+    net_returns: tuple[float, ...] = ()
+    hypothesis_p_value: float | None = None
 
 
 @dataclass(frozen=True)
@@ -142,6 +144,7 @@ class ExperimentReport:
         "Research evidence only; no parameter tuning, strategy mutation or deployment.",
         "Holdout data must be reserved before experiment design and never reused for selection.",
     )
+    statistical_validation: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -153,6 +156,7 @@ class ExperimentReport:
             "passed_sample_gates": self.passed_sample_gates,
             "evidence_ids": list(self.evidence_ids),
             "limitations": list(self.limitations),
+            "statistical_validation": dict(self.statistical_validation),
         }
 
 
@@ -271,8 +275,32 @@ class ExperimentEngine:
                 for variant in variants:
                     raw = evaluator(list(regime_events), variant, cost, regime)
                     metrics, count = self._metrics(raw)
+                    raw_returns = tuple(
+                        float(value) for value in raw.get("net_returns", ())
+                    )
+                    if raw_returns and (
+                        len(raw_returns) != count
+                        or any(not isfinite(value) for value in raw_returns)
+                    ):
+                        raise ValueError(
+                            "net_returns must be finite and align with sample_count"
+                        )
+                    raw_p_value = raw.get("hypothesis_p_value")
+                    p_value = (
+                        float(raw_p_value) if raw_p_value is not None else None
+                    )
+                    if p_value is not None and (
+                        not isfinite(p_value) or not 0.0 <= p_value <= 1.0
+                    ):
+                        raise ValueError("hypothesis_p_value must be in [0,1]")
                     cell = ExperimentCell(
-                        regime, cost.name, variant.name, metrics, count
+                        regime,
+                        cost.name,
+                        variant.name,
+                        metrics,
+                        count,
+                        raw_returns,
+                        p_value,
                     )
                     cells.append(cell)
                     if count < plan.minimum_samples:
@@ -290,6 +318,52 @@ class ExperimentEngine:
         expected = len(regimes) * len(plan.cost_scenarios) * len(variants)
         if len(cells) != expected:
             passed = False
+        statistical_validation: dict[str, Any] = {}
+        from aitos.statistics.financial_ml_validation import validate_strategy_family
+
+        for regime in regimes:
+            for cost in plan.cost_scenarios:
+                cohort_cells = [
+                    cell
+                    for cell in cells
+                    if cell.regime == regime and cell.cost_scenario == cost.name
+                ]
+                if (
+                    len(cohort_cells) < 2
+                    or any(not cell.net_returns for cell in cohort_cells)
+                    or len({len(cell.net_returns) for cell in cohort_cells}) != 1
+                    or len(cohort_cells[0].net_returns) < 20
+                ):
+                    continue
+                family_returns = {
+                    cell.variant: cell.net_returns for cell in cohort_cells
+                }
+                family_p_values = {
+                    cell.variant: cell.hypothesis_p_value for cell in cohort_cells
+                }
+                p_values = (
+                    {
+                        name: float(value)
+                        for name, value in family_p_values.items()
+                        if value is not None
+                    }
+                    if all(value is not None for value in family_p_values.values())
+                    else None
+                )
+                family_report = validate_strategy_family(
+                    family_returns,
+                    hypothesis_p_values=p_values,
+                    model_losses={
+                        name: tuple(-value for value in values)
+                        for name, values in family_returns.items()
+                    },
+                    resamples=250,
+                    block_length=min(5, len(cohort_cells[0].net_returns)),
+                    seed=0,
+                )
+                statistical_validation[f"{regime}|{cost.name}"] = asdict(
+                    family_report
+                )
         dataset_fingerprint = hashlib.sha256(
             json.dumps(
                 [self._event_payload(event) for event in ordered],
