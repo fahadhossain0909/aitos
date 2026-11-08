@@ -303,3 +303,29 @@ def test_executed_fill_supersedes_unresolved_rejection_before_label_resolution(
     assert row["status"] == "EXECUTED"
     assert row["trade_id"] == "trade-after-reconcile"
     pipeline.close()
+
+
+def test_candidate_snapshot_keeps_primary_direction_as_meta_feature(tmp_path):
+    pipeline = FinancialMLPipeline(tmp_path / "financial-ml.sqlite3")
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    for candidate_id, side, expected in (
+        ("candidate-long-direction", "LONG", 1.0),
+        ("candidate-short-direction", "SHORT", -1.0),
+    ):
+        pipeline.register_candidate(
+            candidate_id=candidate_id,
+            symbol="BTCUSDT",
+            side=side,
+            entry_price=100,
+            volatility=0.01,
+            features=_features(5),
+            created_at=created,
+        )
+        row = pipeline._conn.execute(
+            "SELECT features_json FROM financial_ml_candidates WHERE candidate_id=?",
+            (candidate_id,),
+        ).fetchone()
+        import json
+
+        assert json.loads(row["features_json"])["side_sign"] == expected
+    pipeline.close()
