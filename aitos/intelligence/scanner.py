@@ -535,6 +535,8 @@ class OpportunityScanner(AITOSModule):
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         await self._live_cache.shutdown()
+        while self._reconcile_financial_ml_labels():
+            pass
         self._candidate_outcomes.close()
         self._directional_funnel.close()
         self._financial_ml.close()
