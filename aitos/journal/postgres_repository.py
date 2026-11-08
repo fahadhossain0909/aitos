@@ -106,8 +106,24 @@ class PostgresJournalRepository:
         if not trade_id:
             raise ValueError("trade_id is required for durable trade snapshot")
         payload.setdefault("recorded_at", datetime.now(timezone.utc).isoformat())
+        identity_fields = (
+            "trade_id",
+            "snapshot_version",
+            "updated_at",
+            "state",
+            "entry_time",
+            "exit_time",
+            "quantity",
+            "exit_price",
+            "pnl",
+            "pnl_percent",
+        )
+        identity = {key: payload.get(key) for key in identity_fields}
         await self._append(
-            "TRADE_SNAPSHOT", trade_id, self._idempotency_key("trade", payload), payload
+            "TRADE_SNAPSHOT",
+            trade_id,
+            self._idempotency_key("trade", identity),
+            payload,
         )
 
     async def save_journal_entry(self, entry: JournalEntry) -> None:
