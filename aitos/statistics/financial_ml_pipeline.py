@@ -781,6 +781,7 @@ class FinancialMLPipeline:
         oos_labels: list[int] = []
         oos_returns: list[float] = []
         oos_provenance: list[str] = []
+        oos_indices: list[int] = []
         used_folds = 0
         starts = list(range(samples))
         ends = [
@@ -837,9 +838,11 @@ class FinancialMLPipeline:
                 str(rows[index]["outcome_provenance"] or "UNKNOWN")
                 for index in fold.test_indices
             )
+            oos_indices.extend(fold.test_indices)
             used_folds += 1
         calibration_size = max(10, len(oos_labels) // 3)
         evaluation_labels = oos_labels[calibration_size:]
+        evaluation_indices = oos_indices[calibration_size:]
         if (
             len(oos_labels) < calibration_size + self.min_oos_samples
             or len(set(oos_labels[:calibration_size])) < 2
