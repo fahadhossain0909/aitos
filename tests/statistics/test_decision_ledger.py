@@ -188,6 +188,4 @@ def test_decision_ledger_snapshot_reports_resolution_and_provenance_counts(tmp_p
     assert snapshot["unresolved_total"] == 0
     assert snapshot["by_type"]["GATE"] == {"count": 1, "resolved": 1}
     assert snapshot["by_type"]["REJECTION"] == {"count": 1, "resolved": 1}
-    assert snapshot["by_provenance"] == {
-        "COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT": 2
-    }
+    assert snapshot["by_provenance"] == {"COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT": 2}
