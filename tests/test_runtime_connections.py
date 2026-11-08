@@ -191,9 +191,13 @@ async def test_connect_clickhouse_repositories_shuts_down_on_retry_exhaustion(
 
     assert exc_info.value.code == 1
     assert market_repo.shutdown_count == 1
-    assert journal_repo.shutdown_count == 1
+    assert journal_repo.shutdown_count == 0
     assert logger.errors == [
-        ("ClickHouse persistence unavailable after retries: %s", failure)
+        (
+            "ClickHouse market/analytics storage is mandatory; PostgreSQL "
+            "journal fallback cannot safely replace it: %s",
+            failure,
+        )
     ]
 
 
