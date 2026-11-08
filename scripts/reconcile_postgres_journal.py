@@ -25,7 +25,9 @@ def _payload(value: Any) -> dict[str, Any]:
     return dict(value)
 
 
-async def _fetch_clickhouse_rows(client, query: str, since: datetime) -> list[dict[str, Any]]:
+async def _fetch_clickhouse_rows(
+    client, query: str, since: datetime
+) -> list[dict[str, Any]]:
     result = await client.query(query, parameters={"since": since})
     return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
@@ -166,9 +168,7 @@ async def reconcile(since: datetime) -> dict[str, Any]:
                 ch_trade_snapshots,
                 excluded_payload_fields=frozenset({"recorded_at"}),
             ),
-            "journal_entries": compare_records(
-                pg_journal_entries, ch_journal_entries
-            ),
+            "journal_entries": compare_records(pg_journal_entries, ch_journal_entries),
             "decision_lifecycle": compare_records(
                 pg_decisions,
                 ch_decisions,
