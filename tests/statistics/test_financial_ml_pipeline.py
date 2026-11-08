@@ -259,3 +259,30 @@ def test_counterfactual_barrier_resolution_syncs_candidate_ledger_exactly(tmp_pa
     assert decision["outcome_provenance"] == "COUNTERFACTUAL_LIVE_MARKOUT"
     assert decision["candidate_id"] == candidate_id
     pipeline.close()
+
+
+def test_executed_fill_supersedes_unresolved_rejection_before_label_resolution(tmp_path):
+    pipeline = FinancialMLPipeline(tmp_path / "financial-ml.sqlite3")
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    candidate_id = "candidate-retry-execution-001"
+    pipeline.register_candidate(
+        candidate_id=candidate_id,
+        symbol="XRPUSDT",
+        side="LONG",
+        entry_price=1,
+        volatility=0.01,
+        features=_features(6),
+        created_at=created,
+    )
+    assert pipeline.reject_candidate(candidate_id, "temporary_prevalidation_reject")
+    assert pipeline.mark_executed(candidate_id, "trade-after-reconcile")
+    assert pipeline.observe_price(
+        "XRPUSDT", 1.03, created + timedelta(seconds=10)
+    ) == 0
+    row = pipeline._conn.execute(
+        "SELECT status,trade_id FROM financial_ml_candidates WHERE candidate_id=?",
+        (candidate_id,),
+    ).fetchone()
+    assert row["status"] == "EXECUTED"
+    assert row["trade_id"] == "trade-after-reconcile"
+    pipeline.close()
