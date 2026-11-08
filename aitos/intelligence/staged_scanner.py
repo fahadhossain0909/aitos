@@ -214,9 +214,7 @@ async def install_staged_scan(
     original_iter_candidate_batches = getattr(scanner, "iter_candidate_batches", None)
     if callable(original_iter_candidate_batches):
 
-        async def _iter_candidate_batches_with_subscriptions(
-            *args: Any, **kwargs: Any
-        ):
+        async def _iter_candidate_batches_with_subscriptions(*args: Any, **kwargs: Any):
             candidates: list[Any] = []
             async for batch in original_iter_candidate_batches(*args, **kwargs):
                 candidates.extend(batch)
