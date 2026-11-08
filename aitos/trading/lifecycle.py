@@ -203,6 +203,19 @@ class TradeLifecycle(AITOSModule):
         decision_at: str | None = None,
     ) -> None:
         try:
+            candidate_id = (
+                str(payload.get("candidate_id"))
+                if isinstance(payload, Mapping) and payload.get("candidate_id")
+                else (
+                    entity_id
+                    if len(entity_id) == 32
+                    and all(character in "0123456789abcdef" for character in entity_id.lower())
+                    else None
+                )
+            )
+            record_payload = dict(payload or {})
+            if candidate_id:
+                record_payload.setdefault("candidate_id", candidate_id)
             await asyncio.to_thread(
                 self._decision_ledger().record_decision,
                 decision_id,
@@ -212,13 +225,9 @@ class TradeLifecycle(AITOSModule):
                 decision_type=decision_type,
                 accepted=accepted,
                 reason=reason,
-                payload=payload,
+                payload=record_payload,
                 decision_at=decision_at,
-                candidate_id=(
-                    str(payload.get("candidate_id"))
-                    if isinstance(payload, Mapping) and payload.get("candidate_id")
-                    else None
-                ),
+                candidate_id=candidate_id,
             )
         except Exception:
             logger.exception(
