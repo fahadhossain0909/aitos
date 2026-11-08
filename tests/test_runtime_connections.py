@@ -254,7 +254,9 @@ async def test_try_connect_neo4j_closes_driver_when_unavailable(monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_clickhouse_journal_failure_uses_configured_postgres_fallback(monkeypatch):
+async def test_clickhouse_journal_failure_uses_configured_postgres_fallback(
+    monkeypatch,
+):
     from aitos.data import repository as data_repository
     from aitos.journal import repository as journal_repository
     from aitos.journal import postgres_repository
