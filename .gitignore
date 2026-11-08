@@ -32,3 +32,11 @@ monitoring_report.json
 /init_missing.sql
 /tmp/
 .zwork/
+
+# Desktop build/dependency artifacts
+desktop/node_modules/
+desktop/dist/
+desktop/*.tsbuildinfo
+
+# Generated Windows installer candidates, never credentials or source.
+/artifacts/windows/

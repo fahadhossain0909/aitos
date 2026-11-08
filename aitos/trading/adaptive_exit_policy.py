@@ -37,6 +37,9 @@ class AdaptiveExitPolicy:
         self._stagnation_min_progress_r = float(
             cfg.get("stagnation_min_progress_r", 0.4)
         )
+        self._stagnation_entry_band_pct = float(
+            cfg.get("stagnation_entry_band_pct", 0.002)
+        )
         if not (0 < self._be_trigger_r <= 10 and 0 <= self._be_lock_r <= 5):
             raise ValueError("invalid break-even R thresholds")
         if not (0 <= self._fee_rate <= 0.1 and 0 <= self._slippage_rate <= 0.1):
@@ -45,6 +48,8 @@ class AdaptiveExitPolicy:
             raise ValueError("stagnation_bars must be between 1 and 10000")
         if not (0 <= self._stagnation_min_progress_r <= 10):
             raise ValueError("invalid stagnation progress threshold")
+        if not (0 <= self._stagnation_entry_band_pct <= 0.05):
+            raise ValueError("invalid stagnation entry-price band")
 
     def reset_trade(self, trade_id: str) -> None:
         # Observation state lives on the Trade record and survives serialization.
@@ -63,6 +68,7 @@ class AdaptiveExitPolicy:
         if not isfinite(risk) or risk <= 0 or trade.entry_price <= 0:
             return AdaptiveExitResult(reason="invalid_initial_risk")
 
+        trade.record_excursion(current_price)
         sign = 1.0 if trade.side == TradeSide.LONG else -1.0
         progress_r = ((current_price - trade.entry_price) * sign) / risk
         # Position evaluation may run on every tick. Only a caller-supplied,
@@ -93,13 +99,25 @@ class AdaptiveExitPolicy:
         # A trade that already made the required progress must not be
         # classified as stagnant merely because it later retraced.
         best_progress_r = max(progress_r, float(trade.mfe_r or 0.0))
+        max_excursion_price = max(
+            float(trade.mae_price or 0.0), float(trade.mfe_price or 0.0)
+        )
+        max_excursion_pct = max_excursion_price / float(trade.entry_price)
+        current_deviation_pct = abs(current_price - float(trade.entry_price)) / float(
+            trade.entry_price
+        )
+        remained_near_entry = (
+            max_excursion_pct <= self._stagnation_entry_band_pct
+            and current_deviation_pct <= self._stagnation_entry_band_pct
+        )
         stagnation = (
             bool(bar_id)
             and count >= self._stagnation_bars
             and best_progress_r < self._stagnation_min_progress_r
+            and remained_near_entry
         )
         if stagnation:
-            reason = "stagnation_exit"
+            reason = "time_decay_scratch"
         return AdaptiveExitResult(
             stop_price=candidate_stop,
             stagnation_exit=stagnation,

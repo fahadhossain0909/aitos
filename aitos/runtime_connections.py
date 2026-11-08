@@ -20,7 +20,16 @@ async def connect_redis_with_retry(settings, *, logger) -> Redis:
             settings.redis.url,
             max_connections=settings.redis.max_connections,
         )
-        await client.ping()
+        try:
+            await client.ping()
+        except BaseException:
+            try:
+                await client.aclose()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Redis attempt cleanup failed (%s)", type(cleanup_error).__name__
+                )
+            raise
         return client
 
     try:
@@ -48,10 +57,17 @@ async def try_connect_neo4j(settings, *, logger):
     try:
         await driver.verify_connectivity()
         return driver
-    except Exception as exc:
-        logger.warning("Neo4j unavailable: %s", exc)
-        await driver.close()
-        return None
+    except BaseException as exc:
+        try:
+            await driver.close()
+        except Exception as cleanup_error:
+            logger.warning(
+                "Neo4j startup cleanup failed (%s)", type(cleanup_error).__name__
+            )
+        if isinstance(exc, Exception):
+            logger.warning("Neo4j unavailable: %s", exc)
+            return None
+        raise
 
 
 async def connect_clickhouse_repositories(settings, *, logger):
@@ -90,8 +106,19 @@ async def connect_clickhouse_repositories(settings, *, logger):
             operation_name="ClickHouse journal repository initialization",
         )
         return market_repo, journal_repo
-    except RetryExhaustedError as exc:
-        await market_repo.shutdown()
-        await journal_repo.shutdown()
-        logger.error("ClickHouse persistence unavailable after retries: %s", exc)
-        raise SystemExit(1) from exc
+    except BaseException as exc:
+        # The caller cannot own these resources until both are returned. Clean
+        # up cancellation and unexpected failure too; one failed close must not
+        # prevent cleanup of the other repository or hide the startup cause.
+        for repository in (journal_repo, market_repo):
+            try:
+                await repository.shutdown()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "ClickHouse startup cleanup failed (%s)",
+                    type(cleanup_error).__name__,
+                )
+        if isinstance(exc, RetryExhaustedError):
+            logger.error("ClickHouse persistence unavailable after retries: %s", exc)
+            raise SystemExit(1) from exc
+        raise

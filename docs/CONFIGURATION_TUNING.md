@@ -23,6 +23,8 @@ The paper entrypoint requires `AITOS_MODE=paper`; the live entrypoint requires `
 | `AITOS_TUNING_SCANNER_UNIVERSE_MODE` | `all_eligible` or `allowlist` |
 | `AITOS_TUNING_SCANNER_UNIVERSE_LIMIT` | Maximum configured symbols in the scanner |
 | `AITOS_TUNING_SCANNER_SYMBOL_ALLOWLIST` | Comma-separated symbols, e.g. `BTCUSDT,ETHUSDT` |
+| `AITOS_TUNING_SCANNER_MIN_LIQUIDITY_QUALITY` | Hard 0–10 execution-quality floor (default `5.0`) |
+| `AITOS_TUNING_SCANNER_MAX_DIRECTIONAL_CANCEL_PRESSURE` | Fresh, side-specific depth cancellation veto threshold (default `0.6`) |
 | `AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_LIMIT` | Maximum symbols receiving full analysis per scan cycle |
 | `AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY` | Concurrent full-analysis tasks |
 | `AITOS_TUNING_ANALYSIS_LIGHTWEIGHT_CONCURRENCY` | Concurrent short-candle screening tasks |
@@ -35,6 +37,10 @@ The paper entrypoint requires `AITOS_MODE=paper`; the live entrypoint requires `
 | `AITOS_TUNING_POSITIONS_MONITORING_INTERVAL_SECONDS` | Minimum regular full-EIE cadence per open position |
 | `AITOS_TUNING_POSITIONS_EMERGENCY_STOP_R_MULTIPLE` | Catastrophic stop distance in initial soft-stop R multiples (default `2.0`; valid range `>1` to `10`) |
 | `AITOS_TUNING_POSITIONS_INTENSIVE_ANALYSIS_BUDGET` | Legacy compatibility field; no longer a shared global EIE gate |
+| `AITOS_TUNING_POSITIONS_DEAD_CANDLE_EXIT_BARS` | Unique completed 15m candles before a verified flatline scratch exit (default `16`) |
+| `AITOS_TUNING_POSITIONS_DEAD_CANDLE_MAX_PROGRESS_R` | Maximum recorded MFE allowed for the dead-candle exit (default `0.10R`) |
+| `AITOS_TUNING_POSITIONS_DEAD_CANDLE_ENTRY_BAND_PCT` | Maximum entry-relative excursion for dead-flat classification (default `0.002`, or `0.2%`) |
+| `AITOS_TUNING_POSITIONS_STALE_POSITION_MAX_HOURS` | Paper-runtime flatline fallback age (default `6h`; not a blanket age exit) |
 | `AITOS_TUNING_RUNTIME_CONFIG_RELOAD_ENABLED` | Opt in to safe reload attempts between scan cycles |
 
 Allowlist mode requires a non-empty allowlist. Boolean overrides accept

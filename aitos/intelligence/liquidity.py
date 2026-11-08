@@ -215,6 +215,8 @@ def depth_event_flow_analysis(
             "ask_replenishment_ratio": 0.0,
             "replenishment_ratio": 0.0,
             "inferred_cancel_pressure": 0.0,
+            "bid_inferred_cancel_pressure": 0.0,
+            "ask_inferred_cancel_pressure": 0.0,
             "addition_qty": 0.0,
             "event_count": 0.0,
         }
@@ -339,6 +341,27 @@ def depth_event_flow_analysis(
             "inferred_cancel_pressure": round(
                 cancellation_proxy
                 / max(cancellation_proxy + totals["addition_qty"], 1e-12),
+                4,
+            ),
+            # A side-specific reduction is suspicious only to the extent that
+            # matched executions do not explain it. This keeps a global cancel
+            # ratio from incorrectly vetoing the opposite trade direction.
+            "bid_inferred_cancel_pressure": round(
+                totals["bid_cancellation_proxy_qty"]
+                / max(
+                    totals["bid_cancellation_proxy_qty"]
+                    + totals["matched_bid_execution_qty"],
+                    1e-12,
+                ),
+                4,
+            ),
+            "ask_inferred_cancel_pressure": round(
+                totals["ask_cancellation_proxy_qty"]
+                / max(
+                    totals["ask_cancellation_proxy_qty"]
+                    + totals["matched_ask_execution_qty"],
+                    1e-12,
+                ),
                 4,
             ),
             "execution_attributed_ratio": round(

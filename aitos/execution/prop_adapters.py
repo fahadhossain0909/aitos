@@ -11,7 +11,8 @@ from typing import Any
 import aiohttp
 
 from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
-from aitos.execution.order_executor import OrderRequest, OrderResult
+from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
+from aitos.execution.intent_store import ExecutionUncertainError
 
 
 class AlfaxOrderExecutor(BinanceFuturesOrderExecutor):
@@ -24,11 +25,14 @@ class AlfaxOrderExecutor(BinanceFuturesOrderExecutor):
         base_url: str = "https://api.alfax.trade",
         **kwargs: Any,
     ) -> None:
+        # Provider-compatible legacy transport is not assumed to expose
+        # Binance's separate conditional/algo API. Callers may override explicitly.
+        kwargs.setdefault("conditional_orders_api", "legacy")
         super().__init__(api_key, api_secret, **kwargs)
         self._base_url = base_url.rstrip("/")
 
 
-class TradeLockerOrderExecutor:
+class TradeLockerOrderExecutor(OrderExecutor):
     """Minimal TradeLocker REST executor.
 
     TradeLocker requires JWT authentication plus account number and route
@@ -78,7 +82,15 @@ class TradeLockerOrderExecutor:
         if self._session is not None and not self._session.closed:
             await self._session.close()
 
+    @property
+    def requires_exchange_execution(self) -> bool:
+        return True
+
     async def submit_order(self, request: OrderRequest) -> OrderResult:
+        if request.reduce_only:
+            raise NotImplementedError(
+                "TradeLocker position-bound reduction is not implemented"
+            )
         if self._access_token is None:
             raise RuntimeError(
                 "TradeLockerOrderExecutor.connect() must be called first"
@@ -101,14 +113,12 @@ class TradeLockerOrderExecutor:
         response = await self._request(
             "POST", f"/trade/accounts/{self._account_id}/orders", json=payload
         )
-        order_id = str(response.get("orderId", response.get("id", "")))
-        return OrderResult(
-            order_id=order_id,
-            symbol=request.symbol,
-            side=request.side,
-            filled_quantity=request.quantity if response else 0.0,
-            fill_price=request.reference_price,
-            success=True,
+        # An order ID/ACK is not a trade fill. Until TradeLocker deal/status
+        # reconciliation is implemented, never manufacture quantity or price.
+        raise ExecutionUncertainError(
+            request.symbol,
+            request.client_order_id or str(response.get("orderId", "unknown")),
+            "TradeLocker fill reconciliation is not implemented",
         )
 
     async def _request(

@@ -58,6 +58,7 @@ def install(eventbus_cls: type[Any]) -> None:
     eventbus_cls._safe_market_data_telemetry_installed = True
 
     original_init = eventbus_cls.__init__
+    original_initialize = eventbus_cls.initialize
     original_publish = eventbus_cls.publish
     original_subscribe = eventbus_cls.subscribe
     original_health = eventbus_cls.health_check
@@ -77,10 +78,17 @@ def install(eventbus_cls: type[Any]) -> None:
         self._safe_market_loop_lag_ms = 0.0
         self._safe_market_loop_lag_max_ms = 0.0
         self._safe_market_loop_samples = 0
-        try:
-            self._safe_market_watchdog = asyncio.create_task(_watchdog(self))
-        except RuntimeError:
-            self._safe_market_watchdog = None
+        self._safe_market_watchdog = None
+
+    @wraps(original_initialize)
+    async def initialize_wrapper(self: Any, *args: Any, **kwargs: Any):
+        result = await original_initialize(self, *args, **kwargs)
+        task = self._safe_market_watchdog
+        if task is None or task.done():
+            self._safe_market_watchdog = asyncio.create_task(
+                _watchdog(self), name="aitos-market-data-telemetry-watchdog"
+            )
+        return result
 
     @wraps(original_publish)
     async def publish_wrapper(self: Any, event: Any, *args: Any, **kwargs: Any) -> Any:
@@ -169,9 +177,11 @@ def install(eventbus_cls: type[Any]) -> None:
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        self._safe_market_watchdog = None
         await original_shutdown(self, *args, **kwargs)
 
     eventbus_cls.__init__ = init_wrapper
+    eventbus_cls.initialize = initialize_wrapper
     eventbus_cls.publish = publish_wrapper
     eventbus_cls.subscribe = subscribe_wrapper
     eventbus_cls.health_check = health_wrapper

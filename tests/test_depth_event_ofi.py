@@ -182,6 +182,38 @@ def test_timestamped_ofi_aggregates_only_fresh_events():
     assert result["stale_event_count"] == 1.0
 
 
+def test_bid_and_ask_cancel_pressure_are_attributed_independently():
+    now_ms = 2_000_000
+    events = [
+        {
+            "event_time_ms": now_ms - age_ms,
+            "ofi_raw": 0.0,
+            "ofi_scale": 100.0,
+            "bid_cancellation_proxy_qty": 3.0,
+            "matched_bid_execution_qty": 1.0,
+            "ask_cancellation_proxy_qty": 1.0,
+            "matched_ask_execution_qty": 3.0,
+        }
+        for age_ms in (100, 200, 300)
+    ]
+    result = depth_event_flow_analysis(events, now_ms=now_ms)
+    assert result["ofi_available"] is True
+    assert result["bid_inferred_cancel_pressure"] == 0.75
+    assert result["ask_inferred_cancel_pressure"] == 0.25
+
+
+def test_no_side_cancel_pressure_is_zero_when_no_reductions_exist():
+    result = depth_event_flow_analysis(
+        [
+            {"event_time_ms": 1_999_900, "ofi_raw": 0.0, "ofi_scale": 100.0}
+            for _ in range(3)
+        ],
+        now_ms=2_000_000,
+    )
+    assert result["bid_inferred_cancel_pressure"] == 0.0
+    assert result["ask_inferred_cancel_pressure"] == 0.0
+
+
 def test_legacy_depth_events_keep_diagnostic_score_but_are_not_live_available():
     result = depth_event_flow_analysis([{"ofi_raw": 2.0, "ofi_scale": 100.0}])
 

@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from math import isfinite
 from typing import Any
 
 from aitos.config.paths import get_model_data_dir
@@ -183,6 +184,70 @@ def higher_timeframe_alignment(
     if not aligned:
         diagnostics["reason"] = "ltf_signal_opposes_htf_trend"
     return aligned, diagnostics
+
+
+def entry_liquidity_depth_rejection(
+    *,
+    direction: TradeSide,
+    liquidity_quality: float,
+    depth_analysis: dict[str, Any],
+    min_liquidity_quality: float = 5.0,
+    max_directional_cancel_pressure: float = 0.6,
+) -> tuple[str, dict[str, Any]] | None:
+    """Return a hard entry veto for weak execution quality or fresh side pressure.
+
+    Missing/stale depth evidence is not interpreted as spoofing. The liquidity
+    floor is independent and always enforced; cancellation pressure is only
+    applied when the depth-event analyzer marks the sample fresh and reliable.
+    """
+    try:
+        quality = float(liquidity_quality)
+    except (TypeError, ValueError):
+        quality = float("nan")
+    if not isfinite(quality) or quality < min_liquidity_quality:
+        return (
+            "liquidity_quality_below_floor",
+            {
+                "liquidity_quality": quality if isfinite(quality) else None,
+                "min_liquidity_quality": min_liquidity_quality,
+            },
+        )
+
+    if not bool(depth_analysis.get("ofi_available")):
+        return None
+
+    pressure_key = (
+        "bid_inferred_cancel_pressure"
+        if direction == TradeSide.LONG
+        else "ask_inferred_cancel_pressure"
+    )
+    try:
+        pressure = float(depth_analysis.get(pressure_key))
+    except (TypeError, ValueError):
+        pressure = float("nan")
+    if not isfinite(pressure):
+        return (
+            "directional_cancel_pressure_unavailable",
+            {
+                "direction": direction.value,
+                "required_depth_metric": pressure_key,
+                "ofi_confidence": depth_analysis.get("ofi_confidence", 0.0),
+                "depth_freshness_ms": depth_analysis.get("freshness_ms", -1.0),
+            },
+        )
+    if pressure > max_directional_cancel_pressure:
+        return (
+            "directional_cancel_pressure_too_high",
+            {
+                "direction": direction.value,
+                "cancel_pressure_side": "bid" if direction == TradeSide.LONG else "ask",
+                "directional_cancel_pressure": pressure,
+                "max_directional_cancel_pressure": max_directional_cancel_pressure,
+                "ofi_confidence": depth_analysis.get("ofi_confidence", 0.0),
+                "depth_freshness_ms": depth_analysis.get("freshness_ms", -1.0),
+            },
+        )
+    return None
 
 
 def _utc_now_iso() -> str:
@@ -1051,6 +1116,12 @@ class OpportunityScanner(AITOSModule):
                     "depth_inferred_cancel_pressure": depth_analysis[
                         "inferred_cancel_pressure"
                     ],
+                    "depth_bid_inferred_cancel_pressure": depth_analysis[
+                        "bid_inferred_cancel_pressure"
+                    ],
+                    "depth_ask_inferred_cancel_pressure": depth_analysis[
+                        "ask_inferred_cancel_pressure"
+                    ],
                     "entry_extension_atr": round(extension_atr, 3),
                     "entry_timing_score": entry_timing_score,
                     "direction": direction.value if direction else "none",
@@ -1072,6 +1143,62 @@ class OpportunityScanner(AITOSModule):
                 },
             )
             return None
+        liquidity_gate = entry_liquidity_depth_rejection(
+            direction=direction,
+            liquidity_quality=liquidity_quality,
+            depth_analysis=depth_analysis,
+            min_liquidity_quality=self._tuning.scanner.min_liquidity_quality,
+            max_directional_cancel_pressure=(
+                self._tuning.scanner.max_directional_cancel_pressure
+            ),
+        )
+        if liquidity_gate is not None:
+            gate_reason, gate_details = liquidity_gate
+            details = {
+                "symbol": symbol,
+                "market_source": market_source,
+                "direction": direction.value,
+                **gate_details,
+            }
+            await self._record_funnel(
+                symbol=symbol,
+                side=direction.value,
+                stage="liquidity_depth_gate",
+                accepted=False,
+                reason=gate_reason,
+                details=details,
+            )
+            await self._record_funnel(
+                symbol=symbol,
+                side=direction.value,
+                stage="scanner_terminal",
+                accepted=False,
+                reason=gate_reason,
+                details=details,
+            )
+            logger.info(
+                "entry rejected by hard liquidity/depth guard",
+                extra={"aitos_extra": details},
+            )
+            return None
+        await self._record_funnel(
+            symbol=symbol,
+            side=direction.value,
+            stage="liquidity_depth_gate",
+            accepted=True,
+            reason="liquidity_and_directional_depth_accepted",
+            details={
+                "liquidity_quality": liquidity_quality,
+                "min_liquidity_quality": self._tuning.scanner.min_liquidity_quality,
+                "ofi_available": depth_analysis["ofi_available"],
+                "bid_inferred_cancel_pressure": depth_analysis[
+                    "bid_inferred_cancel_pressure"
+                ],
+                "ask_inferred_cancel_pressure": depth_analysis[
+                    "ask_inferred_cancel_pressure"
+                ],
+            },
+        )
         adx_score = min(10.0, indicators.adx(klines) / 10.0)
         structure_boost = min(2.0, structure_strength * 0.2)
         if (
@@ -1213,6 +1340,12 @@ class OpportunityScanner(AITOSModule):
             "depth_freshness_ms": depth_analysis["freshness_ms"],
             "depth_inferred_cancel_pressure": depth_analysis[
                 "inferred_cancel_pressure"
+            ],
+            "depth_bid_inferred_cancel_pressure": depth_analysis[
+                "bid_inferred_cancel_pressure"
+            ],
+            "depth_ask_inferred_cancel_pressure": depth_analysis[
+                "ask_inferred_cancel_pressure"
             ],
             "depth_matched_execution_qty": depth_analysis["matched_execution_qty"],
             "depth_attribution_pending_qty": depth_analysis["attribution_pending_qty"],

@@ -15,6 +15,17 @@ AITOS is an event-driven trading system for Binance USDT-M Futures. The current 
 
 > **Canonical documentation:** this README is the single consolidated project guide. It is intentionally focused on behavior and configuration that match the current repository; obsolete setup templates, duplicate deployment instructions, historical test counts, and superseded CI/CD examples are excluded.
 
+## Read-only desktop console (local-first)
+
+The [desktop workspace](desktop/README.md) provides labelled sample data and
+read-only runtime/evidence views. Built distributions now require the
+[operator gateway](docs/OPERATOR_GATEWAY.md) for session authentication; the
+backend bearer stays server-side. Vite is development-only and refuses a runtime
+bearer in its environment. The shared public preview must stay unattached.
+This is not an exchange-key vault, trading control plane, signed native installer
+or permission to activate live trading. Nonlocal deployment still needs its
+explicit security and operational gates.
+
 ## 🧭 Interactive Index
 
 Click any topic below to jump directly to that section.
@@ -611,3 +622,32 @@ aitos/
 ## Safety boundaries
 
 AITOS is a trading system, not a guarantee of profit. Paper trading and testnet should be used before live execution. Live execution requires deliberate configuration, valid credentials, risk limits and human approval where configured.
+
+
+### Execution integrity and recovery status
+
+The canonical live runner now uses confirmed terminal fills, durable market-order
+intent quarantine, actual reduce-only exits, write-through lifecycle application,
+account snapshot checks and single-runtime capital ownership. Current Binance
+conditional protection uses the separate algo-order API; old persisted order IDs
+retain compatibility. These changes are not a production-readiness or live-activation
+claim. Protective pre-submit recovery, service-backed fault evidence, supported
+broker integrations, paper soak and latency gates remain open. See
+[Execution recovery operations](docs/EXECUTION_RECOVERY.md) and the
+[dated implementation evidence](engineering/EXECUTION_RECOVERY_IMPLEMENTATION_2026-11-07.md).
+
+## Paper shadow and Windows console preparation
+
+Default-off paper runner mirroring and Windows x64 native vault/installer source
+are documented in [implementation evidence](engineering/WINDOWS_PAPER_INTEGRATION_2026-11-06.md)
+and [Windows setup](native/windows/README.md). This is not a production journal
+cutover or an available signed release. Actual service/Windows validation and
+[independent review](engineering/PAPER_NATIVE_REVIEW_BUNDLE.md) remain gates.
+
+## Offline recorded-account reconciliation
+
+Use `python -m aitos.exchange.binance_account_evidence expected-schema2.json recorded-bundle.json`
+for read-only exact comparison of independently prepared expected values against
+recorded Binance-shaped paper/testnet responses. No account requests/credentials
+or financial mutations. See [contract and verification](engineering/BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md)
+for schema, supported subset, pagination limitations and pending real-provider gates.

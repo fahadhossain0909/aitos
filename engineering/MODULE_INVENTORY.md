@@ -65,3 +65,95 @@ For each concrete module add:
 - Status and unresolved questions.
 
 Do not infer a module's health from its name, file existence, class implementation, or a successful process start.
+
+## Added validation assets — 2026-11-06
+
+- `tests/test_clickhouse_revision_hazards.py`: eight integration-marked temporary
+  embedded-engine counterexamples against the existing persistence schema/readers;
+  passing means hazards reproduced, not safety certification. Never targets a
+  deployed database; forced merges are confined to pytest temporary directories.
+- `.github/workflows/persistence-quality.yml`: relevant PR/manual isolated SQL
+  verification, pinned optional test engine, read-only repository permission and
+  no migration/deployment/credentials. Remote execution NOT TESTED.
+- No production module added or changed by this increment. Proposed revision
+  authority remains unimplemented pending the approval gate in
+  `PERSISTENCE_REVISION_GATE_2026-11-06.md`.
+
+## Approved unwired prototype — 2026-11-06
+
+- `aitos/trading/revision_journal.py`: stdlib-only, explicit standalone temporary-
+  file paper/backtest revision authority; scoped CAS/fencing/events/head/outbox.
+  No app imports, default paths, live scope, config wiring or active projector.
+- `tests/test_revision_journal.py`: 37 isolated unit/process tests, including two-
+  process CAS/ownership races and abrupt process-exit transaction recovery.
+- `tests/test_revision_journal_projection.py`: two optional embedded append-only
+  evidence projection checks; no remote database/venue calls.
+- `.github/workflows/persistence-quality.yml`: extended relevant PR/manual checks;
+  no migration/deployment/credentials; remote execution NOT TESTED.
+- Production binding, legacy import, complete financial validation, amendments,
+  order-side fencing and capacity evidence remain separate gates.
+
+## Typed paper recovery batch — 2026-11-06
+
+- `aitos/models/trade.py`: existing snapshot serializer now includes updated_at;
+  no trading/risk semantic change. Existing legacy decoder already reads it.
+- `aitos/trading/revision_journal.py`: complete bounded transactional heads and
+  point-in-time writer observation; not exchange-order authorization.
+- `aitos/trading/paper_revision.py`: unwired paper typed codec, recovery snapshot,
+  monitoring-prerequisite rehearsal and read-only bounded legacy assessment.
+  No database importer, automatic worker, runner registration or order API.
+- `tests/test_trade_revision_binding.py`: 36 new serializer/typed financial/
+  recovery/monitoring/audit cases, including the actual simulated lifecycle.
+- `engineering/tools/benchmark_paper_revision.py`: synthetic temporary-file local
+  append/recovery benchmark, never an existing financial journal.
+- Persistence workflow extended to these paths/tests; remote CI NOT TESTED.
+
+## Immutable paper amendments — 2026-11-06
+
+- `aitos/trading/financial_amendment.py`: stdlib-only strict command/metadata and
+  pure allowed-delta fee/funding calculation; no DB, network, runner or venue calls.
+- `aitos/trading/revision_journal.py`: explicit fenced `amend_closed`, immutable
+  parent-linked payload extension, receipt dedup and complete replay validation;
+  no automatic schema migration or active task loop.
+- `aitos/trading/paper_revision.py`: explicit amendment adapter and known typed
+  metadata support; ordinary post-close snapshot writes remain forbidden.
+- `tests/test_financial_amendments.py`: 32 synthetic temporary-file cases including
+  process races, abrupt exits, receipt conflict/corruption and lifecycle parity.
+- Embedded projection test verifies original close, amended close and duplicate
+  evidence retained after merge. Workflow extended, remote execution NOT TESTED.
+
+## Addendum — paper projector / persistence console (2026-11-06)
+
+| Component | Ownership / activation | Verification |
+|---|---|---|
+| trading/revision_projector.py | Explicit paper batch, injected async sink; no auto-start/DDL | 29 new unit/process cases; 3 new embedded cases |
+| trading/revision_journal.py batch ACK/counts | Atomic scoped receipts and validated conservation | Included full backend 1917 pass |
+| projection_evidence.py | Pure public whitelist/freshness contract | Backend/API/producer contract tests |
+| console_api.py optional observer | Existing protected snapshot; unavailable by default | Real API/gateway/built Chromium |
+| desktop PersistencePanel / projectionClient | Tenth read-only page; strict parsing and explicit examples | 20 new parser cases, ten-page/mobile smoke |
+
+None installs a production runner or execution service. Full evidence and open
+gates: `PROJECTOR_AND_PERSISTENCE_CONSOLE_2026-11-06.md`.
+
+## Paper/native additions (2026-11-06)
+
+- `trading/paper_shadow_runtime.py`: default-off runner mirror/managed worker,
+  failure latch and thread-draining shutdown; no recovery authority cutover.
+- `trading/account_reconciliation.py`: offline exact-decimal snapshot comparator/CLI.
+- `native/windows_vault.py`: WinCred implementation; Linux fake tests verified,
+  actual Windows API test skipped.
+- `native/windows/`: native session manager, Inno installer/build/signing scripts.
+- `engineering/tools/paper_service_soak.py`: dedicated-service harness, logic
+  exercised through embedded SQL, actual real-service run NOT TESTED.
+- Three new manual/validation workflows; protected signing requires external
+  certificate/runner/review configuration. No signed binary produced.
+
+See `WINDOWS_PAPER_INTEGRATION_2026-11-06.md` and pending independent review bundle.
+
+## Finishing tranche — 2026-11-06
+
+Added shared native console host, cross-platform TCP/thread tests, actual-runner-finalbody failure injection and shared Windows installed validation script. Real WinCred/signing/service verification remains pending. See `PAPER_NATIVE_HARDENING_2026-11-06.md`.
+
+## Recorded account boundary — 2026-11-06
+
+New offline Binance evidence adapter/CLI, shared strict file loader, additive schema-2 comparison and 41 regressions. Existing income reconciler and exchange fetcher unchanged; real provider validation pending. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.

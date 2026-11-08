@@ -227,6 +227,12 @@ def _persist_summary(args, result) -> None:
                         if _initial_risk_state(trade.fields)
                         else "unscaled_quote_pnl"
                     ),
+                    "side": trade.fields.get("side") or trade.fields.get("direction"),
+                    "regime": trade.fields.get("regime")
+                    or trade.fields.get("market_regime"),
+                    "mae_r": trade.fields.get("mae_r"),
+                    "mfe_r": trade.fields.get("mfe_r"),
+                    "total_cost_r": trade.fields.get("total_cost_r"),
                 },
             )
         )

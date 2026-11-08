@@ -95,13 +95,12 @@ class SystemComponents:
             or current.hardware != updated.hardware
             or current.storage != updated.storage
             or current.telemetry != updated.telemetry
-            or current.positions.max_open_positions
-            != updated.positions.max_open_positions
+            or current.positions != updated.positions
         )
         if restart_required:
             raise ValueError(
                 "Runtime reload changed mode, infrastructure, hardware, storage, "
-                "telemetry, risk ceilings or the hard position limit; restart AITOS "
+                "telemetry, risk ceilings or position-management tuning; restart AITOS "
                 "to apply this profile safely"
             )
         self.scanner.apply_tuning_settings(updated)
@@ -250,7 +249,23 @@ async def build_system(
     attention_feedback = AttentionFeedbackLoop(
         event_bus=event_bus, explainer=attention_explainer
     )
-    position_manager = PositionManager() if enable_exit_intelligence else None
+    position_manager = (
+        PositionManager(
+            config={
+                "adaptive_exit_policy": {
+                    "stagnation_bars": tuning.positions.dead_candle_exit_bars,
+                    "stagnation_min_progress_r": (
+                        tuning.positions.dead_candle_max_progress_r
+                    ),
+                    "stagnation_entry_band_pct": (
+                        tuning.positions.dead_candle_entry_band_pct
+                    ),
+                }
+            }
+        )
+        if enable_exit_intelligence
+        else None
+    )
     if position_manager is not None:
         logger.info("Exit Intelligence (PositionManager) enabled for TradeLifecycle")
     trade_lifecycle = TradeLifecycle(
@@ -426,28 +441,18 @@ async def restart_unhealthy_modules(modules: list[AITOSModule]) -> list[str]:
 async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) -> None:
     for module in components.all_modules():
         await module.initialize({})
-    components._price_feed_subscriptions = [
-        await components.event_bus.subscribe(
-            "market.kline.*",
-            components.trade_lifecycle.handle_event,
-            group="trade-lifecycle-prices",
-        ),
-        await components.event_bus.subscribe(
-            "market.trade.*",
-            components.trade_lifecycle.handle_event,
-            group="trade-lifecycle-prices",
-        ),
-        await components.event_bus.subscribe(
-            "trade.cost_adjustment",
-            components.trade_lifecycle.handle_event,
-            group="trade-lifecycle-costs",
-        ),
-        await components.event_bus.subscribe(
-            "trade.cost_adjustment",
-            components.trade_lifecycle.handle_event,
-            group="trade-lifecycle-costs",
-        ),
-    ]
+    # Register incrementally: if a later subscription fails, the runner's
+    # managed shutdown must still own every successfully acquired handle.
+    for topic, group in (
+        ("market.kline.*", "trade-lifecycle-prices"),
+        ("market.trade.*", "trade-lifecycle-prices"),
+        ("trade.cost_adjustment", "trade-lifecycle-costs"),
+    ):
+        components._price_feed_subscriptions.append(
+            await components.event_bus.subscribe(
+                topic, components.trade_lifecycle.handle_event, group=group
+            )
+        )
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         statuses = [await _health_status(module) for module in components.all_modules()]
@@ -785,6 +790,14 @@ async def run_scan_and_trade_cycle(
                         "approved_by": opportunity.approved_by,
                         "kernel_direction": decision.direction,
                         "kernel_confidence": decision.confidence,
+                        "candidate_score": candidate.composite_score,
+                        "candidate_component_scores": dict(candidate.component_scores),
+                        "candidate_component_availability": dict(
+                            candidate.component_availability or {}
+                        ),
+                        "candidate_weights": dict(components.scanner._weights),
+                        "candidate_threshold": components.scanner._min_score_threshold,
+                        "candidate_rationale": list(candidate.rationale or []),
                     },
                     source_module="aitos.app",
                 )

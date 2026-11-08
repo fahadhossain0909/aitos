@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "scope": "local_projection_observation",
+  "available": true,
+  "status": "verified",
+  "reason": "none",
+  "observed_at": "2026-11-06T12:00:00+00:00",
+  "counts": {
+    "total": 12,
+    "pending": 3,
+    "delivered": 9
+  },
+  "last_batch": {
+    "checked": 4,
+    "inserted": 3,
+    "acknowledged": 4
+  },
+  "source": "local_journal",
+  "controls": "read_only",
+  "live_authorized": false,
+  "production_certified": false
+}

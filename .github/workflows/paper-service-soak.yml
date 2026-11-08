@@ -1,0 +1,58 @@
+name: Isolated real-service paper recovery rehearsal
+on:
+  push:
+    branches: [arena/ed127d35-aitos]
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Soak seconds (1–3600); does not certify HA or 24-hour behavior
+        default: '60'
+        required: true
+permissions:
+  contents: read
+jobs:
+  restart-recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    services:
+      clickhouse:
+        image: clickhouse/clickhouse-server:25.8
+        env:
+          CLICKHOUSE_SKIP_USER_SETUP: '1'
+        ports:
+          - '127.0.0.1:18123:8123'
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      AITOS_SERVICE_TEST_ACK: isolated-test-services-only
+      AITOS_SERVICE_TEST_PORT: '18123'
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install clickhouse-connect pydantic pydantic-settings python-dotenv
+      - run: python -m engineering.tools.paper_service_soak seed --root "$RUNNER_TEMP/aitos-service-test"
+      - name: Stop and restart this job's dedicated service only
+        env:
+          CONTAINER: ${{ job.services.clickhouse.id }}
+        run: |
+          set -euo pipefail
+          docker stop --time 5 "$CONTAINER"
+          python -m engineering.tools.paper_service_soak probe-offline --root "$RUNNER_TEMP/aitos-service-test"
+          docker start "$CONTAINER"
+          for i in $(seq 1 60); do
+            if docker exec "$CONTAINER" clickhouse-client --query 'SELECT 1'; then exit 0; fi
+            sleep 1
+          done
+          exit 1
+      - env:
+          SOAK_SECONDS: ${{ inputs.seconds || '60' }}
+        run: python -m engineering.tools.paper_service_soak recover-soak --root "$RUNNER_TEMP/aitos-service-test" --seconds "$SOAK_SECONDS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: synthetic-paper-restart-evidence-NOT-production-certification
+          path: ${{ runner.temp }}/aitos-service-test/

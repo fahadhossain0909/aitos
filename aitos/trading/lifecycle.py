@@ -38,6 +38,7 @@ partial-reduce or tighten protection.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import math
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
@@ -55,9 +56,14 @@ from aitos.core.contracts import (
 )
 from aitos.core.exceptions import ModuleNotInitializedError, TradeNotFoundError
 from aitos.eventbus.redis_bus import EventBus
+from aitos.execution.intent_store import (
+    ExecutionRecoveryRequired,
+    ExecutionUncertainError,
+)
 from aitos.execution.order_executor import (
     OrderExecutor,
     OrderRequest,
+    OrderResult,
     SimulatedOrderExecutor,
 )
 from aitos.kernel.ai_kernel import Action, AIKernel
@@ -143,6 +149,11 @@ class TradeLifecycle(AITOSModule):
         self._tp_boundary_breached: set[str] = set()
         self._initialized = False
         self._open_trades: dict[str, Trade] = {}
+        self._execution_locks: dict[str, asyncio.Lock] = {}
+        self._price_update_locks: dict[str, asyncio.Lock] = {}
+        self._execution_faults: dict[str, str] = {}
+        self._confirmed_reductions: dict[str, tuple[str, OrderResult]] = {}
+        self._accepting_live_submissions = True
         self._closed_trades: list[Trade] = []
         self._position_switch_coordinator: Any | None = None
         self._last_event_time: str | None = None
@@ -289,22 +300,53 @@ class TradeLifecycle(AITOSModule):
         )
 
     async def health_check(self) -> HealthStatus:
+        unresolved = False
+        storage_error = False
+        try:
+            unresolved = self._order_executor.has_unresolved_orders()
+        except Exception:
+            storage_error = True
+        account_mismatch = bool(getattr(self, "_account_reconciliation_error", False))
+        execution_fault = (
+            bool(self._execution_faults)
+            or storage_error
+            or account_mismatch
+            or bool(getattr(self, "_execution_recovery_required", False))
+        )
         return HealthStatus(
             module_id=self.module_id,
             status=(
-                ModuleStatus.HEALTHY if self._initialized else ModuleStatus.UNHEALTHY
+                ModuleStatus.UNHEALTHY
+                if not self._initialized or execution_fault
+                else ModuleStatus.DEGRADED if unresolved else ModuleStatus.HEALTHY
             ),
             latency_ms=0.0,
             last_event_time=self._last_event_time,
             details={
                 "open_trades": len(self._open_trades),
                 "closed_trades": len(self._closed_trades),
+                "unresolved_execution": unresolved,
+                "execution_faults": len(self._execution_faults),
+                "execution_storage_error": storage_error,
+                "account_reconciliation_error": account_mismatch,
+                "live_submissions": len(getattr(self, "_live_submission_tasks", set())),
                 "exit_intelligence": self._position_manager is not None,
                 "market_context": self._market_context_provider is not None,
             },
         )
 
+    async def drain_live_submissions(self, grace_period_seconds: float = 30.0) -> None:
+        self._accepting_live_submissions = False
+        tasks = set(getattr(self, "_live_submission_tasks", set()))
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=grace_period_seconds)
+            if pending:
+                raise ExecutionUncertainError(
+                    "runtime", "shutdown", "live submissions did not drain"
+                )
+
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        await self.drain_live_submissions(grace_period_seconds)
         funnel_store = getattr(self, "_aitos_directional_funnel", None)
         if funnel_store is not None:
             funnel_store.close()
@@ -498,6 +540,14 @@ class TradeLifecycle(AITOSModule):
         )
 
     async def update_price(
+        self, trade_id: str, current_price: float, **kwargs: Any
+    ) -> Trade | None:
+        if not self._order_executor.requires_exchange_execution:
+            return await self._update_price_impl(trade_id, current_price, **kwargs)
+        async with self._price_update_locks.setdefault(trade_id, asyncio.Lock()):
+            return await self._update_price_impl(trade_id, current_price, **kwargs)
+
+    async def _update_price_impl(
         self,
         trade_id: str,
         current_price: float,
@@ -535,6 +585,7 @@ class TradeLifecycle(AITOSModule):
         # MAE/MFE includes the terminal price that triggers SL/TP as well.
         trade.record_excursion(float(current_price))
         trade.last_marked_price = current_price
+        trade.last_marked_at = datetime.now(timezone.utc).isoformat()
         is_long = trade.side == TradeSide.LONG
 
         # The scanner's initial SL is a soft risk boundary while EIE is active.
@@ -706,11 +757,19 @@ class TradeLifecycle(AITOSModule):
             if tp_hit:
                 if len(trade.take_profit_levels) > 1:
                     await self._partial_close(
-                        trade, current_price, DEFAULT_PARTIAL_CLOSE_FRACTION
+                        trade,
+                        current_price,
+                        DEFAULT_PARTIAL_CLOSE_FRACTION,
+                        consume_tp=self._order_executor.requires_exchange_execution,
                     )
-                    trade.take_profit_levels.pop(0)
+                    if not self._order_executor.requires_exchange_execution:
+                        trade.take_profit_levels.pop(0)
                     self._tp_boundary_breached.discard(trade.trade_id)
-                    if self._use_exchange_side_stops and trade.tp_order_ids:
+                    if (
+                        self._use_exchange_side_stops
+                        and trade.tp_order_ids
+                        and not self._order_executor.requires_exchange_execution
+                    ):
                         consumed_order_id = trade.tp_order_ids.pop(0)
                         await self._order_executor.cancel_resting_order(
                             trade.symbol, consumed_order_id
@@ -1033,7 +1092,45 @@ class TradeLifecycle(AITOSModule):
             pass
         return result
 
+    async def finalize_confirmed_flat_close(
+        self, trade_id: str, receipt: Any, client_id: str
+    ) -> Trade:
+        """Apply an already journaled switch close, never submit it twice."""
+        async with self._execution_locks.setdefault(trade_id, asyncio.Lock()):
+            self._assert_execution_unlatched(trade_id)
+            self._require_execution_writer()
+            trade = self._open_trades.get(trade_id)
+            if trade is None:
+                raise TradeNotFoundError(trade_id)
+            if not (receipt.confirmed and receipt.position_flat and client_id):
+                raise ValueError("confirmed venue-flat close receipt required")
+            self._confirmed_reductions[trade_id] = (
+                client_id,
+                OrderResult(
+                    receipt.order_id,
+                    trade.symbol,
+                    trade.side,
+                    receipt.filled_quantity,
+                    receipt.fill_price,
+                ),
+            )
+            try:
+                return await self._close_trade_unlocked(
+                    trade_id, receipt.fill_price, "capital_rebalance"
+                )
+            finally:
+                self._confirmed_reductions.pop(trade_id, None)
+
     async def _close_trade_impl(
+        self, trade_id: str, exit_price: float, reason: str
+    ) -> Trade:
+        if not self._order_executor.requires_exchange_execution:
+            return await self._close_trade_unlocked(trade_id, exit_price, reason)
+        async with self._execution_locks.setdefault(trade_id, asyncio.Lock()):
+            self._assert_execution_unlatched(trade_id)
+            return await self._close_trade_unlocked(trade_id, exit_price, reason)
+
+    async def _close_trade_unlocked(
         self, trade_id: str, exit_price: float, reason: str
     ) -> Trade:
         self._require_initialized()
@@ -1044,6 +1141,21 @@ class TradeLifecycle(AITOSModule):
         trade = self._open_trades.get(trade_id)
         if trade is None:
             raise TradeNotFoundError(f"No open trade with id '{trade_id}'")
+        if self._order_executor.requires_exchange_execution:
+            execution = await self._execute_live_reduction(
+                trade, trade.quantity, exit_price
+            )
+            exit_price = execution.fill_price
+            if execution.filled_quantity < trade.quantity * (1 - 1e-9):
+                trade.state = TradeLifecycleState.POSITION_OPENED
+                await self._partial_close_unlocked(
+                    trade,
+                    exit_price,
+                    execution.filled_quantity / trade.quantity,
+                    execution_result=execution,
+                )
+                trade.state = TradeLifecycleState.POSITION_OPENED
+                return trade
         # Cancel exchange-side resting orders before committing the local
         # close transition. If cancellation fails, keep the trade registered
         # as open so monitoring/reconciliation can retry instead of silently
@@ -1102,6 +1214,8 @@ class TradeLifecycle(AITOSModule):
                 except (KeyError, TypeError, ValueError, ArithmeticError):
                     continue
         self._closed_trades.append(trade)
+        if self._order_executor.requires_exchange_execution:
+            await self._commit_live_execution(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
         if gateway is not None:
             try:
@@ -1158,7 +1272,7 @@ class TradeLifecycle(AITOSModule):
             status = await self._order_executor.get_resting_order_status(
                 trade.symbol, trade.sl_order_id
             )
-            if status == "FILLED":
+            if status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
                 # Remember the exchange-filled order but retain its ID until
                 # close succeeds, so a failed cancellation of another order
                 # cannot lose the reconciliation signal.
@@ -1179,7 +1293,7 @@ class TradeLifecycle(AITOSModule):
             status = await self._order_executor.get_resting_order_status(
                 trade.symbol, trade.tp_order_ids[0]
             )
-            if status == "FILLED":
+            if status in {"FILLED", "PARTIALLY_FILLED_TERMINAL"}:
                 trigger_price = (
                     trade.take_profit_levels[0]
                     if trade.take_profit_levels
@@ -1187,12 +1301,15 @@ class TradeLifecycle(AITOSModule):
                 )
                 if len(trade.take_profit_levels) > 1:
                     # A filled partial TP is already consumed by the exchange.
+                    if self._order_executor.requires_exchange_execution:
+                        trade._aitos_filled_resting_order_ids = {trade.tp_order_ids[0]}
                     await self._partial_close(
                         trade, trigger_price, DEFAULT_PARTIAL_CLOSE_FRACTION
                     )
-                    trade.take_profit_levels.pop(0)
-                    if trade.tp_order_ids:
-                        trade.tp_order_ids.pop(0)
+                    if not self._order_executor.requires_exchange_execution:
+                        trade.take_profit_levels.pop(0)
+                        if trade.tp_order_ids:
+                            trade.tp_order_ids.pop(0)
                     return trade
                 filled_ids = set(
                     getattr(trade, "_aitos_filled_resting_order_ids", set())
@@ -1215,7 +1332,15 @@ class TradeLifecycle(AITOSModule):
         )
         if sl_result.success:
             trade.sl_order_id = sl_result.order_id
+            if self._order_executor.requires_exchange_execution:
+                trade.updated_at = utc_now_iso()
+                await self._execution_state_writer(trade)
+                self._order_executor.acknowledge_protection(sl_result, trade.trade_id)
         else:
+            if self._order_executor.requires_exchange_execution:
+                raise ExecutionUncertainError(
+                    trade.symbol, trade.trade_id, "protective stop rejected"
+                )
             logger.error(
                 "failed to place exchange-side stop loss",
                 extra={
@@ -1242,7 +1367,17 @@ class TradeLifecycle(AITOSModule):
             )
             if tp_result.success:
                 trade.tp_order_ids.append(tp_result.order_id)
+                if self._order_executor.requires_exchange_execution:
+                    trade.updated_at = utc_now_iso()
+                    await self._execution_state_writer(trade)
+                    self._order_executor.acknowledge_protection(
+                        tp_result, trade.trade_id
+                    )
             else:
+                if self._order_executor.requires_exchange_execution:
+                    raise ExecutionUncertainError(
+                        trade.symbol, trade.trade_id, "protective target rejected"
+                    )
                 logger.error(
                     "failed to place exchange-side take profit",
                     extra={
@@ -1252,6 +1387,9 @@ class TradeLifecycle(AITOSModule):
                         }
                     },
                 )
+        if self._order_executor.requires_exchange_execution:
+            trade.updated_at = utc_now_iso()
+            await self._execution_state_writer(trade)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_EXCHANGE_STOPS_PLACED,
@@ -1261,6 +1399,11 @@ class TradeLifecycle(AITOSModule):
         )
 
     async def _replace_exchange_side_stop_loss(self, trade: Trade) -> None:
+        if self._order_executor.requires_exchange_execution:
+            self._require_execution_writer()
+            await self._refresh_live_protection(trade)
+            await self._execution_position_verifier()
+            return
         if trade.sl_order_id:
             await self._order_executor.cancel_resting_order(
                 trade.symbol, trade.sl_order_id
@@ -1280,6 +1423,10 @@ class TradeLifecycle(AITOSModule):
         # until every TP cancellation succeeds. Remove IDs only after confirmed
         # cancellation so a later retry can resume from the remaining orders.
         filled_ids = set(getattr(trade, "_aitos_filled_resting_order_ids", set()))
+        pending_stops = trade.agent_consensus.get("_pending_stop_cancellations", [])
+        for order_id in list(pending_stops):
+            await self._order_executor.cancel_resting_order(trade.symbol, order_id)
+            pending_stops.remove(order_id)
         for order_id in list(trade.tp_order_ids):
             if order_id not in filled_ids:
                 await self._order_executor.cancel_resting_order(trade.symbol, order_id)
@@ -1328,6 +1475,30 @@ class TradeLifecycle(AITOSModule):
         from aitos.risk.position_sizing import calculate_position_size
         from aitos.risk.sector import sector_for_symbol
 
+        live_execution = self._order_executor.requires_exchange_execution
+        if live_execution:
+            self._require_execution_writer()
+            if getattr(self, "_execution_recovery_required", False) or any(
+                t.agent_consensus.get("_pending_stop_cancellations")
+                for t in self._open_trades.values()
+            ):
+                raise ExecutionRecoveryRequired(
+                    opportunity.symbol,
+                    opportunity.opportunity_id,
+                    "unresolved protection/execution blocks entry",
+                )
+            if getattr(self, "_account_reconciliation_error", False):
+                raise ExecutionRecoveryRequired(
+                    opportunity.symbol,
+                    opportunity.opportunity_id,
+                    "account exposure mismatch blocks entry",
+                )
+            if not self._use_exchange_side_stops:
+                raise RuntimeError("live entry requires exchange-side protection")
+            if any(t.symbol == opportunity.symbol for t in self._open_trades.values()):
+                return await self._reject(
+                    opportunity, "local position already open for symbol"
+                )
         risk_score = (
             self._risk_engine.last_assessment.total
             if self._risk_engine.last_assessment
@@ -1455,33 +1626,26 @@ class TradeLifecycle(AITOSModule):
                 side=opportunity.side,
                 quantity=quantity,
                 reference_price=opportunity.entry_price,
+                # Intent identity must distinguish later opportunities with the
+                # same economics, while remaining stable for one opportunity.
+                client_order_id="aitos-entry-"
+                + hashlib.sha256(opportunity.opportunity_id.encode()).hexdigest()[:24],
             )
         )
         if not order_result.success:
             return await self._reject(
                 opportunity, f"order submission failed: {order_result.error}"
             )
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_ORDER_SUBMITTED,
-                payload={
-                    "symbol": opportunity.symbol,
-                    "side": opportunity.side.value,
-                    "quantity": quantity,
-                },
-                source_module=self.module_id,
+        if (
+            not _valid_market_price(order_result.filled_quantity)
+            or not _valid_market_price(order_result.fill_price)
+            or order_result.filled_quantity > quantity * (1 + 1e-9)
+        ):
+            raise ExecutionUncertainError(
+                opportunity.symbol,
+                order_result.order_id,
+                "invalid entry execution evidence",
             )
-        )
-        await self._event_bus.publish(
-            Event(
-                topic=TOPIC_ORDER_FILLED,
-                payload={
-                    "order_id": order_result.order_id,
-                    "fill_price": order_result.fill_price,
-                },
-                source_module=self.module_id,
-            )
-        )
         trade = Trade(
             trade_id=new_trade_id(),
             symbol=opportunity.symbol,
@@ -1489,8 +1653,17 @@ class TradeLifecycle(AITOSModule):
             entry_price=order_result.fill_price,
             quantity=order_result.filled_quantity,
             leverage=sizing.leverage,
-            position_size_usd=sizing.position_size_usd,
-            risk_amount_usd=sizing.risk_amount_usd,
+            position_size_usd=(
+                order_result.filled_quantity * order_result.fill_price
+                if live_execution
+                else sizing.position_size_usd
+            ),
+            risk_amount_usd=(
+                abs(order_result.fill_price - sizing_stop_price)
+                * order_result.filled_quantity
+                if live_execution
+                else sizing.risk_amount_usd
+            ),
             strategy_id=opportunity.strategy_id,
             agent_consensus=opportunity.agent_consensus,
             explanation=opportunity.rationale,
@@ -1524,7 +1697,47 @@ class TradeLifecycle(AITOSModule):
                 else None
             ),
         )
+        if live_execution:
+            actual_stop = (
+                trade.emergency_sl_price
+                if self._position_manager is not None
+                else trade.sl_price
+            )
+            trade.risk_amount_usd = (
+                abs(trade.entry_price - actual_stop) * trade.quantity
+            )
         self._open_trades[trade.trade_id] = trade
+        if live_execution:
+            client_id = (
+                "aitos-entry-"
+                + hashlib.sha256(opportunity.opportunity_id.encode()).hexdigest()[:24]
+            )
+            self._execution_faults[trade.trade_id] = client_id
+            # Install durable ownership before optional telemetry can fail.
+            await self._execution_state_writer(trade)
+            await self._place_exchange_side_stops(trade)
+            await self._commit_live_execution(trade)
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_ORDER_SUBMITTED,
+                payload={
+                    "symbol": opportunity.symbol,
+                    "side": opportunity.side.value,
+                    "quantity": quantity,
+                },
+                source_module=self.module_id,
+            )
+        )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_ORDER_FILLED,
+                payload={
+                    "order_id": order_result.order_id,
+                    "fill_price": order_result.fill_price,
+                },
+                source_module=self.module_id,
+            )
+        )
         if self._position_manager is not None:
             register_entry_thesis = getattr(
                 self._position_manager, "register_entry_thesis", None
@@ -1570,7 +1783,7 @@ class TradeLifecycle(AITOSModule):
             )
         )
         self._last_event_time = trade.entry_time
-        if self._use_exchange_side_stops:
+        if self._use_exchange_side_stops and not live_execution:
             await self._place_exchange_side_stops(trade)
         return trade
 
@@ -1634,8 +1847,164 @@ class TradeLifecycle(AITOSModule):
                 trade.state = TradeLifecycleState.POSITION_OPENED
             raise
 
+    def _assert_execution_unlatched(self, trade_id: str) -> None:
+        if trade_id in self._execution_faults:
+            raise ExecutionRecoveryRequired(
+                "position",
+                self._execution_faults[trade_id],
+                "prior reduction/application requires reconciliation",
+            )
+
+    def _require_execution_writer(self) -> None:
+        if not callable(getattr(self, "_execution_state_writer", None)):
+            raise RuntimeError(
+                "live execution requires synchronous durable state persistence"
+            )
+        if not callable(getattr(self, "_execution_position_verifier", None)):
+            raise RuntimeError(
+                "live execution requires authoritative position verification"
+            )
+
+    async def _execute_live_reduction(
+        self, trade: Trade, quantity: float, price: float
+    ) -> OrderResult:
+        self._require_execution_writer()
+        self._assert_execution_unlatched(trade.trade_id)
+        if self._open_trades.get(trade.trade_id) is not trade:
+            raise TradeNotFoundError(trade.trade_id)
+        filled_ids = set(getattr(trade, "_aitos_filled_resting_order_ids", set()))
+        if trade.trade_id in self._confirmed_reductions:
+            client_id, result = self._confirmed_reductions[trade.trade_id]
+            self._execution_faults[trade.trade_id] = client_id
+        elif filled_ids:
+            order_id = sorted(filled_ids)[0]
+            self._execution_faults[trade.trade_id] = "resting:" + order_id
+            evidence = await self._order_executor.get_order_status(
+                trade.symbol, order_id
+            )
+            if not isinstance(evidence, dict) or evidence.get("status") not in {
+                "FILLED",
+                "CANCELED",
+                "EXPIRED",
+                "EXPIRED_IN_MATCH",
+            }:
+                raise ExecutionUncertainError(
+                    trade.symbol, order_id, "resting fill is not confirmed"
+                )
+            result = OrderResult(
+                order_id,
+                trade.symbol,
+                trade.side,
+                float(evidence.get("executedQty", 0)),
+                float(evidence.get("avgPrice", 0)),
+            )
+        else:
+            identity = f"{trade.trade_id}|{float(trade.quantity).hex()}|{float(quantity).hex()}|{len(trade.partial_exits)}"
+            client_id = (
+                "aitos-exit-" + hashlib.sha256(identity.encode()).hexdigest()[:24]
+            )
+            self._execution_faults[trade.trade_id] = client_id
+            result = await self._order_executor.submit_order(
+                OrderRequest(
+                    symbol=trade.symbol,
+                    side=trade.side,
+                    quantity=quantity,
+                    reference_price=price,
+                    reduce_only=True,
+                    client_order_id=client_id,
+                )
+            )
+        if not result.success:
+            self._execution_faults.pop(trade.trade_id, None)
+            raise RuntimeError(f"venue reduction rejected: {result.error}")
+        if (
+            not _valid_market_price(result.fill_price)
+            or not _valid_market_price(result.filled_quantity)
+            or result.filled_quantity > quantity * (1 + 1e-9)
+        ):
+            raise ExecutionUncertainError(
+                trade.symbol, result.order_id, "invalid reduction evidence"
+            )
+        return result
+
+    async def _refresh_live_protection(self, trade: Trade) -> None:
+        # Keep the old protective stop until its replacement is accepted and
+        # durably recorded. A failed replacement must not cancel protection.
+        old_id = trade.sl_order_id
+        stop_price = (
+            self._emergency_stop_price(trade)
+            if self._position_manager
+            else trade.sl_price
+        )
+        result = await self._order_executor.place_stop_loss_order(
+            trade.symbol, trade.side, trade.quantity, stop_price
+        )
+        if not result.success:
+            raise ExecutionUncertainError(
+                trade.symbol, trade.trade_id, "remaining exposure protection failed"
+            )
+        trade.sl_order_id = result.order_id
+        if old_id and old_id != result.order_id:
+            pending = trade.agent_consensus.setdefault(
+                "_pending_stop_cancellations", []
+            )
+            if old_id not in pending:
+                pending.append(old_id)
+        trade.updated_at = utc_now_iso()
+        try:
+            await self._execution_state_writer(trade)
+            for previous_id in list(
+                trade.agent_consensus.get("_pending_stop_cancellations", [])
+            ):
+                await self._order_executor.cancel_resting_order(
+                    trade.symbol, previous_id
+                )
+                trade.agent_consensus["_pending_stop_cancellations"].remove(previous_id)
+            trade.updated_at = utc_now_iso()
+            await self._execution_state_writer(trade)
+            self._order_executor.acknowledge_protection(result, trade.trade_id)
+        except BaseException:
+            self._execution_recovery_required = True
+            raise
+
+    async def _commit_live_execution(self, trade: Trade) -> None:
+        self._require_execution_writer()
+        await self._execution_position_verifier()
+        await self._execution_state_writer(trade)
+        client_id = self._execution_faults.get(trade.trade_id)
+        if client_id and not client_id.startswith("resting:"):
+            self._order_executor.acknowledge_execution(client_id, trade.trade_id)
+        self._execution_faults.pop(trade.trade_id, None)
+        if hasattr(trade, "_aitos_filled_resting_order_ids"):
+            del trade._aitos_filled_resting_order_ids
+
     async def _partial_close(
-        self, trade: Trade, price: float, close_fraction: float
+        self,
+        trade: Trade,
+        price: float,
+        close_fraction: float,
+        *,
+        consume_tp: bool = False,
+    ) -> None:
+        if not self._order_executor.requires_exchange_execution:
+            return await self._partial_close_unlocked(trade, price, close_fraction)
+        if close_fraction == 1:
+            await self.close_trade(trade.trade_id, price, "full_reduction_requested")
+            return
+        async with self._execution_locks.setdefault(trade.trade_id, asyncio.Lock()):
+            self._assert_execution_unlatched(trade.trade_id)
+            return await self._partial_close_unlocked(
+                trade, price, close_fraction, consume_tp=consume_tp
+            )
+
+    async def _partial_close_unlocked(
+        self,
+        trade: Trade,
+        price: float,
+        close_fraction: float,
+        *,
+        execution_result: OrderResult | None = None,
+        consume_tp: bool = False,
     ) -> None:
         if not _valid_market_price(price):
             raise ValueError(f"price must be a finite positive number, got {price!r}")
@@ -1647,6 +2016,12 @@ class TradeLifecycle(AITOSModule):
             raise ValueError(
                 f"trade has no remaining position to close: {trade.trade_id}"
             )
+        if self._order_executor.requires_exchange_execution:
+            execution_result = execution_result or await self._execute_live_reduction(
+                trade, trade.quantity * close_fraction, price
+            )
+            price = execution_result.fill_price
+            close_fraction = execution_result.filled_quantity / trade.quantity
         direction = 1 if trade.side == TradeSide.LONG else -1
         pnl_pct = ((price - trade.entry_price) / trade.entry_price) * direction
         # Keep full precision internally. Rounding the USD ledger to cents while
@@ -1666,12 +2041,33 @@ class TradeLifecycle(AITOSModule):
         )
         trade.position_size_usd = max(0.0, remaining_notional)
         trade.quantity = max(0.0, remaining_quantity)
+        if self._order_executor.requires_exchange_execution:
+            trade.risk_amount_usd *= 1 - close_fraction
         trade.gross_realized_pnl_usd += realized
         trade.pnl = round(
             trade.gross_realized_pnl_usd - trade.fees_paid_usd + trade.funding_pnl_usd,
             8,
         )
         trade.updated_at = utc_now_iso()
+        if self._order_executor.requires_exchange_execution:
+            consumed = set(getattr(trade, "_aitos_filled_resting_order_ids", set()))
+            if consume_tp:
+                if trade.tp_order_ids:
+                    consumed_id = trade.tp_order_ids.pop(0)
+                    await self._order_executor.cancel_resting_order(
+                        trade.symbol, consumed_id
+                    )
+                if trade.take_profit_levels:
+                    trade.take_profit_levels.pop(0)
+            consumed_tp = consumed.intersection(trade.tp_order_ids)
+            trade.tp_order_ids = [
+                order_id for order_id in trade.tp_order_ids if order_id not in consumed
+            ]
+            if consumed_tp and trade.take_profit_levels:
+                trade.take_profit_levels.pop(0)
+            if self._use_exchange_side_stops and trade.quantity > 0:
+                await self._refresh_live_protection(trade)
+            await self._commit_live_execution(trade)
         await self._event_bus.publish(
             Event(
                 topic=TOPIC_PARTIAL_CLOSE,

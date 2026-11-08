@@ -74,16 +74,20 @@ SEMANTIC_TOPICS = (
     "intelligence.*",
     "journey.*",
     "execution.*",
+    "journal.decision_recorded",
+    "journal.outcome_attributed",
 )
 
-# Decision streams that are emitted by the current runtime. Registering these
-# before the wildcard subscription is intentional: Redis wildcard resolution
-# happens against streams known at subscription time, while the subscription
-# itself remains a single wildcard subscription (no duplicate consumers).
+# Decision and journal streams emitted by the current runtime. Registering
+# them before the wildcard subscription is intentional: Redis wildcard
+# resolution happens against known streams, while the subscription itself
+# remains a single wildcard subscription (no duplicate consumers).
 _SEMANTIC_DECISION_STREAMS = (
     "decision.trade_candidate",
     "decision.generated",
     "decision.snapshot",
+    "journal.decision_recorded",
+    "journal.outcome_attributed",
 )
 
 PROJECT_SEMANTIC_EVENT_QUERY = """
@@ -149,6 +153,16 @@ FOREACH (calibration_id IN CASE WHEN $calibration_id <> '' THEN [$calibration_id
     SET c.method = $calibration_method, c.sample_count = $sample_count,
         c.brier = $brier, c.log_loss = $log_loss, c.ece = $ece
     MERGE (e)-[:PART_OF_CALIBRATION]->(c))
+
+OPTIONAL MATCH (decision:Decision {id: $decision_id})
+OPTIONAL MATCH (outcome:Outcome {id: $outcome_id})
+OPTIONAL MATCH (trade:Trade {id: $trade_id})
+FOREACH (decision_link IN CASE
+    WHEN decision IS NOT NULL AND outcome IS NOT NULL THEN [1] ELSE [] END |
+    MERGE (decision)-[:RESULTED_IN]->(outcome))
+FOREACH (trade_link IN CASE
+    WHEN outcome IS NOT NULL AND trade IS NOT NULL THEN [1] ELSE [] END |
+    MERGE (outcome)-[:OUTCOME_OF]->(trade))
 
 WITH e
 UNWIND $evidence AS evidence
@@ -400,7 +414,15 @@ class KnowledgeGraphWriter(AITOSModule):
             ),
             forecast_target=_first(payload, "target", "forecast_target"),
             forecast_horizon=_first(payload, "horizon", "forecast_horizon"),
-            outcome_id=_first(payload, "outcome_id", "result_id"),
+            outcome_id=(
+                _first(payload, "outcome_id", "result_id")
+                or (
+                    f"{_first(payload, 'trade_id')}:outcome"
+                    if event.topic == "journal.outcome_attributed"
+                    and _first(payload, "trade_id")
+                    else ""
+                )
+            ),
             outcome_label=_first(payload, "outcome", "outcome_label", "label"),
             outcome_pnl=_number(payload, "pnl", "outcome_pnl"),
             run_id=_first(payload, "model_run_id", "run_id", "training_run_id"),

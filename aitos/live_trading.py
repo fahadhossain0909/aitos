@@ -6,12 +6,19 @@ credentials — see ``tests/test_live_trading.py``.
 
 from __future__ import annotations
 
+import hashlib
 import sys
 from collections.abc import Callable
+from contextlib import ExitStack
 
+from aitos.config.paths import get_model_data_dir
 from aitos.exchange.binance import BinanceFuturesAdapter
+from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
 from aitos.logging_setup import get_logger
+from aitos.intelligence.capital_gateway import CapitalGateway
+from aitos.intelligence.capital_protection import CapitalReservation
+from aitos.intelligence.capital_controls import ProbabilityCalibrator
 
 logger = get_logger("aitos.live_trading")
 
@@ -67,13 +74,33 @@ async def prepare_live_executor(
         )
         sys.exit(1)
 
+    scope = hashlib.sha256(
+        f"{settings.binance.testnet}:{settings.binance.api_key}".encode()
+    ).hexdigest()
+    intent_store = ExecutionIntentStore(
+        get_model_data_dir() / "execution_intents.sqlite3", scope=scope
+    )
+    # Never infer that an absent runtime position means a submitted order failed.
+    intent_store.assert_ready()
     executor = BinanceFuturesOrderExecutor(
         api_key=settings.binance.api_key,
         api_secret=settings.binance.api_secret,
         testnet=settings.binance.testnet,
         recv_window_ms=settings.binance.recv_window_ms,
         hedge_mode=settings.binance.hedge_mode,
+        intent_store=intent_store,
     )
+    try:
+        return await _prepare_connected_executor(executor, settings, symbols)
+    except BaseException:
+        try:
+            await executor.close()
+        except BaseException:
+            logger.warning("live executor cleanup failed during preparation")
+        raise
+
+
+async def _prepare_connected_executor(executor, settings, symbols):
     await executor.connect()
 
     account_hedge_mode = await executor.get_position_mode()
@@ -83,7 +110,6 @@ async def prepare_live_executor(
             settings.binance.hedge_mode,
             account_hedge_mode,
         )
-        await executor.close()
         sys.exit(1)
 
     info_adapter = BinanceFuturesAdapter()
@@ -96,3 +122,26 @@ async def prepare_live_executor(
     )
 
     return executor
+
+
+def create_live_capital_gateway(scope: str) -> CapitalGateway:
+    """Stable single-runtime ownership; keep live and paper leases isolated.
+
+    The canonical runner holds RuntimeOwnership for this model root. Never
+    share this stable owner between concurrently running, unlocked workers.
+    """
+    if len(scope) != 64 or any(c not in "0123456789abcdef" for c in scope):
+        raise ValueError("hashed execution scope required")
+    root = get_model_data_dir()
+    with ExitStack() as cleanup:
+        reservation = CapitalReservation(
+            root / f"capital_live_{scope}.sqlite3", owner_id=f"live:{scope}"
+        )
+        cleanup.callback(reservation.close)
+        calibrator = ProbabilityCalibrator(
+            path=root / "capital_probability_calibration.sqlite3"
+        )
+        cleanup.callback(calibrator.close)
+        gateway = CapitalGateway(reservation=reservation, calibrator=calibrator)
+        cleanup.pop_all()
+        return gateway

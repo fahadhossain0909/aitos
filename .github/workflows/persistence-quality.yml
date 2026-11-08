@@ -1,0 +1,71 @@
+name: Isolated persistence evidence (no migration)
+on:
+  push:
+    branches: [arena/ed127d35-aitos]
+  pull_request:
+    paths:
+      - 'aitos/trading/persistent_state.py'
+      - 'aitos/trading/revision_journal.py'
+      - 'aitos/trading/revision_projector.py'
+      - 'aitos/trading/paper_shadow_runtime.py'
+      - 'aitos/trading/account_reconciliation.py'
+      - 'aitos/exchange/binance_account_evidence.py'
+      - 'tests/test_binance_account_evidence.py'
+      - 'aitos/health_server.py'
+      - 'run_paper_trading.py'
+      - 'engineering/tools/paper_service_soak.py'
+      - 'tests/test_paper_shadow_runtime.py'
+      - 'tests/test_runner_shadow_teardown.py'
+      - 'tests/test_account_reconciliation.py'
+      - 'tests/test_service_soak_harness.py'
+      - 'tests/test_service_soak_embedded.py'
+      - 'aitos/projection_evidence.py'
+      - 'aitos/console_api.py'
+      - 'tests/test_revision_projector.py'
+      - 'tests/test_revision_projector_embedded.py'
+      - 'desktop/src/projection.fixture.json'
+      - 'aitos/models/trade.py'
+      - 'aitos/trading/paper_revision.py'
+      - 'aitos/trading/financial_amendment.py'
+      - 'tests/test_financial_amendments.py'
+      - 'tests/test_trade_revision_binding.py'
+      - 'tests/test_revision_journal.py'
+      - 'tests/test_revision_journal_projection.py'
+      - 'tests/test_clickhouse_embedded_ledger.py'
+      - 'tests/test_clickhouse_revision_hazards.py'
+      - 'tests/requirements-clickhouse-embedded.txt'
+      - '.github/workflows/persistence-quality.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: persistence-evidence-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  embedded-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            tests/requirements-clickhouse-embedded.txt
+      - run: python -m pip install -r requirements.txt -r requirements-backtest.txt -r tests/requirements-clickhouse-embedded.txt
+      - name: Full backend regression without production credentials or services
+        run: python -m pytest tests -m 'not integration' --timeout=90 -q --junitxml=tmp/backend-regression.xml
+      - name: Revision prototype, shadow lifecycle, CAS races and process-crash recovery
+        run: python -m pytest tests/test_revision_journal.py tests/test_trade_revision_binding.py tests/test_financial_amendments.py tests/test_revision_projector.py tests/test_paper_shadow_runtime.py tests/test_runner_shadow_teardown.py tests/test_account_reconciliation.py tests/test_binance_account_evidence.py tests/test_service_soak_harness.py --timeout=90 -q
+      - name: Current safeguards, legacy counterexamples and append-only projection
+        # Passing hazard tests demonstrate remaining defects; they do NOT certify recovery.
+        # All inserts/forced merges use pytest temporary embedded tables only.
+        run: python -m pytest tests/test_clickhouse_embedded_ledger.py tests/test_clickhouse_revision_hazards.py tests/test_revision_journal_projection.py tests/test_revision_projector_embedded.py tests/test_service_soak_embedded.py -m integration --timeout=90 -q
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: isolated-backend-regression-results
+          path: tmp/backend-regression.xml

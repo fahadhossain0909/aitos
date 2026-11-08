@@ -37,8 +37,10 @@ def main() -> int:
         poll_seconds=args.poll_seconds,
     )
     if args.once:
-        worker.run_once()
-        worker.close()
+        try:
+            worker.run_once()
+        finally:
+            worker.close()
     else:
         worker.run_forever()
     return 0

@@ -71,3 +71,39 @@ Do not introduce a new envelope or break event compatibility without an approved
 
 ## Recovery
 Test consumer restart, Redis restart, adapter reconnect, application restart, replay, pending-message recovery, and position-monitoring re-registration in isolated paper/test environments. Validate idempotency and final state.
+
+## Addendum — optional paper evidence flow (2026-11-06)
+
+Explicit run_once → validate current local writer and scoped pending history →
+bounded sink lookup by revision/event identity → insert missing immutable events →
+complete post-lookup verification → atomic local batch ACK → validated counts →
+sanitized observation → authenticated existing snapshot → operator gateway →
+Persistence & recovery page. The built Chromium harness verified this chain with
+synthetic inputs and an injected test sink, without browser route mocking. Real
+source sink queries were separately verified against embedded ClickHouse.
+
+Timeout/lost response is ambiguous; next explicit run inspects evidence rather
+than blindly reinserting. Takeover may leave remote duplicate immutable evidence
+but cannot authorize stale local ACK. Unattached/stale/invalid/failure observations
+clear counters/export; public observations omit payloads, account IDs and errors.
+No production consumer, runner or execution flow changed. Full details:
+`PROJECTOR_AND_PERSISTENCE_CONSOLE_2026-11-06.md`.
+
+## Optional runner mirror flow (2026-11-06)
+
+Existing lifecycle handler → successful legacy write → optional complete Trade
+mirror → journal/outbox → managed projector → protected snapshot observer. Legacy
+restore/portfolio/financial reads remain unchanged. Mirror failures latch unavailable
+evidence, without changing exits/risk decisions; do not use it as recovery authority.
+Shutdown drains in-flight local threads/projection. Windows vault secrets feed only
+the local read-only gateway, not browser/env/argv. Offline account snapshots require
+same scope/cut and exact decimal strings. Service restart harness is prepared, not
+executed against real services. See `WINDOWS_PAPER_INTEGRATION_2026-11-06.md`.
+
+## Finishing tranche — 2026-11-06
+
+Shadow captures a detached nested Trade before waiting for lock/thread; event identity and stored body share that capture. Native host smoke exercises actual local auth/proxy/revocation with synthetic credentials; not Windows GUI or remote service proof. See `PAPER_NATIVE_HARDENING_2026-11-06.md`.
+
+## Recorded account boundary — 2026-11-06
+
+Recorded Binance-shaped balances/position risk/income pages → strict normalization → schema-2 scope/window/mode validator → exact comparator → sanitized CLI status. No provider request, receipt publication or financial mutation. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.

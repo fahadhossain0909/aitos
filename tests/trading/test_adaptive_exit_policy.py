@@ -53,11 +53,50 @@ def test_stagnation_requires_configured_number_of_observations():
     trade = _trade()
     # Repeated ticks within one completed candle count only once.
     assert not policy.evaluate(trade, 100.1, completed_bar_id="bar-1").stagnation_exit
-    assert not policy.evaluate(trade, 100.2, completed_bar_id="bar-1").stagnation_exit
-    assert not policy.evaluate(trade, 100.2, completed_bar_id="bar-2").stagnation_exit
-    result = policy.evaluate(trade, 100.3, completed_bar_id="bar-3")
+    assert not policy.evaluate(trade, 100.15, completed_bar_id="bar-1").stagnation_exit
+    assert not policy.evaluate(trade, 100.1, completed_bar_id="bar-2").stagnation_exit
+    result = policy.evaluate(trade, 100.1, completed_bar_id="bar-3")
     assert result.stagnation_exit
+    assert result.reason == "time_decay_scratch"
     assert result.bars_observed == 3
+
+
+def test_dead_candle_exit_requires_sixteen_unique_completed_bars_near_entry():
+    policy = AdaptiveExitPolicy(
+        {
+            "stagnation_bars": 16,
+            "stagnation_min_progress_r": 0.10,
+            "stagnation_entry_band_pct": 0.002,
+        }
+    )
+    trade = _trade()
+    for index in range(1, 16):
+        result = policy.evaluate(trade, 100.1, completed_bar_id=f"900:{index * 900}")
+        assert not result.stagnation_exit
+    result = policy.evaluate(trade, 100.1, completed_bar_id="900:14400")
+    assert result.stagnation_exit
+    assert result.bars_observed == 16
+
+
+def test_dead_candle_exit_does_not_fire_after_price_leaves_entry_band():
+    policy = AdaptiveExitPolicy({"stagnation_bars": 2})
+    trade = _trade()
+    policy.evaluate(trade, 100.3, completed_bar_id="bar-1")
+    result = policy.evaluate(trade, 100.1, completed_bar_id="bar-2")
+    assert not result.stagnation_exit
+    assert trade.mfe_r > 0.10
+
+
+def test_dead_candle_exit_does_not_fire_after_meaningful_progress():
+    policy = AdaptiveExitPolicy(
+        {"stagnation_bars": 2, "stagnation_entry_band_pct": 0.005}
+    )
+    trade = _trade()
+    trade.initial_r_distance = 1.0
+    policy.evaluate(trade, 100.45, completed_bar_id="bar-1")
+    result = policy.evaluate(trade, 100.1, completed_bar_id="bar-2")
+    assert trade.mfe_r >= 0.4
+    assert not result.stagnation_exit
 
 
 def test_observation_counter_is_stored_on_trade_for_serialization():
@@ -78,3 +117,8 @@ def test_invalid_risk_and_market_price_fail_safe():
     assert policy.evaluate(trade, 101.0).reason == "invalid_initial_risk"
     trade.initial_r_distance = 2.0
     assert policy.evaluate(trade, float("nan")).reason == "invalid_market_price"
+
+
+def test_stagnation_entry_band_configuration_is_validated():
+    with pytest.raises(ValueError, match="entry-price band"):
+        AdaptiveExitPolicy({"stagnation_entry_band_pct": 0.1})

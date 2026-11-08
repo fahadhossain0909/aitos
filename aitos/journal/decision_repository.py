@@ -65,11 +65,26 @@ class DecisionJournalRepository(AITOSModule):
     async def initialize(self, config):
         if self._initialized:
             return
+        # A prior close failure must be retried before replacing its handle.
+        if self._client is not None:
+            await self.shutdown()
         self._client = await clickhouse_connect.get_async_client(**self._conn_params)
-        await self._client.command(CREATE_DECISION_JOURNAL)
-        await self._client.command(
-            "ALTER TABLE decision_journal ADD COLUMN IF NOT EXISTS evidence_contributions String DEFAULT '[]'"
-        )
+        try:
+            await self._client.command(CREATE_DECISION_JOURNAL)
+            await self._client.command(
+                "ALTER TABLE decision_journal ADD COLUMN IF NOT EXISTS evidence_contributions String DEFAULT '[]'"
+            )
+        except BaseException:
+            # Cancellation is also a startup failure: release acquired resources
+            # without hiding the original schema/connection failure.
+            try:
+                await self.shutdown()
+            except Exception as cleanup_error:
+                logger.error(
+                    "Repository startup cleanup failed (%s); client retained for retry",
+                    type(cleanup_error).__name__,
+                )
+            raise
         self._initialized = True
         logger.info("DecisionJournalRepository initialized")
 
@@ -90,8 +105,11 @@ class DecisionJournalRepository(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds=30.0):
+        # Fail closed immediately, including when close raises or is cancelled.
+        self._initialized = False
         if self._client is not None:
             await self._client.close()
+            self._client = None
 
     async def emit_events(self):
         return
@@ -165,6 +183,31 @@ class DecisionJournalRepository(AITOSModule):
         result = await self._client.query(
             "SELECT * FROM decision_journal WHERE decision_id = {decision_id:String} ORDER BY recorded_at",
             parameters={"decision_id": decision_id},
+        )
+        return [dict(zip(result.column_names, row)) for row in result.result_rows]
+
+    async def save_management_decision(self, decision_id, trade_id, snapshot):
+        """Persist a HOLD/MANAGE/EXIT decision under its trade identity."""
+        self._require_initialized()
+        await self._insert(
+            "MANAGEMENT_DECISION",
+            decision_id,
+            trade_id,
+            snapshot.get("symbol", ""),
+            snapshot.get("side", ""),
+            snapshot.get("strategy_id", ""),
+            snapshot.get("regime", "unknown"),
+            snapshot.get("confidence"),
+            snapshot,
+            evidence=snapshot.get("reasons") or [],
+        )
+
+    async def get_trade_records(self, trade_id):
+        """Recover all decision and outcome records for a trade after restart."""
+        self._require_initialized()
+        result = await self._client.query(
+            "SELECT * FROM decision_journal WHERE trade_id = {trade_id:String} ORDER BY recorded_at",
+            parameters={"trade_id": trade_id},
         )
         return [dict(zip(result.column_names, row)) for row in result.result_rows]
 

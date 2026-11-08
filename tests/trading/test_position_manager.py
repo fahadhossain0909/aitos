@@ -120,11 +120,13 @@ def test_adaptive_completed_bar_identity_survives_trade_recovery():
     trade = _open_trade()
     trade.adaptive_exit_observations = 12
     trade.adaptive_exit_last_bar_id = "900:1710000000"
+    trade.last_marked_at = "2026-11-07T03:00:00+00:00"
 
     restored = _trade_from_dict(trade.to_dict())
 
     assert restored.adaptive_exit_observations == 12
     assert restored.adaptive_exit_last_bar_id == "900:1710000000"
+    assert restored.last_marked_at == "2026-11-07T03:00:00+00:00"
 
 
 def test_adaptive_stagnation_does_not_count_bars_closed_before_entry():

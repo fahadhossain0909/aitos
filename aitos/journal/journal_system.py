@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -37,6 +38,7 @@ TOPIC_MONTHLY_REVIEW = "journal.monthly_review"
 TOPIC_MISTAKE_RECORDED = "journal.mistake_recorded"
 TOPIC_DECISION_RECORDED = "journal.decision_recorded"
 TOPIC_OUTCOME_ATTRIBUTED = "journal.outcome_attributed"
+TOPIC_MANAGEMENT_DECISION_RECORDED = "journal.management_decision_recorded"
 
 
 class JournalSystem(AITOSModule):
@@ -57,6 +59,7 @@ class JournalSystem(AITOSModule):
         self._entries: list[JournalEntry] = []
         self._decision_snapshots: dict[str, dict[str, Any]] = {}
         self._decision_trade_ids: dict[str, str] = {}
+        self._management_decisions_by_trade: dict[str, list[str]] = {}
         self._pending_decisions: dict[tuple[str, str], list[str]] = {}
         self._last_event_time: str | None = None
 
@@ -81,6 +84,9 @@ class JournalSystem(AITOSModule):
                 ),
                 await self._event_bus.subscribe(
                     "trade.rejected", self._on_rejected, group="journal"
+                ),
+                await self._event_bus.subscribe(
+                    "decision.exit", self._on_exit_decision, group="journal"
                 ),
             ]
         )
@@ -269,6 +275,39 @@ class JournalSystem(AITOSModule):
             )
         )
 
+    async def _on_exit_decision(self, event: Event) -> EventResponse | None:
+        """Persist every HOLD/MANAGE/EXIT decision against its open trade."""
+        payload = dict(event.payload)
+        trade_id = str(payload.get("trade_id") or "")
+        if not trade_id:
+            logger.warning("exit decision missing trade_id; attribution skipped")
+            return None
+        decision_id = f"{trade_id}:management:{event.event_id}"
+        snapshot = {
+            **payload,
+            "decision_id": decision_id,
+            "trade_id": trade_id,
+            "decision_type": "exit_management",
+            "action": str(payload.get("action") or "unknown").upper(),
+            "event_time": event.created_at,
+        }
+        self._management_decisions_by_trade.setdefault(trade_id, []).append(decision_id)
+        if self._decision_repository is not None:
+            save_management = getattr(
+                self._decision_repository, "save_management_decision", None
+            )
+            if callable(save_management):
+                await save_management(decision_id, trade_id, snapshot)
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_MANAGEMENT_DECISION_RECORDED,
+                payload=snapshot,
+                source_module=self.module_id,
+            )
+        )
+        self._last_event_time = event.created_at
+        return None
+
     async def _on_position_opened(self, event: Event) -> EventResponse | None:
         trade_dict = dict(event.payload)
         raw_consensus = trade_dict.get("agent_consensus") or {}
@@ -343,16 +382,97 @@ class JournalSystem(AITOSModule):
         await self._persist(entry)
         if self._repository is not None:
             await self._repository.save_trade_snapshot(trade_dict)
+        trade_records = []
+        if self._decision_repository is not None and trade_id:
+            get_trade_records = getattr(
+                self._decision_repository, "get_trade_records", None
+            )
+            if callable(get_trade_records):
+                try:
+                    trade_records = await get_trade_records(str(trade_id))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "trade decision recovery failed during outcome attribution",
+                        extra={
+                            "aitos_extra": {
+                                "trade_id": str(trade_id),
+                                "error": str(exc),
+                            }
+                        },
+                    )
         decision_id = next(
             (did for did, tid in self._decision_trade_ids.items() if tid == trade_id),
             None,
         )
         if not decision_id:
-            decision_id = (trade_dict.get("agent_consensus") or {}).get("decision_id")
-        if self._decision_repository is not None and decision_id:
-            await self._decision_repository.attribute_outcome(
-                str(decision_id), trade_dict
+            trade_link = next(
+                (
+                    record
+                    for record in trade_records
+                    if record.get("record_type") == "TRADE_LINK"
+                ),
+                None,
             )
+            decision_id = trade_link.get("decision_id") if trade_link else None
+        if not decision_id:
+            decision_id = (trade_dict.get("agent_consensus") or {}).get("decision_id")
+        decision_snapshot = (
+            dict(self._decision_snapshots.get(str(decision_id), {}))
+            if decision_id
+            else {}
+        )
+        if (
+            decision_id
+            and not decision_snapshot
+            and self._decision_repository is not None
+        ):
+            get_records = getattr(self._decision_repository, "get_records", None)
+            if callable(get_records):
+                try:
+                    records = await get_records(str(decision_id))
+                    for record in records:
+                        if record.get("record_type") != "DECISION":
+                            continue
+                        raw_snapshot = record.get("payload")
+                        snapshot = (
+                            json.loads(raw_snapshot)
+                            if isinstance(raw_snapshot, str)
+                            else raw_snapshot
+                        )
+                        if isinstance(snapshot, dict):
+                            decision_snapshot = snapshot
+                            self._decision_snapshots[str(decision_id)] = snapshot
+                            break
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "decision snapshot recovery failed during outcome attribution",
+                        extra={
+                            "aitos_extra": {
+                                "decision_id": str(decision_id),
+                                "error": str(exc),
+                            }
+                        },
+                    )
+        memory_management_ids = list(
+            self._management_decisions_by_trade.pop(str(trade_id), [])
+        )
+        management_ids = [
+            str(record.get("decision_id"))
+            for record in trade_records
+            if record.get("record_type") == "MANAGEMENT_DECISION"
+            and record.get("decision_id")
+        ]
+        if not management_ids:
+            management_ids = memory_management_ids
+        if self._decision_repository is not None:
+            if decision_id:
+                await self._decision_repository.attribute_outcome(
+                    str(decision_id), trade_dict
+                )
+            for management_id in management_ids:
+                await self._decision_repository.attribute_outcome(
+                    management_id, trade_dict
+                )
         # Every completed trade is a learning outcome, even when the upstream
         # scanner did not attach a decision-journal ID. The recorder links by
         # trade_id; decision_id remains optional metadata rather than a gate.
@@ -377,6 +497,12 @@ class JournalSystem(AITOSModule):
                     "mae_r": trade_dict.get("mae_r"),
                     "mfe_r": trade_dict.get("mfe_r"),
                     "agent_consensus": dict(trade_dict.get("agent_consensus") or {}),
+                    "decision_snapshot": decision_snapshot,
+                    "root_cause_tags": list(trade_dict.get("root_cause_tags") or []),
+                    "total_cost_r": trade_dict.get("total_cost_r"),
+                    "diagnostics": dict(trade_dict.get("diagnostics") or {}),
+                    "management_decision_ids": management_ids,
+                    "state": "closed",
                 },
                 source_module=self.module_id,
             )
@@ -386,6 +512,7 @@ class JournalSystem(AITOSModule):
 
     async def _on_rejected(self, event: Event) -> EventResponse | None:
         trade_dict = dict(event.payload)
+        decision_id = None
         entry = JournalEntry(
             trade_id=trade_dict.get("trade_id"),
             entry_type=JournalEntryType.PRE_TRADE,
@@ -412,6 +539,34 @@ class JournalSystem(AITOSModule):
                 await self._decision_repository.attribute_outcome(
                     str(decision_id), trade_dict
                 )
+        reason = str(trade_dict.get("rejection_reason") or "")
+        execution_failure = (
+            "order submission failed" in reason.lower()
+            or "execution" in reason.lower()
+            or "fill" in reason.lower()
+        )
+        decision_id = str(decision_id or "")
+        snapshot = (
+            dict(self._decision_snapshots.get(decision_id, {})) if decision_id else {}
+        )
+        await self._event_bus.publish(
+            Event(
+                topic=TOPIC_OUTCOME_ATTRIBUTED,
+                payload={
+                    "decision_id": decision_id,
+                    "trade_id": trade_dict.get("trade_id"),
+                    "symbol": trade_dict.get("symbol"),
+                    "side": trade_dict.get("side"),
+                    "strategy_id": trade_dict.get("strategy_id"),
+                    "state": "rejected",
+                    "outcome": "execution_failure" if execution_failure else "rejected",
+                    "execution_failure": execution_failure,
+                    "rejection_reason": reason,
+                    "decision_snapshot": snapshot,
+                },
+                source_module=self.module_id,
+            )
+        )
         self._last_event_time = entry.created_at
         return None
 

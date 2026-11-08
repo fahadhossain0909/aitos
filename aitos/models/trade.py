@@ -129,6 +129,9 @@ class Trade:
     mfe_price: float | None = None
     mae_r: float | None = None
     mfe_r: float | None = None
+    # Timestamp of the latest valid market observation. Persisted so recovery
+    # cannot mistake an old last price for a fresh executable market mark.
+    last_marked_at: str | None = None
     # Immutable entry-time rationale/invalidations used by Exit Intelligence.
     # Stored on the trade record so restart recovery does not rebuild the
     # thesis from a later, potentially adverse market state.
@@ -197,6 +200,7 @@ class Trade:
             "take_profit_levels": list(self.take_profit_levels),
             "state": self.state.value,
             "entry_time": self.entry_time,
+            "updated_at": self.updated_at,
             "exit_price": self.exit_price,
             "exit_time": self.exit_time,
             "exit_reason": self.exit_reason,
@@ -219,6 +223,7 @@ class Trade:
             "mfe_price": self.mfe_price,
             "mae_r": self.mae_r,
             "mfe_r": self.mfe_r,
+            "last_marked_at": self.last_marked_at,
             "entry_thesis": self.entry_thesis,
             "emergency_sl_price": self.emergency_sl_price,
             "adaptive_exit_observations": self.adaptive_exit_observations,

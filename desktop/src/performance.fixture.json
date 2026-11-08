@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "available": true,
+  "source": "clickhouse_closed_ledger",
+  "scope": "bounded_recorded_net_pnl_not_account_equity",
+  "selection": "latest_ledger_updates",
+  "evidence_sha256": "f650bec30121f967d82eb4d8ff5a4a25ef81565259bcd42cc5ee232234ab1539",
+  "window_limit": 1000,
+  "loaded_trades": 1,
+  "truncated": false,
+  "start": "2026-11-02T00:00:00+00:00",
+  "end": "2026-11-02T00:00:00+00:00",
+  "summary": {
+    "trades": 1,
+    "wins": 1,
+    "losses": 0,
+    "breakeven": 0,
+    "net_pnl_usd": 10.0,
+    "win_rate": 1.0,
+    "expectancy_usd": 10.0,
+    "median_pnl_usd": 10.0,
+    "profit_factor": null,
+    "profit_factor_reason": "No observed losses; ratio is undefined.",
+    "best_trade_usd": 10.0,
+    "worst_trade_usd": 10.0,
+    "max_closed_pnl_drawdown_usd": 0.0
+  },
+  "curve": [
+    {
+      "at": "2026-11-02T00:00:00+00:00",
+      "net_pnl_usd": 10.0,
+      "drawdown_usd": 0.0
+    }
+  ],
+  "costs": {
+    "fees_paid_usd": {
+      "observed_rows": 1,
+      "total_rows": 1,
+      "total_usd": 1.0
+    },
+    "funding_pnl_usd": {
+      "observed_rows": 1,
+      "total_rows": 1,
+      "total_usd": 0.0
+    }
+  },
+  "directions": {
+    "LONG": {
+      "trades": 1,
+      "wins": 1,
+      "losses": 0,
+      "breakeven": 0,
+      "net_pnl_usd": 10.0,
+      "win_rate": 1.0,
+      "expectancy_usd": 10.0,
+      "median_pnl_usd": 10.0,
+      "profit_factor": null,
+      "profit_factor_reason": "No observed losses; ratio is undefined.",
+      "best_trade_usd": 10.0,
+      "worst_trade_usd": 10.0
+    },
+    "SHORT": {
+      "trades": 0,
+      "wins": 0,
+      "losses": 0,
+      "breakeven": 0,
+      "net_pnl_usd": null,
+      "win_rate": null,
+      "expectancy_usd": null,
+      "median_pnl_usd": null,
+      "profit_factor": null,
+      "profit_factor_reason": "No observed losses; ratio is undefined.",
+      "best_trade_usd": null,
+      "worst_trade_usd": null
+    }
+  },
+  "strategies": {
+    "offline-contract-fixture": {
+      "trades": 1,
+      "wins": 1,
+      "losses": 0,
+      "breakeven": 0,
+      "net_pnl_usd": 10.0,
+      "win_rate": 1.0,
+      "expectancy_usd": 10.0,
+      "median_pnl_usd": 10.0,
+      "profit_factor": null,
+      "profit_factor_reason": "No observed losses; ratio is undefined.",
+      "best_trade_usd": 10.0,
+      "worst_trade_usd": 10.0
+    }
+  },
+  "limitations": [
+    "Bounded closed-ledger sample, not all-time account performance.",
+    "Recorded PnL may include prior partial reductions; curve is allocated at final close, not cash-flow timing.",
+    "No deposits, withdrawals, open exposure or mark-to-market valuation is included.",
+    "Equal close timestamps are aggregated before drawdown; no artificial intra-timestamp path is inferred.",
+    "No Sharpe, annualized return, significance or live-readiness claim is inferred."
+  ],
+  "generated_at": "2026-11-07T12:00:00Z"
+}

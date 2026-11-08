@@ -1,0 +1,42 @@
+name: Protected Windows console signing
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: Exact independently reviewed commit SHA (not a review attestation by this workflow)
+        required: true
+permissions:
+  contents: read
+jobs:
+  sign:
+    environment: windows-signing
+    runs-on: [self-hosted, Windows, X64, aitos-signing]
+    timeout-minutes: 30
+    steps:
+      - name: Require exact reviewed source selection
+        shell: pwsh
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: |
+          if ($env:REVIEWED_SHA -notmatch '^[a-f0-9]{40}$' -or $env:REVIEWED_SHA -ne '${{ github.sha }}') { throw 'Exact source SHA required' }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - shell: pwsh
+        run: ./native/windows/build.ps1
+      - shell: pwsh
+        env:
+          AITOS_SIGNING_CERT_SHA1: ${{ vars.AITOS_SIGNING_CERT_SHA1 }}
+        run: ./native/windows/sign.ps1
+      - shell: pwsh
+        env:
+          AITOS_SIGNING_CERT_SHA1: ${{ vars.AITOS_SIGNING_CERT_SHA1 }}
+        run: ./native/windows/validate-install.ps1 -RequireSigned
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signed-Windows-console-candidate
+          path: artifacts/windows/*

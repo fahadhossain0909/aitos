@@ -7,6 +7,7 @@ import pytest
 
 from aitos.learning.evolution import EvolutionEngine, EvolutionProposal
 from aitos.learning.experience import ExperienceRecord
+from aitos.learning.governance import PromotionApproval, validation_evidence_digest
 from aitos.learning.model_registry import ModelArtifact, ModelRegistry
 from aitos.learning.regime_feedback import ModelComparison
 
@@ -54,10 +55,23 @@ def _promotion_validation(*, champion=None):
         initial_equity=10_000.0,
         final_equity=10_800.0,
     )
+    window_metrics = SimpleNamespace(
+        total_return=0.05,
+        max_drawdown=0.03,
+        sharpe=1.1,
+        trades=20,
+        initial_equity=10_000.0,
+        final_equity=10_500.0,
+    )
+    window = SimpleNamespace(
+        test_start=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        test_end=datetime(2026, 1, 31, tzinfo=timezone.utc),
+        result=SimpleNamespace(metrics=window_metrics),
+    )
     walk_forward = SimpleNamespace(
         passed=True,
         locked_holdout=SimpleNamespace(metrics=holdout_metrics),
-        windows=[object(), object()],
+        windows=[window, window],
         reason="walk-forward and locked holdout passed",
     )
     return SimpleNamespace(
@@ -69,13 +83,30 @@ def _promotion_validation(*, champion=None):
     )
 
 
+def _approval(validation, name, version, approval_id, comparison=None):
+    return PromotionApproval(
+        candidate_name=name,
+        candidate_version=version,
+        approved_by="operator:test",
+        approval_id=approval_id,
+        validation_digest=validation_evidence_digest(validation, comparison),
+        approved_at=datetime.now(timezone.utc),
+    )
+
+
 def test_registry_requires_validated_candidate_and_statistical_challenger_gate(
     tmp_path,
 ):
     registry = ModelRegistry(str(tmp_path / "registry.json"))
     registry.register(ModelArtifact("strategy", "v1", "parameter"))
+    first_validation = _promotion_validation()
+    with pytest.raises(ValueError, match="explicit operator approval"):
+        registry.promote("strategy", "v1", validation_result=first_validation)
     first = registry.promote(
-        "strategy", "v1", validation_result=_promotion_validation()
+        "strategy",
+        "v1",
+        validation_result=first_validation,
+        approval=_approval(first_validation, "strategy", "v1", "approval-v1"),
     )
     assert first.status == "champion"
     assert (
@@ -84,9 +115,53 @@ def test_registry_requires_validated_candidate_and_statistical_challenger_gate(
     )
 
     registry.register(ModelArtifact("strategy", "v2", "parameter"))
-    validation = _promotion_validation(champion=SimpleNamespace(metrics=object()))
+    champion_metrics = SimpleNamespace(
+        total_return=0.1,
+        max_drawdown=0.05,
+        sharpe=1.3,
+        trades=35,
+        initial_equity=10_000.0,
+        final_equity=11_000.0,
+    )
+    validation = _promotion_validation(
+        champion=SimpleNamespace(metrics=champion_metrics)
+    )
     with pytest.raises(ValueError, match="statistical comparison"):
-        registry.promote("strategy", "v2", validation_result=validation)
+        registry.promote(
+            "strategy",
+            "v2",
+            validation_result=validation,
+            approval=_approval(validation, "strategy", "v2", "approval-v2-fail"),
+        )
+
+    reused_approval = _approval(
+        validation,
+        "strategy",
+        "v2",
+        "approval-v1",
+        ModelComparison(
+            accepted=True,
+            candidate_mean=1.2,
+            champion_mean=0.8,
+            standard_error=0.1,
+            reason="candidate clears confidence-bound improvement gate",
+        ),
+    )
+    reused_comparison = ModelComparison(
+        accepted=True,
+        candidate_mean=1.2,
+        champion_mean=0.8,
+        standard_error=0.1,
+        reason="candidate clears confidence-bound improvement gate",
+    )
+    with pytest.raises(ValueError, match="already been consumed"):
+        registry.promote(
+            "strategy",
+            "v2",
+            validation_result=validation,
+            approval=reused_approval,
+            champion_comparison=reused_comparison,
+        )
 
     comparison = ModelComparison(
         accepted=True,
@@ -99,6 +174,7 @@ def test_registry_requires_validated_candidate_and_statistical_challenger_gate(
         "strategy",
         "v2",
         validation_result=validation,
+        approval=_approval(validation, "strategy", "v2", "approval-v2", comparison),
         champion_comparison=comparison,
     )
 

@@ -14,10 +14,19 @@ class RoutedOrderExecutor(OrderExecutor):
         self._projected_loss_fn = projected_loss_fn or (lambda _: 0.0)
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
+        if request.reduce_only and self.requires_exchange_execution:
+            raise RuntimeError("live routed reduction requires original-venue binding")
         _, result = await self._router.submit_best(
             request, projected_loss=float(self._projected_loss_fn(request))
         )
         return result
+
+    @property
+    def requires_exchange_execution(self) -> bool:
+        return self._router.requires_exchange_execution
+
+    def has_unresolved_orders(self, symbol: str | None = None) -> bool:
+        return self._router.has_unresolved_orders(symbol)
 
     @property
     def supports_exchange_side_stops(self) -> bool:

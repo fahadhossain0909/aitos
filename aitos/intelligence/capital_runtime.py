@@ -19,9 +19,12 @@ from typing import TYPE_CHECKING, Any
 from aitos.config.paths import get_model_data_dir
 from aitos.intelligence.capital_controls import ProbabilityCalibrator
 from aitos.intelligence.capital_gateway import CapitalGateway
-from aitos.intelligence.capital_protection import CapitalReservation
+from aitos.intelligence.capital_protection import CapitalReservation, Reservation
 from aitos.intelligence.opportunity_outcomes import DirectionalFunnelStore
 from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
+from aitos.logging_setup import get_logger
+
+logger = get_logger("aitos.intelligence.capital_runtime")
 
 if TYPE_CHECKING:
     # Deferred to a function-local import in install_capital_guard() below:
@@ -387,8 +390,40 @@ def install_capital_guard() -> None:
         }
         authorized = replace(protected_opportunity, agent_consensus=consensus)
         try:
+            if self._order_executor.requires_exchange_execution and not gateway.pin(
+                opportunity.symbol
+            ):
+                raise RuntimeError("capital reservation lost before submission")
             trade = await original(self, authorized, portfolio, *args, **kwargs)
-        except Exception:
+        except BaseException as exc:
+            from aitos.execution.intent_store import ExecutionUncertainError
+
+            # Cancellation or failure does not prove that a venue side effect
+            # failed. Keep ownership when evidence is uncertain or a position
+            # was already installed before a later publish/protection failure.
+            reservation_held = isinstance(exc, ExecutionUncertainError)
+            if reservation_held and self._order_executor.requires_exchange_execution:
+                self._execution_recovery_required = True
+            try:
+                reservation_held = (
+                    reservation_held
+                    or self._order_executor.has_unresolved_orders(opportunity.symbol)
+                    or any(
+                        t.symbol == opportunity.symbol for t in self.get_open_trades()
+                    )
+                )
+            except Exception:
+                reservation_held = True
+            if reservation_held:
+                try:
+                    gateway.pin(opportunity.symbol)
+                except Exception as pin_error:
+                    logger.error(
+                        "capital retention reaffirmation failed (%s)",
+                        type(pin_error).__name__,
+                    )
+            if not isinstance(exc, Exception):
+                raise
             await record_gate(
                 symbol=opportunity.symbol,
                 side=opportunity.side.value,
@@ -399,6 +434,14 @@ def install_capital_guard() -> None:
             raise
         else:
             accepted = trade.state == TradeLifecycleState.POSITION_OPENED
+            if accepted and self._order_executor.requires_exchange_execution:
+                gateway.reservation.restore_confirmed_exposure(
+                    Reservation(
+                        trade.symbol,
+                        trade.position_size_usd / trade.leverage,
+                        trade.risk_amount_usd,
+                    )
+                )
             rejection_reason = str(trade.rejection_reason or trade.state.value)
             stage = (
                 "risk_engine_gate"
@@ -423,10 +466,38 @@ def install_capital_guard() -> None:
         finally:
             # An open position retains its capital lease until close. Failed
             # authorization/submission releases the temporary reservation.
-            if not reservation_held:
+            if not reservation_held and not any(
+                t.symbol == opportunity.symbol for t in self.get_open_trades()
+            ):
                 gateway.release(opportunity.symbol)
 
-    TradeLifecycle.submit_opportunity = guarded_submit  # type: ignore[method-assign]
+    @wraps(guarded_submit)
+    async def owned_submit(self, opportunity, portfolio, *args, **kwargs):
+        if not self._order_executor.requires_exchange_execution:
+            return await guarded_submit(self, opportunity, portfolio, *args, **kwargs)
+        if not getattr(self, "_accepting_live_submissions", True):
+            raise RuntimeError(
+                "live lifecycle is draining; new submissions are blocked"
+            )
+        # The entire capital -> execution -> protection -> durable application
+        # transition owns its lifetime, not the HTTP/event caller's wait.
+        task = asyncio.create_task(
+            guarded_submit(self, opportunity, portfolio, *args, **kwargs)
+        )
+        tasks = getattr(self, "_live_submission_tasks", None)
+        if tasks is None:
+            tasks = self._live_submission_tasks = set()
+        tasks.add(task)
+
+        def settle(finished):
+            tasks.discard(finished)
+            if not finished.cancelled():
+                finished.exception()
+
+        task.add_done_callback(settle)
+        return await asyncio.shield(task)
+
+    TradeLifecycle.submit_opportunity = owned_submit  # type: ignore[method-assign]
 
 
 # NOT called eagerly here anymore -- see aitos/trading/__init__.py, which

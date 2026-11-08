@@ -111,6 +111,39 @@ async def test_journal_records_rejected_opportunities(event_bus, risk_engine):
 
 
 @pytest.mark.asyncio
+async def test_journal_links_decision_snapshot_to_closed_trade_outcome(
+    event_bus, risk_engine
+):
+    journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
+    await journal.initialize({})
+    received = []
+
+    async def capture(event):
+        received.append(event)
+
+    await event_bus.subscribe(
+        "journal.outcome_attributed", capture, group="linked-decision-outcome-test"
+    )
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    trade = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    trade.agent_consensus["decision_id"] = "decision-linked"
+    journal._decision_snapshots["decision-linked"] = {
+        "decision_id": "decision-linked",
+        "root_cause_tags": ["adverse_order_flow"],
+        "candidate_score": 7.8,
+    }
+
+    await lifecycle.update_price(trade.trade_id, 105.0)
+
+    assert await _wait_for(lambda: len(received) == 1)
+    assert received[0].payload["decision_id"] == "decision-linked"
+    assert received[0].payload["decision_snapshot"]["root_cause_tags"] == [
+        "adverse_order_flow"
+    ]
+
+
+@pytest.mark.asyncio
 async def test_record_mistake_creates_mistake_entry(event_bus, risk_engine):
     journal = JournalSystem(event_bus=event_bus)
     await journal.initialize({})
@@ -214,3 +247,125 @@ async def test_journal_publishes_learning_outcome_without_decision_id(
     assert received[0].payload["pnl"] > 0
     assert received[0].payload["risk_amount_usd"] == trade.risk_amount_usd
     assert received[0].payload["strategy_id"] == trade.strategy_id
+
+
+@pytest.mark.asyncio
+async def test_hold_decision_is_persisted_as_management_attribution(
+    event_bus, risk_engine
+):
+    from aitos.core.contracts import Event
+
+    journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
+    await journal.initialize({})
+    received = []
+
+    async def capture(event):
+        received.append(event)
+
+    await event_bus.subscribe(
+        "journal.management_decision_recorded",
+        capture,
+        group="management-attribution-test",
+    )
+    await event_bus.publish(
+        Event(
+            topic="decision.exit",
+            payload={
+                "trade_id": "trade-hold-1",
+                "symbol": "BTCUSDT",
+                "action": "HOLD",
+                "reason": "thesis_intact",
+            },
+            source_module="test",
+        )
+    )
+    assert await _wait_for(lambda: len(received) == 1)
+    assert received[0].payload["trade_id"] == "trade-hold-1"
+    assert received[0].payload["action"] == "HOLD"
+    assert received[0].payload["decision_type"] == "exit_management"
+
+
+@pytest.mark.asyncio
+async def test_rejection_emits_final_decision_outcome(event_bus, risk_engine):
+    from aitos.core.contracts import Event
+
+    journal = JournalSystem(event_bus=event_bus, risk_engine=risk_engine)
+    await journal.initialize({})
+    received = []
+
+    async def capture(event):
+        received.append(event)
+
+    await event_bus.subscribe(
+        "journal.outcome_attributed",
+        capture,
+        group="rejection-outcome-attribution-test",
+    )
+    await event_bus.publish(
+        Event(
+            topic="trade.rejected",
+            payload={
+                "trade_id": "trade-rejected-1",
+                "symbol": "BTCUSDT",
+                "side": "LONG",
+                "rejection_reason": "order submission failed: timeout",
+            },
+            source_module="test",
+        )
+    )
+    assert await _wait_for(lambda: len(received) == 1)
+    assert received[0].payload["state"] == "rejected"
+    assert received[0].payload["execution_failure"] is True
+
+
+@pytest.mark.asyncio
+async def test_closed_trade_recovers_entry_and_management_decisions_after_restart(
+    event_bus, risk_engine
+):
+    from aitos.core.contracts import Event
+
+    class DurableDecisionRepository:
+        def __init__(self):
+            self.attributed = []
+
+        async def get_trade_records(self, trade_id):
+            assert trade_id == "trade-recovered"
+            return [
+                {"record_type": "TRADE_LINK", "decision_id": "entry-decision"},
+                {
+                    "record_type": "MANAGEMENT_DECISION",
+                    "decision_id": "hold-decision",
+                },
+            ]
+
+        async def attribute_outcome(self, decision_id, trade):
+            self.attributed.append((decision_id, trade["trade_id"]))
+
+    repository = DurableDecisionRepository()
+    journal = JournalSystem(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        decision_repository=repository,
+    )
+    await journal.initialize({})
+    journal._decision_trade_ids.clear()
+    journal._decision_snapshots.clear()
+
+    await journal._on_position_closed(
+        Event(
+            topic="trade.position_closed",
+            payload={
+                "trade_id": "trade-recovered",
+                "symbol": "BTCUSDT",
+                "side": "LONG",
+                "pnl": 4.0,
+                "risk_amount_usd": 2.0,
+            },
+            source_module="test",
+        )
+    )
+
+    assert repository.attributed == [
+        ("entry-decision", "trade-recovered"),
+        ("hold-decision", "trade-recovered"),
+    ]

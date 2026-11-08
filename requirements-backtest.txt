@@ -13,5 +13,7 @@ numpy>=1.26,<3
 scikit-learn>=1.4,<2
 shap>=0.45,<1
 neo4j>=5.18,<7
-aioresponses>=0.7,<1
+# Same maintained aiohttp mock as requirements.txt; both packages export
+# aioresponses and must not be co-installed (module overwrite/install-order bug).
+aioresponses-ng>=0.8.2,<1
 pytest-timeout>=2.3,<3

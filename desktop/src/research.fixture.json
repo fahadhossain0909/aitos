@@ -1,0 +1,161 @@
+{
+  "schema_version": 1,
+  "engine": "conservative-walk-forward-plan-v1",
+  "scope": "partition_plan_only",
+  "inputs": {
+    "start": "2025-01-01",
+    "end": "2026-11-07",
+    "train_days": 180,
+    "test_days": 30,
+    "holdout_days": 30,
+    "label_horizon_days": 1,
+    "embargo_days": 1,
+    "dataset_sha256": null
+  },
+  "timezone": "UTC",
+  "intervals": "half_open_start_inclusive_end_exclusive",
+  "gap_policy": "pre_test_label_horizon_plus_embargo",
+  "gap_days": 2,
+  "folds": [
+    {
+      "index": 1,
+      "train_start": "2025-01-01",
+      "train_end": "2025-06-30",
+      "gap_start": "2025-06-30",
+      "test_start": "2025-07-02",
+      "test_end": "2025-08-01"
+    },
+    {
+      "index": 2,
+      "train_start": "2025-01-31",
+      "train_end": "2025-07-30",
+      "gap_start": "2025-07-30",
+      "test_start": "2025-08-01",
+      "test_end": "2025-08-31"
+    },
+    {
+      "index": 3,
+      "train_start": "2025-03-02",
+      "train_end": "2025-08-29",
+      "gap_start": "2025-08-29",
+      "test_start": "2025-08-31",
+      "test_end": "2025-09-30"
+    },
+    {
+      "index": 4,
+      "train_start": "2025-04-01",
+      "train_end": "2025-09-28",
+      "gap_start": "2025-09-28",
+      "test_start": "2025-09-30",
+      "test_end": "2025-10-30"
+    },
+    {
+      "index": 5,
+      "train_start": "2025-05-01",
+      "train_end": "2025-10-28",
+      "gap_start": "2025-10-28",
+      "test_start": "2025-10-30",
+      "test_end": "2025-11-29"
+    },
+    {
+      "index": 6,
+      "train_start": "2025-05-31",
+      "train_end": "2025-11-27",
+      "gap_start": "2025-11-27",
+      "test_start": "2025-11-29",
+      "test_end": "2025-12-29"
+    },
+    {
+      "index": 7,
+      "train_start": "2025-06-30",
+      "train_end": "2025-12-27",
+      "gap_start": "2025-12-27",
+      "test_start": "2025-12-29",
+      "test_end": "2026-01-28"
+    },
+    {
+      "index": 8,
+      "train_start": "2025-07-30",
+      "train_end": "2026-01-26",
+      "gap_start": "2026-01-26",
+      "test_start": "2026-01-28",
+      "test_end": "2026-02-27"
+    },
+    {
+      "index": 9,
+      "train_start": "2025-08-29",
+      "train_end": "2026-02-25",
+      "gap_start": "2026-02-25",
+      "test_start": "2026-02-27",
+      "test_end": "2026-03-29"
+    },
+    {
+      "index": 10,
+      "train_start": "2025-09-28",
+      "train_end": "2026-03-27",
+      "gap_start": "2026-03-27",
+      "test_start": "2026-03-29",
+      "test_end": "2026-04-28"
+    },
+    {
+      "index": 11,
+      "train_start": "2025-10-28",
+      "train_end": "2026-04-26",
+      "gap_start": "2026-04-26",
+      "test_start": "2026-04-28",
+      "test_end": "2026-05-28"
+    },
+    {
+      "index": 12,
+      "train_start": "2025-11-27",
+      "train_end": "2026-05-26",
+      "gap_start": "2026-05-26",
+      "test_start": "2026-05-28",
+      "test_end": "2026-06-27"
+    },
+    {
+      "index": 13,
+      "train_start": "2025-12-27",
+      "train_end": "2026-06-25",
+      "gap_start": "2026-06-25",
+      "test_start": "2026-06-27",
+      "test_end": "2026-07-27"
+    },
+    {
+      "index": 14,
+      "train_start": "2026-01-26",
+      "train_end": "2026-07-25",
+      "gap_start": "2026-07-25",
+      "test_start": "2026-07-27",
+      "test_end": "2026-08-26"
+    },
+    {
+      "index": 15,
+      "train_start": "2026-02-25",
+      "train_end": "2026-08-24",
+      "gap_start": "2026-08-24",
+      "test_start": "2026-08-26",
+      "test_end": "2026-09-25"
+    }
+  ],
+  "fold_count": 15,
+  "holdout": {
+    "start": "2026-10-08",
+    "end": "2026-11-07"
+  },
+  "holdout_fully_available": true,
+  "development_test_end": "2026-10-06",
+  "unused_development_days": 11,
+  "status": "planned_not_validated",
+  "dataset_evidence": "not_supplied",
+  "backtest_executed": false,
+  "promotion_authorized": false,
+  "evidence_sha256": "739b59049b2707cb72a8cc32802d208eb8f0772d6e934dbdcac7e866c42f52f6",
+  "limitations": [
+    "Date planning only: no dataset, event labels, strategy or returns were evaluated.",
+    "Gaps assume the declared maximum label horizon; actual intervals must be checked independently.",
+    "Training windows may reuse earlier test periods in later folds, as in chronological walk-forward research.",
+    "Candidate selection and parameter tuning must not inspect the locked holdout.",
+    "No trial-count correction, statistical significance, fee/slippage adequacy or profitable edge is certified."
+  ]
+}

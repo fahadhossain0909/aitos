@@ -583,8 +583,16 @@ def _install_lifecycle_telemetry() -> None:
                     open_after=len(self.get_open_trades()),
                 )
                 raise
+            fully_closed = (
+                str(getattr(getattr(closed_trade, "state", None), "value", ""))
+                == "position_closed"
+            )
             emit_position_event(
-                "position.close.completed",
+                (
+                    "position.close.completed"
+                    if fully_closed
+                    else "position.close.partial"
+                ),
                 closed_trade or trade,
                 requested_exit_price=exit_price,
                 close_reason=reason,
@@ -598,7 +606,11 @@ def _install_lifecycle_telemetry() -> None:
                         getattr(closed_trade, "state", None),
                     )
                 ),
-                outcome="lifecycle_close_returned",
+                outcome=(
+                    "lifecycle_close_returned"
+                    if fully_closed
+                    else "position_remains_open"
+                ),
             )
             return closed_trade
 
