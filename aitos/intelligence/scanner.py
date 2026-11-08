@@ -566,7 +566,9 @@ class OpportunityScanner(AITOSModule):
             timestamp = getattr(trade, "timestamp", None)
             quantity = float(getattr(trade, "quantity", 0.0) or 0.0)
             trade_side = str(
-                getattr(getattr(trade, "side", None), "value", getattr(trade, "side", "BUY"))
+                getattr(
+                    getattr(trade, "side", None), "value", getattr(trade, "side", "BUY")
+                )
             ).upper()
             signed_volume = quantity if trade_side == "BUY" else -quantity
             try:
@@ -582,7 +584,10 @@ class OpportunityScanner(AITOSModule):
                     self._financial_ml.ingest_market_event, trade.symbol, event
                 )
                 await asyncio.to_thread(
-                    self._financial_ml.observe_price, trade.symbol, float(trade.price), timestamp
+                    self._financial_ml.observe_price,
+                    trade.symbol,
+                    float(trade.price),
+                    timestamp,
                 )
                 await asyncio.to_thread(self._reconcile_financial_ml_labels)
             except Exception:
@@ -590,9 +595,7 @@ class OpportunityScanner(AITOSModule):
                     "financial ML live event ingestion failed",
                     extra={"aitos_extra": {"symbol": trade.symbol}},
                 )
-            self._candidate_outcomes.update_price(
-                trade.symbol, trade.price, timestamp
-            )
+            self._candidate_outcomes.update_price(trade.symbol, trade.price, timestamp)
             await asyncio.to_thread(self._reconcile_candidate_markouts)
 
     async def accept_live_order_book(self, book):
@@ -620,7 +623,9 @@ class OpportunityScanner(AITOSModule):
         if event.get("symbol") and event.get("stage"):
             details = dict(event.get("details") or {})
             candidate_id = details.get("candidate_id")
-            attribution_id = str(candidate_id or trace_id or f"scan:{event['symbol']}:{time.time_ns()}")
+            attribution_id = str(
+                candidate_id or trace_id or f"scan:{event['symbol']}:{time.time_ns()}"
+            )
             try:
                 await asyncio.to_thread(
                     self._decision_outcome_ledger.record_decision,
@@ -1705,9 +1710,11 @@ class OpportunityScanner(AITOSModule):
             "entry_timing": component_scores["entry_timing"],
             "breakout_acceptance": component_scores["breakout_acceptance"],
             "relative_strength": component_scores["relative_strength"],
-            "atr_pct": float(atr) / float(candidate.entry_price)
-            if candidate.entry_price > 0
-            else 0.0,
+            "atr_pct": (
+                float(atr) / float(candidate.entry_price)
+                if candidate.entry_price > 0
+                else 0.0
+            ),
             **event_features,
             **volatility_features,
         }
