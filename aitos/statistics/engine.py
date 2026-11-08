@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from threading import RLock
 from collections import deque
 from collections.abc import Iterable
 
@@ -52,20 +53,33 @@ class AStatEngine:
         self._drift_monitor_stop: asyncio.Event | None = None
         self._drift_monitor_scheduler: DriftMonitorScheduler | None = None
         self._hawkes_filters: dict[str, MarkedHawkesOnlineFilter] = {}
+        self._hawkes_lock = RLock()
 
     def register_hawkes_model(self, symbol: str, fit: HawkesMLEFit) -> None:
         """Install a previously fitted marked-Hawkes model for live event updates."""
         normalized = symbol.strip().upper()
         if not normalized:
             raise ValueError("symbol is required for Hawkes event registration")
-        self._hawkes_filters[normalized] = MarkedHawkesOnlineFilter(fit)
+        # Construct before acquiring the lock so an invalid/unconverged fit
+        # cannot replace a currently healthy live filter.
+        online_filter = MarkedHawkesOnlineFilter(fit)
+        with self._hawkes_lock:
+            self._hawkes_filters[normalized] = online_filter
 
     def observe_marked_event(self, symbol: str, timestamp: float, mark: int):
-        """Update the registered online Hawkes filter from a live event consumer."""
+        """Atomically update the symbol's causal Hawkes filter.
+
+        Market-data consumers may be multi-threaded; serialize each update with
+        model registration so event ordering and filter replacement are safe.
+        """
         normalized = symbol.strip().upper()
-        if normalized not in self._hawkes_filters:
-            raise KeyError(f"no fitted Hawkes model registered for {normalized}")
-        return self._hawkes_filters[normalized].observe(timestamp, mark)
+        if not normalized:
+            raise ValueError("symbol is required for Hawkes event updates")
+        with self._hawkes_lock:
+            online_filter = self._hawkes_filters.get(normalized)
+            if online_filter is None:
+                raise KeyError(f"no fitted Hawkes model registered for {normalized}")
+            return online_filter.observe(timestamp, mark)
 
     async def start_drift_monitor(
         self,
@@ -98,10 +112,15 @@ class AStatEngine:
         if self._drift_monitor_stop is None or self._drift_monitor_task is None:
             return
         self._drift_monitor_stop.set()
-        await self._drift_monitor_task
-        self._drift_monitor_stop = None
-        self._drift_monitor_task = None
-        self._drift_monitor_scheduler = None
+        task = self._drift_monitor_task
+        try:
+            await task
+        finally:
+            # A failed provider/alert callback must not leave the engine in a
+            # permanently "already running" state after shutdown is requested.
+            self._drift_monitor_stop = None
+            self._drift_monitor_task = None
+            self._drift_monitor_scheduler = None
 
     def update(self, realised_return: float, predicted_up: float) -> None:
         r = float(realised_return)
