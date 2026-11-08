@@ -55,6 +55,18 @@ class StatisticalGovernanceRuntime:
     def last_drift(self) -> DriftAction | None:
         return self._last_drift
 
+    def mark_drift_unavailable(self, reason: str) -> DriftAction:
+        """Fail closed when a fresh, valid drift assessment cannot be produced."""
+        report = DriftReport(features=(), max_psi=0.0, drifted_features=())
+        action = DriftAction(
+            report=report,
+            status="UNAVAILABLE",
+            promotion_blocked=True,
+            reasons=(str(reason) or "drift_data_unavailable",),
+        )
+        self._last_drift = action
+        return action
+
     def observe_live_features(
         self,
         reference: Mapping[str, Sequence[float]],
@@ -86,11 +98,12 @@ class StatisticalGovernanceRuntime:
     def evaluate_challenger(self, evidence: PromotionEvidence) -> PromotionDecision:
         decision = evaluate_promotion(evidence, self.policy)
         if self._last_drift is not None and self._last_drift.promotion_blocked:
-            reasons = tuple(
-                dict.fromkeys(
-                    decision.reasons + ("live_feature_drift_blocks_promotion",)
-                )
+            block_reason = (
+                "live_feature_drift_blocks_promotion"
+                if self._last_drift.status in {"WARNING", "CRITICAL"}
+                else "live_drift_data_unavailable_blocks_promotion"
             )
+            reasons = tuple(dict.fromkeys(decision.reasons + (block_reason,)))
             return PromotionDecision(False, reasons)
         return decision
 
@@ -153,6 +166,27 @@ class DriftMonitorScheduler:
         self._last_alert_fingerprint: tuple | None = None
         self.last_run_at = None
 
+    async def _notify(self, action: DriftAction) -> None:
+        """Deliver alerts without allowing a notification outage to kill monitoring."""
+        import asyncio
+        import inspect
+
+        if self.alert_callback is None:
+            return
+        try:
+            callback = self.alert_callback
+            is_async_callback = inspect.iscoroutinefunction(
+                callback
+            ) or inspect.iscoroutinefunction(getattr(callback, "__call__", None))
+            if is_async_callback:
+                await callback(action)
+            else:
+                result = await asyncio.to_thread(callback, action)
+                if inspect.isawaitable(result):
+                    await result
+        except Exception:
+            logger.exception("statistical drift alert delivery failed")
+
     async def run_once(self, reference, current, *, now=None):
         """Run one due check; return None when cadence has not elapsed."""
         import asyncio
@@ -176,17 +210,8 @@ class DriftMonitorScheduler:
                 tuple(action.report.drifted_features),
                 round(action.report.max_psi, 6),
             )
-            if fingerprint != self._last_alert_fingerprint and self.alert_callback:
-                callback = self.alert_callback
-                is_async_callback = inspect.iscoroutinefunction(
-                    callback
-                ) or inspect.iscoroutinefunction(getattr(callback, "__call__", None))
-                if is_async_callback:
-                    await callback(action)
-                else:
-                    result = await asyncio.to_thread(callback, action)
-                    if inspect.isawaitable(result):
-                        await result
+            if fingerprint != self._last_alert_fingerprint:
+                await self._notify(action)
             self._last_alert_fingerprint = fingerprint
         return action
 
@@ -216,10 +241,16 @@ class DriftMonitorScheduler:
                     batches = await batches
                 reference, current = batches
                 await self.run_once(reference, current, now=datetime.now(timezone.utc))
-            except Exception:
-                # Missing/stale/undersized data and alert delivery failures are
-                # observable, fail-closed conditions. Keep the managed worker
-                # alive so a transient provider failure can recover next cycle.
+            except Exception as exc:
+                # Preserve a fail-closed governance state instead of leaving a
+                # previous NORMAL report active when fresh data is unavailable.
+                action = self.runtime.mark_drift_unavailable(
+                    f"drift_provider_unavailable:{type(exc).__name__}"
+                )
+                fingerprint = ("UNAVAILABLE", action.reasons)
+                if fingerprint != self._last_alert_fingerprint:
+                    await self._notify(action)
+                self._last_alert_fingerprint = fingerprint
                 logger.exception(
                     "statistical drift check unavailable; promotion remains blocked"
                 )
