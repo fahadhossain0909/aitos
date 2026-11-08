@@ -313,7 +313,10 @@ lifecycle. The integration is additive and remains **shadow-first**.
 - The financial_ml_validation.validate_strategy_family helper runs
   synchronized-block White's Reality Check, Benjamini-Hochberg FDR correction
   and an optional model-confidence set across aligned OOS strategy returns,
-  hypothesis p-values and model losses.
+  hypothesis p-values and model losses. The learning ExperimentEngine now
+  invokes it per regime/cost cohort when its evaluator supplies aligned
+  net_returns (and optional hypothesis_p_value values), and retains the
+  validation evidence in ExperimentReport.
 - A single binary meta-model OOS report is not a substitute for strategy-family
   Reality Check/FDR analysis or a full paper-trading acceptance campaign.
 
