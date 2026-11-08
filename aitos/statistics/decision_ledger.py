@@ -267,7 +267,6 @@ class DecisionOutcomeLedger:
             for row in rows
         )
 
-
     def snapshot(self) -> dict[str, Any]:
         """Return bounded aggregate counts for runtime health and canary evidence."""
         with self._connect() as connection:
