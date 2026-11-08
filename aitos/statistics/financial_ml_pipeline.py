@@ -877,18 +877,21 @@ class FinancialMLPipeline:
         mean_selected_return = (
             sum(selected_returns) / len(selected_returns) if selected_returns else -1.0
         )
-        monte_carlo = (
-            monte_carlo_stress_test(
-                selected_returns,
-                paths=250,
-                horizon=max(20, len(selected_returns)),
-                block_length=min(5, len(selected_returns)),
-                seed=17,
-                additional_cost_bps=5.0,
-            )
-            if len(selected_returns) >= 20
-            else None
-        )
+        monte_carlo = None
+        if len(selected_returns) >= 20:
+            try:
+                monte_carlo = monte_carlo_stress_test(
+                    selected_returns,
+                    paths=250,
+                    horizon=max(20, len(selected_returns)),
+                    block_length=min(5, len(selected_returns)),
+                    seed=17,
+                    additional_cost_bps=5.0,
+                )
+            except ValueError:
+                # A <= -100% observation is a ruin outcome; it must fail
+                # acceptance, not crash the research/reporting pipeline.
+                monte_carlo = None
         executed_oos_samples = sum(
             provenance == "EXECUTED_TRADE_NET_OUTCOME" for provenance in oos_provenance
         )
