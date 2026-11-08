@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import math
-from threading import RLock
 from collections import deque
+from threading import RLock
 from collections.abc import Iterable
 
 from .models import (
