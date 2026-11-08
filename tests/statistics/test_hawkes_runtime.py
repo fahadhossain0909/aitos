@@ -194,8 +194,10 @@ def test_hawkes_oos_gain_integrates_excitation_only_over_holdout_window():
     hawkes_integral = sum(fit.baseline_intensities) * duration + excitation_integral
     poisson_integral = sum(baseline) * duration
     expected = (
-        event_log_likelihood - hawkes_integral
-        - poisson_log_likelihood + poisson_integral
+        event_log_likelihood
+        - hawkes_integral
+        - poisson_log_likelihood
+        + poisson_integral
     ) / len(holdout_marks)
 
     actual = hawkes_runtime._holdout_gain(
