@@ -2118,9 +2118,18 @@ class OpportunityScanner(AITOSModule):
         n = top_n if top_n is not None else self._top_n
         from dataclasses import replace as replace_candidate
 
+        # The scanner is normally fully initialized, but lightweight unit
+        # harnesses and diagnostic callers may construct it without the
+        # optional FinancialMLPipeline. In that case preserve the primary
+        # strategy's score/ranking behavior rather than crashing; production
+        # construction always installs the pipeline in __init__.
+        financial_ml = getattr(self, "_financial_ml", None)
         scored: list[ScanCandidate] = []
         for candidate in candidates:
-            prediction = self._financial_ml.predict(
+            if financial_ml is None:
+                scored.append(candidate)
+                continue
+            prediction = financial_ml.predict(
                 candidate.candidate_id, candidate.financial_ml_features
             )
             candidate = replace_candidate(
@@ -2147,7 +2156,7 @@ class OpportunityScanner(AITOSModule):
                         "raw_probability": prediction.raw_probability,
                         "calibrated_probability": prediction.calibrated_probability,
                         "mode": prediction.mode,
-                        "enforced": self._financial_ml.should_block(prediction),
+                        "enforced": financial_ml.should_block(prediction),
                     },
                 )
         eligible = [
@@ -2155,9 +2164,10 @@ class OpportunityScanner(AITOSModule):
             for candidate in scored
             if candidate.composite_score >= self._min_score_threshold
             and not (
-                self._financial_ml.enforce
-                and self._financial_ml.should_block(
-                    self._financial_ml.predict(
+                financial_ml is not None
+                and financial_ml.enforce
+                and financial_ml.should_block(
+                    financial_ml.predict(
                         candidate.candidate_id, candidate.financial_ml_features
                     )
                 )
@@ -2193,9 +2203,9 @@ class OpportunityScanner(AITOSModule):
         ranked_symbols = {candidate.symbol for candidate in ranked}
         for candidate in eligible:
             accepted = candidate.symbol in ranked_symbols
-            if not accepted:
+            if not accepted and financial_ml is not None:
                 await asyncio.to_thread(
-                    self._financial_ml.reject_candidate,
+                    financial_ml.reject_candidate,
                     candidate.candidate_id,
                     "excluded_by_top_n_or_hysteresis",
                 )
@@ -2218,9 +2228,13 @@ class OpportunityScanner(AITOSModule):
                 },
             )
         for candidate in scored:
-            if candidate.symbol not in ranked_symbols and candidate not in eligible:
+            if (
+                financial_ml is not None
+                and candidate.symbol not in ranked_symbols
+                and candidate not in eligible
+            ):
                 await asyncio.to_thread(
-                    self._financial_ml.reject_candidate,
+                    financial_ml.reject_candidate,
                     candidate.candidate_id,
                     "score_or_meta_gate_rejection",
                 )
