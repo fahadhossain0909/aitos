@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import math
-import os
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -16,7 +14,6 @@ from aitos.logging_setup import get_logger
 from aitos.market_data.bus import MarketDataBus, market_event_from_wire
 from aitos.market_data.contracts import MarketEventType, MarketSource
 from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
-from aitos.statistics.hawkes import MarkedHawkesOnlineFilter, fit_marked_hawkes_mle
 
 logger = get_logger("aitos.intelligence.live_scanner")
 LIVE_SCANNER_GROUP = "live-scanner-cache-v1"
@@ -48,11 +45,6 @@ class LiveSymbolCache:
     hawkes_event_rejections: int = 0
     last_hawkes_timestamp: float | None = None
     last_hawkes_intensities: tuple[float, float] | None = None
-    hawkes_fit_status: str = "disabled"
-    hawkes_fit_attempts: int = 0
-    hawkes_fit_attempted_events: int = 0
-    hawkes_fit_events: int = 0
-    hawkes_fit_error: str | None = None
     last_stale_trade_source_age_sec: float | None = None
     last_stale_book_source_age_sec: float | None = None
 
@@ -67,26 +59,10 @@ class LiveScannerCache:
         max_trades: int = 5000,
         *,
         hawkes_engine=None,
-        hawkes_auto_fit: bool | None = None,
-        hawkes_min_events: int = 200,
-        hawkes_min_mark_events: int = 20,
-        hawkes_min_span_seconds: float = 5.0,
     ) -> None:
         self._event_bus = event_bus
         self._bus = MarketDataBus(event_bus) if event_bus is not None else None
         self._hawkes_engine = hawkes_engine
-        self._hawkes_auto_fit = (
-            os.getenv("AITOS_HAWKES_LIVE_FIT_ENABLED", "false").strip().lower()
-            in {"1", "true", "yes", "on"}
-            if hawkes_auto_fit is None
-            else bool(hawkes_auto_fit)
-        )
-        self._hawkes_min_events = max(
-            100, int(os.getenv("AITOS_HAWKES_LIVE_MIN_EVENTS", hawkes_min_events))
-        )
-        self._hawkes_min_mark_events = max(10, int(hawkes_min_mark_events))
-        self._hawkes_min_span_seconds = max(1.0, float(hawkes_min_span_seconds))
-        self._hawkes_fit_tasks: dict[str, asyncio.Task] = {}
         self._symbols = {s.upper() for s in symbols}
         self._max_trades = max(100, max_trades)
         self._state: dict[str, LiveSymbolCache] = {}
@@ -192,9 +168,6 @@ class LiveScannerCache:
         for sub in self._subscriptions:
             sub.cancel()
         self._subscriptions.clear()
-        if self._hawkes_fit_tasks:
-            await asyncio.gather(*self._hawkes_fit_tasks.values(), return_exceptions=True)
-            self._hawkes_fit_tasks.clear()
         self._initialized = False
 
     def _observe_hawkes_trade(self, trade: TradeTick, state: LiveSymbolCache) -> None:
@@ -214,17 +187,10 @@ class LiveScannerCache:
             if callable(last_timestamp):
                 previous = last_timestamp(trade.symbol)
         if previous is not None:
-            # Exchange timestamps are commonly millisecond-granular. After
-            # separating equal timestamps by one ULP, subsequent prints from
-            # that same millisecond can be a few ULPs behind the adjusted
-            # cursor; treat only that floating-point-sized gap as a tie.
             if timestamp < previous:
-                if previous - timestamp <= 4.0 * math.ulp(previous):
-                    timestamp = math.nextafter(previous, math.inf)
-                else:
-                    state.hawkes_event_rejections += 1
-                    return
-            elif timestamp == previous:
+                state.hawkes_event_rejections += 1
+                return
+            if timestamp == previous:
                 timestamp = math.nextafter(previous, math.inf)
         mark = 1 if trade.side == TradeSide.BUY else 0
         try:
@@ -244,139 +210,6 @@ class LiveScannerCache:
             return
         state.last_hawkes_timestamp = timestamp
         state.last_hawkes_intensities = snapshot.intensities
-
-    def _schedule_hawkes_fit(self, symbol: str, state: LiveSymbolCache) -> None:
-        """Fit a live Hawkes model asynchronously from a bounded causal sample.
-
-        The fit is opt-in, per-symbol, and observational only: Hawkes output is
-        not injected into A-Stat probabilities or entry gates by this lifecycle.
-        """
-        normalized = symbol.upper()
-        engine = self._hawkes_engine
-        if (
-            not self._hawkes_auto_fit
-            or engine is None
-            or engine.has_hawkes_model(normalized)
-            or normalized in self._hawkes_fit_tasks
-            or len(state.trades) < self._hawkes_min_events
-        ):
-            return
-        retry_step = max(50, self._hawkes_min_events // 2)
-        if (
-            state.hawkes_fit_attempts
-            and len(state.trades) - state.hawkes_fit_attempted_events < retry_step
-        ):
-            return
-        state.hawkes_fit_attempts += 1
-        state.hawkes_fit_attempted_events = len(state.trades)
-        state.hawkes_fit_status = "fitting"
-        task = asyncio.create_task(
-            self._fit_hawkes_model(normalized, state),
-            name=f"aitos-hawkes-fit-{normalized.lower()}",
-        )
-        self._hawkes_fit_tasks[normalized] = task
-        task.add_done_callback(
-            lambda completed, key=normalized: self._hawkes_fit_tasks.pop(key, None)
-        )
-
-    async def _fit_hawkes_model(self, symbol: str, state: LiveSymbolCache) -> None:
-        """Fit on the first 80% of events and require a causal 20% holdout."""
-        try:
-            trades = list(state.trades)[-max(self._hawkes_min_events * 4, 1000):]
-            if len(trades) < self._hawkes_min_events:
-                state.hawkes_fit_status = "insufficient_events"
-                return
-            times: list[float] = []
-            marks: list[int] = []
-            previous: float | None = None
-            for trade in trades:
-                timestamp = trade.timestamp.timestamp()
-                if previous is not None and timestamp <= previous:
-                    timestamp = math.nextafter(previous, math.inf)
-                times.append(timestamp)
-                marks.append(1 if trade.side == TradeSide.BUY else 0)
-                previous = timestamp
-            counts = (marks.count(0), marks.count(1))
-            if min(counts) < self._hawkes_min_mark_events:
-                state.hawkes_fit_status = "insufficient_mark_balance"
-                state.hawkes_fit_error = f"mark_counts={counts}"
-                return
-            if times[-1] - times[0] < self._hawkes_min_span_seconds:
-                state.hawkes_fit_status = "insufficient_time_span"
-                return
-            split = int(len(times) * 0.8)
-            train_times, train_marks = times[:split], marks[:split]
-            holdout_times, holdout_marks = times[split:], marks[split:]
-            if len(train_times) < 80 or len(holdout_times) < 20:
-                state.hawkes_fit_status = "insufficient_holdout"
-                return
-            horizon = holdout_times[0]
-            fit = await asyncio.to_thread(
-                fit_marked_hawkes_mle,
-                train_times,
-                train_marks,
-                horizon=horizon,
-                decay_grid=(0.1, 0.25, 0.5, 1.0, 2.0),
-                max_iterations=150,
-            )
-            if (
-                not fit.converged
-                or fit.branching_ratio >= 0.90
-                or fit.gradient_norm >= 1e-2
-                or fit.events != len(train_times)
-            ):
-                state.hawkes_fit_status = "rejected_fit_quality"
-                state.hawkes_fit_error = (
-                    f"converged={fit.converged},branching_ratio={fit.branching_ratio:.5f},"
-                    f"gradient_norm={fit.gradient_norm:.5f}"
-                )
-                return
-            validator = MarkedHawkesOnlineFilter(fit)
-            holdout_intensities = []
-            for timestamp, mark in zip(holdout_times, holdout_marks):
-                holdout_intensities.append(
-                    validator.observe(timestamp, mark).intensities
-                )
-            if not holdout_intensities or any(
-                not math.isfinite(value) or value <= 0
-                for row in holdout_intensities
-                for value in row
-            ):
-                state.hawkes_fit_status = "rejected_oos_validation"
-                state.hawkes_fit_error = "non_finite_or_non_positive_holdout_intensity"
-                return
-            engine = self._hawkes_engine
-            if engine is None:
-                state.hawkes_fit_status = "engine_unavailable"
-                return
-            engine.register_hawkes_model(
-                symbol, fit, warmup_events=zip(times, marks)
-            )
-            state.last_hawkes_timestamp = times[-1]
-            state.last_hawkes_intensities = holdout_intensities[-1]
-            state.hawkes_fit_events = fit.events
-            state.hawkes_fit_error = None
-            state.hawkes_fit_status = "ready_oos_validated"
-            logger.info(
-                "live Hawkes model fitted and OOS validated",
-                extra={
-                    "aitos_extra": {
-                        "symbol": symbol,
-                        "training_events": fit.events,
-                        "holdout_events": len(holdout_times),
-                        "branching_ratio": fit.branching_ratio,
-                        "gradient_norm": fit.gradient_norm,
-                        "decay": fit.decay,
-                    }
-                },
-            )
-        except Exception as exc:
-            state.hawkes_fit_status = "fit_error"
-            state.hawkes_fit_error = str(exc)[:500]
-            logger.exception(
-                "live Hawkes fit lifecycle failed",
-                extra={"aitos_extra": {"symbol": symbol}},
-            )
 
     async def accept_live_trade(self, trade: TradeTick) -> None:
         if trade.symbol.upper() not in self._symbols:
@@ -403,7 +236,6 @@ class LiveScannerCache:
         state.trades.append(trade)
         state.trade_depth_matcher.add_trade(trade)
         self._observe_hawkes_trade(trade, state)
-        self._schedule_hawkes_fit(trade.symbol, state)
         state.last_trade_at = received_at
         state.last_trade_source_at = trade.timestamp
         state.last_trade_received_at = received_at
@@ -492,7 +324,6 @@ class LiveScannerCache:
         state.trades.append(trade)
         state.trade_depth_matcher.add_trade(trade)
         self._observe_hawkes_trade(trade, state)
-        self._schedule_hawkes_fit(event.symbol, state)
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at
