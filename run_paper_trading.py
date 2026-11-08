@@ -410,6 +410,8 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     cleanup.push_async_callback(health_server.stop)
     await health_server.start()
 
+    stop_event = asyncio.Event()
+
     # Self-healing: periodically re-initialize modules that have died
     async def _self_heal_loop() -> None:
         while not stop_event.is_set():
@@ -472,7 +474,6 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
             }
         },
     )
-    stop_event = asyncio.Event()
     if not position_recovery_ready:
         # Enter the managed finally path without running a scan cycle. This
         # shuts down already-started workers/modules while preventing new risk.
