@@ -104,14 +104,17 @@ def test_decision_ledger_persists_candidate_and_resolution_provenance(tmp_path):
         payload={"candidate_id": candidate_id, "trace_id": "trace-1"},
         candidate_id=candidate_id,
     )
-    assert ledger.resolve_entity(
-        candidate_id,
-        outcome_value=0.012,
-        outcome_at="2026-11-08T12:00:00+00:00",
-        outcome={"provenance": "EXECUTED_TRADE_NET_OUTCOME"},
-        candidate_id=candidate_id,
-        outcome_provenance="EXECUTED_TRADE_NET_OUTCOME",
-    ) == 1
+    assert (
+        ledger.resolve_entity(
+            candidate_id,
+            outcome_value=0.012,
+            outcome_at="2026-11-08T12:00:00+00:00",
+            outcome={"provenance": "EXECUTED_TRADE_NET_OUTCOME"},
+            candidate_id=candidate_id,
+            outcome_provenance="EXECUTED_TRADE_NET_OUTCOME",
+        )
+        == 1
+    )
     row = ledger.list_decisions(entity_id=candidate_id)[0]
     assert row["candidate_id"] == candidate_id
     assert row["label_resolution_time"] == "2026-11-08T12:00:00+00:00"
@@ -137,8 +140,15 @@ def test_decision_ledger_migrates_legacy_schema_without_data_loss(tmp_path):
         (decision_id,entity_id,symbol,side,decision_type,decision_at,accepted,
          reason,payload_json) VALUES (?,?,?,?,?,?,?,?,?)""",
         (
-            "legacy-1", "legacy-entity", "ETHUSDT", "SHORT", "REJECTION",
-            "2026-11-01T00:00:00Z", 0, "legacy reason", "{}",
+            "legacy-1",
+            "legacy-entity",
+            "ETHUSDT",
+            "SHORT",
+            "REJECTION",
+            "2026-11-01T00:00:00Z",
+            0,
+            "legacy reason",
+            "{}",
         ),
     )
     connection.commit()
