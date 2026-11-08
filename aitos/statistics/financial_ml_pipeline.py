@@ -821,6 +821,8 @@ class FinancialMLPipeline:
                 seed=fold.test_indices[0],
             )
             sampled = [train_indices[index] for index in selected_local]
+            if len({labels[index] for index in sampled}) < 2:
+                sampled = train_indices
             model = MetaLabeler(learning_rate=0.03, l2=0.01, epochs=600)
             model.fit(
                 [features[index] for index in sampled],
