@@ -1,0 +1,145 @@
+name: Render-equivalent Binance Paper Canary
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/paper-canary.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aitos-paper-canary
+  cancel-in-progress: true
+
+jobs:
+  paper-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.12-alpine
+        env:
+          CLICKHOUSE_DB: aitos
+          CLICKHOUSE_USER: aitos_test
+          CLICKHOUSE_PASSWORD: aitos_test_password
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      AITOS_MODE: paper
+      TESTING: "false"
+      MODEL_DATA_DIR: ${{ github.workspace }}/.paper-canary-models
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      CLICKHOUSE_HOST: 127.0.0.1
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: aitos_test
+      CLICKHOUSE_PASSWORD: aitos_test_password
+      CLICKHOUSE_DATABASE: aitos
+      AITOS_EVENTBUS_BACKEND: redis
+      AITOS_TUNING_PROFILE: low_resource
+      AITOS_TUNING_SCANNER_UNIVERSE_MODE: allowlist
+      AITOS_TUNING_SCANNER_SYMBOL_ALLOWLIST: BTCUSDT,ETHUSDT,SOLUSDT
+      AITOS_TUNING_SCANNER_CORE_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT
+      AITOS_TUNING_SCANNER_UNIVERSE_LIMIT: "3"
+      AITOS_TUNING_SCANNER_DYNAMIC_UNIVERSE_LIMIT: "0"
+      AITOS_TUNING_SCANNER_REFRESH_INTERVAL_SECONDS: "30"
+      AITOS_TUNING_SCANNER_MIN_QUOTE_VOLUME_USD: "0"
+      AITOS_TUNING_SCANNER_MIN_TRADE_COUNT: "0"
+      AITOS_TUNING_SCANNER_MIN_CONTRACT_AGE_DAYS: "0"
+      AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY: "1"
+      AITOS_TUNING_HARDWARE_CPU_WORKER_BUDGET: "2"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install AITOS runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Wait for analytical storage
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8123/ping >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" \
+            http://127.0.0.1:8123/ --data-binary "SELECT 1"
+      - name: Start Binance public-market-data paper runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$MODEL_DATA_DIR"
+          python run_paper_trading.py > paper-canary.log 2>&1 &
+          echo $! > paper-canary.pid
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8090/health > paper-health.json; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$(cat paper-canary.pid)" 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat paper-canary.log
+            exit 1
+          fi
+          cat paper-health.json
+      - name: Sustain live-data paper canary
+        run: |
+          sleep 480
+          curl -fsS http://127.0.0.1:8090/health > paper-health-final.json
+          cat paper-health-final.json
+          grep -E "scan cycle complete|resolved dynamic paper-trading universe|Binance|WebSocket|market data" paper-canary.log | tail -n 100 || true
+          test "$(grep -c "scan cycle complete" paper-canary.log)" -ge 2
+      - name: Stop paper runtime safely
+        if: always()
+        shell: bash
+        run: |
+          if [ -f paper-canary.pid ]; then
+            pid="$(cat paper-canary.pid)"
+            kill -INT "$pid" 2>/dev/null || true
+            for attempt in $(seq 1 30); do
+              kill -0 "$pid" 2>/dev/null || break
+              sleep 2
+            done
+            kill -TERM "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
+          fi
+          tail -n 250 paper-canary.log 2>/dev/null || true
+      - name: Upload paper canary evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: aitos-binance-paper-canary
+          path: |
+            paper-canary.log
+            paper-health.json
+            paper-health-final.json
+          if-no-files-found: warn
+          retention-days: 7
