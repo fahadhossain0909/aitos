@@ -66,7 +66,6 @@ def test_matching_duplicates_are_still_a_reconciliation_anomaly():
     assert not result.clean
 
 
-
 def test_reconciliation_normalizes_database_timestamp_precision_and_zones():
     postgres_payload = {
         "event_time": "2026-11-08T10:20:30.123456+00:00",
