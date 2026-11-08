@@ -102,7 +102,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$MODEL_DATA_DIR"
-          python run_paper_trading.py > paper-canary.log 2>&1 &
+          python scripts/paper_canary_runner.py \
+            --log paper-canary.log \
+            --exit-code paper-canary.exit-code \
+            --child-pid paper-canary.child.pid > paper-canary-launcher.log 2>&1 &
           echo $! > paper-canary.pid
           ready=0
           for attempt in $(seq 1 90); do
@@ -179,36 +182,47 @@ jobs:
         run: |
           set -uo pipefail
           if [ -f paper-canary.pid ]; then
-            pid="$(cat paper-canary.pid)"
-            runtime_alive() {
+            launcher_pid="$(cat paper-canary.pid)"
+            child_pid="$(cat paper-canary.child.pid 2>/dev/null || true)"
+            process_alive() {
               local process_state
-              process_state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+              process_state="$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"
               [ -n "$process_state" ] && [[ "$process_state" != Z* ]]
             }
-            if runtime_alive; then
-              kill -INT "$pid" 2>/dev/null || true
+
+            if process_alive "$launcher_pid"; then
+              kill -INT "$launcher_pid" 2>/dev/null || true
               for attempt in $(seq 1 30); do
-                runtime_alive || break
+                process_alive "$launcher_pid" || break
                 sleep 2
               done
             fi
-            if runtime_alive; then
+
+            if process_alive "$launcher_pid"; then
               echo "SIGINT grace period expired; escalating to SIGTERM"
-              kill -TERM "$pid" 2>/dev/null || true
+              kill -TERM "$launcher_pid" 2>/dev/null || true
               for attempt in $(seq 1 10); do
-                runtime_alive || break
+                process_alive "$launcher_pid" || break
                 sleep 2
               done
             fi
-            if runtime_alive; then
-              echo "paper runtime did not stop after SIGTERM; sending SIGKILL"
-              kill -KILL "$pid" 2>/dev/null || true
+
+            if process_alive "$launcher_pid"; then
+              echo "launcher did not stop; terminating child process group"
+              if [ -n "$child_pid" ]; then
+                kill -KILL -- "-$child_pid" 2>/dev/null || true
+              fi
+              kill -KILL "$launcher_pid" 2>/dev/null || true
             fi
-            set +e
-            wait "$pid"
-            runtime_exit_code=$?
-            set -e
-            printf '%s\\n' "$runtime_exit_code" > paper-canary.exit-code
+
+            if [ ! -f paper-canary.exit-code ]; then
+              echo "paper runtime exit status was not persisted"
+              cat paper-canary-launcher.log 2>/dev/null || true
+              tail -n 250 paper-canary.log 2>/dev/null || true
+              exit 1
+            fi
+
+            runtime_exit_code="$(cat paper-canary.exit-code)"
             echo "paper runtime exit code: $runtime_exit_code"
             if [ "$runtime_exit_code" -ne 0 ]; then
               echo "paper runtime exited unsuccessfully"
@@ -230,6 +244,10 @@ jobs:
           name: aitos-binance-paper-canary
           path: |
             paper-canary.log
+            paper-canary-launcher.log
+            paper-canary.exit-code
+            paper-canary.child.pid
+            paper-canary.shutdown-marker
             paper-health.json
             paper-health-final.json
           if-no-files-found: warn
