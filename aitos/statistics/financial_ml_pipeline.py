@@ -221,6 +221,11 @@ class FinancialMLPipeline:
             ON financial_ml_candidates(symbol, status, created_at);
             CREATE INDEX IF NOT EXISTS idx_financial_ml_resolved
             ON financial_ml_candidates(status, label_resolution_time);
+            CREATE TRIGGER IF NOT EXISTS financial_ml_candidate_snapshot_immutable
+            BEFORE UPDATE OF symbol,side,created_at,entry_price,volatility,
+                take_price,stop_price,expires_at,features_json,trace_id
+            ON financial_ml_candidates
+            BEGIN SELECT RAISE(ABORT, 'financial ML candidate snapshots are immutable'); END;
             CREATE TABLE IF NOT EXISTS financial_ml_event_bars (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
@@ -238,6 +243,12 @@ class FinancialMLPipeline:
             );
             CREATE INDEX IF NOT EXISTS idx_financial_ml_bars
             ON financial_ml_event_bars(symbol, bar_type, end_at);
+            CREATE TRIGGER IF NOT EXISTS financial_ml_event_bars_no_update
+            BEFORE UPDATE ON financial_ml_event_bars
+            BEGIN SELECT RAISE(ABORT, 'financial ML event bars are append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS financial_ml_event_bars_no_delete
+            BEFORE DELETE ON financial_ml_event_bars
+            BEGIN SELECT RAISE(ABORT, 'financial ML event bars are append-only'); END;
             CREATE TABLE IF NOT EXISTS financial_ml_event_bar_state (
                 symbol TEXT NOT NULL,
                 bar_type TEXT NOT NULL,
