@@ -163,6 +163,7 @@ class LoggingDriftAlertSink:
 
     def __call__(self, action) -> None:
         import logging
+
         logging.getLogger("aitos.statistics.drift").warning(
             "statistical feature drift: %s",
             json.dumps(
