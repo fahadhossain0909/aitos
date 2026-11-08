@@ -545,6 +545,14 @@ class FinancialMLPipeline:
             self._conn.commit()
             return cursor.rowcount == 1
 
+    def has_candidate(self, candidate_id: str) -> bool:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM financial_ml_candidates WHERE candidate_id=?",
+                (candidate_id,),
+            ).fetchone()
+        return row is not None
+
     def reject_candidate(self, candidate_id: str, reason: str) -> bool:
         if not candidate_id or not reason:
             return False
