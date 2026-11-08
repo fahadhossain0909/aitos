@@ -749,7 +749,10 @@ async def run_scan_and_trade_cycle(
     for ranked_batch in ranked_batches:
         for candidate in ranked_batch:
             if accepted_opportunities >= target_opportunities:
-                break
+                components.scanner.record_candidate_rejection(
+                    candidate, "opportunity_target_reached"
+                )
+                continue
             logger.info(
                 "scanner candidate ranked",
                 extra={
@@ -774,6 +777,9 @@ async def run_scan_and_trade_cycle(
                             "score": candidate.composite_score,
                         }
                     },
+                )
+                components.scanner.record_candidate_rejection(
+                    candidate, "max_positions_per_symbol_after_rebalance"
                 )
                 continue
 
