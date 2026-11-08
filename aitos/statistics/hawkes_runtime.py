@@ -179,13 +179,19 @@ def _fit_and_accept(
 
     # Absolute epoch timestamps preserve chronology when the live WebSocket
     # consumer takes over. Replay is atomic with model installation.
-    warmup = [
-        (trade.timestamp.timestamp(), 1 if trade.side == TradeSide.BUY else 0)
-        for trade in sorted(
-            trades,
-            key=lambda trade: (trade.timestamp.timestamp(), int(trade.trade_id)),
+    warmup: list[tuple[float, int]] = []
+    previous_timestamp = -math.inf
+    for trade in sorted(
+        trades,
+        key=lambda trade: (trade.timestamp.timestamp(), int(trade.trade_id)),
+    ):
+        timestamp = trade.timestamp.timestamp()
+        if timestamp <= previous_timestamp:
+            timestamp = math.nextafter(previous_timestamp, math.inf)
+        warmup.append(
+            (timestamp, 1 if trade.side == TradeSide.BUY else 0)
         )
-    ]
+        previous_timestamp = timestamp
     result = HawkesBootstrapResult(
         symbol, "accepted", count, split, count - split, gain,
         fit.branching_ratio, None,
