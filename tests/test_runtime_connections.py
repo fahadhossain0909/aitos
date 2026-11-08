@@ -23,10 +23,10 @@ class FakeLogger:
         self.errors: list[tuple[str, object]] = []
         self.warnings: list[tuple[str, object]] = []
 
-    def error(self, message: str, error: object) -> None:
+    def error(self, message: str, error: object | None = None) -> None:
         self.errors.append((message, error))
 
-    def warning(self, message: str, error: object) -> None:
+    def warning(self, message: str, error: object | None = None) -> None:
         self.warnings.append((message, error))
 
 
