@@ -525,6 +525,17 @@ class OpportunityScanner(AITOSModule):
                 "live_state_symbols": sum(
                     1 for s in self._symbols if self._live_cache.snapshot(s) is not None
                 ),
+                "live_state_symbols_by_symbol": [
+                    symbol
+                    for symbol in self._symbols
+                    if self._live_cache.snapshot(symbol) is not None
+                ],
+                "live_trade_events_by_symbol": {
+                    symbol: len(state.trades)
+                    for symbol in self._symbols
+                    if (state := self._live_cache.snapshot(symbol)) is not None
+                    and state.trades
+                },
                 "hawkes_models": self._a_stat_bridge.engine.hawkes_model_status(),
                 "live_hawkes": {
                     symbol: {
