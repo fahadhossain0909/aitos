@@ -144,13 +144,81 @@ class PostgresJournalRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT payload FROM aitos_operational_records
+                SELECT payload::text AS payload FROM aitos_operational_records
                 WHERE record_type = 'JOURNAL_ENTRY' AND entity_id = $1
                 ORDER BY recorded_at, record_id
                 """,
                 trade_id,
             )
-        return [dict(row["payload"]) for row in rows]
+        return [self._decode_payload(row["payload"]) for row in rows]
+
+    async def save_decision(self, decision_id: str, snapshot: dict[str, Any]) -> None:
+        await self._append("DECISION", decision_id, f"decision:{decision_id}", snapshot)
+
+    async def link_trade(self, decision_id: str, trade: dict[str, Any]) -> None:
+        trade_id = str(trade.get("trade_id") or "")
+        if not trade_id:
+            raise ValueError("trade_id is required to link a decision")
+        await self._append(
+            "TRADE_LINK", decision_id, f"decision:{decision_id}:trade:{trade_id}", trade
+        )
+
+    async def attribute_outcome(self, decision_id: str, trade: dict[str, Any]) -> None:
+        trade_id = str(trade.get("trade_id") or "")
+        if not trade_id:
+            raise ValueError("trade_id is required for outcome attribution")
+        await self._append(
+            "OUTCOME", decision_id, f"decision:{decision_id}:outcome:{trade_id}", trade
+        )
+
+    async def save_management_decision(
+        self, decision_id: str, trade_id: str, snapshot: dict[str, Any]
+    ) -> None:
+        payload = {**snapshot, "trade_id": trade_id}
+        await self._append(
+            "MANAGEMENT_DECISION", decision_id, f"management:{decision_id}", payload
+        )
+
+    async def get_records(self, decision_id: str) -> list[dict[str, Any]]:
+        return await self._get_records(
+            "SELECT record_type, entity_id, recorded_at, payload::text AS payload "
+            "FROM aitos_operational_records WHERE entity_id = $1 "
+            "ORDER BY recorded_at, record_id",
+            decision_id,
+        )
+
+    async def get_trade_records(self, trade_id: str) -> list[dict[str, Any]]:
+        return await self._get_records(
+            "SELECT record_type, entity_id, recorded_at, payload::text AS payload "
+            "FROM aitos_operational_records WHERE entity_id = $1 "
+            "OR payload->>'trade_id' = $1 ORDER BY recorded_at, record_id",
+            trade_id,
+        )
+
+    async def _get_records(self, query: str, key: str) -> list[dict[str, Any]]:
+        self._require_initialized()
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(query, key)
+        records = []
+        for row in rows:
+            payload = self._decode_payload(row["payload"])
+            records.append(
+                {
+                    "record_type": row["record_type"],
+                    "decision_id": row["entity_id"],
+                    "recorded_at": row["recorded_at"],
+                    "payload": json.dumps(payload, default=str),
+                    **payload,
+                }
+            )
+        return records
+
+    @staticmethod
+    def _decode_payload(value: Any) -> dict[str, Any]:
+        if isinstance(value, str):
+            decoded = json.loads(value)
+            return decoded if isinstance(decoded, dict) else {"value": decoded}
+        return dict(value)
 
     async def _append(
         self, record_type: str, entity_id: str, key: str, payload: dict[str, Any]
