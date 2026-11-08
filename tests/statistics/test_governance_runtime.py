@@ -140,3 +140,48 @@ def test_engine_drift_shutdown_clears_state_after_provider_failure(tmp_path):
         assert engine._drift_monitor_task is None
 
     asyncio.run(exercise())
+
+
+
+def test_provider_failure_marks_drift_unavailable_and_blocks_promotion(tmp_path):
+    import asyncio
+    import threading
+
+    registry = StatisticalModelRegistry(tmp_path / "registry.sqlite3")
+    _register(registry, "2.0.0")
+    runtime = StatisticalGovernanceRuntime(
+        registry,
+        policy=PromotionPolicy(min_observations=100, min_shadow_days=1),
+    )
+    reference = {"volatility": [float(i) for i in range(100)]}
+    runtime.observe_live_features(reference, reference)
+    scheduler = DriftMonitorScheduler(runtime, interval_seconds=1)
+    first_failure = threading.Event()
+    attempts = 0
+
+    def provider():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            first_failure.set()
+            raise RuntimeError("temporary feature store outage")
+        return reference, reference
+
+    async def exercise():
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(scheduler.run_forever(stop_event, provider))
+        assert await asyncio.to_thread(first_failure.wait, 2.0)
+        for _ in range(50):
+            if runtime.last_drift and runtime.last_drift.status == "UNAVAILABLE":
+                break
+            await asyncio.sleep(0.01)
+        assert runtime.last_drift is not None
+        assert runtime.last_drift.status == "UNAVAILABLE"
+        assert runtime.last_drift.promotion_blocked
+        decision = runtime.evaluate_challenger(_evidence())
+        assert not decision.eligible
+        assert "live_drift_data_unavailable_blocks_promotion" in decision.reasons
+        stop_event.set()
+        await task
+
+    asyncio.run(exercise())
