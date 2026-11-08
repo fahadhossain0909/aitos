@@ -189,8 +189,6 @@ class DriftMonitorScheduler:
 
     async def run_once(self, reference, current, *, now=None):
         """Run one due check; return None when cadence has not elapsed."""
-        import asyncio
-        import inspect
         from datetime import datetime, timezone
 
         current_time = now or datetime.now(timezone.utc)
