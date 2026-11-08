@@ -80,7 +80,9 @@ async def test_postgres_market_and_journal_round_trip():
         )
         await journal.save_journal_entry(entry)
         await journal.save_journal_entry(entry)
-        await journal.save_decision(decision_id, {"candidate_id": token, "symbol": symbol})
+        await journal.save_decision(
+            decision_id, {"candidate_id": token, "symbol": symbol}
+        )
         await journal.link_trade(
             decision_id, {"trade_id": trade_id, "symbol": symbol}
         )
