@@ -1,4 +1,5 @@
 import hashlib
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -131,9 +132,13 @@ def test_approval_rejects_wrong_role_and_candidate_mismatch(tmp_path):
             model_version="2.0.0",
             reason="Viewer must not approve any candidate",
         )
-    token = service.issue_approval(identity, model_id="a-stat", model_version="2.0.0")
+    token = service.issue_approval(
+        identity,
+        model_id="a-stat",
+        model_version="2.0.0",
+        reason="Approve candidate after independent review",
+    )
     bad = _evidence()
-    from dataclasses import replace
 
     with pytest.raises(PermissionError, match="does not match"):
         service.approve_and_promote(
