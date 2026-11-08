@@ -38,12 +38,16 @@ class ClickHouseDriftFeatureBatchProvider:
         self, store, *, lookback: timedelta = timedelta(days=30),
         window: timedelta = timedelta(days=7), min_observations: int = 200,
         sources: Sequence[str] = ("paper", "live"),
-        feature_names: Sequence[str] | None = None, clock=None,
+        feature_names: Sequence[str], max_staleness: timedelta = timedelta(days=2), clock=None,
     ) -> None:
         if lookback <= window or window.total_seconds() <= 0:
             raise ValueError("lookback must exceed a positive window")
         if min_observations < 20:
             raise ValueError("min_observations must be >= 20")
+        if not feature_names or any(not str(name).strip() for name in feature_names):
+            raise ValueError("an explicit non-empty feature allow-list is required")
+        if max_staleness <= timedelta(0) or max_staleness > window:
+            raise ValueError("max_staleness must be positive and no larger than window")
         if not sources or any(s not in {"paper", "live", "backtest"} for s in sources):
             raise ValueError("sources must contain supported experience sources")
         self.store = store
@@ -51,7 +55,8 @@ class ClickHouseDriftFeatureBatchProvider:
         self.window = window
         self.min_observations = int(min_observations)
         self.sources = tuple(sources)
-        self.feature_names = tuple(feature_names or ())
+        self.feature_names = tuple(dict.fromkeys(str(name) for name in feature_names))
+        self.max_staleness = max_staleness
         self.clock = clock or (lambda: datetime.now(timezone.utc))
 
     def __call__(self):
@@ -61,13 +66,18 @@ class ClickHouseDriftFeatureBatchProvider:
         end = now.astimezone(timezone.utc)
         current_start = end - self.window
         reference_start = current_start - self.lookback
-        rows = self.store.query_closed_experiences(
-            reference_start, end, sources=self.sources,
-            limit=max(self.min_observations * 20, 100_000),
+        # Query non-overlapping windows separately. Ascending LIMIT on a
+        # combined query can truncate the newest observations behind backlog.
+        reference_rows = self.store.query_closed_experiences(
+            reference_start, current_start, sources=self.sources, limit=1_000_000,
+        )
+        current_rows = self.store.query_closed_experiences(
+            current_start, end, sources=self.sources, limit=1_000_000,
         )
         reference: dict[str, list[float]] = {}
         current: dict[str, list[float]] = {}
-        for row in rows:
+        latest_current = None
+        for row in (*reference_rows, *current_rows):
             timestamp = row.get("timestamp")
             if isinstance(timestamp, str):
                 timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
@@ -81,19 +91,24 @@ class ClickHouseDriftFeatureBatchProvider:
                 raw = json.loads(raw)
             if not isinstance(raw, Mapping):
                 raise ValueError("experience features must be a JSON object")
-            target = current if timestamp >= current_start else reference
-            names = self.feature_names or tuple(sorted(raw.keys()))
-            for name in names:
+            is_current = timestamp >= current_start
+            target = current if is_current else reference
+            if is_current and (latest_current is None or timestamp > latest_current):
+                latest_current = timestamp
+            for name in self.feature_names:
                 if name not in raw:
-                    continue
+                    raise RuntimeError(f"configured drift feature missing: {name}")
                 value = raw[name]
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
-                    continue
+                    raise RuntimeError(f"configured drift feature is non-numeric: {name}")
                 number = float(value)
-                if math.isfinite(number):
-                    target.setdefault(str(name), []).append(number)
+                if not math.isfinite(number):
+                    raise RuntimeError(f"configured drift feature is non-finite: {name}")
+                target.setdefault(str(name), []).append(number)
         if not reference or not current:
             raise RuntimeError("drift feature windows are empty; fail closed")
+        if latest_current is None or end - latest_current > self.max_staleness:
+            raise RuntimeError("current drift feature batch is stale; fail closed")
         common = sorted(set(reference).intersection(current))
         if not common:
             raise RuntimeError("no common numeric features across drift windows")
