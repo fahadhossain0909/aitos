@@ -102,9 +102,12 @@ async def test_postgres_market_and_journal_round_trip():
             *(retry_market.save_kline(updated) for _ in range(12)),
             *(retry_journal.save_trade_snapshot(snapshot) for _ in range(12)),
             *(retry_journal.save_journal_entry(entry) for _ in range(12)),
-            *(retry_journal.save_decision(
-                decision_id, {"candidate_id": token, "symbol": symbol}
-            ) for _ in range(12)),
+            *(
+                retry_journal.save_decision(
+                    decision_id, {"candidate_id": token, "symbol": symbol}
+                )
+                for _ in range(12)
+            ),
         )
 
         journal_entries = await journal.get_journal_entries_for_trade(trade_id)
