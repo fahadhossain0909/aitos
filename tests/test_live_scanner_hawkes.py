@@ -36,11 +36,7 @@ def test_live_trade_ingestion_updates_registered_hawkes_model_in_aggressor_order
 
     asyncio.run(cache.accept_live_trade(trade(10, TradeSide.BUY, timestamp)))
     # Exchange feeds can timestamp multiple prints in the same millisecond.
-    asyncio.run(
-        cache.accept_live_trade(
-            trade(11, TradeSide.SELL, timestamp)
-        )
-    )
+    asyncio.run(cache.accept_live_trade(trade(11, TradeSide.SELL, timestamp)))
     asyncio.run(
         cache.accept_live_trade(
             trade(12, TradeSide.BUY, timestamp + timedelta(milliseconds=1))
