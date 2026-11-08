@@ -15,7 +15,7 @@ import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from aitos.statistics.financial_ml import (
     MarketEvent,
@@ -237,6 +237,12 @@ class FinancialMLPipeline:
                 rationale TEXT NOT NULL,
                 approved_at TEXT NOT NULL
             );
+            CREATE TRIGGER IF NOT EXISTS financial_ml_approvals_no_update
+            BEFORE UPDATE ON financial_ml_approvals
+            BEGIN SELECT RAISE(ABORT, 'financial ML approvals are append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS financial_ml_approvals_no_delete
+            BEFORE DELETE ON financial_ml_approvals
+            BEGIN SELECT RAISE(ABORT, 'financial ML approvals are append-only'); END;
             CREATE TABLE IF NOT EXISTS financial_ml_artifacts (
                 artifact_id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
@@ -722,11 +728,25 @@ class FinancialMLPipeline:
         return report
 
     def approve_artifact(
-        self, artifact_id: str, *, approved_by: str, rationale: str
+        self,
+        artifact_id: str,
+        *,
+        approved_by: str,
+        rationale: str,
+        approval_verifier: Callable[[str, str, str], bool] | None = None,
     ) -> bool:
-        """Explicit local operator approval; failed OOS artifacts cannot activate."""
+        """Activate an OOS-passing artifact after trusted middleware verification.
+
+        The verifier must validate the operator against the deployment's
+        authenticated identity/RBAC boundary. A caller-supplied display name
+        alone is never sufficient to approve an artifact.
+        """
         if not artifact_id or not approved_by.strip() or not 8 <= len(rationale.strip()) <= 500:
             raise ValueError("artifact, operator and 8-500 character rationale are required")
+        if not callable(approval_verifier) or not approval_verifier(
+            artifact_id, approved_by.strip(), rationale.strip()
+        ):
+            raise PermissionError("trusted operator approval verification is required")
         with self._lock:
             row = self._conn.execute(
                 "SELECT artifact_json,report_json FROM financial_ml_artifacts WHERE artifact_id=?",
