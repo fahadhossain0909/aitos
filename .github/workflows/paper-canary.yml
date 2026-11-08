@@ -5,13 +5,18 @@ on:
     branches: [main]
     paths:
       - .github/workflows/paper-canary.yml
+      - run_paper_trading.py
+      - aitos/**
+      - requirements.txt
+      - pyproject.toml
+      - Dockerfile
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: aitos-paper-canary
+  group: aitos-paper-canary-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
