@@ -268,9 +268,9 @@ async def _start_optional_hawkes_bootstrap(components):
 
     decay_grid = tuple(
         float(value)
-        for value in os.getenv(
-            "AITOS_HAWKES_DECAY_GRID", "0.05,0.1,0.2,0.5,1.0"
-        ).split(",")
+        for value in os.getenv("AITOS_HAWKES_DECAY_GRID", "0.05,0.1,0.2,0.5,1.0").split(
+            ","
+        )
         if value.strip()
     )
     results = await bootstrap_hawkes_models(
@@ -279,12 +279,8 @@ async def _start_optional_hawkes_bootstrap(components):
         symbols,
         sample_limit=int(os.getenv("AITOS_HAWKES_SAMPLE_LIMIT", "1000")),
         min_events=int(os.getenv("AITOS_HAWKES_MIN_EVENTS", "200")),
-        holdout_fraction=float(
-            os.getenv("AITOS_HAWKES_HOLDOUT_FRACTION", "0.2")
-        ),
-        min_mark_events=int(
-            os.getenv("AITOS_HAWKES_MIN_MARK_EVENTS", "20")
-        ),
+        holdout_fraction=float(os.getenv("AITOS_HAWKES_HOLDOUT_FRACTION", "0.2")),
+        min_mark_events=int(os.getenv("AITOS_HAWKES_MIN_MARK_EVENTS", "20")),
         min_oos_gain_per_event=float(
             os.getenv("AITOS_HAWKES_MIN_OOS_GAIN_PER_EVENT", "0")
         ),
