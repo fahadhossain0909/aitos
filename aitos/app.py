@@ -21,6 +21,7 @@ from aitos.execution.order_executor import OrderExecutor
 from aitos.intelligence.rl_feedback import RLFeedbackLoop
 from aitos.intelligence.rl_policy import RLPolicyScorer, TabularBanditRLScorer
 from aitos.intelligence.scanner import OpportunityScanner
+from aitos.statistics.feedback import AStatFeedbackLoop
 
 # Keep model persistence independent of any developer-specific host path.
 # MODEL_DATA_DIR is already part of the deployment environment contract;
@@ -74,6 +75,7 @@ class SystemComponents:
     ml_feedback: MLExplainerFeedbackLoop
     attention_explainer: AttentionExplainer
     attention_feedback: AttentionFeedbackLoop
+    a_stat_feedback: AStatFeedbackLoop
     reconciliation: ReconciliationScheduler | None = None
     knowledge_graph: KnowledgeGraphWriter | None = None
     correlation_updater: SymbolCorrelationUpdater | None = None
@@ -131,6 +133,7 @@ class SystemComponents:
             self.rl_feedback,
             self.ml_feedback,
             self.attention_feedback,
+            self.a_stat_feedback,
         ]
         if self.knowledge_graph is not None:
             modules.append(self.knowledge_graph)
@@ -248,6 +251,11 @@ async def build_system(
     attention_explainer = attention_explainer or AttentionExplainer()
     attention_feedback = AttentionFeedbackLoop(
         event_bus=event_bus, explainer=attention_explainer
+    )
+    a_stat_feedback = AStatFeedbackLoop(
+        event_bus=event_bus,
+        engine=scanner._a_stat_bridge.engine,
+        database_path=_MODEL_DATA_DIR / "a_stat_feedback.sqlite3",
     )
     position_manager = (
         PositionManager(
@@ -399,6 +407,7 @@ async def build_system(
         ml_feedback=ml_feedback,
         attention_explainer=attention_explainer,
         attention_feedback=attention_feedback,
+        a_stat_feedback=a_stat_feedback,
         reconciliation=reconciliation,
         knowledge_graph=knowledge_graph,
         correlation_updater=correlation_updater,
