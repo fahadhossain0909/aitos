@@ -112,9 +112,11 @@ first reconciliation scope and must not be inferred as reconciled.
 ## Not yet accepted
 
 - Additional forward migrations for future schema evolution; the initial versioned migration and compatibility checks are implemented.
-- AITOS adapter round-trip against Render-hosted PostgreSQL (the Render smoke
-  service is being upgraded from raw asyncpg checks to the actual adapters;
-  GitHub Actions also tests ephemeral PostgreSQL 16).
+- Full AITOS paper-runtime acceptance on Render. The deployed smoke service
+  now exercises the actual market-data and operational-journal adapters,
+  schema migration v1, write/read, and repeat-request idempotency against the
+  Render-hosted PostgreSQL database. GitHub Actions also tests ephemeral
+  PostgreSQL 16. This is not a full scanner-to-trade paper lifecycle test.
 - Full crash-window reconciliation across exchange execution state, operational
   journal and market records; the current CLI only compares operational
   journal/trade snapshots between ClickHouse and PostgreSQL.
