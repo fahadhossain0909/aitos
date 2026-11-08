@@ -1892,11 +1892,21 @@ class TradeLifecycle(AITOSModule):
         candidate_id = trade.agent_consensus.get("candidate_id")
         if candidate_id:
             try:
-                await asyncio.to_thread(
+                bound = await asyncio.to_thread(
                     self._financial_ml_pipeline().mark_executed,
                     str(candidate_id),
                     trade.trade_id,
                 )
+                if not bound:
+                    logger.error(
+                        "filled trade could not bind its Financial ML candidate",
+                        extra={
+                            "aitos_extra": {
+                                "candidate_id": candidate_id,
+                                "trade_id": trade.trade_id,
+                            }
+                        },
+                    )
             except Exception:
                 logger.exception(
                     "financial ML candidate execution binding failed",
