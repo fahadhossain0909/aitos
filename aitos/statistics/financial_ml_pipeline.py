@@ -250,6 +250,12 @@ class FinancialMLPipeline:
                 processed_at TEXT NOT NULL,
                 PRIMARY KEY(symbol,event_id)
             );
+            CREATE TRIGGER IF NOT EXISTS financial_ml_processed_events_no_update
+            BEFORE UPDATE ON financial_ml_processed_events
+            BEGIN SELECT RAISE(ABORT, 'processed market events are append-only'); END;
+            CREATE TRIGGER IF NOT EXISTS financial_ml_processed_events_no_delete
+            BEFORE DELETE ON financial_ml_processed_events
+            BEGIN SELECT RAISE(ABORT, 'processed market events are append-only'); END;
             CREATE TABLE IF NOT EXISTS financial_ml_event_bar_state (
                 symbol TEXT NOT NULL,
                 bar_type TEXT NOT NULL,
