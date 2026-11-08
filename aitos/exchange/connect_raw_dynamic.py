@@ -48,6 +48,10 @@ async def connect_raw_dynamic(
         streams = list(dict.fromkeys(get_streams()))
         if not streams:
             changed.clear()
+            # Close the check/wait race: if a producer changed the desired
+            # cohort just before clear(), observe it before sleeping.
+            if get_streams():
+                continue
             await changed.wait()
             continue
         base_url, _ = adapter._get_ws_base_url(streams)
