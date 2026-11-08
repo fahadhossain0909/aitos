@@ -167,8 +167,22 @@ class PostgresJournalRepository:
         trade_id = str(trade.get("trade_id") or "")
         if not trade_id:
             raise ValueError("trade_id is required for outcome attribution")
+        payload = dict(trade)
+        pnl = payload.get("pnl")
+        risk = payload.get("risk_amount_usd")
+        payload["r_multiple"] = (
+            float(pnl) / float(risk)
+            if pnl is not None and risk not in (None, 0, 0.0)
+            else None
+        )
+        payload["holding_seconds"] = self._holding_seconds(
+            payload.get("entry_time"), payload.get("exit_time")
+        )
         await self._append(
-            "OUTCOME", decision_id, f"decision:{decision_id}:outcome:{trade_id}", trade
+            "OUTCOME",
+            decision_id,
+            f"decision:{decision_id}:outcome:{trade_id}",
+            payload,
         )
 
     async def save_management_decision(
@@ -212,6 +226,21 @@ class PostgresJournalRepository:
                 }
             )
         return records
+
+    @staticmethod
+    def _holding_seconds(entry_time: Any, exit_time: Any) -> float | None:
+        if not entry_time or not exit_time:
+            return None
+        try:
+            start = datetime.fromisoformat(str(entry_time).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(exit_time).replace("Z", "+00:00"))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=timezone.utc)
+            return max(0.0, (end - start).total_seconds())
+        except (TypeError, ValueError):
+            return None
 
     @staticmethod
     def _decode_payload(value: Any) -> dict[str, Any]:
