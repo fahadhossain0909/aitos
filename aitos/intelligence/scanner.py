@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from math import isfinite
+from math import isfinite, log
 from typing import Any
 
 from aitos.config.paths import get_model_data_dir
@@ -1673,6 +1673,17 @@ class OpportunityScanner(AITOSModule):
             statistical_forecast=statistical_forecast,
         )
         event_features = self._financial_ml.event_features(symbol)
+        from aitos.statistics.financial_volatility import (
+            financial_volatility_features,
+        )
+
+        closes = [float(kline.close) for kline in klines]
+        historical_returns = [
+            log(closes[index] / closes[index - 1])
+            for index in range(1, len(closes))
+            if closes[index - 1] > 0 and closes[index] > 0
+        ]
+        volatility_features = financial_volatility_features(historical_returns)
         financial_ml_features = {
             "composite_score": candidate.composite_score,
             "trend_strength": component_scores["trend_strength"],
@@ -1695,6 +1706,7 @@ class OpportunityScanner(AITOSModule):
             if candidate.entry_price > 0
             else 0.0,
             **event_features,
+            **volatility_features,
         }
         from dataclasses import replace as replace_candidate
 
