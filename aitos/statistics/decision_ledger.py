@@ -184,7 +184,9 @@ class DecisionOutcomeLedger:
                         row["label_resolution_time"],
                         row["outcome_provenance"],
                     ) != (
-                        value, outcome_at, body,
+                        value,
+                        outcome_at,
+                        body,
                         candidate_id or row["candidate_id"],
                         outcome_at,
                         provenance,
@@ -200,8 +202,13 @@ class DecisionOutcomeLedger:
                     label_resolution_time=?,outcome_provenance=?
                     WHERE decision_id=? AND outcome_value IS NULL""",
                     (
-                        value, outcome_at, body, candidate_id, outcome_at,
-                        provenance, row["decision_id"],
+                        value,
+                        outcome_at,
+                        body,
+                        candidate_id,
+                        outcome_at,
+                        provenance,
+                        row["decision_id"],
                     ),
                 )
                 updated += 1
