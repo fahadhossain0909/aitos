@@ -4,6 +4,7 @@ ClickHouse remains the analytical system of record. A fallback is selected
 only when a concrete adapter advertises every required capability and its
 connectivity probe succeeds; a healthy database alone is never sufficient.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
