@@ -16,6 +16,7 @@ from aitos.statistics.registry import StatisticalModelRegistry
 class FakeStore:
     def __init__(self, rows):
         self.rows = rows
+
     def query_closed_experiences(self, start, end, *, sources, limit):
         return [r for r in self.rows if start <= r["timestamp"] < end]
 
@@ -126,6 +127,7 @@ def test_approval_rejects_wrong_role_and_candidate_mismatch(tmp_path):
     token = service.issue_approval(identity, model_id="a-stat", model_version="2.0.0")
     bad = _evidence()
     from dataclasses import replace
+
     with pytest.raises(PermissionError, match="does not match"):
         service.approve_and_promote(
             identity, token, replace(bad, model_version="3.0.0")
