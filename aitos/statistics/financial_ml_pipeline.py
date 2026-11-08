@@ -1239,11 +1239,23 @@ class FinancialMLPipeline:
                     "SELECT COUNT(*) FROM financial_ml_artifacts WHERE active=1"
                 ).fetchone()[0]
             )
+            processed_events = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM financial_ml_processed_events"
+                ).fetchone()[0]
+            )
+            open_bar_states = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM financial_ml_event_bar_state"
+                ).fetchone()[0]
+            )
         return {
             "mode": self.mode,
             "enforce": self.enforce,
             "candidate_states": counts,
             "event_bars": bars,
+            "processed_market_events": processed_events,
+            "open_event_bar_states": open_bar_states,
             "active_oos_approved_artifacts": active,
             "artifact_version": self._artifact_version,
         }
