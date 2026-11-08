@@ -329,3 +329,22 @@ def test_candidate_snapshot_keeps_primary_direction_as_meta_feature(tmp_path):
 
         assert json.loads(row["features_json"])["side_sign"] == expected
     pipeline.close()
+
+
+def test_candidate_feature_snapshot_is_immutable_after_registration(tmp_path):
+    pipeline = FinancialMLPipeline(tmp_path / "financial-ml.sqlite3")
+    pipeline.register_candidate(
+        candidate_id="candidate-immutable-001",
+        symbol="BTCUSDT",
+        side="LONG",
+        entry_price=100,
+        volatility=0.01,
+        features=_features(5),
+    )
+    with pytest.raises(Exception, match="candidate snapshots are immutable"):
+        pipeline._conn.execute(
+            "UPDATE financial_ml_candidates SET features_json='{}' "
+            "WHERE candidate_id=?",
+            ("candidate-immutable-001",),
+        )
+    pipeline.close()
