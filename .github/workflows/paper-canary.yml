@@ -77,6 +77,17 @@ jobs:
       AITOS_TUNING_SCANNER_MIN_CONTRACT_AGE_DAYS: "0"
       AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY: "1"
       AITOS_TUNING_HARDWARE_CPU_WORKER_BUDGET: "2"
+      # Exercise the validated, telemetry-only Hawkes bootstrap on one liquid
+      # symbol. OOS-rejected/insufficient fits remain unregistered and cannot
+      # affect scanner scores or paper entries.
+      AITOS_HAWKES_ENABLED: "true"
+      AITOS_HAWKES_SYMBOLS: BTCUSDT
+      AITOS_HAWKES_SAMPLE_LIMIT: "1000"
+      AITOS_HAWKES_MIN_EVENTS: "200"
+      AITOS_HAWKES_MIN_MARK_EVENTS: "20"
+      AITOS_HAWKES_HOLDOUT_FRACTION: "0.2"
+      AITOS_HAWKES_MIN_OOS_GAIN_PER_EVENT: "0"
+      AITOS_HAWKES_MAX_ITERATIONS: "80"
     steps:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-python@v7.0.0
@@ -148,6 +159,10 @@ jobs:
           missing = sorted(required - subscribed)
           assert not missing, f"live trade subscription missing symbols: {missing}; got {sorted(subscribed)}"
           scanner_details = scanner.get("details", {})
+          ledger = scanner_details.get("decision_outcome_ledger", {})
+          assert int(ledger.get("decisions_total", 0) or 0) > 0, (
+              f"scanner produced no durable decision attribution: {ledger}"
+          )
           live_state_count = int(scanner_details.get("live_state_symbols", 0) or 0)
           live_state_symbols = {
               str(symbol).upper()
@@ -196,8 +211,12 @@ jobs:
               "ranked candidate kline/deep-book coverage diverged: "
               f"klines={sorted(selected_klines)}, books={sorted(deep_symbols)}"
           )
+          hawkes_models = scanner_details.get("hawkes_models", {})
           print(json.dumps({
               "status": health["status"],
+              "decision_outcome_ledger": ledger,
+              "hawkes_models": hawkes_models,
+              "live_hawkes": scanner_details.get("live_hawkes", {}),
               "live_trade_symbols": sorted(subscribed),
               "live_state_symbols": live_state_count,
               "live_trade_events_by_symbol": trade_events_by_symbol,
@@ -208,7 +227,25 @@ jobs:
           }, indent=2))
           PY
           test "$(grep -c "scan cycle complete" paper-canary.log)" -ge 2
-          grep -E "scan cycle complete|scanner market-data stage reached|live trade subscription reconfigured|staged scan complete" paper-canary.log | tail -n 120 || true
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          records = []
+          for line in Path("paper-canary.log").read_text(errors="replace").splitlines():
+              try:
+                  record = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if record.get("message") == "A-Stat Hawkes bootstrap completed":
+                  records.extend(record.get("results", []))
+          assert records, "opt-in Hawkes bootstrap did not report a per-symbol result"
+          btc = next((item for item in records if item.get("symbol") == "BTCUSDT"), None)
+          assert btc is not None, f"BTC Hawkes bootstrap result missing: {records}"
+          assert btc.get("status") in {"accepted", "rejected", "skipped"}, btc
+          print(json.dumps({"hawkes_bootstrap": btc}, indent=2))
+          PY
+          grep -E "scan cycle complete|scanner market-data stage reached|live trade subscription reconfigured|staged scan complete|A-Stat Hawkes bootstrap completed" paper-canary.log | tail -n 120 || true
       - name: Stop paper runtime and verify graceful shutdown
         if: always()
         shell: bash
