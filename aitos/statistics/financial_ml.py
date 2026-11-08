@@ -6,6 +6,7 @@ meta-label classifier. Labels must never be joined to features before their
 label_end timestamp; fit only on purged, chronological training folds.
 Nothing here submits orders or overrides primary strategy/risk controls.
 """
+
 from __future__ import annotations
 
 import math
@@ -176,7 +177,9 @@ def fractional_difference(
         if width < required:
             output.append(None)
             continue
-        output.append(sum(weights[offset] * xs[index - offset] for offset in range(width)))
+        output.append(
+            sum(weights[offset] * xs[index - offset] for offset in range(width))
+        )
     return tuple(output)
 
 
@@ -191,9 +194,16 @@ class BarrierObservation:
     def __post_init__(self) -> None:
         if not self.timestamp:
             raise ValueError("timestamp is required")
-        values = tuple(_finite(getattr(self, name), name) for name in ("open", "high", "low", "close"))
+        values = tuple(
+            _finite(getattr(self, name), name)
+            for name in ("open", "high", "low", "close")
+        )
         opening, high, low, close = values
-        if min(values) <= 0 or high < max(opening, close, low) or low > min(opening, close, high):
+        if (
+            min(values) <= 0
+            or high < max(opening, close, low)
+            or low > min(opening, close, high)
+        ):
             raise ValueError("invalid OHLC bar")
 
 
@@ -241,9 +251,10 @@ def triple_barrier_labels(
         raise ValueError("bars and positive max_holding_bars are required")
     if min(profit_take, stop_loss) <= 0:
         raise ValueError("barrier multiples must be positive")
-    costs = tuple(_finite(x, "cost") for x in (
-        entry_fee_bps, exit_fee_bps, slippage_bps, funding_bps_per_bar
-    ))
+    costs = tuple(
+        _finite(x, "cost")
+        for x in (entry_fee_bps, exit_fee_bps, slippage_bps, funding_bps_per_bar)
+    )
     if any(value < 0 for value in costs):
         raise ValueError("costs must be non-negative")
     fee_entry, fee_exit, slip, funding = costs
@@ -268,12 +279,8 @@ def triple_barrier_labels(
         barrier = "vertical"
         for cursor in range(index + 1, end + 1):
             bar = bars[cursor]
-            stop_hit = (
-                bar.low <= lower_price if side == 1 else bar.high >= upper_price
-            )
-            take_hit = (
-                bar.high >= upper_price if side == 1 else bar.low <= lower_price
-            )
+            stop_hit = bar.low <= lower_price if side == 1 else bar.high >= upper_price
+            take_hit = bar.high >= upper_price if side == 1 else bar.low <= lower_price
             if stop_hit:
                 exit_price, end, barrier = lower_price, cursor, "stop"
                 break
@@ -284,12 +291,20 @@ def triple_barrier_labels(
         total_cost_bps = fee_entry + fee_exit + slip + funding * (end - index)
         net = gross - total_cost_bps / 10_000.0
         label = 1 if net > 0 else (-1 if net < 0 else 0)
-        results.append(TripleBarrierLabel(
-            event_index=index, end_index=end,
-            start_timestamp=bars[index].timestamp, end_timestamp=bars[end].timestamp,
-            side=side, label=label, gross_return=gross, net_return=net,
-            barrier=barrier, holding_bars=end - index,
-        ))
+        results.append(
+            TripleBarrierLabel(
+                event_index=index,
+                end_index=end,
+                start_timestamp=bars[index].timestamp,
+                end_timestamp=bars[end].timestamp,
+                side=side,
+                label=label,
+                gross_return=gross,
+                net_return=net,
+                barrier=barrier,
+                holding_bars=end - index,
+            )
+        )
     return tuple(results)
 
 
@@ -309,7 +324,9 @@ class MetaLabeler:
     Standardization and model coefficients are learned from training data only.
     """
 
-    def __init__(self, *, learning_rate: float = 0.05, l2: float = 1e-3, epochs: int = 1000):
+    def __init__(
+        self, *, learning_rate: float = 0.05, l2: float = 1e-3, epochs: int = 1000
+    ):
         if not math.isfinite(learning_rate) or learning_rate <= 0:
             raise ValueError("learning_rate must be positive")
         if not math.isfinite(l2) or l2 < 0 or epochs <= 0:
@@ -324,8 +341,12 @@ class MetaLabeler:
         self.fitted = False
 
     @staticmethod
-    def _matrix(features: Sequence[Sequence[float]], labels: Sequence[int] | None = None):
-        rows = tuple(tuple(_finite(value, "feature") for value in row) for row in features)
+    def _matrix(
+        features: Sequence[Sequence[float]], labels: Sequence[int] | None = None
+    ):
+        rows = tuple(
+            tuple(_finite(value, "feature") for value in row) for row in features
+        )
         if not rows or not rows[0] or any(len(row) != len(rows[0]) for row in rows):
             raise ValueError("features must be a non-empty rectangular matrix")
         if labels is not None and (
@@ -342,7 +363,9 @@ class MetaLabeler:
         z = math.exp(max(value, -700.0))
         return z / (1.0 + z)
 
-    def fit(self, features: Sequence[Sequence[float]], labels: Sequence[int]) -> "MetaLabeler":
+    def fit(
+        self, features: Sequence[Sequence[float]], labels: Sequence[int]
+    ) -> "MetaLabeler":
         rows = self._matrix(features, labels)
         ys = tuple(int(value) for value in labels)
         if len(set(ys)) != 2:
@@ -364,31 +387,41 @@ class MetaLabeler:
             grad = [0.0] * width
             bias_grad = 0.0
             for row, target in zip(standardized, ys):
-                probability = self._sigmoid(intercept + sum(w * x for w, x in zip(weights, row)))
+                probability = self._sigmoid(
+                    intercept + sum(w * x for w, x in zip(weights, row))
+                )
                 error = probability - target
                 bias_grad += error
                 for col, value in enumerate(row):
                     grad[col] += error * value
             intercept -= self.learning_rate * bias_grad / count
             for col in range(width):
-                weights[col] -= self.learning_rate * (grad[col] / count + self.l2 * weights[col])
+                weights[col] -= self.learning_rate * (
+                    grad[col] / count + self.l2 * weights[col]
+                )
         self.means, self.scales = means, scales
         self.coefficients, self.intercept = tuple(weights), intercept
         self.fitted = True
         return self
 
-    def predict_probability(self, features: Sequence[Sequence[float]]) -> tuple[float, ...]:
+    def predict_probability(
+        self, features: Sequence[Sequence[float]]
+    ) -> tuple[float, ...]:
         if not self.fitted:
             raise RuntimeError("meta-labeler must be fitted before prediction")
         rows = self._matrix(features)
         if len(rows[0]) != len(self.coefficients):
             raise ValueError("feature width differs from fitted model")
-        return tuple(self._sigmoid(
-            self.intercept + sum(
-                weight * ((value - self.means[index]) / self.scales[index])
-                for index, (weight, value) in enumerate(zip(self.coefficients, row))
+        return tuple(
+            self._sigmoid(
+                self.intercept
+                + sum(
+                    weight * ((value - self.means[index]) / self.scales[index])
+                    for index, (weight, value) in enumerate(zip(self.coefficients, row))
+                )
             )
-        ) for row in rows)
+            for row in rows
+        )
 
     def predict(
         self, features: Sequence[Sequence[float]], *, threshold: float = 0.5
@@ -431,7 +464,9 @@ def sequential_bootstrap_indices(
     for _ in range(count):
         uniqueness = []
         for start, end in intervals:
-            score = mean(1.0 / (concurrency.get(tick, 0) + 1) for tick in range(start, end + 1))
+            score = mean(
+                1.0 / (concurrency.get(tick, 0) + 1) for tick in range(start, end + 1)
+            )
             uniqueness.append(score)
         total = sum(uniqueness)
         if total <= _EPS:
