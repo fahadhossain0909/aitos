@@ -175,22 +175,27 @@ jobs:
           set -uo pipefail
           if [ -f paper-canary.pid ]; then
             pid="$(cat paper-canary.pid)"
-            if kill -0 "$pid" 2>/dev/null; then
+            runtime_alive() {
+              local process_state
+              process_state="$(ps -o stat= -p "$pid" 2>/dev/null | tr -d ' ')"
+              [ -n "$process_state" ] && [[ "$process_state" != Z* ]]
+            }
+            if runtime_alive; then
               kill -INT "$pid" 2>/dev/null || true
               for attempt in $(seq 1 30); do
-                kill -0 "$pid" 2>/dev/null || break
+                runtime_alive || break
                 sleep 2
               done
             fi
-            if kill -0 "$pid" 2>/dev/null; then
+            if runtime_alive; then
               echo "SIGINT grace period expired; escalating to SIGTERM"
               kill -TERM "$pid" 2>/dev/null || true
               for attempt in $(seq 1 10); do
-                kill -0 "$pid" 2>/dev/null || break
+                runtime_alive || break
                 sleep 2
               done
             fi
-            if kill -0 "$pid" 2>/dev/null; then
+            if runtime_alive; then
               echo "paper runtime did not stop after SIGTERM; sending SIGKILL"
               kill -KILL "$pid" 2>/dev/null || true
             fi
