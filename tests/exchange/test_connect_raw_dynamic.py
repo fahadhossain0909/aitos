@@ -938,10 +938,9 @@ async def test_subscription_change_during_handshake_is_not_lost():
     changed.set()
     handshake_release.set()
     await wait_state(adapter, "connected")
-    recv_event.set()
     await asyncio.sleep(0.15)
 
-    subscribe_calls = [
+    subscribe_calls = 
         call
         for call in ws.send.call_args_list
         if json.loads(call.args[0]).get("method") == "SUBSCRIBE"
