@@ -183,6 +183,25 @@ async def test_postgres_market_and_journal_round_trip():
         assert len(await journal.get_journal_entries_for_trade(trade_id)) == 1
         recovered_decisions = await journal.get_records(decision_id)
         assert sum(row["record_type"] == "DECISION" for row in recovered_decisions) == 1
+
+        # A database created by a newer application build must fail closed.
+        async with journal._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO aitos_schema_migrations (version, name, checksum)
+                VALUES (999, 'future_migration', repeat('0', 64))
+                """
+            )
+        future_probe = PostgresJournalRepository(dsn)
+        try:
+            with pytest.raises(RuntimeError, match="newer than this AITOS build"):
+                await future_probe.initialize({})
+        finally:
+            await future_probe.shutdown()
+            async with journal._pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM aitos_schema_migrations WHERE version = 999"
+                )
     finally:
         if market._pool is not None:
             async with market._pool.acquire() as conn:
