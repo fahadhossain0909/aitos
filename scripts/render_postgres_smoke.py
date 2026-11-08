@@ -1,34 +1,20 @@
-"""Temporary, authenticated Render PostgreSQL connectivity smoke service."""
+"""Temporary Render health endpoint that verifies PostgreSQL read/write access."""
 
 from __future__ import annotations
 
 import asyncio
-import hmac
 import json
 import os
-import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
 
-async def _connect_and_ping() -> None:
-    import asyncpg
-
-    dsn = os.environ["DATABASE_URL"]
-    conn = await asyncpg.connect(dsn=dsn, timeout=8)
-    try:
-        await conn.fetchval("SELECT 1")
-    finally:
-        await conn.close()
-
-
 async def _write_and_read() -> dict[str, Any]:
     import asyncpg
 
-    dsn = os.environ["DATABASE_URL"]
-    conn = await asyncpg.connect(dsn=dsn, timeout=8)
-    key = f"render-smoke:{uuid.uuid4().hex}"
+    conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"], timeout=8)
+    key = "render-smoke:health-check"
     payload = {"check": "postgres_write_read", "status": "ok"}
     try:
         await conn.execute(
@@ -78,31 +64,17 @@ class Handler(BaseHTTPRequestHandler):
             self._respond(404, {"status": "not_found"})
             return
         try:
-            asyncio.run(_connect_and_ping())
-            self._respond(200, {"status": "ok", "database": "reachable"})
+            result = asyncio.run(_write_and_read())
+            self._respond(
+                200,
+                {"status": "ok", "database": "reachable", "write_read": result},
+            )
         except Exception as exc:
             print(f"PostgreSQL smoke health failed: {type(exc).__name__}")
             self._respond(503, {"status": "unavailable"})
 
-    def do_POST(self) -> None:
-        if urlparse(self.path).path != "/verify":
-            self._respond(404, {"status": "not_found"})
-            return
-        expected = os.environ.get("SMOKE_TOKEN", "")
-        supplied = self.headers.get("Authorization", "")
-        authorization = f"Bearer {expected}"
-        if not expected or not hmac.compare_digest(supplied, authorization):
-            self._respond(403, {"status": "forbidden"})
-            return
-        try:
-            result = asyncio.run(_write_and_read())
-            self._respond(200, {"status": "ok", "result": result})
-        except Exception as exc:
-            print(f"PostgreSQL smoke write/read failed: {type(exc).__name__}")
-            self._respond(503, {"status": "write_read_failed"})
-
     def log_message(self, format: str, *args: Any) -> None:
-        # Avoid logging headers, tokens, query strings, or database details.
+        # Avoid logging headers, query strings, or database details.
         print(
             f"HTTP {self.command} {urlparse(self.path).path} "
             f"{args[1] if len(args) > 1 else ''}"
