@@ -244,6 +244,12 @@ class FinancialMLPipeline:
             CREATE TRIGGER IF NOT EXISTS financial_ml_event_bars_no_delete
             BEFORE DELETE ON financial_ml_event_bars
             BEGIN SELECT RAISE(ABORT, 'financial ML event bars are append-only'); END;
+            CREATE TABLE IF NOT EXISTS financial_ml_processed_events (
+                symbol TEXT NOT NULL,
+                event_id TEXT NOT NULL,
+                processed_at TEXT NOT NULL,
+                PRIMARY KEY(symbol,event_id)
+            );
             CREATE TABLE IF NOT EXISTS financial_ml_event_bar_state (
                 symbol TEXT NOT NULL,
                 bar_type TEXT NOT NULL,
@@ -378,6 +384,15 @@ class FinancialMLPipeline:
         with self._lock:
             self._conn.execute("BEGIN IMMEDIATE")
             try:
+                if event.event_id is not None:
+                    duplicate = self._conn.execute(
+                        "SELECT 1 FROM financial_ml_processed_events "
+                        "WHERE symbol=? AND event_id=?",
+                        (key, str(event.event_id)),
+                    ).fetchone()
+                    if duplicate is not None:
+                        self._conn.execute("COMMIT")
+                        return {"volume": 0, "dollar": 0, "imbalance": 0}
                 for bar_type, threshold, increment in specs:
                     row = self._conn.execute(
                         """SELECT * FROM financial_ml_event_bar_state
@@ -471,6 +486,12 @@ class FinancialMLPipeline:
                             ),
                         )
                         output[bar_type] = 0
+                if event.event_id is not None:
+                    self._conn.execute(
+                        """INSERT INTO financial_ml_processed_events
+                        (symbol,event_id,processed_at) VALUES (?,?,?)""",
+                        (key, str(event.event_id), event.timestamp),
+                    )
                 self._conn.execute("COMMIT")
             except Exception:
                 self._conn.execute("ROLLBACK")
