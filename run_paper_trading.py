@@ -315,13 +315,14 @@ async def _start_optional_statistical_drift_monitor(
         if webhook_url
         else LoggingDriftAlertSink()
     )
+    interval_seconds = float(
+        os.getenv("AITOS_STATISTICAL_DRIFT_INTERVAL_SECONDS", "300")
+    )
     engine = scanner._a_stat_bridge.engine
     await engine.start_drift_monitor(
         governance,
         provider,
-        interval_seconds=float(
-            os.getenv("AITOS_STATISTICAL_DRIFT_INTERVAL_SECONDS", "300")
-        ),
+        interval_seconds=interval_seconds,
         alert_callback=alert_sink,
     )
     cleanup.push_async_callback(engine.stop_drift_monitor)
@@ -331,7 +332,7 @@ async def _start_optional_statistical_drift_monitor(
             "aitos_extra": {
                 "features": list(feature_names),
                 "sources": list(provider.sources),
-                "interval_seconds": provider.window.total_seconds(),
+                "interval_seconds": interval_seconds,
                 "min_observations": provider.min_observations,
                 "alert_sink": "webhook" if webhook_url else "structured_log",
                 "promotion_policy": "operator_approval_required",
