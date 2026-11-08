@@ -127,16 +127,16 @@ def test_engine_drift_shutdown_clears_state_after_provider_failure(tmp_path):
 
     async def exercise():
         await engine.start_drift_monitor(runtime, broken_provider, interval_seconds=1)
-        await asyncio.sleep(0)
-        try:
-            await engine.stop_drift_monitor()
-        except RuntimeError as exc:
-            assert "feature store unavailable" in str(exc)
-        else:
-            raise AssertionError("provider failure should propagate during shutdown")
+        await asyncio.sleep(0.05)
+        # Provider failures are fail-closed and retried; they must not kill the
+        # managed worker or escape from cooperative shutdown.
+        await engine.stop_drift_monitor()
+        assert engine._drift_monitor_task is None
+        assert engine._drift_monitor_scheduler is None
 
-        # A failed worker must not leave a stale task handle that blocks restart.
+        # A recovered provider can start a fresh managed worker after shutdown.
         await engine.start_drift_monitor(runtime, healthy_provider, interval_seconds=1)
         await engine.stop_drift_monitor()
+        assert engine._drift_monitor_task is None
 
     asyncio.run(exercise())
