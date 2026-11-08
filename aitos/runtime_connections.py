@@ -83,15 +83,15 @@ async def connect_clickhouse_repositories(settings, *, logger):
         and fallback_name != primary_name
     )
     postgres_url = getattr(storage, "postgres_url", "") if storage else ""
-    require_analytics = bool(
-        getattr(storage, "require_clickhouse_analytics", True)
-    )
+    require_analytics = bool(getattr(storage, "require_clickhouse_analytics", True))
 
     market_repo = None
     market_backend = StorageBackend(primary_name)
     if market_backend is StorageBackend.POSTGRES:
         if not postgres_url:
-            logger.error("PostgreSQL is primary but AITOS_STORAGE_POSTGRES_URL is empty")
+            logger.error(
+                "PostgreSQL is primary but AITOS_STORAGE_POSTGRES_URL is empty"
+            )
             raise SystemExit(1)
         if require_analytics:
             logger.error(
