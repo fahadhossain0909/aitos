@@ -15,6 +15,7 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Mapping, Sequence
+from itertools import chain
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -77,7 +78,7 @@ class ClickHouseDriftFeatureBatchProvider:
         reference: dict[str, list[float]] = {}
         current: dict[str, list[float]] = {}
         latest_current = None
-        for row in (*reference_rows, *current_rows):
+        for row in chain(reference_rows, current_rows):
             timestamp = row.get("timestamp")
             if isinstance(timestamp, str):
                 timestamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
@@ -215,13 +216,16 @@ class OperatorApprovalService:
         self.allowed_issuers = frozenset(allowed_issuers)
         self.approver_roles = frozenset(approver_roles)
         self.token_ttl_seconds = token_ttl_seconds
-        with self._connect() as db:
+        db = self._connect()
+        try:
             db.execute("""CREATE TABLE IF NOT EXISTS operator_approval_nonces (
                 nonce_hash TEXT PRIMARY KEY, issuer TEXT NOT NULL, subject TEXT NOT NULL,
                 model_id TEXT NOT NULL, model_version TEXT NOT NULL,
                 artifact_sha256 TEXT NOT NULL, expires_at INTEGER NOT NULL,
                 consumed_at INTEGER, decision_json TEXT
             )""")
+        finally:
+            db.close()
 
     def _connect(self):
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
