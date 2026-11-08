@@ -40,7 +40,9 @@ async def _fetch_clickhouse_rows(
     return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
 
-def _record(record_type: str, entity_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _record(
+    record_type: str, entity_id: str, payload: dict[str, Any]
+) -> dict[str, Any]:
     return {
         "record_type": record_type,
         "entity_id": str(entity_id),
@@ -178,9 +180,7 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]
         payload = _payload(row["payload"])
         if record_type == "LIVE_ANALYTICS":
             payload["event_time"] = row["event_time"]
-            payload["event_id"] = row["idempotency_key"].removeprefix(
-                "live-analytics:"
-            )
+            payload["event_id"] = row["idempotency_key"].removeprefix("live-analytics:")
         elif record_type == "DEPTH_EVENT":
             payload["event_time"] = row["event_time"]
         pg_records.setdefault(record_type, []).append(
