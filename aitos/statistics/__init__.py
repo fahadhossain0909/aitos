@@ -40,6 +40,15 @@ from .experiments import (
     SymbolRegimeExperimentResult,
     run_symbol_regime_walk_forward,
 )
+from .financial_volatility import (
+    JumpDiffusionEstimate,
+    RoughVolatilityEstimate,
+    StochasticVolatilityEstimate,
+    estimate_jump_diffusion,
+    estimate_rough_volatility,
+    estimate_stochastic_volatility,
+    financial_volatility_features,
+)
 from .financial_ml_pipeline import (
     FinancialMLPipeline,
     FinancialMLPrediction,
@@ -208,6 +217,13 @@ __all__ = [
     "GaussianHSMM",
     "HSMMParameters",
     "HSMMResult",
+    "JumpDiffusionEstimate",
+    "RoughVolatilityEstimate",
+    "StochasticVolatilityEstimate",
+    "estimate_jump_diffusion",
+    "estimate_rough_volatility",
+    "estimate_stochastic_volatility",
+    "financial_volatility_features",
     "FinancialMLPipeline",
     "FinancialMLPrediction",
     "FinancialMLTrainingReport",
