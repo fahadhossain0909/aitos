@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 from aitos.statistics.financial_ml import MarketEvent
 from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
@@ -114,11 +116,13 @@ def test_executed_candidate_is_not_resolved_from_counterfactual_ticks(tmp_path):
 def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(
     tmp_path,
 ):
+    database = tmp_path / "financial-ml.sqlite3"
     pipeline = FinancialMLPipeline(
-        tmp_path / "financial-ml.sqlite3",
+        database,
         min_training_samples=50,
         min_oos_samples=20,
     )
+    observer = FinancialMLPipeline(database, mode="shadow")
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     for index in range(80):
         candidate_id = f"candidate-{index:03d}"
@@ -164,6 +168,12 @@ def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(
     assert active == 0
     if report.passed_oos:
         artifact_id = pipeline._pending_artifact_id
+        with pytest.raises(PermissionError):
+            pipeline.approve_artifact(
+                artifact_id,
+                approved_by="test-operator",
+                rationale="Approved after reviewing chronological OOS evidence.",
+            )
         assert pipeline.approve_artifact(
             artifact_id,
             approved_by="test-operator",
@@ -175,7 +185,10 @@ def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(
             ),
         )
         assert pipeline.snapshot()["active_oos_approved_artifacts"] == 1
+        refreshed = observer.predict("candidate-live-refresh", _features(9))
+        assert refreshed.calibrated_probability is not None
     pipeline.close()
+    observer.close()
 
 
 def test_enforce_mode_fails_closed_without_approved_artifact(tmp_path):
