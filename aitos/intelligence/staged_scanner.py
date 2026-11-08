@@ -211,9 +211,7 @@ async def install_staged_scan(
 
         scanner._lightweight_rank_symbols = _rank_and_subscribe
 
-    original_iter_candidate_batches = getattr(
-        scanner, "iter_candidate_batches", None
-    )
+    original_iter_candidate_batches = getattr(scanner, "iter_candidate_batches", None)
     if callable(original_iter_candidate_batches):
 
         async def _iter_candidate_batches_with_subscriptions(
