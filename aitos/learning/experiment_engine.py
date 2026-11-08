@@ -360,6 +360,16 @@ class ExperimentEngine:
                     seed=0,
                 )
                 statistical_validation[f"{regime}|{cost.name}"] = asdict(family_report)
+        if statistical_validation:
+            for family_result in statistical_validation.values():
+                reality_check = family_result["reality_check"]
+                if float(reality_check["p_value"]) >= 0.05:
+                    passed = False
+                adjusted = family_result["adjusted_p_values"]
+                if adjusted is not None and not any(
+                    bool(value) for value in adjusted["rejected"].values()
+                ):
+                    passed = False
         dataset_fingerprint = hashlib.sha256(
             json.dumps(
                 [self._event_payload(event) for event in ordered],
