@@ -269,8 +269,8 @@ class OperatorApprovalService:
                 """CREATE TABLE IF NOT EXISTS operator_approval_nonces (
                 nonce_hash TEXT PRIMARY KEY, issuer TEXT NOT NULL, subject TEXT NOT NULL,
                 model_id TEXT NOT NULL, model_version TEXT NOT NULL,
-                artifact_sha256 TEXT NOT NULL, expires_at INTEGER NOT NULL,
-                consumed_at INTEGER, decision_json TEXT
+                artifact_sha256 TEXT NOT NULL, approval_reason TEXT NOT NULL,
+                expires_at INTEGER NOT NULL, consumed_at INTEGER, decision_json TEXT
             )"""
             )
         finally:
@@ -308,9 +308,12 @@ class OperatorApprovalService:
         *,
         model_id: str,
         model_version: str,
+        reason: str,
         now: int | None = None,
     ) -> str:
         self._validate_identity(identity)
+        if not isinstance(reason, str) or not 8 <= len(reason.strip()) <= 500:
+            raise ValueError("approval reason must contain 8 to 500 characters")
         artifact = self._candidate(model_id, model_version)
         issued = int(time.time() if now is None else now)
         nonce = secrets.token_urlsafe(24)
@@ -320,6 +323,7 @@ class OperatorApprovalService:
             "model_id": model_id,
             "model_version": model_version,
             "artifact_sha256": artifact.artifact_sha256,
+            "reason": reason.strip(),
             "iat": issued,
             "exp": issued + self.token_ttl_seconds,
             "nonce": nonce,
@@ -337,8 +341,8 @@ class OperatorApprovalService:
         try:
             db.execute(
                 "INSERT INTO operator_approval_nonces "
-                "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,expires_at) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "(nonce_hash,issuer,subject,model_id,model_version,artifact_sha256,"
+                "approval_reason,expires_at) VALUES (?,?,?,?,?,?,?,?)",
                 (
                     nonce_hash,
                     identity.issuer,
@@ -346,6 +350,7 @@ class OperatorApprovalService:
                     model_id,
                     model_version,
                     artifact.artifact_sha256,
+                    payload["reason"],
                     payload["exp"],
                 ),
             )
@@ -391,7 +396,7 @@ class OperatorApprovalService:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute(
                 "SELECT issuer,subject,model_id,model_version,artifact_sha256,"
-                "expires_at,consumed_at FROM operator_approval_nonces "
+                "approval_reason,expires_at,consumed_at FROM operator_approval_nonces "
                 "WHERE nonce_hash=?",
                 (nonce_hash,),
             ).fetchone()
@@ -402,8 +407,9 @@ class OperatorApprovalService:
                 or row[2] != payload["model_id"]
                 or row[3] != payload["model_version"]
                 or row[4] != artifact.artifact_sha256
-                or row[5] < now
-                or row[6] is not None
+                or row[5] != payload.get("reason")
+                or row[6] < now
+                or row[7] is not None
             ):
                 raise PermissionError(
                     "approval nonce is invalid, expired or already consumed"
