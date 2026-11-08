@@ -109,7 +109,6 @@ def test_drift_scheduler_respects_cadence_and_deduplicates_alerts(tmp_path):
     assert len(alerts) == 1
 
 
-
 def test_engine_drift_shutdown_clears_state_after_provider_failure(tmp_path):
     import asyncio
 
