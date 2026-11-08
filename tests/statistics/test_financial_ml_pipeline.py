@@ -409,3 +409,35 @@ def test_legacy_candidate_expiry_is_migrated_before_immutability_trigger(tmp_pat
             ("2026-01-01T00:00:00+00:00", "candidate-legacy-expiry"),
         )
     pipeline.close()
+
+
+def test_live_trade_event_ids_make_event_bar_ingestion_idempotent(tmp_path):
+    pipeline = FinancialMLPipeline(
+        tmp_path / "financial-ml.sqlite3",
+        volume_bar_threshold=2,
+        dollar_bar_threshold=20,
+        imbalance_bar_threshold=2,
+    )
+    first = MarketEvent(
+        "2026-01-01T00:00:00+00:00", 10, 1, 1, event_id="BTCUSDT:100"
+    )
+    second = MarketEvent(
+        "2026-01-01T00:00:01+00:00", 10, 1, 1, event_id="BTCUSDT:101"
+    )
+    assert pipeline.ingest_market_event("BTCUSDT", first) == {
+        "volume": 0,
+        "dollar": 0,
+        "imbalance": 0,
+    }
+    assert pipeline.ingest_market_event("BTCUSDT", first) == {
+        "volume": 0,
+        "dollar": 0,
+        "imbalance": 0,
+    }
+    assert pipeline.ingest_market_event("BTCUSDT", second) == {
+        "volume": 1,
+        "dollar": 1,
+        "imbalance": 1,
+    }
+    assert pipeline.snapshot()["event_bars"] == 3
+    pipeline.close()
