@@ -142,7 +142,6 @@ def test_engine_drift_shutdown_clears_state_after_provider_failure(tmp_path):
     asyncio.run(exercise())
 
 
-
 def test_provider_failure_marks_drift_unavailable_and_blocks_promotion(tmp_path):
     import asyncio
     import threading
