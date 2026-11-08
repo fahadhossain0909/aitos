@@ -155,6 +155,7 @@ class DriftMonitorScheduler:
 
     async def run_once(self, reference, current, *, now=None):
         """Run one due check; return None when cadence has not elapsed."""
+        import asyncio
         import inspect
         from datetime import datetime, timezone
 
@@ -176,9 +177,16 @@ class DriftMonitorScheduler:
                 round(action.report.max_psi, 6),
             )
             if fingerprint != self._last_alert_fingerprint and self.alert_callback:
-                result = self.alert_callback(action)
-                if inspect.isawaitable(result):
-                    await result
+                callback = self.alert_callback
+                is_async_callback = inspect.iscoroutinefunction(
+                    callback
+                ) or inspect.iscoroutinefunction(getattr(callback, "__call__", None))
+                if is_async_callback:
+                    await callback(action)
+                else:
+                    result = await asyncio.to_thread(callback, action)
+                    if inspect.isawaitable(result):
+                        await result
             self._last_alert_fingerprint = fingerprint
         return action
 
@@ -195,7 +203,15 @@ class DriftMonitorScheduler:
 
         while not stop_event.is_set():
             try:
-                batches = batch_provider()
+                is_async_provider = inspect.iscoroutinefunction(
+                    batch_provider
+                ) or inspect.iscoroutinefunction(
+                    getattr(batch_provider, "__call__", None)
+                )
+                if is_async_provider:
+                    batches = await batch_provider()
+                else:
+                    batches = await asyncio.to_thread(batch_provider)
                 if inspect.isawaitable(batches):
                     batches = await batches
                 reference, current = batches
