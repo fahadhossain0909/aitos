@@ -286,12 +286,8 @@ def triple_barrier_labels(
             # Opening gaps are filled at the observed open, not at an
             # unreachable barrier price. Intrabar double touches remain
             # conservatively stop-first because OHLC has no path ordering.
-            stop_gap = (
-                bar.open <= lower_price if side == 1 else bar.open >= upper_price
-            )
-            take_gap = (
-                bar.open >= upper_price if side == 1 else bar.open <= lower_price
-            )
+            stop_gap = bar.open <= lower_price if side == 1 else bar.open >= upper_price
+            take_gap = bar.open >= upper_price if side == 1 else bar.open <= lower_price
             if stop_gap:
                 exit_price, end, barrier = bar.open, cursor, "stop"
                 break
