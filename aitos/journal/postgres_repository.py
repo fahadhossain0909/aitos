@@ -267,7 +267,11 @@ class PostgresJournalRepository:
         self._require_initialized()
         recorded_at = datetime.now(timezone.utc)
         encoded = json.dumps(
-            payload, sort_keys=True, default=str, separators=(",", ":")
+            payload,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+            allow_nan=False,
         )
         async with self._pool.acquire() as conn:
             await conn.execute(
