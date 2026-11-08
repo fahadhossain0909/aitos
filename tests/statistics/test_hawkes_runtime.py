@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import math
 
 import pytest
 
@@ -161,7 +162,7 @@ def test_hawkes_oos_gain_integrates_excitation_only_over_holdout_window():
     for timestamp, mark in zip(train_times, train_marks):
         online.observe(timestamp, mark)
     event_log_likelihood = sum(
-        __import__("math").log(
+        math.log(
             online.observe(timestamp, mark).intensities[mark]
         )
         for timestamp, mark in zip(holdout_times, holdout_marks)
@@ -170,7 +171,7 @@ def test_hawkes_oos_gain_integrates_excitation_only_over_holdout_window():
     counts = [train_marks.count(mark) for mark in (0, 1)]
     baseline = [count / boundary for count in counts]
     poisson_log_likelihood = sum(
-        __import__("math").log(baseline[mark]) for mark in holdout_marks
+        math.log(baseline[mark]) for mark in holdout_marks
     )
 
     source_integrals = []
@@ -182,11 +183,11 @@ def test_hawkes_oos_gain_integrates_excitation_only_over_holdout_window():
             if mark != source or timestamp >= end:
                 continue
             at_boundary = (
-                __import__("math").exp(-fit.decay * (boundary - timestamp))
+                math.exp(-fit.decay * (boundary - timestamp))
                 if timestamp < boundary
                 else 1.0
             )
-            at_end = __import__("math").exp(-fit.decay * (end - timestamp))
+            at_end = math.exp(-fit.decay * (end - timestamp))
             total += max(0.0, at_boundary - at_end)
         source_integrals.append(total)
     excitation_integral = sum(
