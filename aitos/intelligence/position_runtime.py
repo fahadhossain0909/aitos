@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import TYPE_CHECKING, Any
 
-from aitos.data.ingestion import DataIngestionService
 from aitos.intelligence.exit_intelligence import ExitAction
 from aitos.intelligence.position_monitor import (
     PositionMonitorController,
@@ -18,6 +17,8 @@ from aitos.logging_setup import get_logger
 from aitos.telemetry.position_lifecycle import emit_position_event
 
 if TYPE_CHECKING:
+    from aitos.data.ingestion import DataIngestionService
+
     # Deferred to function-local imports in _install_lifecycle_wiring() and
     # _install_lifecycle_telemetry() below (the only two functions that
     # actually touch TradeLifecycle at runtime): importing it at module
@@ -126,6 +127,11 @@ _capital_policy_consensus = _capital_policy
 
 
 def _install_ingestion_guards() -> None:
+    # Import only after the package-level import graph has completed. Loading
+    # this at module import time closes a cycle when aitos.data.ingestion is
+    # itself the first import and it reaches aitos.intelligence.
+    from aitos.data.ingestion import DataIngestionService
+
     if getattr(DataIngestionService, "_aitos_position_runtime_installed", False):
         return
     original_init = DataIngestionService.__init__
@@ -713,9 +719,6 @@ def _install_lifecycle_wiring() -> None:
     TradeLifecycle._aitos_position_runtime_installed = True  # type: ignore[attr-defined]
 
 
-_install_ingestion_guards()
-
-
 def install_lifecycle_guards() -> None:
     """Public entry point for aitos/trading/__init__.py to call once
     TradeLifecycle and PositionManager are fully defined.
@@ -733,10 +736,11 @@ def install_lifecycle_guards() -> None:
     before aitos.trading -- importing aitos.trading, aitos.kernel, or
     aitos.trading.lifecycle directly, as the first import in a process,
     raised ImportError either way.
-    _install_ingestion_guards() only touches DataIngestionService (from
-    aitos.data.ingestion, unrelated to this cycle) so it's unaffected and
-    still runs above, at this module's own import time.
+    The ingestion guard is installed here too, after the package import graph
+    is complete, so importing aitos.data.ingestion first cannot recurse into
+    its own partially initialized module.
     """
+    _install_ingestion_guards()
     _install_position_monitor()
     _install_lifecycle_wiring()
     _install_lifecycle_telemetry()
