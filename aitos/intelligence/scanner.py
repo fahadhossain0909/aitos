@@ -1983,6 +1983,8 @@ class OpportunityScanner(AITOSModule):
             attribution_id = str(markout.get("attribution_id") or "")
             if not attribution_id:
                 continue
+            if self._financial_ml.has_candidate(str(attribution_id)):
+                continue
             existing = self._decision_outcome_ledger.list_decisions(
                 entity_id=attribution_id
             )
