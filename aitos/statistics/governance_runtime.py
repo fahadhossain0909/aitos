@@ -166,13 +166,13 @@ class DriftMonitorScheduler:
         self._last_alert_fingerprint: tuple | None = None
         self.last_run_at = None
 
-    async def _notify(self, action: DriftAction) -> None:
+    async def _notify(self, action: DriftAction) -> bool:
         """Deliver alerts without allowing a notification outage to kill monitoring."""
         import asyncio
         import inspect
 
         if self.alert_callback is None:
-            return
+            return True
         try:
             callback = self.alert_callback
             is_async_callback = inspect.iscoroutinefunction(
@@ -184,8 +184,10 @@ class DriftMonitorScheduler:
                 result = await asyncio.to_thread(callback, action)
                 if inspect.isawaitable(result):
                     await result
+            return True
         except Exception:
             logger.exception("statistical drift alert delivery failed")
+            return False
 
     async def run_once(self, reference, current, *, now=None):
         """Run one due check; return None when cadence has not elapsed."""
@@ -209,8 +211,9 @@ class DriftMonitorScheduler:
                 round(action.report.max_psi, 6),
             )
             if fingerprint != self._last_alert_fingerprint:
-                await self._notify(action)
-            self._last_alert_fingerprint = fingerprint
+                delivered = await self._notify(action)
+                if delivered:
+                    self._last_alert_fingerprint = fingerprint
         return action
 
     async def run_forever(self, stop_event, batch_provider) -> None:
@@ -247,8 +250,9 @@ class DriftMonitorScheduler:
                 )
                 fingerprint = ("UNAVAILABLE", action.reasons)
                 if fingerprint != self._last_alert_fingerprint:
-                    await self._notify(action)
-                self._last_alert_fingerprint = fingerprint
+                    delivered = await self._notify(action)
+                    if delivered:
+                        self._last_alert_fingerprint = fingerprint
                 logger.exception(
                     "statistical drift check unavailable; promotion remains blocked"
                 )
