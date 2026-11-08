@@ -949,7 +949,7 @@ class FinancialMLPipeline:
         )
         passed = (
             final_training_ready
-            len(oos_labels) >= self.min_oos_samples
+            and len(oos_labels) >= self.min_oos_samples
             and ece <= 0.15
             and precision > base_rate
             and mean_selected_return > 0.0
