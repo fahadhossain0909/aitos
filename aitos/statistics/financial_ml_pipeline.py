@@ -967,10 +967,39 @@ class FinancialMLPipeline:
         reason = (
             "oos_calibration_and_acceptance_passed"
             if passed
-            else "oos_acceptance_not_proven"
+            else (
+                "insufficient_final_training_data_before_holdout"
+                if not final_training_ready
+                else "oos_acceptance_not_proven"
+            )
         )
+        if not final_training_ready:
+            return FinancialMLTrainingReport(
+                False,
+                False,
+                samples,
+                used_folds,
+                len(oos_labels),
+                brier,
+                ece,
+                precision,
+                base_rate,
+                self.acceptance_threshold,
+                reason,
+                executed_oos_samples,
+                counterfactual_oos_samples,
+                accepted_executed_mean,
+                accepted_counterfactual_mean,
+                monte_carlo.probability_of_loss if monte_carlo else None,
+                monte_carlo.terminal_return_p05 if monte_carlo else None,
+                monte_carlo.max_drawdown_p95 if monte_carlo else None,
+                calibration_size,
+            )
         final_model = MetaLabeler(learning_rate=0.03, l2=0.01, epochs=800)
-        final_model.fit(features, labels)
+        final_model.fit(
+            [features[index] for index in final_train_indices],
+            [labels[index] for index in final_train_indices],
+        )
         artifact_id = (
             f"financial-ml-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
         )
@@ -978,6 +1007,8 @@ class FinancialMLPipeline:
             "model": self._model_to_dict(final_model),
             "calibrator": self._model_to_dict(calibrator),
             "feature_names": list(self.FEATURE_NAMES),
+            "final_training_samples": len(final_train_indices),
+            "holdout_start": evaluation_cutoff,
             "threshold": self.acceptance_threshold,
             "oos_samples": len(oos_labels),
             "calibration_samples": calibration_size,
