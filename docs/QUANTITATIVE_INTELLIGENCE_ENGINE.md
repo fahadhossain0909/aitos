@@ -299,12 +299,19 @@ lifecycle. The integration is additive and remains **shadow-first**.
 ### Phase E — statistical validation and multiple testing
 
 - Financial ML OOS reporting includes Brier score, ECE, OOS precision, base
-  rate and accepted-subset mean net return.
+  rate and accepted-subset mean net return. A 250-path circular-block Monte
+  Carlo stress is also run on accepted OOS returns with an additional 5 bps
+  per-observation cost shock; acceptance requires loss probability no greater
+  than 50% and 95th-percentile maximum drawdown no greater than 35%.
 - The A-Stat selection module already provides White's Reality Check,
   Deflated/Probabilistic Sharpe, model-confidence-set diagnostics and
   multiple-hypothesis p-value correction. Apply these to the complete
   experiment/strategy search family; do not select a winner and then test only
   that winner.
+- The financial_ml_validation.validate_strategy_family helper runs
+  synchronized-block White's Reality Check, Benjamini-Hochberg FDR correction
+  and an optional model-confidence set across aligned OOS strategy returns,
+  hypothesis p-values and model losses.
 - A single binary meta-model OOS report is not a substitute for strategy-family
   Reality Check/FDR analysis or a full paper-trading acceptance campaign.
 
