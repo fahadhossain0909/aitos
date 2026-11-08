@@ -60,7 +60,7 @@ async def test_drift_scheduler_retries_after_fail_closed_provider_error(tmp_path
     registry = StatisticalModelRegistry(tmp_path / "models.sqlite3")
     runtime = StatisticalGovernanceRuntime(registry)
     engine = AStatEngine()
-    observed = asyncio.Event()
+    observed = threading.Event()
     attempts = 0
     provider_threads = []
     event_loop_thread = threading.get_ident()
@@ -78,7 +78,7 @@ async def test_drift_scheduler_retries_after_fail_closed_provider_error(tmp_path
     task = await engine.start_drift_monitor(
         runtime, batch_provider, interval_seconds=1.0
     )
-    await asyncio.wait_for(observed.wait(), timeout=3.0)
+    await asyncio.wait_for(asyncio.to_thread(observed.wait, 3.0), timeout=4.0)
     await engine.stop_drift_monitor()
     assert task.done()
     assert attempts >= 2
