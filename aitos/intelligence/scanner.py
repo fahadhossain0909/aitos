@@ -1668,6 +1668,57 @@ class OpportunityScanner(AITOSModule):
             trace_id=_ACTIVE_SCAN_TRACE_ID.get() or None,
             statistical_forecast=statistical_forecast,
         )
+        event_features = self._financial_ml.event_features(symbol)
+        financial_ml_features = {
+            "composite_score": candidate.composite_score,
+            "trend_strength": component_scores["trend_strength"],
+            "liquidity_quality": component_scores["liquidity_quality"],
+            "order_flow_bias": component_scores["order_flow_bias"],
+            "auction_context": component_scores["auction_context"],
+            "volatility_score": component_scores["volatility"],
+            "market_regime": component_scores["market_regime"],
+            "lead_lag": component_scores["lead_lag"],
+            "funding_rate": component_scores["funding_rate"],
+            "open_interest_trend": component_scores["open_interest_trend"],
+            "rl_confidence": component_scores["rl_confidence"],
+            "footprint_interaction": component_scores["footprint_interaction"],
+            "a_stat": component_scores["a_stat"],
+            "order_book_flow_imbalance": component_scores["order_book_flow_imbalance"],
+            "entry_timing": component_scores["entry_timing"],
+            "breakout_acceptance": component_scores["breakout_acceptance"],
+            "relative_strength": component_scores["relative_strength"],
+            "atr_pct": float(atr) / float(candidate.entry_price)
+            if candidate.entry_price > 0
+            else 0.0,
+            **event_features,
+        }
+        from dataclasses import replace as replace_candidate
+
+        candidate = replace_candidate(
+            candidate, financial_ml_features=financial_ml_features
+        )
+        try:
+            await asyncio.to_thread(
+                self._financial_ml.register_candidate,
+                candidate_id=candidate.candidate_id,
+                symbol=symbol,
+                side=direction.value,
+                entry_price=float(candidate.entry_price),
+                volatility=max(1e-6, financial_ml_features["atr_pct"]),
+                features=financial_ml_features,
+                created_at=scanned_at,
+                trace_id=candidate.trace_id,
+            )
+        except Exception:
+            logger.exception(
+                "financial ML candidate registration failed",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "candidate_id": candidate.candidate_id,
+                    }
+                },
+            )
         await self._record_funnel(
             symbol=symbol,
             side=direction.value,
@@ -1678,6 +1729,7 @@ class OpportunityScanner(AITOSModule):
                 "composite_score": candidate.composite_score,
                 "component_availability": candidate.component_availability,
                 "regime": candidate.regime,
+                "candidate_id": candidate.candidate_id,
             },
         )
         return candidate
