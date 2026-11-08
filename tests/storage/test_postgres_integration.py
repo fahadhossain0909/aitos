@@ -30,11 +30,25 @@ async def test_postgres_market_and_journal_round_trip():
     journal = PostgresJournalRepository(dsn)
     retry_market = PostgresMarketDataRepository(dsn)
     retry_journal = PostgresJournalRepository(dsn)
-    await market.initialize({})
-    await journal.initialize({})
-    await retry_market.initialize({})
-    await retry_journal.initialize({})
+    # Independent adapter pools race through the same migration lock. The
+    # schema must be created once and every process must observe the same
+    # committed migration version.
+    await asyncio.gather(
+        market.initialize({}),
+        journal.initialize({}),
+        retry_market.initialize({}),
+        retry_journal.initialize({}),
+    )
     try:
+        async with market._pool.acquire() as conn:
+            migration_rows = await conn.fetch(
+                "SELECT version, name, checksum FROM aitos_schema_migrations "
+                "ORDER BY version"
+            )
+        assert [(row["version"], row["name"]) for row in migration_rows] == [
+            (1, "operational_and_market_records")
+        ]
+        assert len(migration_rows[0]["checksum"]) == 64
         initial = Kline(
             symbol=symbol,
             timeframe="1m",
