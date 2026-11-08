@@ -30,3 +30,15 @@ def test_trade_snapshot_material_change_gets_new_idempotency_key():
     ) != PostgresJournalRepository._idempotency_key(
         "trade", PostgresJournalRepository._trade_snapshot_identity(updated)
     )
+
+
+def test_postgres_jsonb_payload_decoding_handles_asyncpg_default_string():
+    payload = PostgresJournalRepository._decode_payload('{"trade_id":"t-1","pnl":1.25}')
+    assert payload == {"trade_id": "t-1", "pnl": 1.25}
+
+
+def test_postgres_outcome_holding_time_handles_utc_timestamps():
+    seconds = PostgresJournalRepository._holding_seconds(
+        "2026-11-08T10:00:00+00:00", "2026-11-08T10:03:30+00:00"
+    )
+    assert seconds == 210.0
