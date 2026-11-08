@@ -107,3 +107,37 @@ def test_drift_scheduler_respects_cadence_and_deduplicates_alerts(tmp_path):
     assert skipped is None
     assert second.status == first.status
     assert len(alerts) == 1
+
+
+
+def test_engine_drift_shutdown_clears_state_after_provider_failure(tmp_path):
+    import asyncio
+
+    from aitos.statistics.engine import AStatEngine
+
+    registry = StatisticalModelRegistry(tmp_path / "registry.sqlite3")
+    runtime = StatisticalGovernanceRuntime(registry)
+    engine = AStatEngine()
+
+    async def broken_provider():
+        raise RuntimeError("feature store unavailable")
+
+    async def healthy_provider():
+        reference = {"volatility": [float(i) for i in range(100)]}
+        return reference, reference
+
+    async def exercise():
+        await engine.start_drift_monitor(runtime, broken_provider, interval_seconds=1)
+        await asyncio.sleep(0)
+        try:
+            await engine.stop_drift_monitor()
+        except RuntimeError as exc:
+            assert "feature store unavailable" in str(exc)
+        else:
+            raise AssertionError("provider failure should propagate during shutdown")
+
+        # A failed worker must not leave a stale task handle that blocks restart.
+        await engine.start_drift_monitor(runtime, healthy_provider, interval_seconds=1)
+        await engine.stop_drift_monitor()
+
+    asyncio.run(exercise())
