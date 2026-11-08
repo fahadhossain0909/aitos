@@ -759,7 +759,7 @@ class FinancialMLPipeline:
                     and existing["net_return"] is not None
                     and abs(float(existing["net_return"]) - value) < 1e-12
                 ):
-                    return False
+                    return True
                 raise ValueError("candidate already resolved with different outcome")
             if row["status"] != "EXECUTED" or row["trade_id"] != trade_id:
                 raise ValueError("candidate is not bound to this executed trade")
