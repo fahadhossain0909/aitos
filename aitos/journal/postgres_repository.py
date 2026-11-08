@@ -22,7 +22,9 @@ from aitos.journal.models import JournalEntry
 class PostgresJournalRepository:
     """Transactional operational journal adapter backed by asyncpg."""
 
-    CAPABILITIES = frozenset({"trade_snapshots", "journal_entries"})
+    CAPABILITIES = frozenset(
+        {"trade_snapshots", "journal_entries", "decision_journal", "outcome_attribution"}
+    )
 
     def __init__(self, dsn: str, *, min_size: int = 1, max_size: int = 5) -> None:
         if not dsn or not dsn.strip():
