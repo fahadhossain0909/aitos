@@ -239,7 +239,7 @@ lifecycle. The integration is additive and remains **shadow-first**.
 - Independent Volume, Dollar and Imbalance bar accumulators run incrementally
   in SQLite. Completed bars and unfinished per-symbol/per-bar-type accumulators
   survive process restart; the hot path is O(1) per trade.
-- The scanner uses completed volume-bar closes for causal fractional-return
+- The scanner uses completed volume-bar closes for causal fractionally differentiated log-price
   features. Warm-up observations are omitted rather than backfilled.
 - Default research thresholds are 25 base-volume units, 250,000 quote dollars
   and 8 signed-volume units. These are starting defaults, not universal
