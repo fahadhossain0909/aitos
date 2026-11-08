@@ -40,6 +40,11 @@ from .experiments import (
     SymbolRegimeExperimentResult,
     run_symbol_regime_walk_forward,
 )
+from .financial_ml_pipeline import (
+    FinancialMLPipeline,
+    FinancialMLPrediction,
+    FinancialMLTrainingReport,
+)
 from .financial_ml import (
     BarrierObservation,
     EventBar,
@@ -203,6 +208,9 @@ __all__ = [
     "GaussianHSMM",
     "HSMMParameters",
     "HSMMResult",
+    "FinancialMLPipeline",
+    "FinancialMLPrediction",
+    "FinancialMLTrainingReport",
     "BarrierObservation",
     "EventBar",
     "MarketEvent",
