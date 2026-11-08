@@ -349,3 +349,54 @@ def test_candidate_feature_snapshot_is_immutable_after_registration(tmp_path):
             ("candidate-immutable-001",),
         )
     pipeline.close()
+
+
+def test_legacy_candidate_expiry_is_migrated_before_immutability_trigger(tmp_path):
+    path = tmp_path / "legacy-financial-ml.sqlite3"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """CREATE TABLE financial_ml_candidates (
+            candidate_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, side TEXT NOT NULL,
+            created_at TEXT NOT NULL, entry_price REAL NOT NULL, volatility REAL NOT NULL,
+            take_price REAL NOT NULL, stop_price REAL NOT NULL, expires_at REAL NOT NULL,
+            features_json TEXT NOT NULL, trace_id TEXT, status TEXT NOT NULL DEFAULT 'PENDING',
+            label INTEGER, gross_return REAL, net_return REAL, label_resolution_time TEXT,
+            outcome_provenance TEXT, trade_id TEXT, outcome_json TEXT
+        )"""
+    )
+    connection.execute(
+        """INSERT INTO financial_ml_candidates
+        (candidate_id,symbol,side,created_at,entry_price,volatility,take_price,
+         stop_price,expires_at,features_json,status)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            "candidate-legacy-expiry",
+            "BTCUSDT",
+            "LONG",
+            "2026-01-01T00:00:00+00:00",
+            100.0,
+            0.01,
+            102.0,
+            99.0,
+            1767226500.0,
+            "{}",
+            "PENDING",
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    pipeline = FinancialMLPipeline(path)
+    row = pipeline._conn.execute(
+        "SELECT expires_at,ledger_synced FROM financial_ml_candidates "
+        "WHERE candidate_id=?",
+        ("candidate-legacy-expiry",),
+    ).fetchone()
+    assert isinstance(row["expires_at"], str)
+    assert row["ledger_synced"] == 0
+    with pytest.raises(sqlite3.IntegrityError, match="candidate snapshots are immutable"):
+        pipeline._conn.execute(
+            "UPDATE financial_ml_candidates SET expires_at=? WHERE candidate_id=?",
+            ("2026-01-01T00:00:00+00:00", "candidate-legacy-expiry"),
+        )
+    pipeline.close()
