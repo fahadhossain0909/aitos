@@ -1,0 +1,72 @@
+name: Railway Anonymous VM Probe
+
+on:
+  push:
+    branches:
+      - ops/railway-anonymous-vm-actions
+
+permissions:
+  contents: read
+
+jobs:
+  railway-anonymous-vm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Prepare ephemeral SSH identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          ssh-keygen -q -t ed25519 -N "" -C "aitos-github-actions-anonymous-vm" -f "$HOME/.ssh/railway_anon"
+          chmod 600 "$HOME/.ssh/railway_anon"
+          echo "Ephemeral SSH key generated for this Actions job."
+
+      - name: Run requested ssh railway.new command
+        id: requested
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          timeout 75s ssh -T \
+            -i "$HOME/.ssh/railway_anon" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 \
+            railway.new </dev/null 2>&1 | tee railway-new-output.txt
+          rc=${PIPESTATUS[0]}
+          echo "ssh_railway_new_exit_code=$rc" | tee -a railway-new-output.txt
+          exit "$rc"
+
+      - name: Request agent-compatible sandbox handoff
+        id: sandbox
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          timeout 75s ssh -T \
+            -i "$HOME/.ssh/railway_anon" \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=20 \
+            sandbox@railway.new </dev/null 2>&1 | tee railway-sandbox-output.txt
+          rc=${PIPESTATUS[0]}
+          echo "ssh_sandbox_exit_code=$rc" | tee -a railway-sandbox-output.txt
+          exit "$rc"
+
+      - name: Upload SSH handoff diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: railway-anonymous-vm-ssh-diagnostics
+          path: |
+            railway-new-output.txt
+            railway-sandbox-output.txt
+          if-no-files-found: warn
+          retention-days: 3
+
+      - name: Remove ephemeral SSH identity
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/railway_anon" "$HOME/.ssh/railway_anon.pub"
