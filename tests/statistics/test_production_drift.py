@@ -109,7 +109,12 @@ def _service(tmp_path):
 
 def test_approval_is_authenticated_candidate_bound_and_one_time(tmp_path):
     registry, service, identity = _service(tmp_path)
-    token = service.issue_approval(identity, model_id="a-stat", model_version="2.0.0")
+    token = service.issue_approval(
+        identity,
+        model_id="a-stat",
+        model_version="2.0.0",
+        reason="Approve validated challenger after OOS review",
+    )
     decision = service.approve_and_promote(identity, token, _evidence())
     assert decision.eligible
     assert registry.get_champion("a-stat").model_version == "2.0.0"
@@ -124,6 +129,7 @@ def test_approval_rejects_wrong_role_and_candidate_mismatch(tmp_path):
             OperatorIdentity(identity.issuer, "viewer", ("viewer",)),
             model_id="a-stat",
             model_version="2.0.0",
+            reason="Viewer must not approve any candidate",
         )
     token = service.issue_approval(identity, model_id="a-stat", model_version="2.0.0")
     bad = _evidence()
