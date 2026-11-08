@@ -1,4 +1,4 @@
-from aitos.storage.reconciliation import compare_records
+from aitos.storage.reconciliation import compare_fingerprints, compare_records
 
 
 def test_reconciliation_reports_missing_records_in_both_directions():
@@ -46,3 +46,16 @@ def test_reconciliation_can_ignore_only_explicit_volatile_fields():
 
     assert result.clean
     assert result.matched_count == 1
+
+
+
+def test_matching_duplicates_are_still_a_reconciliation_anomaly():
+    duplicate = "same-fingerprint"
+
+    result = compare_fingerprints([duplicate, duplicate], [duplicate, duplicate])
+
+    assert result.source_count == result.target_count == 2
+    assert result.matched_count == 2
+    assert result.source_duplicate_fingerprints == (duplicate,)
+    assert result.target_duplicate_fingerprints == (duplicate,)
+    assert not result.clean
