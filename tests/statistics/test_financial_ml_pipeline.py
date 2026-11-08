@@ -175,3 +175,41 @@ def test_walk_forward_training_keeps_artifact_inactive_until_operator_approval(t
         )
         assert pipeline.snapshot()["active_oos_approved_artifacts"] == 1
     pipeline.close()
+
+
+def test_enforce_mode_fails_closed_without_approved_artifact(tmp_path):
+    pipeline = FinancialMLPipeline(
+        tmp_path / "financial-ml.sqlite3",
+        mode="enforce",
+    )
+    prediction = pipeline.predict("candidate-untrained", _features(9))
+    assert prediction.calibrated_probability is None
+    assert pipeline.should_block(prediction)
+    pipeline.close()
+
+
+def test_counterfactual_labels_are_available_for_exact_ledger_sync(tmp_path):
+    pipeline = FinancialMLPipeline(tmp_path / "financial-ml.sqlite3")
+    created = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    candidate_id = "candidate-ledger-sync-001"
+    pipeline.register_candidate(
+        candidate_id=candidate_id,
+        symbol="SOLUSDT",
+        side="LONG",
+        entry_price=100,
+        volatility=0.01,
+        features=_features(8),
+        created_at=created,
+    )
+    pipeline.reject_candidate(candidate_id, "meta_veto")
+    pipeline.observe_price("SOLUSDT", 102.5, created + timedelta(seconds=9))
+    labels = pipeline.pending_counterfactual_labels()
+    assert len(labels) == 1
+    assert labels[0]["candidate_id"] == candidate_id
+    assert labels[0]["label_resolution_time"] == (
+        created + timedelta(seconds=9)
+    ).isoformat()
+    assert labels[0]["outcome_provenance"] == "COUNTERFACTUAL_LIVE_MARKOUT"
+    assert pipeline.mark_ledger_synced(candidate_id)
+    assert pipeline.pending_counterfactual_labels() == ()
+    pipeline.close()
