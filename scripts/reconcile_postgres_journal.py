@@ -12,8 +12,12 @@ import asyncio
 import json
 import os
 import sys
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from aitos.storage.reconciliation import compare_records
 
