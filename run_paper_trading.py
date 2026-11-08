@@ -233,6 +233,114 @@ async def _shutdown_agents(agents) -> None:
             )
 
 
+async def _start_optional_statistical_drift_monitor(
+    components, market_repo, settings, cleanup: AsyncExitStack
+):
+    """Start fail-closed drift monitoring only when explicitly configured.
+
+    The feature allow-list is deployment-owned because learning experience
+    schemas differ between strategies. No feature or alert endpoint is guessed.
+    """
+    enabled = os.getenv("AITOS_STATISTICAL_DRIFT_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return None, None
+
+    feature_names = tuple(
+        name.strip()
+        for name in os.getenv("AITOS_STATISTICAL_DRIFT_FEATURES", "").split(",")
+        if name.strip()
+    )
+    if not feature_names:
+        raise RuntimeError(
+            "statistical drift is enabled but AITOS_STATISTICAL_DRIFT_FEATURES "
+            "is empty; refusing to monitor an undefined feature schema"
+        )
+
+    import clickhouse_connect
+
+    from aitos.learning.clickhouse_store import ClickHouseExperienceStore
+    from aitos.statistics.governance_runtime import StatisticalGovernanceRuntime
+    from aitos.statistics.production_drift import (
+        ClickHouseDriftFeatureBatchProvider,
+        LoggingDriftAlertSink,
+        WebhookDriftAlertSink,
+    )
+    from aitos.statistics.registry import StatisticalModelRegistry
+
+    # Use a dedicated synchronous client because the provider is executed on
+    # the scheduler's worker task and must not block the paper event loop.
+    client = await asyncio.to_thread(
+        clickhouse_connect.get_client, **market_repo._conn_params
+    )
+    cleanup.callback(client.close)
+    store = ClickHouseExperienceStore(
+        client, database=settings.clickhouse.database
+    )
+    provider = ClickHouseDriftFeatureBatchProvider(
+        store,
+        feature_names=feature_names,
+        min_observations=int(
+            os.getenv("AITOS_STATISTICAL_DRIFT_MIN_OBSERVATIONS", "200")
+        ),
+        sources=tuple(
+            source.strip()
+            for source in os.getenv("AITOS_STATISTICAL_DRIFT_SOURCES", "paper").split(",")
+            if source.strip()
+        ),
+    )
+    scanner = next(
+        (
+            module
+            for module in components.all_modules()
+            if getattr(module, "module_id", None) == "opportunity-scanner"
+        ),
+        None,
+    )
+    if scanner is None:
+        raise RuntimeError("opportunity-scanner unavailable for A-Stat drift lifecycle")
+
+    registry = StatisticalModelRegistry(
+        get_model_data_dir() / "statistical_model_registry.sqlite3"
+    )
+    governance = StatisticalGovernanceRuntime(registry)
+    webhook_url = os.getenv("AITOS_STATISTICAL_DRIFT_WEBHOOK_URL", "").strip()
+    webhook_token = os.getenv("AITOS_STATISTICAL_DRIFT_WEBHOOK_TOKEN", "").strip()
+    if bool(webhook_url) != bool(webhook_token):
+        raise RuntimeError(
+            "both AITOS_STATISTICAL_DRIFT_WEBHOOK_URL and "
+            "AITOS_STATISTICAL_DRIFT_WEBHOOK_TOKEN must be configured together"
+        )
+    alert_sink = (
+        WebhookDriftAlertSink(webhook_url, bearer_token=webhook_token)
+        if webhook_url
+        else LoggingDriftAlertSink()
+    )
+    engine = scanner._a_stat_bridge.engine
+    await engine.start_drift_monitor(
+        governance,
+        provider,
+        interval_seconds=float(
+            os.getenv("AITOS_STATISTICAL_DRIFT_INTERVAL_SECONDS", "300")
+        ),
+        alert_callback=alert_sink,
+    )
+    cleanup.push_async_callback(engine.stop_drift_monitor)
+    logger.info(
+        "A-Stat drift monitor started",
+        extra={
+            "aitos_extra": {
+                "features": list(feature_names),
+                "sources": list(provider.sources),
+                "interval_seconds": provider.window.total_seconds(),
+                "min_observations": provider.min_observations,
+                "alert_sink": "webhook" if webhook_url else "structured_log",
+                "promotion_policy": "operator_approval_required",
+            }
+        },
+    )
+    return engine, client
+
+
 async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     settings = get_settings()
     if settings.tuning.mode != "paper":
@@ -253,6 +361,8 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     )
     await event_bus.initialize({})
     event_bus_cleanup_owner = {"components": False}
+    drift_engine = None
+    drift_client = None
     cleanup.push_async_callback(
         _shutdown_event_bus_if_unowned, event_bus, event_bus_cleanup_owner
     )
@@ -392,6 +502,9 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     )
     cleanup.push_async_callback(experience_recorder.shutdown)
     await experience_recorder.initialize({})
+    drift_engine, drift_client = await _start_optional_statistical_drift_monitor(
+        components, market_repo, settings, cleanup
+    )
     health_server = HealthServer(
         components.all_modules()
         + [
@@ -551,6 +664,16 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
             except TimeoutError:
                 pass
     finally:
+        if drift_engine is not None:
+            try:
+                await drift_engine.stop_drift_monitor()
+            except Exception:
+                logger.exception("A-Stat drift monitor shutdown failed")
+        if drift_client is not None:
+            try:
+                await asyncio.to_thread(drift_client.close)
+            except Exception:
+                logger.exception("A-Stat drift ClickHouse client shutdown failed")
         await _cancel_task(heal_task)
         # Let the worker finish its current ClickHouse batch before joining.
         await _stop_learning_worker(learning_worker, learning_task)
