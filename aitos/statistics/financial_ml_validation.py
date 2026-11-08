@@ -1,4 +1,5 @@
 """Multiple-testing and Monte-Carlo validation for Financial ML experiments."""
+
 from __future__ import annotations
 
 import math
@@ -77,7 +78,9 @@ def monte_carlo_stress_test(
     values = _finite_series(returns)
     horizon = len(values) if horizon is None else int(horizon)
     if paths < 100 or horizon < 1 or not 1 <= block_length <= len(values):
-        raise ValueError("paths >= 100, positive horizon and valid block length required")
+        raise ValueError(
+            "paths >= 100, positive horizon and valid block length required"
+        )
     if not math.isfinite(additional_cost_bps) or additional_cost_bps < 0:
         raise ValueError("additional_cost_bps must be finite and non-negative")
     cost = additional_cost_bps / 10_000.0
@@ -89,8 +92,7 @@ def monte_carlo_stress_test(
         while len(sampled) < horizon:
             start = rng.randrange(len(values))
             sampled.extend(
-                values[(start + offset) % len(values)]
-                for offset in range(block_length)
+                values[(start + offset) % len(values)] for offset in range(block_length)
             )
         equity = 1.0
         peak = 1.0
@@ -140,9 +142,7 @@ def validate_strategy_family(
         seed=seed,
     )
     adjusted = (
-        correct_multiple_testing(
-            hypothesis_p_values, alpha=alpha, method="bh"
-        )
+        correct_multiple_testing(hypothesis_p_values, alpha=alpha, method="bh")
         if hypothesis_p_values
         else None
     )
