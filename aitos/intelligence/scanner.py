@@ -2088,8 +2088,11 @@ class OpportunityScanner(AITOSModule):
             if candidate.composite_score >= self._min_score_threshold
             and not (
                 self._financial_ml.enforce
-                and candidate.meta_probability is not None
-                and candidate.meta_accepted is False
+                and self._financial_ml.should_block(
+                    self._financial_ml.predict(
+                        candidate.candidate_id, candidate.financial_ml_features
+                    )
+                )
             )
         ]
         eligible_symbols = {candidate.symbol for candidate in eligible}
@@ -2103,7 +2106,12 @@ class OpportunityScanner(AITOSModule):
                 reason=(
                     "score_above_threshold"
                     if accepted
-                    else "composite_score_below_threshold"
+                    else (
+                        "financial_ml_meta_rejected"
+                        if candidate.composite_score >= self._min_score_threshold
+                        and self._financial_ml.enforce
+                        else "composite_score_below_threshold"
+                    )
                 ),
                 details={
                     "composite_score": candidate.composite_score,
@@ -2162,6 +2170,13 @@ class OpportunityScanner(AITOSModule):
                     "component_availability": dict(candidate.component_availability),
                     "regime": candidate.regime,
                     "entry_price": candidate.entry_price,
+                    "candidate_id": candidate.candidate_id,
+                    "financial_ml_meta": {
+                        "raw_probability": candidate.meta_raw_probability,
+                        "calibrated_probability": candidate.meta_probability,
+                        "accepted": candidate.meta_accepted,
+                        "reason": candidate.meta_reason,
+                    },
                 },
             )
         )
