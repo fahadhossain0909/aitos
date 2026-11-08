@@ -13,5 +13,3 @@ services:
         fromDatabase:
           name: aitos-paper-test-postgres
           property: connectionString
-      - key: SMOKE_TOKEN
-        generateValue: true
