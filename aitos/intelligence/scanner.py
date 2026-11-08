@@ -537,6 +537,7 @@ class OpportunityScanner(AITOSModule):
                     and state.trades
                 },
                 "hawkes_models": self._a_stat_bridge.engine.hawkes_model_status(),
+                "decision_outcome_ledger": self._decision_outcome_ledger.snapshot(),
                 "live_hawkes": {
                     symbol: {
                         "last_event_timestamp": state.last_hawkes_timestamp,
