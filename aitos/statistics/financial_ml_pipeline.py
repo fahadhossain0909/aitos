@@ -543,6 +543,38 @@ class FinancialMLPipeline:
             self._conn.commit()
         return resolved
 
+    def pending_counterfactual_labels(self, limit: int = 500) -> tuple[dict[str, Any], ...]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT candidate_id,symbol,side,label,net_return,
+                label_resolution_time,outcome_provenance,outcome_json
+                FROM financial_ml_candidates
+                WHERE status='RESOLVED' AND outcome_provenance LIKE 'COUNTERFACTUAL%'
+                  AND ledger_synced=0
+                ORDER BY label_resolution_time ASC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return tuple(
+            {
+                **dict(row),
+                "outcome": json.loads(row["outcome_json"] or "{}"),
+            }
+            for row in rows
+        )
+
+    def mark_ledger_synced(self, candidate_id: str) -> bool:
+        with self._lock:
+            cursor = self._conn.execute(
+                """UPDATE financial_ml_candidates SET ledger_synced=1
+                WHERE candidate_id=? AND status='RESOLVED'
+                  AND outcome_provenance LIKE 'COUNTERFACTUAL%'""",
+                (candidate_id,),
+            )
+            self._conn.commit()
+            return cursor.rowcount == 1
+
     def mark_executed(self, candidate_id: str, trade_id: str) -> bool:
         if not candidate_id or not trade_id:
             return False
