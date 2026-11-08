@@ -162,9 +162,7 @@ def test_hawkes_oos_gain_integrates_excitation_only_over_holdout_window():
     for timestamp, mark in zip(train_times, train_marks):
         online.observe(timestamp, mark)
     event_log_likelihood = sum(
-        math.log(
-            online.observe(timestamp, mark).intensities[mark]
-        )
+        math.log(online.observe(timestamp, mark).intensities[mark])
         for timestamp, mark in zip(holdout_times, holdout_marks)
     )
     duration = end - boundary
