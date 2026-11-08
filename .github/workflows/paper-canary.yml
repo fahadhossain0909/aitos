@@ -147,9 +147,16 @@ jobs:
           subscribed = {str(symbol).upper() for symbol in details.get("live_trade_symbols", [])}
           missing = sorted(required - subscribed)
           assert not missing, f"live trade subscription missing symbols: {missing}; got {sorted(subscribed)}"
-          live_state_count = int(scanner.get("details", {}).get("live_state_symbols", 0) or 0)
-          assert live_state_count >= len(required), (
-              f"only {live_state_count}/{len(required)} symbols reached the live scanner cache"
+          scanner_details = scanner.get("details", {})
+          live_state_count = int(scanner_details.get("live_state_symbols", 0) or 0)
+          # The scanner intentionally retains BTC as a permanent deep-book
+          # anchor and only creates full trade+book cache entries for symbols
+          # selected by the expensive candidate stage. Requiring all Top-50
+          # trade subscriptions to become full live-state entries incorrectly
+          # treats unselected symbols as a transport failure.
+          assert live_state_count >= 2, (
+              f"expected BTC anchor plus at least one selected candidate in live cache; "
+              f"got {live_state_count} states"
           )
 
           canonical = details.get("canonical_market_data", {})
@@ -165,10 +172,21 @@ jobs:
 
           deep_symbols = {str(symbol).upper() for symbol in details.get("live_deep_orderbook_symbols", [])}
           assert "BTCUSDT" in deep_symbols, f"BTC deep-orderbook anchor missing: {sorted(deep_symbols)}"
+          selected_klines = {
+              str(symbol).upper() for symbol in details.get("live_kline_symbols", [])
+          }
+          selected_non_btc_books = deep_symbols - {"BTCUSDT"}
+          assert selected_klines, "no ranked candidate received live kline coverage"
+          assert selected_non_btc_books, "no ranked candidate received deep order-book coverage"
+          assert selected_klines & selected_non_btc_books, (
+              "ranked candidate kline/deep-book coverage diverged: "
+              f"klines={sorted(selected_klines)}, books={sorted(deep_symbols)}"
+          )
           print(json.dumps({
               "status": health["status"],
               "live_trade_symbols": sorted(subscribed),
               "live_state_symbols": live_state_count,
+              "live_kline_symbols": sorted(selected_klines),
               "deep_orderbook_symbols": sorted(deep_symbols),
               "trade_stream_events": trade_stream.get("events"),
               "gateway_dropped_events": gateway_health.get("dropped_events"),
