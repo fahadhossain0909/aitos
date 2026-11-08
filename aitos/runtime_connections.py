@@ -77,6 +77,8 @@ async def connect_clickhouse_repositories(settings, *, logger):
     primary_name = (
         "postgres"
         if backend_mode == "postgres"
+        else "clickhouse"
+        if backend_mode == "clickhouse"
         else getattr(storage, "primary", "clickhouse")
     )
     fallback_name = getattr(storage, "fallback", "postgres")
