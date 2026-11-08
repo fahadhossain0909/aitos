@@ -115,26 +115,102 @@ jobs:
             exit 1
           fi
           cat paper-health.json
-      - name: Sustain live-data paper canary
+      - name: Sustain and verify per-symbol live-data paper canary
         run: |
+          set -euo pipefail
           sleep 480
           curl -fsS http://127.0.0.1:8090/health > paper-health-final.json
-          cat paper-health-final.json
-          grep -E "scan cycle complete|resolved dynamic paper-trading universe|Binance|WebSocket|market data" paper-canary.log | tail -n 100 || true
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          health = json.loads(Path("paper-health-final.json").read_text())
+          assert health.get("status") == "healthy", health.get("status")
+          modules = {item.get("module_id"): item for item in health.get("modules", [])}
+          ingestion = modules.get("data-ingestion-service")
+          scanner = modules.get("opportunity-scanner")
+          assert ingestion is not None, "data-ingestion-service missing from health"
+          assert scanner is not None, "opportunity-scanner missing from health"
+          assert ingestion.get("status") == "healthy", ingestion
+          assert scanner.get("status") == "healthy", scanner
+
+          details = ingestion.get("details", {})
+          required = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+          subscribed = {str(symbol).upper() for symbol in details.get("live_trade_symbols", [])}
+          missing = sorted(required - subscribed)
+          assert not missing, f"live trade subscription missing symbols: {missing}; got {sorted(subscribed)}"
+          live_state_count = int(scanner.get("details", {}).get("live_state_symbols", 0) or 0)
+          assert live_state_count >= len(required), (
+              f"only {live_state_count}/{len(required)} symbols reached the live scanner cache"
+          )
+
+          canonical = details.get("canonical_market_data", {})
+          gateway_health = canonical.get("health", {})
+          assert gateway_health.get("connected") is True, "canonical market-data gateway disconnected"
+          assert int(gateway_health.get("dropped_events", 0) or 0) == 0, gateway_health
+          assert int(gateway_health.get("publish_errors", 0) or 0) == 0, gateway_health
+          runtime_streams = canonical.get("transport", {}).get("runtime_streams", {})
+          trade_stream = runtime_streams.get("trades", {})
+          assert int(trade_stream.get("events", 0) or 0) > 0, "no live trade stream events received"
+          assert int(trade_stream.get("errors", 0) or 0) == 0, trade_stream
+          assert int(trade_stream.get("idle_timeouts", 0) or 0) == 0, trade_stream
+
+          deep_symbols = {str(symbol).upper() for symbol in details.get("live_deep_orderbook_symbols", [])}
+          assert "BTCUSDT" in deep_symbols, f"BTC deep-orderbook anchor missing: {sorted(deep_symbols)}"
+          print(json.dumps({
+              "status": health["status"],
+              "live_trade_symbols": sorted(subscribed),
+              "live_state_symbols": live_state_count,
+              "deep_orderbook_symbols": sorted(deep_symbols),
+              "trade_stream_events": trade_stream.get("events"),
+              "gateway_dropped_events": gateway_health.get("dropped_events"),
+          }, indent=2))
+          PY
           test "$(grep -c "scan cycle complete" paper-canary.log)" -ge 2
-      - name: Stop paper runtime safely
+          grep -E "scan cycle complete|scanner market-data stage reached|live trade subscription reconfigured|staged scan complete" paper-canary.log | tail -n 120 || true
+      - name: Stop paper runtime and verify graceful shutdown
         if: always()
         shell: bash
         run: |
+          set -uo pipefail
           if [ -f paper-canary.pid ]; then
             pid="$(cat paper-canary.pid)"
-            kill -INT "$pid" 2>/dev/null || true
-            for attempt in $(seq 1 30); do
-              kill -0 "$pid" 2>/dev/null || break
-              sleep 2
-            done
-            kill -TERM "$pid" 2>/dev/null || true
-            wait "$pid" 2>/dev/null || true
+            if kill -0 "$pid" 2>/dev/null; then
+              kill -INT "$pid" 2>/dev/null || true
+              for attempt in $(seq 1 30); do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 2
+              done
+            fi
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "SIGINT grace period expired; escalating to SIGTERM"
+              kill -TERM "$pid" 2>/dev/null || true
+              for attempt in $(seq 1 10); do
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 2
+              done
+            fi
+            if kill -0 "$pid" 2>/dev/null; then
+              echo "paper runtime did not stop after SIGTERM; sending SIGKILL"
+              kill -KILL "$pid" 2>/dev/null || true
+            fi
+            set +e
+            wait "$pid"
+            runtime_exit_code=$?
+            set -e
+            printf '%s\\n' "$runtime_exit_code" > paper-canary.exit-code
+            echo "paper runtime exit code: $runtime_exit_code"
+            if [ "$runtime_exit_code" -ne 0 ]; then
+              echo "paper runtime exited unsuccessfully"
+              tail -n 250 paper-canary.log 2>/dev/null || true
+              exit 1
+            fi
+            if ! grep -Fq '"message": "paper runtime shutdown complete"' paper-canary.log; then
+              echo "paper runtime shutdown completion marker missing"
+              tail -n 250 paper-canary.log 2>/dev/null || true
+              exit 1
+            fi
+            touch paper-canary.shutdown-marker
           fi
           tail -n 250 paper-canary.log 2>/dev/null || true
       - name: Upload paper canary evidence
