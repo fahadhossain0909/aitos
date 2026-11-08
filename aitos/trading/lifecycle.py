@@ -265,7 +265,7 @@ class TradeLifecycle(AITOSModule):
             )
             candidate_id = trade.agent_consensus.get("candidate_id")
             if candidate_id:
-                await asyncio.to_thread(
+                resolved = await asyncio.to_thread(
                     self._financial_ml_pipeline().resolve_executed,
                     str(candidate_id),
                     net_return=float(trade.pnl_percent) / 100.0,
@@ -278,6 +278,16 @@ class TradeLifecycle(AITOSModule):
                         "close_reason": str(getattr(trade, "close_reason", "") or ""),
                     },
                 )
+                if not resolved:
+                    logger.error(
+                        "closed trade did not resolve its Financial ML candidate",
+                        extra={
+                            "aitos_extra": {
+                                "candidate_id": candidate_id,
+                                "trade_id": trade.trade_id,
+                            }
+                        },
+                    )
         except Exception:
             logger.exception(
                 "decision outcome reconciliation failed",
