@@ -799,9 +799,12 @@ class FinancialMLPipeline:
             rows = self._conn.execute(
                 """SELECT candidate_id,created_at,expires_at,features_json,label,
                 net_return,label_resolution_time,outcome_provenance FROM financial_ml_candidates
-                WHERE status='RESOLVED' AND label IS NOT NULL
-                ORDER BY created_at ASC"""
+                WHERE status='RESOLVED' AND label IS NOT NULL AND net_return IS NOT NULL
+                ORDER BY created_at DESC LIMIT ?""",
+                (self.max_training_samples,),
             ).fetchall()
+        rows = list(rows)
+        rows.reverse()
         samples = len(rows)
         if samples < self.min_training_samples:
             return FinancialMLTrainingReport(
