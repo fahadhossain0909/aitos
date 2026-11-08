@@ -73,16 +73,12 @@ def test_reconciliation_normalizes_database_timestamp_precision_and_zones():
         "price": 12.5,
     }
     clickhouse_payload = {
-        "event_time": datetime(
-            2026, 11, 8, 10, 20, 30, 123000, tzinfo=timezone.utc
-        ),
+        "event_time": datetime(2026, 11, 8, 10, 20, 30, 123000, tzinfo=timezone.utc),
         "schema_version": 1,
         "price": 12.5,
     }
 
     source = canonical_record_fingerprint("MARKET_EVENT", "BTCUSDT", postgres_payload)
-    target = canonical_record_fingerprint(
-        "MARKET_EVENT", "BTCUSDT", clickhouse_payload
-    )
+    target = canonical_record_fingerprint("MARKET_EVENT", "BTCUSDT", clickhouse_payload)
 
     assert source == target
