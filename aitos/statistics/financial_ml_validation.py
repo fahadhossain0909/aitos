@@ -131,8 +131,8 @@ def validate_strategy_family(
     seed: int = 0,
 ) -> StrategyFamilyValidation:
     """Run White Reality Check, BH-FDR and optional model-confidence-set tests."""
-    if not strategy_returns:
-        raise ValueError("strategy_returns must not be empty")
+    if len(strategy_returns) < 2:
+        raise ValueError("at least two aligned strategy return series are required")
     if not math.isfinite(alpha) or not 0.0 < alpha < 0.5:
         raise ValueError("alpha must be finite and in (0,0.5)")
     reality = white_reality_check(
