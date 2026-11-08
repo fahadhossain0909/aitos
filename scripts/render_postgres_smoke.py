@@ -90,9 +90,8 @@ class Handler(BaseHTTPRequestHandler):
             return
         expected = os.environ.get("SMOKE_TOKEN", "")
         supplied = self.headers.get("Authorization", "")
-        if not expected or not hmac.compare_digest(
-            supplied, f"Bearer {expected}"
-        ):
+        authorization = f"Bearer {expected}"
+        if not expected or not hmac.compare_digest(supplied, authorization):
             self._respond(403, {"status": "forbidden"})
             return
         try:
@@ -104,7 +103,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, format: str, *args: Any) -> None:
         # Avoid logging headers, tokens, query strings, or database details.
-        print(f"HTTP {self.command} {urlparse(self.path).path} {args[1] if len(args) > 1 else ''}")
+        print(
+            f"HTTP {self.command} {urlparse(self.path).path} "
+            f"{args[1] if len(args) > 1 else ''}"
+        )
 
 
 if __name__ == "__main__":
