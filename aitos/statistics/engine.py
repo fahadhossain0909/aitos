@@ -82,6 +82,25 @@ class AStatEngine:
         with self._hawkes_lock:
             return normalized in self._hawkes_filters
 
+    def last_hawkes_timestamp(self, symbol: str) -> float | None:
+        """Return the last accepted event time for a registered live filter."""
+        normalized = symbol.strip().upper()
+        with self._hawkes_lock:
+            online_filter = self._hawkes_filters.get(normalized)
+            return online_filter.last_timestamp if online_filter is not None else None
+
+    def hawkes_model_status(self) -> dict[str, dict[str, float | int | None]]:
+        """Expose read-only model and warm-up status for runtime health telemetry."""
+        with self._hawkes_lock:
+            return {
+                symbol: {
+                    "branching_ratio": online_filter.fit.branching_ratio,
+                    "training_events": online_filter.fit.events,
+                    "last_event_timestamp": online_filter.last_timestamp,
+                }
+                for symbol, online_filter in sorted(self._hawkes_filters.items())
+            }
+
     def observe_marked_event(self, symbol: str, timestamp: float, mark: int):
         """Atomically update the symbol's causal Hawkes filter.
 
