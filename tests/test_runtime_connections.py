@@ -350,3 +350,78 @@ async def test_clickhouse_market_failure_never_falls_back_to_postgres(monkeypatc
             settings, logger=FakeLogger()
         )
     assert market_repo.shutdown_count == 1
+
+
+@pytest.mark.asyncio
+async def test_clickhouse_market_failure_uses_postgres_only_when_analytics_degradation_allowed(
+    monkeypatch,
+):
+    from aitos.data import postgres_repository as postgres_market_module
+    from aitos.data import repository as data_repository
+    from aitos.journal import postgres_repository as postgres_journal_module
+    from aitos.journal import repository as journal_repository
+
+    clickhouse_market = FakeRepository()
+    postgres_market = FakeRepository()
+    clickhouse_journal = FakeRepository()
+
+    class FakePostgresJournalRepository(FakeRepository):
+        CAPABILITIES = frozenset(
+            {
+                "trade_snapshots",
+                "journal_entries",
+                "decision_journal",
+                "outcome_attribution",
+            }
+        )
+
+        def __init__(self, dsn):
+            super().__init__()
+            self.dsn = dsn
+
+    postgres_journal = FakePostgresJournalRepository("postgresql://test")
+    monkeypatch.setattr(
+        data_repository, "MarketDataRepository", lambda **kwargs: clickhouse_market
+    )
+    monkeypatch.setattr(
+        postgres_market_module,
+        "PostgresMarketDataRepository",
+        lambda dsn: postgres_market,
+    )
+    monkeypatch.setattr(
+        journal_repository, "JournalRepository", lambda **kwargs: clickhouse_journal
+    )
+    monkeypatch.setattr(
+        postgres_journal_module,
+        "PostgresJournalRepository",
+        FakePostgresJournalRepository,
+    )
+
+    async def retry(fn, **kwargs):
+        if kwargs["operation_name"] == "ClickHouse market repository initialization":
+            raise RetryExhaustedError(5, ConnectionError("ClickHouse unsupported"))
+        return await fn()
+
+    monkeypatch.setattr(runtime_connections, "retry_with_backoff", retry)
+    settings = SimpleNamespace(
+        clickhouse=SimpleNamespace(
+            host="localhost", port=8123, user="aitos", password="test", database="aitos"
+        ),
+        storage=SimpleNamespace(
+            backend="auto",
+            primary="clickhouse",
+            fallback="postgres",
+            allow_fallback=True,
+            require_clickhouse_analytics=False,
+            postgres_url="postgresql://test",
+        ),
+    )
+    market, journal = await runtime_connections.connect_clickhouse_repositories(
+        settings, logger=FakeLogger()
+    )
+    assert market is postgres_market
+    assert journal is postgres_journal
+    assert clickhouse_market.shutdown_count == 1
+    assert postgres_market.initialized
+    assert postgres_journal.initialized
+    assert clickhouse_journal.shutdown_count == 0
