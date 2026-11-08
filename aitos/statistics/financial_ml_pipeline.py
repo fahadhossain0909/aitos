@@ -87,6 +87,7 @@ class FinancialMLTrainingReport:
     monte_carlo_probability_of_loss: float | None = None
     monte_carlo_terminal_p05: float | None = None
     monte_carlo_max_drawdown_p95: float | None = None
+    calibration_samples: int = 0
 
 
 class FinancialMLPipeline:
@@ -837,29 +838,41 @@ class FinancialMLPipeline:
                 for index in fold.test_indices
             )
             used_folds += 1
-        if len(oos_labels) < self.min_oos_samples or len(set(oos_labels)) < 2:
+        calibration_size = max(10, len(oos_labels) // 3)
+        evaluation_labels = oos_labels[calibration_size:]
+        if (
+            len(oos_labels) < calibration_size + self.min_oos_samples
+            or len(set(oos_labels[:calibration_size])) < 2
+            or len(set(evaluation_labels)) < 2
+        ):
             return FinancialMLTrainingReport(
                 False,
                 False,
                 samples,
                 used_folds,
-                len(oos_labels),
+                len(evaluation_labels),
                 None,
                 None,
                 None,
                 sum(labels) / samples,
                 self.acceptance_threshold,
-                "insufficient_oos_samples_or_single_class",
+                "insufficient_disjoint_calibration_and_oos_samples",
+                calibration_samples=calibration_size,
             )
-        # Platt scaling is fitted only to walk-forward predictions, never on
-        # the final model's in-sample scores.
+        # Fit Platt scaling on the early walk-forward OOF segment, then
+        # evaluate calibration/acceptance only on a later untouched OOF segment.
         calibrator = MetaLabeler(learning_rate=0.02, l2=0.01, epochs=800)
         calibrator.fit(
-            [[self._logit(value)] for value in oos_probabilities], oos_labels
+            [[self._logit(value)] for value in oos_probabilities[:calibration_size]],
+            oos_labels[:calibration_size],
         )
+        evaluation_probabilities = oos_probabilities[calibration_size:]
         calibrated_oos = calibrator.predict_probability(
-            [[self._logit(value)] for value in oos_probabilities]
+            [[self._logit(value)] for value in evaluation_probabilities]
         )
+        oos_labels = evaluation_labels
+        oos_returns = oos_returns[calibration_size:]
+        oos_provenance = oos_provenance[calibration_size:]
         brier = brier_score(calibrated_oos, oos_labels)
         ece = expected_calibration_error(calibrated_oos, oos_labels, n_bins=10)
         selected = [
@@ -951,6 +964,7 @@ class FinancialMLPipeline:
             "feature_names": list(self.FEATURE_NAMES),
             "threshold": self.acceptance_threshold,
             "oos_samples": len(oos_labels),
+            "calibration_samples": calibration_size,
             "executed_oos_samples": executed_oos_samples,
             "counterfactual_oos_samples": counterfactual_oos_samples,
             "accepted_executed_mean_return": accepted_executed_mean,
@@ -986,6 +1000,7 @@ class FinancialMLPipeline:
             monte_carlo.probability_of_loss if monte_carlo else None,
             monte_carlo.terminal_return_p05 if monte_carlo else None,
             monte_carlo.max_drawdown_p95 if monte_carlo else None,
+            calibration_size,
         )
         with self._lock:
             self._conn.execute("UPDATE financial_ml_artifacts SET active=0")
