@@ -99,8 +99,8 @@ async def apply_postgres_migrations(pool) -> int:
         async with conn.transaction():
             await conn.execute("SELECT pg_advisory_xact_lock($1)", _MIGRATION_LOCK_ID)
             await conn.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {_MIGRATION_TABLE} (
+                """
+                CREATE TABLE IF NOT EXISTS aitos_schema_migrations (
                     version INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
                     checksum TEXT NOT NULL,
@@ -109,7 +109,7 @@ async def apply_postgres_migrations(pool) -> int:
                 """
             )
             rows = await conn.fetch(
-                f"SELECT version, name, checksum FROM {_MIGRATION_TABLE}"
+                "SELECT version, name, checksum FROM aitos_schema_migrations"
             )
             applied = {int(row["version"]): row for row in rows}
             known_versions = {migration.version for migration in MIGRATIONS}
@@ -137,8 +137,8 @@ async def apply_postgres_migrations(pool) -> int:
                 for statement in migration.statements:
                     await conn.execute(statement)
                 await conn.execute(
-                    f"""
-                    INSERT INTO {_MIGRATION_TABLE} (version, name, checksum)
+                    """
+                    INSERT INTO aitos_schema_migrations (version, name, checksum)
                     VALUES ($1, $2, $3)
                     """,
                     migration.version,
