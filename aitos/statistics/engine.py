@@ -55,14 +55,22 @@ class AStatEngine:
         self._hawkes_filters: dict[str, MarkedHawkesOnlineFilter] = {}
         self._hawkes_lock = RLock()
 
-    def register_hawkes_model(self, symbol: str, fit: HawkesMLEFit) -> None:
-        """Install a previously fitted marked-Hawkes model for live event updates."""
+    def register_hawkes_model(
+        self,
+        symbol: str,
+        fit: HawkesMLEFit,
+        *,
+        warmup_events: Iterable[tuple[float, int]] = (),
+    ) -> None:
+        """Atomically install a validated fit after optional chronological warm-up."""
         normalized = symbol.strip().upper()
         if not normalized:
             raise ValueError("symbol is required for Hawkes event registration")
-        # Construct before acquiring the lock so an invalid/unconverged fit
-        # cannot replace a currently healthy live filter.
+        # Build and warm the replacement before acquiring the lock. A malformed
+        # history cannot replace a currently healthy live filter.
         online_filter = MarkedHawkesOnlineFilter(fit)
+        for timestamp, mark in warmup_events:
+            online_filter.observe(timestamp, mark)
         with self._hawkes_lock:
             self._hawkes_filters[normalized] = online_filter
 
