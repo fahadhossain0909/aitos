@@ -1,6 +1,7 @@
 import pytest
 
 from aitos.statistics.financial_ml_validation import (
+    monte_carlo_portfolio_stress_test,
     monte_carlo_stress_test,
     validate_strategy_family,
 )
@@ -57,3 +58,34 @@ def test_monte_carlo_and_family_validation_reject_bad_inputs():
         monte_carlo_stress_test([0.01] * 20, paths=10)
     with pytest.raises(ValueError):
         validate_strategy_family({})
+
+
+def test_portfolio_monte_carlo_uses_synchronized_cross_asset_returns():
+    asset_a = [0.01, -0.01, 0.015, -0.015] * 8
+    asset_b = [-value for value in asset_a]
+    report = monte_carlo_portfolio_stress_test(
+        {"asset-a": asset_a, "asset-b": asset_b},
+        {"asset-a": 0.5, "asset-b": 0.5},
+        paths=200,
+        horizon=40,
+        block_length=4,
+        seed=5,
+    )
+    assert report.asset_count == 2
+    assert report.observations == 32
+    assert report.stress.probability_of_loss == 0.0
+    assert report.stress.max_drawdown_p95 == 0.0
+    assert all(value == 0.5 for value in report.weights.values())
+
+
+def test_portfolio_monte_carlo_rejects_misaligned_assets_and_weights():
+    with pytest.raises(ValueError):
+        monte_carlo_portfolio_stress_test(
+            {"asset-a": [0.01] * 20},
+            {"asset-b": 1.0},
+        )
+    with pytest.raises(ValueError):
+        monte_carlo_portfolio_stress_test(
+            {"asset-a": [0.01] * 20, "asset-b": [0.01] * 19},
+            {"asset-a": 0.5, "asset-b": 0.5},
+        )
