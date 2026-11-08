@@ -585,7 +585,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     )
     cleanup.push_async_callback(experience_recorder.shutdown)
     await experience_recorder.initialize({})
-    hawkes_bootstrap_results = await _start_optional_hawkes_bootstrap(components)
+    await _start_optional_hawkes_bootstrap(components)
     drift_engine, drift_client = await _start_optional_statistical_drift_monitor(
         components, market_repo, settings, cleanup
     )
