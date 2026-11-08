@@ -15,7 +15,11 @@ from typing import Iterable
 
 from aitos.models.market import TradeSide
 from aitos.statistics.engine import AStatEngine
-from aitos.statistics.hawkes import HawkesMLEFit, MarkedHawkesOnlineFilter, fit_marked_hawkes_mle
+from aitos.statistics.hawkes import (
+    HawkesMLEFit,
+    MarkedHawkesOnlineFilter,
+    fit_marked_hawkes_mle,
+)
 
 
 @dataclass(frozen=True)
@@ -78,9 +82,7 @@ def _holdout_gain(
         raise ValueError("Hawkes training duration must be positive")
     counts = [train_marks.count(mark) for mark in (0, 1)]
     baseline = [max(count / training_duration, 1e-12) for count in counts]
-    poisson_log_events = sum(
-        math.log(baseline[mark]) for mark in holdout_marks
-    )
+    poisson_log_events = sum(math.log(baseline[mark]) for mark in holdout_marks)
 
     excitation_integral = 0.0
     all_times = train_times + holdout_times
@@ -92,8 +94,7 @@ def _holdout_gain(
             if mark == source and timestamp < end
         )
         excitation_integral += sum(
-            fit.excitation_matrix[target][source] * source_tail
-            for target in (0, 1)
+            fit.excitation_matrix[target][source] * source_tail for target in (0, 1)
         )
     hawkes_integral = sum(fit.baseline_intensities) * duration + excitation_integral
     poisson_integral = sum(baseline) * duration
@@ -118,7 +119,13 @@ def _fit_and_accept(
     split = int(count * (1.0 - holdout_fraction))
     if count < min_events or split < 20 or count - split < 20:
         result = HawkesBootstrapResult(
-            symbol, "skipped", count, split, count - split, None, None,
+            symbol,
+            "skipped",
+            count,
+            split,
+            count - split,
+            None,
+            None,
             "insufficient_events",
         )
         return None, [], result
@@ -127,22 +134,30 @@ def _fit_and_accept(
     holdout_times, holdout_marks = times[split:], marks[split:]
     if min(train_marks.count(0), train_marks.count(1)) < min_mark_events:
         result = HawkesBootstrapResult(
-            symbol, "skipped", count, split, count - split, None, None,
+            symbol,
+            "skipped",
+            count,
+            split,
+            count - split,
+            None,
+            None,
             "insufficient_training_events_per_mark",
         )
         return None, [], result
     if min(holdout_marks.count(0), holdout_marks.count(1)) < 2:
         result = HawkesBootstrapResult(
-            symbol, "skipped", count, split, count - split, None, None,
+            symbol,
+            "skipped",
+            count,
+            split,
+            count - split,
+            None,
+            None,
             "insufficient_holdout_events_per_mark",
         )
         return None, [], result
 
-    gaps = [
-        right - left
-        for left, right in zip(times, times[1:])
-        if right > left
-    ]
+    gaps = [right - left for left, right in zip(times, times[1:]) if right > left]
     boundary = (train_times[-1] + holdout_times[0]) / 2.0
     end = holdout_times[-1] + median(gaps)
     try:
@@ -166,13 +181,25 @@ def _fit_and_accept(
         )
         if not math.isfinite(gain) or gain <= min_oos_gain_per_event:
             result = HawkesBootstrapResult(
-                symbol, "rejected", count, split, count - split, gain,
-                fit.branching_ratio, "oos_did_not_beat_poisson_baseline",
+                symbol,
+                "rejected",
+                count,
+                split,
+                count - split,
+                gain,
+                fit.branching_ratio,
+                "oos_did_not_beat_poisson_baseline",
             )
             return None, [], result
     except Exception as exc:
         result = HawkesBootstrapResult(
-            symbol, "rejected", count, split, count - split, None, None,
+            symbol,
+            "rejected",
+            count,
+            split,
+            count - split,
+            None,
+            None,
             f"fit_or_oos_validation_failed:{type(exc).__name__}",
         )
         return None, [], result
@@ -188,13 +215,17 @@ def _fit_and_accept(
         timestamp = trade.timestamp.timestamp()
         if timestamp <= previous_timestamp:
             timestamp = math.nextafter(previous_timestamp, math.inf)
-        warmup.append(
-            (timestamp, 1 if trade.side == TradeSide.BUY else 0)
-        )
+        warmup.append((timestamp, 1 if trade.side == TradeSide.BUY else 0))
         previous_timestamp = timestamp
     result = HawkesBootstrapResult(
-        symbol, "accepted", count, split, count - split, gain,
-        fit.branching_ratio, None,
+        symbol,
+        "accepted",
+        count,
+        split,
+        count - split,
+        gain,
+        fit.branching_ratio,
+        None,
     )
     return fit, warmup, result
 
@@ -219,7 +250,11 @@ async def bootstrap_hawkes_models(
         raise ValueError("Hawkes min_events must be between 40 and sample_limit")
     if not 0.1 <= holdout_fraction <= 0.4:
         raise ValueError("Hawkes holdout_fraction must be between 0.1 and 0.4")
-    normalized = tuple(dict.fromkeys(str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()))
+    normalized = tuple(
+        dict.fromkeys(
+            str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()
+        )
+    )
     if not normalized:
         raise ValueError("at least one explicit Hawkes symbol is required")
 
@@ -230,7 +265,13 @@ async def bootstrap_hawkes_models(
         except Exception as exc:
             results.append(
                 HawkesBootstrapResult(
-                    symbol, "skipped", 0, 0, 0, None, None,
+                    symbol,
+                    "skipped",
+                    0,
+                    0,
+                    0,
+                    None,
+                    None,
                     f"exchange_history_unavailable:{type(exc).__name__}",
                 )
             )
@@ -251,8 +292,12 @@ async def bootstrap_hawkes_models(
                 engine.register_hawkes_model(symbol, fit, warmup_events=warmup)
             except Exception as exc:
                 result = HawkesBootstrapResult(
-                    symbol, "rejected", result.events, result.training_events,
-                    result.holdout_events, result.oos_gain_per_event,
+                    symbol,
+                    "rejected",
+                    result.events,
+                    result.training_events,
+                    result.holdout_events,
+                    result.oos_gain_per_event,
                     result.branching_ratio,
                     f"live_filter_registration_failed:{type(exc).__name__}",
                 )
