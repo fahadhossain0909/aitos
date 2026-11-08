@@ -525,6 +525,17 @@ class OpportunityScanner(AITOSModule):
                 "live_state_symbols": sum(
                     1 for s in self._symbols if self._live_cache.snapshot(s) is not None
                 ),
+                "hawkes_models": self._a_stat_bridge.engine.hawkes_model_status(),
+                "live_hawkes": {
+                    symbol: {
+                        "last_event_timestamp": state.last_hawkes_timestamp,
+                        "intensities": state.last_hawkes_intensities,
+                        "event_rejections": state.hawkes_event_rejections,
+                    }
+                    for symbol in self._symbols
+                    if (state := self._live_cache.snapshot(symbol)) is not None
+                    and state.last_hawkes_timestamp is not None
+                },
                 "candidate_rotation": self._candidate_rotation.snapshot(),
                 "candidate_outcomes": self._candidate_outcomes.snapshot(),
                 "financial_ml": self._financial_ml.snapshot(),
