@@ -16,11 +16,11 @@ import secrets
 import sqlite3
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from itertools import chain
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -425,8 +425,6 @@ class OperatorApprovalService:
             raise
         finally:
             db.close()
-        from dataclasses import replace
-
         approved_evidence = replace(evidence, operator_approved=True)
         decision = self.runtime.promote_challenger(
             approved_evidence, operator_approved=True
