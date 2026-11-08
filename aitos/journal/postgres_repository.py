@@ -107,19 +107,7 @@ class PostgresJournalRepository:
         if not trade_id:
             raise ValueError("trade_id is required for durable trade snapshot")
         payload.setdefault("recorded_at", datetime.now(timezone.utc).isoformat())
-        identity_fields = (
-            "trade_id",
-            "snapshot_version",
-            "updated_at",
-            "state",
-            "entry_time",
-            "exit_time",
-            "quantity",
-            "exit_price",
-            "pnl",
-            "pnl_percent",
-        )
-        identity = {key: payload.get(key) for key in identity_fields}
+        identity = self._trade_snapshot_identity(payload)
         await self._append(
             "TRADE_SNAPSHOT",
             trade_id,
@@ -187,6 +175,11 @@ class PostgresJournalRepository:
                 encoded,
             )
         self._last_event_time = recorded_at.isoformat()
+
+    @staticmethod
+    def _trade_snapshot_identity(payload: dict[str, Any]) -> dict[str, Any]:
+        """Exclude the generated write timestamp while retaining all trade state."""
+        return {key: value for key, value in payload.items() if key != "recorded_at"}
 
     @staticmethod
     def _idempotency_key(prefix: str, payload: dict[str, Any]) -> str:
