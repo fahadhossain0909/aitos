@@ -267,7 +267,22 @@ async def test_clickhouse_journal_failure_uses_configured_postgres_fallback(
 
     market_repo = FakeRepository()
     clickhouse_journal = FakeRepository()
-    postgres_journal = FakeRepository()
+
+    class FakePostgresJournalRepository(FakeRepository):
+        CAPABILITIES = frozenset(
+            {
+                "trade_snapshots",
+                "journal_entries",
+                "decision_journal",
+                "outcome_attribution",
+            }
+        )
+
+        def __init__(self, dsn):
+            super().__init__()
+            self.dsn = dsn
+
+    postgres_journal = FakePostgresJournalRepository("postgresql://test")
     monkeypatch.setattr(
         data_repository, "MarketDataRepository", lambda **kwargs: market_repo
     )
@@ -277,7 +292,7 @@ async def test_clickhouse_journal_failure_uses_configured_postgres_fallback(
     monkeypatch.setattr(
         postgres_repository,
         "PostgresJournalRepository",
-        lambda dsn: postgres_journal,
+        FakePostgresJournalRepository,
     )
 
     async def retry(fn, **kwargs):
