@@ -1,4 +1,5 @@
 import hashlib
+import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
@@ -119,6 +120,17 @@ def test_approval_is_authenticated_candidate_bound_and_one_time(tmp_path):
     decision = service.approve_and_promote(identity, token, _evidence())
     assert decision.eligible
     assert registry.get_champion("a-stat").model_version == "2.0.0"
+    events = service.audit_history("a-stat")
+    assert [event["event"] for event in events] == [
+        "ISSUED",
+        "CONSUMED",
+        "PROMOTION_DECISION",
+    ]
+    with sqlite3.connect(service.path) as db:
+        with pytest.raises(sqlite3.IntegrityError, match="append-only"):
+            db.execute(
+                "UPDATE operator_approval_audit SET event='TAMPERED' WHERE audit_id=1"
+            )
     with pytest.raises(PermissionError, match="consumed"):
         service.approve_and_promote(identity, token, _evidence())
 
