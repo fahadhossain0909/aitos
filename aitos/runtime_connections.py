@@ -191,17 +191,13 @@ async def connect_clickhouse_repositories(settings, *, logger):
     async def probe_postgres_journal() -> None:
         if postgres_journal is None:
             raise RuntimeError("PostgreSQL journal adapter is not configured")
-        try:
-            await retry_with_backoff(
-                lambda: postgres_journal.initialize({}),
-                max_attempts=5,
-                base_delay_seconds=2.0,
-                max_delay_seconds=30.0,
-                operation_name="PostgreSQL operational journal initialization",
-            )
-        except Exception:
-            await postgres_journal.shutdown()
-            raise
+        await retry_with_backoff(
+            lambda: postgres_journal.initialize({}),
+            max_attempts=5,
+            base_delay_seconds=2.0,
+            max_delay_seconds=30.0,
+            operation_name="PostgreSQL operational journal initialization",
+        )
 
     if market_backend is StorageBackend.POSTGRES:
         journal_adapters = {
@@ -224,17 +220,13 @@ async def connect_clickhouse_repositories(settings, *, logger):
         )
 
         async def probe_clickhouse_journal() -> None:
-            try:
-                await retry_with_backoff(
-                    lambda: clickhouse_journal.initialize({}),
-                    max_attempts=5,
-                    base_delay_seconds=2.0,
-                    max_delay_seconds=30.0,
-                    operation_name="ClickHouse journal repository initialization",
-                )
-            except Exception:
-                await clickhouse_journal.shutdown()
-                raise
+            await retry_with_backoff(
+                lambda: clickhouse_journal.initialize({}),
+                max_attempts=5,
+                base_delay_seconds=2.0,
+                max_delay_seconds=30.0,
+                operation_name="ClickHouse journal repository initialization",
+            )
 
         journal_adapters = {
             StorageBackend.CLICKHOUSE: BackendAdapter(
