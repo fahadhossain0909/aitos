@@ -23,6 +23,7 @@ from aitos.statistics.financial_ml import (
     fractional_difference,
     sequential_bootstrap_indices,
 )
+from aitos.statistics.financial_ml_validation import monte_carlo_stress_test
 from aitos.statistics.validation import (
     brier_score,
     expected_calibration_error,
@@ -82,6 +83,9 @@ class FinancialMLTrainingReport:
     counterfactual_oos_samples: int = 0
     accepted_executed_mean_return: float | None = None
     accepted_counterfactual_mean_return: float | None = None
+    monte_carlo_probability_of_loss: float | None = None
+    monte_carlo_terminal_p05: float | None = None
+    monte_carlo_max_drawdown_p95: float | None = None
 
 
 class FinancialMLPipeline:
@@ -759,6 +763,18 @@ class FinancialMLPipeline:
         mean_selected_return = (
             sum(selected_returns) / len(selected_returns) if selected_returns else -1.0
         )
+        monte_carlo = (
+            monte_carlo_stress_test(
+                selected_returns,
+                paths=250,
+                horizon=max(20, len(selected_returns)),
+                block_length=min(5, len(selected_returns)),
+                seed=17,
+                additional_cost_bps=5.0,
+            )
+            if len(selected_returns) >= 20
+            else None
+        )
         executed_oos_samples = sum(
             provenance == "EXECUTED_TRADE_NET_OUTCOME"
             for provenance in oos_provenance
@@ -799,6 +815,9 @@ class FinancialMLPipeline:
             and accepted_executed_mean > 0.0
             and accepted_counterfactual_mean is not None
             and accepted_counterfactual_mean > 0.0
+            and monte_carlo is not None
+            and monte_carlo.probability_of_loss <= 0.50
+            and monte_carlo.max_drawdown_p95 <= 0.35
             and bool(selected)
         )
         reason = "oos_calibration_and_acceptance_passed" if passed else "oos_acceptance_not_proven"
@@ -815,6 +834,15 @@ class FinancialMLPipeline:
             "counterfactual_oos_samples": counterfactual_oos_samples,
             "accepted_executed_mean_return": accepted_executed_mean,
             "accepted_counterfactual_mean_return": accepted_counterfactual_mean,
+            "monte_carlo_probability_of_loss": (
+                monte_carlo.probability_of_loss if monte_carlo else None
+            ),
+            "monte_carlo_terminal_p05": (
+                monte_carlo.terminal_return_p05 if monte_carlo else None
+            ),
+            "monte_carlo_max_drawdown_p95": (
+                monte_carlo.max_drawdown_p95 if monte_carlo else None
+            ),
             "brier": brier,
             "ece": ece,
         }
@@ -828,6 +856,9 @@ class FinancialMLPipeline:
             counterfactual_oos_samples,
             accepted_executed_mean,
             accepted_counterfactual_mean,
+            monte_carlo.probability_of_loss if monte_carlo else None,
+            monte_carlo.terminal_return_p05 if monte_carlo else None,
+            monte_carlo.max_drawdown_p95 if monte_carlo else None,
         )
         with self._lock:
             self._conn.execute("UPDATE financial_ml_artifacts SET active=0")
