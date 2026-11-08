@@ -28,14 +28,27 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: desktop/package-lock.json
-      - run: python -m pip install pytest pytest-asyncio pytest-timeout fakeredis python-dotenv pydantic pydantic-settings
+      - run: python -m pip install -r native/windows/requirements.txt pytest pytest-asyncio pytest-timeout fakeredis python-dotenv pydantic pydantic-settings
       - run: python -m pytest tests/test_native_console_host.py --noconftest --timeout=90 -q
       # Native vault tests are outside the broad trading conftest dependency graph.
       - run: python -m pytest native/windows/test_native_vault.py -q
       - shell: pwsh
-        run: ./native/windows/build.ps1
+        run: |
+          try { ./native/windows/build.ps1 2>&1 | Tee-Object -Variable output }
+          catch {
+            $detail=(($output | Select-Object -Last 25) -join "`n") + "`n" + $_.ToString()
+            $detail=$detail.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Windows build failure::$detail"
+            throw
+          }
       - shell: pwsh
-        run: ./native/windows/validate-install.ps1
+        run: |
+          try { ./native/windows/validate-install.ps1 }
+          catch {
+            $detail=$_.ToString().Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Installed Windows validation failure::$detail"
+            throw
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: UNSIGNED-Windows-console-test-only

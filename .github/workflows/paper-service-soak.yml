@@ -33,8 +33,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: python -m pip install clickhouse-connect pydantic pydantic-settings python-dotenv
-      - run: python -m engineering.tools.paper_service_soak seed --root "$RUNNER_TEMP/aitos-service-test"
+      - run: python -m pip install -r requirements.txt -r requirements-backtest.txt
+      - name: Seed committed evidence before an intentionally lost local ACK
+        run: |
+          set -o pipefail
+          python -m engineering.tools.paper_service_soak seed --root "$RUNNER_TEMP/aitos-service-test" 2>&1 | tee "$RUNNER_TEMP/seed.log"
+        # No secrets or real account data are supplied to this job.
+
       - name: Stop and restart this job's dedicated service only
         env:
           CONTAINER: ${{ job.services.clickhouse.id }}
@@ -56,3 +61,16 @@ jobs:
         with:
           name: synthetic-paper-restart-evidence-NOT-production-certification
           path: ${{ runner.temp }}/aitos-service-test/
+
+      - name: Surface bounded synthetic diagnostics through check annotations
+        if: failure()
+        run: |
+          python - <<'PYDIAG'
+          import os
+          from pathlib import Path
+          p=Path(os.environ['RUNNER_TEMP'])/'seed.log'
+          if p.exists():
+              tail='\n'.join(p.read_text(errors='replace').splitlines()[-20:])
+              escaped=tail.replace('%','%25').replace('\r','%0D').replace('\n','%0A')
+              print('::error title=Synthetic service seed trace::'+escaped)
+          PYDIAG

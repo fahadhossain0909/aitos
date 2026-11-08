@@ -13,7 +13,7 @@ function Verify-Signer([string]$path) {
 function Run-Checked([string]$file,[string[]]$arguments) {
   $p=Start-Process $file -ArgumentList $arguments -PassThru
   if (!$p.WaitForExit(120000)) { Stop-Process -Id $p.Id -Force; throw 'Owned test process timed out' }
-  if ($p.ExitCode -ne 0) { throw 'Installed application test failed' }
+  if ($p.ExitCode -ne 0) { throw ('Installed test failed: ' + (Split-Path $file -Leaf) + ' ' + ($arguments -join ' ')) }
 }
 if (!$env:RUNNER_TEMP -or !(Test-Path $env:RUNNER_TEMP -PathType Container)) { throw 'CI temporary directory required' }
 $destination=Join-Path $env:RUNNER_TEMP ('AITOS-test-'+[guid]::NewGuid().ToString('N'))
