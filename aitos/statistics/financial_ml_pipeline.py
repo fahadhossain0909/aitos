@@ -20,9 +20,6 @@ from typing import Any, Mapping, Sequence
 from aitos.statistics.financial_ml import (
     MarketEvent,
     MetaLabeler,
-    build_dollar_bars,
-    build_imbalance_bars,
-    build_volume_bars,
     fractional_difference,
     sequential_bootstrap_indices,
 )
@@ -213,6 +210,22 @@ class FinancialMLPipeline:
             );
             CREATE INDEX IF NOT EXISTS idx_financial_ml_bars
             ON financial_ml_event_bars(symbol, bar_type, end_at);
+            CREATE TABLE IF NOT EXISTS financial_ml_event_bar_state (
+                symbol TEXT NOT NULL,
+                bar_type TEXT NOT NULL,
+                start_at TEXT NOT NULL,
+                end_at TEXT NOT NULL,
+                open REAL NOT NULL,
+                high REAL NOT NULL,
+                low REAL NOT NULL,
+                close REAL NOT NULL,
+                volume REAL NOT NULL,
+                dollar_volume REAL NOT NULL,
+                signed_volume REAL NOT NULL,
+                event_count INTEGER NOT NULL,
+                measure_value REAL NOT NULL,
+                PRIMARY KEY(symbol, bar_type)
+            );
             CREATE TABLE IF NOT EXISTS financial_ml_approvals (
                 approval_id INTEGER PRIMARY KEY AUTOINCREMENT,
                 artifact_id TEXT NOT NULL,
@@ -273,57 +286,104 @@ class FinancialMLPipeline:
         return model
 
     def ingest_market_event(self, symbol: str, event: MarketEvent) -> dict[str, int]:
-        """Persist completed event bars; incomplete tails remain buffered."""
+        """Incrementally persist event bars and their unfinished tails.
+
+        Each bar type has its own durable accumulator, so the hot path is O(1)
+        per trade and restart recovery does not discard an incomplete bar.
+        """
         key = symbol.upper()
+        dollar = event.price * event.volume
+        specs = (
+            ("volume", self.volume_bar_threshold, event.volume),
+            ("dollar", self.dollar_bar_threshold, dollar),
+            ("imbalance", self.imbalance_bar_threshold, event.signed_volume),
+        )
+        output: dict[str, int] = {}
         with self._lock:
-            events = self._events.setdefault(key, [])
-            events.append(event)
-            # Bound the in-memory working set; bars are emitted before trimming.
-            if len(events) > 20_000:
-                events[:] = events[-10_000:]
-            output: dict[str, int] = {}
-            for bar_type, builder, threshold in (
-                ("volume", build_volume_bars, self.volume_bar_threshold),
-                ("dollar", build_dollar_bars, self.dollar_bar_threshold),
-                ("imbalance", build_imbalance_bars, self.imbalance_bar_threshold),
-            ):
-                bars = builder(events, **{
-                    "volume_threshold" if bar_type == "volume" else
-                    "dollar_threshold" if bar_type == "dollar" else
-                    "imbalance_threshold": threshold
-                })
-                count = 0
-                if bars:
-                    # The builder is replayed over the buffer; insert only bars
-                    # whose end timestamp has not already been persisted.
-                    for bar in bars:
-                        cursor = self._conn.execute(
+            self._conn.execute("BEGIN IMMEDIATE")
+            try:
+                for bar_type, threshold, increment in specs:
+                    row = self._conn.execute(
+                        """SELECT * FROM financial_ml_event_bar_state
+                        WHERE symbol=? AND bar_type=?""",
+                        (key, bar_type),
+                    ).fetchone()
+                    if row is None:
+                        start_at = end_at = event.timestamp
+                        opening = high = low = close = event.price
+                        volume = event.volume
+                        dollar_volume = dollar
+                        signed_volume = event.signed_volume
+                        event_count = 1
+                        measure_value = increment
+                    else:
+                        if event.timestamp < row["end_at"]:
+                            raise ValueError("market events must be chronological per symbol")
+                        start_at = row["start_at"]
+                        end_at = event.timestamp
+                        opening = float(row["open"])
+                        high = max(float(row["high"]), event.price)
+                        low = min(float(row["low"]), event.price)
+                        close = event.price
+                        volume = float(row["volume"]) + event.volume
+                        dollar_volume = float(row["dollar_volume"]) + dollar
+                        signed_volume = float(row["signed_volume"]) + event.signed_volume
+                        event_count = int(row["event_count"]) + 1
+                        measure_value = float(row["measure_value"]) + increment
+                    crossed = (
+                        abs(measure_value) >= threshold
+                        if bar_type == "imbalance"
+                        else measure_value >= threshold
+                    )
+                    if crossed:
+                        self._conn.execute(
                             """INSERT INTO financial_ml_event_bars
                             (symbol,bar_type,start_at,end_at,open,high,low,close,
                              volume,dollar_volume,signed_volume,event_count)
-                            SELECT ?,?,?,?,?,?,?,?,?,?,?,?
-                            WHERE NOT EXISTS (
-                                SELECT 1 FROM financial_ml_event_bars
-                                WHERE symbol=? AND bar_type=? AND end_at=?
-                            )""",
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                             (
-                                key, bar_type, bar.start_timestamp, bar.end_timestamp,
-                                bar.open, bar.high, bar.low, bar.close, bar.volume,
-                                bar.dollar_volume, bar.signed_volume, bar.event_count,
-                                key, bar_type, bar.end_timestamp,
+                                key, bar_type, start_at, end_at, opening, high, low,
+                                close, volume, dollar_volume, signed_volume, event_count,
                             ),
                         )
-                        count += max(0, cursor.rowcount)
-                output[bar_type] = count
-            self._conn.commit()
-            return output
+                        self._conn.execute(
+                            "DELETE FROM financial_ml_event_bar_state WHERE symbol=? AND bar_type=?",
+                            (key, bar_type),
+                        )
+                        output[bar_type] = 1
+                    else:
+                        self._conn.execute(
+                            """INSERT INTO financial_ml_event_bar_state
+                            (symbol,bar_type,start_at,end_at,open,high,low,close,
+                             volume,dollar_volume,signed_volume,event_count,measure_value)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                            ON CONFLICT(symbol,bar_type) DO UPDATE SET
+                            end_at=excluded.end_at,high=excluded.high,low=excluded.low,
+                            close=excluded.close,volume=excluded.volume,
+                            dollar_volume=excluded.dollar_volume,
+                            signed_volume=excluded.signed_volume,
+                            event_count=excluded.event_count,
+                            measure_value=excluded.measure_value""",
+                            (
+                                key, bar_type, start_at, end_at, opening, high, low,
+                                close, volume, dollar_volume, signed_volume,
+                                event_count, measure_value,
+                            ),
+                        )
+                        output[bar_type] = 0
+                self._conn.execute("COMMIT")
+            except Exception:
+                self._conn.execute("ROLLBACK")
+                raise
+        return output
 
     def event_features(self, symbol: str) -> dict[str, float]:
         key = symbol.upper()
         with self._lock:
             rows = self._conn.execute(
                 """SELECT volume,dollar_volume,signed_volume,close
-                FROM financial_ml_event_bars WHERE symbol=?
+                FROM financial_ml_event_bars
+                WHERE symbol=? AND bar_type='volume'
                 ORDER BY end_at DESC LIMIT 20""",
                 (key,),
             ).fetchall()
