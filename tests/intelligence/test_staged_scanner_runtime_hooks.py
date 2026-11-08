@@ -42,9 +42,11 @@ def test_staged_subscriptions_follow_the_iterator_used_by_paper_runtime() -> Non
 
         batches = [batch async for batch in scanner.iter_candidate_batches()]
         assert len(batches) == 2
-        assert [
-            candidate.symbol for batch in batches for candidate in batch
-        ] == ["ETHUSDT", "BTCUSDT", "SOLUSDT"]
+        assert [candidate.symbol for batch in batches for candidate in batch] == [
+            "ETHUSDT",
+            "BTCUSDT",
+            "SOLUSDT",
+        ]
         assert notifications[1:] == [
             (["SOLUSDT", "ETHUSDT", "BTCUSDT"], "TOP_5"),
             (["SOLUSDT", "ETHUSDT"], "TOP_2"),
