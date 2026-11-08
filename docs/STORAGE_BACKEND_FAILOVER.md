@@ -38,6 +38,18 @@ refused while `AITOS_STORAGE_REQUIRE_CLICKHOUSE_ANALYTICS=true`. This is a
 constrained paper-runtime mode, not a general-purpose replacement for
 ClickHouse.
 
+## PostgreSQL schema lifecycle
+
+Both PostgreSQL adapters use the shared versioned migration runner in
+`aitos/storage/postgres_migrations.py`. Migration DDL and its version/checksum
+record are committed in one transaction under a PostgreSQL advisory lock.
+Concurrent process startup is serialized; a crash rolls back the in-flight
+migration rather than leaving a false applied-version marker. Existing
+unversioned adapter tables are adopted by the idempotent initial migration and
+validated for required columns. A checksum or schema mismatch fails startup
+closed. Future schema changes must add a new numbered migration; do not edit an
+already-applied migration.
+
 ## PostgreSQL adapter guarantees and limits
 
 The market adapter persists canonical market events, live analytics events,
@@ -80,14 +92,32 @@ a world-open IP allowlist. Railway is only a fallback test platform after the
 account's free allowance is verified; do not create usage-metered resources
 when cost is unclear.
 
+## Read-only reconciliation
+
+`scripts/reconcile_postgres_journal.py` compares PostgreSQL operational
+snapshots, journal entries and decision lifecycle records against the matching
+ClickHouse `trades`, `journal_entries` and `decision_journal` tables. It
+checks both directions, preserves duplicate counts, hashes canonical payloads,
+and emits a JSON report. It defaults to a bounded seven-day window; pass
+`--since` to select a different timezone-aware lower bound. Configure
+`AITOS_RECONCILE_POSTGRES_URL` (or `AITOS_STORAGE_POSTGRES_URL`) and the
+standard `CLICKHOUSE_*` variables before running it.
+
+The command is deliberately read-only. It does not repair, copy, delete, or
+promote data. A clean operational comparison is necessary evidence, not
+sufficient authorization to switch backends. Market OHLCV, depth, ticks,
+funding, learning experiences and analytical feature tables are outside this
+first reconciliation scope and must not be inferred as reconciled.
+
 ## Not yet accepted
 
-- Versioned, ordered PostgreSQL schema migrations and compatibility checks.
-- AITOS adapter round-trip, concurrent duplicate/retry and restart-recovery
-  tests against the Render-hosted database (the GitHub Actions integration
-  job uses an ephemeral PostgreSQL 16 service).
-- Crash-window reconciliation across execution state, operational journal and
-  market records.
+- Additional forward migrations for future schema evolution; the initial versioned migration and compatibility checks are implemented.
+- AITOS adapter round-trip against Render-hosted PostgreSQL (the Render smoke
+  service is being upgraded from raw asyncpg checks to the actual adapters;
+  GitHub Actions also tests ephemeral PostgreSQL 16).
+- Full crash-window reconciliation across exchange execution state, operational
+  journal and market records; the current CLI only compares operational
+  journal/trade snapshots between ClickHouse and PostgreSQL.
 - ClickHouse-to-PostgreSQL and PostgreSQL-to-ClickHouse reconciliation with
   counts, key coverage, checksums and explicit operator approval.
 - Empirical paper-canary acceptance using real market-data flow and complete
