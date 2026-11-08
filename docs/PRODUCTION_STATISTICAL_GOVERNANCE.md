@@ -47,3 +47,7 @@ be exposed through an independently authenticated endpoint.
 - No secrets, production URLs, or credentials are committed by this change.
 - Paper/shadow validation and CI acceptance remain required. No live trading
   or automatic promotion is enabled.
+
+## Feature configuration example
+
+Choose an explicit allow-list that matches the numeric keys actually written into `learning_experiences.features_json`, for example `("return_1m", "realized_volatility", "spread_bps", "cvd_zscore", "ofi_zscore", "slippage_bps", "fill_ratio")`. Do not enable features until their producer, units, sampling cadence, and missing-value policy have been audited. Tune `window`, `lookback`, `max_staleness`, and `min_observations` from the observed data cadence; defaults are conservative examples, not universal production thresholds.
