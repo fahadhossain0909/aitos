@@ -445,7 +445,6 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     await event_bus.initialize({})
     event_bus_cleanup_owner = {"components": False}
     drift_engine = None
-    drift_client = None
     cleanup.push_async_callback(
         _shutdown_event_bus_if_unowned, event_bus, event_bus_cleanup_owner
     )
@@ -586,7 +585,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     cleanup.push_async_callback(experience_recorder.shutdown)
     await experience_recorder.initialize({})
     await _start_optional_hawkes_bootstrap(components)
-    drift_engine, drift_client = await _start_optional_statistical_drift_monitor(
+    drift_engine, _ = await _start_optional_statistical_drift_monitor(
         components, market_repo, settings, cleanup
     )
     health_server = HealthServer(
@@ -753,11 +752,6 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
                 await drift_engine.stop_drift_monitor()
             except Exception:
                 logger.exception("A-Stat drift monitor shutdown failed")
-        if drift_client is not None:
-            try:
-                await asyncio.to_thread(drift_client.close)
-            except Exception:
-                logger.exception("A-Stat drift ClickHouse client shutdown failed")
         await _cancel_task(heal_task)
         # Let the worker finish its current ClickHouse batch before joining.
         await _stop_learning_worker(learning_worker, learning_task)
