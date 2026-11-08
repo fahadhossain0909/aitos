@@ -273,9 +273,7 @@ async def _start_optional_statistical_drift_monitor(
         clickhouse_connect.get_client, **market_repo._conn_params
     )
     cleanup.callback(client.close)
-    store = ClickHouseExperienceStore(
-        client, database=settings.clickhouse.database
-    )
+    store = ClickHouseExperienceStore(client, database=settings.clickhouse.database)
     provider = ClickHouseDriftFeatureBatchProvider(
         store,
         feature_names=feature_names,
