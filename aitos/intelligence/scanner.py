@@ -2042,11 +2042,52 @@ class OpportunityScanner(AITOSModule):
         self, candidates: list[ScanCandidate], top_n: int | None = None
     ) -> list[ScanCandidate]:
         n = top_n if top_n is not None else self._top_n
+        from dataclasses import replace as replace_candidate
+
+        scored: list[ScanCandidate] = []
+        for candidate in candidates:
+            prediction = self._financial_ml.predict(
+                candidate.candidate_id, candidate.financial_ml_features
+            )
+            candidate = replace_candidate(
+                candidate,
+                meta_raw_probability=prediction.raw_probability,
+                meta_probability=prediction.calibrated_probability,
+                meta_accepted=(
+                    prediction.accepted
+                    if prediction.calibrated_probability is not None
+                    else None
+                ),
+                meta_reason=prediction.reason,
+            )
+            scored.append(candidate)
+            if prediction.calibrated_probability is not None:
+                await self._record_funnel(
+                    symbol=candidate.symbol,
+                    side=candidate.direction.value,
+                    stage="financial_ml_meta_gate",
+                    accepted=prediction.accepted,
+                    reason=prediction.reason,
+                    details={
+                        "candidate_id": candidate.candidate_id,
+                        "raw_probability": prediction.raw_probability,
+                        "calibrated_probability": prediction.calibrated_probability,
+                        "mode": prediction.mode,
+                        "enforced": self._financial_ml.should_block(prediction),
+                    },
+                )
         eligible = [
-            c for c in candidates if c.composite_score >= self._min_score_threshold
+            candidate
+            for candidate in scored
+            if candidate.composite_score >= self._min_score_threshold
+            and not (
+                self._financial_ml.enforce
+                and candidate.meta_probability is not None
+                and candidate.meta_accepted is False
+            )
         ]
         eligible_symbols = {candidate.symbol for candidate in eligible}
-        for candidate in candidates:
+        for candidate in scored:
             accepted = candidate.symbol in eligible_symbols
             await self._record_funnel(
                 symbol=candidate.symbol,
@@ -2062,12 +2103,20 @@ class OpportunityScanner(AITOSModule):
                     "composite_score": candidate.composite_score,
                     "minimum_score": self._min_score_threshold,
                     "trace_id": candidate.trace_id,
+                    "candidate_id": candidate.candidate_id,
+                    "meta_probability": candidate.meta_probability,
                 },
             )
         ranked = self._ranking_hysteresis.rank(eligible, n)
         ranked_symbols = {candidate.symbol for candidate in ranked}
         for candidate in eligible:
             accepted = candidate.symbol in ranked_symbols
+            if not accepted:
+                await asyncio.to_thread(
+                    self._financial_ml.reject_candidate,
+                    candidate.candidate_id,
+                    "excluded_by_top_n_or_hysteresis",
+                )
             await self._record_funnel(
                 symbol=candidate.symbol,
                 side=candidate.direction.value,
@@ -2082,8 +2131,17 @@ class OpportunityScanner(AITOSModule):
                     "composite_score": candidate.composite_score,
                     "top_n": n,
                     "trace_id": candidate.trace_id,
+                    "candidate_id": candidate.candidate_id,
+                    "meta_probability": candidate.meta_probability,
                 },
             )
+        for candidate in scored:
+            if candidate.symbol not in ranked_symbols and candidate not in eligible:
+                await asyncio.to_thread(
+                    self._financial_ml.reject_candidate,
+                    candidate.candidate_id,
+                    "score_or_meta_gate_rejection",
+                )
         return ranked
 
     async def decide_with_kernel(self, candidate: ScanCandidate, kernel: Any) -> Any:
