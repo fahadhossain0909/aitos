@@ -48,7 +48,12 @@ class ReconciliationResult:
 
     @property
     def clean(self) -> bool:
-        return not self.source_only and not self.target_only
+        return (
+            not self.source_only
+            and not self.target_only
+            and not self.source_duplicate_fingerprints
+            and not self.target_duplicate_fingerprints
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {**asdict(self), "clean": self.clean}
