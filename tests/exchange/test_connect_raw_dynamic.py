@@ -895,3 +895,63 @@ async def test_subscribed_streams_reflected_in_transport():
     except asyncio.CancelledError:
         pass
     await gen.aclose()
+
+
+
+@pytest.mark.asyncio
+async def test_subscription_change_during_handshake_is_not_lost():
+    """A rank update during TCP/WebSocket setup is applied after handshake."""
+    streams = ["btcusdt@aggTrade"]
+    get_streams = MagicMock(return_value=streams)
+    changed = asyncio.Event()
+    handshake_release = asyncio.Event()
+    recv_event = asyncio.Event()
+
+    adapter = make_adapter()
+    ws = AsyncMock()
+    ws.recv.side_effect = recv_event.wait
+
+    class DelayedConnector:
+        async def __aenter__(self):
+            await handshake_release.wait()
+            return ws
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+    adapter._ws_connector.return_value = DelayedConnector()
+    gen = connect_raw_dynamic(
+        adapter=adapter,
+        get_streams=get_streams,
+        changed=changed,
+        emit_reconnect=False,
+        label="trades",
+    )
+
+    task = asyncio.create_task(gen.asend(None))
+    await wait_state(adapter, "connecting")
+    get_streams.return_value = [
+        "btcusdt@aggTrade",
+        "ethusdt@aggTrade",
+        "solusdt@aggTrade",
+    ]
+    changed.set()
+    handshake_release.set()
+    await wait_state(adapter, "connected")
+    recv_event.set()
+    await asyncio.sleep(0.15)
+
+    subscribe_calls = [
+        call
+        for call in ws.send.call_args_list
+        if json.loads(call.args[0]).get("method") == "SUBSCRIBE"
+    ]
+    assert subscribe_calls
+    payload = json.loads(subscribe_calls[-1].args[0])
+    assert set(payload["params"]) == {"ethusdt@aggTrade", "solusdt@aggTrade"}
+    assert set(adapter._ws_transport["streams"]) == set(get_streams.return_value)
+
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await gen.aclose()
