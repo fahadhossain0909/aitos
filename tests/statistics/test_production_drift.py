@@ -54,6 +54,7 @@ def test_clickhouse_provider_creates_disjoint_batches_and_fails_closed():
             lookback=timedelta(days=10),
             window=timedelta(days=2),
             min_observations=20,
+            feature_names=("vol",),
             clock=lambda: now,
         )()
 
