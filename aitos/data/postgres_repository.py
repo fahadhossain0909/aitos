@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from datetime import datetime, timezone
 from typing import Any
 
@@ -222,7 +223,7 @@ class PostgresMarketDataRepository:
                 "bids": book.bids,
                 "asks": book.asks,
                 "spread": book.spread,
-                "depth_ratio": book.depth_ratio,
+                "depth_ratio": book.depth_ratio if math.isfinite(book.depth_ratio) else None,
                 "last_update_id": book.last_update_id,
                 "depth_event": book.depth_event,
             }
@@ -390,7 +391,13 @@ class PostgresMarketDataRepository:
     ) -> None:
         self._require_initialized()
         occurred_at = self._as_datetime(event_time)
-        encoded = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+        encoded = json.dumps(
+            payload,
+            sort_keys=True,
+            default=str,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
         conflict_action = (
             "DO UPDATE SET event_time = EXCLUDED.event_time, payload = EXCLUDED.payload"
             if replace
