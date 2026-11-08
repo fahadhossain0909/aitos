@@ -561,8 +561,34 @@ class OpportunityScanner(AITOSModule):
             and trade.trade_id != previous_trade_id
         )
         if accepted:
+            timestamp = getattr(trade, "timestamp", None)
+            quantity = float(getattr(trade, "quantity", 0.0) or 0.0)
+            trade_side = str(
+                getattr(getattr(trade, "side", None), "value", getattr(trade, "side", "BUY"))
+            ).upper()
+            signed_volume = quantity if trade_side == "BUY" else -quantity
+            try:
+                from aitos.statistics.financial_ml import MarketEvent
+
+                event = MarketEvent(
+                    timestamp=_timestamp_iso(timestamp, _utc_now_iso()),
+                    price=float(trade.price),
+                    volume=quantity,
+                    signed_volume=signed_volume,
+                )
+                await asyncio.to_thread(
+                    self._financial_ml.ingest_market_event, trade.symbol, event
+                )
+                await asyncio.to_thread(
+                    self._financial_ml.observe_price, trade.symbol, float(trade.price), timestamp
+                )
+            except Exception:
+                logger.exception(
+                    "financial ML live event ingestion failed",
+                    extra={"aitos_extra": {"symbol": trade.symbol}},
+                )
             self._candidate_outcomes.update_price(
-                trade.symbol, trade.price, getattr(trade, "timestamp", None)
+                trade.symbol, trade.price, timestamp
             )
             await asyncio.to_thread(self._reconcile_candidate_markouts)
 
