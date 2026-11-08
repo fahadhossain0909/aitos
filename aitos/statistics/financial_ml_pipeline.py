@@ -290,6 +290,11 @@ class FinancialMLPipeline:
             self._artifact_version = None
             return
         artifact = json.loads(row["artifact_json"])
+        if artifact.get("feature_names") != list(self.FEATURE_NAMES):
+            self._models.clear()
+            self._calibrators.clear()
+            self._artifact_version = str(row["artifact_id"])
+            return
         self._models["meta"] = self._model_from_dict(artifact["model"])
         if artifact.get("calibrator"):
             self._calibrators["platt"] = self._model_from_dict(artifact["calibrator"])
