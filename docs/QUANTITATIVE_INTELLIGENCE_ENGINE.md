@@ -189,3 +189,39 @@ head before code validation can be declared. Even a green CI run does not
 establish production calibration, venue-specific market-impact coefficients,
 live event-consumer wiring, paper-runtime reconciliation or real-world
 execution quality.
+
+
+## Financial machine-learning layer (new foundations)
+
+The aitos.statistics.financial_ml module adds deterministic, dependency-light
+research primitives:
+
+- Volume, dollar and signed-volume imbalance bars. Only threshold-complete
+  bars are emitted; the incomplete tail is intentionally retained by the
+  caller rather than misrepresented as a closed sample.
+- Fixed-width fractional differentiation with causal newest-to-oldest weights
+  and explicit warm-up null values. Fit thresholds and feature choices on
+  training windows only; do not use a future-fitted differencing order.
+- Side-aware triple-barrier labels with volatility-scaled profit/stop barriers,
+  vertical maximum holding period, conservative stop-first handling when both
+  OHLC barriers are touched in the same bar, and explicit fee/slippage/funding
+  costs. Volatility inputs must be known at event time.
+- A deterministic logistic MetaLabeler that estimates whether a primary
+  strategy proposal achieved a positive net outcome. It is an acceptance
+  estimate only: it does not generate direction, submit orders, resize beyond
+  existing sizing policy, or bypass hard Risk/HTF/execution gates.
+- Sequential bootstrap indices weighted by marginal event uniqueness to
+  reduce repeated sampling of overlapping labels.
+
+These are primitives, not a production-ready training pipeline. The next
+integration step is to bind labels to immutable candidate/decision IDs and
+label_end timestamps, then create training rows only after each label has
+resolved. Use expanding purged walk-forward folds and embargo before fitting;
+keep calibration data separate from model fitting; report executed outcomes
+separately from replay-derived counterfactual labels. Rejected candidates must
+never be reported as realised PnL. White Reality Check and multiple-testing
+corrections are already available in selection.py and should be applied to
+the complete strategy/model search family, not just the winning experiment.
+
+No meta-model output is a standalone permission to trade. Promotion remains
+manual and governed; no automatic promotion or live trading is enabled.
