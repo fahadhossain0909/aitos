@@ -44,7 +44,9 @@ jobs:
           --health-retries 30
     env:
       AITOS_MODE: paper
-      BINANCE_TESTNET: "false"
+      BINANCE_TESTNET: "true"
+      AITOS_BINANCE_FUTURES_REST_BASE_URL: https://testnet.binancefuture.com
+      AITOS_BINANCE_FUTURES_WS_BASE_URL: wss://stream.binancefuture.com
       TESTING: "false"
       MODEL_DATA_DIR: ${{ github.workspace }}/.paper-canary-models
       REDIS_HOST: 127.0.0.1
