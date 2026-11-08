@@ -15,7 +15,7 @@ import threading
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 from aitos.statistics.financial_ml import (
     MarketEvent,
@@ -158,7 +158,6 @@ class FinancialMLPipeline:
         if not 0.0 < self.acceptance_threshold < 1.0:
             raise ValueError("acceptance_threshold must be in (0,1)")
         self._lock = threading.RLock()
-        self._events: dict[str, list[MarketEvent]] = {}
         self._models: dict[str, Any] = {}
         self._calibrators: dict[str, Any] = {}
         self._artifact_version: str | None = None
@@ -767,7 +766,9 @@ class FinancialMLPipeline:
     def should_block(self, prediction: FinancialMLPrediction) -> bool:
         # Enforce is opt-in and requires an active artifact that passed OOS
         # acceptance. Even then it is only an additional veto, never a bypass.
-        return self.enforce and prediction.calibrated_probability is not None and not prediction.accepted
+        return self.enforce and (
+            prediction.calibrated_probability is None or not prediction.accepted
+        )
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
