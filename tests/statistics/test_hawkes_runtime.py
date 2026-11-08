@@ -146,3 +146,68 @@ def test_invalid_hawkes_warmup_does_not_replace_existing_filter():
             "BTCUSDT", fit, warmup_events=[(101.0, 1), (100.0, 0)]
         )
     assert engine.last_hawkes_timestamp("BTCUSDT") == 100.0
+
+
+def test_hawkes_oos_gain_integrates_excitation_only_over_holdout_window():
+    fit = _fit(5.0)
+    train_times = [0.0, 1.0]
+    train_marks = [0, 1]
+    holdout_times = [2.0, 3.0]
+    holdout_marks = [0, 1]
+    boundary = 1.5
+    end = 4.0
+
+    online = hawkes_runtime.MarkedHawkesOnlineFilter(fit)
+    for timestamp, mark in zip(train_times, train_marks):
+        online.observe(timestamp, mark)
+    event_log_likelihood = sum(
+        __import__("math").log(
+            online.observe(timestamp, mark).intensities[mark]
+        )
+        for timestamp, mark in zip(holdout_times, holdout_marks)
+    )
+    duration = end - boundary
+    counts = [train_marks.count(mark) for mark in (0, 1)]
+    baseline = [count / boundary for count in counts]
+    poisson_log_likelihood = sum(
+        __import__("math").log(baseline[mark]) for mark in holdout_marks
+    )
+
+    source_integrals = []
+    for source in (0, 1):
+        total = 0.0
+        for timestamp, mark in zip(
+            train_times + holdout_times, train_marks + holdout_marks
+        ):
+            if mark != source or timestamp >= end:
+                continue
+            at_boundary = (
+                __import__("math").exp(-fit.decay * (boundary - timestamp))
+                if timestamp < boundary
+                else 1.0
+            )
+            at_end = __import__("math").exp(-fit.decay * (end - timestamp))
+            total += max(0.0, at_boundary - at_end)
+        source_integrals.append(total)
+    excitation_integral = sum(
+        fit.excitation_matrix[target][source] * source_integrals[source]
+        for target in (0, 1)
+        for source in (0, 1)
+    )
+    hawkes_integral = sum(fit.baseline_intensities) * duration + excitation_integral
+    poisson_integral = sum(baseline) * duration
+    expected = (
+        event_log_likelihood - hawkes_integral
+        - poisson_log_likelihood + poisson_integral
+    ) / len(holdout_marks)
+
+    actual = hawkes_runtime._holdout_gain(
+        fit,
+        train_times,
+        train_marks,
+        holdout_times,
+        holdout_marks,
+        boundary,
+        end,
+    )
+    assert actual == pytest.approx(expected)
