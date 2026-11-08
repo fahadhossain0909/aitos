@@ -44,6 +44,9 @@ def test_event_bar_partial_state_survives_restart(tmp_path):
         "imbalance": 1,
     }
     assert restored.snapshot()["event_bars"] == 3
+    features = restored.event_features("BTCUSDT")
+    assert features["event_volume_imbalance"] == 1.0
+    assert features["event_dollar_activity"] > 0.0
     restored.close()
 
 
