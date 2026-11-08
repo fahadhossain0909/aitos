@@ -32,7 +32,9 @@ def _closed_trade(trade_id="trade-1", pnl_percent=1.25):
 
 
 @pytest.mark.asyncio
-async def test_a_stat_feedback_updates_calibration_from_closed_trade(event_bus, tmp_path):
+async def test_a_stat_feedback_updates_calibration_from_closed_trade(
+    event_bus, tmp_path
+):
     engine = AStatEngine(calibration_window=16)
     loop = AStatFeedbackLoop(
         event_bus, engine, tmp_path / "a-stat-feedback.sqlite3", calibration_window=16
