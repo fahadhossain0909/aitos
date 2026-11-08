@@ -135,3 +135,27 @@ the bounded public-trade sample on each process start. It does not persist or
 promote a champion artifact, and it is not a multi-instance model registry.
 Persisted signed model artifacts, rolling refit cadence, champion/challenger
 comparison and rollback remain separate governance work.
+
+
+## Hawkes live-paper acceptance and telemetry
+
+The paper runtime supports an opt-in per-symbol marked Hawkes bootstrap. It
+fetches a bounded recent-trade sample, fits only the training partition, checks
+stationarity/convergence, and compares held-out marked-event log likelihood
+against a training-rate Poisson baseline. Only accepted fits are installed;
+the held-out events are replayed into the online filter before the live stream
+continues. The live event consumer rejects out-of-order timestamps and reports
+per-symbol intensities and rejection counts.
+
+Enable with `AITOS_HAWKES_ENABLED=true` and an explicit
+`AITOS_HAWKES_SYMBOLS` allow-list. Defaults cap history at 1,000 trades and
+require at least 200 total events plus per-mark training support. A rejected
+or insufficient sample is a normal fail-closed outcome and does not register a
+model. Current Hawkes output is telemetry-only: it is not an A-Stat scoring
+feature, entry gate, position manager, or execution signal. Strategy use
+requires a separately reviewed feature contract, calibration study, ablation,
+walk-forward/OOS acceptance and explicit approval.
+
+The paper Canary exercises bootstrap reporting and publishes the registered
+model state plus decision-ledger aggregate counts in its health artifact. It
+does not require a model to be accepted on every market sample.
