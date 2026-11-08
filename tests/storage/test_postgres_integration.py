@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -96,9 +97,24 @@ async def test_postgres_market_and_journal_round_trip():
         )
         await journal.save_journal_entry(entry)
         await journal.save_journal_entry(entry)
-        await journal.save_decision(
-            decision_id, {"candidate_id": token, "symbol": symbol}
-        )
+        decision_snapshot = {"candidate_id": token, "symbol": symbol}
+        # Simulate a process dying after PostgreSQL committed but before the
+        # caller received its acknowledgement. A fresh adapter retry must
+        # collide with the durable idempotency key rather than append twice.
+        async with retry_journal._pool.acquire() as conn:
+            await conn.execute(
+                """
+                INSERT INTO aitos_operational_records
+                    (record_type, entity_id, idempotency_key, recorded_at, payload)
+                VALUES ('DECISION', $1, $2, $3, $4::jsonb)
+                ON CONFLICT (idempotency_key) DO NOTHING
+                """,
+                decision_id,
+                f"decision:{decision_id}",
+                opened,
+                json.dumps(decision_snapshot),
+            )
+        await journal.save_decision(decision_id, decision_snapshot)
         await journal.link_trade(decision_id, {"trade_id": trade_id, "symbol": symbol})
         await journal.attribute_outcome(
             decision_id,
@@ -163,7 +179,10 @@ async def test_postgres_market_and_journal_round_trip():
             "OUTCOME",
         }
         await journal.save_journal_entry(entry)
+        await journal.save_decision(decision_id, decision_snapshot)
         assert len(await journal.get_journal_entries_for_trade(trade_id)) == 1
+        recovered_decisions = await journal.get_records(decision_id)
+        assert sum(row["record_type"] == "DECISION" for row in recovered_decisions) == 1
     finally:
         if market._pool is not None:
             async with market._pool.acquire() as conn:
