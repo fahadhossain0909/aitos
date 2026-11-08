@@ -1,53 +1,102 @@
-"""Temporary Render health endpoint that verifies PostgreSQL read/write access."""
+"""Temporary Render endpoint exercising the real AITOS PostgreSQL adapters."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse
 
 
 async def _write_and_read() -> dict[str, Any]:
-    import asyncpg
+    from aitos.data.postgres_repository import PostgresMarketDataRepository
+    from aitos.journal.models import JournalEntry, JournalEntryType
+    from aitos.journal.postgres_repository import PostgresJournalRepository
 
-    conn = await asyncpg.connect(dsn=os.environ["DATABASE_URL"], timeout=8)
-    key = "render-smoke:health-check"
-    payload = {"check": "postgres_write_read", "status": "ok"}
+    dsn = os.environ["DATABASE_URL"]
+    market = PostgresMarketDataRepository(dsn, min_size=1, max_size=2)
+    journal = PostgresJournalRepository(dsn, min_size=1, max_size=2)
     try:
-        await conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS aitos_render_smoke (
-                idempotency_key TEXT PRIMARY KEY,
-                payload JSONB NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        # Both real AITOS adapters apply the same versioned, transactional
+        # migration set during initialization.
+        await asyncio.gather(market.initialize({}), journal.initialize({}))
+
+        opened = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        kline = SimpleNamespace(
+            symbol="AITOSSMOKEUSDT",
+            timeframe="1m",
+            open_time=opened,
+            close_time=opened,
+            open=100.0,
+            high=101.0,
+            low=99.0,
+            close=100.5,
+            volume=10.0,
+            quote_volume=1005.0,
+            trades_count=3,
+            taker_buy_volume=6.0,
+            taker_buy_quote_volume=603.0,
+        )
+        await market.save_kline(kline)
+        klines = await market.get_recent_klines("AITOSSMOKEUSDT", "1m", limit=5)
+        if not klines or float(klines[0]["close"]) != 100.5:
+            raise RuntimeError("AITOS market adapter round-trip failed")
+
+        trade_id = "render-smoke:trade"
+        decision_id = "render-smoke:decision"
+        await journal.save_trade_snapshot(
+            {"trade_id": trade_id, "symbol": "AITOSSMOKEUSDT", "state": "OPEN"}
+        )
+        await journal.save_journal_entry(
+            JournalEntry(
+                entry_id="render-smoke:journal-entry",
+                trade_id=trade_id,
+                entry_type=JournalEntryType.PRE_TRADE,
+                market_context={"symbol": "AITOSSMOKEUSDT", "source": "render-smoke"},
             )
-            """
         )
-        await conn.execute(
-            """
-            INSERT INTO aitos_render_smoke (idempotency_key, payload)
-            VALUES ($1, $2::jsonb)
-            ON CONFLICT (idempotency_key) DO NOTHING
-            """,
-            key,
-            json.dumps(payload),
+        await journal.save_decision(
+            decision_id, {"candidate_id": "render-smoke:candidate"}
         )
-        row = await conn.fetchrow(
-            """
-            SELECT payload::text AS payload
-            FROM aitos_render_smoke
-            WHERE idempotency_key = $1
-            """,
-            key,
+        await journal.link_trade(
+            decision_id, {"trade_id": trade_id, "symbol": "AITOSSMOKEUSDT"}
         )
-        if row is None:
-            raise RuntimeError("PostgreSQL read-after-write returned no row")
-        return json.loads(row["payload"])
+        await journal.attribute_outcome(
+            decision_id,
+            {
+                "trade_id": trade_id,
+                "pnl": 0.5,
+                "risk_amount_usd": 0.25,
+                "entry_time": opened.isoformat(),
+                "exit_time": opened.isoformat(),
+            },
+        )
+        entries = await journal.get_journal_entries_for_trade(trade_id)
+        records = await journal.get_records(decision_id)
+        record_types = {row["record_type"] for row in records}
+        if len(entries) != 1 or not {"DECISION", "TRADE_LINK", "OUTCOME"} <= record_types:
+            raise RuntimeError("AITOS operational journal round-trip failed")
+
+        async with market._pool.acquire() as conn:
+            schema_version = await conn.fetchval(
+                "SELECT max(version) FROM aitos_schema_migrations"
+            )
+        if schema_version != 1:
+            raise RuntimeError("AITOS PostgreSQL migration version is unexpected")
+
+        return {
+            "check": "aitos_postgres_adapter_round_trip",
+            "status": "ok",
+            "schema_version": int(schema_version),
+            "market_data": "ok",
+            "operational_journal": "ok",
+        }
     finally:
-        await conn.close()
+        await asyncio.gather(market.shutdown(), journal.shutdown())
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -67,14 +116,13 @@ class Handler(BaseHTTPRequestHandler):
             result = asyncio.run(_write_and_read())
             self._respond(
                 200,
-                {"status": "ok", "database": "reachable", "write_read": result},
+                {"status": "ok", "database": "reachable", "adapter_test": result},
             )
         except Exception as exc:
-            print(f"PostgreSQL smoke health failed: {type(exc).__name__}")
+            print(f"AITOS PostgreSQL adapter smoke failed: {type(exc).__name__}")
             self._respond(503, {"status": "unavailable"})
-
+    
     def log_message(self, format: str, *args: Any) -> None:
-        # Avoid logging headers, query strings, or database details.
         print(
             f"HTTP {self.command} {urlparse(self.path).path} "
             f"{args[1] if len(args) > 1 else ''}"
@@ -84,5 +132,5 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "10000"))
     server = ThreadingHTTPServer(("0.0.0.0", port), Handler)
-    print(f"PostgreSQL smoke service listening on port {port}")
+    print(f"AITOS PostgreSQL adapter smoke service listening on port {port}")
     server.serve_forever()
