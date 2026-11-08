@@ -159,3 +159,12 @@ walk-forward/OOS acceptance and explicit approval.
 The paper Canary exercises bootstrap reporting and publishes the registered
 model state plus decision-ledger aggregate counts in its health artifact. It
 does not require a model to be accepted on every market sample.
+
+
+### Separate outcome horizons
+
+Rejected-candidate 15-minute markouts use a dedicated ledger entity
+`{candidate_id}:MARKOUT:900`. Financial-ML barrier labels remain attached to
+the base candidate entity. Both retain the same candidate ID, but resolving
+one horizon can no longer overwrite or suppress the other. Runtime health
+counts provenance only after the corresponding outcome has actually resolved.
