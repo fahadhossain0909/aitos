@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+from pathlib import Path
+import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 
 
 async def _write_and_read() -> dict[str, Any]:
