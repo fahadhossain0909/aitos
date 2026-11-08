@@ -225,3 +225,138 @@ the complete strategy/model search family, not just the winning experiment.
 
 No meta-model output is a standalone permission to trade. Promotion remains
 manual and governed; no automatic promotion or live trading is enabled.
+
+
+## Financial Machine Learning phases A-G — integrated implementation
+
+The Financial ML path is now wired into the live scanner and paper-trading
+lifecycle. The integration is additive and remains **shadow-first**.
+
+### Phase A — event-time sampling and fractional differentiation
+
+- Accepted canonical live trades are converted into validated MarketEvent
+  records with aggressor-side signed volume.
+- Independent Volume, Dollar and Imbalance bar accumulators run incrementally
+  in SQLite. Completed bars and unfinished per-symbol/per-bar-type accumulators
+  survive process restart; the hot path is O(1) per trade.
+- The scanner uses completed volume-bar closes for causal fractional-return
+  features. Warm-up observations are omitted rather than backfilled.
+- Default research thresholds are 25 base-volume units, 250,000 quote dollars
+  and 8 signed-volume units. These are starting defaults, not universal
+  instrument calibrations.
+
+### Phase B — Triple Barrier labels and outcome provenance
+
+- Each scanner candidate receives a UUID-derived stable candidate_id, an
+  event-time feature snapshot, entry reference, ATR/price volatility estimate,
+  upper/lower barriers and a 15-minute vertical expiry.
+- Rejected candidates enter the counterfactual observation state. Live trade
+  ticks resolve the first observed take/stop touch or vertical expiry, recording
+  the exact label_resolution_time, gross/net return, assumed costs and
+  COUNTERFACTUAL_LIVE_MARKOUT provenance.
+- The offline OHLC Triple Barrier function supports LONG and SHORT, vertical
+  expiry, fee/slippage/funding bps, conservative stop-first intrabar ambiguity,
+  and opening-gap fills at the observed open.
+- A candidate that is actually filled transitions to EXECUTED; counterfactual
+  ticks cannot resolve it. On close, the lifecycle supplies realised net return
+  including actual recorded fees and funding under
+  EXECUTED_TRADE_NET_OUTCOME provenance.
+- Counterfactual labels are never represented as realised PnL. The default
+  counterfactual round-trip cost assumption is 8 bps and must be calibrated
+  against the venue. Actual executed outcomes use the trade ledger's realised
+  net result.
+
+### Phase C — Meta-Labeling, calibration and acceptance
+
+- The existing primary strategy still owns direction. The logistic meta-model
+  estimates whether that primary proposal is likely to produce a positive
+  net outcome; it cannot generate a side or override Risk, MTF/HTF, kernel or
+  execution safeguards.
+- Standardization is fit on each training fold only. Platt scaling is fit on
+  chronological out-of-fold predictions, not on final-model in-sample scores.
+- The training report requires resolved samples, at least 20 OOS predictions,
+  ECE at most 0.15, precision above the OOS base rate and positive mean net
+  return among accepted OOS predictions.
+- Training writes an inactive artifact. Activation requires a separate
+  operator approval call with a trusted approval_verifier supplied by the
+  deployment's authenticated identity/RBAC boundary. A display name and
+  rationale alone are insufficient.
+- Scanner default is AITOS_FINANCIAL_ML_MODE=shadow. In enforce mode the
+  meta model is an additional veto and fails closed when no approved artifact
+  is loaded. It never relaxes an existing gate.
+
+### Phase D — purged walk-forward and sequential bootstrap
+
+- Training folds are expanding and chronological. Each training observation
+  must have resolved before the first test timestamp; unresolved/overlapping
+  labels are excluded and a one-observation embargo is applied.
+- Sequential bootstrap weights samples by marginal uniqueness of their label
+  intervals. It is applied only within each training fold, after temporal
+  purging; it is not a substitute for purging.
+- Calibration predictions remain out-of-fold. The final model is refit only
+  after OOS reporting has completed.
+
+### Phase E — statistical validation and multiple testing
+
+- Financial ML OOS reporting includes Brier score, ECE, OOS precision, base
+  rate and accepted-subset mean net return.
+- The A-Stat selection module already provides White's Reality Check,
+  Deflated/Probabilistic Sharpe, model-confidence-set diagnostics and
+  multiple-hypothesis p-value correction. Apply these to the complete
+  experiment/strategy search family; do not select a winner and then test only
+  that winner.
+- A single binary meta-model OOS report is not a substitute for strategy-family
+  Reality Check/FDR analysis or a full paper-trading acceptance campaign.
+
+### Phase F — advanced volatility diagnostics
+
+- Scanner candidate features now include a causal AR(1) log-variance stochastic
+  volatility proxy, robust-MAD jump-diffusion intensity/variance contribution,
+  and a multi-scale roughness/Hurst diagnostic.
+- These estimators are deterministic, bounded and use only the supplied
+  historical return window. They are diagnostics/features, not full calibrated
+  Heston, Bates or rough-Bergomi pricing implementations.
+- Existing GJR-GARCH, EGARCH, HAR-RV, HSMM, Hawkes and DCC-GARCH/Copula
+  components remain available in the wider A-Stat stack.
+
+### Phase G — live scanner, paper lifecycle and governance
+
+- Candidate IDs and meta evidence flow from ScanCandidate to Opportunity,
+  then into Trade.agent_consensus and every lifecycle decision record.
+- DecisionOutcomeLedger is migrated additively with candidate_id,
+  label_resolution_time and outcome_provenance. Entry, HOLD, MANAGE, EXIT,
+  execution-failure and rejection records for a candidate share that identity.
+- Counterfactual barrier labels synchronize to the Decision-to-Outcome Ledger
+  at the exact barrier/vertical resolution timestamp. The older 15-minute
+  rejection markout reconciler skips an entity already resolved by this path.
+- Actual filled trades are bound to their candidate ID; final net outcome,
+  fees, funding, exit time and provenance resolve the same entity.
+- The scanner exposes pipeline mode, candidate states, event-bar count and
+  active approved artifact in its health snapshot.
+
+### Operating the research pipeline
+
+Run the manual walk-forward training command after enough labels have resolved:
+
+    python scripts/train_financial_ml.py
+
+The command reports OOS evidence and stores an inactive artifact; it never
+approves or promotes it. The runtime defaults to shadow mode. Set
+AITOS_FINANCIAL_ML_MODE=disabled to turn off feature scoring, or shadow to
+observe without changing scanner eligibility. Enforce must only be enabled
+after OOS acceptance, trusted operator approval, venue-cost review and a
+paper canary; without an approved artifact it rejects candidates closed.
+
+### Explicit acceptance limits
+
+- This implementation does not claim production profitability or authorize
+  live orders. It has not been empirically calibrated against exchange-specific
+  historical queue position, partial-fill, market-impact and latency data.
+- Counterfactual labels use the configured round-trip cost estimate; they do
+  not reconstruct an actual queue/partial-fill path. Existing L2 execution
+  replay remains the research route for that calibration.
+- Stochastic/jump/rough volatility outputs are diagnostic estimators, not
+  full likelihood-calibrated derivatives-pricing models.
+- Training is deliberately manual; no background auto-training or auto-
+  promotion is enabled. Trusted approval middleware must be provided before
+  any production artifact activation workflow is exposed.
