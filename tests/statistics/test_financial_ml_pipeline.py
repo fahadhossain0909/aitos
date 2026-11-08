@@ -425,12 +425,8 @@ def test_live_trade_event_ids_make_event_bar_ingestion_idempotent(tmp_path):
         dollar_bar_threshold=20,
         imbalance_bar_threshold=2,
     )
-    first = MarketEvent(
-        "2026-01-01T00:00:00+00:00", 10, 1, 1, event_id="BTCUSDT:100"
-    )
-    second = MarketEvent(
-        "2026-01-01T00:00:01+00:00", 10, 1, 1, event_id="BTCUSDT:101"
-    )
+    first = MarketEvent("2026-01-01T00:00:00+00:00", 10, 1, 1, event_id="BTCUSDT:100")
+    second = MarketEvent("2026-01-01T00:00:01+00:00", 10, 1, 1, event_id="BTCUSDT:101")
     assert pipeline.ingest_market_event("BTCUSDT", first) == {
         "volume": 0,
         "dollar": 0,
