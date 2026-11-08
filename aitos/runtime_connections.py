@@ -50,15 +50,20 @@ async def try_connect_neo4j(settings, *, logger):
 
 
 async def connect_clickhouse_repositories(settings, *, logger):
-    """Connect ClickHouse analytics first, with a narrow PostgreSQL journal fallback.
+    """Connect ClickHouse analytics and capability-checked operational journal.
 
-    ClickHouse remains mandatory for market data and analytical repositories.
-    PostgreSQL can replace only the operational JournalRepository adapter;
-    it is never presented as a substitute for ClickHouse analytics, market
-    history, learning queries, or feature-store capabilities.
+    ClickHouse remains mandatory for market history and analytics. The
+    PostgreSQL adapter is eligible only for the narrower trade/journal
+    capability set it actually implements.
     """
     from aitos.data.repository import MarketDataRepository
     from aitos.journal.repository import JournalRepository
+    from aitos.storage.backend import (
+        BackendAdapter,
+        StorageBackend,
+        StorageBackendError,
+        select_storage_backend,
+    )
 
     market_repo = MarketDataRepository(
         host=settings.clickhouse.host,
@@ -69,18 +74,19 @@ async def connect_clickhouse_repositories(settings, *, logger):
     )
     storage = getattr(settings, "storage", None)
     backend_mode = getattr(storage, "backend", "auto")
-    primary_backend = getattr(storage, "primary", "clickhouse")
-    fallback_backend = getattr(storage, "fallback", "postgres")
-    explicit_postgres = backend_mode == "postgres" or (
-        backend_mode == "auto" and primary_backend == "postgres"
+    primary_name = (
+        "postgres"
+        if backend_mode == "postgres"
+        else getattr(storage, "primary", "clickhouse")
     )
+    fallback_name = getattr(storage, "fallback", "postgres")
     allow_fallback = (
         bool(getattr(storage, "allow_fallback", False))
-        and backend_mode != "clickhouse"
-        and fallback_backend == "postgres"
+        and backend_mode == "auto"
+        and fallback_name != primary_name
     )
     postgres_url = getattr(storage, "postgres_url", "") if storage else ""
-    journal_repo = None
+    required = frozenset({"trade_snapshots", "journal_entries"})
 
     try:
         await retry_with_backoff(
@@ -99,69 +105,89 @@ async def connect_clickhouse_repositories(settings, *, logger):
         )
         raise SystemExit(1) from exc
 
-    try:
-        if not explicit_postgres:
-            journal_repo = JournalRepository(
-                host=settings.clickhouse.host,
-                port=settings.clickhouse.port,
-                username=settings.clickhouse.user,
-                password=settings.clickhouse.password,
-                database=settings.clickhouse.database,
-            )
+    clickhouse_journal = JournalRepository(
+        host=settings.clickhouse.host,
+        port=settings.clickhouse.port,
+        username=settings.clickhouse.user,
+        password=settings.clickhouse.password,
+        database=settings.clickhouse.database,
+    )
+
+    async def probe_clickhouse_journal() -> None:
+        try:
             await retry_with_backoff(
-                lambda: journal_repo.initialize({}),
+                lambda: clickhouse_journal.initialize({}),
                 max_attempts=5,
                 base_delay_seconds=2.0,
                 max_delay_seconds=30.0,
                 operation_name="ClickHouse journal repository initialization",
             )
-            return market_repo, journal_repo
+        except Exception:
+            await clickhouse_journal.shutdown()
+            raise
 
-        if not allow_fallback:
-            raise RuntimeError(
-                "AITOS_STORAGE_BACKEND=postgres requires "
-                "AITOS_STORAGE_ALLOW_FALLBACK=true"
-            )
-        raise RetryExhaustedError(1, RuntimeError("PostgreSQL explicitly selected"))
-
-    except (RetryExhaustedError, RuntimeError) as clickhouse_error:
-        if not allow_fallback or not postgres_url:
-            await market_repo.shutdown()
-            if journal_repo is not None:
-                await journal_repo.shutdown()
-            logger.error(
-                "ClickHouse journal unavailable and PostgreSQL fallback is not "
-                "enabled/configured: %s",
-                clickhouse_error,
-            )
-            raise SystemExit(1) from clickhouse_error
-
-        if journal_repo is not None:
-            await journal_repo.shutdown()
-
+    adapters = {
+        StorageBackend.CLICKHOUSE: BackendAdapter(
+            backend=StorageBackend.CLICKHOUSE,
+            capabilities=required,
+            probe=probe_clickhouse_journal,
+        )
+    }
+    postgres_journal = None
+    if postgres_url:
         from aitos.journal.postgres_repository import PostgresJournalRepository
 
-        postgres_repo = PostgresJournalRepository(postgres_url)
-        try:
-            await retry_with_backoff(
-                lambda: postgres_repo.initialize({}),
-                max_attempts=5,
-                base_delay_seconds=2.0,
-                max_delay_seconds=30.0,
-                operation_name="PostgreSQL operational journal initialization",
-            )
-        except RetryExhaustedError as postgres_error:
-            await postgres_repo.shutdown()
-            await market_repo.shutdown()
-            logger.error(
-                "Both ClickHouse journal and PostgreSQL operational journal "
-                "are unavailable; refusing to start without durable journal: %s",
-                postgres_error,
-            )
-            raise SystemExit(1) from postgres_error
+        postgres_journal = PostgresJournalRepository(postgres_url)
 
-        logger.warning(
-            "Using PostgreSQL fallback for operational trade/journal records only; "
-            "ClickHouse remains the market-data and analytics system of record"
+        async def probe_postgres_journal() -> None:
+            try:
+                await retry_with_backoff(
+                    lambda: postgres_journal.initialize({}),
+                    max_attempts=5,
+                    base_delay_seconds=2.0,
+                    max_delay_seconds=30.0,
+                    operation_name="PostgreSQL operational journal initialization",
+                )
+            except Exception:
+                await postgres_journal.shutdown()
+                raise
+
+        adapters[StorageBackend.POSTGRES] = BackendAdapter(
+            backend=StorageBackend.POSTGRES,
+            capabilities=PostgresJournalRepository.CAPABILITIES,
+            probe=probe_postgres_journal,
         )
-        return market_repo, postgres_repo
+
+    try:
+        primary = StorageBackend(primary_name)
+        fallback = StorageBackend(fallback_name)
+        selection = await select_storage_backend(
+            adapters=adapters,
+            required_capabilities=required,
+            primary=primary,
+            fallback=fallback,
+            allow_fallback=allow_fallback,
+        )
+    except (StorageBackendError, ValueError) as exc:
+        await market_repo.shutdown()
+        await clickhouse_journal.shutdown()
+        if postgres_journal is not None:
+            await postgres_journal.shutdown()
+        logger.error(
+            "No configured journal backend can satisfy the operational "
+            "persistence contract; refusing to start: %s",
+            exc,
+        )
+        raise SystemExit(1) from exc
+
+    if selection.backend is StorageBackend.CLICKHOUSE:
+        if postgres_journal is not None:
+            await postgres_journal.shutdown()
+        return market_repo, clickhouse_journal
+
+    await clickhouse_journal.shutdown()
+    logger.warning(
+        "Using PostgreSQL fallback for operational trade/journal records only; "
+        "ClickHouse remains the market-data and analytics system of record"
+    )
+    return market_repo, postgres_journal
