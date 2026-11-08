@@ -935,7 +935,20 @@ class FinancialMLPipeline:
             else None
         )
         provenance_floor = max(5, self.min_oos_samples // 4)
+        evaluation_cutoff = rows[evaluation_indices[0]]["created_at"]
+        final_train_indices = [
+            index
+            for index, row in enumerate(rows)
+            if row["created_at"] < evaluation_cutoff
+            and row["label_resolution_time"] is not None
+            and row["label_resolution_time"] < evaluation_cutoff
+        ]
+        final_training_ready = (
+            len(final_train_indices) >= self.min_training_samples
+            and len({labels[index] for index in final_train_indices}) == 2
+        )
         passed = (
+            final_training_ready
             len(oos_labels) >= self.min_oos_samples
             and ece <= 0.15
             and precision > base_rate
