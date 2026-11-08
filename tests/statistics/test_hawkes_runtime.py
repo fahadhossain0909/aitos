@@ -168,9 +168,7 @@ def test_hawkes_oos_gain_integrates_excitation_only_over_holdout_window():
     duration = end - boundary
     counts = [train_marks.count(mark) for mark in (0, 1)]
     baseline = [count / boundary for count in counts]
-    poisson_log_likelihood = sum(
-        math.log(baseline[mark]) for mark in holdout_marks
-    )
+    poisson_log_likelihood = sum(math.log(baseline[mark]) for mark in holdout_marks)
 
     source_integrals = []
     for source in (0, 1):
