@@ -104,8 +104,7 @@ def _holdout_gain(
             at_end = math.exp(-fit.decay * (end - timestamp))
             source_integral += max(0.0, at_boundary - at_end)
         excitation_integral += sum(
-            fit.excitation_matrix[target][source] * source_integral
-            for target in (0, 1)
+            fit.excitation_matrix[target][source] * source_integral for target in (0, 1)
         )
     hawkes_integral = sum(fit.baseline_intensities) * duration + excitation_integral
     poisson_integral = sum(baseline) * duration
