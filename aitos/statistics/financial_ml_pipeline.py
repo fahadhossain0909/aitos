@@ -5,6 +5,7 @@ It persists candidate identity, event-time features, triple-barrier resolution
 and provenance. Executed trades are resolved only from the lifecycle's realised
 net outcome; rejected/not-filled candidates are explicitly counterfactual.
 """
+
 from __future__ import annotations
 
 import json
@@ -149,22 +150,32 @@ class FinancialMLPipeline:
         )
         self.volume_bar_threshold = _finite(volume_bar_threshold, "volume threshold")
         self.dollar_bar_threshold = _finite(dollar_bar_threshold, "dollar threshold")
-        self.imbalance_bar_threshold = _finite(imbalance_bar_threshold, "imbalance threshold")
-        self.profit_take_multiple = _finite(profit_take_multiple, "profit take multiple")
+        self.imbalance_bar_threshold = _finite(
+            imbalance_bar_threshold, "imbalance threshold"
+        )
+        self.profit_take_multiple = _finite(
+            profit_take_multiple, "profit take multiple"
+        )
         self.stop_loss_multiple = _finite(stop_loss_multiple, "stop loss multiple")
         self.max_holding_seconds = _finite(max_holding_seconds, "max holding seconds")
         self.round_trip_cost_bps = _finite(round_trip_cost_bps, "round trip costs")
         self.min_training_samples = int(min_training_samples)
         self.min_oos_samples = int(min_oos_samples)
-        self.acceptance_threshold = _finite(acceptance_threshold, "acceptance threshold")
-        if min(
-            self.volume_bar_threshold,
-            self.dollar_bar_threshold,
-            self.imbalance_bar_threshold,
-            self.profit_take_multiple,
-            self.stop_loss_multiple,
-            self.max_holding_seconds,
-        ) <= 0 or self.round_trip_cost_bps < 0:
+        self.acceptance_threshold = _finite(
+            acceptance_threshold, "acceptance threshold"
+        )
+        if (
+            min(
+                self.volume_bar_threshold,
+                self.dollar_bar_threshold,
+                self.imbalance_bar_threshold,
+                self.profit_take_multiple,
+                self.stop_loss_multiple,
+                self.max_holding_seconds,
+            )
+            <= 0
+            or self.round_trip_cost_bps < 0
+        ):
             raise ValueError("financial ML thresholds and horizons must be positive")
         if self.min_training_samples < 20 or self.min_oos_samples < 10:
             raise ValueError("financial ML sample floors are too small")
@@ -174,7 +185,9 @@ class FinancialMLPipeline:
         self._models: dict[str, Any] = {}
         self._calibrators: dict[str, Any] = {}
         self._artifact_version: str | None = None
-        self._conn = sqlite3.connect(str(self.path), timeout=10.0, check_same_thread=False)
+        self._conn = sqlite3.connect(
+            str(self.path), timeout=10.0, check_same_thread=False
+        )
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=FULL")
@@ -263,9 +276,7 @@ class FinancialMLPipeline:
         )
         candidate_columns = {
             row["name"]
-            for row in self._conn.execute(
-                "PRAGMA table_info(financial_ml_candidates)"
-            )
+            for row in self._conn.execute("PRAGMA table_info(financial_ml_candidates)")
         }
         if "ledger_synced" not in candidate_columns:
             self._conn.execute(
@@ -364,7 +375,9 @@ class FinancialMLPipeline:
                         measure_value = increment
                     else:
                         if event.timestamp < row["end_at"]:
-                            raise ValueError("market events must be chronological per symbol")
+                            raise ValueError(
+                                "market events must be chronological per symbol"
+                            )
                         start_at = row["start_at"]
                         end_at = event.timestamp
                         opening = float(row["open"])
@@ -373,7 +386,9 @@ class FinancialMLPipeline:
                         close = event.price
                         volume = float(row["volume"]) + event.volume
                         dollar_volume = float(row["dollar_volume"]) + dollar
-                        signed_volume = float(row["signed_volume"]) + event.signed_volume
+                        signed_volume = (
+                            float(row["signed_volume"]) + event.signed_volume
+                        )
                         event_count = int(row["event_count"]) + 1
                         measure_value = float(row["measure_value"]) + increment
                     crossed = (
@@ -388,8 +403,18 @@ class FinancialMLPipeline:
                              volume,dollar_volume,signed_volume,event_count)
                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                             (
-                                key, bar_type, start_at, end_at, opening, high, low,
-                                close, volume, dollar_volume, signed_volume, event_count,
+                                key,
+                                bar_type,
+                                start_at,
+                                end_at,
+                                opening,
+                                high,
+                                low,
+                                close,
+                                volume,
+                                dollar_volume,
+                                signed_volume,
+                                event_count,
                             ),
                         )
                         self._conn.execute(
@@ -411,9 +436,19 @@ class FinancialMLPipeline:
                             event_count=excluded.event_count,
                             measure_value=excluded.measure_value""",
                             (
-                                key, bar_type, start_at, end_at, opening, high, low,
-                                close, volume, dollar_volume, signed_volume,
-                                event_count, measure_value,
+                                key,
+                                bar_type,
+                                start_at,
+                                end_at,
+                                opening,
+                                high,
+                                low,
+                                close,
+                                volume,
+                                dollar_volume,
+                                signed_volume,
+                                event_count,
+                                measure_value,
                             ),
                         )
                         output[bar_type] = 0
@@ -434,8 +469,11 @@ class FinancialMLPipeline:
                 (key,),
             ).fetchall()
         if not rows:
-            return {"event_volume_imbalance": 0.0, "event_dollar_activity": 0.0,
-                    "fractional_return": 0.0}
+            return {
+                "event_volume_imbalance": 0.0,
+                "event_dollar_activity": 0.0,
+                "fractional_return": 0.0,
+            }
         chronological = list(reversed(rows))
         signed = sum(float(row["signed_volume"]) for row in chronological)
         volume = sum(float(row["volume"]) for row in chronological)
@@ -490,9 +528,17 @@ class FinancialMLPipeline:
                  take_price,stop_price,expires_at,features_json,trace_id)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    candidate_id, symbol.upper(), side, now.isoformat(), entry, vol,
-                    take, stop, _iso(now.timestamp() + self.max_holding_seconds),
-                    json.dumps(clean, sort_keys=True, allow_nan=False), trace_id,
+                    candidate_id,
+                    symbol.upper(),
+                    side,
+                    now.isoformat(),
+                    entry,
+                    vol,
+                    take,
+                    stop,
+                    _iso(now.timestamp() + self.max_holding_seconds),
+                    json.dumps(clean, sort_keys=True, allow_nan=False),
+                    trace_id,
                 ),
             )
             self._conn.commit()
@@ -505,7 +551,12 @@ class FinancialMLPipeline:
             cursor = self._conn.execute(
                 "UPDATE financial_ml_candidates SET status='REJECTED', outcome_json=? "
                 "WHERE candidate_id=? AND status='PENDING'",
-                (json.dumps({"rejection_reason": str(reason), "counterfactual": True}), candidate_id),
+                (
+                    json.dumps(
+                        {"rejection_reason": str(reason), "counterfactual": True}
+                    ),
+                    candidate_id,
+                ),
             )
             self._conn.commit()
             return cursor.rowcount == 1
@@ -526,8 +577,16 @@ class FinancialMLPipeline:
             ).fetchall()
             for row in rows:
                 side = 1.0 if row["side"] == "LONG" else -1.0
-                take_hit = value >= row["take_price"] if side > 0 else value <= row["take_price"]
-                stop_hit = value <= row["stop_price"] if side > 0 else value >= row["stop_price"]
+                take_hit = (
+                    value >= row["take_price"]
+                    if side > 0
+                    else value <= row["take_price"]
+                )
+                stop_hit = (
+                    value <= row["stop_price"]
+                    if side > 0
+                    else value >= row["stop_price"]
+                )
                 expired = now >= _utc(row["expires_at"])
                 if not (take_hit or stop_hit or expired):
                     continue
@@ -551,15 +610,21 @@ class FinancialMLPipeline:
                     outcome_provenance='COUNTERFACTUAL_LIVE_MARKOUT',outcome_json=?
                     WHERE candidate_id=? AND status='REJECTED'""",
                     (
-                        label, gross, net, now.isoformat(),
-                        json.dumps(outcome, sort_keys=True), row["candidate_id"],
+                        label,
+                        gross,
+                        net,
+                        now.isoformat(),
+                        json.dumps(outcome, sort_keys=True),
+                        row["candidate_id"],
                     ),
                 )
                 resolved += max(0, cursor.rowcount)
             self._conn.commit()
         return resolved
 
-    def pending_counterfactual_labels(self, limit: int = 500) -> tuple[dict[str, Any], ...]:
+    def pending_counterfactual_labels(
+        self, limit: int = 500
+    ) -> tuple[dict[str, Any], ...]:
         if limit <= 0:
             raise ValueError("limit must be positive")
         with self._lock:
@@ -653,12 +718,16 @@ class FinancialMLPipeline:
                 outcome_provenance='EXECUTED_TRADE_NET_OUTCOME',outcome_json=?
                 WHERE candidate_id=?""",
                 (
-                    label, value, (
+                    label,
+                    value,
+                    (
                         _finite(body["gross_return"], "gross_return")
                         if body.get("gross_return") is not None
                         else None
-                    ), now.isoformat(),
-                    json.dumps(body, sort_keys=True, allow_nan=False), candidate_id,
+                    ),
+                    now.isoformat(),
+                    json.dumps(body, sort_keys=True, allow_nan=False),
+                    candidate_id,
                 ),
             )
             self._conn.commit()
@@ -681,17 +750,31 @@ class FinancialMLPipeline:
         samples = len(rows)
         if samples < self.min_training_samples:
             return FinancialMLTrainingReport(
-                False, False, samples, 0, 0, None, None, None, None,
-                self.acceptance_threshold, "insufficient_resolved_samples",
+                False,
+                False,
+                samples,
+                0,
+                0,
+                None,
+                None,
+                None,
+                None,
+                self.acceptance_threshold,
+                "insufficient_resolved_samples",
             )
         features = [
-            [float(json.loads(row["features_json"]).get(name, 0.0)) for name in self.FEATURE_NAMES]
+            [
+                float(json.loads(row["features_json"]).get(name, 0.0))
+                for name in self.FEATURE_NAMES
+            ]
             for row in rows
         ]
         labels = [int(row["label"]) for row in rows]
         folds = purged_walk_forward_folds(
-            samples, n_splits=min(5, max(2, samples // 20)),
-            label_horizon=1, embargo=1,
+            samples,
+            n_splits=min(5, max(2, samples // 20)),
+            label_horizon=1,
+            embargo=1,
         )
         oos_probabilities: list[float] = []
         oos_labels: list[int] = []
@@ -700,22 +783,32 @@ class FinancialMLPipeline:
         used_folds = 0
         starts = list(range(samples))
         ends = [
-            max(index, next(
-                (j for j in range(index, samples)
-                 if rows[j]["created_at"] >= rows[index]["expires_at"]),
+            max(
                 index,
-            ))
+                next(
+                    (
+                        j
+                        for j in range(index, samples)
+                        if rows[j]["created_at"] >= rows[index]["expires_at"]
+                    ),
+                    index,
+                ),
+            )
             for index in range(samples)
         ]
         for fold in folds:
             test_start = fold.test_indices[0]
             test_time = rows[test_start]["created_at"]
             train_indices = [
-                index for index in fold.train_indices
+                index
+                for index in fold.train_indices
                 if rows[index]["label_resolution_time"] is not None
                 and rows[index]["label_resolution_time"] < test_time
             ]
-            if len(train_indices) < 10 or len({labels[index] for index in train_indices}) < 2:
+            if (
+                len(train_indices) < 10
+                or len({labels[index] for index in train_indices}) < 2
+            ):
                 continue
             # Sequential bootstrap reduces overlap concentration within each
             # chronological training fold; purge remains the primary leakage guard.
@@ -727,11 +820,18 @@ class FinancialMLPipeline:
             )
             sampled = [train_indices[index] for index in selected_local]
             model = MetaLabeler(learning_rate=0.03, l2=0.01, epochs=600)
-            model.fit([features[index] for index in sampled], [labels[index] for index in sampled])
-            probabilities = model.predict_probability([features[index] for index in fold.test_indices])
+            model.fit(
+                [features[index] for index in sampled],
+                [labels[index] for index in sampled],
+            )
+            probabilities = model.predict_probability(
+                [features[index] for index in fold.test_indices]
+            )
             oos_probabilities.extend(probabilities)
             oos_labels.extend(labels[index] for index in fold.test_indices)
-            oos_returns.extend(float(rows[index]["net_return"] or 0.0) for index in fold.test_indices)
+            oos_returns.extend(
+                float(rows[index]["net_return"] or 0.0) for index in fold.test_indices
+            )
             oos_provenance.extend(
                 str(rows[index]["outcome_provenance"] or "UNKNOWN")
                 for index in fold.test_indices
@@ -739,8 +839,16 @@ class FinancialMLPipeline:
             used_folds += 1
         if len(oos_labels) < self.min_oos_samples or len(set(oos_labels)) < 2:
             return FinancialMLTrainingReport(
-                False, False, samples, used_folds, len(oos_labels), None, None,
-                None, sum(labels) / samples, self.acceptance_threshold,
+                False,
+                False,
+                samples,
+                used_folds,
+                len(oos_labels),
+                None,
+                None,
+                None,
+                sum(labels) / samples,
+                self.acceptance_threshold,
                 "insufficient_oos_samples_or_single_class",
             )
         # Platt scaling is fitted only to walk-forward predictions, never on
@@ -754,11 +862,15 @@ class FinancialMLPipeline:
         )
         brier = brier_score(calibrated_oos, oos_labels)
         ece = expected_calibration_error(calibrated_oos, oos_labels, n_bins=10)
-        selected = [index for index, value in enumerate(calibrated_oos)
-                    if value >= self.acceptance_threshold]
+        selected = [
+            index
+            for index, value in enumerate(calibrated_oos)
+            if value >= self.acceptance_threshold
+        ]
         precision = (
             sum(oos_labels[index] for index in selected) / len(selected)
-            if selected else 0.0
+            if selected
+            else 0.0
         )
         base_rate = sum(oos_labels) / len(oos_labels)
         selected_returns = [oos_returns[index] for index in selected]
@@ -778,12 +890,10 @@ class FinancialMLPipeline:
             else None
         )
         executed_oos_samples = sum(
-            provenance == "EXECUTED_TRADE_NET_OUTCOME"
-            for provenance in oos_provenance
+            provenance == "EXECUTED_TRADE_NET_OUTCOME" for provenance in oos_provenance
         )
         counterfactual_oos_samples = sum(
-            provenance.startswith("COUNTERFACTUAL")
-            for provenance in oos_provenance
+            provenance.startswith("COUNTERFACTUAL") for provenance in oos_provenance
         )
         accepted_executed = [
             oos_returns[index]
@@ -822,10 +932,16 @@ class FinancialMLPipeline:
             and monte_carlo.max_drawdown_p95 <= 0.35
             and bool(selected)
         )
-        reason = "oos_calibration_and_acceptance_passed" if passed else "oos_acceptance_not_proven"
+        reason = (
+            "oos_calibration_and_acceptance_passed"
+            if passed
+            else "oos_acceptance_not_proven"
+        )
         final_model = MetaLabeler(learning_rate=0.03, l2=0.01, epochs=800)
         final_model.fit(features, labels)
-        artifact_id = f"financial-ml-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
+        artifact_id = (
+            f"financial-ml-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')}"
+        )
         artifact = {
             "model": self._model_to_dict(final_model),
             "calibrator": self._model_to_dict(calibrator),
@@ -849,7 +965,13 @@ class FinancialMLPipeline:
             "ece": ece,
         }
         report = FinancialMLTrainingReport(
-            True, passed, samples, used_folds, len(oos_labels), brier, ece,
+            True,
+            passed,
+            samples,
+            used_folds,
+            len(oos_labels),
+            brier,
+            ece,
             precision,
             base_rate,
             self.acceptance_threshold,
@@ -869,8 +991,11 @@ class FinancialMLPipeline:
                 (artifact_id,created_at,artifact_json,report_json,active)
                 VALUES (?,?,?,?,?)""",
                 (
-                    artifact_id, _iso(), json.dumps(artifact, sort_keys=True),
-                    json.dumps(asdict(report), sort_keys=True), 0,
+                    artifact_id,
+                    _iso(),
+                    json.dumps(artifact, sort_keys=True),
+                    json.dumps(asdict(report), sort_keys=True),
+                    0,
                 ),
             )
             self._conn.commit()
@@ -893,8 +1018,14 @@ class FinancialMLPipeline:
         authenticated identity/RBAC boundary. A caller-supplied display name
         alone is never sufficient to approve an artifact.
         """
-        if not artifact_id or not approved_by.strip() or not 8 <= len(rationale.strip()) <= 500:
-            raise ValueError("artifact, operator and 8-500 character rationale are required")
+        if (
+            not artifact_id
+            or not approved_by.strip()
+            or not 8 <= len(rationale.strip()) <= 500
+        ):
+            raise ValueError(
+                "artifact, operator and 8-500 character rationale are required"
+            )
         if not callable(approval_verifier) or not approval_verifier(
             artifact_id, approved_by.strip(), rationale.strip()
         ):
@@ -911,7 +1042,9 @@ class FinancialMLPipeline:
             if not report.get("passed_oos"):
                 raise ValueError("artifact did not pass out-of-sample acceptance")
             if artifact.get("feature_names") != list(self.FEATURE_NAMES):
-                raise ValueError("artifact feature schema is incompatible with this runtime")
+                raise ValueError(
+                    "artifact feature schema is incompatible with this runtime"
+                )
             self._conn.execute("BEGIN IMMEDIATE")
             self._conn.execute("UPDATE financial_ml_artifacts SET active=0")
             self._conn.execute(
@@ -928,7 +1061,9 @@ class FinancialMLPipeline:
             self._artifact_version = artifact_id
             return True
 
-    def predict(self, candidate_id: str, features: Mapping[str, float]) -> FinancialMLPrediction:
+    def predict(
+        self, candidate_id: str, features: Mapping[str, float]
+    ) -> FinancialMLPrediction:
         if self.mode == "disabled":
             return FinancialMLPrediction(
                 candidate_id, None, None, True, self.mode, "disabled"
@@ -977,11 +1112,22 @@ class FinancialMLPipeline:
                     "SELECT status,COUNT(*) AS count FROM financial_ml_candidates GROUP BY status"
                 ).fetchall()
             }
-            bars = int(self._conn.execute("SELECT COUNT(*) FROM financial_ml_event_bars").fetchone()[0])
-            active = int(self._conn.execute("SELECT COUNT(*) FROM financial_ml_artifacts WHERE active=1").fetchone()[0])
+            bars = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM financial_ml_event_bars"
+                ).fetchone()[0]
+            )
+            active = int(
+                self._conn.execute(
+                    "SELECT COUNT(*) FROM financial_ml_artifacts WHERE active=1"
+                ).fetchone()[0]
+            )
         return {
-            "mode": self.mode, "enforce": self.enforce, "candidate_states": counts,
-            "event_bars": bars, "active_oos_approved_artifacts": active,
+            "mode": self.mode,
+            "enforce": self.enforce,
+            "candidate_states": counts,
+            "event_bars": bars,
+            "active_oos_approved_artifacts": active,
             "artifact_version": self._artifact_version,
         }
 
