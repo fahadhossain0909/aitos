@@ -157,10 +157,12 @@ def fit_marked_hawkes_mle(
             ]
             projected_a = [
                 [
-                    0.0
-                    if excitation[target][source] <= 1e-12
-                    and grad_a[target][source] < 0.0
-                    else grad_a[target][source]
+                    (
+                        0.0
+                        if excitation[target][source] <= 1e-12
+                        and grad_a[target][source] < 0.0
+                        else grad_a[target][source]
+                    )
                     for source in range(2)
                 ]
                 for target in range(2)
