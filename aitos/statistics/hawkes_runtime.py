@@ -89,13 +89,23 @@ def _holdout_gain(
     all_times = train_times + holdout_times
     all_marks = train_marks + holdout_marks
     for source in (0, 1):
-        source_tail = sum(
-            1.0 - math.exp(-fit.decay * (end - timestamp))
-            for timestamp, mark in zip(all_times, all_marks)
-            if mark == source and timestamp < end
-        )
+        source_integral = 0.0
+        for timestamp, mark in zip(all_times, all_marks):
+            if mark != source or timestamp >= end:
+                continue
+            # Integrate excitation only over the held-out interval [boundary,
+            # end], not from each historical event's timestamp. Pre-boundary
+            # events contribute the decayed tail at both interval endpoints.
+            at_boundary = (
+                math.exp(-fit.decay * (boundary - timestamp))
+                if timestamp < boundary
+                else 1.0
+            )
+            at_end = math.exp(-fit.decay * (end - timestamp))
+            source_integral += max(0.0, at_boundary - at_end)
         excitation_integral += sum(
-            fit.excitation_matrix[target][source] * source_tail for target in (0, 1)
+            fit.excitation_matrix[target][source] * source_integral
+            for target in (0, 1)
         )
     hawkes_integral = sum(fit.baseline_intensities) * duration + excitation_integral
     poisson_integral = sum(baseline) * duration
