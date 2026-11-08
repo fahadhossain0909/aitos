@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -26,6 +27,7 @@ from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence import indicators
 from aitos.intelligence.a_stat_bridge import AStatBridge
 from aitos.statistics.decision_ledger import DecisionOutcomeLedger
+from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
 from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.candidate_rotation import CandidateRotationManager
@@ -291,6 +293,12 @@ class ScanCandidate:
     htf_adx: float = 0.0
     trace_id: str | None = None
     statistical_forecast: dict[str, Any] | None = None
+    candidate_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    financial_ml_features: dict[str, float] = field(default_factory=dict)
+    meta_raw_probability: float | None = None
+    meta_probability: float | None = None
+    meta_accepted: bool | None = None
+    meta_reason: str | None = None
 
 
 def _volatility_fitness(
@@ -429,6 +437,9 @@ class OpportunityScanner(AITOSModule):
         self._decision_outcome_ledger = DecisionOutcomeLedger(
             get_model_data_dir() / "decision_outcomes.sqlite3"
         )
+        self._financial_ml = FinancialMLPipeline(
+            get_model_data_dir() / "financial_ml.sqlite3"
+        )
         self._ranking_hysteresis = RankingHysteresis(
             margin_points=self._tuning.analysis.ranking_hysteresis_points
         )
@@ -516,6 +527,7 @@ class OpportunityScanner(AITOSModule):
                 ),
                 "candidate_rotation": self._candidate_rotation.snapshot(),
                 "candidate_outcomes": self._candidate_outcomes.snapshot(),
+                "financial_ml": self._financial_ml.snapshot(),
                 "directional_funnel": self._directional_funnel.snapshot(),
                 "ranking_hysteresis": self._ranking_hysteresis.snapshot(),
             },
@@ -525,6 +537,7 @@ class OpportunityScanner(AITOSModule):
         await self._live_cache.shutdown()
         self._candidate_outcomes.close()
         self._directional_funnel.close()
+        self._financial_ml.close()
         await self._exchange.close()
 
     async def emit_events(self) -> AsyncIterator[Event]:
