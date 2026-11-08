@@ -147,12 +147,29 @@ def fit_marked_hawkes_mle(
                     for source in range(2):
                         grad_a[target][source] += histories[index][source] / intensity
             # Normalize by event count to keep a scale-stable line search.
+            # Apply the KKT projection at non-negative parameter boundaries:
+            # a negative gradient at a zero coefficient points outside the
+            # feasible set and must not prevent convergence at the MLE boundary.
             scale = float(len(times))
+            projected_mu = [
+                0.0 if mu[k] <= 1.0001e-9 and grad_mu[k] < 0.0 else grad_mu[k]
+                for k in range(2)
+            ]
+            projected_a = [
+                [
+                    0.0
+                    if excitation[target][source] <= 1e-12
+                    and grad_a[target][source] < 0.0
+                    else grad_a[target][source]
+                    for source in range(2)
+                ]
+                for target in range(2)
+            ]
             gradient_norm = math.sqrt(
-                sum((value / scale) ** 2 for value in grad_mu)
-                + sum((value / scale) ** 2 for row in grad_a for value in row)
+                sum((value / scale) ** 2 for value in projected_mu)
+                + sum((value / scale) ** 2 for row in projected_a for value in row)
             )
-            if gradient_norm < 1e-7:
+            if gradient_norm < 1e-5:
                 converged = True
                 break
             accepted = False
@@ -175,11 +192,17 @@ def fit_marked_hawkes_mle(
                     mu, excitation, current = candidate_mu, candidate_a, candidate
                     step = min(trial_step * 1.25, 2.0)
                     accepted = True
-                    if improvement < 1e-10:
-                        converged = True
+                    # Re-check the projected gradient on the next
+                    # iteration; tiny objective movement alone is not proof
+                    # of convergence near a constrained optimum.
                     break
                 trial_step *= 0.5
-            if not accepted or converged:
+            if not accepted:
+                # Backtracking can stall at machine precision. Accept this as
+                # convergence only when the feasible (KKT) gradient is small.
+                converged = gradient_norm < 1e-5
+                break
+            if converged:
                 break
         if best is None or current > best[0]:
             best = (
