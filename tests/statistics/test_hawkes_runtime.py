@@ -73,6 +73,9 @@ async def test_hawkes_bootstrap_registers_only_after_oos_acceptance(monkeypatch)
     assert results[0].oos_gain_per_event == 0.25
     assert engine.has_hawkes_model("BTCUSDT")
     last_timestamp = _trades()[-1].timestamp.timestamp()
+    status = engine.hawkes_model_status()["BTCUSDT"]
+    assert status["training_events"] == 80
+    assert status["last_event_timestamp"] == pytest.approx(last_timestamp)
     snapshot = engine.observe_marked_event("BTCUSDT", last_timestamp + 1, 1)
     assert snapshot.timestamp == last_timestamp + 1
 
@@ -132,3 +135,15 @@ def test_hawkes_warmup_events_make_duplicate_millisecond_times_strictly_ordered(
     times, marks = hawkes_runtime._strict_event_times(trades)
     assert all(left < right for left, right in zip(times, times[1:]))
     assert len(times) == len(marks)
+
+
+
+def test_invalid_hawkes_warmup_does_not_replace_existing_filter():
+    engine = AStatEngine()
+    fit = _fit(80.0)
+    engine.register_hawkes_model("BTCUSDT", fit, warmup_events=[(100.0, 1)])
+    with pytest.raises(ValueError):
+        engine.register_hawkes_model(
+            "BTCUSDT", fit, warmup_events=[(101.0, 1), (100.0, 0)]
+        )
+    assert engine.last_hawkes_timestamp("BTCUSDT") == 100.0
