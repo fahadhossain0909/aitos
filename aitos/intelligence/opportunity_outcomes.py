@@ -85,10 +85,14 @@ class CandidateOutcomeStore:
             "regime": candidate.regime,
             "rationale": list(candidate.rationale),
             "trace_id": getattr(candidate, "trace_id", None),
+            "candidate_id": getattr(candidate, "candidate_id", None),
             "attribution_id": (
-                f"{candidate.trace_id}:{side}"
-                if getattr(candidate, "trace_id", None)
-                else rejection_id
+                getattr(candidate, "candidate_id", None)
+                or (
+                    f"{candidate.trace_id}:{side}"
+                    if getattr(candidate, "trace_id", None)
+                    else rejection_id
+                )
             ),
         }
         with self._lock:
@@ -201,6 +205,7 @@ class CandidateOutcomeStore:
             results.append(
                 {
                     "rejection_id": row["rejection_id"],
+                    "candidate_id": features.get("candidate_id"),
                     "symbol": row["symbol"],
                     "side": row["side"],
                     "reason": row["reason"],
