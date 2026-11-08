@@ -53,21 +53,29 @@ def test_fractional_difference_is_causal_and_validated():
 def _bars():
     return [
         BarrierObservation(f"2026-01-01T00:00:{i:02d}Z", 100, high, low, close)
-        for i, (high, low, close) in enumerate([
-            (100, 100, 100),
-            (103, 100, 102),
-            (102, 100, 101),
-            (101, 99, 100),
-        ])
+        for i, (high, low, close) in enumerate(
+            [
+                (100, 100, 100),
+                (103, 100, 102),
+                (102, 100, 101),
+                (101, 99, 100),
+            ]
+        )
     ]
 
 
 def test_triple_barrier_labels_long_and_short_with_costs():
     bars = _bars()
     labels = triple_barrier_labels(
-        bars, event_indices=[0, 2], sides=[1, -1],
-        volatility=[0.01] * len(bars), profit_take=2, stop_loss=1,
-        max_holding_bars=2, entry_fee_bps=2, exit_fee_bps=2,
+        bars,
+        event_indices=[0, 2],
+        sides=[1, -1],
+        volatility=[0.01] * len(bars),
+        profit_take=2,
+        stop_loss=1,
+        max_holding_bars=2,
+        entry_fee_bps=2,
+        exit_fee_bps=2,
     )
     assert labels[0].barrier == "take"
     assert labels[0].label == 1
@@ -81,8 +89,13 @@ def test_triple_barrier_uses_conservative_stop_when_both_hit():
         BarrierObservation("t1", 100, 98, 98, 99),
     ]
     label = triple_barrier_labels(
-        bars, event_indices=[0], sides=[1], volatility=[0.01, 0.01],
-        profit_take=1, stop_loss=1, max_holding_bars=1,
+        bars,
+        event_indices=[0],
+        sides=[1],
+        volatility=[0.01, 0.01],
+        profit_take=1,
+        stop_loss=1,
+        max_holding_bars=1,
     )[0]
     assert label.barrier == "stop"
     assert label.label == -1
@@ -111,8 +124,12 @@ def test_meta_labeler_rejects_single_class_and_bad_feature_width():
 
 
 def test_sequential_bootstrap_is_reproducible_and_validates_intervals():
-    first = sequential_bootstrap_indices([0, 0, 5], [5, 5, 7], sample_count=20, seed=7)
-    second = sequential_bootstrap_indices([0, 0, 5], [5, 5, 7], sample_count=20, seed=7)
+    first = sequential_bootstrap_indices(
+        [0, 0, 5], [5, 5, 7], sample_count=20, seed=7
+    )
+    second = sequential_bootstrap_indices(
+        [0, 0, 5], [5, 5, 7], sample_count=20, seed=7
+    )
     assert first == second
     assert len(first) == 20
     with pytest.raises(ValueError):
