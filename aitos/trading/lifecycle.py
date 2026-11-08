@@ -209,7 +209,10 @@ class TradeLifecycle(AITOSModule):
                 else (
                     entity_id
                     if len(entity_id) == 32
-                    and all(character in "0123456789abcdef" for character in entity_id.lower())
+                    and all(
+                        character in "0123456789abcdef"
+                        for character in entity_id.lower()
+                    )
                     else None
                 )
             )
