@@ -43,9 +43,24 @@ class DecisionOutcomeLedger:
                     payload_json TEXT NOT NULL,
                     outcome_value REAL,
                     outcome_at TEXT,
-                    outcome_json TEXT
+                    outcome_json TEXT,
+                    candidate_id TEXT,
+                    label_resolution_time TEXT,
+                    outcome_provenance TEXT
                 )
                 """
+            )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(decision_outcomes)")
+            }
+            for name in ("candidate_id", "label_resolution_time", "outcome_provenance"):
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE decision_outcomes ADD COLUMN {name} TEXT"
+                    )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_decision_candidate ON decision_outcomes(candidate_id, decision_at)"
             )
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS idx_decision_entity ON decision_outcomes(entity_id, decision_at)"
@@ -75,6 +90,8 @@ class DecisionOutcomeLedger:
         reason: str,
         payload: Mapping[str, Any] | None = None,
         decision_at: str | None = None,
+        candidate_id: str | None = None,
+        outcome_provenance: str | None = None,
     ) -> bool:
         if not all(
             isinstance(v, str) and v.strip()
@@ -99,9 +116,12 @@ class DecisionOutcomeLedger:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT entity_id,symbol,side,decision_type,decision_at,accepted,reason,payload_json FROM decision_outcomes WHERE decision_id=?",
+                """SELECT entity_id,symbol,side,decision_type,decision_at,accepted,
+                reason,payload_json,candidate_id,outcome_provenance
+                FROM decision_outcomes WHERE decision_id=?""",
                 (decision_id,),
             ).fetchone()
+            values = values + (candidate_id, outcome_provenance)
             if row is not None:
                 if tuple(row) != values:
                     connection.execute("ROLLBACK")
@@ -112,8 +132,9 @@ class DecisionOutcomeLedger:
                 return False
             connection.execute(
                 """INSERT INTO decision_outcomes
-                (decision_id,entity_id,symbol,side,decision_type,decision_at,accepted,reason,payload_json)
-                VALUES (?,?,?,?,?,?,?,?,?)""",
+                (decision_id,entity_id,symbol,side,decision_type,decision_at,accepted,
+                 reason,payload_json,candidate_id,outcome_provenance)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (decision_id, *values),
             )
             connection.execute("COMMIT")
@@ -126,17 +147,30 @@ class DecisionOutcomeLedger:
         outcome_value: float,
         outcome_at: str,
         outcome: Mapping[str, Any] | None = None,
+        candidate_id: str | None = None,
+        outcome_provenance: str | None = None,
     ) -> int:
         import math
 
         value = float(outcome_value)
         if not math.isfinite(value):
             raise ValueError("outcome_value must be finite")
-        body = json.dumps(dict(outcome or {}), sort_keys=True, allow_nan=False)
+        outcome_payload = dict(outcome or {})
+        provenance = outcome_provenance or str(
+            outcome_payload.get("provenance")
+            or (
+                "COUNTERFACTUAL_REPLAY"
+                if outcome_payload.get("counterfactual")
+                else "EXECUTED_TRADE"
+            )
+        )
+        body = json.dumps(outcome_payload, sort_keys=True, allow_nan=False)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute(
-                "SELECT decision_id,outcome_value,outcome_at,outcome_json FROM decision_outcomes WHERE entity_id=?",
+                """SELECT decision_id,outcome_value,outcome_at,outcome_json,
+                candidate_id,label_resolution_time,outcome_provenance
+                FROM decision_outcomes WHERE entity_id=?""",
                 (entity_id,),
             ).fetchall()
             updated = 0
@@ -146,15 +180,29 @@ class DecisionOutcomeLedger:
                         row["outcome_value"],
                         row["outcome_at"],
                         row["outcome_json"],
-                    ) != (value, outcome_at, body):
+                        row["candidate_id"],
+                        row["label_resolution_time"],
+                        row["outcome_provenance"],
+                    ) != (
+                        value, outcome_at, body,
+                        candidate_id or row["candidate_id"],
+                        outcome_at,
+                        provenance,
+                    ):
                         connection.execute("ROLLBACK")
                         raise ValueError(
                             "decision outcome already resolved differently"
                         )
                     continue
                 connection.execute(
-                    "UPDATE decision_outcomes SET outcome_value=?,outcome_at=?,outcome_json=? WHERE decision_id=? AND outcome_value IS NULL",
-                    (value, outcome_at, body, row["decision_id"]),
+                    """UPDATE decision_outcomes SET outcome_value=?,outcome_at=?,
+                    outcome_json=?,candidate_id=COALESCE(?,candidate_id),
+                    label_resolution_time=?,outcome_provenance=?
+                    WHERE decision_id=? AND outcome_value IS NULL""",
+                    (
+                        value, outcome_at, body, candidate_id, outcome_at,
+                        provenance, row["decision_id"],
+                    ),
                 )
                 updated += 1
             connection.execute("COMMIT")
