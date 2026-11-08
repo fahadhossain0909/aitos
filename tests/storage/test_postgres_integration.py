@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -27,8 +28,12 @@ async def test_postgres_market_and_journal_round_trip():
 
     market = PostgresMarketDataRepository(dsn)
     journal = PostgresJournalRepository(dsn)
+    retry_market = PostgresMarketDataRepository(dsn)
+    retry_journal = PostgresJournalRepository(dsn)
     await market.initialize({})
     await journal.initialize({})
+    await retry_market.initialize({})
+    await retry_journal.initialize({})
     try:
         initial = Kline(
             symbol=symbol,
@@ -67,12 +72,9 @@ async def test_postgres_market_and_journal_round_trip():
         assert klines[0]["close"] == 102.0
         assert isinstance(klines[0]["time"], datetime)
 
-        await journal.save_trade_snapshot(
-            {"trade_id": trade_id, "state": "OPEN", "quantity": 0.25}
-        )
-        await journal.save_trade_snapshot(
-            {"trade_id": trade_id, "state": "OPEN", "quantity": 0.25}
-        )
+        snapshot = {"trade_id": trade_id, "state": "OPEN", "quantity": 0.25}
+        await journal.save_trade_snapshot(snapshot)
+        await journal.save_trade_snapshot(snapshot)
         entry = JournalEntry(
             trade_id=trade_id,
             entry_type=JournalEntryType.PRE_TRADE,
@@ -95,6 +97,16 @@ async def test_postgres_market_and_journal_round_trip():
             },
         )
 
+        # Concurrent retries through independent pools must remain idempotent.
+        await asyncio.gather(
+            *(retry_market.save_kline(updated) for _ in range(12)),
+            *(retry_journal.save_trade_snapshot(snapshot) for _ in range(12)),
+            *(retry_journal.save_journal_entry(entry) for _ in range(12)),
+            *(retry_journal.save_decision(
+                decision_id, {"candidate_id": token, "symbol": symbol}
+            ) for _ in range(12)),
+        )
+
         journal_entries = await journal.get_journal_entries_for_trade(trade_id)
         decision_records = await journal.get_records(decision_id)
         trade_records = await journal.get_trade_records(trade_id)
@@ -110,19 +122,48 @@ async def test_postgres_market_and_journal_round_trip():
         assert outcome["r_multiple"] == 3.0
         assert outcome["holding_seconds"] == 60.0
         assert any(row["record_type"] == "TRADE_LINK" for row in trade_records)
-    finally:
-        async with market._pool.acquire() as conn:
-            await conn.execute(
-                "DELETE FROM aitos_market_records WHERE entity_id = $1", symbol
-            )
-        async with journal._pool.acquire() as conn:
-            await conn.execute(
-                """
-                DELETE FROM aitos_operational_records
-                WHERE entity_id IN ($1, $2) OR payload->>'trade_id' = $1
-                """,
-                trade_id,
-                decision_id,
-            )
+
+        # Simulate process restart: close every pool, construct fresh adapters,
+        # and verify persisted state and idempotency survive reconnection.
         await market.shutdown()
         await journal.shutdown()
+        await retry_market.shutdown()
+        await retry_journal.shutdown()
+
+        market = PostgresMarketDataRepository(dsn)
+        journal = PostgresJournalRepository(dsn)
+        await market.initialize({})
+        await journal.initialize({})
+        persisted_klines = await market.get_recent_klines(symbol, "1m", limit=10)
+        persisted_entries = await journal.get_journal_entries_for_trade(trade_id)
+        persisted_decisions = await journal.get_records(decision_id)
+        assert len(persisted_klines) == 1
+        assert persisted_klines[0]["close"] == 102.0
+        assert len(persisted_entries) == 1
+        assert {row["record_type"] for row in persisted_decisions} >= {
+            "DECISION",
+            "TRADE_LINK",
+            "OUTCOME",
+        }
+        await journal.save_journal_entry(entry)
+        assert len(await journal.get_journal_entries_for_trade(trade_id)) == 1
+    finally:
+        if market._pool is not None:
+            async with market._pool.acquire() as conn:
+                await conn.execute(
+                    "DELETE FROM aitos_market_records WHERE entity_id = $1", symbol
+                )
+        if journal._pool is not None:
+            async with journal._pool.acquire() as conn:
+                await conn.execute(
+                    """
+                    DELETE FROM aitos_operational_records
+                    WHERE entity_id IN ($1, $2) OR payload->>'trade_id' = $1
+                    """,
+                    trade_id,
+                    decision_id,
+                )
+        await market.shutdown()
+        await journal.shutdown()
+        await retry_market.shutdown()
+        await retry_journal.shutdown()
