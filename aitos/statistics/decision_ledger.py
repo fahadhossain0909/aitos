@@ -292,6 +292,7 @@ class DecisionOutcomeLedger:
                 SELECT outcome_provenance, COUNT(*) AS count
                 FROM decision_outcomes
                 WHERE outcome_provenance IS NOT NULL
+                  AND outcome_value IS NOT NULL
                 GROUP BY outcome_provenance ORDER BY outcome_provenance
                 """
             ).fetchall()
