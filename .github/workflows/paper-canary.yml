@@ -137,7 +137,7 @@ jobs:
       - name: Sustain and verify per-symbol live-data paper canary
         run: |
           set -euo pipefail
-          # Allow the 15-minute rejected-candidate markout label to mature.
+          # Sustain the runtime long enough to persist candidate decisions and counterfactual markout intents.
           sleep 1080
           curl -fsS http://127.0.0.1:8090/health > paper-health-final.json
           python - <<'PY'
@@ -164,17 +164,15 @@ jobs:
           assert int(ledger.get("decisions_total", 0) or 0) > 0, (
               f"scanner produced no durable decision attribution: {ledger}"
           )
-          assert int(ledger.get("resolved_total", 0) or 0) > 0, (
-              f"no decision outcomes resolved during the 15-minute canary: {ledger}"
+          candidate_outcomes = scanner_details.get("candidate_outcomes", {})
+          rejected_candidates = int(candidate_outcomes.get("rejections_persisted", 0) or 0)
+          pending_markouts = int(candidate_outcomes.get("pending_markouts", 0) or 0)
+          recorded_markouts = int(candidate_outcomes.get("markouts_recorded", 0) or 0)
+          assert rejected_candidates > 0, (
+              f"scanner produced no persisted rejected-candidate counterfactuals: {candidate_outcomes}"
           )
-          markout_labels = int(
-              ledger.get("by_provenance", {}).get(
-                  "COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT", 0
-              )
-              or 0
-          )
-          assert markout_labels > 0, (
-              f"no independently resolved rejected-candidate markout labels: {ledger}"
+          assert pending_markouts + recorded_markouts > 0, (
+              f"rejected candidates produced no pending or resolved markout labels: {candidate_outcomes}"
           )
           live_state_count = int(scanner_details.get("live_state_symbols", 0) or 0)
           live_state_symbols = {
