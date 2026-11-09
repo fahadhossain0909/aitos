@@ -17,7 +17,7 @@ rm -rf .venv-linux-package build/linux dist/linux artifacts/linux
 npm --prefix desktop ci
 npm --prefix desktop run build
 mkdir -p build/linux dist/linux artifacts/linux
-.venv-linux-package/bin/pyinstaller --noconfirm --clean --onedir --name AITOS-Console --paths "$ROOT" --add-data "$ROOT/desktop/dist:console_dist" --collect-all keyring --collect-all secretstorage --hidden-import keyring.backends.SecretService --distpath "$ROOT/dist/linux" --workpath "$ROOT/build/linux" native/linux/launcher.py
+.venv-linux-package/bin/pyinstaller --noconfirm --clean --onedir --name AITOS-Console --paths "$ROOT" --add-data "$ROOT/desktop/dist:console_dist" --collect-all keyring --collect-all secretstorage --copy-metadata keyring --copy-metadata secretstorage --hidden-import keyring.backends.SecretService --distpath "$ROOT/dist/linux" --workpath "$ROOT/build/linux" native/linux/launcher.py
 STAGE="$ROOT/build/linux/deb-root"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/DEBIAN" "$STAGE/opt/aitos" "$STAGE/usr/bin" "$STAGE/usr/share/applications" "$STAGE/usr/share/icons/hicolor/512x512/apps"
