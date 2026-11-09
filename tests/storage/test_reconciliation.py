@@ -1,7 +1,7 @@
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
-from datetime import datetime, timezone
 
 from scripts.reconcile_postgres_journal import reconcile
 
@@ -87,7 +87,6 @@ def test_reconciliation_normalizes_database_timestamp_precision_and_zones():
     target = canonical_record_fingerprint("MARKET_EVENT", "BTCUSDT", clickhouse_payload)
 
     assert source == target
-
 
 
 def test_reconciliation_rejects_empty_or_reversed_time_window():
