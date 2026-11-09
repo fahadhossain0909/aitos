@@ -20,6 +20,25 @@ PASSWORD = "test-only-operator-password-not-a-real-credential"
 TOKEN = "test-only-backend-bearer-" + "x" * 32
 ORIGIN = "http://127.0.0.1:8780"
 
+@pytest.mark.parametrize(
+    ("password", "valid"),
+    [
+        ("a" * 23, False),
+        ("a" * 24, True),
+        ("λ" * 11, False),
+        ("λ" * 12, True),
+        ("a" * 1024, True),
+        ("a" * 1025, False),
+        (None, False),
+    ],
+)
+def test_operator_password_validation_uses_utf8_byte_contract(password, valid):
+    from aitos.console_gateway import is_valid_operator_password
+
+    assert is_valid_operator_password(password) is valid
+
+
+
 
 @pytest.fixture
 async def harness(tmp_path):
