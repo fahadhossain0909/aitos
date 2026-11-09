@@ -514,11 +514,15 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     await trade_state_persistence.initialize()
     # Persist every entry intent before submission and recover uncertain submits
     # by exchange client-order-id lookup after a process restart.
-    if not isinstance(components.trade_lifecycle._order_executor, IdempotentOrderExecutor):
+    if not isinstance(
+        components.trade_lifecycle._order_executor, IdempotentOrderExecutor
+    ):
         components.trade_lifecycle._order_executor = IdempotentOrderExecutor(
             components.trade_lifecycle._order_executor, state_store
         )
-    order_recovery = await components.trade_lifecycle._order_executor.reconcile_pending_orders()
+    order_recovery = (
+        await components.trade_lifecycle._order_executor.reconcile_pending_orders()
+    )
     logger.info(
         "durable order-intent reconciliation complete",
         extra={"aitos_extra": order_recovery},
