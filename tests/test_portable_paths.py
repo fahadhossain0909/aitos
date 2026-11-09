@@ -88,7 +88,7 @@ def test_windows_and_macos_defaults(monkeypatch, tmp_path):
     assert paths.get_config_dir() == (tmp_path / "Roaming/AITOS").resolve()
 
     monkeypatch.setattr(paths.sys, "platform", "darwin")
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(Path, "home", lambda *_: tmp_path)
     assert paths.get_data_dir() == (
         tmp_path / "Library/Application Support/AITOS"
     ).resolve()
