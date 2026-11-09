@@ -51,7 +51,7 @@ jobs:
           grep -Fq '/opt/aitos/.venv/bin/python' "$RUNNER_TEMP/aitos-package-files.txt"
           grep -Fq '/usr/share/applications/aitos-console.desktop' "$RUNNER_TEMP/aitos-package-files.txt"
           sha256sum --check artifacts/linux/SHA256SUMS
-      - name: Extract and execute frozen bundle smoke
+      - name: Run packaged Python environment smoke
         run: |
           package="$(find artifacts/linux -name '*.deb' -print -quit)"
           target="$RUNNER_TEMP/aitos-linux-package"
