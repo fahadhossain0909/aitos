@@ -195,6 +195,32 @@ class DurableTradingStateStore:
             ],
         )
 
+    async def load_pending_order_intents(self) -> list[dict[str, Any]]:
+        """Return latest order intents whose venue outcome is not yet terminal."""
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT
+                client_order_id,
+                argMax(symbol, updated_at) AS symbol,
+                argMax(state, updated_at) AS state,
+                argMax(request_json, updated_at) AS request_json
+            FROM order_execution_ledger
+            GROUP BY client_order_id
+            HAVING state = 'SUBMITTING'
+            ORDER BY client_order_id
+            """
+        )
+        pending = []
+        for row in result.result_rows:
+            pending.append({
+                "client_order_id": str(row[0]),
+                "symbol": str(row[1]),
+                "state": str(row[2]),
+                "request": json.loads(row[3] or "{}"),
+            })
+        return pending
+
     async def load_order_record(self, client_order_id: str) -> dict[str, Any] | None:
         """Load the latest durable order-intent/acknowledgement state."""
         client = self._client()
@@ -888,6 +914,37 @@ class IdempotentOrderExecutor(OrderExecutor):
             key, request.symbol, self._result_payload(result)
         )
         return result
+
+    async def reconcile_pending_orders(self) -> dict[str, Any]:
+        """Reconcile crash-window intents before allowing the runtime to trade."""
+        if self._state_store is None:
+            return {"pending": 0, "filled_unlinked": [], "terminal_unfilled": []}
+        pending = await self._state_store.load_pending_order_intents()
+        filled_unlinked: list[str] = []
+        terminal_unfilled: list[str] = []
+        for record in pending:
+            payload = record.get("request", {})
+            request = OrderRequest(
+                symbol=str(payload["symbol"]),
+                side=TradeSide(str(payload["side"])),
+                quantity=float(payload["quantity"]),
+                reference_price=float(payload["reference_price"]),
+                order_type=str(payload.get("order_type", "MARKET")),
+                client_order_id=str(record["client_order_id"]),
+                reduce_only=bool(payload.get("reduce_only", False)),
+            )
+            result = await self._recover_ambiguous(str(record["client_order_id"]), request)
+            if result.filled_quantity > 0:
+                # A fill recovered without a matching durable Trade snapshot
+                # cannot be safely attached to portfolio risk automatically.
+                filled_unlinked.append(str(record["client_order_id"]))
+            else:
+                terminal_unfilled.append(str(record["client_order_id"]))
+        return {
+            "pending": len(pending),
+            "filled_unlinked": filled_unlinked,
+            "terminal_unfilled": terminal_unfilled,
+        }
 
     async def _recover_ambiguous(
         self, key: str, request: OrderRequest
