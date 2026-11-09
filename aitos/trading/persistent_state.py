@@ -167,8 +167,12 @@ class DurableTradingStateStore:
                 datetime.now(timezone.utc),
             ]],
             column_names=[
-                "client_order_id", "symbol", "state", "request_json",
-                "result_json", "updated_at",
+                "client_order_id",
+                "symbol",
+                "state",
+                "request_json",
+                "result_json",
+                "updated_at",
             ],
         )
 
@@ -180,19 +184,24 @@ class DurableTradingStateStore:
         payload = dict(result)
         state = (
             "ACKNOWLEDGED"
-            if bool(payload.get("success")) or float(payload.get("filled_quantity", 0) or 0) > 0
+            if (
+                bool(payload.get("success"))
+                or float(payload.get("filled_quantity", 0) or 0) > 0
+            )
             else "REJECTED"
         )
         await client.insert(
             "order_execution_ledger",
-            [[
-                client_order_id,
-                symbol,
-                state,
-                "{}",
-                json.dumps(payload, sort_keys=True, default=str),
-                datetime.now(timezone.utc),
-            ]],
+            [
+                [
+                    client_order_id,
+                    symbol,
+                    state,
+                    "{}",
+                    json.dumps(payload, sort_keys=True, default=str),
+                    datetime.now(timezone.utc),
+                ]
+            ],
             column_names=[
                 "client_order_id", "symbol", "state", "request_json",
                 "result_json", "updated_at",
@@ -217,12 +226,14 @@ class DurableTradingStateStore:
         )
         pending = []
         for row in result.result_rows:
-            pending.append({
-                "client_order_id": str(row[0]),
-                "symbol": str(row[1]),
-                "state": str(row[2]),
-                "request": json.loads(row[3] or "{}"),
-            })
+            pending.append(
+                {
+                    "client_order_id": str(row[0]),
+                    "symbol": str(row[1]),
+                    "state": str(row[2]),
+                    "request": json.loads(row[3] or "{}"),
+                }
+            )
         return pending
 
     async def load_unlinked_acknowledged_orders(self) -> list[str]:
@@ -254,7 +265,10 @@ class DurableTradingStateStore:
                 continue
             trade_id = client_order_id.removeprefix("aitos-entry-")
             result = json.loads(row[2] or "{}")
-            if float(result.get("filled_quantity", 0) or 0) > 0 and trade_id not in known_trade_ids:
+            if (
+                float(result.get("filled_quantity", 0) or 0) > 0
+                and trade_id not in known_trade_ids
+            ):
                 unlinked.append(client_order_id)
         return sorted(unlinked)
 
@@ -936,11 +950,14 @@ class IdempotentOrderExecutor(OrderExecutor):
         if record is not None:
             state = str(record.get("state", "")).upper()
             if state in {"ACKNOWLEDGED", "REJECTED"}:
-                return self._result_from_payload(record.get("result", {}), request)
+                return self._result_from_payload(
+                    record.get("result", {}), request
+                )
             if state == "SUBMITTING":
                 return await self._recover_ambiguous(key, request)
             raise AmbiguousOrderSubmissionError(
-                f"unsupported durable order state {state!r} for {key}; manual reconciliation required"
+                f"unsupported durable order state {state!r} for {key}; "
+                "manual reconciliation required"
             )
 
         await self._state_store.save_order_intent(key, self._request_payload(request))
@@ -998,7 +1015,13 @@ class IdempotentOrderExecutor(OrderExecutor):
                 "automatic resubmission blocked"
             )
         venue_state = str(status.get("status", "")).upper()
-        terminal_states = {"FILLED", "PARTIALLY_FILLED", "CANCELED", "EXPIRED", "REJECTED"}
+        terminal_states = {
+            "FILLED",
+            "PARTIALLY_FILLED",
+            "CANCELED",
+            "EXPIRED",
+            "REJECTED",
+        }
         if venue_state not in terminal_states:
             raise AmbiguousOrderSubmissionError(
                 f"order {key} is still {venue_state or 'unknown'}; automatic resubmission blocked"
@@ -1012,9 +1035,17 @@ class IdempotentOrderExecutor(OrderExecutor):
             side=request.side,
             filled_quantity=filled,
             fill_price=price,
-            filled_at=str(status.get("updateTime") or status.get("filled_at") or datetime.now(timezone.utc).isoformat()),
+            filled_at=str(
+                status.get("updateTime")
+                or status.get("filled_at")
+                or datetime.now(timezone.utc).isoformat()
+            ),
             success=accepted,
-            error=None if accepted else f"venue order terminal state: {venue_state}",
+            error=(
+                None
+                if accepted
+                else f"venue order terminal state: {venue_state}"
+            ),
         )
         await self._state_store.save_order_result(
             key, request.symbol, self._result_payload(result)
@@ -1056,7 +1087,10 @@ class IdempotentOrderExecutor(OrderExecutor):
             side=TradeSide(str(payload.get("side") or request.side.value)),
             filled_quantity=float(payload.get("filled_quantity", 0) or 0),
             fill_price=float(payload.get("fill_price", 0) or 0),
-            filled_at=str(payload.get("filled_at") or datetime.now(timezone.utc).isoformat()),
+            filled_at=str(
+                payload.get("filled_at")
+                or datetime.now(timezone.utc).isoformat()
+            ),
             success=bool(payload.get("success")),
             error=payload.get("error"),
         )
