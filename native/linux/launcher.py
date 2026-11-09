@@ -139,11 +139,10 @@ def main():
     root.mainloop()
 
 
-def self_test():
-    if get_credential_vault() is None:
-        raise RuntimeError("credential vault unavailable")
+def bundle_self_test():
+    """Verify frozen imports/assets without requiring an unlocked user keyring."""
     dist = _assets_dir()
-    if not dist.is_dir():
+    if not dist.is_dir() or not (dist / "index.html").is_file():
         raise RuntimeError("console assets missing")
     from aitos.console_gateway import GatewayConfig, create_gateway
 
@@ -155,8 +154,19 @@ def self_test():
     )
 
 
+def self_test():
+    if get_credential_vault() is None:
+        raise RuntimeError("credential vault unavailable")
+    bundle_self_test()
+
+
 if __name__ == "__main__":
-    if sys.argv[1:] in (["--self-test"], ["--gateway-self-test"]):
+    if sys.argv[1:] == ["--bundle-self-test"]:
+        try:
+            bundle_self_test()
+        except Exception:
+            raise SystemExit(2) from None
+    elif sys.argv[1:] in (["--self-test"], ["--gateway-self-test"]):
         try:
             self_test()
             if sys.argv[1:] == ["--gateway-self-test"]:
