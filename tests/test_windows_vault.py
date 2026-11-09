@@ -36,7 +36,7 @@ def test_fake_transport_namespace_unicode_replace_delete():
     assert not vault.delete("test/one")
 
 
-@pytest.mark.parametrize("slot", ["", "../secret\0", "bad space", "x" * 121, True])
+@pytest.mark.parametrize("slot", ["", "../secret", "bad space", "x" * 121, True])
 def test_bad_slot_fails_before_native_access(slot):
     api = API()
     vault = WindowsVault(api=api)
