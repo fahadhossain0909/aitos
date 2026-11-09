@@ -824,11 +824,21 @@ class PersistentLivePortfolioTracker(LivePortfolioTracker):
         return equity
 
 
-class IdempotentOrderExecutor(OrderExecutor):
-    """Adds deterministic client IDs and in-process deduplication to an executor."""
+class AmbiguousOrderSubmissionError(RuntimeError):
+    """Venue acceptance is uncertain; resubmission is blocked until reconciled."""
 
-    def __init__(self, inner: OrderExecutor) -> None:
+
+class IdempotentOrderExecutor(OrderExecutor):
+    """Idempotent submit wrapper with durable intent and acknowledgement recovery.
+
+    The intent is persisted before the exchange side effect. After a crash or
+    lost response, recovery queries the venue by client order id and never
+    blindly submits the same intent again.
+    """
+
+    def __init__(self, inner: OrderExecutor, state_store: Any | None = None) -> None:
         self._inner = inner
+        self._state_store = state_store
         self._completed: dict[str, OrderResult] = {}
         self._inflight: dict[str, asyncio.Future[OrderResult]] = {}
 
@@ -838,24 +848,124 @@ class IdempotentOrderExecutor(OrderExecutor):
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
         key = request.client_order_id or self._key(request)
-        request = (
-            request
-            if request.client_order_id
-            else replace(request, client_order_id=key)
-        )
+        request = request if request.client_order_id else replace(request, client_order_id=key)
         if key in self._completed:
             return self._completed[key]
         if key in self._inflight:
             return await self._inflight[key]
-        task = asyncio.create_task(self._inner.submit_order(request))
+        task = asyncio.create_task(self._submit_with_recovery(key, request))
         self._inflight[key] = task
         try:
             result = await task
-            if result.success:
+            if result.success or result.filled_quantity > 0:
                 self._completed[key] = result
             return result
         finally:
             self._inflight.pop(key, None)
+
+    async def _submit_with_recovery(
+        self, key: str, request: OrderRequest
+    ) -> OrderResult:
+        if self._state_store is None:
+            return await self._inner.submit_order(request)
+
+        record = await self._state_store.load_order_record(key)
+        if record is not None:
+            state = str(record.get("state", "")).upper()
+            if state in {"ACKNOWLEDGED", "REJECTED"}:
+                return self._result_from_payload(record.get("result", {}), request)
+            if state == "SUBMITTING":
+                return await self._recover_ambiguous(key, request)
+            raise AmbiguousOrderSubmissionError(
+                f"unsupported durable order state {state!r} for {key}; manual reconciliation required"
+            )
+
+        await self._state_store.save_order_intent(key, self._request_payload(request))
+        # An exception or process death here is ambiguous: retain SUBMITTING
+        # so the next process must query the venue rather than resubmit.
+        result = await self._inner.submit_order(request)
+        await self._state_store.save_order_result(
+            key, request.symbol, self._result_payload(result)
+        )
+        return result
+
+    async def _recover_ambiguous(
+        self, key: str, request: OrderRequest
+    ) -> OrderResult:
+        lookup = getattr(self._inner, "get_order_by_client_id", None)
+        if lookup is None:
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} has a durable intent but executor cannot query by client id"
+            )
+        status = await lookup(request.symbol, key)
+        if not status:
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} remains ambiguous: venue lookup returned no authoritative result; "
+                "automatic resubmission blocked"
+            )
+        venue_state = str(status.get("status", "")).upper()
+        terminal_states = {"FILLED", "PARTIALLY_FILLED", "CANCELED", "EXPIRED", "REJECTED"}
+        if venue_state not in terminal_states:
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} is still {venue_state or 'unknown'}; automatic resubmission blocked"
+            )
+        filled = float(status.get("executedQty", status.get("filled_quantity", 0)) or 0)
+        price = float(status.get("avgPrice", status.get("fill_price", 0)) or 0)
+        accepted = filled > 0 and price > 0
+        result = OrderResult(
+            order_id=str(status.get("orderId", status.get("order_id", ""))),
+            symbol=request.symbol,
+            side=request.side,
+            filled_quantity=filled,
+            fill_price=price,
+            filled_at=str(status.get("updateTime") or status.get("filled_at") or datetime.now(timezone.utc).isoformat()),
+            success=accepted,
+            error=None if accepted else f"venue order terminal state: {venue_state}",
+        )
+        await self._state_store.save_order_result(
+            key, request.symbol, self._result_payload(result)
+        )
+        return result
+
+    @staticmethod
+    def _request_payload(request: OrderRequest) -> dict[str, Any]:
+        return {
+            "symbol": request.symbol,
+            "side": request.side.value,
+            "quantity": request.quantity,
+            "reference_price": request.reference_price,
+            "order_type": request.order_type,
+            "client_order_id": request.client_order_id,
+            "reduce_only": request.reduce_only,
+        }
+
+    @staticmethod
+    def _result_payload(result: OrderResult) -> dict[str, Any]:
+        return {
+            "order_id": result.order_id,
+            "symbol": result.symbol,
+            "side": result.side.value,
+            "filled_quantity": result.filled_quantity,
+            "fill_price": result.fill_price,
+            "filled_at": result.filled_at,
+            "success": result.success,
+            "error": result.error,
+        }
+
+    @staticmethod
+    def _result_from_payload(
+        payload: dict[str, Any], request: OrderRequest
+    ) -> OrderResult:
+        return OrderResult(
+            order_id=str(payload.get("order_id", "")),
+            symbol=str(payload.get("symbol") or request.symbol),
+            side=TradeSide(str(payload.get("side") or request.side.value)),
+            filled_quantity=float(payload.get("filled_quantity", 0) or 0),
+            fill_price=float(payload.get("fill_price", 0) or 0),
+            filled_at=str(payload.get("filled_at") or datetime.now(timezone.utc).isoformat()),
+            success=bool(payload.get("success")),
+            error=payload.get("error"),
+        )
 
     def _key(self, request: OrderRequest) -> str:
         raw = "|".join(
@@ -868,6 +978,14 @@ class IdempotentOrderExecutor(OrderExecutor):
             ]
         )
         return "aitos-" + hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+    async def get_order_status(self, symbol: str, order_id: str) -> dict | None:
+        return await self._inner.get_order_status(symbol, order_id)
+
+    async def get_order_by_client_id(
+        self, symbol: str, client_order_id: str
+    ) -> dict | None:
+        return await self._inner.get_order_by_client_id(symbol, client_order_id)
 
     async def place_stop_loss_order(self, *args: Any, **kwargs: Any) -> OrderResult:
         return await self._inner.place_stop_loss_order(*args, **kwargs)
