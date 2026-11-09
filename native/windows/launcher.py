@@ -9,7 +9,11 @@ from pathlib import Path
 import tkinter as tk
 from tkinter import simpledialog, messagebox
 
-from aitos.console_gateway import GatewayConfig, create_gateway
+from aitos.console_gateway import (
+    GatewayConfig,
+    create_gateway,
+    is_valid_operator_password,
+)
 from aitos.native.windows_vault import WindowsVault
 from aitos.native.console_host import LocalConsoleHost, exercise_local_host
 
@@ -28,7 +32,7 @@ def main():
         if password is None:
             password = simpledialog.askstring(
                 "AITOS setup",
-                "Choose an operator password (16–256 characters)",
+                "Choose an operator password (24–1024 UTF-8 bytes)",
                 show="*",
                 parent=root,
             )
@@ -38,7 +42,7 @@ def main():
             confirmation = simpledialog.askstring(
                 "Confirm", "Repeat operator password", show="*", parent=root
             )
-            if password != confirmation or not 16 <= len(password) <= 256:
+            if password != confirmation or not is_valid_operator_password(password):
                 raise ValueError()
             vault.put("console/operator-password", password)
         port = simpledialog.askinteger(
