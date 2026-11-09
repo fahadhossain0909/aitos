@@ -41,7 +41,7 @@ jobs:
           python -m pip install python-dotenv pydantic-settings pytest
           python -m pytest --noconftest tests/test_portable_paths.py tests/test_credential_vault.py -q
       - name: Build Debian package
-        run: PYTHON_BIN=/usr/bin/python3 bash native/linux/build.sh
+        run: env -u LD_LIBRARY_PATH PYTHON_BIN=/usr/bin/python3 bash native/linux/build.sh
       - name: Validate package metadata and payload
         run: |
           package="$(find artifacts/linux -name '*.deb' -print -quit)"
@@ -57,7 +57,7 @@ jobs:
           target="$RUNNER_TEMP/aitos-linux-package"
           mkdir -p "$target"
           dpkg-deb --extract "$package" "$target"
-          "$target/opt/aitos/AITOS-Console" --bundle-self-test
+          env -u LD_LIBRARY_PATH "$target/opt/aitos/AITOS-Console" --bundle-self-test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
