@@ -95,6 +95,8 @@ def get_model_data_dir() -> Path:
     configured = os.getenv("MODEL_DATA_DIR")
     if configured:
         return resolve_project_path(configured)
+    if os.getenv("AITOS_DATA_DIR"):
+        return (get_data_dir() / "models").resolve()
     if Path("/.dockerenv").exists():
         return Path("/models")
     # Preserve an existing checkout's model data during the storage transition.
