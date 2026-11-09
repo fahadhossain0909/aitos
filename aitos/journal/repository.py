@@ -285,10 +285,14 @@ class JournalRepository(AITOSModule):
 
     async def save_journal_entry(self, entry: JournalEntry) -> None:
         self._require_initialized()
+        created_at = datetime.fromisoformat(entry.created_at.replace("Z", "+00:00"))
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
         await self._client.insert(
             "journal_entries",
             [
                 [
+                    created_at,
                     entry.entry_id,
                     entry.trade_id,
                     entry.entry_type.value,
@@ -304,6 +308,7 @@ class JournalRepository(AITOSModule):
                 ]
             ],
             column_names=[
+                "created_at",
                 "entry_id",
                 "trade_id",
                 "entry_type",

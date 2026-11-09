@@ -107,7 +107,7 @@ jobs:
               password=os.environ["REDIS_PASSWORD"],
               decode_responses=True,
           )
-          if client.ping() is not True:
+          if not client.ping():
               raise SystemExit("Redis health check failed")
           print("Redis: PONG")
           PY

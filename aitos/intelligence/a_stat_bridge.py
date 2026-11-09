@@ -22,6 +22,7 @@ from aitos.logging_setup import get_logger
 from aitos.models.trade import TradeSide
 from aitos.statistics.engine import AStatEngine
 from aitos.statistics.models import AStatObservation, AStatResult
+from aitos.statistics.router import StatisticalStrategyRouter
 
 logger = get_logger("aitos.intelligence.a_stat")
 
@@ -41,7 +42,8 @@ class AStatBridge:
 
     def __init__(self, calibration_window: int = 256) -> None:
         self._engine = AStatEngine(calibration_window=calibration_window)
-        self._last_kline_count: dict[str, int] = {}
+        self._strategy_router = StatisticalStrategyRouter()
+        self._last_kline_state: dict[str, tuple[str | None, float]] = {}
 
     @property
     def engine(self) -> AStatEngine:
@@ -80,15 +82,43 @@ class AStatBridge:
         )
         if len(returns) < MIN_KLINES_FOR_STACK:
             return None, None
-        # Avoid re-feeding the same overlapping return window on every scan.
-        # The statistical stack accumulates history internally, so only new
-        # returns should be appended.
-        previous_klines = self._last_kline_count.get(symbol, 0)
-        if previous_klines <= 0 or len(closes) <= previous_klines:
-            new_returns = returns if previous_klines <= 0 else ()
+        # Kline windows are normally fixed-length. Count-based cursors therefore
+        # miss every new candle after the first scan. Track the last candle's
+        # identity and append only returns after that candle.
+        last_kline = klines[-1]
+        last_open_time = getattr(last_kline, "open_time", None)
+        last_key = (
+            last_open_time.isoformat()
+            if hasattr(last_open_time, "isoformat")
+            else str(last_open_time) if last_open_time is not None else None
+        )
+        previous_state = self._last_kline_state.get(symbol)
+        if previous_state is None:
+            new_returns = returns
+        elif last_key is not None and previous_state[0] is not None:
+            if last_key == previous_state[0]:
+                new_returns = ()
+            else:
+                previous_index = next(
+                    (
+                        index
+                        for index, kline in enumerate(klines)
+                        if (
+                            kline.open_time.isoformat()
+                            if hasattr(getattr(kline, "open_time", None), "isoformat")
+                            else str(getattr(kline, "open_time", None))
+                        )
+                        == previous_state[0]
+                    ),
+                    None,
+                )
+                new_returns = (
+                    returns[previous_index:]
+                    if previous_index is not None
+                    else returns[-1:]
+                )
         else:
-            new_returns = returns[previous_klines - 1 :]
-        self._last_kline_count[symbol] = len(closes)
+            new_returns = () if closes[-1] == previous_state[1] else returns[-1:]
         window = returns[-MOMENTUM_WINDOW:]
         momentum = sum(window)
         if orderflow_vwap and orderflow_vwap > 0.0 and last_close > 0.0:
@@ -124,6 +154,7 @@ class AStatBridge:
                     sample_size=len(returns),
                 )
             )
+            self._last_kline_state[symbol] = (last_key, closes[-1])
         except Exception:
             logger.warning(
                 "a_stat evaluation failed",
@@ -137,6 +168,7 @@ class AStatBridge:
             else result.direction.down
         )
         component = round(10.0 * agree, 2)
+        strategy_scores = self._strategy_router.rank(result)
         logger.info(
             "a_stat evaluation",
             extra={
@@ -156,6 +188,14 @@ class AStatBridge:
                     "regime_high_vol": round(result.regime.high_volatility, 4),
                     "confidence": round(result.probability_confidence, 4),
                     "advanced_stack": result.advanced is not None,
+                    "statistical_strategy_ranking": [
+                        {
+                            "strategy_id": item.strategy_id,
+                            "score": round(item.score, 4),
+                            "rationale": list(item.rationale),
+                        }
+                        for item in strategy_scores
+                    ],
                 }
             },
         )

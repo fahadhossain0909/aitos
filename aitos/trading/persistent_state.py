@@ -8,7 +8,7 @@ import json
 import weakref
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 
 from aitos.app import LivePortfolioTracker
 from aitos.data.ingestion import DataIngestionService
@@ -49,6 +49,19 @@ CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY trade_id
 """
+
+CREATE_ORDER_EXECUTION_LEDGER = """
+CREATE TABLE IF NOT EXISTS order_execution_ledger (
+    client_order_id String,
+    symbol LowCardinality(String),
+    state LowCardinality(String),
+    request_json String,
+    result_json String,
+    updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY client_order_id
+"""
+
 
 CREATE_EXCHANGE_INCOME_CURSOR = """
 CREATE TABLE IF NOT EXISTS exchange_income_sync_cursor (
@@ -103,6 +116,7 @@ class DurableTradingStateStore:
             await self._repository._client.command(CREATE_DRAWDOWN_STATE)
             await self._repository._client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
             await self._repository._client.command(CREATE_EXCHANGE_INCOME_CURSOR)
+            await self._repository._client.command(CREATE_ORDER_EXECUTION_LEDGER)
             logger.info("durable trading state tables ensured")
         except Exception:
             logger.exception("durable trading state table ensure failed")
@@ -133,6 +147,167 @@ class DurableTradingStateStore:
             [[account, int(cursor_time_ms), datetime.now(timezone.utc)]],
             column_names=["account", "cursor_time_ms", "updated_at"],
         )
+
+    async def save_order_intent(
+        self, client_order_id: str, request: Mapping[str, Any]
+    ) -> None:
+        """Durably record an order intent before any exchange side effect."""
+        if not client_order_id:
+            raise ValueError("client_order_id is required")
+        client = self._client()
+        symbol = str(request.get("symbol") or "")
+        if not symbol:
+            raise ValueError("order intent symbol is required")
+        await client.insert(
+            "order_execution_ledger",
+            [
+                [
+                    client_order_id,
+                    symbol,
+                    "SUBMITTING",
+                    json.dumps(dict(request), sort_keys=True, default=str),
+                    "",
+                    datetime.now(timezone.utc),
+                ]
+            ],
+            column_names=[
+                "client_order_id",
+                "symbol",
+                "state",
+                "request_json",
+                "result_json",
+                "updated_at",
+            ],
+        )
+
+    async def save_order_result(
+        self, client_order_id: str, symbol: str, result: Mapping[str, Any]
+    ) -> None:
+        """Persist the authoritative acknowledgement/fill returned by the executor."""
+        client = self._client()
+        payload = dict(result)
+        existing = await self.load_order_record(client_order_id)
+        request_json = json.dumps(
+            existing.get("request", {}) if existing else {},
+            sort_keys=True,
+            default=str,
+        )
+        state = (
+            "ACKNOWLEDGED"
+            if (
+                bool(payload.get("success"))
+                or float(payload.get("filled_quantity", 0) or 0) > 0
+            )
+            else "REJECTED"
+        )
+        await client.insert(
+            "order_execution_ledger",
+            [
+                [
+                    client_order_id,
+                    symbol,
+                    state,
+                    request_json,
+                    json.dumps(payload, sort_keys=True, default=str),
+                    datetime.now(timezone.utc),
+                ]
+            ],
+            column_names=[
+                "client_order_id",
+                "symbol",
+                "state",
+                "request_json",
+                "result_json",
+                "updated_at",
+            ],
+        )
+
+    async def load_pending_order_intents(self) -> list[dict[str, Any]]:
+        """Return latest order intents whose venue outcome is not yet terminal."""
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT
+                client_order_id,
+                argMax(symbol, updated_at) AS symbol,
+                argMax(state, updated_at) AS state,
+                argMax(request_json, updated_at) AS request_json
+            FROM order_execution_ledger
+            GROUP BY client_order_id
+            HAVING state = 'SUBMITTING'
+            ORDER BY client_order_id
+            """
+        )
+        pending = []
+        for row in result.result_rows:
+            pending.append(
+                {
+                    "client_order_id": str(row[0]),
+                    "symbol": str(row[1]),
+                    "state": str(row[2]),
+                    "request": json.loads(row[3] or "{}"),
+                }
+            )
+        return pending
+
+    async def load_unlinked_acknowledged_orders(self) -> list[str]:
+        """Find acknowledged entry fills lacking any open or closed trade snapshot."""
+        client = self._client()
+        orders = await client.query(
+            """
+            SELECT
+                client_order_id,
+                argMax(state, updated_at) AS state,
+                argMax(result_json, updated_at) AS result_json
+            FROM order_execution_ledger
+            GROUP BY client_order_id
+            HAVING state = 'ACKNOWLEDGED'
+            """
+        )
+        trade_rows = await client.query(
+            """
+            SELECT trade_id FROM trade_runtime_state
+            UNION DISTINCT
+            SELECT trade_id FROM paper_closed_trade_ledger
+            """
+        )
+        known_trade_ids = {str(row[0]) for row in trade_rows.result_rows}
+        unlinked = []
+        for row in orders.result_rows:
+            client_order_id = str(row[0])
+            if not client_order_id.startswith("aitos-entry-"):
+                continue
+            trade_id = client_order_id.removeprefix("aitos-entry-")
+            if trade_id not in known_trade_ids:
+                # Even an accepted zero-fill order may still be resting at the
+                # venue and fill after this process exits. Require reconciliation.
+                unlinked.append(client_order_id)
+        return sorted(unlinked)
+
+    async def load_order_record(self, client_order_id: str) -> dict[str, Any] | None:
+        """Load the latest durable order-intent/acknowledgement state."""
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT
+                argMax(symbol, updated_at) AS symbol,
+                argMax(state, updated_at) AS state,
+                argMax(request_json, updated_at) AS request_json,
+                argMax(result_json, updated_at) AS result_json
+            FROM order_execution_ledger
+            WHERE client_order_id = {client_order_id:String}
+            """,
+            parameters={"client_order_id": client_order_id},
+        )
+        if not result.result_rows or not result.result_rows[0][1]:
+            return None
+        row = result.result_rows[0]
+        return {
+            "symbol": str(row[0]),
+            "state": str(row[1]),
+            "request": json.loads(row[2] or "{}"),
+            "result": json.loads(row[3] or "{}"),
+        }
 
     async def save_trade(self, trade: Trade) -> None:
         client = self._client()
@@ -476,6 +651,34 @@ class TradeStatePersistence:
             self._lifecycle._closed_trades.extend(
                 trade for trade in closed_trades if trade.trade_id not in existing
             )
+
+        # Rebuild the statistical shadow ledger from durable trade state after
+        # a crash between position persistence and the shadow SQLite write.
+        record_forecast = getattr(self._lifecycle, "_record_statistical_forecast", None)
+        record_outcome = getattr(self._lifecycle, "_record_statistical_outcome", None)
+        if callable(record_forecast):
+            recovery_trades = {trade.trade_id: trade for trade in trades}
+            recovery_trades.update({trade.trade_id: trade for trade in closed_trades})
+            for trade in recovery_trades.values():
+                consensus = getattr(trade, "agent_consensus", None)
+                forecast = (
+                    consensus.get("statistical_forecast")
+                    if isinstance(consensus, Mapping)
+                    else None
+                )
+                if not isinstance(forecast, Mapping):
+                    continue
+                try:
+                    await asyncio.to_thread(record_forecast, trade)
+                    if trade.state == TradeLifecycleState.POSITION_CLOSED and callable(
+                        record_outcome
+                    ):
+                        await asyncio.to_thread(record_outcome, trade)
+                except Exception:
+                    logger.exception(
+                        "failed to reconcile statistical shadow state from trade journal",
+                        extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                    )
         if trades:
             symbols = list(
                 dict.fromkeys(
@@ -710,13 +913,25 @@ class PersistentLivePortfolioTracker(LivePortfolioTracker):
         return equity
 
 
-class IdempotentOrderExecutor(OrderExecutor):
-    """Adds deterministic client IDs and in-process deduplication to an executor."""
+class AmbiguousOrderSubmissionError(RuntimeError):
+    """Venue acceptance is uncertain; resubmission is blocked until reconciled."""
 
-    def __init__(self, inner: OrderExecutor) -> None:
+
+class IdempotentOrderExecutor(OrderExecutor):
+    """Idempotent submit wrapper with durable intent and acknowledgement recovery.
+
+    The intent is persisted before the exchange side effect. After a crash or
+    lost response, recovery queries the venue by client order id and never
+    blindly submits the same intent again.
+    """
+
+    def __init__(self, inner: OrderExecutor, state_store: Any | None = None) -> None:
         self._inner = inner
+        self._state_store = state_store
         self._completed: dict[str, OrderResult] = {}
         self._inflight: dict[str, asyncio.Future[OrderResult]] = {}
+        self._blocked_reason: str | None = None
+        self._blocked_client_order_id: str | None = None
 
     @property
     def supports_exchange_side_stops(self) -> bool:
@@ -729,19 +944,194 @@ class IdempotentOrderExecutor(OrderExecutor):
             if request.client_order_id
             else replace(request, client_order_id=key)
         )
+        if self._blocked_reason and key != self._blocked_client_order_id:
+            raise AmbiguousOrderSubmissionError(
+                f"new order submissions blocked by unresolved intent "
+                f"{self._blocked_client_order_id}: {self._blocked_reason}"
+            )
         if key in self._completed:
             return self._completed[key]
         if key in self._inflight:
             return await self._inflight[key]
-        task = asyncio.create_task(self._inner.submit_order(request))
+        task = asyncio.create_task(self._submit_with_recovery(key, request))
         self._inflight[key] = task
         try:
             result = await task
-            if result.success:
+            if result.success or result.filled_quantity > 0:
                 self._completed[key] = result
             return result
         finally:
             self._inflight.pop(key, None)
+
+    async def _submit_with_recovery(
+        self, key: str, request: OrderRequest
+    ) -> OrderResult:
+        if self._state_store is None:
+            return await self._inner.submit_order(request)
+
+        record = await self._state_store.load_order_record(key)
+        if record is not None:
+            state = str(record.get("state", "")).upper()
+            if state in {"ACKNOWLEDGED", "REJECTED"}:
+                self._blocked_reason = None
+                self._blocked_client_order_id = None
+                return self._result_from_payload(record.get("result", {}), request)
+            if state == "SUBMITTING":
+                try:
+                    recovered = await self._recover_ambiguous(key, request)
+                except Exception as exc:
+                    self._blocked_reason = str(exc)
+                    self._blocked_client_order_id = key
+                    raise
+                self._blocked_reason = None
+                self._blocked_client_order_id = None
+                return recovered
+            raise AmbiguousOrderSubmissionError(
+                f"unsupported durable order state {state!r} for {key}; "
+                "manual reconciliation required"
+            )
+
+        await self._state_store.save_order_intent(key, self._request_payload(request))
+        # An exception or process death here is ambiguous: retain SUBMITTING
+        # so the next process must query the venue rather than resubmit.
+        try:
+            result = await self._inner.submit_order(request)
+            await self._state_store.save_order_result(
+                key, request.symbol, self._result_payload(result)
+            )
+        except BaseException as exc:
+            self._blocked_reason = str(exc) or type(exc).__name__
+            self._blocked_client_order_id = key
+            raise
+        return result
+
+    async def reconcile_pending_orders(self) -> dict[str, Any]:
+        """Reconcile crash-window intents and detect fills without trade snapshots."""
+        if self._state_store is None:
+            return {"pending": 0, "filled_unlinked": [], "terminal_unfilled": []}
+        unlinked = list(await self._state_store.load_unlinked_acknowledged_orders())
+        pending = await self._state_store.load_pending_order_intents()
+        terminal_unfilled: list[str] = []
+        for record in pending:
+            payload = record.get("request", {})
+            request = OrderRequest(
+                symbol=str(payload["symbol"]),
+                side=TradeSide(str(payload["side"])),
+                quantity=float(payload["quantity"]),
+                reference_price=float(payload["reference_price"]),
+                order_type=str(payload.get("order_type", "MARKET")),
+                client_order_id=str(record["client_order_id"]),
+                reduce_only=bool(payload.get("reduce_only", False)),
+            )
+            result = await self._recover_ambiguous(
+                str(record["client_order_id"]), request
+            )
+            if result.filled_quantity > 0:
+                # A recovered fill without a matching durable Trade snapshot
+                # cannot safely be attached to portfolio risk automatically.
+                unlinked.append(str(record["client_order_id"]))
+            else:
+                terminal_unfilled.append(str(record["client_order_id"]))
+        filled_unlinked = sorted(set(unlinked))
+        if filled_unlinked:
+            self._blocked_reason = "acknowledged fill has no durable trade snapshot"
+            self._blocked_client_order_id = filled_unlinked[0]
+        else:
+            self._blocked_reason = None
+            self._blocked_client_order_id = None
+        return {
+            "pending": len(pending),
+            "filled_unlinked": filled_unlinked,
+            "terminal_unfilled": terminal_unfilled,
+        }
+
+    async def _recover_ambiguous(self, key: str, request: OrderRequest) -> OrderResult:
+        lookup = getattr(self._inner, "get_order_by_client_id", None)
+        if lookup is None:
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} has a durable intent but executor cannot query by client id"
+            )
+        status = await lookup(request.symbol, key)
+        if not status:
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} remains ambiguous: venue lookup returned no authoritative result; "
+                "automatic resubmission blocked"
+            )
+        venue_state = str(status.get("status", "")).upper()
+        terminal_states = {
+            "FILLED",
+            "PARTIALLY_FILLED",
+            "CANCELED",
+            "EXPIRED",
+            "REJECTED",
+        }
+        if venue_state not in terminal_states:
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} is still {venue_state or 'unknown'}; automatic resubmission blocked"
+            )
+        filled = float(status.get("executedQty", status.get("filled_quantity", 0)) or 0)
+        price = float(status.get("avgPrice", status.get("fill_price", 0)) or 0)
+        accepted = filled > 0 and price > 0
+        result = OrderResult(
+            order_id=str(status.get("orderId", status.get("order_id", ""))),
+            symbol=request.symbol,
+            side=request.side,
+            filled_quantity=filled,
+            fill_price=price,
+            filled_at=str(
+                status.get("updateTime")
+                or status.get("filled_at")
+                or datetime.now(timezone.utc).isoformat()
+            ),
+            success=accepted,
+            error=(None if accepted else f"venue order terminal state: {venue_state}"),
+        )
+        await self._state_store.save_order_result(
+            key, request.symbol, self._result_payload(result)
+        )
+        return result
+
+    @staticmethod
+    def _request_payload(request: OrderRequest) -> dict[str, Any]:
+        return {
+            "symbol": request.symbol,
+            "side": request.side.value,
+            "quantity": request.quantity,
+            "reference_price": request.reference_price,
+            "order_type": request.order_type,
+            "client_order_id": request.client_order_id,
+            "reduce_only": request.reduce_only,
+        }
+
+    @staticmethod
+    def _result_payload(result: OrderResult) -> dict[str, Any]:
+        return {
+            "order_id": result.order_id,
+            "symbol": result.symbol,
+            "side": result.side.value,
+            "filled_quantity": result.filled_quantity,
+            "fill_price": result.fill_price,
+            "filled_at": result.filled_at,
+            "success": result.success,
+            "error": result.error,
+        }
+
+    @staticmethod
+    def _result_from_payload(
+        payload: dict[str, Any], request: OrderRequest
+    ) -> OrderResult:
+        return OrderResult(
+            order_id=str(payload.get("order_id", "")),
+            symbol=str(payload.get("symbol") or request.symbol),
+            side=TradeSide(str(payload.get("side") or request.side.value)),
+            filled_quantity=float(payload.get("filled_quantity", 0) or 0),
+            fill_price=float(payload.get("fill_price", 0) or 0),
+            filled_at=str(
+                payload.get("filled_at") or datetime.now(timezone.utc).isoformat()
+            ),
+            success=bool(payload.get("success")),
+            error=payload.get("error"),
+        )
 
     def _key(self, request: OrderRequest) -> str:
         raw = "|".join(
@@ -754,6 +1144,14 @@ class IdempotentOrderExecutor(OrderExecutor):
             ]
         )
         return "aitos-" + hashlib.sha256(raw.encode()).hexdigest()[:24]
+
+    async def get_order_status(self, symbol: str, order_id: str) -> dict | None:
+        return await self._inner.get_order_status(symbol, order_id)
+
+    async def get_order_by_client_id(
+        self, symbol: str, client_order_id: str
+    ) -> dict | None:
+        return await self._inner.get_order_by_client_id(symbol, client_order_id)
 
     async def place_stop_loss_order(self, *args: Any, **kwargs: Any) -> OrderResult:
         return await self._inner.place_stop_loss_order(*args, **kwargs)

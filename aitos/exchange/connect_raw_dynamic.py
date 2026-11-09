@@ -48,6 +48,10 @@ async def connect_raw_dynamic(
         streams = list(dict.fromkeys(get_streams()))
         if not streams:
             changed.clear()
+            # Close the check/wait race: if a producer changed the desired
+            # cohort just before clear(), observe it before sleeping.
+            if get_streams():
+                continue
             await changed.wait()
             continue
         base_url, _ = adapter._get_ws_base_url(streams)
@@ -106,7 +110,10 @@ async def connect_raw_dynamic(
                 backoff = INITIAL_BACKOFF_SECONDS
                 sub_request_id = 0
                 first_message = True
-                changed.clear()
+                # Do not clear changed here: a universe update can arrive
+                # while the TCP/WebSocket handshake is in progress. Clearing
+                # it after the handshake loses that update and leaves the
+                # connection subscribed to the stale bootstrap cohort.
 
                 async def _recv() -> str:
                     return await ws.recv()

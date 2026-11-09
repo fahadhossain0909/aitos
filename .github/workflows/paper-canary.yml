@@ -1,0 +1,335 @@
+name: Render-equivalent Binance Paper Canary
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/paper-canary.yml
+      - run_paper_trading.py
+      - aitos/**
+      - requirements.txt
+      - pyproject.toml
+      - Dockerfile
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aitos-paper-canary-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  paper-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      redis:
+        image: redis:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+      clickhouse:
+        image: clickhouse/clickhouse-server:24.12-alpine
+        env:
+          CLICKHOUSE_DB: aitos
+          CLICKHOUSE_USER: aitos_test
+          CLICKHOUSE_PASSWORD: aitos_test_password
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        ports:
+          - 8123:8123
+        options: >-
+          --health-cmd "wget --no-verbose --tries=1 --spider http://127.0.0.1:8123/ping || exit 1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    env:
+      AITOS_MODE: paper
+      BINANCE_TESTNET: "true"
+      AITOS_BINANCE_FUTURES_REST_BASE_URL: https://testnet.binancefuture.com
+      AITOS_BINANCE_FUTURES_WS_BASE_URL: wss://stream.binancefuture.com
+      AITOS_BINANCE_FUTURES_WS_COMBINED_URL: wss://stream.binancefuture.com/stream
+      AITOS_BINANCE_FUTURES_WS_RAW_URL: wss://stream.binancefuture.com/ws
+      TESTING: "false"
+      MODEL_DATA_DIR: ${{ github.workspace }}/.paper-canary-models
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      CLICKHOUSE_HOST: 127.0.0.1
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_USER: aitos_test
+      CLICKHOUSE_PASSWORD: aitos_test_password
+      CLICKHOUSE_DATABASE: aitos
+      AITOS_EVENTBUS_BACKEND: redis
+      AITOS_TUNING_PROFILE: low_resource
+      AITOS_TUNING_SCANNER_UNIVERSE_MODE: allowlist
+      AITOS_TUNING_SCANNER_SYMBOL_ALLOWLIST: BTCUSDT,ETHUSDT,SOLUSDT
+      AITOS_TUNING_SCANNER_CORE_SYMBOLS: BTCUSDT,ETHUSDT,SOLUSDT
+      AITOS_TUNING_SCANNER_UNIVERSE_LIMIT: "3"
+      AITOS_TUNING_SCANNER_DYNAMIC_UNIVERSE_LIMIT: "0"
+      AITOS_TUNING_SCANNER_REFRESH_INTERVAL_SECONDS: "30"
+      AITOS_TUNING_SCANNER_MIN_QUOTE_VOLUME_USD: "0"
+      AITOS_TUNING_SCANNER_MIN_TRADE_COUNT: "0"
+      AITOS_TUNING_SCANNER_MIN_CONTRACT_AGE_DAYS: "0"
+      AITOS_TUNING_ANALYSIS_EXPENSIVE_ANALYSIS_CONCURRENCY: "1"
+      AITOS_TUNING_HARDWARE_CPU_WORKER_BUDGET: "2"
+      # Exercise the validated, telemetry-only Hawkes bootstrap on one liquid
+      # symbol. OOS-rejected/insufficient fits remain unregistered and cannot
+      # affect scanner scores or paper entries.
+      AITOS_HAWKES_ENABLED: "true"
+      AITOS_HAWKES_SYMBOLS: BTCUSDT
+      AITOS_HAWKES_SAMPLE_LIMIT: "1000"
+      AITOS_HAWKES_MIN_EVENTS: "200"
+      AITOS_HAWKES_MIN_MARK_EVENTS: "20"
+      AITOS_HAWKES_HOLDOUT_FRACTION: "0.2"
+      AITOS_HAWKES_MIN_OOS_GAIN_PER_EVENT: "0"
+      AITOS_HAWKES_MAX_ITERATIONS: "80"
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install AITOS runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Wait for analytical storage
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8123/ping >/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS --user "$CLICKHOUSE_USER:$CLICKHOUSE_PASSWORD" \
+            http://127.0.0.1:8123/ --data-binary "SELECT 1"
+      - name: Start Binance public-market-data paper runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$MODEL_DATA_DIR"
+          python scripts/paper_canary_runner.py \
+            --log paper-canary.log \
+            --exit-code paper-canary.exit-code \
+            --child-pid paper-canary.child.pid > paper-canary-launcher.log 2>&1 &
+          echo $! > paper-canary.pid
+          ready=0
+          for attempt in $(seq 1 90); do
+            if curl -fsS http://127.0.0.1:8090/health > paper-health.json; then
+              ready=1
+              break
+            fi
+            if ! kill -0 "$(cat paper-canary.pid)" 2>/dev/null; then
+              break
+            fi
+            sleep 2
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat paper-canary.log
+            exit 1
+          fi
+          cat paper-health.json
+      - name: Sustain and verify per-symbol live-data paper canary
+        run: |
+          set -euo pipefail
+          # Sustain the runtime long enough to persist candidate decisions and counterfactual markout intents.
+          sleep 1080
+          curl -fsS http://127.0.0.1:8090/health > paper-health-final.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          health = json.loads(Path("paper-health-final.json").read_text())
+          assert health.get("status") == "healthy", health.get("status")
+          modules = {item.get("module_id"): item for item in health.get("modules", [])}
+          ingestion = modules.get("data-ingestion-service")
+          scanner = modules.get("opportunity-scanner")
+          assert ingestion is not None, "data-ingestion-service missing from health"
+          assert scanner is not None, "opportunity-scanner missing from health"
+          assert ingestion.get("status") == "healthy", ingestion
+          assert scanner.get("status") == "healthy", scanner
+
+          details = ingestion.get("details", {})
+          required = {"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+          subscribed = {str(symbol).upper() for symbol in details.get("live_trade_symbols", [])}
+          missing = sorted(required - subscribed)
+          assert not missing, f"live trade subscription missing symbols: {missing}; got {sorted(subscribed)}"
+          scanner_details = scanner.get("details", {})
+          ledger = scanner_details.get("decision_outcome_ledger", {})
+          assert int(ledger.get("decisions_total", 0) or 0) > 0, (
+              f"scanner produced no durable decision attribution: {ledger}"
+          )
+          candidate_outcomes = scanner_details.get("candidate_outcomes", {})
+          rejected_candidates = int(candidate_outcomes.get("rejections_persisted", 0) or 0)
+          pending_markouts = int(candidate_outcomes.get("pending_markouts", 0) or 0)
+          recorded_markouts = int(candidate_outcomes.get("markouts_recorded", 0) or 0)
+          assert rejected_candidates > 0, (
+              f"scanner produced no persisted rejected-candidate counterfactuals: {candidate_outcomes}"
+          )
+          assert pending_markouts + recorded_markouts > 0, (
+              f"rejected candidates produced no pending or resolved markout labels: {candidate_outcomes}"
+          )
+          live_state_count = int(scanner_details.get("live_state_symbols", 0) or 0)
+          live_state_symbols = {
+              str(symbol).upper()
+              for symbol in scanner_details.get("live_state_symbols_by_symbol", [])
+          }
+          trade_events_by_symbol = {
+              str(symbol).upper(): int(count)
+              for symbol, count in scanner_details.get("live_trade_events_by_symbol", {}).items()
+          }
+          missing_live_state = sorted(required - live_state_symbols)
+          missing_live_trades = sorted(
+              symbol for symbol in required if trade_events_by_symbol.get(symbol, 0) <= 0
+          )
+          assert not missing_live_state, (
+              f"symbols missing from live scanner state: {missing_live_state}; "
+              f"got {sorted(live_state_symbols)}"
+          )
+          assert not missing_live_trades, (
+              f"symbols missing actual live trade events: {missing_live_trades}; "
+              f"got {trade_events_by_symbol}"
+          )
+          assert live_state_count >= len(required), (
+              f"only {live_state_count}/{len(required)} required symbols reached live state"
+          )
+
+          canonical = details.get("canonical_market_data", {})
+          gateway_health = canonical.get("health", {})
+          assert gateway_health.get("connected") is True, "canonical market-data gateway disconnected"
+          assert int(gateway_health.get("dropped_events", 0) or 0) == 0, gateway_health
+          assert int(gateway_health.get("publish_errors", 0) or 0) == 0, gateway_health
+          runtime_streams = canonical.get("transport", {}).get("runtime_streams", {})
+          trade_stream = runtime_streams.get("trades", {})
+          assert int(trade_stream.get("events", 0) or 0) > 0, "no live trade stream events received"
+          assert int(trade_stream.get("errors", 0) or 0) == 0, trade_stream
+          assert int(trade_stream.get("idle_timeouts", 0) or 0) == 0, trade_stream
+
+          deep_symbols = {str(symbol).upper() for symbol in details.get("live_deep_orderbook_symbols", [])}
+          assert "BTCUSDT" in deep_symbols, f"BTC deep-orderbook anchor missing: {sorted(deep_symbols)}"
+          selected_klines = {
+              str(symbol).upper() for symbol in details.get("live_kline_symbols", [])
+          }
+          selected_non_btc_books = deep_symbols - {"BTCUSDT"}
+          assert selected_klines, "no ranked candidate received live kline coverage"
+          assert selected_non_btc_books, "no ranked candidate received deep order-book coverage"
+          assert selected_klines & selected_non_btc_books, (
+              "ranked candidate kline/deep-book coverage diverged: "
+              f"klines={sorted(selected_klines)}, books={sorted(deep_symbols)}"
+          )
+          hawkes_models = scanner_details.get("hawkes_models", {})
+          print(json.dumps({
+              "status": health["status"],
+              "decision_outcome_ledger": ledger,
+              "hawkes_models": hawkes_models,
+              "live_hawkes": scanner_details.get("live_hawkes", {}),
+              "live_trade_symbols": sorted(subscribed),
+              "live_state_symbols": live_state_count,
+              "live_trade_events_by_symbol": trade_events_by_symbol,
+              "live_kline_symbols": sorted(selected_klines),
+              "deep_orderbook_symbols": sorted(deep_symbols),
+              "trade_stream_events": trade_stream.get("events"),
+              "gateway_dropped_events": gateway_health.get("dropped_events"),
+          }, indent=2))
+          PY
+          test "$(grep -c "scan cycle complete" paper-canary.log)" -ge 2
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          records = []
+          for line in Path("paper-canary.log").read_text(errors="replace").splitlines():
+              try:
+                  record = json.loads(line)
+              except json.JSONDecodeError:
+                  continue
+              if record.get("message") == "A-Stat Hawkes bootstrap completed":
+                  records.extend(record.get("results", []))
+          assert records, "opt-in Hawkes bootstrap did not report a per-symbol result"
+          btc = next((item for item in records if item.get("symbol") == "BTCUSDT"), None)
+          assert btc is not None, f"BTC Hawkes bootstrap result missing: {records}"
+          assert btc.get("status") in {"accepted", "rejected", "skipped"}, btc
+          print(json.dumps({"hawkes_bootstrap": btc}, indent=2))
+          PY
+          grep -E "scan cycle complete|scanner market-data stage reached|live trade subscription reconfigured|staged scan complete|A-Stat Hawkes bootstrap completed" paper-canary.log | tail -n 120 || true
+      - name: Stop paper runtime and verify graceful shutdown
+        if: always()
+        shell: bash
+        run: |
+          set -uo pipefail
+          if [ -f paper-canary.pid ]; then
+            launcher_pid="$(cat paper-canary.pid)"
+            child_pid="$(cat paper-canary.child.pid 2>/dev/null || true)"
+            process_alive() {
+              local process_state
+              process_state="$(ps -o stat= -p "$1" 2>/dev/null | tr -d ' ')"
+              [ -n "$process_state" ] && [[ "$process_state" != Z* ]]
+            }
+
+            if process_alive "$launcher_pid"; then
+              kill -INT "$launcher_pid" 2>/dev/null || true
+              for attempt in $(seq 1 30); do
+                process_alive "$launcher_pid" || break
+                sleep 2
+              done
+            fi
+
+            if process_alive "$launcher_pid"; then
+              echo "SIGINT grace period expired; escalating to SIGTERM"
+              kill -TERM "$launcher_pid" 2>/dev/null || true
+              for attempt in $(seq 1 10); do
+                process_alive "$launcher_pid" || break
+                sleep 2
+              done
+            fi
+
+            if process_alive "$launcher_pid"; then
+              echo "launcher did not stop; terminating child process group"
+              if [ -n "$child_pid" ]; then
+                kill -KILL -- "-$child_pid" 2>/dev/null || true
+              fi
+              kill -KILL "$launcher_pid" 2>/dev/null || true
+            fi
+
+            if [ ! -f paper-canary.exit-code ]; then
+              echo "paper runtime exit status was not persisted"
+              cat paper-canary-launcher.log 2>/dev/null || true
+              tail -n 250 paper-canary.log 2>/dev/null || true
+              exit 1
+            fi
+
+            runtime_exit_code="$(cat paper-canary.exit-code)"
+            echo "paper runtime exit code: $runtime_exit_code"
+            if [ "$runtime_exit_code" -ne 0 ]; then
+              echo "paper runtime exited unsuccessfully"
+              tail -n 250 paper-canary.log 2>/dev/null || true
+              exit 1
+            fi
+            if ! grep -Fq '"message": "paper runtime shutdown complete"' paper-canary.log; then
+              echo "paper runtime shutdown completion marker missing"
+              tail -n 250 paper-canary.log 2>/dev/null || true
+              exit 1
+            fi
+            touch paper-canary.shutdown-marker
+          fi
+          tail -n 250 paper-canary.log 2>/dev/null || true
+      - name: Upload paper canary evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: aitos-binance-paper-canary
+          path: |
+            paper-canary.log
+            paper-canary-launcher.log
+            paper-canary.exit-code
+            paper-canary.child.pid
+            paper-canary.shutdown-marker
+            paper-health.json
+            paper-health-final.json
+          if-no-files-found: warn
+          retention-days: 7

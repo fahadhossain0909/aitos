@@ -188,8 +188,8 @@ class ContinualLearningWorker:
         WHERE source IN ('backtest', 'paper', 'live')
           AND (ingested_at > {cursor_timestamp:DateTime64(3)}
                OR (ingested_at = {cursor_timestamp:DateTime64(3)}
-                   AND experience_id > toUUID({cursor_experience_id:String})))
-        ORDER BY ingested_at ASC, experience_id ASC
+                   AND toString(experience_id) > {cursor_experience_id:String}))
+        ORDER BY ingested_at ASC, toString(experience_id) ASC
         LIMIT {limit:UInt32}
         """
         result = self.client.query(

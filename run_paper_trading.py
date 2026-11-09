@@ -40,6 +40,7 @@ from aitos.runtime_connections import (
 from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
+    IdempotentOrderExecutor,
     TradeStatePersistence,
     restored_position_feeds_ready,
 )
@@ -233,6 +234,193 @@ async def _shutdown_agents(agents) -> None:
             )
 
 
+async def _start_optional_hawkes_bootstrap(components):
+    """Fit and OOS-gate per-symbol Hawkes filters before live event scoring.
+
+    This lifecycle is opt-in and requires an explicit symbol allow-list. Models
+    that fail convergence, stationarity, sample sufficiency or held-out
+    Poisson-baseline comparison are not registered.
+    """
+    enabled = os.getenv("AITOS_HAWKES_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return ()
+
+    symbols = tuple(
+        symbol.strip().upper()
+        for symbol in os.getenv("AITOS_HAWKES_SYMBOLS", "").split(",")
+        if symbol.strip()
+    )
+    if not symbols:
+        raise RuntimeError(
+            "AITOS_HAWKES_ENABLED is true but AITOS_HAWKES_SYMBOLS is empty"
+        )
+    scanner = next(
+        (
+            module
+            for module in components.all_modules()
+            if getattr(module, "module_id", None) == "opportunity-scanner"
+        ),
+        None,
+    )
+    if scanner is None:
+        raise RuntimeError("opportunity-scanner unavailable for Hawkes bootstrap")
+
+    from aitos.statistics.hawkes_runtime import bootstrap_hawkes_models
+
+    decay_grid = tuple(
+        float(value)
+        for value in os.getenv("AITOS_HAWKES_DECAY_GRID", "0.05,0.1,0.2,0.5,1.0").split(
+            ","
+        )
+        if value.strip()
+    )
+    results = await bootstrap_hawkes_models(
+        scanner._exchange,
+        scanner._a_stat_bridge.engine,
+        symbols,
+        sample_limit=int(os.getenv("AITOS_HAWKES_SAMPLE_LIMIT", "1000")),
+        min_events=int(os.getenv("AITOS_HAWKES_MIN_EVENTS", "200")),
+        holdout_fraction=float(os.getenv("AITOS_HAWKES_HOLDOUT_FRACTION", "0.2")),
+        min_mark_events=int(os.getenv("AITOS_HAWKES_MIN_MARK_EVENTS", "20")),
+        min_oos_gain_per_event=float(
+            os.getenv("AITOS_HAWKES_MIN_OOS_GAIN_PER_EVENT", "0")
+        ),
+        decay_grid=decay_grid,
+        max_iterations=int(os.getenv("AITOS_HAWKES_MAX_ITERATIONS", "120")),
+    )
+    logger.info(
+        "A-Stat Hawkes bootstrap completed",
+        extra={
+            "aitos_extra": {
+                "results": [
+                    {
+                        "symbol": item.symbol,
+                        "status": item.status,
+                        "events": item.events,
+                        "training_events": item.training_events,
+                        "holdout_events": item.holdout_events,
+                        "oos_gain_per_event": item.oos_gain_per_event,
+                        "branching_ratio": item.branching_ratio,
+                        "reason": item.reason,
+                    }
+                    for item in results
+                ],
+                "decision_policy": "telemetry_only_until_separate_strategy_approval",
+            }
+        },
+    )
+    return results
+
+
+async def _start_optional_statistical_drift_monitor(
+    components, market_repo, settings, cleanup: AsyncExitStack
+):
+    """Start fail-closed drift monitoring only when explicitly configured.
+
+    The feature allow-list is deployment-owned because learning experience
+    schemas differ between strategies. No feature or alert endpoint is guessed.
+    """
+    enabled = os.getenv("AITOS_STATISTICAL_DRIFT_ENABLED", "false").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return None, None
+
+    feature_names = tuple(
+        name.strip()
+        for name in os.getenv("AITOS_STATISTICAL_DRIFT_FEATURES", "").split(",")
+        if name.strip()
+    )
+    if not feature_names:
+        raise RuntimeError(
+            "statistical drift is enabled but AITOS_STATISTICAL_DRIFT_FEATURES "
+            "is empty; refusing to monitor an undefined feature schema"
+        )
+
+    import clickhouse_connect
+
+    from aitos.learning.clickhouse_store import ClickHouseExperienceStore
+    from aitos.statistics.governance_runtime import StatisticalGovernanceRuntime
+    from aitos.statistics.production_drift import (
+        ClickHouseDriftFeatureBatchProvider,
+        LoggingDriftAlertSink,
+        WebhookDriftAlertSink,
+    )
+    from aitos.statistics.registry import StatisticalModelRegistry
+
+    # Use a dedicated synchronous client because the provider is executed on
+    # the scheduler's worker task and must not block the paper event loop.
+    client = await asyncio.to_thread(
+        clickhouse_connect.get_client, **market_repo._conn_params
+    )
+    cleanup.callback(client.close)
+    store = ClickHouseExperienceStore(client, database=settings.clickhouse.database)
+    provider = ClickHouseDriftFeatureBatchProvider(
+        store,
+        feature_names=feature_names,
+        min_observations=int(
+            os.getenv("AITOS_STATISTICAL_DRIFT_MIN_OBSERVATIONS", "200")
+        ),
+        sources=tuple(
+            source.strip()
+            for source in os.getenv("AITOS_STATISTICAL_DRIFT_SOURCES", "paper").split(
+                ","
+            )
+            if source.strip()
+        ),
+    )
+    scanner = next(
+        (
+            module
+            for module in components.all_modules()
+            if getattr(module, "module_id", None) == "opportunity-scanner"
+        ),
+        None,
+    )
+    if scanner is None:
+        raise RuntimeError("opportunity-scanner unavailable for A-Stat drift lifecycle")
+
+    registry = StatisticalModelRegistry(
+        get_model_data_dir() / "statistical_model_registry.sqlite3"
+    )
+    governance = StatisticalGovernanceRuntime(registry)
+    webhook_url = os.getenv("AITOS_STATISTICAL_DRIFT_WEBHOOK_URL", "").strip()
+    webhook_token = os.getenv("AITOS_STATISTICAL_DRIFT_WEBHOOK_TOKEN", "").strip()
+    if bool(webhook_url) != bool(webhook_token):
+        raise RuntimeError(
+            "both AITOS_STATISTICAL_DRIFT_WEBHOOK_URL and "
+            "AITOS_STATISTICAL_DRIFT_WEBHOOK_TOKEN must be configured together"
+        )
+    alert_sink = (
+        WebhookDriftAlertSink(webhook_url, bearer_token=webhook_token)
+        if webhook_url
+        else LoggingDriftAlertSink()
+    )
+    interval_seconds = float(
+        os.getenv("AITOS_STATISTICAL_DRIFT_INTERVAL_SECONDS", "300")
+    )
+    engine = scanner._a_stat_bridge.engine
+    await engine.start_drift_monitor(
+        governance,
+        provider,
+        interval_seconds=interval_seconds,
+        alert_callback=alert_sink,
+    )
+    cleanup.push_async_callback(engine.stop_drift_monitor)
+    logger.info(
+        "A-Stat drift monitor started",
+        extra={
+            "aitos_extra": {
+                "features": list(feature_names),
+                "sources": list(provider.sources),
+                "interval_seconds": interval_seconds,
+                "min_observations": provider.min_observations,
+                "alert_sink": "webhook" if webhook_url else "structured_log",
+                "promotion_policy": "operator_approval_required",
+            }
+        },
+    )
+    return engine, client
+
+
 async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     settings = get_settings()
     if settings.tuning.mode != "paper":
@@ -253,6 +441,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     )
     await event_bus.initialize({})
     event_bus_cleanup_owner = {"components": False}
+    drift_engine = None
     cleanup.push_async_callback(
         _shutdown_event_bus_if_unowned, event_bus, event_bus_cleanup_owner
     )
@@ -323,6 +512,29 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     # Restoring before initialization could query a table that has not yet been
     # created on a fresh/recreated ClickHouse volume.
     await trade_state_persistence.initialize()
+    # Persist every entry intent before submission and recover uncertain submits
+    # by exchange client-order-id lookup after a process restart.
+    if not isinstance(
+        components.trade_lifecycle._order_executor, IdempotentOrderExecutor
+    ):
+        components.trade_lifecycle._order_executor = IdempotentOrderExecutor(
+            components.trade_lifecycle._order_executor, state_store
+        )
+    order_recovery = (
+        await components.trade_lifecycle._order_executor.reconcile_pending_orders()
+    )
+    logger.info(
+        "durable order-intent reconciliation complete",
+        extra={"aitos_extra": order_recovery},
+    )
+    if order_recovery["filled_unlinked"]:
+        logger.critical(
+            "paper startup blocked: exchange fills lack durable trade snapshots",
+            extra={"aitos_extra": order_recovery},
+        )
+        raise RuntimeError(
+            "unlinked exchange fills require operator reconciliation before new entries"
+        )
     set_open_position_provider(components.trade_lifecycle.get_open_trades)
     # Install protection before recovery/resubscription so every subsequent
     # scanner-driven subscription update preserves restored position symbols.
@@ -392,6 +604,10 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     )
     cleanup.push_async_callback(experience_recorder.shutdown)
     await experience_recorder.initialize({})
+    await _start_optional_hawkes_bootstrap(components)
+    drift_engine, _ = await _start_optional_statistical_drift_monitor(
+        components, market_repo, settings, cleanup
+    )
     health_server = HealthServer(
         components.all_modules()
         + [
@@ -409,6 +625,8 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     )
     cleanup.push_async_callback(health_server.stop)
     await health_server.start()
+
+    stop_event = asyncio.Event()
 
     # Self-healing: periodically re-initialize modules that have died
     async def _self_heal_loop() -> None:
@@ -472,7 +690,6 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
             }
         },
     )
-    stop_event = asyncio.Event()
     if not position_recovery_ready:
         # Enter the managed finally path without running a scan cycle. This
         # shuts down already-started workers/modules while preventing new risk.
@@ -550,6 +767,11 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
             except TimeoutError:
                 pass
     finally:
+        if drift_engine is not None:
+            try:
+                await drift_engine.stop_drift_monitor()
+            except Exception:
+                logger.exception("A-Stat drift monitor shutdown failed")
         await _cancel_task(heal_task)
         # Let the worker finish its current ClickHouse batch before joining.
         await _stop_learning_worker(learning_worker, learning_task)
@@ -571,6 +793,10 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
         if graph_driver is not None:
             await graph_driver.close()
         await redis_client.close()
+        logger.info(
+            "paper runtime shutdown complete",
+            extra={"aitos_extra": {"shutdown_status": "complete"}},
+        )
 
 
 async def main() -> None:

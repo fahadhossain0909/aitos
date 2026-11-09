@@ -21,6 +21,7 @@ from aitos.execution.order_executor import OrderExecutor
 from aitos.intelligence.rl_feedback import RLFeedbackLoop
 from aitos.intelligence.rl_policy import RLPolicyScorer, TabularBanditRLScorer
 from aitos.intelligence.scanner import OpportunityScanner
+from aitos.statistics.feedback import AStatFeedbackLoop
 
 # Keep model persistence independent of any developer-specific host path.
 # MODEL_DATA_DIR is already part of the deployment environment contract;
@@ -74,6 +75,7 @@ class SystemComponents:
     ml_feedback: MLExplainerFeedbackLoop
     attention_explainer: AttentionExplainer
     attention_feedback: AttentionFeedbackLoop
+    a_stat_feedback: AStatFeedbackLoop
     reconciliation: ReconciliationScheduler | None = None
     knowledge_graph: KnowledgeGraphWriter | None = None
     correlation_updater: SymbolCorrelationUpdater | None = None
@@ -131,6 +133,7 @@ class SystemComponents:
             self.rl_feedback,
             self.ml_feedback,
             self.attention_feedback,
+            self.a_stat_feedback,
         ]
         if self.knowledge_graph is not None:
             modules.append(self.knowledge_graph)
@@ -249,6 +252,11 @@ async def build_system(
     attention_feedback = AttentionFeedbackLoop(
         event_bus=event_bus, explainer=attention_explainer
     )
+    a_stat_feedback = AStatFeedbackLoop(
+        event_bus=event_bus,
+        engine=scanner._a_stat_bridge.engine,
+        database_path=_MODEL_DATA_DIR / "a_stat_feedback.sqlite3",
+    )
     position_manager = (
         PositionManager(
             config={
@@ -339,7 +347,27 @@ async def build_system(
         trade_lifecycle.configure_position_switching(coordinator)
         logger.info("Durable position-switching coordinator explicitly configured")
 
-    decision_journal = decision_journal_repository or DecisionJournalRepository()
+    decision_journal = decision_journal_repository
+    if (
+        decision_journal is None
+        and journal_repository is not None
+        and all(
+            hasattr(journal_repository, method)
+            for method in (
+                "save_decision",
+                "link_trade",
+                "attribute_outcome",
+                "get_records",
+                "save_management_decision",
+                "get_trade_records",
+            )
+        )
+    ):
+        # The PostgreSQL fallback implements both operational journal
+        # interfaces over one append-only transactional record table.
+        decision_journal = journal_repository
+    if decision_journal is None:
+        decision_journal = DecisionJournalRepository()
     journal = JournalSystem(
         event_bus=event_bus,
         repository=journal_repository,
@@ -379,6 +407,7 @@ async def build_system(
         ml_feedback=ml_feedback,
         attention_explainer=attention_explainer,
         attention_feedback=attention_feedback,
+        a_stat_feedback=a_stat_feedback,
         reconciliation=reconciliation,
         knowledge_graph=knowledge_graph,
         correlation_updater=correlation_updater,
@@ -656,6 +685,9 @@ async def run_scan_and_trade_cycle(
     for batch in ranked_batches:
         for candidate in batch:
             if open_symbol_counts.get(candidate.symbol, 0) >= max_per_symbol:
+                components.scanner.record_candidate_rejection(
+                    candidate, "max_positions_per_symbol"
+                )
                 continue
             kernel_decision = await components.scanner.decide_with_kernel(
                 candidate, components.kernel
@@ -746,7 +778,10 @@ async def run_scan_and_trade_cycle(
     for ranked_batch in ranked_batches:
         for candidate in ranked_batch:
             if accepted_opportunities >= target_opportunities:
-                break
+                components.scanner.record_candidate_rejection(
+                    candidate, "opportunity_target_reached"
+                )
+                continue
             logger.info(
                 "scanner candidate ranked",
                 extra={
@@ -771,6 +806,9 @@ async def run_scan_and_trade_cycle(
                             "score": candidate.composite_score,
                         }
                     },
+                )
+                components.scanner.record_candidate_rejection(
+                    candidate, "max_positions_per_symbol_after_rebalance"
                 )
                 continue
 

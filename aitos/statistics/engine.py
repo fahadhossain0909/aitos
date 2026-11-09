@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections import deque
+from threading import RLock
 from collections.abc import Iterable
 
 from .models import (
@@ -14,6 +16,8 @@ from .models import (
     RegimeProbability,
 )
 from .stack import ContractStatisticalStack
+from .governance_runtime import DriftMonitorScheduler, StatisticalGovernanceRuntime
+from .hawkes import HawkesMLEFit, MarkedHawkesOnlineFilter
 
 
 class AStatEngine:
@@ -45,6 +49,113 @@ class AStatEngine:
         self._stack = ContractStatisticalStack(
             max_history=max(1024, calibration_window * 8)
         )
+        self._drift_monitor_task: asyncio.Task | None = None
+        self._drift_monitor_stop: asyncio.Event | None = None
+        self._drift_monitor_scheduler: DriftMonitorScheduler | None = None
+        self._hawkes_filters: dict[str, MarkedHawkesOnlineFilter] = {}
+        self._hawkes_lock = RLock()
+
+    def register_hawkes_model(
+        self,
+        symbol: str,
+        fit: HawkesMLEFit,
+        *,
+        warmup_events: Iterable[tuple[float, int]] = (),
+    ) -> None:
+        """Atomically install a validated fit after optional chronological warm-up."""
+        normalized = symbol.strip().upper()
+        if not normalized:
+            raise ValueError("symbol is required for Hawkes event registration")
+        # Build and warm the replacement before acquiring the lock. A malformed
+        # history cannot replace a currently healthy live filter.
+        online_filter = MarkedHawkesOnlineFilter(fit)
+        for timestamp, mark in warmup_events:
+            online_filter.observe(timestamp, mark)
+        with self._hawkes_lock:
+            self._hawkes_filters[normalized] = online_filter
+
+    def has_hawkes_model(self, symbol: str) -> bool:
+        """Return whether a validated live Hawkes filter is registered."""
+        normalized = symbol.strip().upper()
+        if not normalized:
+            return False
+        with self._hawkes_lock:
+            return normalized in self._hawkes_filters
+
+    def last_hawkes_timestamp(self, symbol: str) -> float | None:
+        """Return the last accepted event time for a registered live filter."""
+        normalized = symbol.strip().upper()
+        with self._hawkes_lock:
+            online_filter = self._hawkes_filters.get(normalized)
+            return online_filter.last_timestamp if online_filter is not None else None
+
+    def hawkes_model_status(self) -> dict[str, dict[str, float | int | None]]:
+        """Expose read-only model and warm-up status for runtime health telemetry."""
+        with self._hawkes_lock:
+            return {
+                symbol: {
+                    "branching_ratio": online_filter.fit.branching_ratio,
+                    "training_events": online_filter.fit.events,
+                    "last_event_timestamp": online_filter.last_timestamp,
+                }
+                for symbol, online_filter in sorted(self._hawkes_filters.items())
+            }
+
+    def observe_marked_event(self, symbol: str, timestamp: float, mark: int):
+        """Atomically update the symbol's causal Hawkes filter.
+
+        Market-data consumers may be multi-threaded; serialize each update with
+        model registration so event ordering and filter replacement are safe.
+        """
+        normalized = symbol.strip().upper()
+        if not normalized:
+            raise ValueError("symbol is required for Hawkes event updates")
+        with self._hawkes_lock:
+            online_filter = self._hawkes_filters.get(normalized)
+            if online_filter is None:
+                raise KeyError(f"no fitted Hawkes model registered for {normalized}")
+            return online_filter.observe(timestamp, mark)
+
+    async def start_drift_monitor(
+        self,
+        governance_runtime: StatisticalGovernanceRuntime,
+        batch_provider,
+        *,
+        interval_seconds: float = 300.0,
+        alert_callback=None,
+    ) -> asyncio.Task:
+        """Start the opt-in drift worker under the engine's async lifecycle."""
+        if self._drift_monitor_task is not None and not self._drift_monitor_task.done():
+            raise RuntimeError("A-Stat drift monitor is already running")
+        scheduler = DriftMonitorScheduler(
+            governance_runtime,
+            interval_seconds=interval_seconds,
+            alert_callback=alert_callback,
+        )
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(
+            scheduler.run_forever(stop_event, batch_provider),
+            name="aitos-statistical-drift-monitor",
+        )
+        self._drift_monitor_scheduler = scheduler
+        self._drift_monitor_stop = stop_event
+        self._drift_monitor_task = task
+        return task
+
+    async def stop_drift_monitor(self) -> None:
+        """Cooperatively stop and await the managed drift-monitor task."""
+        if self._drift_monitor_stop is None or self._drift_monitor_task is None:
+            return
+        self._drift_monitor_stop.set()
+        task = self._drift_monitor_task
+        try:
+            await task
+        finally:
+            # A failed provider/alert callback must not leave the engine in a
+            # permanently "already running" state after shutdown is requested.
+            self._drift_monitor_stop = None
+            self._drift_monitor_task = None
+            self._drift_monitor_scheduler = None
 
     def update(self, realised_return: float, predicted_up: float) -> None:
         r = float(realised_return)
@@ -103,11 +214,12 @@ class AStatEngine:
         scale = up + down + flat
         direction = DirectionProbability(up / scale, down / scale, flat / scale)
         returns = observation.features.get("returns", ())
-        advanced = (
-            self._stack.evaluate(observation.symbol, returns)
-            if isinstance(returns, (tuple, list)) and returns
-            else None
-        )
+        advanced = None
+        if isinstance(returns, (tuple, list)):
+            if returns:
+                advanced = self._stack.evaluate(observation.symbol, returns)
+            elif self._stack.has_history(observation.symbol, minimum_observations=20):
+                advanced = self._stack.evaluate(observation.symbol)
         if advanced is not None:
             expected_return = advanced.expected_return
             volatility = advanced.garch.volatility
@@ -148,4 +260,14 @@ class AStatEngine:
             sample_size=max(observation.sample_size, len(self._returns)),
             evidence=tuple(item.name for item in evidence),
             advanced=advanced,
+            upside_tail_probability=(
+                advanced.upside_evt.tail_probability
+                if advanced is not None and advanced.upside_evt is not None
+                else 0.0
+            ),
+            upside_expected_shortfall=(
+                advanced.upside_evt.expected_shortfall
+                if advanced is not None and advanced.upside_evt is not None
+                else None
+            ),
         )

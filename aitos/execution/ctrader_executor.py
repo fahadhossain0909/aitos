@@ -149,8 +149,11 @@ class CTraderOrderExecutor(OrderExecutor):
         return await asyncio.wait_for(future, timeout=self._timeout)
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
-        if request.order_type not in {"MARKET", "LIMIT", "STOP"}:
-            raise ValueError(f"unsupported cTrader order type: {request.order_type}")
+        if request.order_type != "MARKET":
+            raise ValueError(
+                "cTrader resting LIMIT/STOP orders are disabled until order "
+                "status polling and cancellation are wired into TradeLifecycle"
+            )
         symbol_id = self._symbol_ids.get(request.symbol.upper())
         if symbol_id is None:
             raise ValueError(f"missing cTrader symbol id for {request.symbol}")
@@ -181,14 +184,27 @@ class CTraderOrderExecutor(OrderExecutor):
             raise RuntimeError("cTrader execution response did not contain an order")
         execution_price = float(getattr(order_result, "executionPrice", 0.0))
         executed_volume = float(getattr(order_result, "executedVolume", 0)) / 100.0
+        fill_price = (
+            execution_price if execution_price > 0.0 else request.reference_price
+        )
+        price_fallback = execution_price <= 0.0 and executed_volume > 0.0
         return OrderResult(
             order_id=str(getattr(order_result, "orderId", "")),
             symbol=request.symbol,
             side=request.side,
             filled_quantity=executed_volume,
-            fill_price=execution_price,
+            fill_price=fill_price,
             filled_at=datetime.now(timezone.utc).isoformat(),
-            success=True,
+            success=executed_volume > 0.0 and fill_price > 0.0,
+            error=(
+                "cTrader fill price missing; reference-price fallback requires reconciliation"
+                if price_fallback
+                else (
+                    None
+                    if executed_volume > 0.0 and fill_price > 0.0
+                    else "cTrader accepted the request without a confirmed execution fill"
+                )
+            ),
         )
 
     @property

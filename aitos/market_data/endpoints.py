@@ -9,12 +9,18 @@ from __future__ import annotations
 
 import os
 
-BINANCE_USDM_WS_BASE = "wss://fstream.binance.com"
+BINANCE_USDM_WS_BASE = os.getenv(
+    "AITOS_BINANCE_FUTURES_WS_BASE_URL", "wss://fstream.binance.com"
+).rstrip("/")
 # Binance's current USDⓈ-M WebSocket Streams SDK connects to the market
 # routing path and then sends SUBSCRIBE requests over that connection.
-BINANCE_USDM_WS_COMBINED = f"{BINANCE_USDM_WS_BASE}/stream"
+BINANCE_USDM_WS_COMBINED = os.getenv(
+    "AITOS_BINANCE_FUTURES_WS_COMBINED_URL", f"{BINANCE_USDM_WS_BASE}/stream"
+).rstrip("/")
 # Kept for compatibility with callers/tests that use the raw-stream constant.
-BINANCE_USDM_WS_RAW = f"{BINANCE_USDM_WS_BASE}/market/ws"
+BINANCE_USDM_WS_RAW = os.getenv(
+    "AITOS_BINANCE_FUTURES_WS_RAW_URL", f"{BINANCE_USDM_WS_BASE}/market/ws"
+).rstrip("/")
 # Legacy public-route names are retained as aliases. All USDⓈ-M public market
 # streams are intentionally routed through the validated market path.
 BINANCE_USDM_WS_PUBLIC_COMBINED = BINANCE_USDM_WS_COMBINED

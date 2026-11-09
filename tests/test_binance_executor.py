@@ -628,3 +628,63 @@ def _order_request(side=TradeSide.LONG, quantity=1.0):
     return OrderRequest(
         symbol="BTCUSDT", side=side, quantity=quantity, reference_price=100.0
     )
+
+
+@pytest.mark.asyncio
+async def test_new_order_is_accepted_without_falsely_reporting_a_full_fill():
+    executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
+    await executor.connect()
+    with aioresponses() as mocked:
+        mocked.post(
+            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+            payload={
+                "orderId": 123,
+                "status": "NEW",
+                "executedQty": "0",
+                "avgPrice": "0",
+            },
+        )
+        mocked.delete(
+            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+            payload={
+                "orderId": 123,
+                "status": "CANCELED",
+                "executedQty": "0",
+                "avgPrice": "0",
+            },
+        )
+        result = await executor.submit_order(_order_request(quantity=2.0))
+    assert result.success is False
+    assert result.filled_quantity == 0.0
+    assert "not filled" in result.error
+    await executor.close()
+
+
+@pytest.mark.asyncio
+async def test_partially_filled_market_order_cancels_remainder_and_preserves_fill():
+    executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
+    await executor.connect()
+    with aioresponses() as mocked:
+        mocked.post(
+            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+            payload={
+                "orderId": 124,
+                "status": "PARTIALLY_FILLED",
+                "executedQty": "0.4",
+                "avgPrice": "100.1",
+            },
+        )
+        mocked.delete(
+            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+            payload={
+                "orderId": 124,
+                "status": "CANCELED",
+                "executedQty": "0.4",
+                "avgPrice": "100.1",
+            },
+        )
+        result = await executor.submit_order(_order_request(quantity=1.0))
+    assert result.success is True
+    assert result.filled_quantity == pytest.approx(0.4)
+    assert result.fill_price == pytest.approx(100.1)
+    await executor.close()
