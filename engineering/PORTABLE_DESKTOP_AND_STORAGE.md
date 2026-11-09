@@ -84,3 +84,55 @@ GNOME Keyring/KWallet interaction. Those remain explicit acceptance gates.
    databases.
 8. Add backup/restore, free-space checks, permissions, atomic writes, schema
    versioning and restart recovery before automatic state migration.
+
+## Implementation checkpoint: 2026-11-06 (PR #248)
+
+Phase 1's obsolete fresh-install model-directory test now follows portable user
+storage. Phase 2 adds explicit canonical runtime origins (HTTPS except loopback),
+origin-hashed credential slots, pinned native Secret Service/Keychain backends,
+and authenticated read-only `/console/v1/capabilities` protocol 1.0. React now
+fails closed against older runtimes without this contract: deploy compatible
+read-only backend and frontend together; no silent fallback/endpoint discovery.
+Native launchers accept explicit origins, not arbitrary paths or remote HTTP.
+No runtime launch, live authority or credential access is added to JavaScript.
+
+`aitos/config/durable_files.py` is an **opt-in foundation**, not a migration of
+financial stores: private POSIX directory checks, free-space checks, fsync/atomic
+JSON replacement, process locks and no-clobber SQLite snapshot staging. Financial
+stores are not redirected and restore never activates a staged database.
+Windows ACL validation, parent/symlink race hardening, versioned migration,
+active recovery and concurrent migration acceptance remain outstanding.
+
+An initial Tauri v2 shell and shared frozen Python gateway are under
+`desktop/src-tauri` and `native/shared`. The shell embeds only its loopback
+read-only gateway and permits same-origin navigation; no JavaScript IPC/control
+capabilities are granted. Native dialogs and OS vault handle credentials; only
+an origin is sent through child stdout. Closing the shell terminates its gateway,
+not any trading backend. Existing browser/Tk packages remain the accepted fallback.
+**Rust compilation, bundled execution, install and desktop vault acceptance have
+not yet been verified.** Local environment lacks Rust and access to its registry.
+The new hosted workflow builds unsigned Windows NSIS, Linux AppImage/DEB and
+macOS DMG candidates and runs synthetic gateway smoke, plus isolated Linux
+Secret Service cross-process persistence. It publishes no release or updater and
+has no VPS/deployment step. These are CI definitions, not successful evidence.
+Fresh-user installation/reboot, signed/notarized builds, Windows/macOS real-vault
+acceptance and Linux session/desktop integration still require evidence.
+
+Verification at this checkpoint:
+- Full non-integration backend: **2312 passed, 2 skipped, 38 deselected** (79.64s).
+- React production build: PASS; **93 tests across 8 files: PASS**.
+- Operator browser integration: **1 passed** (9.61s).
+- Shared source gateway self-test: PASS (synthetic backend/auth/revocation).
+- New Python files F-lint: PASS; workflow/config parsing: PASS.
+- Hosted native packaging/signing and provider/account evidence: NOT VERIFIED.
+
+Real account equity/margin timelines, mark-price PnL, protection-order monitoring,
+alerts delivery, consistent historical cursors, audited multi-user control,
+secure remote updates and full backup/restore authority remain unimplemented.
+The capabilities response explicitly marks these unavailable. Existing performance
+is bounded-window, not all-time. No production certification, independent approval,
+financial migration, trading activation or VPS deployment is implied.
+
+Rollback: pair prior frontend/backend protocol versions, keep legacy launchers,
+and do not activate staged snapshots. Never remove durable user data or substitute
+memory/cache storage on failure.

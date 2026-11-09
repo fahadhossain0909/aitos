@@ -46,3 +46,9 @@ desktop/*.tsbuildinfo
 /build/linux/
 /dist/linux/
 /artifacts/linux/
+
+# Cross-platform generated sidecars / Rust artifacts / packaged app images.
+/desktop/src-tauri/binaries/
+/desktop/src-tauri/target/
+/.venv-tauri/
+/artifacts/tauri/
