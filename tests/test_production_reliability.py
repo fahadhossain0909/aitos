@@ -110,8 +110,7 @@ async def test_durable_order_executor_recovers_lost_ack_without_resubmitting():
 
 
 @pytest.mark.asyncio
-async def test_durable_order_executor_blocks_resubmit_when_venue_lookup_is_ambiguous(
-):
+async def test_durable_order_executor_blocks_resubmit_when_venue_lookup_is_ambiguous():
     class NoLookupExecutor(CountingExecutor):
         async def get_order_by_client_id(self, symbol, client_order_id):
             return None
