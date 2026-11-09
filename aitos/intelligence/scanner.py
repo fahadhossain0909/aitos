@@ -549,6 +549,7 @@ class OpportunityScanner(AITOSModule):
                 },
                 "candidate_rotation": self._candidate_rotation.snapshot(),
                 "candidate_outcomes": self._candidate_outcomes.snapshot(),
+                "decision_outcome_ledger": self._decision_outcome_ledger.snapshot(),
                 "financial_ml": self._financial_ml.snapshot(),
                 "directional_funnel": self._directional_funnel.snapshot(),
                 "ranking_hysteresis": self._ranking_hysteresis.snapshot(),
