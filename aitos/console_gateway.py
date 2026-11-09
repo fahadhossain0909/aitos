@@ -119,6 +119,7 @@ def _loopback(origin: str) -> bool:
     except ValueError:
         return False
 
+
 def is_valid_operator_password(password: object) -> bool:
     """Apply the same UTF-8 byte contract in native setup and gateway startup."""
     if not isinstance(password, str):
