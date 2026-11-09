@@ -50,7 +50,9 @@ def _record(
     }
 
 
-async def _reconcile_operational(pg_pool, ch, since: datetime, until: datetime) -> dict[str, Any]:
+async def _reconcile_operational(
+    pg_pool, ch, since: datetime, until: datetime
+) -> dict[str, Any]:
     async with pg_pool.acquire() as conn:
         pg_rows = await conn.fetch(
             """
@@ -168,7 +170,9 @@ async def _reconcile_operational(pg_pool, ch, since: datetime, until: datetime) 
     }
 
 
-async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) -> dict[str, Any]:
+async def _reconcile_market_data(
+    pg_pool, ch, since: datetime, until: datetime
+) -> dict[str, Any]:
     async with pg_pool.acquire() as conn:
         pg_rows = await conn.fetch(
             """
