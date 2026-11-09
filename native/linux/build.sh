@@ -45,7 +45,7 @@ Section: finance
 Priority: optional
 Architecture: $ARCH
 Maintainer: AITOS Project
-Depends: libglib2.0-0, libsecret-1-0, libdbus-1-3, libx11-6, libxext6, libxrender1, libxss1, libxtst6, libnss3
+Depends: python3-tk, xdg-utils, libglib2.0-0, libsecret-1-0, libdbus-1-3, libx11-6, libxext6, libxrender1, libxss1, libxtst6, libnss3
 Description: AITOS authenticated read-only operator console
  Native Linux session manager. Does not install or start trading services.
 CONTROL
