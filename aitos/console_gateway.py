@@ -119,6 +119,16 @@ def _loopback(origin: str) -> bool:
     except ValueError:
         return False
 
+def is_valid_operator_password(password: object) -> bool:
+    """Apply the same UTF-8 byte contract in native setup and gateway startup."""
+    if not isinstance(password, str):
+        return False
+    try:
+        size = len(password.encode("utf-8"))
+    except UnicodeEncodeError:
+        return False
+    return 24 <= size <= 1024
+
 
 @dataclass(frozen=True)
 class GatewayConfig:
@@ -167,10 +177,7 @@ class OperatorSessions:
     """Hash-only, bounded, absolute-expiry sessions; restart revokes everything."""
 
     def __init__(self, config: GatewayConfig, password: str, *, clock=time.monotonic):
-        if (
-            not isinstance(password, str)
-            or not 24 <= len(password.encode("utf-8")) <= 1024
-        ):
+        if not is_valid_operator_password(password):
             raise ValueError("operator password must be 24–1024 UTF-8 bytes")
         self.config = config
         self.clock = clock
