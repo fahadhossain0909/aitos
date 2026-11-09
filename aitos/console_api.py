@@ -67,13 +67,17 @@ def register_console_routes(
     token: str | None = None,
     runtime_mode: str = "unknown",
     projection_observer=None,
+    account_observer=None,
 ) -> None:
     modules = list(modules)
     if runtime_mode not in {"unknown", "paper", "live", "backtest"}:
         raise ValueError("invalid declared runtime mode")
-    if (modules or state_store is not None or projection_observer is not None) and (
-        not token or len(token) < 32
-    ):
+    if (
+        modules
+        or state_store is not None
+        or projection_observer is not None
+        or account_observer is not None
+    ) and (not token or len(token) < 32):
         raise ValueError(
             "attached operator console requires a bearer token of at least 32 characters"
         )
@@ -245,6 +249,29 @@ def register_console_routes(
             raise web.HTTPBadRequest(text="Invalid bounded research plan") from None
         return web.json_response(report, headers={"Cache-Control": "no-store"})
 
+    async def account_observation(request):
+        authorize(request)
+        if request.query:
+            raise web.HTTPBadRequest(text="Account query parameters are not supported")
+        headers = {"Cache-Control": "no-store"}
+        if account_observer is None:
+            return web.json_response(
+                {"available": False, "error": "Account provider not attached"},
+                status=503,
+                headers=headers,
+            )
+        try:
+            # Provider explicitly injected by the runtime owner, never selected
+            # by browser parameters. No credentials or executor passed here.
+            result = await asyncio.wait_for(account_observer.observe(), timeout=12)
+        except Exception:
+            return web.json_response(
+                {"available": False, "error": "Account observation unavailable"},
+                status=503,
+                headers=headers,
+            )
+        return web.json_response(result, headers=headers)
+
     async def capabilities(request):
         from aitos.console_capabilities import describe_capabilities
 
@@ -258,6 +285,7 @@ def register_console_routes(
             headers={"Cache-Control": "no-store"},
         )
 
+    app.router.add_get("/console/v1/account", account_observation)
     app.router.add_get("/console/v1/capabilities", capabilities)
     app.router.add_get("/console/v1/research/plan", research_plan)
     app.router.add_get("/console/v1/performance", performance)

@@ -191,3 +191,31 @@ security review/control plane, authenticated secure updates, signed releases,
 installed/fresh-user/reboot tests and independent review. The five-phase program
 is **not complete**; these missing behaviors must not be inferred from the new
 primitives or packaging smoke results.
+
+### Account adapter HTTP wiring follow-up
+
+VERIFIED — `HealthServer(console_account_observer=...)` now passes an explicitly
+injected account observer into the authenticated read-only console. The fixed
+GET `/console/v1/account` route is allowed by the session gateway, accepts no
+query parameters/account selectors, requires attached-console bearer auth and
+uses no-store responses. Missing/failed providers return 503 with no synthetic
+balance and no raw provider exception. Route reads have a 12-second outer budget;
+the adapter retains its 10-second request deadline/cleanup. No runtime default
+constructs or activates a signed provider or loads exchange keys.
+
+VERIFIED — adapter-to-HTTP synthetic integration, auth/no-query/no-write,
+unavailable/error redaction and related gateway/API/health tests: **105 passed**
+(2.93s). Real provider and UI integration: NOT TESTED / not enabled. The fixed
+capability protocol still marks account timeline/margin/marks unavailable until
+consumer integration and freshness evidence are provided; this internal route
+alone does not claim complete account monitoring or change financial authority.
+
+Explicit owner wiring is `HealthServer(..., console_token=...,
+console_account_observer=BinanceOperatorAccount(signed_get))`. Supply a bounded
+GET-only signed transport from an approved runtime owner, never from webview
+input. Do not pass a trading executor/order client or enable live activity to test.
+Rollback: omit the observer; account reads return unavailable and all existing
+snapshot/history routes continue unchanged.
+
+VERIFIED — full non-integration backend after HTTP wiring: **2341 passed,
+2 skipped, 38 deselected** (81.03s); changed Python F-lint PASS.

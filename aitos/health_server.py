@@ -36,6 +36,7 @@ class HealthServer:
         console_state_store=None,
         console_runtime_mode: str = "unknown",
         console_projection_observer=None,
+        console_account_observer=None,
     ) -> None:
         self._modules: list[AITOSModule] = list(modules)
         self._host = host
@@ -45,6 +46,7 @@ class HealthServer:
         self._console_state_store = console_state_store
         self._console_runtime_mode = console_runtime_mode
         self._console_projection_observer = console_projection_observer
+        self._console_account_observer = console_account_observer
 
     def set_rate_limiter(self, rate_limiter) -> None:
         """Attach the exchange rate limiter for health/metrics reporting."""
@@ -103,6 +105,7 @@ class HealthServer:
                 runtime_mode=self._console_runtime_mode,
                 token=self._console_token,
                 projection_observer=self._console_projection_observer,
+                account_observer=self._console_account_observer,
             )
         return app
 
