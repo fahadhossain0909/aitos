@@ -24,7 +24,7 @@ mkdir -p "$STAGE/DEBIAN" "$STAGE/opt/aitos" "$STAGE/usr/bin" "$STAGE/usr/share/a
 cp -a "$ROOT/dist/linux/AITOS-Console/." "$STAGE/opt/aitos/"
 cat > "$STAGE/usr/bin/aitos-console" <<'WRAPPER'
 #!/bin/sh
-exec /opt/aitos/launcher "$@"
+exec /opt/aitos/AITOS-Console "$@"
 WRAPPER
 chmod 0755 "$STAGE/usr/bin/aitos-console"
 cp desktop/public/icon-512.png "$STAGE/usr/share/icons/hicolor/512x512/apps/aitos-console.png"
