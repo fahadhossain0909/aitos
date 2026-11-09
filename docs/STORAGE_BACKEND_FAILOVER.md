@@ -66,6 +66,25 @@ ignored. These writes are not transactionally atomic with ClickHouse, Redis,
 exchange execution, or the other adapter. There is no dual-write or silent
 mirroring.
 
+## Durable paper execution intent and recovery
+
+The ClickHouse-backed `order_execution_ledger` records a stable
+`client_order_id` and the complete order request before the executor performs
+the venue side effect. A terminal acknowledgement/fill is appended afterward.
+If the process loses the response or crashes between submit and acknowledgement
+persistence, restart queries the venue by client order ID. It never blindly
+resubmits an intent whose outcome is ambiguous. Executors that cannot perform
+an authoritative client-ID lookup leave the intent unresolved and require
+operator reconciliation.
+
+Paper startup also checks for acknowledged entry fills without a matching
+open or closed trade snapshot. Such an unlinked fill blocks new entries rather
+than silently allowing portfolio state to diverge. This is a fail-closed
+recovery guard, not automatic position reconstruction. The current paper
+executor is simulated; an exchange-backed executor must implement
+`get_order_by_client_id` against the venue's authoritative order query before
+this recovery path can be accepted for real exchange execution.
+
 ## Fail-closed rules
 
 - If ClickHouse market/analytics storage is unavailable, startup stops unless
@@ -128,10 +147,11 @@ was authoritative.
   schema migration v1, write/read, and repeat-request idempotency against the
   Render-hosted PostgreSQL database. GitHub Actions also tests ephemeral
   PostgreSQL 16. This is not a full scanner-to-trade paper lifecycle test.
-- Full crash-window reconciliation across exchange execution acknowledgements,
-  position/runtime state, operational journal and market records. The current
-  CLI audits stored market and journal records but does not recover exchange
-  side effects or ClickHouse-only runtime-state tables.
+- Full cross-system crash-window reconciliation across exchange execution acknowledgements,
+  position/runtime state, operational journal and market records. Durable order
+  intent/acknowledgement journaling and fail-closed startup detection are now
+  implemented, but automatic position reconstruction for an unlinked fill and
+  exchange-specific client-ID lookup still require an exchange-backed executor.
 - A controlled, operator-approved data-copy/switchback procedure. The current
   tool is a read-only comparison with counts, directional missing-key
   fingerprints, canonical payload checksums and duplicate detection; it does
