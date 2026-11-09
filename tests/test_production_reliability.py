@@ -132,7 +132,9 @@ async def test_ambiguous_order_blocks_other_entries_until_same_intent_is_reconci
 
     with pytest.raises(OSError, match="lost acknowledgement"):
         await executor.submit_order(original)
-    with pytest.raises(AmbiguousOrderSubmissionError, match="new order submissions blocked"):
+    with pytest.raises(
+        AmbiguousOrderSubmissionError, match="new order submissions blocked"
+    ):
         await executor.submit_order(unrelated)
 
     recovered = await executor.submit_order(original)
