@@ -57,7 +57,7 @@ jobs:
           target="$RUNNER_TEMP/aitos-linux-package"
           mkdir -p "$target"
           dpkg-deb --extract "$package" "$target"
-          env -u LD_LIBRARY_PATH "$target/opt/aitos/AITOS-Console" --bundle-self-test
+          env -u LD_LIBRARY_PATH PYTHONPATH="$target/opt/aitos/app" "$target/opt/aitos/.venv/bin/python" "$target/opt/aitos/app/native/linux/launcher.py" --bundle-self-test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
