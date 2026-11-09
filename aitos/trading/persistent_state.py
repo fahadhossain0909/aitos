@@ -963,6 +963,8 @@ class IdempotentOrderExecutor(OrderExecutor):
         if record is not None:
             state = str(record.get("state", "")).upper()
             if state in {"ACKNOWLEDGED", "REJECTED"}:
+                self._blocked_reason = None
+                self._blocked_client_order_id = None
                 return self._result_from_payload(
                     record.get("result", {}), request
                 )
