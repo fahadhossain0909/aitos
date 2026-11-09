@@ -34,9 +34,9 @@ def _json_value(value: Any) -> Any:
 
 
 async def _fetch_clickhouse_rows(
-    client, query: str, since: datetime
+    client, query: str, since: datetime, until: datetime
 ) -> list[dict[str, Any]]:
-    result = await client.query(query, parameters={"since": since})
+    result = await client.query(query, parameters={"since": since, "until": until})
     return [dict(zip(result.column_names, row)) for row in result.result_rows]
 
 
@@ -50,16 +50,17 @@ def _record(
     }
 
 
-async def _reconcile_operational(pg_pool, ch, since: datetime) -> dict[str, Any]:
+async def _reconcile_operational(pg_pool, ch, since: datetime, until: datetime) -> dict[str, Any]:
     async with pg_pool.acquire() as conn:
         pg_rows = await conn.fetch(
             """
             SELECT record_type, entity_id, payload::text AS payload
             FROM aitos_operational_records
-            WHERE recorded_at >= $1
+            WHERE recorded_at >= $1 AND recorded_at < $2
             ORDER BY recorded_at, record_id
             """,
             since,
+            until,
         )
 
     pg_trade_snapshots: list[dict[str, Any]] = []
@@ -87,9 +88,12 @@ async def _reconcile_operational(pg_pool, ch, since: datetime) -> dict[str, Any]
         SELECT trade_id, payload
         FROM trades
         WHERE recorded_at >= {since:DateTime64(3, 'UTC')}
+          AND recorded_at < {until:DateTime64(3, 'UTC')}
+          AND recorded_at < {until:DateTime64(3, 'UTC')}
         ORDER BY recorded_at, trade_id
         """,
         since,
+        until,
     )
     ch_trade_snapshots = [
         _record("TRADE_SNAPSHOT", row["trade_id"], _payload(row["payload"]))
@@ -105,9 +109,11 @@ async def _reconcile_operational(pg_pool, ch, since: datetime) -> dict[str, Any]
                lead_lag_observations, mistakes, lessons, improvements
         FROM journal_entries
         WHERE created_at >= {since:DateTime64(3, 'UTC')}
+          AND created_at < {until:DateTime64(3, 'UTC')}
         ORDER BY created_at, entry_id
         """,
         since,
+        until,
     )
     ch_journal_entries = []
     for row in ch_journal_rows:
@@ -135,9 +141,12 @@ async def _reconcile_operational(pg_pool, ch, since: datetime) -> dict[str, Any]
         SELECT decision_id, record_type, payload
         FROM decision_journal
         WHERE recorded_at >= {since:DateTime64(3, 'UTC')}
+          AND recorded_at < {until:DateTime64(3, 'UTC')}
+          AND recorded_at < {until:DateTime64(3, 'UTC')}
         ORDER BY recorded_at, decision_id
         """,
         since,
+        until,
     )
     ch_decisions = [
         _record(row["record_type"], row["decision_id"], _payload(row["payload"]))
@@ -161,17 +170,18 @@ async def _reconcile_operational(pg_pool, ch, since: datetime) -> dict[str, Any]
     }
 
 
-async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]:
+async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) -> dict[str, Any]:
     async with pg_pool.acquire() as conn:
         pg_rows = await conn.fetch(
             """
             SELECT record_type, entity_id, idempotency_key, event_time,
                    payload::text AS payload
             FROM aitos_market_records
-            WHERE event_time >= $1
+            WHERE event_time >= $1 AND event_time < $2
             ORDER BY event_time, record_id
             """,
             since,
+            until,
         )
 
     pg_records: dict[str, list[dict[str, Any]]] = {}
@@ -194,6 +204,10 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]
                    taker_buy_quote_volume
             FROM market_ohlcv
             WHERE time >= {since:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol, timeframe
         """,
         "MARKET_EVENT": """
@@ -202,6 +216,9 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]
                    trace_id, payload_json
             FROM market_events
             WHERE event_time >= {since:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
             ORDER BY event_time, symbol, event_id
         """,
         "LIVE_ANALYTICS": """
@@ -210,6 +227,9 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]
                    payload_json
             FROM live_analytics_events
             WHERE event_time >= {since:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
             ORDER BY event_time, category, symbol, event_id
         """,
         "ORDER_BOOK_SNAPSHOT": """
@@ -217,6 +237,10 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]
                    last_update_id
             FROM order_book_snapshots
             WHERE time >= {since:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol, last_update_id
         """,
         "DEPTH_EVENT": """
@@ -224,24 +248,39 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]
                    payload_json
             FROM depth_events
             WHERE event_time >= {since:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
+          AND event_time < {until:DateTime64(3, 'UTC')}
             ORDER BY event_time, symbol, final_update_id
         """,
         "TRADE_TICK": """
             SELECT time, symbol, trade_id, price, quantity, side, is_buyer_maker
             FROM trade_ticks
             WHERE time >= {since:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol, trade_id
         """,
         "FUNDING_RATE": """
             SELECT time, symbol, funding_rate, mark_price
             FROM funding_rates
             WHERE time >= {since:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol
         """,
         "OPEN_INTEREST": """
             SELECT time, symbol, open_interest
             FROM open_interest
             WHERE time >= {since:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
+          AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol
         """,
         "LEARNING_EXPERIENCE": """
@@ -251,6 +290,7 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]
                    model_version, metadata_json
             FROM learning_experiences
             WHERE timestamp >= {since:DateTime64(3, 'UTC')}
+          AND timestamp < {until:DateTime64(3, 'UTC')}
             ORDER BY timestamp, symbol, experience_id
         """,
     }
@@ -365,7 +405,10 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime) -> dict[str, Any]
     return results
 
 
-async def reconcile(since: datetime) -> dict[str, Any]:
+async def reconcile(since: datetime, until: datetime | None = None) -> dict[str, Any]:
+    until = until or datetime.now(timezone.utc)
+    if since >= until:
+        raise ValueError("since must be earlier than until")
     import asyncpg
     import clickhouse_connect
 
@@ -386,11 +429,12 @@ async def reconcile(since: datetime) -> dict[str, Any]:
         database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
     )
     try:
-        operational = await _reconcile_operational(pg_pool, ch, since)
-        market_data = await _reconcile_market_data(pg_pool, ch, since)
+        operational = await _reconcile_operational(pg_pool, ch, since, until)
+        market_data = await _reconcile_market_data(pg_pool, ch, since, until)
         return {
             "mode": "read_only",
             "since": since.isoformat(),
+            "until": until.isoformat(),
             "source": "postgresql",
             "target": "clickhouse",
             "operational": operational,
@@ -417,6 +461,10 @@ def main() -> int:
         help="UTC ISO-8601 lower bound; defaults to the last seven days",
     )
     parser.add_argument(
+        "--until",
+        help="UTC ISO-8601 exclusive upper bound; defaults to now",
+    )
+    parser.add_argument(
         "--output",
         help="Optional JSON report path; stdout is used when omitted",
     )
@@ -426,12 +474,22 @@ def main() -> int:
         if args.since
         else datetime.now(timezone.utc) - timedelta(days=7)
     )
+    until = (
+        datetime.fromisoformat(args.until.replace("Z", "+00:00"))
+        if args.until
+        else datetime.now(timezone.utc)
+    )
     if since.tzinfo is None:
         parser.error("--since must include a timezone")
+    if until.tzinfo is None:
+        parser.error("--until must include a timezone")
     since = since.astimezone(timezone.utc)
+    until = until.astimezone(timezone.utc)
+    if since >= until:
+        parser.error("--since must be earlier than --until")
 
     try:
-        report = asyncio.run(reconcile(since))
+        report = asyncio.run(reconcile(since, until))
     except Exception as exc:
         print(
             json.dumps(
