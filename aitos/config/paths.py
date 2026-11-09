@@ -1,4 +1,5 @@
 """Portable AITOS filesystem locations with explicit, overridable roots."""
+
 from __future__ import annotations
 
 import os
@@ -8,7 +9,11 @@ from pathlib import Path
 
 def get_project_root() -> Path:
     configured = os.getenv("AITOS_HOME")
-    root = Path(configured).expanduser() if configured else Path(__file__).resolve().parents[2]
+    root = (
+        Path(configured).expanduser()
+        if configured
+        else Path(__file__).resolve().parents[2]
+    )
     return root.resolve()
 
 
@@ -33,30 +38,36 @@ def get_data_dir() -> Path:
     if configured := _override("AITOS_DATA_DIR"):
         return configured
     if sys.platform == "win32":
-        return (Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData/Local")) / "AITOS").resolve()
+        base = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData/Local"))
+        return (base / "AITOS").resolve()
     if sys.platform == "darwin":
         return (Path.home() / "Library/Application Support/AITOS").resolve()
-    return (Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local/share")).expanduser() / "aitos").resolve()
+    base = Path(os.getenv("XDG_DATA_HOME", Path.home() / ".local/share"))
+    return (base.expanduser() / "aitos").resolve()
 
 
 def get_cache_dir() -> Path:
     if configured := _override("AITOS_CACHE_DIR"):
         return configured
     if sys.platform == "win32":
-        return (Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData/Local")) / "AITOS/Cache").resolve()
+        base = Path(os.getenv("LOCALAPPDATA", Path.home() / "AppData/Local"))
+        return (base / "AITOS/Cache").resolve()
     if sys.platform == "darwin":
         return (Path.home() / "Library/Caches/AITOS").resolve()
-    return (Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache")).expanduser() / "aitos").resolve()
+    base = Path(os.getenv("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return (base.expanduser() / "aitos").resolve()
 
 
 def get_config_dir() -> Path:
     if configured := _override("AITOS_CONFIG_DIR"):
         return configured
     if sys.platform == "win32":
-        return (Path(os.getenv("APPDATA", Path.home() / "AppData/Roaming")) / "AITOS").resolve()
+        base = Path(os.getenv("APPDATA", Path.home() / "AppData/Roaming"))
+        return (base / "AITOS").resolve()
     if sys.platform == "darwin":
         return (Path.home() / "Library/Application Support/AITOS/config").resolve()
-    return (Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config")).expanduser() / "aitos").resolve()
+    base = Path(os.getenv("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return (base.expanduser() / "aitos").resolve()
 
 
 def get_logs_dir() -> Path:
