@@ -148,7 +148,9 @@ class DurableTradingStateStore:
             column_names=["account", "cursor_time_ms", "updated_at"],
         )
 
-    async def save_order_intent(self, client_order_id: str, request: Mapping[str, Any]) -> None:
+    async def save_order_intent(
+        self, client_order_id: str, request: Mapping[str, Any]
+    ) -> None:
         """Durably record an order intent before any exchange side effect."""
         if not client_order_id:
             raise ValueError("client_order_id is required")
@@ -158,14 +160,16 @@ class DurableTradingStateStore:
             raise ValueError("order intent symbol is required")
         await client.insert(
             "order_execution_ledger",
-            [[
-                client_order_id,
-                symbol,
-                "SUBMITTING",
-                json.dumps(dict(request), sort_keys=True, default=str),
-                "",
-                datetime.now(timezone.utc),
-            ]],
+            [
+                [
+                    client_order_id,
+                    symbol,
+                    "SUBMITTING",
+                    json.dumps(dict(request), sort_keys=True, default=str),
+                    "",
+                    datetime.now(timezone.utc),
+                ]
+            ],
             column_names=[
                 "client_order_id",
                 "symbol",
@@ -209,8 +213,12 @@ class DurableTradingStateStore:
                 ]
             ],
             column_names=[
-                "client_order_id", "symbol", "state", "request_json",
-                "result_json", "updated_at",
+                "client_order_id",
+                "symbol",
+                "state",
+                "request_json",
+                "result_json",
+                "updated_at",
             ],
         )
 
@@ -933,7 +941,11 @@ class IdempotentOrderExecutor(OrderExecutor):
 
     async def submit_order(self, request: OrderRequest) -> OrderResult:
         key = request.client_order_id or self._key(request)
-        request = request if request.client_order_id else replace(request, client_order_id=key)
+        request = (
+            request
+            if request.client_order_id
+            else replace(request, client_order_id=key)
+        )
         if self._blocked_reason and key != self._blocked_client_order_id:
             raise AmbiguousOrderSubmissionError(
                 f"new order submissions blocked by unresolved intent "
@@ -965,9 +977,7 @@ class IdempotentOrderExecutor(OrderExecutor):
             if state in {"ACKNOWLEDGED", "REJECTED"}:
                 self._blocked_reason = None
                 self._blocked_client_order_id = None
-                return self._result_from_payload(
-                    record.get("result", {}), request
-                )
+                return self._result_from_payload(record.get("result", {}), request)
             if state == "SUBMITTING":
                 try:
                     recovered = await self._recover_ambiguous(key, request)
@@ -1015,7 +1025,9 @@ class IdempotentOrderExecutor(OrderExecutor):
                 client_order_id=str(record["client_order_id"]),
                 reduce_only=bool(payload.get("reduce_only", False)),
             )
-            result = await self._recover_ambiguous(str(record["client_order_id"]), request)
+            result = await self._recover_ambiguous(
+                str(record["client_order_id"]), request
+            )
             if result.filled_quantity > 0:
                 # A recovered fill without a matching durable Trade snapshot
                 # cannot safely be attached to portfolio risk automatically.
@@ -1035,9 +1047,7 @@ class IdempotentOrderExecutor(OrderExecutor):
             "terminal_unfilled": terminal_unfilled,
         }
 
-    async def _recover_ambiguous(
-        self, key: str, request: OrderRequest
-    ) -> OrderResult:
+    async def _recover_ambiguous(self, key: str, request: OrderRequest) -> OrderResult:
         lookup = getattr(self._inner, "get_order_by_client_id", None)
         if lookup is None:
             raise AmbiguousOrderSubmissionError(
@@ -1118,7 +1128,9 @@ class IdempotentOrderExecutor(OrderExecutor):
             side=TradeSide(str(payload.get("side") or request.side.value)),
             filled_quantity=float(payload.get("filled_quantity", 0) or 0),
             fill_price=float(payload.get("fill_price", 0) or 0),
-            filled_at=str(payload.get("filled_at") or datetime.now(timezone.utc).isoformat()),
+            filled_at=str(
+                payload.get("filled_at") or datetime.now(timezone.utc).isoformat()
+            ),
             success=bool(payload.get("success")),
             error=payload.get("error"),
         )
