@@ -110,6 +110,38 @@ async def test_durable_order_executor_recovers_lost_ack_without_resubmitting():
 
 
 @pytest.mark.asyncio
+async def test_ambiguous_order_blocks_other_entries_until_same_intent_is_reconciled():
+    inner = CountingExecutor()
+    store = FakeDurableOrderStore()
+    store.fail_ack_once = True
+    executor = IdempotentOrderExecutor(inner, store)
+    original = OrderRequest(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=0.01,
+        reference_price=100_000.0,
+        client_order_id="aitos-entry-blocked-1",
+    )
+    unrelated = OrderRequest(
+        symbol="ETHUSDT",
+        side=TradeSide.SHORT,
+        quantity=0.02,
+        reference_price=3_000.0,
+        client_order_id="aitos-entry-blocked-2",
+    )
+
+    with pytest.raises(OSError, match="lost acknowledgement"):
+        await executor.submit_order(original)
+    with pytest.raises(AmbiguousOrderSubmissionError, match="new order submissions blocked"):
+        await executor.submit_order(unrelated)
+
+    recovered = await executor.submit_order(original)
+
+    assert recovered.order_id == "sim-1"
+    assert inner.calls == 1
+
+
+@pytest.mark.asyncio
 async def test_durable_order_executor_blocks_resubmit_when_venue_lookup_is_ambiguous():
     class NoLookupExecutor(CountingExecutor):
         async def get_order_by_client_id(self, symbol, client_order_id):
