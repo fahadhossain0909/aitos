@@ -1089,10 +1089,7 @@ class IdempotentOrderExecutor(OrderExecutor):
             side=TradeSide(str(payload.get("side") or request.side.value)),
             filled_quantity=float(payload.get("filled_quantity", 0) or 0),
             fill_price=float(payload.get("fill_price", 0) or 0),
-            filled_at=str(
-                payload.get("filled_at")
-                or datetime.now(timezone.utc).isoformat()
-            ),
+            filled_at=str(payload.get("filled_at") or datetime.now(timezone.utc).isoformat()),
             success=bool(payload.get("success")),
             error=payload.get("error"),
         )
