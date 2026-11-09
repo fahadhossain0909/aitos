@@ -182,6 +182,12 @@ class DurableTradingStateStore:
         """Persist the authoritative acknowledgement/fill returned by the executor."""
         client = self._client()
         payload = dict(result)
+        existing = await self.load_order_record(client_order_id)
+        request_json = json.dumps(
+            existing.get("request", {}) if existing else {},
+            sort_keys=True,
+            default=str,
+        )
         state = (
             "ACKNOWLEDGED"
             if (
@@ -197,7 +203,7 @@ class DurableTradingStateStore:
                     client_order_id,
                     symbol,
                     state,
-                    "{}",
+                    request_json,
                     json.dumps(payload, sort_keys=True, default=str),
                     datetime.now(timezone.utc),
                 ]
