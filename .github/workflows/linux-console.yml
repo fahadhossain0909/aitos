@@ -50,6 +50,13 @@ jobs:
           dpkg-deb --contents "$package" | grep -q '/opt/aitos/AITOS-Console'
           dpkg-deb --contents "$package" | grep -q '/usr/share/applications/aitos-console.desktop'
           sha256sum --check artifacts/linux/SHA256SUMS
+      - name: Extract and execute frozen bundle smoke
+        run: |
+          package="$(find artifacts/linux -name '*.deb' -print -quit)"
+          target="$RUNNER_TEMP/aitos-linux-package"
+          mkdir -p "$target"
+          dpkg-deb --extract "$package" "$target"
+          "$target/opt/aitos/AITOS-Console" --bundle-self-test
       - uses: actions/upload-artifact@v4
         if: always()
         with:
