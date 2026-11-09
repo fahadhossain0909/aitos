@@ -221,6 +221,39 @@ class DurableTradingStateStore:
             })
         return pending
 
+    async def load_unlinked_acknowledged_orders(self) -> list[str]:
+        """Find acknowledged entry fills lacking any open or closed trade snapshot."""
+        client = self._client()
+        orders = await client.query(
+            """
+            SELECT
+                client_order_id,
+                argMax(state, updated_at) AS state,
+                argMax(result_json, updated_at) AS result_json
+            FROM order_execution_ledger
+            GROUP BY client_order_id
+            HAVING state = 'ACKNOWLEDGED'
+            """
+        )
+        trade_rows = await client.query(
+            """
+            SELECT trade_id FROM trade_runtime_state
+            UNION DISTINCT
+            SELECT trade_id FROM paper_closed_trade_ledger
+            """
+        )
+        known_trade_ids = {str(row[0]) for row in trade_rows.result_rows}
+        unlinked = []
+        for row in orders.result_rows:
+            client_order_id = str(row[0])
+            if not client_order_id.startswith("aitos-entry-"):
+                continue
+            trade_id = client_order_id.removeprefix("aitos-entry-")
+            result = json.loads(row[2] or "{}")
+            if float(result.get("filled_quantity", 0) or 0) > 0 and trade_id not in known_trade_ids:
+                unlinked.append(client_order_id)
+        return sorted(unlinked)
+
     async def load_order_record(self, client_order_id: str) -> dict[str, Any] | None:
         """Load the latest durable order-intent/acknowledgement state."""
         client = self._client()
@@ -916,11 +949,11 @@ class IdempotentOrderExecutor(OrderExecutor):
         return result
 
     async def reconcile_pending_orders(self) -> dict[str, Any]:
-        """Reconcile crash-window intents before allowing the runtime to trade."""
+        """Reconcile crash-window intents and detect fills without trade snapshots."""
         if self._state_store is None:
             return {"pending": 0, "filled_unlinked": [], "terminal_unfilled": []}
+        unlinked = list(await self._state_store.load_unlinked_acknowledged_orders())
         pending = await self._state_store.load_pending_order_intents()
-        filled_unlinked: list[str] = []
         terminal_unfilled: list[str] = []
         for record in pending:
             payload = record.get("request", {})
@@ -935,14 +968,14 @@ class IdempotentOrderExecutor(OrderExecutor):
             )
             result = await self._recover_ambiguous(str(record["client_order_id"]), request)
             if result.filled_quantity > 0:
-                # A fill recovered without a matching durable Trade snapshot
-                # cannot be safely attached to portfolio risk automatically.
-                filled_unlinked.append(str(record["client_order_id"]))
+                # A recovered fill without a matching durable Trade snapshot
+                # cannot safely be attached to portfolio risk automatically.
+                unlinked.append(str(record["client_order_id"]))
             else:
                 terminal_unfilled.append(str(record["client_order_id"]))
         return {
             "pending": len(pending),
-            "filled_unlinked": filled_unlinked,
+            "filled_unlinked": sorted(set(unlinked)),
             "terminal_unfilled": terminal_unfilled,
         }
 
