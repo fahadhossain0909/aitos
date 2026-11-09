@@ -74,7 +74,8 @@ def main():
     except Exception:
         messagebox.showerror(
             "AITOS",
-            "Vault/setup failed. No server was started. Credentials are never saved to a plaintext fallback.",
+            "Vault/setup failed. No server was started. Credentials are never saved "
+            "to a plaintext fallback.",
             parent=root,
         )
         root.destroy()
