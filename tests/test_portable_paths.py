@@ -96,3 +96,17 @@ def test_windows_and_macos_defaults(monkeypatch, tmp_path):
     assert paths.get_config_dir() == (
         tmp_path / "Library/Application Support/AITOS/config"
     ).resolve()
+
+
+def test_explicit_application_data_root_overrides_legacy_model_path(
+    monkeypatch, tmp_path
+):
+    root = tmp_path / "repo"
+    (root / "data/models").mkdir(parents=True)
+    monkeypatch.setenv("AITOS_HOME", str(root))
+    monkeypatch.setenv("AITOS_DATA_DIR", str(tmp_path / "selected-data"))
+    monkeypatch.delenv("MODEL_DATA_DIR", raising=False)
+    _hide_docker_marker(monkeypatch)
+    assert paths.get_model_data_dir() == (
+        tmp_path / "selected-data/models"
+    ).resolve()
