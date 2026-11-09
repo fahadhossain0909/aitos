@@ -115,3 +115,7 @@ Published source on the required branch with branch-specific no-deployment valid
 ## Sustained-write harness correction
 
 Disposable harness now exercises unique new events throughout duration; no runtime topology/authority changes. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Advanced-main source integration
+
+Main e332e2b9 is an ancestor of integrated source 58807516. PostgreSQL operational fallback and capability selection coexist with ClickHouse analytics; no silent emulation of analytical SQL. Main statistical feedback/ML pipeline wiring retained. Branch local shadow remains default-off and not financial authority. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.

@@ -1,6 +1,15 @@
 # Published source and actual hosted validation
 
-## Latest source: continuous-write coverage correction
+## Current integration handoff
+
+Current tested source is **58807516**: advanced main `e332e2b9` is fully included
+on this arena branch, with individual conflict resolution. **Eight selected hosted
+workflows PASS**, including actual PostgreSQL/ClickHouse reconciliation and Windows
+unsigned build/install/uninstall. See [main integration review](MAIN_INTEGRATION_REVIEW.md)
+for exact SHAs, fresh artifacts, local 2270-test result and remaining gates. Earlier
+results below are historical and do not independently certify the merged source.
+
+## Historical source: continuous-write coverage correction
 
 Source `65644157531a888819e51553c160a4ac149977e2` corrects a P2 **test-harness
 coverage gap**, not a production incident. The previous loop used `iterations %
@@ -58,10 +67,11 @@ archive size 142761 bytes; archive digest
 Successful hosted step outcomes and artifact metadata were observed, not a downloaded
 payload or independent review. No exact remote iteration count is invented.
 
-A corrected **3600-second continuous-write run is IN PROGRESS**, not a pass:
+The corrected **3600-second continuous-write run completed PASS** on pre-integration
+source `6564415`:
 https://github.com/fahadhossain0909/aitos/actions/runs/42511298412
-It uses the same source `6564415`; a background `gh run watch --exit-status`
-monitor is running. No automatic future success or notification is promised.
+It is historical evidence for `6564415`, not an hour-long test of the integrated
+source `58807516`. The completed GitHub job conclusion was observed explicitly.
 Single-service synthetic workload is not replicated HA, production capacity,
 representative p50/p95/p99 latency, power-loss or real-account certification.
 

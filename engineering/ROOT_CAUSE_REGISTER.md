@@ -269,3 +269,7 @@ REPRODUCED: thin service environment importing trading/lifecycle/execution requi
 ## Sustained-write harness correction
 
 AUD-20261106-54 — P2 validation coverage gap, ROOT CAUSE CONFIRMED: iterations % 100 stopped creating new remote writes after 100 events. Pre-fix deterministic 125-iteration test observed 110 rows, expected 135. Unique IDs + checked/inserted/ACKed=1 + full final count fix; local SQL tests pass. No production incident. Historical hour PASS retained with bounded/replay limitation. Corrected remote evidence tracked separately. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Advanced-main source integration
+
+INT-MAIN-01 — REPRODUCED integration incompatibility: random trade ID failed stable logical-entry regression and old hash-only client ID could not satisfy main orphan suffix mapping. One opportunity-derived trade ID and matching client suffix verified. INT-MAIN-02 — journal capability selection/cleanup integration initially failed six ownership cases; restored independent cleanup and cancellation propagation, updated test expectation for sanitized new selection error layer. INT-MAIN-03 — combined drift/shadow teardown verified with actual-AST drift failure and cancellation tests. No production incident or independent review asserted. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.

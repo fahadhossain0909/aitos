@@ -108,3 +108,7 @@ Actual synthetic 300-second service soak completed, total job 6m5s; 60-second ru
 ## Sustained-write harness correction
 
 Historical hour PASS was bounded/replay after 100 unique events, not sustained-write capacity. Corrected harness continuously inserts unique events with 0.1s pacing. Accelerated 125-event SQL regression is not wall-clock latency evidence; representative percentiles remain NOT MEASURED. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Advanced-main source integration
+
+Integrated source functional verification: backend 80.80s; hosted isolated PostgreSQL/ClickHouse job 1m10s; these are test durations, not trading latency. Earlier one-hour continuous-write PASS belongs to pre-integration 6564415. Representative integrated p50/p95/p99/capacity remain NOT MEASURED. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.

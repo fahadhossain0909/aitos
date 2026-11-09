@@ -165,3 +165,7 @@ Windows vault/manager/installer and real service harness are now exercised on ho
 ## Sustained-write harness correction
 
 Only engineering/tools/paper_service_soak.py and its embedded regression changed. New deterministic >100-event SQL case complements actual wall-clock case. External-gate handoff lists concrete unmet inputs. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Advanced-main source integration
+
+Included main PostgreSQL repositories/migrations/reconciliation, durable order ledger/startup guards, Financial ML/statistical/scanner updates and A-Stat feedback/drift integration. Retained native/gateway/evidence/mirror modules. Thirteen conflict files resolved individually; no blanket overwrite. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.

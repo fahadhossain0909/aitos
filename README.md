@@ -660,3 +660,12 @@ available; it is not a signed production release. Current artifact links, tested
 commit, seven workflow results, 300-second soak, review request and remaining gates:
 [remote validation evidence](engineering/REMOTE_VALIDATION_EVIDENCE.md). No main
 merge, production cutover, trusted signing or live capability was activated.
+
+## Advanced-main integration evidence
+
+Main `e332e2b9` is fully included on this arena branch in tested merge `58807516`.
+Eight isolated hosted validations passed, including real PostgreSQL/ClickHouse
+reconciliation and Windows unsigned install/uninstall. See the
+[main integration review](engineering/MAIN_INTEGRATION_REVIEW.md) for comparison,
+conflict decisions, current artifacts, exact evidence and remaining gates. This
+is not a main release, trusted signature or production/live activation.

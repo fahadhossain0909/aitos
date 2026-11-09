@@ -458,3 +458,25 @@ workload interpretation are in `REMOTE_VALIDATION_EVIDENCE.md`. Windows signing,
 independent review, real provider/account verification, HA and authority cutover
 remain gated; user-reported signing infrastructure has not been identified/connected.
 Black/Flake8 F-lint/compile/whitespace PASS; Ruff unavailable, no result claimed.
+
+## Advanced-main integration completed
+
+VERIFIED: fetched main `e332e2b9` is included as a merge parent of **58807516**,
+on the required arena branch only. Shared base `6f8052b`; 168 upstream net files,
+57 overlaps, 13 manual conflict files; 132 files changed by integration. Kept
+main durable order/startup recovery, PostgreSQL adapters, statistical/scanner/
+outcome features and branch default-off mirror/desktop/evidence hardening.
+Stable opportunity identity now maps exactly to main's client-ID trade suffix;
+shielded submission ownership and strict live terminal evidence remain. Drift
+cancellation can no longer bypass shadow finalization.
+
+Local **2270 passed / 2 service-dependent skipped / 38 deselected (80.80s)**;
+**22 embedded passed**, **84 frontend/build**, **1 authenticated browser**,
+**12 native host passed / 1 Windows-only skipped**. Whole Black **735 files PASS**;
+whole F-lint has 17 inherited findings, zero new versus both parents (not a clean
+whole-tree lint claim). All **8 selected hosted workflows PASS** on exact 58807516,
+including actual PostgreSQL16/ClickHouse24.12 reconciliation and unsigned Windows
+build/install/uninstall. Duplicate push validations superseded/cancelled, not
+claimed passes. No VPS, main push, live order, production config application or
+financial authority cutover. Review/signing/account/HA gates remain. Details,
+artifact hashes and reversible handoff: `MAIN_INTEGRATION_REVIEW.md`.

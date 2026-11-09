@@ -129,3 +129,7 @@ Actual remote job/step results and artifact digests now retained via GitHub link
 ## Sustained-write harness correction
 
 Corrected service reports add workload=continuous_unique_events; iterations must equal newly inserted soak rows. Historical reports remain identifiable by source SHA and lack this label. No fabricated throughput/percentiles. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Advanced-main source integration
+
+Main candidate/outcome/statistical feedback and successful shutdown marker retained. Latest source validation is pinned to 58807516 with eight hosted successes. No fabricated runtime health, HA or latency percentiles; 17 F-lint findings inherited from parents are explicitly recorded. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.

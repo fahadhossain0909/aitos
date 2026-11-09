@@ -97,3 +97,15 @@ accumulated source. The old soak recycled IDs at 100, so its historical hour PAS
 is bounded/replay only. New 125-event regression reproduces the gap and verifies
 unique continuous insert/ACK invariants. See current remote evidence and
 `EXTERNAL_COMPLETION_GATES.md`. This author review is not independent approval.
+
+## Main integration review supersedes earlier source selection
+
+Review exact integrated source **58807516c519372bb8b33a8c94caf421cd313de3**
+(and the final documentation-only delta if selecting a later workflow SHA).
+Main **e332e2b9** is now an ancestor, not an omitted comparison. Thirteen conflict
+files were individually reconciled; see `MAIN_INTEGRATION_REVIEW.md` for decisions,
+new identity/cleanup regressions and all eight successful hosted runs. Existing
+review requests for earlier SHAs do not approve this larger combined source.
+Review main's PostgreSQL fallback capability boundaries and durable ACK/startup
+reconciliation alongside the branch's SQLite execution/shadow safeguards; do not
+assume that two durable ledgers establish atomic/exactly-once venue execution.

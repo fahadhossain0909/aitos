@@ -115,3 +115,7 @@ Actual ClickHouse insert → lost local ACK → stopped service/offline probe �
 ## Sustained-write harness correction
 
 Each corrected soak iteration appends a unique event → verifies remote evidence → inserts → ACKs exactly one row. Final remote count must equal ten recovered seeds plus every iteration. Old cycling-ID evidence is explicitly limited. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Advanced-main source integration
+
+Main durable SUBMITTING → venue lookup/ACK → startup orphan checks preserved. Opportunity-derived stable trade ID is also the exact client-ID suffix, retaining retry identity and orphan mapping. Actual-fill attribution retained; live ownership is persisted before optional telemetry. Isolated PostgreSQL ↔ ClickHouse reconciliation passed. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.

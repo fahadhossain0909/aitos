@@ -10,7 +10,7 @@ make that infrastructure accessible to this sandbox.
 - Nominate an actual reviewer by GitHub username in issue
   https://github.com/fahadhossain0909/aitos/issues/247 .
 - Review baseline `6f8052bbc9818bda83f6a566cd70aac82ccb4c46` to source
-  `65644157531a888819e51553c160a4ac149977e2`, including the accumulated changes,
+  `58807516c519372bb8b33a8c94caf421cd313de3`, including advanced main and accumulated changes,
   not only the two-file latest fix. See `PAPER_NATIVE_REVIEW_BUNDLE.md`.
 - Record reviewer identity, exact reviewed SHA, findings and retest evidence.
 - New code after that SHA requires review of its delta. Merely copying a SHA into
