@@ -77,25 +77,64 @@ ORDER BY account
 """
 
 
-# Filter only AFTER selecting latest retained payloads; timestamp ties are not
-# silently resolved with argMax. Existing tables are read without migrations.
-LATEST_CLOSED_LEDGER = """
-SELECT trade_id, any(payload_json) AS latest_payload,
-       uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
-FROM paper_closed_trade_ledger
-WHERE (trade_id, updated_at) IN (
-    SELECT trade_id, max(updated_at) FROM paper_closed_trade_ledger GROUP BY trade_id
+# Static, reviewable SQL statements. Filter only AFTER selecting latest
+# retained payloads; timestamp ties are not silently resolved with argMax.
+# User-controlled values remain driver-bound parameters, never SQL fragments.
+CLOSED_HISTORY_QUERY = """
+SELECT trade_id, latest_payload, payload_versions
+FROM (
+    SELECT trade_id, any(payload_json) AS latest_payload,
+           uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
+    FROM paper_closed_trade_ledger
+    WHERE (trade_id, updated_at) IN (
+        SELECT trade_id, max(updated_at)
+        FROM paper_closed_trade_ledger
+        GROUP BY trade_id
+    )
+    GROUP BY trade_id
 )
-GROUP BY trade_id
+WHERE (payload_versions != 1 OR {symbol:String} = ''
+       OR JSONExtractString(latest_payload, 'symbol') = {symbol:String})
+ORDER BY latest DESC, trade_id
+LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
+         max_memory_usage=134217728, read_overflow_mode='throw'
 """
 
-
-# Query-local console budgets: throw rather than return a partial financial report.
-# Startup/full recovery deliberately does not reuse this bounded UI query path.
-CONSOLE_QUERY_BUDGET = (
-    " SETTINGS max_execution_time=3, max_bytes_to_read=67108864, "
-    "max_memory_usage=134217728, read_overflow_mode='throw'"
+CLOSED_PERFORMANCE_QUERY = """
+SELECT trade_id, latest_payload, payload_versions
+FROM (
+    SELECT trade_id, any(payload_json) AS latest_payload,
+           uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
+    FROM paper_closed_trade_ledger
+    WHERE (trade_id, updated_at) IN (
+        SELECT trade_id, max(updated_at)
+        FROM paper_closed_trade_ledger
+        GROUP BY trade_id
+    )
+    GROUP BY trade_id
 )
+ORDER BY latest DESC, trade_id
+LIMIT {limit:UInt32}
+SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
+         max_memory_usage=134217728, read_overflow_mode='throw'
+"""
+
+CLOSED_RECOVERY_QUERY = """
+SELECT trade_id, latest_payload, payload_versions
+FROM (
+    SELECT trade_id, any(payload_json) AS latest_payload,
+           uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
+    FROM paper_closed_trade_ledger
+    WHERE (trade_id, updated_at) IN (
+        SELECT trade_id, max(updated_at)
+        FROM paper_closed_trade_ledger
+        GROUP BY trade_id
+    )
+    GROUP BY trade_id
+)
+ORDER BY trade_id
+"""
 
 
 def _closed_payload(row) -> dict:
@@ -489,13 +528,7 @@ class DurableTradingStateStore:
         ):
             raise ValueError("invalid bounded history query")
         result = await self._client().query(
-            "SELECT trade_id, latest_payload, payload_versions FROM ("
-            + LATEST_CLOSED_LEDGER
-            + ") "
-            "WHERE (payload_versions != 1 OR {symbol:String} = '' "
-            "OR JSONExtractString(latest_payload, 'symbol') = {symbol:String}) "
-            "ORDER BY latest DESC, trade_id LIMIT {limit:UInt32} OFFSET {offset:UInt32}"
-            + CONSOLE_QUERY_BUDGET,
+            CLOSED_HISTORY_QUERY,
             parameters={"symbol": symbol, "limit": limit, "offset": offset},
         )
         return [_closed_payload(row) for row in result.result_rows]
@@ -511,11 +544,7 @@ class DurableTradingStateStore:
         ):
             raise ValueError("invalid bounded performance query")
         result = await self._client().query(
-            "SELECT trade_id, latest_payload, payload_versions FROM ("
-            + LATEST_CLOSED_LEDGER
-            + ") "
-            "ORDER BY latest DESC, trade_id LIMIT {limit:UInt32}"
-            + CONSOLE_QUERY_BUDGET,
+            CLOSED_PERFORMANCE_QUERY,
             parameters={"limit": limit + 1},
         )
         rows = result.result_rows
@@ -527,11 +556,7 @@ class DurableTradingStateStore:
 
     async def load_closed_trades(self) -> list[Trade]:
         """Restore complete realized evidence or fail; never silently lose PnL."""
-        result = await self._client().query(
-            "SELECT trade_id, latest_payload, payload_versions FROM ("
-            + LATEST_CLOSED_LEDGER
-            + ") ORDER BY trade_id"
-        )
+        result = await self._client().query(CLOSED_RECOVERY_QUERY)
         try:
             return [
                 _trade_from_dict(_closed_payload(row)) for row in result.result_rows
