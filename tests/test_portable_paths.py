@@ -1,12 +1,21 @@
 from pathlib import Path
+
 from aitos.config import paths
 
 
 def _hide_docker_marker(monkeypatch):
     exists = Path.exists
     is_dir = Path.is_dir
-    monkeypatch.setattr(Path, "exists", lambda self: False if self == Path("/.dockerenv") else exists(self))
-    monkeypatch.setattr(Path, "is_dir", lambda self: False if self == Path("/.dockerenv") else is_dir(self))
+    monkeypatch.setattr(
+        Path,
+        "exists",
+        lambda self: False if self == Path("/.dockerenv") else exists(self),
+    )
+    monkeypatch.setattr(
+        Path,
+        "is_dir",
+        lambda self: False if self == Path("/.dockerenv") else is_dir(self),
+    )
 
 
 def test_linux_xdg_paths_and_overrides(monkeypatch, tmp_path):
@@ -15,7 +24,12 @@ def test_linux_xdg_paths_and_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg-data"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg-cache"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-config"))
-    for name in ("AITOS_DATA_DIR", "AITOS_CACHE_DIR", "AITOS_CONFIG_DIR", "AITOS_LOG_DIR"):
+    for name in (
+        "AITOS_DATA_DIR",
+        "AITOS_CACHE_DIR",
+        "AITOS_CONFIG_DIR",
+        "AITOS_LOG_DIR",
+    ):
         monkeypatch.delenv(name, raising=False)
     assert paths.get_data_dir() == (tmp_path / "xdg-data/aitos").resolve()
     assert paths.get_cache_dir() == (tmp_path / "xdg-cache/aitos").resolve()
@@ -53,7 +67,12 @@ def test_model_directory_defaults_to_user_data(monkeypatch, tmp_path):
 
 
 def test_explicit_directory_creation(monkeypatch, tmp_path):
-    for name in ("AITOS_DATA_DIR", "AITOS_CACHE_DIR", "AITOS_CONFIG_DIR", "AITOS_LOG_DIR"):
+    for name in (
+        "AITOS_DATA_DIR",
+        "AITOS_CACHE_DIR",
+        "AITOS_CONFIG_DIR",
+        "AITOS_LOG_DIR",
+    ):
         monkeypatch.setenv(name, str(tmp_path / name.lower()))
     result = paths.ensure_application_directories()
     assert set(result) == {"data", "cache", "config", "logs"}
