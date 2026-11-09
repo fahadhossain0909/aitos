@@ -21,7 +21,7 @@ pytestmark = [
 ]
 
 
-async def test_built_operator_browser_authentication(tmp_path):
+async def test_built_operator_browser_authentication(tmp_path, monkeypatch):
     root = Path(__file__).resolve().parents[1]
     upstream_app = web.Application()
     from aitos.trading.revision_journal import RevisionJournal, Scope
@@ -58,8 +58,51 @@ async def test_built_operator_browser_authentication(tmp_path):
     projector = RevisionProjector(journal, writer, Sink())
     assert (await projector.run_once())["status"] == "verified"
     upstream_token = "test-only-projection-bearer-" + ("x" * 32)
+    from aitos.exchange.operator_account import BinanceOperatorAccount
+    from aitos.trading import account_timeline
+
+    timeline_directory = tmp_path / "synthetic-account-observations"
+    timeline_directory.mkdir(mode=0o700)
+    # Synthetic sandbox storage only; production continues rejecting temp roots.
+    monkeypatch.setattr(account_timeline, "prepare_durable_directory", lambda p: p)
+    timeline = account_timeline.AccountTimeline(
+        timeline_directory,
+        account="synthetic-browser",
+        cursor_key=b"test-only-synthetic-cursor-key-32-bytes",
+    )
+
+    async def signed_get(path, params):
+        if path == "/fapi/v3/account":
+            return dict(
+                totalWalletBalance="100.00000001",
+                totalUnrealizedProfit="-1",
+                totalMarginBalance="99.00000001",
+                totalInitialMargin="10",
+                totalMaintMargin="1",
+                availableBalance="89.00000001",
+            )
+        if path == "/fapi/v3/positionRisk":
+            return [
+                dict(
+                    symbol="BTCUSDT",
+                    positionSide="LONG",
+                    positionAmt="0.01",
+                    entryPrice="10000",
+                    markPrice="9900",
+                    unRealizedProfit="-1",
+                )
+            ]
+        raise AssertionError("unexpected synthetic provider path")
+
+    observer = account_timeline.RecordedAccountObserver(
+        BinanceOperatorAccount(signed_get), timeline
+    )
+    await observer.observe()
     register_console_routes(
-        upstream_app, projection_observer=projector, token=upstream_token
+        upstream_app,
+        projection_observer=projector,
+        token=upstream_token,
+        account_observer=observer,
     )
     upstream = TestServer(upstream_app)
     await upstream.start_server()

@@ -219,3 +219,76 @@ snapshot/history routes continue unchanged.
 
 VERIFIED — full non-integration backend after HTTP wiring: **2341 passed,
 2 skipped, 38 deselected** (81.03s); changed Python F-lint PASS.
+
+### Account UI and durable timeline implementation
+
+VERIFIED — Connections / Runtime view now mounts separate account observation
+and account timeline panels. Sample mode never mounts the panels. Values remain
+exact decimal strings; malformed, stale or unavailable observations are cleared,
+not replaced with demo balances. Reads are cancellable/deadline-bounded and
+nonoverlapping. Timeline refresh explicitly starts a new cut; older-page requests
+use only a fixed same-origin route and signed continuation. These are bounded
+observations, not provider-atomic cuts, realized returns or protection assurance.
+
+`aitos/trading/account_timeline.py` adds an opt-in SQLite observation store with
+explicit account/directory/key selection, private durable-directory preparation,
+FULL synchronous commits, process write locks and no memory fallback. Only
+allowlisted totals/timestamps persist. Owner/provider errors fail closed; no
+trading store is relocated. Database/account identity is checked on reopen;
+unknown existing databases are rejected, not migrated. UPDATE/DELETE triggers
+protect against accidental history mutation (not a malicious local owner).
+
+`RecordedAccountObserver(provider, timeline)` records successful reads before
+returning them. Failed provider reads are not inserted. A cancelled request may
+have already committed a monitoring observation; there is no automatic order or
+financial-action retry. Collection is currently on demand from account reads,
+not a supervised 24/7 polling service; do not infer gap-free coverage.
+
+GET `/console/v1/account/timeline?limit=50&cursor=...` is bearer/session-protected,
+no-store, bounded to 100 rows and has no account-selection or mutation parameters.
+SQLite increasing IDs plus a pinned upper ID provide consistent **insert-only
+account-observation** pagination. HMAC cursors bind store/account/key/page size;
+new inserts cannot shift the cut. Reopen preserves rows/cursors with the same
+key; key rotation invalidates cursors. Cursors use hashed scope, not raw account
+labels. This does NOT solve existing ClickHouse trade-history offset pagination;
+`ledger.consistent_cursor` remains false.
+
+Example owner integration (not auto-activated):
+
+```python
+from aitos.trading.account_timeline import AccountTimeline, RecordedAccountObserver
+from aitos.exchange.operator_account import BinanceOperatorAccount
+# directory: explicitly owned durable directory, never install/cache/temp.
+# cursor_key: 32+ secret bytes supplied by the runtime owner, never JavaScript.
+timeline = AccountTimeline(directory, account=account_scope, cursor_key=cursor_key)
+observer = RecordedAccountObserver(BinanceOperatorAccount(signed_get), timeline)
+# Pass observer via HealthServer(console_account_observer=observer, ...).
+```
+
+Capabilities now report attached account margin/mark adapters and optional
+observation timeline availability without asserting freshness/health. Their
+existing null capability paths remain unchanged; UI uses fixed allowlisted
+observation routes, never server-supplied arbitrary URLs. Production/live/control
+flags remain false. Protection/alerts remain unavailable.
+
+Evidence:
+- VERIFIED — frontend production build; **105 tests / 10 files PASS**.
+- VERIFIED — synthetic adapter -> SQLite -> authenticated gateway -> built
+  Chromium observation/timeline UI, with exact decimals, cursor rejection and
+  existing logout/expiry/revocation checks: **1 PASS (10.44s)**.
+- VERIFIED — timeline reopen, account/key/page binding, concurrent-insert cut,
+  stale/malformed rejection and mutation guards; HTTP/capability focused suite
+  **24 PASS**.
+- VERIFIED — full backend before final capability availability change:
+  **2350 passed, 2 skipped, 38 deselected (81.42s)**.
+- NOT TESTED — real signed provider, fresh-user install/reboot, Windows ACL and
+  parent/symlink race acceptance, independent review and signing.
+
+Rollback: omit the observer or use the unrecorded adapter; disable the panels by
+sample view. Preserve the timeline directory and owner cursor key. Never delete
+or replace financial databases as rollback. Backup/staged restore can inspect the
+SQLite file offline, but there is no active recovery switch. Timeline corruption,
+schema mismatch, disk/lock failure must surface unavailable, never memory fallback.
+
+VERIFIED — final full backend including attached-account capability tests:
+**2351 passed, 2 skipped, 38 deselected (79.83s)**; changed Python F-lint PASS.

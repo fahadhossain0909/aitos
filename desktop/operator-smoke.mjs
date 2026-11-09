@@ -63,6 +63,16 @@ await page.screenshot({
   path: "../tmp/console/projector-built-end-to-end.png",
   fullPage: true,
 });
+await page.getByRole("button", { name: "Sample workspace", exact: true }).click();
+await page.locator("nav").getByRole("button", { name: "Connections" }).click();
+const accountPanel = page.getByRole("region", { name: "Read-only account observations" });
+await accountPanel.getByText("100.00000001", { exact: true }).waitFor();
+await accountPanel.getByRole("cell", { name: "9900", exact: true }).waitFor();
+const timelinePanel = page.getByRole("region", { name: "Durable account timeline" });
+await timelinePanel.getByRole("cell", { name: "99.00000001", exact: true }).first().waitFor();
+if ((await page.request.get(url + "/console/v1/account/timeline?cursor=bad")).status() !== 400)
+  throw Error("Tampered account timeline cursor accepted");
+console.log("PASS: synthetic account GET adapter -> durable timeline -> authenticated gateway -> built observation/timeline UI; decimal strings preserved");
 await page.getByRole("button", { name: "Sign out", exact: true }).click();
 await page.getByLabel("Operator password").waitFor();
 if ((await page.request.get(url + "/console/v1/snapshot")).status() !== 401)

@@ -1,3 +1,4 @@
+import AccountPanel from "./AccountPanel";
 import { parseRuntimeCapabilities, type RuntimeCapabilities } from "./runtimeCapabilities";
 import { consoleFetch } from "./operatorSession";
 import ResearchPlanner from "./ResearchPlanner";
@@ -1680,6 +1681,7 @@ export default function App() {
               )}
             </>
           )}
+          {page === "exchanges" && !demo && <AccountPanel />}
           {page === "exchanges" && (
             <section className="panel" aria-label="Runtime API capabilities">
               <div className="panel-heading"><h3>Runtime protocol & capabilities</h3></div>
