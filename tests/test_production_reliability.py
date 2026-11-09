@@ -10,6 +10,7 @@ from aitos.models.trade import (
     TradeSide,
 )
 from aitos.trading.persistent_state import (
+    AmbiguousOrderSubmissionError,
     IdempotentOrderExecutor,
     TradeStatePersistence,
     _trade_from_dict,
@@ -42,6 +43,88 @@ async def test_order_executor_is_idempotent_for_repeated_request():
 
     assert first.order_id == second.order_id
     assert inner.calls == 1
+
+
+class FakeDurableOrderStore:
+    def __init__(self):
+        self.records = {}
+        self.fail_ack_once = False
+
+    async def load_order_record(self, client_order_id):
+        return self.records.get(client_order_id)
+
+    async def save_order_intent(self, client_order_id, request):
+        self.records[client_order_id] = {
+            "symbol": request["symbol"],
+            "state": "SUBMITTING",
+            "request": request,
+            "result": {},
+        }
+
+    async def save_order_result(self, client_order_id, symbol, result):
+        if self.fail_ack_once:
+            self.fail_ack_once = False
+            raise OSError("simulated lost acknowledgement persistence")
+        self.records[client_order_id] = {
+            "symbol": symbol,
+            "state": "ACKNOWLEDGED" if result["success"] else "REJECTED",
+            "request": self.records[client_order_id]["request"],
+            "result": result,
+        }
+
+
+@pytest.mark.asyncio
+async def test_durable_order_executor_recovers_lost_ack_without_resubmitting():
+    inner = CountingExecutor()
+    store = FakeDurableOrderStore()
+    store.fail_ack_once = True
+    request = OrderRequest(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=0.01,
+        reference_price=100_000.0,
+        client_order_id="aitos-entry-crash-window-1",
+    )
+
+    first_process = IdempotentOrderExecutor(inner, store)
+    with pytest.raises(OSError, match="lost acknowledgement"):
+        await first_process.submit_order(request)
+
+    second_process = IdempotentOrderExecutor(inner, store)
+    recovered = await second_process.submit_order(request)
+
+    assert recovered.order_id == "sim-1"
+    assert recovered.filled_quantity == pytest.approx(0.01)
+    assert inner.calls == 1
+    assert store.records[request.client_order_id]["state"] == "ACKNOWLEDGED"
+
+
+@pytest.mark.asyncio
+async def test_durable_order_executor_blocks_resubmit_when_venue_lookup_is_ambiguous():
+    class NoLookupExecutor(CountingExecutor):
+        async def get_order_by_client_id(self, symbol, client_order_id):
+            return None
+
+    inner = NoLookupExecutor()
+    store = FakeDurableOrderStore()
+    request = OrderRequest(
+        symbol="ETHUSDT",
+        side=TradeSide.SHORT,
+        quantity=0.02,
+        reference_price=3_000.0,
+        client_order_id="aitos-entry-ambiguous-1",
+    )
+    await store.save_order_intent(
+        request.client_order_id,
+        IdempotentOrderExecutor._request_payload(request),
+    )
+
+    executor = IdempotentOrderExecutor(inner, store)
+    with pytest.raises(AmbiguousOrderSubmissionError, match="automatic resubmission blocked"):
+        await executor.submit_order(request)
+
+    assert inner.calls == 0
+    assert store.records[request.client_order_id]["state"] == "SUBMITTING"
 
 
 class FakeExchange:
