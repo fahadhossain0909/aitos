@@ -95,3 +95,24 @@ async def test_real_adapter_to_authenticated_route_uses_only_get_paths():
         assert response.status == 200
         assert (await response.json())["totals"]["totalMarginBalance"] == "11"
     assert set(calls) == {"/fapi/v3/account", "/fapi/v3/positionRisk"}
+
+
+async def test_account_availability_is_explicit_not_runtime_authority():
+    app = web.Application()
+    register_console_routes(
+        app, token=TOKEN, account_observer=SimpleNamespace(timeline=object())
+    )
+    async with TestClient(TestServer(app)) as client:
+        result = await client.get(
+            "/console/v1/capabilities", headers={"Authorization": "Bearer " + TOKEN}
+        )
+        body = await result.json()
+        caps = {row["id"]: row["available"] for row in body["capabilities"]}
+        assert (
+            caps["account.margin"]
+            and caps["account.equity_timeline"]
+            and caps["market.mark_price"]
+        )
+        assert not caps["orders.protection"] and not caps["alerts.delivery"]
+        assert not caps["ledger.consistent_cursor"] and not caps["runtime.control"]
+        assert body["live_authorized"] is body["production_certified"] is False

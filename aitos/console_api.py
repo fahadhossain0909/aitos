@@ -249,6 +249,41 @@ def register_console_routes(
             raise web.HTTPBadRequest(text="Invalid bounded research plan") from None
         return web.json_response(report, headers={"Cache-Control": "no-store"})
 
+    async def account_timeline(request):
+        authorize(request)
+        headers = {"Cache-Control": "no-store"}
+        try:
+            if set(request.query) - {"limit", "cursor"} or any(
+                len(request.query.getall(key)) != 1 for key in request.query
+            ):
+                raise ValueError()
+            limit = int(request.query.get("limit", "50"))
+            cursor = request.query.get("cursor")
+            if not 1 <= limit <= 100 or (cursor is not None and len(cursor) > 512):
+                raise ValueError()
+        except ValueError:
+            raise web.HTTPBadRequest(text="Invalid timeline query") from None
+        timeline = getattr(account_observer, "timeline", None)
+        if timeline is None:
+            return web.json_response(
+                {"available": False, "error": "Account timeline not attached"},
+                status=503,
+                headers=headers,
+            )
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(timeline.page, limit=limit, cursor=cursor), timeout=5
+            )
+        except ValueError:
+            raise web.HTTPBadRequest(text="Invalid timeline cursor") from None
+        except Exception:
+            return web.json_response(
+                {"available": False, "error": "Account timeline unavailable"},
+                status=503,
+                headers=headers,
+            )
+        return web.json_response(result, headers=headers)
+
     async def account_observation(request):
         authorize(request)
         if request.query:
@@ -281,10 +316,13 @@ def register_console_routes(
                 text="Capability query parameters are not supported"
             )
         return web.json_response(
-            describe_capabilities(modules, state_store, projection_observer),
+            describe_capabilities(
+                modules, state_store, projection_observer, account_observer
+            ),
             headers={"Cache-Control": "no-store"},
         )
 
+    app.router.add_get("/console/v1/account/timeline", account_timeline)
     app.router.add_get("/console/v1/account", account_observation)
     app.router.add_get("/console/v1/capabilities", capabilities)
     app.router.add_get("/console/v1/research/plan", research_plan)

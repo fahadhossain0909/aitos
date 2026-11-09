@@ -30,7 +30,9 @@ class RuntimeEndpoint:
         return "console/endpoint/" + hashlib.sha256(self.origin.encode()).hexdigest()
 
 
-def describe_capabilities(modules, state_store, projection_observer):
+def describe_capabilities(
+    modules, state_store, projection_observer, account_observer=None
+):
     def entry(name, path, available):
         return dict(id=name, path=path, available=bool(available))
 
@@ -55,14 +57,18 @@ def describe_capabilities(modules, state_store, projection_observer):
             ),
             entry("research.plan", "/console/v1/research/plan", True),
             entry("persistence.shadow", None, projection_observer is not None),
+            entry("account.margin", None, account_observer is not None),
+            entry("market.mark_price", None, account_observer is not None),
+            entry(
+                "account.equity_timeline",
+                None,
+                getattr(account_observer, "timeline", None) is not None,
+            ),
             # These must not be inferred from position rows, page existence or
             # a healthy HTTP listener. No provider-backed service is wired yet.
             *[
                 entry(name, None, False)
                 for name in (
-                    "account.equity_timeline",
-                    "account.margin",
-                    "market.mark_price",
                     "orders.protection",
                     "alerts.delivery",
                     "ledger.consistent_cursor",
