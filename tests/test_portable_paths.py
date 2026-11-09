@@ -89,6 +89,10 @@ def test_windows_and_macos_defaults(monkeypatch, tmp_path):
 
     monkeypatch.setattr(paths.sys, "platform", "darwin")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    assert paths.get_data_dir() == (tmp_path / "Library/Application Support/AITOS").resolve()
+    assert paths.get_data_dir() == (
+        tmp_path / "Library/Application Support/AITOS"
+    ).resolve()
     assert paths.get_cache_dir() == (tmp_path / "Library/Caches/AITOS").resolve()
-    assert paths.get_config_dir() == (tmp_path / "Library/Application Support/AITOS/config").resolve()
+    assert paths.get_config_dir() == (
+        tmp_path / "Library/Application Support/AITOS/config"
+    ).resolve()
