@@ -41,13 +41,13 @@ jobs:
           python -m pip install -r requirements.txt pytest
           python -m pytest tests/test_portable_paths.py tests/test_credential_vault.py -q
       - name: Build Debian package
-        run: bash native/linux/build.sh
+        run: PYTHON_BIN=/usr/bin/python3 bash native/linux/build.sh
       - name: Validate package metadata and payload
         run: |
           package="$(find artifacts/linux -name '*.deb' -print -quit)"
           test -n "$package"
           dpkg-deb --info "$package"
-          dpkg-deb --contents "$package" | grep -q '/opt/aitos/launcher'
+          dpkg-deb --contents "$package" | grep -q '/opt/aitos/AITOS-Console'
           dpkg-deb --contents "$package" | grep -q '/usr/share/applications/aitos-console.desktop'
           sha256sum --check artifacts/linux/SHA256SUMS
       - uses: actions/upload-artifact@v4
