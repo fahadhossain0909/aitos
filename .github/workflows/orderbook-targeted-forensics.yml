@@ -27,7 +27,8 @@ concurrency:
 
 jobs:
   orderbook-forensics:
-    if: ${{ vars.AITOS_VPS_ENABLED == 'true' }}
+    # This local-first review branch must not resume remote VPS diagnostics.
+    if: ${{ vars.AITOS_VPS_ENABLED == 'true' && github.head_ref != 'arena/ed127d35-aitos' }}
     name: VPS order-book forensic pass
     runs-on: ubuntu-latest
     timeout-minutes: 8

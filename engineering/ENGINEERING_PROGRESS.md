@@ -476,3 +476,15 @@ build/install/uninstall. Duplicate push validations superseded/cancelled, not
 claimed passes. No VPS, main push, live order, production config application or
 financial authority cutover. Review/signing/account/HA gates remain. Details,
 artifact hashes and reversible handoff: `MAIN_INTEGRATION_REVIEW.md`.
+
+## Pull request publication safety
+
+User explicitly requested opening a PR against main. Before creation, inspected
+all PR-triggered workflows: only the two legacy transport/orderbook diagnostics
+contain SSH/deployment-secret paths. Added exact `github.head_ref` exclusion for
+`arena/ed127d35-aitos` to both job guards, preserving the existing enable flag and
+all other branches/manual behavior. YAML parsing and both flag-value denial checks
+PASS. This resolves the earlier blocker specifically for this PR; no VPS settings,
+secrets or remote runtime were accessed. Existing runtime validation remains pinned
+to 58807516; subsequent changes are workflow guards/documentation only. PR checks
+will be fresh evidence, not presumed passing or independent review.
