@@ -53,6 +53,16 @@ class FakeDurableOrderStore:
     async def load_order_record(self, client_order_id):
         return self.records.get(client_order_id)
 
+    async def load_pending_order_intents(self):
+        return [
+            {"client_order_id": key, **record}
+            for key, record in self.records.items()
+            if record["state"] == "SUBMITTING"
+        ]
+
+    async def load_unlinked_acknowledged_orders(self):
+        return []
+
     async def save_order_intent(self, client_order_id, request):
         self.records[client_order_id] = {
             "symbol": request["symbol"],
@@ -125,6 +135,31 @@ async def test_durable_order_executor_blocks_resubmit_when_venue_lookup_is_ambig
 
     assert inner.calls == 0
     assert store.records[request.client_order_id]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_blocks_unlinked_recovered_fill():
+    inner = CountingExecutor()
+    store = FakeDurableOrderStore()
+    request = OrderRequest(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=0.01,
+        reference_price=100_000.0,
+        client_order_id="aitos-entry-unlinked-1",
+    )
+    await store.save_order_intent(
+        request.client_order_id,
+        IdempotentOrderExecutor._request_payload(request),
+    )
+    await inner.submit_order(request)
+
+    executor = IdempotentOrderExecutor(inner, store)
+    recovery = await executor.reconcile_pending_orders()
+
+    assert recovery["pending"] == 1
+    assert recovery["filled_unlinked"] == [request.client_order_id]
+    assert recovery["terminal_unfilled"] == []
 
 
 class FakeExchange:
