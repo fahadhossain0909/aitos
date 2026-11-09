@@ -16,9 +16,10 @@ from aitos.native.credential_vault import get_credential_vault
 
 
 def _assets_dir():
-    return Path(
-        getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2])
-    ) / "console_dist"
+    return (
+        Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[2]))
+        / "console_dist"
+    )
 
 
 def main():
@@ -91,15 +92,11 @@ def main():
 
     dist = _assets_dir()
     if not dist.is_dir():
-        messagebox.showerror(
-            "AITOS", "Packaged console assets missing.", parent=root
-        )
+        messagebox.showerror("AITOS", "Packaged console assets missing.", parent=root)
         root.destroy()
         return
 
-    host = LocalConsoleHost(
-        dist, upstream_port=port, password=password, token=token
-    )
+    host = LocalConsoleHost(dist, upstream_port=port, password=password, token=token)
     host.start()
 
     def close():
@@ -115,9 +112,7 @@ def main():
             root.after(100, opened)
             return
         if host.failed:
-            messagebox.showerror(
-                "AITOS", "Local gateway could not start.", parent=root
-            )
+            messagebox.showerror("AITOS", "Local gateway could not start.", parent=root)
             return
         tk.Label(
             root,
@@ -132,9 +127,9 @@ def main():
         webbrowser.open(host.origin)
 
     root.protocol("WM_DELETE_WINDOW", close)
-    tk.Button(
-        root, text="Close console and revoke sessions", command=close
-    ).pack(pady=8)
+    tk.Button(root, text="Close console and revoke sessions", command=close).pack(
+        pady=8
+    )
     root.after(100, opened)
     root.mainloop()
 
@@ -147,9 +142,7 @@ def bundle_self_test():
     from aitos.console_gateway import GatewayConfig, create_gateway
 
     create_gateway(
-        GatewayConfig(
-            "http://127.0.0.1:8780", "http://127.0.0.1:8090", dist
-        ),
+        GatewayConfig("http://127.0.0.1:8780", "http://127.0.0.1:8090", dist),
         password=secrets.token_urlsafe(32),
     )
 
