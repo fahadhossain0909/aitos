@@ -9,8 +9,6 @@ ARCH="$(dpkg --print-architecture)"
 case "$ARCH" in amd64|arm64) ;; *) echo "Unsupported Debian architecture: $ARCH" >&2; exit 2 ;; esac
 "$NODE_BIN" --version
 "$PYTHON_BIN" --version
-STRUCT_EXTENSION="$("$PYTHON_BIN" -c 'import _struct; print(_struct.__file__)')"
-test -f "$STRUCT_EXTENSION"
 command -v dpkg-deb >/dev/null
 rm -rf .venv-linux-package build/linux dist/linux artifacts/linux
 "$PYTHON_BIN" -m venv .venv-linux-package
@@ -18,15 +16,20 @@ rm -rf .venv-linux-package build/linux dist/linux artifacts/linux
 .venv-linux-package/bin/python -m pip install -r native/linux/requirements.txt
 npm --prefix desktop ci
 npm --prefix desktop run build
-mkdir -p build/linux dist/linux artifacts/linux
-.venv-linux-package/bin/pyinstaller --noconfirm --clean --onedir --name AITOS-Console --paths "$ROOT" --add-data "$ROOT/desktop/dist:console_dist" --collect-all keyring --collect-all secretstorage --copy-metadata keyring --copy-metadata secretstorage --hidden-import keyring.backends.SecretService --hidden-import _struct --add-binary "$STRUCT_EXTENSION:." --distpath "$ROOT/dist/linux" --workpath "$ROOT/build/linux" native/linux/launcher.py
+
 STAGE="$ROOT/build/linux/deb-root"
 rm -rf "$STAGE"
-mkdir -p "$STAGE/DEBIAN" "$STAGE/opt/aitos" "$STAGE/usr/bin" "$STAGE/usr/share/applications" "$STAGE/usr/share/icons/hicolor/512x512/apps"
-cp -a "$ROOT/dist/linux/AITOS-Console/." "$STAGE/opt/aitos/"
+mkdir -p "$STAGE/DEBIAN" "$STAGE/opt/aitos/app/native/linux" \
+  "$STAGE/usr/bin" "$STAGE/usr/share/applications" \
+  "$STAGE/usr/share/icons/hicolor/512x512/apps"
+cp -a "$ROOT/.venv-linux-package" "$STAGE/opt/aitos/.venv"
+cp -a "$ROOT/aitos" "$STAGE/opt/aitos/app/"
+cp "$ROOT/native/linux/launcher.py" "$STAGE/opt/aitos/app/native/linux/launcher.py"
+cp -a "$ROOT/desktop/dist" "$STAGE/opt/aitos/app/console_dist"
 cat > "$STAGE/usr/bin/aitos-console" <<'WRAPPER'
 #!/bin/sh
-exec /opt/aitos/AITOS-Console "$@"
+export PYTHONPATH=/opt/aitos/app
+exec /opt/aitos/.venv/bin/python /opt/aitos/app/native/linux/launcher.py "$@"
 WRAPPER
 chmod 0755 "$STAGE/usr/bin/aitos-console"
 cp desktop/public/icon-512.png "$STAGE/usr/share/icons/hicolor/512x512/apps/aitos-console.png"
@@ -47,10 +50,11 @@ Section: finance
 Priority: optional
 Architecture: $ARCH
 Maintainer: AITOS Project
-Depends: python3-tk, xdg-utils, libglib2.0-0, libsecret-1-0, libdbus-1-3, libx11-6, libxext6, libxrender1, libxss1, libxtst6, libnss3
+Depends: python3, python3-venv, python3-tk, xdg-utils, libglib2.0-0, libsecret-1-0, libdbus-1-3, libx11-6, libxext6, libxrender1, libxss1, libxtst6, libnss3
 Description: AITOS authenticated read-only operator console
  Native Linux session manager. Does not install or start trading services.
 CONTROL
+mkdir -p "$ROOT/artifacts/linux"
 dpkg-deb --root-owner-group --build "$STAGE" "$ROOT/artifacts/linux/aitos-console_${VERSION}_${ARCH}.deb"
 sha256sum artifacts/linux/*.deb > artifacts/linux/SHA256SUMS
 echo "Unsigned Linux test package created under artifacts/linux."
