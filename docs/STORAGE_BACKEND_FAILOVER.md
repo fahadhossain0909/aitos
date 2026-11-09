@@ -100,7 +100,7 @@ snapshots, journal entries and decision lifecycle records against the matching
 ClickHouse `trades`, `journal_entries` and `decision_journal` tables. It
 checks both directions, preserves duplicate counts, hashes canonical payloads,
 and emits a JSON report. It defaults to a bounded seven-day window; pass
-`--since` to select a different timezone-aware lower bound. Configure
+`--since` and `--until` to select an explicit timezone-aware half-open interval (`since <= record_time < until`). Configure
 `AITOS_RECONCILE_POSTGRES_URL` (or `AITOS_STORAGE_POSTGRES_URL`) and the
 standard `CLICKHOUSE_*` variables before running it.
 
@@ -116,7 +116,7 @@ promote data. A clean comparison is necessary evidence, not sufficient
 authorization to switch backends. ClickHouse-only analytical/feature tables,
 trade runtime state, portfolio drawdown state and exchange execution
 acknowledgements are outside this reconciliation scope and must not be
-inferred as reconciled. Use `--since` to bound the report to the actual
+inferred as reconciled. Use `--since` and `--until` to bound the report to the actual
 fallback/outage interval rather than comparing periods when only one backend
 was authoritative.
 
