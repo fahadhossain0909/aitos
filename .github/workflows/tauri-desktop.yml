@@ -59,6 +59,12 @@ jobs:
           test -n "$target"
           echo "AITOS_TARGET=$target" >> "$GITHUB_ENV"
           python native/shared/build_sidecar.py --target "$target"
+      - name: Real Windows Credential Manager acceptance (synthetic only)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: PYTHONPATH="$GITHUB_WORKSPACE" python native/shared/test_real_vault.py
+      - name: Backup staging and storage regression tests
+        run: python -m pytest tests/test_backup_bundle.py tests/test_durable_files.py -q
       - name: Frozen gateway auth and revocation smoke (synthetic, no vault)
         shell: bash
         run: |

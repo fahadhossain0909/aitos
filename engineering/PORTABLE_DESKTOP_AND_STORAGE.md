@@ -136,3 +136,58 @@ financial migration, trading activation or VPS deployment is implied.
 Rollback: pair prior frontend/backend protocol versions, keep legacy launchers,
 and do not activate staged snapshots. Never remove durable user data or substitute
 memory/cache storage on failure.
+
+### Follow-up implementation and evidence
+
+Hosted run [42686896943](https://github.com/fahadhossain0909/aitos/actions/runs/42686896943)
+at source `7df63472`:
+- VERIFIED — Windows NSIS build, frozen gateway smoke and embedded executable smoke PASS.
+- VERIFIED — Linux AppImage/DEB build and extracted AppImage gateway smoke PASS.
+- VERIFIED — isolated Linux Secret Service cross-process persistence/delete PASS.
+- NOT TESTED — macOS job cancelled; specific cancelled job was requested for rerun.
+- NOT TESTED — installed-user desktop interaction/reboot, Windows real-vault test
+  (newly added to workflow), macOS real-vault, signing/notarization.
+These are unsigned synthetic gateway acceptance results, not trading health.
+
+Phase 4 foundation now includes `aitos/exchange/operator_account.py`: explicit
+injected GET-only signed transport, bounded account/position-risk reads, exact
+Decimal-string totals and marks/unrealized PnL, provider-field allowlisting,
+redacted errors, bounded wait and pending-request cancellation. No executor,
+credentials, order submission, account selection or console route is wired.
+Therefore account capabilities correctly remain unavailable. It does not collect
+realized PnL, protection orders, historical account timeline or atomic cross-API
+cuts. VERIFIED — fake-transport contract/validation/cancellation tests only.
+NOT TESTED — real provider/account integration. Decimal values are not converted
+to floats or silently replaced with zero after failure.
+
+Phase 5 now has an offline backup utility with a versioned manifest, SHA-256,
+byte size and SQLite user_version validation. It rejects incomplete/corrupt or
+incompatible bundles, symlink bundle roots/files and existing destinations.
+It retains failed/incomplete bundles for inspection and never edits runtime
+configuration or activates recovery. Hashes detect corruption, not authenticity;
+use trusted private offline directories. Parent/symlink race hardening and Windows
+ACL validation remain outstanding, so this is not active production recovery.
+
+Explicit commands (select owned offline paths; no automatic path discovery):
+
+```sh
+python -m aitos.config.backup backup --source /owned/database.sqlite3 --destination /owned/new-backup
+python -m aitos.config.backup stage-restore --bundle /owned/new-backup --destination /owned/new-candidate.sqlite3 --expected-user-version 7
+```
+
+The version is an example, not the application's guaranteed schema version.
+Review the selected database's actual version. Never activate a candidate against
+running financial writers. No overwrite, deletion or live restore command exists.
+
+VERIFIED — latest full backend regression: **2336 passed, 2 skipped, 38 deselected**
+(80.72s); new backup/adapter/sidecar tests **24 passed**; new Python F-lint PASS.
+REPRODUCED / ROOT CAUSE CONFIRMED — naive asyncio.gather returned on one transport
+failure while a sibling request remained pending. Explicit task cancellation and
+awaited cleanup now pass the regression. No runtime integration was activated.
+
+Remaining acceptance: provider-to-console wiring, durable account timelines,
+protective orders/alerts, consistent historical pagination, full multi-user
+security review/control plane, authenticated secure updates, signed releases,
+installed/fresh-user/reboot tests and independent review. The five-phase program
+is **not complete**; these missing behaviors must not be inferred from the new
+primitives or packaging smoke results.
