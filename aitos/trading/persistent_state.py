@@ -278,11 +278,9 @@ class DurableTradingStateStore:
             if not client_order_id.startswith("aitos-entry-"):
                 continue
             trade_id = client_order_id.removeprefix("aitos-entry-")
-            result = json.loads(row[2] or "{}")
-            if (
-                float(result.get("filled_quantity", 0) or 0) > 0
-                and trade_id not in known_trade_ids
-            ):
+            if trade_id not in known_trade_ids:
+                # Even an accepted zero-fill order may still be resting at the
+                # venue and fill after this process exits. Require reconciliation.
                 unlinked.append(client_order_id)
         return sorted(unlinked)
 
