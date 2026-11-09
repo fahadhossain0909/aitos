@@ -77,3 +77,18 @@ def test_explicit_directory_creation(monkeypatch, tmp_path):
     result = paths.ensure_application_directories()
     assert set(result) == {"data", "cache", "config", "logs"}
     assert all(path.is_dir() for path in result.values())
+
+
+def test_windows_and_macos_defaults(monkeypatch, tmp_path):
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setattr(paths.sys, "platform", "win32")
+    assert paths.get_data_dir() == (tmp_path / "Local/AITOS").resolve()
+    assert paths.get_cache_dir() == (tmp_path / "Local/AITOS/Cache").resolve()
+    assert paths.get_config_dir() == (tmp_path / "Roaming/AITOS").resolve()
+
+    monkeypatch.setattr(paths.sys, "platform", "darwin")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert paths.get_data_dir() == (tmp_path / "Library/Application Support/AITOS").resolve()
+    assert paths.get_cache_dir() == (tmp_path / "Library/Caches/AITOS").resolve()
+    assert paths.get_config_dir() == (tmp_path / "Library/Application Support/AITOS/config").resolve()
