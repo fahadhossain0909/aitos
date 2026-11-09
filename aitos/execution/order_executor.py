@@ -58,6 +58,12 @@ class OrderExecutor(ABC):
         """Return authoritative venue order state, or None when unsupported."""
         return None
 
+    async def get_order_by_client_id(
+        self, symbol: str, client_order_id: str
+    ) -> dict | None:
+        """Look up an order by client id after an ambiguous submission."""
+        return None
+
     @property
     def supports_exchange_side_stops(self) -> bool:
         """Whether this executor can place resting stop/take-profit orders
