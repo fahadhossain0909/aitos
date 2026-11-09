@@ -84,6 +84,12 @@ class CandidateOutcomeStore:
             "component_availability": dict(candidate.component_availability),
             "regime": candidate.regime,
             "rationale": list(candidate.rationale),
+            "trace_id": getattr(candidate, "trace_id", None),
+            "attribution_id": (
+                f"{candidate.trace_id}:{side}"
+                if getattr(candidate, "trace_id", None)
+                else rejection_id
+            ),
         }
         with self._lock:
             self._conn.execute(
@@ -168,6 +174,48 @@ class CandidateOutcomeStore:
                 )
             self._conn.commit()
         return updated
+
+    def completed_markouts(
+        self, *, horizon_seconds: int = 900, limit: int = 5000
+    ) -> tuple[dict[str, Any], ...]:
+        """Return persisted counterfactual markouts with their scanner trace IDs."""
+        if horizon_seconds not in self.HORIZONS_SECONDS or limit <= 0:
+            raise ValueError("unsupported markout horizon or invalid limit")
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT r.rejection_id, r.symbol, r.side, r.reason, r.features_json,
+                       m.horizon_seconds, m.observed_at, m.price,
+                       m.signed_return_pct, m.mae_pct, m.mfe_pct
+                FROM candidate_markouts m
+                JOIN candidate_rejections r ON r.rejection_id=m.rejection_id
+                WHERE m.horizon_seconds=?
+                ORDER BY m.observed_at ASC
+                LIMIT ?
+                """,
+                (horizon_seconds, limit),
+            ).fetchall()
+        results = []
+        for row in rows:
+            features = json.loads(row["features_json"])
+            results.append(
+                {
+                    "rejection_id": row["rejection_id"],
+                    "symbol": row["symbol"],
+                    "side": row["side"],
+                    "reason": row["reason"],
+                    "trace_id": features.get("trace_id"),
+                    "attribution_id": features.get("attribution_id")
+                    or row["rejection_id"],
+                    "horizon_seconds": row["horizon_seconds"],
+                    "observed_at": row["observed_at"],
+                    "price": row["price"],
+                    "signed_return_pct": row["signed_return_pct"],
+                    "mae_pct": row["mae_pct"],
+                    "mfe_pct": row["mfe_pct"],
+                }
+            )
+        return tuple(results)
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:

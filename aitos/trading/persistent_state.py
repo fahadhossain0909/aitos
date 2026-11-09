@@ -8,7 +8,7 @@ import json
 import weakref
 from dataclasses import replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Mapping
 
 from aitos.app import LivePortfolioTracker
 from aitos.data.ingestion import DataIngestionService
@@ -476,6 +476,34 @@ class TradeStatePersistence:
             self._lifecycle._closed_trades.extend(
                 trade for trade in closed_trades if trade.trade_id not in existing
             )
+
+        # Rebuild the statistical shadow ledger from durable trade state after
+        # a crash between position persistence and the shadow SQLite write.
+        record_forecast = getattr(self._lifecycle, "_record_statistical_forecast", None)
+        record_outcome = getattr(self._lifecycle, "_record_statistical_outcome", None)
+        if callable(record_forecast):
+            recovery_trades = {trade.trade_id: trade for trade in trades}
+            recovery_trades.update({trade.trade_id: trade for trade in closed_trades})
+            for trade in recovery_trades.values():
+                consensus = getattr(trade, "agent_consensus", None)
+                forecast = (
+                    consensus.get("statistical_forecast")
+                    if isinstance(consensus, Mapping)
+                    else None
+                )
+                if not isinstance(forecast, Mapping):
+                    continue
+                try:
+                    await asyncio.to_thread(record_forecast, trade)
+                    if trade.state == TradeLifecycleState.POSITION_CLOSED and callable(
+                        record_outcome
+                    ):
+                        await asyncio.to_thread(record_outcome, trade)
+                except Exception:
+                    logger.exception(
+                        "failed to reconcile statistical shadow state from trade journal",
+                        extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                    )
         if trades:
             symbols = list(
                 dict.fromkeys(

@@ -1,0 +1,104 @@
+import hashlib
+
+from aitos.statistics.governance import PromotionEvidence, PromotionPolicy
+from aitos.statistics.governance_runtime import (
+    DriftMonitorScheduler,
+    StatisticalGovernanceRuntime,
+)
+from aitos.statistics.registry import StatisticalModelRegistry
+
+
+def _evidence(version="2.0.0", approved=True):
+    return PromotionEvidence(
+        model_id="a-stat",
+        model_version=version,
+        observations=2000,
+        shadow_days=45,
+        brier=0.18,
+        qlike=1.2,
+        pbo=0.08,
+        max_drawdown=0.05,
+        drift_score=0.02,
+        paired_oos_improvement_lower_bound=0.01,
+        operator_approved=approved,
+    )
+
+
+def _register(registry, version):
+    digest = hashlib.sha256(version.encode()).hexdigest()
+    registry.register_candidate(
+        model_id="a-stat",
+        model_version=version,
+        artifact_uri=f"models/{version}.bin",
+        artifact_sha256=digest,
+        config_hash=digest,
+        feature_schema_version="1",
+    )
+
+
+def test_live_drift_blocks_challenger_promotion_and_is_audited(tmp_path):
+    registry = StatisticalModelRegistry(tmp_path / "registry.sqlite3")
+    _register(registry, "2.0.0")
+    runtime = StatisticalGovernanceRuntime(
+        registry,
+        policy=PromotionPolicy(min_observations=100, min_shadow_days=1),
+    )
+    reference = {"volatility": [float(i) for i in range(100)]}
+    current = {"volatility": [float(i + 1000) for i in range(100)]}
+    drift = runtime.observe_live_features(reference, current)
+    assert drift.status in {"WARNING", "CRITICAL"}
+    decision = runtime.evaluate_challenger(_evidence())
+    assert not decision.eligible
+    assert "live_feature_drift_blocks_promotion" in decision.reasons
+    blocked = runtime.promote_challenger(_evidence(), operator_approved=True)
+    assert not blocked.eligible
+    assert registry.get_champion("a-stat") is None
+    assert registry.promotion_history("a-stat")[-1]["action"] == "PROMOTION_BLOCKED"
+
+
+def test_challenger_requires_explicit_runtime_operator_approval(tmp_path):
+    registry = StatisticalModelRegistry(tmp_path / "registry.sqlite3")
+    _register(registry, "2.0.0")
+    runtime = StatisticalGovernanceRuntime(
+        registry,
+        policy=PromotionPolicy(min_observations=100, min_shadow_days=1),
+    )
+    reference = {"volatility": [float(i) for i in range(100)]}
+    runtime.observe_live_features(reference, reference)
+    blocked = runtime.promote_challenger(
+        _evidence(approved=True), operator_approved=False
+    )
+    assert not blocked.eligible
+    assert registry.get_champion("a-stat") is None
+    promoted = runtime.promote_challenger(
+        _evidence(approved=True), operator_approved=True
+    )
+    assert promoted.eligible
+    assert registry.get_champion("a-stat").model_version == "2.0.0"
+
+
+def test_drift_scheduler_respects_cadence_and_deduplicates_alerts(tmp_path):
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+
+    registry = StatisticalModelRegistry(tmp_path / "registry.sqlite3")
+    runtime = StatisticalGovernanceRuntime(registry)
+    alerts = []
+    scheduler = DriftMonitorScheduler(
+        runtime, interval_seconds=60, alert_callback=alerts.append
+    )
+    reference = {"volatility": [float(i) for i in range(100)]}
+    shifted = {"volatility": [float(i + 1000) for i in range(100)]}
+    start = datetime(2026, 11, 7, tzinfo=timezone.utc)
+
+    first = asyncio.run(scheduler.run_once(reference, shifted, now=start))
+    skipped = asyncio.run(
+        scheduler.run_once(reference, shifted, now=start + timedelta(seconds=20))
+    )
+    second = asyncio.run(
+        scheduler.run_once(reference, shifted, now=start + timedelta(seconds=61))
+    )
+    assert first.status in {"WARNING", "CRITICAL"}
+    assert skipped is None
+    assert second.status == first.status
+    assert len(alerts) == 1

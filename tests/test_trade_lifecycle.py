@@ -1,10 +1,12 @@
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from aitos.core.contracts import Event
 from aitos.core.exceptions import TradeNotFoundError
 from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
+from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.risk.models import PortfolioState, PositionExposure
 from aitos.trading.lifecycle import TradeLifecycle
 
@@ -720,3 +722,157 @@ async def test_lifecycle_routes_external_funding_adjustment_events(
 
     assert trade.funding_pnl_usd == pytest.approx(0.08)
     assert "funding-event-42" in trade.cost_adjustments
+
+
+@pytest.mark.asyncio
+async def test_statistical_forecast_reduces_size_and_is_persisted(
+    event_bus, risk_engine
+):
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    baseline = await lifecycle.submit_opportunity(make_opportunity(), make_portfolio())
+    assert baseline.state == TradeLifecycleState.POSITION_OPENED
+    await lifecycle.close_trade(
+        baseline.trade_id, baseline.entry_price, "statistical_overlay_baseline"
+    )
+    forecast = {
+        "symbol": "BTCUSDT",
+        "horizon": "15m",
+        "side": "LONG",
+        "model_id": "aitos-contract-statistical-stack",
+        "model_version": "1",
+        "as_of": datetime.now(timezone.utc).isoformat(),
+        "window_start": "2026-11-07T04:00:00+00:00",
+        "feature_snapshot_id": "snapshot-risk-overlay-test",
+        "sample_size": 256,
+        "predicted_up": 0.8,
+        "downside_probability": 0.2,
+        "forecast_volatility": 0.04,
+        "reference_volatility": 0.02,
+        "tail_probability": 0.20,
+        "expected_shortfall": 0.05,
+        "expected_return": 0.01,
+        "probability_confidence": 0.8,
+    }
+    reduced = await lifecycle.submit_opportunity(
+        make_opportunity(
+            timeframe="15m",
+            agent_consensus={"statistical_forecast": forecast},
+        ),
+        make_portfolio(),
+    )
+    assessment = reduced.agent_consensus["statistical_risk_assessment"]
+    assert reduced.state == TradeLifecycleState.POSITION_OPENED
+    assert 0.0 < assessment["size_multiplier"] < 1.0
+    assert reduced.position_size_usd < baseline.position_size_usd
+    assert reduced.risk_amount_usd < baseline.risk_amount_usd
+    assert reduced.agent_consensus["statistical_forecast"] == forecast
+    assert "forecast_volatility_above_reference" in assessment["reasons"]
+
+
+@pytest.mark.asyncio
+async def test_statistical_forecast_mismatch_or_staleness_fails_closed(
+    event_bus, risk_engine
+):
+    lifecycle = TradeLifecycle(event_bus=event_bus, risk_engine=risk_engine)
+    await lifecycle.initialize({})
+    stale = {
+        "symbol": "BTCUSDT",
+        "horizon": "15m",
+        "side": "LONG",
+        "model_id": "aitos-contract-statistical-stack",
+        "model_version": "1",
+        "as_of": (datetime.now(timezone.utc) - timedelta(seconds=60)).isoformat(),
+        "sample_size": 256,
+        "predicted_up": 0.8,
+        "downside_probability": 0.2,
+        "expected_return": 0.01,
+        "forecast_volatility": 0.04,
+        "reference_volatility": 0.02,
+        "tail_probability": 0.20,
+        "expected_shortfall": 0.05,
+    }
+    stale_trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            timeframe="15m",
+            agent_consensus={"statistical_forecast": stale},
+        ),
+        make_portfolio(),
+    )
+    assert stale_trade.state == TradeLifecycleState.REJECTED
+    assert "statistical forecast is stale" in stale_trade.rejection_reason
+
+    fresh = dict(stale, as_of=datetime.now(timezone.utc).isoformat())
+    mismatch_trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            timeframe="1h",
+            agent_consensus={"statistical_forecast": fresh},
+        ),
+        make_portfolio(),
+    )
+    assert mismatch_trade.state == TradeLifecycleState.REJECTED
+    assert "symbol, side or horizon mismatch" in mismatch_trade.rejection_reason
+
+
+@pytest.mark.asyncio
+async def test_statistical_shadow_ledger_resolves_trade_outcome(
+    event_bus, risk_engine, tmp_path
+):
+    ledger = StatisticalShadowLedger(tmp_path / "statistical-shadow.sqlite3")
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        statistical_shadow_ledger=ledger,
+    )
+    await lifecycle.initialize({})
+    now = datetime.now(timezone.utc)
+    forecast = {
+        "symbol": "BTCUSDT",
+        "side": "LONG",
+        "horizon": "15m",
+        "model_id": "aitos-contract-statistical-stack",
+        "model_version": "1",
+        "as_of": now.isoformat(),
+        "window_start": (now - timedelta(hours=1)).isoformat(),
+        "feature_snapshot_id": "snapshot-lifecycle-1",
+        "sample_size": 256,
+        "predicted_up": 0.8,
+        "downside_probability": 0.2,
+        "forecast_volatility": 0.02,
+        "reference_volatility": 0.01,
+        "tail_probability": 0.1,
+        "expected_shortfall": 0.03,
+        "expected_return": 0.01,
+        "probability_confidence": 0.8,
+    }
+    trade = await lifecycle.submit_opportunity(
+        make_opportunity(
+            timeframe="15m",
+            agent_consensus={"statistical_forecast": forecast, "a_stat": 8.0},
+        ),
+        make_portfolio(),
+    )
+    assert trade.state == TradeLifecycleState.POSITION_OPENED
+    pending = ledger.metrics(
+        symbol="BTCUSDT",
+        horizon="15m",
+        model_id="aitos-contract-statistical-stack",
+        model_version="1",
+        side="LONG",
+    )
+    assert pending.observations == 0
+
+    closed = await lifecycle.close_trade(
+        trade.trade_id, trade.entry_price * 1.01, "shadow_outcome_test"
+    )
+    assert closed.state == TradeLifecycleState.POSITION_CLOSED
+    resolved = ledger.metrics(
+        symbol="BTCUSDT",
+        horizon="15m",
+        model_id="aitos-contract-statistical-stack",
+        model_version="1",
+        side="LONG",
+    )
+    assert resolved.observations == 1
+    assert resolved.directional_hit_rate == 1.0
+    assert resolved.brier == pytest.approx(0.04)

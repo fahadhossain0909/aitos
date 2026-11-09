@@ -73,6 +73,7 @@ class Opportunity:
     )
     opportunity_id: str = field(default_factory=lambda: f"opp-{uuid.uuid4().hex[:12]}")
     detected_at: str = field(default_factory=_utc_now_iso)
+    timeframe: str = "unknown"
 
 
 @dataclass
