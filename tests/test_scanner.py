@@ -416,6 +416,24 @@ async def test_scanner_blocks_ltf_long_when_htf_is_bearish(event_bus):
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_scanner_health_exposes_decision_outcome_ledger_snapshot(event_bus):
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=FakeScannerExchange(),
+        symbols=["BTCUSDT"],
+        reference_symbol="",
+    )
+    await scanner.initialize({})
+    health = await scanner.health_check()
+    ledger = health.details["decision_outcome_ledger"]
+    assert ledger["decisions_total"] == 0
+    assert ledger["resolved_total"] == 0
+    assert ledger["unresolved_total"] == 0
+    assert ledger["by_provenance"] == {}
+    await scanner.shutdown()
+
+
 async def test_to_opportunity_preserves_statistical_forecast_identity(event_bus):
     scanner = OpportunityScanner(
         event_bus=event_bus,
