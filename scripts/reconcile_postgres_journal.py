@@ -89,7 +89,6 @@ async def _reconcile_operational(pg_pool, ch, since: datetime, until: datetime) 
         FROM trades
         WHERE recorded_at >= {since:DateTime64(3, 'UTC')}
           AND recorded_at < {until:DateTime64(3, 'UTC')}
-          AND recorded_at < {until:DateTime64(3, 'UTC')}
         ORDER BY recorded_at, trade_id
         """,
         since,
@@ -141,7 +140,6 @@ async def _reconcile_operational(pg_pool, ch, since: datetime, until: datetime) 
         SELECT decision_id, record_type, payload
         FROM decision_journal
         WHERE recorded_at >= {since:DateTime64(3, 'UTC')}
-          AND recorded_at < {until:DateTime64(3, 'UTC')}
           AND recorded_at < {until:DateTime64(3, 'UTC')}
         ORDER BY recorded_at, decision_id
         """,
@@ -205,9 +203,6 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) 
             FROM market_ohlcv
             WHERE time >= {since:DateTime64(3, 'UTC')}
           AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol, timeframe
         """,
         "MARKET_EVENT": """
@@ -216,8 +211,6 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) 
                    trace_id, payload_json
             FROM market_events
             WHERE event_time >= {since:DateTime64(3, 'UTC')}
-          AND event_time < {until:DateTime64(3, 'UTC')}
-          AND event_time < {until:DateTime64(3, 'UTC')}
           AND event_time < {until:DateTime64(3, 'UTC')}
             ORDER BY event_time, symbol, event_id
         """,
@@ -228,8 +221,6 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) 
             FROM live_analytics_events
             WHERE event_time >= {since:DateTime64(3, 'UTC')}
           AND event_time < {until:DateTime64(3, 'UTC')}
-          AND event_time < {until:DateTime64(3, 'UTC')}
-          AND event_time < {until:DateTime64(3, 'UTC')}
             ORDER BY event_time, category, symbol, event_id
         """,
         "ORDER_BOOK_SNAPSHOT": """
@@ -237,9 +228,6 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) 
                    last_update_id
             FROM order_book_snapshots
             WHERE time >= {since:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
           AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol, last_update_id
         """,
@@ -249,17 +237,12 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) 
             FROM depth_events
             WHERE event_time >= {since:DateTime64(3, 'UTC')}
           AND event_time < {until:DateTime64(3, 'UTC')}
-          AND event_time < {until:DateTime64(3, 'UTC')}
-          AND event_time < {until:DateTime64(3, 'UTC')}
             ORDER BY event_time, symbol, final_update_id
         """,
         "TRADE_TICK": """
             SELECT time, symbol, trade_id, price, quantity, side, is_buyer_maker
             FROM trade_ticks
             WHERE time >= {since:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
           AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol, trade_id
         """,
@@ -268,18 +251,12 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) 
             FROM funding_rates
             WHERE time >= {since:DateTime64(3, 'UTC')}
           AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol
         """,
         "OPEN_INTEREST": """
             SELECT time, symbol, open_interest
             FROM open_interest
             WHERE time >= {since:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
-          AND time < {until:DateTime64(3, 'UTC')}
           AND time < {until:DateTime64(3, 'UTC')}
             ORDER BY time, symbol
         """,
@@ -297,7 +274,7 @@ async def _reconcile_market_data(pg_pool, ch, since: datetime, until: datetime) 
 
     ch_records: dict[str, list[dict[str, Any]]] = {}
     for record_type, query in queries.items():
-        rows = await _fetch_clickhouse_rows(ch, query, since)
+        rows = await _fetch_clickhouse_rows(ch, query, since, until)
         normalized = []
         for row in rows:
             if record_type == "KLINE":
