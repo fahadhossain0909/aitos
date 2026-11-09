@@ -2,6 +2,7 @@ name: CI
 
 on:
   # Feature branches are validated by their PR, avoiding duplicate push + PR runs.
+  # Cross-platform desktop and storage changes must pass the same repository-wide gates.
   push:
     branches: [main]
   pull_request:
