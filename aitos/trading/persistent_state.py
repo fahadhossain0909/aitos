@@ -924,6 +924,8 @@ class IdempotentOrderExecutor(OrderExecutor):
         self._state_store = state_store
         self._completed: dict[str, OrderResult] = {}
         self._inflight: dict[str, asyncio.Future[OrderResult]] = {}
+        self._blocked_reason: str | None = None
+        self._blocked_client_order_id: str | None = None
 
     @property
     def supports_exchange_side_stops(self) -> bool:
@@ -932,6 +934,11 @@ class IdempotentOrderExecutor(OrderExecutor):
     async def submit_order(self, request: OrderRequest) -> OrderResult:
         key = request.client_order_id or self._key(request)
         request = request if request.client_order_id else replace(request, client_order_id=key)
+        if self._blocked_reason and key != self._blocked_client_order_id:
+            raise AmbiguousOrderSubmissionError(
+                f"new order submissions blocked by unresolved intent "
+                f"{self._blocked_client_order_id}: {self._blocked_reason}"
+            )
         if key in self._completed:
             return self._completed[key]
         if key in self._inflight:
@@ -960,7 +967,15 @@ class IdempotentOrderExecutor(OrderExecutor):
                     record.get("result", {}), request
                 )
             if state == "SUBMITTING":
-                return await self._recover_ambiguous(key, request)
+                try:
+                    recovered = await self._recover_ambiguous(key, request)
+                except Exception as exc:
+                    self._blocked_reason = str(exc)
+                    self._blocked_client_order_id = key
+                    raise
+                self._blocked_reason = None
+                self._blocked_client_order_id = None
+                return recovered
             raise AmbiguousOrderSubmissionError(
                 f"unsupported durable order state {state!r} for {key}; "
                 "manual reconciliation required"
@@ -969,10 +984,15 @@ class IdempotentOrderExecutor(OrderExecutor):
         await self._state_store.save_order_intent(key, self._request_payload(request))
         # An exception or process death here is ambiguous: retain SUBMITTING
         # so the next process must query the venue rather than resubmit.
-        result = await self._inner.submit_order(request)
-        await self._state_store.save_order_result(
-            key, request.symbol, self._result_payload(result)
-        )
+        try:
+            result = await self._inner.submit_order(request)
+            await self._state_store.save_order_result(
+                key, request.symbol, self._result_payload(result)
+            )
+        except BaseException as exc:
+            self._blocked_reason = str(exc) or type(exc).__name__
+            self._blocked_client_order_id = key
+            raise
         return result
 
     async def reconcile_pending_orders(self) -> dict[str, Any]:
@@ -1000,9 +1020,16 @@ class IdempotentOrderExecutor(OrderExecutor):
                 unlinked.append(str(record["client_order_id"]))
             else:
                 terminal_unfilled.append(str(record["client_order_id"]))
+        filled_unlinked = sorted(set(unlinked))
+        if filled_unlinked:
+            self._blocked_reason = "acknowledged fill has no durable trade snapshot"
+            self._blocked_client_order_id = filled_unlinked[0]
+        else:
+            self._blocked_reason = None
+            self._blocked_client_order_id = None
         return {
             "pending": len(pending),
-            "filled_unlinked": sorted(set(unlinked)),
+            "filled_unlinked": filled_unlinked,
             "terminal_unfilled": terminal_unfilled,
         }
 
