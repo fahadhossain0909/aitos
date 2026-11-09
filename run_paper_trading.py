@@ -40,6 +40,7 @@ from aitos.runtime_connections import (
 from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
+    IdempotentOrderExecutor,
     TradeStatePersistence,
     restored_position_feeds_ready,
 )
@@ -511,6 +512,12 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     # Restoring before initialization could query a table that has not yet been
     # created on a fresh/recreated ClickHouse volume.
     await trade_state_persistence.initialize()
+    # Persist every entry intent before submission and recover uncertain submits
+    # by exchange client-order-id lookup after a process restart.
+    if not isinstance(components.trade_lifecycle._order_executor, IdempotentOrderExecutor):
+        components.trade_lifecycle._order_executor = IdempotentOrderExecutor(
+            components.trade_lifecycle._order_executor, state_store
+        )
     set_open_position_provider(components.trade_lifecycle.get_open_trades)
     # Install protection before recovery/resubscription so every subsequent
     # scanner-driven subscription update preserves restored position symbols.
