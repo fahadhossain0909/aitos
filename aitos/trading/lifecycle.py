@@ -1768,12 +1768,14 @@ class TradeLifecycle(AITOSModule):
             )
         )
         quantity = sizing.position_size_usd / opportunity.entry_price
+        trade_id = new_trade_id()
         order_result = await self._order_executor.submit_order(
             OrderRequest(
                 symbol=opportunity.symbol,
                 side=opportunity.side,
                 quantity=quantity,
                 reference_price=opportunity.entry_price,
+                client_order_id=f"aitos-entry-{trade_id}",
             )
         )
         if not order_result.success and order_result.filled_quantity <= 0.0:
@@ -1842,7 +1844,7 @@ class TradeLifecycle(AITOSModule):
             )
         )
         trade = Trade(
-            trade_id=new_trade_id(),
+            trade_id=trade_id,
             symbol=opportunity.symbol,
             side=opportunity.side,
             entry_price=order_result.fill_price,
