@@ -189,7 +189,13 @@ async def test_startup_detects_unlinked_accepted_zero_fill_order():
             self.calls += 1
             if self.calls == 1:
                 return QueryResult(
-                    [("aitos-entry-trade-orphan", "ACKNOWLEDGED", '{"filled_quantity": 0}')]
+                    [
+                        (
+                            "aitos-entry-trade-orphan",
+                            "ACKNOWLEDGED",
+                            '{"filled_quantity": 0}',
+                        )
+                    ]
                 )
             return QueryResult([])
 
