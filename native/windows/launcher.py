@@ -135,7 +135,7 @@ def self_test():
     import uuid
     import secrets
 
-    vault = WindowsVault()
+    vault = get_credential_vault()
     if vault.get("tests/self-test-" + uuid.uuid4().hex) is not None:
         raise RuntimeError("unexpected test credential")
     dist = (
