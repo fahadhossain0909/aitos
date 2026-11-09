@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 
 from aitos.console_gateway import is_valid_operator_password
+from aitos.console_capabilities import RuntimeEndpoint
 from aitos.native.console_host import LocalConsoleHost, exercise_local_host
 from aitos.native.credential_vault import get_credential_vault
 
@@ -54,18 +55,17 @@ def main():
                 raise ValueError("password policy")
             vault.put("console/operator-password", password)
 
-        port = simpledialog.askinteger(
-            "Backend connection",
-            "Existing local backend port (or SSH-forwarded port)",
-            initialvalue=8090,
-            minvalue=1,
-            maxvalue=65535,
+        selected_origin = simpledialog.askstring(
+            "Runtime endpoint",
+            "Exact HTTPS runtime origin or local SSH-tunnel origin. Runtime is NOT started.",
+            initialvalue="http://127.0.0.1:8090",
             parent=root,
         )
-        if port is None:
+        if selected_origin is None:
             root.destroy()
             return
-        slot = f"console/backend-token/{port}"
+        endpoint = RuntimeEndpoint(selected_origin)
+        slot = endpoint.token_slot
         token = vault.get(slot)
         if token is None:
             token = simpledialog.askstring(
@@ -96,7 +96,9 @@ def main():
         root.destroy()
         return
 
-    host = LocalConsoleHost(dist, upstream_port=port, password=password, token=token)
+    host = LocalConsoleHost(
+        dist, upstream_origin=endpoint.origin, password=password, token=token
+    )
     host.start()
 
     def close():

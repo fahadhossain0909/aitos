@@ -29,6 +29,7 @@ from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.console_gateway")
 READ_QUERIES = {
+    "/console/v1/capabilities": frozenset(),
     "/console/v1/snapshot": frozenset(),
     "/console/v1/performance": frozenset(),
     "/console/v1/history": frozenset({"limit", "offset", "symbol"}),

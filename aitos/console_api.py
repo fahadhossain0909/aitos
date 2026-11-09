@@ -245,6 +245,20 @@ def register_console_routes(
             raise web.HTTPBadRequest(text="Invalid bounded research plan") from None
         return web.json_response(report, headers={"Cache-Control": "no-store"})
 
+    async def capabilities(request):
+        from aitos.console_capabilities import describe_capabilities
+
+        authorize(request)
+        if request.query:
+            raise web.HTTPBadRequest(
+                text="Capability query parameters are not supported"
+            )
+        return web.json_response(
+            describe_capabilities(modules, state_store, projection_observer),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    app.router.add_get("/console/v1/capabilities", capabilities)
     app.router.add_get("/console/v1/research/plan", research_plan)
     app.router.add_get("/console/v1/performance", performance)
     app.router.add_get("/console/v1/snapshot", snapshot)

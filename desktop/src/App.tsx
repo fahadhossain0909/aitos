@@ -1,3 +1,4 @@
+import { parseRuntimeCapabilities, type RuntimeCapabilities } from "./runtimeCapabilities";
 import { consoleFetch } from "./operatorSession";
 import ResearchPlanner from "./ResearchPlanner";
 import PersistencePanel from "./PersistencePanel";
@@ -425,6 +426,8 @@ export default function App() {
   const [page, setPage] = useState<Page>("overview");
   const [demo, setDemo] = useState(true);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
+  const [capabilities, setCapabilities] = useState<RuntimeCapabilities | null>(null);
+  const [compatibility, setCompatibility] = useState("Runtime API not negotiated");
   const [apiError, setApiError] = useState(false);
   const [history, setHistory] = useState<Position[]>([]);
   const [historyError, setHistoryError] = useState(false);
@@ -470,6 +473,9 @@ export default function App() {
       controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 8000);
       try {
+        const contract = await consoleFetch("/console/v1/capabilities", { signal: controller.signal });
+        if (!contract.ok) throw Error("Runtime capability negotiation unavailable");
+        const negotiated = parseRuntimeCapabilities(await contract.json());
         const r = await consoleFetch("/console/v1/snapshot", {
           signal: controller.signal,
           cache: "no-store",
@@ -478,12 +484,16 @@ export default function App() {
         const s = parseSnapshot(await r.json());
         if (!stop) {
           setSnapshot(s);
+          setCapabilities(negotiated);
+          setCompatibility("Read-only API 1.0 negotiated; availability is not health or trading authority");
           setApiError(false);
         }
       } catch {
         if (!stop) {
           setApiError(true);
           setSnapshot(null);
+          setCapabilities(null);
+          setCompatibility("Runtime API unavailable or incompatible — requires read-only protocol 1.0. No endpoint fallback or authority transfer.");
           setHistory([]);
           setSelected(null);
         }
@@ -1669,6 +1679,16 @@ export default function App() {
                 </div>
               )}
             </>
+          )}
+          {page === "exchanges" && (
+            <section className="panel" aria-label="Runtime API capabilities">
+              <div className="panel-heading"><h3>Runtime protocol & capabilities</h3></div>
+              <p>{compatibility}</p>
+              <p className="muted">Endpoint selection belongs to the native manager. Backend credentials never enter this UI. Missing capabilities remain unavailable, not sample balances or enabled controls.</p>
+              {capabilities && <div className="gate-grid">{capabilities.capabilities.map(c =>
+                <div className="panel" key={c.id}><strong>{c.id}</strong><p>{c.available ? "Adapter available — inspect evidence freshness" : "Not connected / not supported"}</p></div>
+              )}</div>}
+            </section>
           )}
           {page === "exchanges" && (
             <>

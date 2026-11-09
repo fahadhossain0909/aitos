@@ -15,6 +15,7 @@ from aitos.console_gateway import (
     is_valid_operator_password,
 )
 from aitos.native.credential_vault import get_credential_vault
+from aitos.console_capabilities import RuntimeEndpoint
 from aitos.native.console_host import LocalConsoleHost, exercise_local_host
 
 
@@ -45,18 +46,17 @@ def main():
             if password != confirmation or not is_valid_operator_password(password):
                 raise ValueError()
             vault.put("console/operator-password", password)
-        port = simpledialog.askinteger(
-            "Local backend",
-            "Existing local paper backend port (runner is NOT started)",
-            initialvalue=8090,
-            minvalue=1,
-            maxvalue=65535,
+        selected_origin = simpledialog.askstring(
+            "Runtime endpoint",
+            "Exact HTTPS runtime origin or local SSH-tunnel origin. Runtime is NOT started.",
+            initialvalue="http://127.0.0.1:8090",
             parent=root,
         )
-        if port is None:
+        if selected_origin is None:
             root.destroy()
             return
-        slot = f"console/backend-token/{port}"
+        endpoint = RuntimeEndpoint(selected_origin)
+        slot = endpoint.token_slot
         token = vault.get(slot)
         if token is None:
             token = simpledialog.askstring(
@@ -92,7 +92,9 @@ def main():
         )
         root.destroy()
         return
-    host = LocalConsoleHost(dist, upstream_port=port, password=password, token=token)
+    host = LocalConsoleHost(
+        dist, upstream_origin=endpoint.origin, password=password, token=token
+    )
     host.start()
 
     def close():

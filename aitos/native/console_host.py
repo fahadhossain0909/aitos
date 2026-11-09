@@ -16,9 +16,22 @@ from aitos.console_gateway import GatewayConfig, create_gateway
 
 
 class LocalConsoleHost:
-    def __init__(self, dist, *, upstream_port, password, token):
-        if type(upstream_port) is not int or not 1 <= upstream_port <= 65535:
+    def __init__(
+        self, dist, *, upstream_port=None, upstream_origin=None, password, token
+    ):
+        from aitos.console_capabilities import RuntimeEndpoint
+
+        if (upstream_port is None) == (upstream_origin is None):
+            raise ValueError("select exactly one explicit runtime endpoint")
+        if upstream_port is not None and (
+            type(upstream_port) is not int or not 1 <= upstream_port <= 65535
+        ):
             raise ValueError("local upstream port required")
+        self._endpoint = RuntimeEndpoint(
+            upstream_origin
+            if upstream_origin is not None
+            else f"http://127.0.0.1:{upstream_port}"
+        )
         self._dist = Path(dist)
         self._port = upstream_port
         self._password = password
@@ -72,7 +85,7 @@ class LocalConsoleHost:
             self.origin = f"http://127.0.0.1:{sock.getsockname()[1]}"
             config = GatewayConfig(
                 self.origin,
-                f"http://127.0.0.1:{self._port}",
+                self._endpoint.origin,
                 self._dist,
                 upstream_token=self._token,
             )
