@@ -14,7 +14,7 @@ from aitos.console_gateway import (
     create_gateway,
     is_valid_operator_password,
 )
-from aitos.native.windows_vault import WindowsVault
+from aitos.native.credential_vault import get_credential_vault
 from aitos.native.console_host import LocalConsoleHost, exercise_local_host
 
 
@@ -27,7 +27,7 @@ def main():
     )
     label.pack(pady=18)
     try:
-        vault = WindowsVault()
+        vault = get_credential_vault()
         password = vault.get("console/operator-password")
         if password is None:
             password = simpledialog.askstring(
