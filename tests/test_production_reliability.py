@@ -11,6 +11,7 @@ from aitos.models.trade import (
 )
 from aitos.trading.persistent_state import (
     AmbiguousOrderSubmissionError,
+    DurableTradingStateStore,
     IdempotentOrderExecutor,
     TradeStatePersistence,
     _trade_from_dict,
@@ -172,6 +173,34 @@ async def test_durable_order_executor_blocks_resubmit_when_venue_lookup_is_ambig
 
     assert inner.calls == 0
     assert store.records[request.client_order_id]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_startup_detects_unlinked_accepted_zero_fill_order():
+    class QueryResult:
+        def __init__(self, rows):
+            self.result_rows = rows
+
+    class ClickHouseClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def query(self, query, parameters=None):
+            self.calls += 1
+            if self.calls == 1:
+                return QueryResult(
+                    [("aitos-entry-trade-orphan", "ACKNOWLEDGED", '{"filled_quantity": 0}')]
+                )
+            return QueryResult([])
+
+    class Repository:
+        _client = ClickHouseClient()
+
+    store = DurableTradingStateStore(Repository())
+
+    unlinked = await store.load_unlinked_acknowledged_orders()
+
+    assert unlinked == ["aitos-entry-trade-orphan"]
 
 
 @pytest.mark.asyncio
