@@ -99,7 +99,12 @@ class WindowsVault:
 
     @staticmethod
     def _target(slot):
-        if type(slot) is not str or not re.fullmatch(r"[a-zA-Z0-9_.:/-]{1,120}", slot):
+        if (
+            type(slot) is not str
+            or not re.fullmatch(r"[a-zA-Z0-9_.:/-]{1,120}", slot)
+            or slot.startswith("/")
+            or any(part in {".", ".."} for part in slot.split("/"))
+        ):
             raise ValueError("invalid vault slot")
         return "AITOS/v1/" + slot
 
