@@ -47,8 +47,9 @@ jobs:
           package="$(find artifacts/linux -name '*.deb' -print -quit)"
           test -n "$package"
           dpkg-deb --info "$package"
-          dpkg-deb --contents "$package" | grep -q '/opt/aitos/AITOS-Console'
-          dpkg-deb --contents "$package" | grep -q '/usr/share/applications/aitos-console.desktop'
+          dpkg-deb --contents "$package" > "$RUNNER_TEMP/aitos-package-files.txt"
+          grep -Fq '/opt/aitos/AITOS-Console' "$RUNNER_TEMP/aitos-package-files.txt"
+          grep -Fq '/usr/share/applications/aitos-console.desktop' "$RUNNER_TEMP/aitos-package-files.txt"
           sha256sum --check artifacts/linux/SHA256SUMS
       - name: Extract and execute frozen bundle smoke
         run: |
