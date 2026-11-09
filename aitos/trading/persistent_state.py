@@ -50,6 +50,19 @@ CREATE TABLE IF NOT EXISTS paper_closed_trade_ledger (
 ORDER BY trade_id
 """
 
+CREATE_ORDER_EXECUTION_LEDGER = """
+CREATE TABLE IF NOT EXISTS order_execution_ledger (
+    client_order_id String,
+    symbol LowCardinality(String),
+    state LowCardinality(String),
+    request_json String,
+    result_json String,
+    updated_at DateTime64(3, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY client_order_id
+"""
+
+
 CREATE_EXCHANGE_INCOME_CURSOR = """
 CREATE TABLE IF NOT EXISTS exchange_income_sync_cursor (
     account LowCardinality(String),
@@ -103,6 +116,7 @@ class DurableTradingStateStore:
             await self._repository._client.command(CREATE_DRAWDOWN_STATE)
             await self._repository._client.command(CREATE_PAPER_CLOSED_TRADE_LEDGER)
             await self._repository._client.command(CREATE_EXCHANGE_INCOME_CURSOR)
+            await self._repository._client.command(CREATE_ORDER_EXECUTION_LEDGER)
             logger.info("durable trading state tables ensured")
         except Exception:
             logger.exception("durable trading state table ensure failed")
@@ -133,6 +147,78 @@ class DurableTradingStateStore:
             [[account, int(cursor_time_ms), datetime.now(timezone.utc)]],
             column_names=["account", "cursor_time_ms", "updated_at"],
         )
+
+    async def save_order_intent(self, client_order_id: str, request: Mapping[str, Any]) -> None:
+        """Durably record an order intent before any exchange side effect."""
+        if not client_order_id:
+            raise ValueError("client_order_id is required")
+        client = self._client()
+        symbol = str(request.get("symbol") or "")
+        if not symbol:
+            raise ValueError("order intent symbol is required")
+        await client.insert(
+            "order_execution_ledger",
+            [[
+                client_order_id,
+                symbol,
+                "SUBMITTING",
+                json.dumps(dict(request), sort_keys=True, default=str),
+                "",
+                datetime.now(timezone.utc),
+            ]],
+            column_names=[
+                "client_order_id", "symbol", "state", "request_json",
+                "result_json", "updated_at",
+            ],
+        )
+
+    async def save_order_result(
+        self, client_order_id: str, symbol: str, result: Mapping[str, Any]
+    ) -> None:
+        """Persist the authoritative acknowledgement/fill returned by the executor."""
+        client = self._client()
+        payload = dict(result)
+        state = "ACKNOWLEDGED" if bool(payload.get("success")) else "REJECTED"
+        await client.insert(
+            "order_execution_ledger",
+            [[
+                client_order_id,
+                symbol,
+                state,
+                "{}",
+                json.dumps(payload, sort_keys=True, default=str),
+                datetime.now(timezone.utc),
+            ]],
+            column_names=[
+                "client_order_id", "symbol", "state", "request_json",
+                "result_json", "updated_at",
+            ],
+        )
+
+    async def load_order_record(self, client_order_id: str) -> dict[str, Any] | None:
+        """Load the latest durable order-intent/acknowledgement state."""
+        client = self._client()
+        result = await client.query(
+            """
+            SELECT
+                argMax(symbol, updated_at) AS symbol,
+                argMax(state, updated_at) AS state,
+                argMax(request_json, updated_at) AS request_json,
+                argMax(result_json, updated_at) AS result_json
+            FROM order_execution_ledger
+            WHERE client_order_id = {client_order_id:String}
+            """,
+            parameters={"client_order_id": client_order_id},
+        )
+        if not result.result_rows or not result.result_rows[0][1]:
+            return None
+        row = result.result_rows[0]
+        return {
+            "symbol": str(row[0]),
+            "state": str(row[1]),
+            "request": json.loads(row[2] or "{}"),
+            "result": json.loads(row[3] or "{}"),
+        }
 
     async def save_trade(self, trade: Trade) -> None:
         client = self._client()
