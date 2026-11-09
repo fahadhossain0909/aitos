@@ -178,7 +178,11 @@ class DurableTradingStateStore:
         """Persist the authoritative acknowledgement/fill returned by the executor."""
         client = self._client()
         payload = dict(result)
-        state = "ACKNOWLEDGED" if bool(payload.get("success")) else "REJECTED"
+        state = (
+            "ACKNOWLEDGED"
+            if bool(payload.get("success")) or float(payload.get("filled_quantity", 0) or 0) > 0
+            else "REJECTED"
+        )
         await client.insert(
             "order_execution_ledger",
             [[
