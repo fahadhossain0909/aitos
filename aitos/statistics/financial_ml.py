@@ -11,10 +11,9 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from statistics import mean
-from typing import Iterable, Sequence
-
 
 _EPS = 1e-12
 
@@ -383,7 +382,7 @@ class MetaLabeler:
 
     def fit(
         self, features: Sequence[Sequence[float]], labels: Sequence[int]
-    ) -> "MetaLabeler":
+    ) -> MetaLabeler:
         rows = self._matrix(features, labels)
         ys = tuple(int(value) for value in labels)
         if len(set(ys)) != 2:

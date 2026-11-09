@@ -8,9 +8,9 @@ only the supplied historical return window.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import median
-from typing import Iterable
 
 
 @dataclass(frozen=True)

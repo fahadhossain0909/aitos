@@ -6,12 +6,12 @@ import hashlib
 import json
 import math
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Iterable
+from typing import Any
 from uuid import UUID
-
 
 _TIME_FIELDS = frozenset(
     {

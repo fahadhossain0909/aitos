@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from statistics import mean, pstdev
-from typing import Mapping, Sequence
+from statistics import mean
 
 from .garch import GARCH11
 from .tail_calibration import StudentTCopulaFit, fit_student_t_copula

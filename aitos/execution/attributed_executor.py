@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Callable, Mapping
+from typing import TYPE_CHECKING, Any
 
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.models.trade import TradeSide

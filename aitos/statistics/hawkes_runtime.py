@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import median
-from typing import Iterable
 
 from aitos.models.market import TradeSide
 from aitos.statistics.engine import AStatEngine

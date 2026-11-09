@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 import random
 from bisect import bisect_right
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from statistics import mean
-from typing import Iterable, Mapping, Sequence
 
 
 def _probability(value: float) -> float:

@@ -13,10 +13,11 @@ import math
 import os
 import sqlite3
 import threading
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 from aitos.statistics.financial_ml import (
     MarketEvent,

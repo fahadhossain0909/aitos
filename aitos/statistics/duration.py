@@ -8,9 +8,9 @@ is in-sample and must not be used as an out-of-sample evaluation.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from statistics import mean, pstdev
-from typing import Iterable
 
 
 @dataclass(frozen=True)

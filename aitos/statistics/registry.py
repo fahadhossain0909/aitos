@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .governance import (
     PromotionDecision,

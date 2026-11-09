@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 import logging
-from typing import Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, replace
 
 from .governance import (
     PromotionDecision,

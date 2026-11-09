@@ -75,9 +75,9 @@ from aitos.models.trade import (
 from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResult
 from aitos.risk.risk_engine import RiskEngine
 from aitos.statistics.contracts import FeatureSnapshot, ForecastEnvelope
-from aitos.statistics.risk_overlay import assess_statistical_risk_forecast
 from aitos.statistics.decision_ledger import DecisionOutcomeLedger
 from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
+from aitos.statistics.risk_overlay import assess_statistical_risk_forecast
 from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.trading.tp_contract import TakeProfitExecutionContract
 

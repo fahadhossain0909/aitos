@@ -5,10 +5,10 @@ import pytest
 
 from aitos.core.contracts import Event
 from aitos.core.exceptions import TradeNotFoundError
-from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
 from aitos.execution.order_executor import OrderExecutor, OrderResult
-from aitos.statistics.shadow import StatisticalShadowLedger
+from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
 from aitos.risk.models import PortfolioState, PositionExposure
+from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.trading.lifecycle import TradeLifecycle
 
 

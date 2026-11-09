@@ -262,8 +262,8 @@ async def test_clickhouse_journal_failure_uses_configured_postgres_fallback(
     monkeypatch,
 ):
     from aitos.data import repository as data_repository
-    from aitos.journal import repository as journal_repository
     from aitos.journal import postgres_repository
+    from aitos.journal import repository as journal_repository
 
     market_repo = FakeRepository()
     clickhouse_journal = FakeRepository()

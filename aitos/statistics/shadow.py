@@ -5,10 +5,11 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .contracts import FeatureSnapshot, ForecastEnvelope
 from .validation import brier_score, log_loss, qlike_loss
@@ -415,4 +416,4 @@ class StatisticalShadowLedger:
 
     def close(self) -> None:
         """Compatibility hook; connections are scoped to individual methods."""
-        return None
+        return

@@ -5,10 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from pathlib import Path
 import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import urlparse

@@ -95,11 +95,10 @@ async def apply_postgres_migrations(pool) -> int:
     unversioned tables created by earlier AITOS releases are adopted by the
     idempotent v1 migration and validated before the transaction commits.
     """
-    async with pool.acquire() as conn:
-        async with conn.transaction():
-            await conn.execute("SELECT pg_advisory_xact_lock($1)", _MIGRATION_LOCK_ID)
-            await conn.execute(
-                """
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock($1)", _MIGRATION_LOCK_ID)
+        await conn.execute(
+            """
                 CREATE TABLE IF NOT EXISTS aitos_schema_migrations (
                     version INTEGER PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -107,60 +106,60 @@ async def apply_postgres_migrations(pool) -> int:
                     applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 )
                 """
+        )
+        rows = await conn.fetch(
+            "SELECT version, name, checksum FROM aitos_schema_migrations"
+        )
+        applied = {int(row["version"]): row for row in rows}
+        known_versions = {migration.version for migration in MIGRATIONS}
+        unknown_versions = set(applied) - known_versions
+        if unknown_versions:
+            raise RuntimeError(
+                "PostgreSQL schema is newer than this AITOS build; "
+                "unknown migration versions: "
+                + ", ".join(str(version) for version in sorted(unknown_versions))
             )
-            rows = await conn.fetch(
-                "SELECT version, name, checksum FROM aitos_schema_migrations"
-            )
-            applied = {int(row["version"]): row for row in rows}
-            known_versions = {migration.version for migration in MIGRATIONS}
-            unknown_versions = set(applied) - known_versions
-            if unknown_versions:
-                raise RuntimeError(
-                    "PostgreSQL schema is newer than this AITOS build; "
-                    "unknown migration versions: "
-                    + ", ".join(str(version) for version in sorted(unknown_versions))
-                )
 
-            for migration in MIGRATIONS:
-                previous = applied.get(migration.version)
-                if previous is not None:
-                    if (
-                        previous["name"] != migration.name
-                        or previous["checksum"] != migration.checksum
-                    ):
-                        raise RuntimeError(
-                            "PostgreSQL migration history mismatch at version "
-                            f"{migration.version}; refusing unsafe startup"
-                        )
-                    continue
+        for migration in MIGRATIONS:
+            previous = applied.get(migration.version)
+            if previous is not None:
+                if (
+                    previous["name"] != migration.name
+                    or previous["checksum"] != migration.checksum
+                ):
+                    raise RuntimeError(
+                        "PostgreSQL migration history mismatch at version "
+                        f"{migration.version}; refusing unsafe startup"
+                    )
+                continue
 
-                for statement in migration.statements:
-                    await conn.execute(statement)
-                await conn.execute(
-                    """
+            for statement in migration.statements:
+                await conn.execute(statement)
+            await conn.execute(
+                """
                     INSERT INTO aitos_schema_migrations (version, name, checksum)
                     VALUES ($1, $2, $3)
                     """,
-                    migration.version,
-                    migration.name,
-                    migration.checksum,
-                )
+                migration.version,
+                migration.name,
+                migration.checksum,
+            )
 
-            for table, expected in _REQUIRED_COLUMNS.items():
-                rows = await conn.fetch(
-                    """
+        for table, expected in _REQUIRED_COLUMNS.items():
+            rows = await conn.fetch(
+                """
                     SELECT column_name
                     FROM information_schema.columns
                     WHERE table_schema = current_schema() AND table_name = $1
                     """,
-                    table,
+                table,
+            )
+            actual = {row["column_name"] for row in rows}
+            missing = expected - actual
+            if missing:
+                raise RuntimeError(
+                    f"PostgreSQL schema drift in {table}; missing columns: "
+                    + ", ".join(sorted(missing))
                 )
-                actual = {row["column_name"] for row in rows}
-                missing = expected - actual
-                if missing:
-                    raise RuntimeError(
-                        f"PostgreSQL schema drift in {table}; missing columns: "
-                        + ", ".join(sorted(missing))
-                    )
 
-            return max((migration.version for migration in MIGRATIONS), default=0)
+        return max((migration.version for migration in MIGRATIONS), default=0)

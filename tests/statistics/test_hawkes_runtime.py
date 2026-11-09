@@ -4,9 +4,9 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from aitos.models.market import TradeSide, TradeTick
+from aitos.statistics import hawkes_runtime
 from aitos.statistics.engine import AStatEngine
 from aitos.statistics.hawkes import HawkesMLEFit
-from aitos.statistics import hawkes_runtime
 
 
 def _trades(count=100):

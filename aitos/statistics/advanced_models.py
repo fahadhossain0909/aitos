@@ -8,10 +8,9 @@ them in risk or execution decisions.
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from statistics import mean
-from typing import Iterable, Sequence
-
 
 _EPS = 1e-12
 

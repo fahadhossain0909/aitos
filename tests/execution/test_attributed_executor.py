@@ -5,8 +5,8 @@ import pytest
 from aioresponses import aioresponses
 
 from aitos.execution.attributed_executor import (
-    AttributionPersistenceError,
     AttributedOrderExecutor,
+    AttributionPersistenceError,
     OrderAttributionContext,
 )
 from aitos.execution.binance_executor import TESTNET_URL, BinanceFuturesOrderExecutor

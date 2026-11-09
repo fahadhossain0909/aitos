@@ -26,8 +26,6 @@ from aitos.eventbus.redis_bus import EventBus
 from aitos.exchange.base import ExchangeAdapter
 from aitos.intelligence import indicators
 from aitos.intelligence.a_stat_bridge import AStatBridge
-from aitos.statistics.decision_ledger import DecisionOutcomeLedger
-from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
 from aitos.intelligence.amt.engine import AMTContext, AMTEngine
 from aitos.intelligence.auction import auction_context_score
 from aitos.intelligence.candidate_rotation import CandidateRotationManager
@@ -65,6 +63,8 @@ from aitos.intelligence.orderflow_liquidity_interaction import (
 from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeSide
+from aitos.statistics.decision_ledger import DecisionOutcomeLedger
+from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
 
 logger = get_logger("aitos.intelligence.scanner")
 _ACTIVE_SCAN_TRACE_ID: ContextVar[str] = ContextVar("aitos_scan_trace_id", default="")

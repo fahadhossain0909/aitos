@@ -516,7 +516,7 @@ async def test_paper_main_closes_redis_if_clickhouse_startup_fails(monkeypatch):
 async def test_restart_reconciles_shadow_ledger_from_open_and_closed_trades(
     event_bus, risk_engine, paper_trade, tmp_path
 ):
-    from datetime import timedelta, timezone, datetime
+    from datetime import datetime, timedelta, timezone
 
     def attach_forecast(trade, snapshot_id):
         as_of = trade.entry_time

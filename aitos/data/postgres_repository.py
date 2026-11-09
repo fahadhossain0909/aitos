@@ -4,6 +4,7 @@ This adapter preserves canonical incoming market records and the recent OHLCV
 read path needed by the scanner. It is not an analytical SQL engine; arbitrary
 ClickHouse queries and historical research workloads fail explicitly.
 """
+
 from __future__ import annotations
 
 import json
@@ -181,7 +182,9 @@ class PostgresMarketDataRepository:
             "taker_buy_volume": kline.taker_buy_volume,
             "taker_buy_quote_volume": kline.taker_buy_quote_volume,
         }
-        identity = f"kline:{kline.symbol}:{kline.timeframe}:{self._time_key(kline.open_time)}"
+        identity = (
+            f"kline:{kline.symbol}:{kline.timeframe}:{self._time_key(kline.open_time)}"
+        )
         await self._append(
             "KLINE",
             kline.symbol,
@@ -205,7 +208,9 @@ class PostgresMarketDataRepository:
                 "bids": book.bids,
                 "asks": book.asks,
                 "spread": book.spread,
-                "depth_ratio": book.depth_ratio if math.isfinite(book.depth_ratio) else None,
+                "depth_ratio": (
+                    book.depth_ratio if math.isfinite(book.depth_ratio) else None
+                ),
                 "last_update_id": book.last_update_id,
                 "depth_event": book.depth_event,
             }
@@ -436,7 +441,9 @@ class PostgresMarketDataRepository:
     def _time_key(cls, value: Any) -> str:
         return cls._as_datetime(value).isoformat()
 
-    async def _query(self, sql: str, parameters: dict[str, Any]) -> list[dict[str, Any]]:
+    async def _query(
+        self, sql: str, parameters: dict[str, Any]
+    ) -> list[dict[str, Any]]:
         raise UnsupportedStorageCapabilityError(
             "arbitrary ClickHouse SQL queries are not supported by the "
             "PostgreSQL paper-runtime adapter"

@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import math
 import random
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from statistics import mean, pstdev
-from typing import Iterable, Mapping, Sequence
 
 
 def _series(values: Iterable[float], name: str, minimum: int = 2) -> tuple[float, ...]:

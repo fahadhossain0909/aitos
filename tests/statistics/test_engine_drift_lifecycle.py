@@ -4,8 +4,8 @@ import threading
 import pytest
 
 from aitos.statistics.engine import AStatEngine
-from aitos.statistics.hawkes import fit_marked_hawkes_mle
 from aitos.statistics.governance_runtime import StatisticalGovernanceRuntime
+from aitos.statistics.hawkes import fit_marked_hawkes_mle
 from aitos.statistics.registry import StatisticalModelRegistry
 
 

@@ -7,9 +7,9 @@ connectivity probe succeeds; a healthy database alone is never sufficient.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
-from typing import Awaitable, Callable, Mapping
 
 
 class StorageBackend(str, Enum):

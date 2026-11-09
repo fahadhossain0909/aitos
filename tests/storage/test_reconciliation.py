@@ -3,13 +3,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from scripts.reconcile_postgres_journal import reconcile
-
 from aitos.storage.reconciliation import (
     canonical_record_fingerprint,
     compare_fingerprints,
     compare_records,
 )
+from scripts.reconcile_postgres_journal import reconcile
 
 
 def test_reconciliation_reports_missing_records_in_both_directions():

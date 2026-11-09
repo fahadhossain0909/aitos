@@ -342,11 +342,7 @@ async def _reconcile_market_data(
                 payload["time"] = row["time"]
                 payload["is_buyer_maker"] = bool(row["is_buyer_maker"])
                 entity_id = row["symbol"]
-            elif record_type == "FUNDING_RATE":
-                payload = dict(row)
-                payload["time"] = row["time"]
-                entity_id = row["symbol"]
-            elif record_type == "OPEN_INTEREST":
+            elif record_type == "FUNDING_RATE" or record_type == "OPEN_INTEREST":
                 payload = dict(row)
                 payload["time"] = row["time"]
                 entity_id = row["symbol"]

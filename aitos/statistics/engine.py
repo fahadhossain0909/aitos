@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import math
 from collections import deque
-from threading import RLock
 from collections.abc import Iterable
+from threading import RLock
 
+from .governance_runtime import DriftMonitorScheduler, StatisticalGovernanceRuntime
+from .hawkes import HawkesMLEFit, MarkedHawkesOnlineFilter
 from .models import (
     AStatObservation,
     AStatResult,
@@ -16,8 +18,6 @@ from .models import (
     RegimeProbability,
 )
 from .stack import ContractStatisticalStack
-from .governance_runtime import DriftMonitorScheduler, StatisticalGovernanceRuntime
-from .hawkes import HawkesMLEFit, MarkedHawkesOnlineFilter
 
 
 class AStatEngine:

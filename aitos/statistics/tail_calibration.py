@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Sequence
 
 
 @dataclass(frozen=True)
