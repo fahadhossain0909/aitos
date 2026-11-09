@@ -518,6 +518,19 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
         components.trade_lifecycle._order_executor = IdempotentOrderExecutor(
             components.trade_lifecycle._order_executor, state_store
         )
+    order_recovery = await components.trade_lifecycle._order_executor.reconcile_pending_orders()
+    logger.info(
+        "durable order-intent reconciliation complete",
+        extra={"aitos_extra": order_recovery},
+    )
+    if order_recovery["filled_unlinked"]:
+        logger.critical(
+            "paper startup blocked: exchange fills lack durable trade snapshots",
+            extra={"aitos_extra": order_recovery},
+        )
+        raise RuntimeError(
+            "unlinked exchange fills require operator reconciliation before new entries"
+        )
     set_open_position_provider(components.trade_lifecycle.get_open_trades)
     # Install protection before recovery/resubscription so every subsequent
     # scanner-driven subscription update preserves restored position symbols.
