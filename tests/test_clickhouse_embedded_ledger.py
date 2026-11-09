@@ -144,9 +144,14 @@ async def test_engine_read_budget_throws_instead_of_returning_partial_financials
     engine, monkeypatch
 ):
     insert(engine, "paper_closed_trade_ledger", trade(), "2026-11-02 12:00:00.001")
+    from aitos.trading import persistent_state
+
     monkeypatch.setattr(
-        "aitos.trading.persistent_state.CONSOLE_QUERY_BUDGET",
-        " SETTINGS max_bytes_to_read=1, read_overflow_mode='throw'",
+        persistent_state,
+        "CLOSED_PERFORMANCE_QUERY",
+        persistent_state.CLOSED_PERFORMANCE_QUERY.replace(
+            "max_bytes_to_read=67108864", "max_bytes_to_read=1"
+        ),
     )
     with pytest.raises(Exception) as caught:
         await store(engine).query_closed_performance()
