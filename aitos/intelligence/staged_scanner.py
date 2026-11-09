@@ -196,5 +196,41 @@ async def install_staged_scan(
         )
         return top2
 
+    # Paper runtime consumes iter_candidate_batches(), not scan_all().  The
+    # original staged hook only replaced scan_all(), so live subscriptions
+    # silently stayed on the bootstrap anchor while the actual scanner ranked
+    # other symbols.  Wire the same ranked symbol lifecycle into the methods
+    # used by the production/paper scan loop.
+    original_lightweight_rank = getattr(scanner, "_lightweight_rank_symbols", None)
+    if callable(original_lightweight_rank):
+
+        async def _rank_and_subscribe(*args: Any, **kwargs: Any) -> list[str]:
+            selected = await original_lightweight_rank(*args, **kwargs)
+            await on_subscription_change(list(selected), "TOP_50")
+            return selected
+
+        scanner._lightweight_rank_symbols = _rank_and_subscribe
+
+    original_iter_candidate_batches = getattr(scanner, "iter_candidate_batches", None)
+    if callable(original_iter_candidate_batches):
+
+        async def _iter_candidate_batches_with_subscriptions(*args: Any, **kwargs: Any):
+            candidates: list[Any] = []
+            async for batch in original_iter_candidate_batches(*args, **kwargs):
+                candidates.extend(batch)
+                yield batch
+
+            if candidates:
+                ranked = sorted(
+                    candidates,
+                    key=lambda candidate: float(candidate.composite_score),
+                    reverse=True,
+                )
+                top5 = [candidate.symbol for candidate in ranked[:TOP_5]]
+                top2 = top5[:TOP_2]
+                await on_subscription_change(top5, "TOP_5")
+                await on_subscription_change(top2, "TOP_2")
+
+        scanner.iter_candidate_batches = _iter_candidate_batches_with_subscriptions
     scanner.scan_all = _staged_scan_all
     scanner._staged_scan_installed = True

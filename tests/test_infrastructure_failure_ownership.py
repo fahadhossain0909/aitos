@@ -116,13 +116,19 @@ async def test_partial_clickhouse_startup_releases_both_repositories(
         return await fn()
 
     monkeypatch.setattr(connections, "retry_with_backoff", once)
-    expected = SystemExit if failure is RetryExhaustedError else failure
+    # Capability selection now wraps ordinary failed probes in a sanitized
+    # StorageBackendError; cancellation must still propagate unchanged.
+    expected = (
+        asyncio.CancelledError if failure is asyncio.CancelledError else SystemExit
+    )
     with pytest.raises(expected) as caught:
         await connections.connect_clickhouse_repositories(settings(), logger=Mock())
     if expected is not SystemExit:
         assert caught.value is original
     else:
         assert caught.value.code == 1
-        assert caught.value.__cause__ is original
+        from aitos.storage.backend import StorageBackendError
+
+        assert isinstance(caught.value.__cause__, StorageBackendError)
     market.shutdown.assert_awaited_once()
     journal.shutdown.assert_awaited_once()

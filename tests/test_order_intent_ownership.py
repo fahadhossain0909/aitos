@@ -169,14 +169,16 @@ async def test_lifecycle_provides_stable_logical_entry_id(event_bus, risk_engine
         rationale="offline intent identity",
     )
     portfolio = PortfolioState(equity_usd=10000.0, peak_equity_usd=10000.0)
-    await lifecycle._validate_and_open(opportunity, portfolio)
-    await lifecycle._validate_and_open(opportunity, portfolio)
+    first = await lifecycle._validate_and_open(opportunity, portfolio)
+    second = await lifecycle._validate_and_open(opportunity, portfolio)
     await lifecycle._validate_and_open(
         replace(opportunity, opportunity_id="distinct-opportunity"), portfolio
     )
     ids = [value.client_order_id for value in executor.requests]
     assert all(value and len(value) <= 36 for value in ids)
     assert ids[0] == ids[1]
+    assert ids[0] == f"aitos-entry-{first.trade_id}"
+    assert ids[1] == f"aitos-entry-{second.trade_id}"
     assert ids[2] != ids[0]
 
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import pytest
 
 from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
+from aitos.statistics.shadow import StatisticalShadowLedger
+from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.persistent_state import TradeStatePersistence
 
 
@@ -508,3 +510,85 @@ async def test_paper_main_closes_redis_if_clickhouse_startup_fails(monkeypatch):
 
     assert redis.closed is True
     assert event_bus.closed is True
+
+
+@pytest.mark.asyncio
+async def test_restart_reconciles_shadow_ledger_from_open_and_closed_trades(
+    event_bus, risk_engine, paper_trade, tmp_path
+):
+    from datetime import datetime, timedelta, timezone
+
+    def attach_forecast(trade, snapshot_id):
+        as_of = trade.entry_time
+        window_start = (
+            (datetime.fromisoformat(as_of.replace("Z", "+00:00")) - timedelta(hours=1))
+            .astimezone(timezone.utc)
+            .isoformat()
+        )
+        trade.agent_consensus = {
+            "a_stat": 8.0,
+            "statistical_forecast": {
+                "symbol": trade.symbol,
+                "side": trade.side.value,
+                "horizon": "15m",
+                "model_id": "aitos-contract-statistical-stack",
+                "model_version": "1",
+                "as_of": as_of,
+                "window_start": window_start,
+                "feature_snapshot_id": snapshot_id,
+                "sample_size": 256,
+                "predicted_up": 0.8,
+                "downside_probability": 0.2,
+                "forecast_volatility": 0.02,
+                "reference_volatility": 0.01,
+                "tail_probability": 0.1,
+                "expected_shortfall": 0.03,
+                "expected_return": 0.01,
+                "probability_confidence": 0.8,
+            },
+        }
+
+    open_trade = paper_trade
+    attach_forecast(open_trade, "snapshot-open")
+    closed_trade = Trade(
+        trade_id="paper-recovery-closed",
+        symbol="ETHUSDT",
+        side=TradeSide.SHORT,
+        entry_price=2000.0,
+        quantity=0.01,
+        leverage=1.0,
+        position_size_usd=20.0,
+        risk_amount_usd=1.0,
+        strategy_id="paper",
+        agent_consensus={},
+        explanation="closed recovery test",
+        sl_price=2050.0,
+        tp_price=1900.0,
+        state=TradeLifecycleState.POSITION_CLOSED,
+        entry_time="2026-08-24T00:00:00+00:00",
+        exit_time="2026-08-24T01:00:00+00:00",
+        exit_price=1980.0,
+        pnl=0.2,
+        pnl_percent=1.0,
+    )
+    attach_forecast(closed_trade, "snapshot-closed")
+    ledger = StatisticalShadowLedger(tmp_path / "recovered-shadow.sqlite3")
+    lifecycle = TradeLifecycle(
+        event_bus=event_bus,
+        risk_engine=risk_engine,
+        statistical_shadow_ledger=ledger,
+    )
+    store = FakeStateStore([open_trade])
+    store.closed_trades = [closed_trade]
+    persistence = TradeStatePersistence(event_bus, lifecycle, store)
+
+    assert await persistence.restore() == 1
+    open_record = ledger.get_forecast(open_trade.trade_id)
+    closed_record = ledger.get_forecast(closed_trade.trade_id)
+    assert open_record is not None and open_record.actual_return is None
+    assert closed_record is not None
+    assert closed_record.actual_return == pytest.approx(0.01)
+    assert closed_record.side == "SHORT"
+    assert {item.forecast_id for item in ledger.unresolved_forecasts()} == {
+        open_trade.trade_id
+    }

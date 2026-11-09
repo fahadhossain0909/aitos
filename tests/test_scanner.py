@@ -413,3 +413,94 @@ async def test_scanner_blocks_ltf_long_when_htf_is_bearish(event_bus):
     await scanner.initialize({})
     assert await scanner.scan_symbol("BTCUSDT") is None
     await scanner.shutdown()
+
+
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+async def test_scanner_health_exposes_decision_outcome_ledger_snapshot(event_bus):
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=FakeScannerExchange(),
+        symbols=["BTCUSDT"],
+        reference_symbol="",
+    )
+    await scanner.initialize({})
+    health = await scanner.health_check()
+    ledger = health.details["decision_outcome_ledger"]
+    assert ledger["decisions_total"] == 0
+    assert ledger["resolved_total"] == 0
+    assert ledger["unresolved_total"] == 0
+    assert ledger["by_provenance"] == {}
+    await scanner.shutdown()
+
+
+async def test_to_opportunity_preserves_statistical_forecast_identity(event_bus):
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=FakeScannerExchange(),
+        symbols=["BTCUSDT"],
+        reference_symbol="",
+    )
+    forecast = {
+        "symbol": "BTCUSDT",
+        "horizon": "15m",
+        "side": "LONG",
+        "model_id": "aitos-contract-statistical-stack",
+        "model_version": "1",
+        "as_of": "2026-11-07T10:00:00+00:00",
+        "sample_size": 256,
+        "forecast_volatility": 0.04,
+        "reference_volatility": 0.02,
+        "tail_probability": 0.2,
+        "expected_shortfall": 0.05,
+    }
+    candidate = ScanCandidate(
+        symbol="BTCUSDT",
+        direction=TradeSide.LONG,
+        composite_score=80.0,
+        component_scores={"a_stat": 8.0},
+        component_availability={"a_stat": True},
+        rationale=["statistical forecast available"],
+        entry_price=100.0,
+        atr=1.0,
+        regime="trending",
+        statistical_forecast=forecast,
+    )
+    opportunity = scanner.to_opportunity(candidate)
+    assert opportunity.timeframe == scanner._timeframe
+    assert opportunity.agent_consensus["statistical_forecast"] == forecast
+
+
+@pytest.mark.asyncio
+async def test_financial_ml_candidate_identity_flows_through_shadow_scanner(event_bus):
+    scanner = OpportunityScanner(
+        event_bus=event_bus,
+        exchange=FakeScannerExchange(),
+        symbols=["BTCUSDT"],
+        reference_symbol="",
+        min_score_threshold=0.0,
+        top_n=5,
+    )
+    await scanner.initialize({})
+    candidate = await scanner.scan_symbol("BTCUSDT")
+    assert candidate is not None
+    assert len(candidate.candidate_id) == 32
+    assert "sv_log_variance" in candidate.financial_ml_features
+    assert "jump_intensity" in candidate.financial_ml_features
+
+    persisted = scanner._financial_ml._conn.execute(
+        "SELECT candidate_id,status,features_json FROM financial_ml_candidates "
+        "WHERE candidate_id=?",
+        (candidate.candidate_id,),
+    ).fetchone()
+    assert persisted is not None
+    assert persisted["status"] == "PENDING"
+
+    ranked = await scanner.rank([candidate])
+    assert len(ranked) == 1
+    assert ranked[0].meta_probability is None
+    opportunity = scanner.to_opportunity(ranked[0])
+    assert opportunity.agent_consensus["candidate_id"] == candidate.candidate_id
+    assert opportunity.agent_consensus["financial_ml_meta"]["mode"] == "shadow"
+
+    await scanner.shutdown()

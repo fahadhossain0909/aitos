@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -12,7 +13,7 @@ from aitos.intelligence.trade_depth_matcher import TradeDepthMatcher
 from aitos.logging_setup import get_logger
 from aitos.market_data.bus import MarketDataBus, market_event_from_wire
 from aitos.market_data.contracts import MarketEventType, MarketSource
-from aitos.models.market import OrderBookSnapshot, TradeTick
+from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
 
 logger = get_logger("aitos.intelligence.live_scanner")
 LIVE_SCANNER_GROUP = "live-scanner-cache-v1"
@@ -41,6 +42,9 @@ class LiveSymbolCache:
     stale_book_rejections: int = 0
     duplicate_trade_rejections: int = 0
     duplicate_book_rejections: int = 0
+    hawkes_event_rejections: int = 0
+    last_hawkes_timestamp: float | None = None
+    last_hawkes_intensities: tuple[float, float] | None = None
     last_stale_trade_source_age_sec: float | None = None
     last_stale_book_source_age_sec: float | None = None
 
@@ -49,10 +53,16 @@ class LiveScannerCache:
     """Maintain scanner state from canonical semantic market-data channels."""
 
     def __init__(
-        self, event_bus: EventBus | None, symbols: list[str], max_trades: int = 5000
+        self,
+        event_bus: EventBus | None,
+        symbols: list[str],
+        max_trades: int = 5000,
+        *,
+        hawkes_engine=None,
     ) -> None:
         self._event_bus = event_bus
         self._bus = MarketDataBus(event_bus) if event_bus is not None else None
+        self._hawkes_engine = hawkes_engine
         self._symbols = {s.upper() for s in symbols}
         self._max_trades = max(100, max_trades)
         self._state: dict[str, LiveSymbolCache] = {}
@@ -160,6 +170,47 @@ class LiveScannerCache:
         self._subscriptions.clear()
         self._initialized = False
 
+    def _observe_hawkes_trade(self, trade: TradeTick, state: LiveSymbolCache) -> None:
+        """Forward accepted aggressor trades to an explicitly registered A-Stat model.
+
+        Exchange trade IDs provide deterministic ordering for equal-millisecond
+        timestamps. Equal timestamps are separated by one floating-point ULP;
+        genuinely out-of-order timestamps are rejected rather than time-shifted.
+        """
+        engine = self._hawkes_engine
+        if engine is None or not engine.has_hawkes_model(trade.symbol):
+            return
+        timestamp = trade.timestamp.timestamp()
+        previous = state.last_hawkes_timestamp
+        if previous is None:
+            last_timestamp = getattr(engine, "last_hawkes_timestamp", None)
+            if callable(last_timestamp):
+                previous = last_timestamp(trade.symbol)
+        if previous is not None:
+            if timestamp < previous:
+                state.hawkes_event_rejections += 1
+                return
+            if timestamp == previous:
+                timestamp = math.nextafter(previous, math.inf)
+        mark = 1 if trade.side == TradeSide.BUY else 0
+        try:
+            snapshot = engine.observe_marked_event(trade.symbol, timestamp, mark)
+        except (KeyError, ValueError):
+            state.hawkes_event_rejections += 1
+            logger.warning(
+                "live Hawkes event rejected",
+                extra={
+                    "aitos_extra": {
+                        "symbol": trade.symbol,
+                        "trade_id": trade.trade_id,
+                        "timestamp": timestamp,
+                    }
+                },
+            )
+            return
+        state.last_hawkes_timestamp = timestamp
+        state.last_hawkes_intensities = snapshot.intensities
+
     async def accept_live_trade(self, trade: TradeTick) -> None:
         if trade.symbol.upper() not in self._symbols:
             return
@@ -184,6 +235,7 @@ class LiveScannerCache:
             return
         state.trades.append(trade)
         state.trade_depth_matcher.add_trade(trade)
+        self._observe_hawkes_trade(trade, state)
         state.last_trade_at = received_at
         state.last_trade_source_at = trade.timestamp
         state.last_trade_received_at = received_at
@@ -271,6 +323,7 @@ class LiveScannerCache:
             return
         state.trades.append(trade)
         state.trade_depth_matcher.add_trade(trade)
+        self._observe_hawkes_trade(trade, state)
         state.last_trade_at = received_at
         state.last_trade_source_at = event.event_time
         state.last_trade_received_at = received_at

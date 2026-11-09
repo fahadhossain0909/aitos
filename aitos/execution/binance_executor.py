@@ -325,7 +325,7 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 0,
                 0,
                 success=False,
-                error=f"terminal order without fill: {status}",
+                error=f"order was not filled (terminal status: {status})",
             )
         if isinstance(response.get("avgPrice"), bool) or isinstance(
             response.get("orderId"), bool

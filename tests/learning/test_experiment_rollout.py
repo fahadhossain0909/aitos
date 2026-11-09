@@ -325,3 +325,38 @@ def test_canary_rollback_failure_is_persisted_for_manual_reconciliation(
         coordinator.get("strategy", "v2")["rollback_reason"]
         == "canary_rollback_route_failed"
     )
+
+
+def test_experiment_engine_runs_reality_check_fdr_and_mcs_on_net_returns():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    events = [
+        {"timestamp": start + timedelta(days=i), "regime": "trend"} for i in range(120)
+    ]
+    plan = ExperimentPlan(
+        name="family-validation",
+        baseline=ExperimentVariant("primary"),
+        variants=(ExperimentVariant("challenger"),),
+        cost_scenarios=(CostScenario("base", 0.0004, 2.0),),
+        minimum_samples=30,
+    )
+
+    def evaluate(rows, variant, cost, regime):
+        offset = 0.001 if variant.name == "primary" else 0.0005
+        returns = [offset + (index % 7) * 0.0001 for index in range(len(rows))]
+        return {
+            "total_return": sum(returns),
+            "max_drawdown": 0.02,
+            "sharpe": 1.2,
+            "trades": len(rows),
+            "sample_count": len(rows),
+            "net_returns": returns,
+            "hypothesis_p_value": 0.01 if variant.name == "primary" else 0.04,
+        }
+
+    report = ExperimentEngine().run(plan, events, evaluate)
+    family = report.statistical_validation["trend|base"]
+    assert family["family_size"] == 2
+    assert family["reality_check"]["resamples"] == 1000
+    assert family["adjusted_p_values"]["method"] == "bh"
+    assert family["model_confidence_set"] is not None
+    assert "trend|base" in report.to_dict()["statistical_validation"]

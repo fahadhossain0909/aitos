@@ -45,6 +45,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from aitos.config.paths import get_model_data_dir
 from aitos.config.tuning import TuningSettings, load_tuning_settings
 from aitos.core.contracts import (
     AITOSModule,
@@ -79,6 +80,11 @@ from aitos.models.trade import (
 )
 from aitos.risk.models import PortfolioState, PositionExposure, PositionSizeResult
 from aitos.risk.risk_engine import RiskEngine
+from aitos.statistics.contracts import FeatureSnapshot, ForecastEnvelope
+from aitos.statistics.decision_ledger import DecisionOutcomeLedger
+from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
+from aitos.statistics.risk_overlay import assess_statistical_risk_forecast
+from aitos.statistics.shadow import StatisticalShadowLedger
 from aitos.trading.tp_contract import TakeProfitExecutionContract
 
 if TYPE_CHECKING:
@@ -95,6 +101,7 @@ TOPIC_ENTRY_SIGNAL = "decision.entry"
 TOPIC_REJECTED = "trade.rejected"
 TOPIC_ORDER_SUBMITTED = "trade.order_submitted"
 TOPIC_ORDER_FILLED = "trade.order_filled"
+TOPIC_EXECUTION_RECONCILIATION_REQUIRED = "trade.execution_reconciliation_required"
 TOPIC_POSITION_OPENED = "trade.position_opened"
 TOPIC_POSITION_UPDATED = "trade.position_updated"
 TOPIC_COST_ADJUSTMENT = "trade.cost_adjustment"
@@ -127,6 +134,7 @@ class TradeLifecycle(AITOSModule):
         use_exchange_side_stops: bool = False,
         position_manager: PositionManager | None = None,
         market_context_provider: MarketContextProvider | None = None,
+        statistical_shadow_ledger: StatisticalShadowLedger | None = None,
     ) -> None:
         self._event_bus = event_bus
         self._risk_engine = risk_engine
@@ -140,6 +148,7 @@ class TradeLifecycle(AITOSModule):
         # identical to the pre-Phase-E lifecycle.
         self._position_manager = position_manager
         self._market_context_provider = market_context_provider
+        self._statistical_shadow_ledger = statistical_shadow_ledger
         self._tuning = load_tuning_settings()
         # Fair, per-position cadence: one busy symbol must not consume another
         # position's exit-analysis allowance.
@@ -157,6 +166,223 @@ class TradeLifecycle(AITOSModule):
         self._closed_trades: list[Trade] = []
         self._position_switch_coordinator: Any | None = None
         self._last_event_time: str | None = None
+
+    def _shadow_ledger(self) -> StatisticalShadowLedger:
+        if self._statistical_shadow_ledger is None:
+            self._statistical_shadow_ledger = StatisticalShadowLedger(
+                get_model_data_dir() / "statistical_shadow.sqlite3"
+            )
+        return self._statistical_shadow_ledger
+
+    def _decision_ledger(self) -> DecisionOutcomeLedger:
+        if not hasattr(self, "_decision_outcome_ledger"):
+            self._decision_outcome_ledger = DecisionOutcomeLedger(
+                get_model_data_dir() / "decision_outcomes.sqlite3"
+            )
+        return self._decision_outcome_ledger
+
+    def _financial_ml_pipeline(self) -> FinancialMLPipeline:
+        if not hasattr(self, "_financial_ml"):
+            self._financial_ml = FinancialMLPipeline(
+                get_model_data_dir() / "financial_ml.sqlite3"
+            )
+        return self._financial_ml
+
+    @staticmethod
+    def _trade_attribution_id(trade: Trade) -> str:
+        candidate_id = trade.agent_consensus.get("candidate_id")
+        if candidate_id:
+            return str(candidate_id)
+        trace_id = trade.agent_consensus.get("trace_id")
+        return (
+            f"{str(trace_id).strip()}:{trade.side.value}"
+            if trace_id
+            else trade.trade_id
+        )
+
+    async def _record_decision(
+        self,
+        decision_id: str,
+        *,
+        entity_id: str,
+        symbol: str,
+        side: str,
+        decision_type: str,
+        accepted: bool,
+        reason: str,
+        payload: Mapping[str, Any] | None = None,
+        decision_at: str | None = None,
+    ) -> None:
+        try:
+            candidate_id = (
+                str(payload.get("candidate_id"))
+                if isinstance(payload, Mapping) and payload.get("candidate_id")
+                else (
+                    entity_id
+                    if len(entity_id) == 32
+                    and all(
+                        character in "0123456789abcdef"
+                        for character in entity_id.lower()
+                    )
+                    else None
+                )
+            )
+            record_payload = dict(payload or {})
+            if candidate_id:
+                record_payload.setdefault("candidate_id", candidate_id)
+            await asyncio.to_thread(
+                self._decision_ledger().record_decision,
+                decision_id,
+                entity_id=entity_id,
+                symbol=symbol,
+                side=side,
+                decision_type=decision_type,
+                accepted=accepted,
+                reason=reason,
+                payload=record_payload,
+                decision_at=decision_at,
+                candidate_id=candidate_id,
+            )
+        except Exception:
+            logger.exception(
+                "decision attribution persistence failed",
+                extra={"aitos_extra": {"decision_id": decision_id, "symbol": symbol}},
+            )
+
+    async def _resolve_decision_outcomes(self, trade: Trade) -> None:
+        if trade.pnl_percent is None:
+            return
+        try:
+            await asyncio.to_thread(
+                self._decision_ledger().resolve_entity,
+                self._trade_attribution_id(trade),
+                outcome_value=float(trade.pnl_percent) / 100.0,
+                outcome_at=str(trade.exit_time or utc_now_iso()),
+                outcome={
+                    "provenance": "EXECUTED_TRADE_NET_OUTCOME",
+                    "counterfactual": False,
+                    "net_pnl_usd": float(trade.pnl),
+                    "pnl_percent": float(trade.pnl_percent),
+                    "close_reason": str(getattr(trade, "close_reason", "") or ""),
+                    "fees_paid_usd": float(trade.fees_paid_usd),
+                    "funding_pnl_usd": float(trade.funding_pnl_usd),
+                },
+                candidate_id=(
+                    str(trade.agent_consensus.get("candidate_id"))
+                    if trade.agent_consensus.get("candidate_id")
+                    else None
+                ),
+                outcome_provenance="EXECUTED_TRADE_NET_OUTCOME",
+            )
+            candidate_id = trade.agent_consensus.get("candidate_id")
+            if candidate_id:
+                resolved = await asyncio.to_thread(
+                    self._financial_ml_pipeline().resolve_executed,
+                    str(candidate_id),
+                    net_return=float(trade.pnl_percent) / 100.0,
+                    resolved_at=str(trade.exit_time or utc_now_iso()),
+                    trade_id=trade.trade_id,
+                    outcome={
+                        "net_pnl_usd": float(trade.pnl),
+                        "fees_paid_usd": float(trade.fees_paid_usd),
+                        "funding_pnl_usd": float(trade.funding_pnl_usd),
+                        "close_reason": str(getattr(trade, "close_reason", "") or ""),
+                    },
+                )
+                if not resolved:
+                    logger.error(
+                        "closed trade did not resolve its Financial ML candidate",
+                        extra={
+                            "aitos_extra": {
+                                "candidate_id": candidate_id,
+                                "trade_id": trade.trade_id,
+                            }
+                        },
+                    )
+        except Exception:
+            logger.exception(
+                "decision outcome reconciliation failed",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
+
+    def _record_statistical_forecast(self, trade: Trade) -> bool:
+        forecast = trade.agent_consensus.get("statistical_forecast")
+        if not isinstance(forecast, Mapping):
+            return False
+        as_of = str(forecast["as_of"])
+        sample_count = int(forecast["sample_size"])
+        feature_values = {
+            str(key): float(value)
+            for key, value in trade.agent_consensus.items()
+            if isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        }
+        feature_values.update(
+            {
+                f"statistical_{key}": float(value)
+                for key, value in forecast.items()
+                if isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+            }
+        )
+        feature_snapshot_id = str(
+            forecast.get("feature_snapshot_id")
+            or f"{trade.symbol}:{forecast['horizon']}:{as_of}"
+        )
+        snapshot = FeatureSnapshot(
+            symbol=trade.symbol,
+            horizon=str(forecast["horizon"]),
+            as_of=as_of,
+            window_start=str(forecast.get("window_start") or as_of),
+            values=feature_values,
+            source_watermarks={"scanner": as_of},
+            sample_count=sample_count,
+        )
+        envelope = ForecastEnvelope(
+            symbol=trade.symbol,
+            horizon=str(forecast["horizon"]),
+            side=str(forecast["side"]),
+            model_id=str(forecast["model_id"]),
+            model_version=str(forecast["model_version"]),
+            as_of=as_of,
+            feature_snapshot_id=feature_snapshot_id,
+            sample_count=sample_count,
+            expected_return=float(forecast["expected_return"]),
+            expected_volatility=float(forecast["forecast_volatility"]),
+            downside_probability=float(forecast["downside_probability"]),
+            tail_probability=float(forecast["tail_probability"]),
+            expected_shortfall=(
+                None
+                if forecast.get("expected_shortfall") is None
+                else float(forecast["expected_shortfall"])
+            ),
+        )
+        return self._shadow_ledger().record_forecast(
+            trade.trade_id,
+            envelope,
+            predicted_up=float(forecast["predicted_up"]),
+            predicted_variance=max(envelope.expected_volatility**2, 1e-12),
+            created_at=trade.entry_time,
+            feature_snapshot=snapshot,
+        )
+
+    def _record_statistical_outcome(self, trade: Trade) -> bool:
+        if not isinstance(trade.agent_consensus.get("statistical_forecast"), Mapping):
+            return False
+        if trade.pnl_percent is None:
+            return False
+        actual_return = float(trade.pnl_percent) / 100.0
+        # A single trade's squared net return is a low-frequency variance
+        # proxy, not high-frequency realised variance. Keep that limitation
+        # explicit in the ledger documentation and validation interpretation.
+        return self._shadow_ledger().record_outcome(
+            trade.trade_id,
+            actual_return=actual_return,
+            realised_variance=actual_return * actual_return,
+            resolved_at=trade.exit_time,
+        )
 
     def apply_tuning_settings(self, settings: TuningSettings) -> None:
         """Apply an explicitly reloaded tuning snapshot to position monitoring."""
@@ -351,6 +577,10 @@ class TradeLifecycle(AITOSModule):
         if funnel_store is not None:
             funnel_store.close()
             delattr(self, "_aitos_directional_funnel")
+        financial_ml = getattr(self, "_financial_ml", None)
+        if financial_ml is not None:
+            financial_ml.close()
+            delattr(self, "_financial_ml")
         gateway = getattr(self, "_aitos_capital_gateway", None)
         if gateway is not None:
             close_calibrator = getattr(gateway.calibrator, "close", None)
@@ -449,7 +679,25 @@ class TradeLifecycle(AITOSModule):
             pass
         try:
             trade = await self._submit_opportunity_impl(opportunity, portfolio)
-        except Exception:
+        except Exception as exc:
+            trace_id = opportunity.agent_consensus.get("trace_id")
+            await self._record_decision(
+                f"{opportunity.opportunity_id}:EXECUTION_FAILURE:{time.time_ns()}",
+                entity_id=(
+                    f"{str(trace_id).strip()}:{opportunity.side.value}"
+                    if trace_id
+                    else opportunity.opportunity_id
+                ),
+                symbol=symbol or "UNKNOWN",
+                side=opportunity.side.value,
+                decision_type="EXECUTION_FAILURE",
+                accepted=False,
+                reason=f"opportunity_submission_failed:{type(exc).__name__}",
+                payload={
+                    "opportunity_id": opportunity.opportunity_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
             try:
                 record_error(
                     PipelineStage.TRADE_LIFECYCLE.value,
@@ -872,6 +1120,17 @@ class TradeLifecycle(AITOSModule):
                 source_module=self.module_id,
             )
         )
+        action_type = str(pos_action.action.value).upper()
+        await self._record_decision(
+            f"{trade.trade_id}:EIE:{time.time_ns()}",
+            entity_id=self._trade_attribution_id(trade),
+            symbol=trade.symbol,
+            side=trade.side.value,
+            decision_type=action_type,
+            accepted=action_type != "HOLD",
+            reason=str(getattr(pos_action, "reason", action_type.lower())),
+            payload=pos_action.to_dict(),
+        )
 
         if pos_action.action == ExitAction.EXIT:
             return await self._trigger_exit(
@@ -1072,7 +1331,21 @@ class TradeLifecycle(AITOSModule):
             pass
         try:
             result = await self._close_trade_impl(trade_id, exit_price, reason)
-        except Exception:
+        except Exception as exc:
+            if trade is not None:
+                await self._record_decision(
+                    f"{trade_id}:CLOSE_EXECUTION_FAILURE:{time.time_ns()}",
+                    entity_id=self._trade_attribution_id(trade),
+                    symbol=symbol or "UNKNOWN",
+                    side=trade.side.value,
+                    decision_type="EXECUTION_FAILURE",
+                    accepted=False,
+                    reason=f"close_execution_failed:{type(exc).__name__}",
+                    payload={
+                        "trade_id": trade_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
             try:
                 record_error(
                     PipelineStage.TRADE_LIFECYCLE.value,
@@ -1216,6 +1489,7 @@ class TradeLifecycle(AITOSModule):
         self._closed_trades.append(trade)
         if self._order_executor.requires_exchange_execution:
             await self._commit_live_execution(trade)
+        await self._resolve_decision_outcomes(trade)
         gateway = getattr(self, "_aitos_capital_gateway", None)
         if gateway is not None:
             try:
@@ -1255,6 +1529,13 @@ class TradeLifecycle(AITOSModule):
                 source_module=self.module_id,
             )
         )
+        try:
+            await asyncio.to_thread(self._record_statistical_outcome, trade)
+        except Exception:
+            logger.exception(
+                "statistical shadow outcome persistence failed",
+                extra={"aitos_extra": {"trade_id": trade.trade_id}},
+            )
         self._last_event_time = trade.updated_at
         return trade
 
@@ -1593,6 +1874,43 @@ class TradeLifecycle(AITOSModule):
                         f"({approved_risk_budget:.8f} USD)"
                     ),
                 )
+
+        statistical_risk_assessment = None
+        statistical_forecast = opportunity.agent_consensus.get("statistical_forecast")
+        if statistical_forecast is not None:
+            try:
+                statistical_risk_assessment = assess_statistical_risk_forecast(
+                    statistical_forecast,
+                    symbol=opportunity.symbol,
+                    side=opportunity.side.value,
+                    horizon=opportunity.timeframe,
+                )
+            except (TypeError, ValueError) as exc:
+                return await self._reject(
+                    opportunity, f"statistical_risk_overlay: {exc}"
+                )
+            if statistical_risk_assessment.size_multiplier < 1.0:
+                stop_risk_rate = (
+                    abs(opportunity.entry_price - sizing_stop_price)
+                    / opportunity.entry_price
+                )
+                reduced_notional = (
+                    math.floor(
+                        sizing.position_size_usd
+                        * statistical_risk_assessment.size_multiplier
+                        * 100.0
+                    )
+                    / 100.0
+                )
+                sizing = PositionSizeResult(
+                    position_size_usd=reduced_notional,
+                    leverage=sizing.leverage,
+                    risk_amount_usd=round(reduced_notional * stop_risk_rate, 2),
+                    rationale=(
+                        f"{sizing.rationale}; statistical risk multiplier="
+                        f"{statistical_risk_assessment.size_multiplier:.4f}"
+                    ),
+                )
         if sizing.position_size_usd <= 0.0:
             return await self._reject(
                 opportunity, f"sector exposure cap exhausted for {candidate_sector}"
@@ -1620,21 +1938,29 @@ class TradeLifecycle(AITOSModule):
             )
         )
         quantity = sizing.position_size_usd / opportunity.entry_price
+        # Bind both durable ledgers to one stable logical opportunity identity.
+        # The client ID suffix must remain the actual trade ID for orphan checks.
+        trade_id = hashlib.sha256(opportunity.opportunity_id.encode()).hexdigest()[:24]
         order_result = await self._order_executor.submit_order(
             OrderRequest(
                 symbol=opportunity.symbol,
                 side=opportunity.side,
                 quantity=quantity,
                 reference_price=opportunity.entry_price,
-                # Intent identity must distinguish later opportunities with the
-                # same economics, while remaining stable for one opportunity.
-                client_order_id="aitos-entry-"
-                + hashlib.sha256(opportunity.opportunity_id.encode()).hexdigest()[:24],
+                client_order_id=f"aitos-entry-{trade_id}",
             )
         )
-        if not order_result.success:
+        if not order_result.success and order_result.filled_quantity <= 0.0:
             return await self._reject(
                 opportunity, f"order submission failed: {order_result.error}"
+            )
+        if not live_execution and (
+            not _valid_market_price(order_result.filled_quantity)
+            or not _valid_market_price(order_result.fill_price)
+        ):
+            return await self._reject(
+                opportunity,
+                "order accepted without a valid confirmed fill; venue reconciliation required",
             )
         if (
             not _valid_market_price(order_result.filled_quantity)
@@ -1646,8 +1972,31 @@ class TradeLifecycle(AITOSModule):
                 order_result.order_id,
                 "invalid entry execution evidence",
             )
+        actual_filled_notional = order_result.filled_quantity * order_result.fill_price
+        fill_ratio = actual_filled_notional / sizing.position_size_usd
+        if not math.isfinite(fill_ratio) or fill_ratio <= 0.0:
+            return await self._reject(
+                opportunity,
+                "venue fill produced an invalid actual position notional",
+            )
+        execution_error = order_result.error
+        if not order_result.success and not execution_error:
+            execution_error = (
+                "adapter reported failure despite a confirmed venue fill; "
+                "manual execution reconciliation required"
+            )
+        sizing = PositionSizeResult(
+            position_size_usd=actual_filled_notional,
+            leverage=sizing.leverage,
+            risk_amount_usd=round(sizing.risk_amount_usd * fill_ratio, 2),
+            rationale=(
+                f"{sizing.rationale}; reconciled to actual venue fill "
+                f"({order_result.filled_quantity:.12g} @ "
+                f"{order_result.fill_price:.12g})"
+            ),
+        )
         trade = Trade(
-            trade_id=new_trade_id(),
+            trade_id=trade_id,
             symbol=opportunity.symbol,
             side=opportunity.side,
             entry_price=order_result.fill_price,
@@ -1665,7 +2014,22 @@ class TradeLifecycle(AITOSModule):
                 else sizing.risk_amount_usd
             ),
             strategy_id=opportunity.strategy_id,
-            agent_consensus=opportunity.agent_consensus,
+            agent_consensus={
+                **opportunity.agent_consensus,
+                **(
+                    {
+                        "statistical_risk_assessment": {
+                            "size_multiplier": statistical_risk_assessment.size_multiplier,
+                            "volatility_ratio": statistical_risk_assessment.volatility_ratio,
+                            "tail_probability": statistical_risk_assessment.tail_probability,
+                            "expected_shortfall": statistical_risk_assessment.expected_shortfall,
+                            "reasons": list(statistical_risk_assessment.reasons),
+                        }
+                    }
+                    if statistical_risk_assessment is not None
+                    else {}
+                ),
+            },
             explanation=opportunity.rationale,
             sl_price=opportunity.stop_loss_price,
             tp_price=(
@@ -1708,10 +2072,7 @@ class TradeLifecycle(AITOSModule):
             )
         self._open_trades[trade.trade_id] = trade
         if live_execution:
-            client_id = (
-                "aitos-entry-"
-                + hashlib.sha256(opportunity.opportunity_id.encode()).hexdigest()[:24]
-            )
+            client_id = f"aitos-entry-{trade.trade_id}"
             self._execution_faults[trade.trade_id] = client_id
             # Install durable ownership before optional telemetry can fail.
             await self._execution_state_writer(trade)
@@ -1738,6 +2099,84 @@ class TradeLifecycle(AITOSModule):
                 source_module=self.module_id,
             )
         )
+        candidate_id = trade.agent_consensus.get("candidate_id")
+        if candidate_id:
+            try:
+                bound = await asyncio.to_thread(
+                    self._financial_ml_pipeline().mark_executed,
+                    str(candidate_id),
+                    trade.trade_id,
+                )
+                if not bound:
+                    logger.error(
+                        "filled trade could not bind its Financial ML candidate",
+                        extra={
+                            "aitos_extra": {
+                                "candidate_id": candidate_id,
+                                "trade_id": trade.trade_id,
+                            }
+                        },
+                    )
+            except Exception:
+                logger.exception(
+                    "financial ML candidate execution binding failed",
+                    extra={
+                        "aitos_extra": {
+                            "candidate_id": candidate_id,
+                            "trade_id": trade.trade_id,
+                        }
+                    },
+                )
+        await self._record_decision(
+            f"{trade.trade_id}:ENTRY",
+            entity_id=self._trade_attribution_id(trade),
+            symbol=trade.symbol,
+            side=trade.side.value,
+            decision_type="ENTRY",
+            accepted=True,
+            reason="entry_order_filled_and_position_opened",
+            payload={
+                "entry_price": trade.entry_price,
+                "quantity": trade.quantity,
+                "position_size_usd": trade.position_size_usd,
+                "risk_amount_usd": trade.risk_amount_usd,
+                "strategy_id": trade.strategy_id,
+                "candidate_id": trade.agent_consensus.get("candidate_id"),
+                "statistical_risk_assessment": trade.agent_consensus.get(
+                    "statistical_risk_assessment"
+                ),
+            },
+            decision_at=trade.entry_time,
+        )
+        if execution_error:
+            await self._record_decision(
+                f"{trade.trade_id}:EXECUTION_FAILURE",
+                entity_id=self._trade_attribution_id(trade),
+                symbol=trade.symbol,
+                side=trade.side.value,
+                decision_type="EXECUTION_FAILURE",
+                accepted=False,
+                reason="partial_fill_or_order_state_requires_reconciliation",
+                payload={
+                    "order_id": order_result.order_id,
+                    "filled_quantity": order_result.filled_quantity,
+                    "fill_price": order_result.fill_price,
+                    "execution_error": execution_error,
+                },
+            )
+            await self._event_bus.publish(
+                Event(
+                    topic=TOPIC_EXECUTION_RECONCILIATION_REQUIRED,
+                    payload={
+                        "trade_id": trade.trade_id,
+                        "symbol": trade.symbol,
+                        "order_id": order_result.order_id,
+                        "filled_quantity": order_result.filled_quantity,
+                        "error": execution_error,
+                    },
+                    source_module=self.module_id,
+                )
+            )
         if self._position_manager is not None:
             register_entry_thesis = getattr(
                 self._position_manager, "register_entry_thesis", None
@@ -1785,9 +2224,30 @@ class TradeLifecycle(AITOSModule):
         self._last_event_time = trade.entry_time
         if self._use_exchange_side_stops and not live_execution:
             await self._place_exchange_side_stops(trade)
+        if statistical_risk_assessment is not None:
+            try:
+                await asyncio.to_thread(self._record_statistical_forecast, trade)
+            except Exception:
+                logger.exception(
+                    "statistical shadow forecast persistence failed",
+                    extra={"aitos_extra": {"trade_id": trade.trade_id}},
+                )
         return trade
 
     async def _reject(self, opportunity: Opportunity, reason: str) -> Trade:
+        candidate_id = opportunity.agent_consensus.get("candidate_id")
+        if candidate_id:
+            try:
+                await asyncio.to_thread(
+                    self._financial_ml_pipeline().reject_candidate,
+                    str(candidate_id),
+                    reason,
+                )
+            except Exception:
+                logger.exception(
+                    "financial ML rejected candidate transition failed",
+                    extra={"aitos_extra": {"candidate_id": candidate_id}},
+                )
         trade = Trade(
             trade_id=new_trade_id(),
             symbol=opportunity.symbol,
@@ -1810,6 +2270,27 @@ class TradeLifecycle(AITOSModule):
             state=TradeLifecycleState.REJECTED,
             entry_time=utc_now_iso(),
             rejection_reason=reason,
+        )
+        failure_type = (
+            "EXECUTION_FAILURE"
+            if reason.startswith("order submission failed:")
+            else "REJECTION"
+        )
+        await self._record_decision(
+            f"{trade.trade_id}:{failure_type}",
+            entity_id=self._trade_attribution_id(trade),
+            symbol=trade.symbol,
+            side=trade.side.value,
+            decision_type=failure_type,
+            accepted=False,
+            reason=reason,
+            payload={
+                "strategy_id": trade.strategy_id,
+                "candidate_id": trade.agent_consensus.get("candidate_id"),
+                "entry_price": trade.entry_price,
+                "rationale": trade.explanation,
+            },
+            decision_at=trade.entry_time,
         )
         await self._event_bus.publish(
             Event(

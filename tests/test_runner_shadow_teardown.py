@@ -3,12 +3,14 @@
 import ast
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+import asyncio
+from unittest.mock import AsyncMock, Mock
 import pytest
 
 
 @pytest.mark.parametrize(
-    "failure", ["none", "heal", "health", "persistence", "repository"]
+    "failure",
+    ["none", "heal", "health", "persistence", "repository", "drift", "drift-cancel"],
 )
 async def test_real_runner_finally_always_drains_new_shadow_worker(failure):
     tree = ast.parse(Path("run_paper_trading.py").read_text())
@@ -29,6 +31,20 @@ async def test_real_runner_finally_always_drains_new_shadow_worker(failure):
         return SimpleNamespace(**kwargs)
 
     env.update(
+        logger=Mock(),
+        drift_engine=obj(
+            stop_drift_monitor=AsyncMock(
+                side_effect=(
+                    asyncio.CancelledError()
+                    if failure == "drift-cancel"
+                    else (
+                        OSError("synthetic drift stop failure")
+                        if failure == "drift"
+                        else None
+                    )
+                )
+            )
+        ),
         _cancel_task=AsyncMock(
             side_effect=OSError("synthetic") if failure == "heal" else None
         ),
@@ -81,9 +97,12 @@ async def test_real_runner_finally_always_drains_new_shadow_worker(failure):
     )
     module = ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[]))
     exec(compile(module, "actual-runner-teardown", "exec"), env)
-    if failure == "none":
+    if failure in {"none", "drift"}:
         await env["teardown"]()
     else:
-        with pytest.raises(OSError):
+        with pytest.raises(
+            asyncio.CancelledError if failure == "drift-cancel" else OSError
+        ):
             await env["teardown"]()
     assert env["shadow"].stop.await_count >= 1
+    env["drift_engine"].stop_drift_monitor.assert_awaited_once()

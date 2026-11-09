@@ -10,6 +10,8 @@ from aitos.models.trade import (
     TradeSide,
 )
 from aitos.trading.persistent_state import (
+    AmbiguousOrderSubmissionError,
+    DurableTradingStateStore,
     IdempotentOrderExecutor,
     TradeStatePersistence,
     _trade_from_dict,
@@ -42,6 +44,194 @@ async def test_order_executor_is_idempotent_for_repeated_request():
 
     assert first.order_id == second.order_id
     assert inner.calls == 1
+
+
+class FakeDurableOrderStore:
+    def __init__(self):
+        self.records = {}
+        self.fail_ack_once = False
+
+    async def load_order_record(self, client_order_id):
+        return self.records.get(client_order_id)
+
+    async def load_pending_order_intents(self):
+        return [
+            {"client_order_id": key, **record}
+            for key, record in self.records.items()
+            if record["state"] == "SUBMITTING"
+        ]
+
+    async def load_unlinked_acknowledged_orders(self):
+        return []
+
+    async def save_order_intent(self, client_order_id, request):
+        self.records[client_order_id] = {
+            "symbol": request["symbol"],
+            "state": "SUBMITTING",
+            "request": request,
+            "result": {},
+        }
+
+    async def save_order_result(self, client_order_id, symbol, result):
+        if self.fail_ack_once:
+            self.fail_ack_once = False
+            raise OSError("simulated lost acknowledgement persistence")
+        self.records[client_order_id] = {
+            "symbol": symbol,
+            "state": "ACKNOWLEDGED" if result["success"] else "REJECTED",
+            "request": self.records[client_order_id]["request"],
+            "result": result,
+        }
+
+
+@pytest.mark.asyncio
+async def test_durable_order_executor_recovers_lost_ack_without_resubmitting():
+    inner = CountingExecutor()
+    store = FakeDurableOrderStore()
+    store.fail_ack_once = True
+    request = OrderRequest(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=0.01,
+        reference_price=100_000.0,
+        client_order_id="aitos-entry-crash-window-1",
+    )
+
+    first_process = IdempotentOrderExecutor(inner, store)
+    with pytest.raises(OSError, match="lost acknowledgement"):
+        await first_process.submit_order(request)
+
+    second_process = IdempotentOrderExecutor(inner, store)
+    recovered = await second_process.submit_order(request)
+
+    assert recovered.order_id == "sim-1"
+    assert recovered.filled_quantity == pytest.approx(0.01)
+    assert inner.calls == 1
+    assert store.records[request.client_order_id]["state"] == "ACKNOWLEDGED"
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_order_blocks_other_entries_until_same_intent_is_reconciled():
+    inner = CountingExecutor()
+    store = FakeDurableOrderStore()
+    store.fail_ack_once = True
+    executor = IdempotentOrderExecutor(inner, store)
+    original = OrderRequest(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=0.01,
+        reference_price=100_000.0,
+        client_order_id="aitos-entry-blocked-1",
+    )
+    unrelated = OrderRequest(
+        symbol="ETHUSDT",
+        side=TradeSide.SHORT,
+        quantity=0.02,
+        reference_price=3_000.0,
+        client_order_id="aitos-entry-blocked-2",
+    )
+
+    with pytest.raises(OSError, match="lost acknowledgement"):
+        await executor.submit_order(original)
+    with pytest.raises(
+        AmbiguousOrderSubmissionError, match="new order submissions blocked"
+    ):
+        await executor.submit_order(unrelated)
+
+    recovered = await executor.submit_order(original)
+
+    assert recovered.order_id == "sim-1"
+    assert inner.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_durable_order_executor_blocks_resubmit_when_venue_lookup_is_ambiguous():
+    class NoLookupExecutor(CountingExecutor):
+        async def get_order_by_client_id(self, symbol, client_order_id):
+            return None
+
+    inner = NoLookupExecutor()
+    store = FakeDurableOrderStore()
+    request = OrderRequest(
+        symbol="ETHUSDT",
+        side=TradeSide.SHORT,
+        quantity=0.02,
+        reference_price=3_000.0,
+        client_order_id="aitos-entry-ambiguous-1",
+    )
+    await store.save_order_intent(
+        request.client_order_id,
+        IdempotentOrderExecutor._request_payload(request),
+    )
+
+    executor = IdempotentOrderExecutor(inner, store)
+    with pytest.raises(
+        AmbiguousOrderSubmissionError,
+        match="automatic resubmission blocked",
+    ):
+        await executor.submit_order(request)
+
+    assert inner.calls == 0
+    assert store.records[request.client_order_id]["state"] == "SUBMITTING"
+
+
+@pytest.mark.asyncio
+async def test_startup_detects_unlinked_accepted_zero_fill_order():
+    class QueryResult:
+        def __init__(self, rows):
+            self.result_rows = rows
+
+    class ClickHouseClient:
+        def __init__(self):
+            self.calls = 0
+
+        async def query(self, query, parameters=None):
+            self.calls += 1
+            if self.calls == 1:
+                return QueryResult(
+                    [
+                        (
+                            "aitos-entry-trade-orphan",
+                            "ACKNOWLEDGED",
+                            '{"filled_quantity": 0}',
+                        )
+                    ]
+                )
+            return QueryResult([])
+
+    class Repository:
+        _client = ClickHouseClient()
+
+    store = DurableTradingStateStore(Repository())
+
+    unlinked = await store.load_unlinked_acknowledged_orders()
+
+    assert unlinked == ["aitos-entry-trade-orphan"]
+
+
+@pytest.mark.asyncio
+async def test_startup_reconciliation_blocks_unlinked_recovered_fill():
+    inner = CountingExecutor()
+    store = FakeDurableOrderStore()
+    request = OrderRequest(
+        symbol="BTCUSDT",
+        side=TradeSide.LONG,
+        quantity=0.01,
+        reference_price=100_000.0,
+        client_order_id="aitos-entry-unlinked-1",
+    )
+    await store.save_order_intent(
+        request.client_order_id,
+        IdempotentOrderExecutor._request_payload(request),
+    )
+    await inner.submit_order(request)
+
+    executor = IdempotentOrderExecutor(inner, store)
+    recovery = await executor.reconcile_pending_orders()
+
+    assert recovery["pending"] == 1
+    assert recovery["filled_unlinked"] == [request.client_order_id]
+    assert recovery["terminal_unfilled"] == []
 
 
 class FakeExchange:

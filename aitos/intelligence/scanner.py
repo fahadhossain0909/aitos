@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from math import isfinite
+from math import isfinite, log
 from typing import Any
 
 from aitos.config.paths import get_model_data_dir
@@ -62,6 +63,8 @@ from aitos.intelligence.orderflow_liquidity_interaction import (
 from aitos.intelligence.rl_policy import NeutralRLScorer, RLPolicyScorer
 from aitos.logging_setup import get_logger
 from aitos.models.trade import Opportunity, TradeSide
+from aitos.statistics.decision_ledger import DecisionOutcomeLedger
+from aitos.statistics.financial_ml_pipeline import FinancialMLPipeline
 
 logger = get_logger("aitos.intelligence.scanner")
 _ACTIVE_SCAN_TRACE_ID: ContextVar[str] = ContextVar("aitos_scan_trace_id", default="")
@@ -254,6 +257,27 @@ def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _timestamp_iso(value: Any, fallback: str) -> str:
+    """Normalize exchange candle timestamps to timezone-aware ISO-8601."""
+    try:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, (int, float)) and isfinite(float(value)):
+            timestamp = float(value)
+            if abs(timestamp) > 100_000_000_000:
+                timestamp /= 1000.0
+            parsed = datetime.fromtimestamp(timestamp, timezone.utc)
+        elif isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            return fallback
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat()
+    except (OverflowError, OSError, TypeError, ValueError):
+        return fallback
+
+
 @dataclass(frozen=True)
 class ScanCandidate:
     symbol: str
@@ -268,6 +292,13 @@ class ScanCandidate:
     scanned_at: str = field(default_factory=_utc_now_iso)
     htf_adx: float = 0.0
     trace_id: str | None = None
+    statistical_forecast: dict[str, Any] | None = None
+    candidate_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    financial_ml_features: dict[str, float] = field(default_factory=dict)
+    meta_raw_probability: float | None = None
+    meta_probability: float | None = None
+    meta_accepted: bool | None = None
+    meta_reason: str | None = None
 
 
 def _volatility_fitness(
@@ -384,7 +415,10 @@ class OpportunityScanner(AITOSModule):
         self._interaction_engine = FlowLiquidityInteractionEngine()
         self._a_stat_bridge = AStatBridge()
         self._live_cache = LiveScannerCache(
-            event_bus, self._symbols, max_trades=max(5000, trade_lookback)
+            event_bus,
+            self._symbols,
+            max_trades=max(5000, trade_lookback),
+            hawkes_engine=self._a_stat_bridge.engine,
         )
         self._last_scan_at = None
         self._last_candidate_count = 0
@@ -399,6 +433,12 @@ class OpportunityScanner(AITOSModule):
         )
         self._directional_funnel = DirectionalFunnelStore(
             get_model_data_dir() / "directional_funnel.sqlite3"
+        )
+        self._decision_outcome_ledger = DecisionOutcomeLedger(
+            get_model_data_dir() / "decision_outcomes.sqlite3"
+        )
+        self._financial_ml = FinancialMLPipeline(
+            get_model_data_dir() / "financial_ml.sqlite3"
         )
         self._ranking_hysteresis = RankingHysteresis(
             margin_points=self._tuning.analysis.ranking_hysteresis_points
@@ -485,8 +525,32 @@ class OpportunityScanner(AITOSModule):
                 "live_state_symbols": sum(
                     1 for s in self._symbols if self._live_cache.snapshot(s) is not None
                 ),
+                "live_state_symbols_by_symbol": [
+                    symbol
+                    for symbol in self._symbols
+                    if self._live_cache.snapshot(symbol) is not None
+                ],
+                "live_trade_events_by_symbol": {
+                    symbol: len(state.trades)
+                    for symbol in self._symbols
+                    if (state := self._live_cache.snapshot(symbol)) is not None
+                    and state.trades
+                },
+                "hawkes_models": self._a_stat_bridge.engine.hawkes_model_status(),
+                "live_hawkes": {
+                    symbol: {
+                        "last_event_timestamp": state.last_hawkes_timestamp,
+                        "intensities": state.last_hawkes_intensities,
+                        "event_rejections": state.hawkes_event_rejections,
+                    }
+                    for symbol in self._symbols
+                    if (state := self._live_cache.snapshot(symbol)) is not None
+                    and state.last_hawkes_timestamp is not None
+                },
                 "candidate_rotation": self._candidate_rotation.snapshot(),
                 "candidate_outcomes": self._candidate_outcomes.snapshot(),
+                "decision_outcome_ledger": self._decision_outcome_ledger.snapshot(),
+                "financial_ml": self._financial_ml.snapshot(),
                 "directional_funnel": self._directional_funnel.snapshot(),
                 "ranking_hysteresis": self._ranking_hysteresis.snapshot(),
             },
@@ -494,8 +558,11 @@ class OpportunityScanner(AITOSModule):
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
         await self._live_cache.shutdown()
+        while self._reconcile_financial_ml_labels():
+            pass
         self._candidate_outcomes.close()
         self._directional_funnel.close()
+        self._financial_ml.close()
         await self._exchange.close()
 
     async def emit_events(self) -> AsyncIterator[Event]:
@@ -519,9 +586,41 @@ class OpportunityScanner(AITOSModule):
             and trade.trade_id != previous_trade_id
         )
         if accepted:
-            self._candidate_outcomes.update_price(
-                trade.symbol, trade.price, getattr(trade, "timestamp", None)
-            )
+            timestamp = getattr(trade, "timestamp", None)
+            quantity = float(getattr(trade, "quantity", 0.0) or 0.0)
+            trade_side = str(
+                getattr(
+                    getattr(trade, "side", None), "value", getattr(trade, "side", "BUY")
+                )
+            ).upper()
+            signed_volume = quantity if trade_side == "BUY" else -quantity
+            try:
+                from aitos.statistics.financial_ml import MarketEvent
+
+                event = MarketEvent(
+                    timestamp=_timestamp_iso(timestamp, _utc_now_iso()),
+                    price=float(trade.price),
+                    volume=quantity,
+                    signed_volume=signed_volume,
+                    event_id=f"{trade.symbol.upper()}:{trade.trade_id}",
+                )
+                await asyncio.to_thread(
+                    self._financial_ml.ingest_market_event, trade.symbol, event
+                )
+                await asyncio.to_thread(
+                    self._financial_ml.observe_price,
+                    trade.symbol,
+                    float(trade.price),
+                    timestamp,
+                )
+                await asyncio.to_thread(self._reconcile_financial_ml_labels)
+            except Exception:
+                logger.exception(
+                    "financial ML live event ingestion failed",
+                    extra={"aitos_extra": {"symbol": trade.symbol}},
+                )
+            self._candidate_outcomes.update_price(trade.symbol, trade.price, timestamp)
+            await asyncio.to_thread(self._reconcile_candidate_markouts)
 
     async def accept_live_order_book(self, book):
         await self._live_cache.accept_live_order_book(book)
@@ -545,6 +644,43 @@ class OpportunityScanner(AITOSModule):
                     }
                 },
             )
+        if event.get("symbol") and event.get("stage"):
+            details = dict(event.get("details") or {})
+            candidate_id = details.get("candidate_id")
+            attribution_id = str(
+                candidate_id or trace_id or f"scan:{event['symbol']}:{time.time_ns()}"
+            )
+            try:
+                await asyncio.to_thread(
+                    self._decision_outcome_ledger.record_decision,
+                    (
+                        f"{attribution_id}:{event.get('symbol')}:"
+                        f"{event.get('side', 'UNKNOWN')}:{event['stage']}:{time.time_ns()}"
+                    ),
+                    entity_id=attribution_id,
+                    symbol=str(event["symbol"]),
+                    side=str(event.get("side") or "UNKNOWN"),
+                    decision_type="GATE",
+                    accepted=bool(event.get("accepted", False)),
+                    reason=str(event.get("reason") or event["stage"]),
+                    payload={
+                        "stage": str(event["stage"]),
+                        "details": details,
+                        "candidate_id": candidate_id,
+                    },
+                    candidate_id=str(candidate_id) if candidate_id else None,
+                )
+            except Exception:
+                logger.exception(
+                    "scanner decision attribution persistence failed",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": event.get("symbol"),
+                            "stage": event.get("stage"),
+                            "trace_id": attribution_id,
+                        }
+                    },
+                )
 
     def _footprint_tick_size(self, symbol: str) -> float | None:
         tick = self._footprint_tick_sizes.get(symbol)
@@ -1508,6 +1644,54 @@ class OpportunityScanner(AITOSModule):
                 f"confidence={a_stat_result.probability_confidence:.3f}, "
                 f"advanced_stack={a_stat_result.advanced is not None}"
             )
+        scanned_at = _utc_now_iso()
+        statistical_forecast = None
+        if a_stat_result is not None and a_stat_result.advanced is not None:
+            advanced = a_stat_result.advanced
+            is_long = direction == TradeSide.LONG
+            loss_tail = advanced.evt if is_long else advanced.upside_evt
+            reference_variance = float(advanced.garch.long_run_variance)
+            forecast_volatility = float(a_stat_result.expected_volatility)
+            if (
+                loss_tail is not None
+                and isfinite(reference_variance)
+                and reference_variance > 0.0
+                and isfinite(forecast_volatility)
+                and forecast_volatility >= 0.0
+            ):
+                statistical_forecast = {
+                    "symbol": symbol,
+                    "side": direction.value,
+                    "horizon": self._timeframe,
+                    "model_id": "aitos-contract-statistical-stack",
+                    "model_version": "1",
+                    "as_of": scanned_at,
+                    "window_start": _timestamp_iso(
+                        getattr(klines[0], "open_time", None), scanned_at
+                    ),
+                    "feature_snapshot_id": (f"{symbol}:{self._timeframe}:{scanned_at}"),
+                    "sample_size": int(a_stat_result.sample_size),
+                    "predicted_up": float(
+                        a_stat_result.direction.up
+                        if is_long
+                        else a_stat_result.direction.down
+                    ),
+                    "downside_probability": float(
+                        a_stat_result.downside_probability
+                        if is_long
+                        else a_stat_result.direction.up
+                    ),
+                    "forecast_volatility": forecast_volatility,
+                    "reference_volatility": reference_variance**0.5,
+                    "tail_probability": float(loss_tail.tail_probability),
+                    "expected_shortfall": float(loss_tail.expected_shortfall),
+                    "expected_return": float(
+                        a_stat_result.expected_return * (1.0 if is_long else -1.0)
+                    ),
+                    "probability_confidence": float(
+                        a_stat_result.probability_confidence
+                    ),
+                }
         candidate = ScanCandidate(
             symbol=symbol,
             direction=direction,
@@ -1518,9 +1702,77 @@ class OpportunityScanner(AITOSModule):
             entry_price=klines[-1].close,
             atr=atr,
             regime=regime,
+            scanned_at=scanned_at,
             htf_adx=float(htf_diagnostics.get("adx", 0.0)),
             trace_id=_ACTIVE_SCAN_TRACE_ID.get() or None,
+            statistical_forecast=statistical_forecast,
         )
+        event_features = self._financial_ml.event_features(symbol)
+        from aitos.statistics.financial_volatility import (
+            financial_volatility_features,
+        )
+
+        closes = [float(kline.close) for kline in klines]
+        historical_returns = [
+            log(closes[index] / closes[index - 1])
+            for index in range(1, len(closes))
+            if closes[index - 1] > 0 and closes[index] > 0
+        ]
+        volatility_features = financial_volatility_features(historical_returns)
+        financial_ml_features = {
+            "composite_score": candidate.composite_score,
+            "trend_strength": component_scores["trend_strength"],
+            "liquidity_quality": component_scores["liquidity_quality"],
+            "order_flow_bias": component_scores["order_flow_bias"],
+            "auction_context": component_scores["auction_context"],
+            "volatility_score": component_scores["volatility"],
+            "market_regime": component_scores["market_regime"],
+            "lead_lag": component_scores["lead_lag"],
+            "funding_rate": component_scores["funding_rate"],
+            "open_interest_trend": component_scores["open_interest_trend"],
+            "rl_confidence": component_scores["rl_confidence"],
+            "footprint_interaction": component_scores["footprint_interaction"],
+            "a_stat": component_scores["a_stat"],
+            "order_book_flow_imbalance": component_scores["order_book_flow_imbalance"],
+            "entry_timing": component_scores["entry_timing"],
+            "breakout_acceptance": component_scores["breakout_acceptance"],
+            "relative_strength": component_scores["relative_strength"],
+            "atr_pct": (
+                float(atr) / float(candidate.entry_price)
+                if candidate.entry_price > 0
+                else 0.0
+            ),
+            "side_sign": (1.0 if candidate.direction.value == "LONG" else -1.0),
+            **event_features,
+            **volatility_features,
+        }
+        from dataclasses import replace as replace_candidate
+
+        candidate = replace_candidate(
+            candidate, financial_ml_features=financial_ml_features
+        )
+        try:
+            await asyncio.to_thread(
+                self._financial_ml.register_candidate,
+                candidate_id=candidate.candidate_id,
+                symbol=symbol,
+                side=direction.value,
+                entry_price=float(candidate.entry_price),
+                volatility=max(1e-6, financial_ml_features["atr_pct"]),
+                features=financial_ml_features,
+                created_at=scanned_at,
+                trace_id=candidate.trace_id,
+            )
+        except Exception:
+            logger.exception(
+                "financial ML candidate registration failed",
+                extra={
+                    "aitos_extra": {
+                        "symbol": symbol,
+                        "candidate_id": candidate.candidate_id,
+                    }
+                },
+            )
         await self._record_funnel(
             symbol=symbol,
             side=direction.value,
@@ -1531,6 +1783,7 @@ class OpportunityScanner(AITOSModule):
                 "composite_score": candidate.composite_score,
                 "component_availability": candidate.component_availability,
                 "regime": candidate.regime,
+                "candidate_id": candidate.candidate_id,
             },
         )
         return candidate
@@ -1681,7 +1934,60 @@ class OpportunityScanner(AITOSModule):
         return self._top_n
 
     def record_candidate_rejection(self, candidate: ScanCandidate, reason: str) -> None:
-        self._candidate_outcomes.record_rejection(candidate, reason)
+        self._financial_ml.reject_candidate(candidate.candidate_id, reason)
+        rejection_id = self._candidate_outcomes.record_rejection(candidate, reason)
+        attribution_id = candidate.candidate_id or rejection_id
+        if rejection_id:
+            try:
+                self._decision_outcome_ledger.record_decision(
+                    f"{rejection_id}:REJECTION",
+                    entity_id=attribution_id,
+                    symbol=candidate.symbol,
+                    side=candidate.direction.value,
+                    decision_type="REJECTION",
+                    accepted=False,
+                    reason=reason,
+                    payload={
+                        "rejection_id": rejection_id,
+                        "trace_id": candidate.trace_id,
+                        "composite_score": candidate.composite_score,
+                        "regime": candidate.regime,
+                        "candidate_id": candidate.candidate_id,
+                    },
+                    candidate_id=candidate.candidate_id,
+                )
+                # Keep the fixed-horizon rejection markout as a separate
+                # outcome entity from Financial-ML barrier labels. Both share
+                # candidate_id, but their labels have different horizons and
+                # must never overwrite one another.
+                self._decision_outcome_ledger.record_decision(
+                    f"{rejection_id}:MARKOUT:900",
+                    entity_id=f"{attribution_id}:MARKOUT:900",
+                    symbol=candidate.symbol,
+                    side=candidate.direction.value,
+                    decision_type="REJECTION",
+                    accepted=False,
+                    reason=reason,
+                    payload={
+                        "rejection_id": rejection_id,
+                        "candidate_id": candidate.candidate_id,
+                        "trace_id": candidate.trace_id,
+                        "label_horizon_seconds": 900,
+                        "label_kind": "COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
+                    },
+                    candidate_id=candidate.candidate_id,
+                    outcome_provenance="COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
+                )
+            except Exception:
+                logger.exception(
+                    "candidate rejection attribution persistence failed",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": candidate.symbol,
+                            "trace_id": candidate.trace_id,
+                        }
+                    },
+                )
         self._candidate_rotation.record_rejection(
             candidate.symbol,
             reason,
@@ -1690,6 +1996,88 @@ class OpportunityScanner(AITOSModule):
                 f"{candidate.direction.value}:{candidate.regime}:{candidate.composite_score:.2f}",
             ),
         )
+
+    def _reconcile_financial_ml_labels(self) -> int:
+        """Publish resolved counterfactual barrier labels with their exact resolution time."""
+        resolved = 0
+        for label in self._financial_ml.pending_counterfactual_labels():
+            candidate_id = str(label["candidate_id"])
+            try:
+                updated = self._decision_outcome_ledger.resolve_entity(
+                    candidate_id,
+                    outcome_value=float(label["net_return"]),
+                    outcome_at=str(label["label_resolution_time"]),
+                    outcome={
+                        **dict(label.get("outcome") or {}),
+                        "label": int(label["label"]),
+                        "counterfactual": True,
+                        "provenance": str(label["outcome_provenance"]),
+                    },
+                    candidate_id=candidate_id,
+                    outcome_provenance=str(label["outcome_provenance"]),
+                )
+                if updated:
+                    self._financial_ml.mark_ledger_synced(candidate_id)
+                    resolved += updated
+                else:
+                    existing = self._decision_outcome_ledger.list_decisions(
+                        entity_id=candidate_id
+                    )
+                    if existing and all(
+                        row.get("outcome_value") is not None for row in existing
+                    ):
+                        self._financial_ml.mark_ledger_synced(candidate_id)
+            except Exception:
+                logger.exception(
+                    "financial ML candidate label could not be synchronized to decision ledger",
+                    extra={"aitos_extra": {"candidate_id": candidate_id}},
+                )
+        return resolved
+
+    def _reconcile_candidate_markouts(self) -> int:
+        """Resolve rejected-candidate decisions from the final 15-minute markout."""
+        resolved = 0
+        for markout in self._candidate_outcomes.completed_markouts(horizon_seconds=900):
+            attribution_id = str(markout.get("attribution_id") or "")
+            if not attribution_id:
+                continue
+            markout_entity_id = f"{attribution_id}:MARKOUT:900"
+            existing = self._decision_outcome_ledger.list_decisions(
+                entity_id=markout_entity_id
+            )
+            if any(row.get("outcome_value") is not None for row in existing):
+                continue
+            observed_at = datetime.fromtimestamp(
+                float(markout["observed_at"]), tz=timezone.utc
+            ).isoformat()
+            try:
+                resolved += self._decision_outcome_ledger.resolve_entity(
+                    markout_entity_id,
+                    outcome_value=float(markout["signed_return_pct"]) / 100.0,
+                    outcome_at=observed_at,
+                    outcome={
+                        "counterfactual": True,
+                        "provenance": "COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
+                        "horizon_seconds": 900,
+                        "markout_price": float(markout["price"]),
+                        "mae_pct": float(markout["mae_pct"]),
+                        "mfe_pct": float(markout["mfe_pct"]),
+                        "rejection_reason": str(markout["reason"]),
+                    },
+                    candidate_id=str(markout.get("candidate_id") or attribution_id),
+                    outcome_provenance="COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT",
+                )
+            except Exception:
+                logger.exception(
+                    "rejected-candidate outcome reconciliation failed",
+                    extra={
+                        "aitos_extra": {
+                            "symbol": markout.get("symbol"),
+                            "rejection_id": markout.get("rejection_id"),
+                        }
+                    },
+                )
+        return resolved
 
     def clear_candidate_cooldown(self, symbol: str) -> None:
         self._candidate_rotation.force_recheck(symbol)
@@ -1775,11 +2163,65 @@ class OpportunityScanner(AITOSModule):
         self, candidates: list[ScanCandidate], top_n: int | None = None
     ) -> list[ScanCandidate]:
         n = top_n if top_n is not None else self._top_n
+        from dataclasses import replace as replace_candidate
+
+        # The scanner is normally fully initialized, but lightweight unit
+        # harnesses and diagnostic callers may construct it without the
+        # optional FinancialMLPipeline. In that case preserve the primary
+        # strategy's score/ranking behavior rather than crashing; production
+        # construction always installs the pipeline in __init__.
+        financial_ml = getattr(self, "_financial_ml", None)
+        scored: list[ScanCandidate] = []
+        for candidate in candidates:
+            if financial_ml is None:
+                scored.append(candidate)
+                continue
+            prediction = financial_ml.predict(
+                candidate.candidate_id, candidate.financial_ml_features
+            )
+            candidate = replace_candidate(
+                candidate,
+                meta_raw_probability=prediction.raw_probability,
+                meta_probability=prediction.calibrated_probability,
+                meta_accepted=(
+                    prediction.accepted
+                    if prediction.calibrated_probability is not None
+                    else None
+                ),
+                meta_reason=prediction.reason,
+            )
+            scored.append(candidate)
+            if prediction.calibrated_probability is not None:
+                await self._record_funnel(
+                    symbol=candidate.symbol,
+                    side=candidate.direction.value,
+                    stage="financial_ml_meta_gate",
+                    accepted=prediction.accepted,
+                    reason=prediction.reason,
+                    details={
+                        "candidate_id": candidate.candidate_id,
+                        "raw_probability": prediction.raw_probability,
+                        "calibrated_probability": prediction.calibrated_probability,
+                        "mode": prediction.mode,
+                        "enforced": financial_ml.should_block(prediction),
+                    },
+                )
         eligible = [
-            c for c in candidates if c.composite_score >= self._min_score_threshold
+            candidate
+            for candidate in scored
+            if candidate.composite_score >= self._min_score_threshold
+            and not (
+                financial_ml is not None
+                and financial_ml.enforce
+                and financial_ml.should_block(
+                    financial_ml.predict(
+                        candidate.candidate_id, candidate.financial_ml_features
+                    )
+                )
+            )
         ]
         eligible_symbols = {candidate.symbol for candidate in eligible}
-        for candidate in candidates:
+        for candidate in scored:
             accepted = candidate.symbol in eligible_symbols
             await self._record_funnel(
                 symbol=candidate.symbol,
@@ -1789,18 +2231,32 @@ class OpportunityScanner(AITOSModule):
                 reason=(
                     "score_above_threshold"
                     if accepted
-                    else "composite_score_below_threshold"
+                    else (
+                        "financial_ml_meta_rejected"
+                        if candidate.composite_score >= self._min_score_threshold
+                        and financial_ml is not None
+                        and financial_ml.enforce
+                        else "composite_score_below_threshold"
+                    )
                 ),
                 details={
                     "composite_score": candidate.composite_score,
                     "minimum_score": self._min_score_threshold,
                     "trace_id": candidate.trace_id,
+                    "candidate_id": candidate.candidate_id,
+                    "meta_probability": candidate.meta_probability,
                 },
             )
         ranked = self._ranking_hysteresis.rank(eligible, n)
         ranked_symbols = {candidate.symbol for candidate in ranked}
         for candidate in eligible:
             accepted = candidate.symbol in ranked_symbols
+            if not accepted and financial_ml is not None:
+                await asyncio.to_thread(
+                    financial_ml.reject_candidate,
+                    candidate.candidate_id,
+                    "excluded_by_top_n_or_hysteresis",
+                )
             await self._record_funnel(
                 symbol=candidate.symbol,
                 side=candidate.direction.value,
@@ -1815,8 +2271,21 @@ class OpportunityScanner(AITOSModule):
                     "composite_score": candidate.composite_score,
                     "top_n": n,
                     "trace_id": candidate.trace_id,
+                    "candidate_id": candidate.candidate_id,
+                    "meta_probability": candidate.meta_probability,
                 },
             )
+        for candidate in scored:
+            if (
+                financial_ml is not None
+                and candidate.symbol not in ranked_symbols
+                and candidate not in eligible
+            ):
+                await asyncio.to_thread(
+                    financial_ml.reject_candidate,
+                    candidate.candidate_id,
+                    "score_or_meta_gate_rejection",
+                )
         return ranked
 
     async def decide_with_kernel(self, candidate: ScanCandidate, kernel: Any) -> Any:
@@ -1831,6 +2300,13 @@ class OpportunityScanner(AITOSModule):
                     "component_availability": dict(candidate.component_availability),
                     "regime": candidate.regime,
                     "entry_price": candidate.entry_price,
+                    "candidate_id": candidate.candidate_id,
+                    "financial_ml_meta": {
+                        "raw_probability": candidate.meta_raw_probability,
+                        "calibrated_probability": candidate.meta_probability,
+                        "accepted": candidate.meta_accepted,
+                        "reason": candidate.meta_reason,
+                    },
                 },
             )
         )
@@ -1878,11 +2354,26 @@ class OpportunityScanner(AITOSModule):
             agent_consensus={
                 **dict(candidate.component_scores),
                 "trace_id": candidate.trace_id,
+                "candidate_id": candidate.candidate_id,
+                "financial_ml_meta": {
+                    "raw_probability": candidate.meta_raw_probability,
+                    "calibrated_probability": candidate.meta_probability,
+                    "accepted": candidate.meta_accepted,
+                    "reason": candidate.meta_reason,
+                    "mode": self._financial_ml.mode,
+                    "features": dict(candidate.financial_ml_features),
+                },
+                **(
+                    {"statistical_forecast": dict(candidate.statistical_forecast)}
+                    if candidate.statistical_forecast is not None
+                    else {}
+                ),
             },
             is_production=is_production,
             approved_by=approved_by,
             trailing_sl_enabled=True,
             regime=candidate.regime,
+            timeframe=self._timeframe,
         )
 
     def _require_initialized(self) -> None:
