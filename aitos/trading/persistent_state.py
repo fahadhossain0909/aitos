@@ -1041,11 +1041,7 @@ class IdempotentOrderExecutor(OrderExecutor):
                 or datetime.now(timezone.utc).isoformat()
             ),
             success=accepted,
-            error=(
-                None
-                if accepted
-                else f"venue order terminal state: {venue_state}"
-            ),
+            error=(None if accepted else f"venue order terminal state: {venue_state}"),
         )
         await self._state_store.save_order_result(
             key, request.symbol, self._result_payload(result)
