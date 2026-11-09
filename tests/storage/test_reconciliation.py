@@ -1,4 +1,9 @@
+import asyncio
+
+import pytest
 from datetime import datetime, timezone
+
+from scripts.reconcile_postgres_journal import reconcile
 
 from aitos.storage.reconciliation import (
     canonical_record_fingerprint,
@@ -82,3 +87,12 @@ def test_reconciliation_normalizes_database_timestamp_precision_and_zones():
     target = canonical_record_fingerprint("MARKET_EVENT", "BTCUSDT", clickhouse_payload)
 
     assert source == target
+
+
+
+def test_reconciliation_rejects_empty_or_reversed_time_window():
+    since = datetime(2026, 11, 8, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="since must be earlier than until"):
+        asyncio.run(reconcile(since, since))
+    with pytest.raises(ValueError, match="since must be earlier than until"):
+        asyncio.run(reconcile(since, datetime(2026, 11, 7, tzinfo=timezone.utc)))
