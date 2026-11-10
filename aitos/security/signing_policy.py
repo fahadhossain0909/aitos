@@ -157,9 +157,8 @@ class OrderIntentPolicy:
     clock_skew_ms: int = 5_000
 
     def __post_init__(self) -> None:
-        if (
-            not isinstance(self.account_alias, str)
-            or not _ID_RE.fullmatch(self.account_alias)
+        if not isinstance(self.account_alias, str) or not _ID_RE.fullmatch(
+            self.account_alias
         ):
             raise ValueError("account_alias_required")
         if (
