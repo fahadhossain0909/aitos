@@ -246,6 +246,7 @@ async def test_invalid_economics_fail_before_identity_registration_or_submission
     # Rejection cannot poison the valid logical intent with the same ID.
     assert (await wrapper.submit_order(request())).success
 
+
 class RecoveryStore:
     def __init__(self):
         self.saved = []
@@ -307,14 +308,13 @@ async def test_ambiguous_recovery_rejects_unbound_or_invalid_fill_evidence(overr
 
 async def test_ambiguous_recovery_persists_only_identity_bound_partial_fill():
     store = RecoveryStore()
-    wrapper = IdempotentOrderExecutor(
-        LookupExecutor(recovery_evidence()), store
-    )
+    wrapper = IdempotentOrderExecutor(LookupExecutor(recovery_evidence()), store)
     result = await wrapper._recover_ambiguous("intent-a", request())
     assert result.success and result.filled_quantity == 0.5
     assert result.fill_price == 101
     assert len(store.saved) == 1
     assert store.saved[0][0:2] == ("intent-a", "BTCUSDT")
+
 
 class DurableReplayStore:
     def __init__(self, record):
@@ -351,10 +351,13 @@ async def test_durable_ack_cannot_be_replayed_for_changed_request_after_restart(
     }
     inner = BlockingExecutor()
     wrapper = IdempotentOrderExecutor(inner, DurableReplayStore(record))
-    with pytest.raises(AmbiguousOrderSubmissionError, match="different durable request"):
+    with pytest.raises(
+        AmbiguousOrderSubmissionError, match="different durable request"
+    ):
         await wrapper._submit_with_recovery("intent-a", original)
     assert inner.calls == 0
     assert wrapper._blocked_client_order_id == "intent-a"
+
 
 @pytest.mark.parametrize(
     "result",
@@ -402,4 +405,3 @@ async def test_corrupt_acknowledged_result_never_releases_durable_recovery(resul
         await wrapper._submit_with_recovery("intent-a", original)
     assert inner.calls == 0
     assert wrapper._blocked_client_order_id == "intent-a"
-
