@@ -142,6 +142,15 @@ class SimulatedOrderExecutor(OrderExecutor):
             "orderId": order_id,
             "clientOrderId": request.client_order_id,
             "symbol": request.symbol,
+            "side": (
+                "SELL"
+                if request.reduce_only and request.side == TradeSide.LONG
+                else "BUY"
+                if request.reduce_only
+                else "BUY"
+                if request.side == TradeSide.LONG
+                else "SELL"
+            ),
             "status": "FILLED",
             "executedQty": str(request.quantity),
             "avgPrice": str(result.fill_price),
