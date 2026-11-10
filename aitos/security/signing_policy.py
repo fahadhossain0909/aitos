@@ -117,7 +117,12 @@ def _decimal(value: Any, field: str) -> Decimal:
 
 
 def _timestamp(value: Any, field: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or value > 9_223_372_036_854_775_807
+    ):
         raise IntentRejected(f"invalid_{field}")
     return value
 
@@ -152,7 +157,7 @@ class OrderIntentPolicy:
     clock_skew_ms: int = 5_000
 
     def __post_init__(self) -> None:
-        if not isinstance(self.account_alias, str) or not self.account_alias:
+        if not isinstance(self.account_alias, str) or not _ID_RE.fullmatch(self.account_alias):
             raise ValueError("account_alias_required")
         if (
             not isinstance(self.allowed_symbols, frozenset)
@@ -179,6 +184,8 @@ class OrderIntentPolicy:
             or not self.allowed_order_types <= {"LIMIT", "MARKET"}
         ):
             raise ValueError("invalid_order_type_policy")
+        if type(self.allow_market_orders) is not bool or type(self.allow_reduce_only) is not bool:
+            raise ValueError("boolean_policy_flags_required")
         if "MARKET" in self.allowed_order_types and not self.allow_market_orders:
             raise ValueError("market_order_requires_explicit_enablement")
         if (
@@ -239,7 +246,7 @@ def validate_order_intent(
         raise IntentRejected("missing_fields")
 
     version = payload["schema_version"]
-    if isinstance(version, bool) or version != 1:
+    if type(version) is not int or version != 1:
         raise IntentRejected("unsupported_schema_version")
 
     intent_id = _identifier(payload["intent_id"], "intent_id")
@@ -306,7 +313,7 @@ def validate_order_intent(
 
     try:
         with localcontext() as context:
-            context.prec = 60
+            context.prec = 100
             notional = quantity * valuation_price
     except DecimalException:
         raise IntentRejected("invalid_order_notional") from None
