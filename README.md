@@ -15,6 +15,10 @@ AITOS is an event-driven trading system for Binance USDT-M Futures. The current 
 
 > **Canonical documentation:** this README is the project overview. For installation, follow the [AITOS Installation & Deployment Guide](INSTALLATION.md), which documents both desktop installation and VPS runtime deployment.
 
+## Credential security and remote signing
+
+Read [Credential Security & Remote Signing RFC](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md) before entering exchange credentials on a remote host. OS vaults protect local storage, not against a provider administrator with root/administrator access to that same machine. The remote signer and live order-dispatch path are not implemented or authorized by this RFC.
+
 ## Read-only desktop console (local-first)
 
 The [desktop Operator Console](desktop/README.md) is a read-only desktop interface for an already-running AITOS backend. Windows and Linux unsigned test installers are built by the native packaging workflows. It does not install or start the trading engine. For step-by-step installation and VPS connection, see [INSTALLATION.md](INSTALLATION.md). The shared public preview must stay unattached; this is not an exchange-key vault or permission to activate live trading.
@@ -51,6 +55,7 @@ Click any topic below to jump directly to that section.
 
 - [Project structure](#project-structure)
 - [Safety boundaries](#safety-boundaries)
+- [Credential security & remote signing](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md)
 
 ---
 
