@@ -98,11 +98,44 @@ async def test_built_operator_browser_authentication(tmp_path, monkeypatch):
         BinanceOperatorAccount(signed_get), timeline
     )
     await observer.observe()
+    from datetime import datetime, timezone
+    from aitos.execution.operator_protection import ExportedProtectionObserver
+
+    async def capture_protection():
+        return dict(
+            intents=[
+                dict(
+                    scope="synthetic-browser",
+                    client_id="test-sensitive-protection-id",
+                    state="PROTECTED",
+                    request_json=dict(
+                        symbol="BTCUSDT",
+                        side="LONG",
+                        quantity=1,
+                        reference_price=90,
+                        order_type="STOP_MARKET",
+                        reduce_only=True,
+                    ),
+                )
+            ],
+            evidence=dict(
+                scope="synthetic-browser",
+                complete=True,
+                captured_at=datetime.now(timezone.utc).isoformat(),
+                symbols=["BTCUSDT"],
+                orders=[],
+            ),
+        )
+
+    protection = ExportedProtectionObserver(
+        capture_protection, scope="synthetic-browser"
+    )
     register_console_routes(
         upstream_app,
         projection_observer=projector,
         token=upstream_token,
         account_observer=observer,
+        protection_observer=protection,
     )
     upstream = TestServer(upstream_app)
     await upstream.start_server()

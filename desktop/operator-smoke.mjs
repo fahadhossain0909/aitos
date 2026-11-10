@@ -68,6 +68,9 @@ await page.locator("nav").getByRole("button", { name: "Connections" }).click();
 const accountPanel = page.getByRole("region", { name: "Read-only account observations" });
 await accountPanel.getByText("100.00000001", { exact: true }).waitFor();
 await accountPanel.getByRole("cell", { name: "9900", exact: true }).waitFor();
+const protectionPanel = page.getByRole("region", { name: "Protection evidence findings" });
+await protectionPanel.getByRole("cell", { name: "not_in_open_inventory", exact: true }).waitFor();
+if ((await protectionPanel.textContent()).includes("test-sensitive-protection-id")) throw Error("Raw protection client ID exposed");
 const timelinePanel = page.getByRole("region", { name: "Durable account timeline" });
 await timelinePanel.getByRole("cell", { name: "99.00000001", exact: true }).first().waitFor();
 if ((await page.request.get(url + "/console/v1/account/timeline?cursor=bad")).status() !== 400)

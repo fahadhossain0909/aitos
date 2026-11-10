@@ -292,3 +292,67 @@ schema mismatch, disk/lock failure must surface unavailable, never memory fallba
 
 VERIFIED — final full backend including attached-account capability tests:
 **2351 passed, 2 skipped, 38 deselected (79.83s)**; changed Python F-lint PASS.
+
+### Protective-order evidence console implementation
+
+VERIFIED — `ExportedProtectionObserver(capture, scope=...)` now adapts the existing
+`audit_protection_inventory` into a scoped read-only console observation. The
+owner supplies an async capture returning exactly `intents` and `evidence`; the
+latter must declare scope/completeness/symbol coverage/current captured_at as
+required by the existing audit. Capture deadline is 8 seconds, concurrent calls
+fail closed, cancellation releases the lock and malformed/stale/cross-scope or
+oversized captures fail unavailable. Capture is bounded to 4 MiB, 10,000 intents,
+10,000 orders and 2,000 covered symbols. No new exchange IO or credentials exist.
+
+Only allowlisted findings/counts leave the observer. Raw journal client IDs and
+scope labels are not exposed; browser references are scoped SHA-256 prefixes.
+`safe_to_resume` and `account_exposure_verified` are always false and automatic
+order actions always empty. Matching open orders remain candidates, while absent
+orders require terminal/child-fill evidence. No intent acknowledgement, replacement
+order, quarantine clearing or execution/recovery state mutation is implemented.
+
+`HealthServer(console_protection_observer=...)` passes the explicit observer into
+GET `/console/v1/protection`, a fixed no-query gateway route requiring attached
+console bearer/session authentication. Missing/failed providers return no-store
+503, never synthetic zero counts. Endpoint deadline is 10 seconds. Connections /
+Runtime view has a separate protective-evidence panel with captured timestamp,
+counts and the first 100 bounded findings. Parser validates freshness, duplicate
+references, exact finding/count agreement and absence of authority grants/actions.
+Account/protection UI now also clears evidence at the freshness deadline, not just
+on next poll or request failure. Sample view does not mount the monitor.
+
+This is **caller-exported evidence comparison**, not authenticated live-provider
+protection monitoring. Therefore `orders.protection` remains unavailable in the
+full protection capability contract. `alerts.delivery` also remains false:
+displayed local findings are not sent notifications, acknowledgements, or a
+supervised alert service. No collection is enabled by default.
+
+Owner example:
+
+```python
+from aitos.execution.operator_protection import ExportedProtectionObserver
+observer = ExportedProtectionObserver(read_scoped_capture, scope=account_scope)
+# HealthServer(..., console_token=token, console_protection_observer=observer)
+```
+
+Do not reuse an order executor as a capture provider. Audit/provenance acceptance
+and actual signed account/order enumeration must be independently reviewed before
+claiming live protection coverage. No missing-order interpretation establishes
+absence of exposure or permits automatic resumption.
+
+Verification:
+- VERIFIED — targeted protection/audit/gateway tests: **89 passed** before added
+  cancellation/size regressions; observer regression suite now **9 passed**.
+- VERIFIED — final full backend: **2360 passed, 2 skipped, 38 deselected (79.80s)**.
+- VERIFIED — frontend tests **110 passed / 11 files**; production build PASS.
+- VERIFIED — built Chromium synthetic account/timeline/protection-to-gateway/UI
+  flow plus auth/logout/expiry/revocation: **1 passed (10.13s)**. Test explicitly
+  checks a missing-protection finding and absence of the raw client ID.
+- VERIFIED — changed Python F-lint PASS.
+- NOT TESTED — live signed exchange provenance, continuous collector, delivered
+  alerts, consistent trade-ledger pagination, multi-user audited authorization,
+  authenticated update installation, signed native releases, fresh-user reboot.
+
+Rollback: omit the protection observer; the route returns unavailable. Existing
+account/ledger stores and execution behavior are unchanged. Preserve all journals;
+never delete intents or replace orders to clear a finding.
