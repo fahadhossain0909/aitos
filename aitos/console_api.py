@@ -69,6 +69,7 @@ def register_console_routes(
     projection_observer=None,
     account_observer=None,
     protection_observer=None,
+    history_pages=None,
 ) -> None:
     modules = list(modules)
     if runtime_mode not in {"unknown", "paper", "live", "backtest"}:
@@ -79,6 +80,7 @@ def register_console_routes(
         or projection_observer is not None
         or account_observer is not None
         or protection_observer is not None
+        or history_pages is not None
     ) and (not token or len(token) < 32):
         raise ValueError(
             "attached operator console requires a bearer token of at least 32 characters"
@@ -251,6 +253,44 @@ def register_console_routes(
             raise web.HTTPBadRequest(text="Invalid bounded research plan") from None
         return web.json_response(report, headers={"Cache-Control": "no-store"})
 
+    async def history_cursor(request):
+        authorize(request)
+        headers = {"Cache-Control": "no-store"}
+        try:
+            if set(request.query) - {"limit", "cursor"} or any(
+                len(request.query.getall(key)) != 1 for key in request.query
+            ):
+                raise ValueError()
+            limit = int(request.query.get("limit", "100"))
+            cursor = request.query.get("cursor")
+            if not 1 <= limit <= 100 or (cursor is not None and len(cursor) > 256):
+                raise ValueError()
+        except ValueError:
+            raise web.HTTPBadRequest(
+                text="Invalid history continuation query"
+            ) from None
+        if history_pages is None:
+            return web.json_response(
+                {"available": False, "error": "History materializer not attached"},
+                status=503,
+                headers=headers,
+            )
+        try:
+            result = await asyncio.wait_for(
+                history_pages.page(limit=limit, cursor=cursor), timeout=8
+            )
+        except ValueError:
+            raise web.HTTPBadRequest(
+                text="Invalid, expired or changed history continuation"
+            ) from None
+        except Exception:
+            return web.json_response(
+                {"available": False, "error": "History materialization unavailable"},
+                status=503,
+                headers=headers,
+            )
+        return web.json_response(result, headers=headers)
+
     async def protection_observation(request):
         authorize(request)
         if request.query:
@@ -342,11 +382,16 @@ def register_console_routes(
             )
         return web.json_response(
             describe_capabilities(
-                modules, state_store, projection_observer, account_observer
+                modules,
+                state_store,
+                projection_observer,
+                account_observer,
+                history_pages,
             ),
             headers={"Cache-Control": "no-store"},
         )
 
+    app.router.add_get("/console/v1/history/cursor", history_cursor)
     app.router.add_get("/console/v1/protection", protection_observation)
     app.router.add_get("/console/v1/account/timeline", account_timeline)
     app.router.add_get("/console/v1/account", account_observation)

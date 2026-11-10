@@ -31,7 +31,7 @@ class RuntimeEndpoint:
 
 
 def describe_capabilities(
-    modules, state_store, projection_observer, account_observer=None
+    modules, state_store, projection_observer, account_observer=None, history_pages=None
 ):
     def entry(name, path, available):
         return dict(id=name, path=path, available=bool(available))
@@ -64,6 +64,7 @@ def describe_capabilities(
                 None,
                 getattr(account_observer, "timeline", None) is not None,
             ),
+            entry("ledger.consistent_cursor", None, history_pages is not None),
             # These must not be inferred from position rows, page existence or
             # a healthy HTTP listener. No provider-backed service is wired yet.
             *[
@@ -71,7 +72,6 @@ def describe_capabilities(
                 for name in (
                     "orders.protection",
                     "alerts.delivery",
-                    "ledger.consistent_cursor",
                     "configuration.approval",
                     "runtime.control",
                 )

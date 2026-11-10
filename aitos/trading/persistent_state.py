@@ -533,6 +533,18 @@ class DurableTradingStateStore:
         )
         return [_closed_payload(row) for row in result.result_rows]
 
+    async def query_closed_snapshot(self, *, limit: int = 10000) -> dict:
+        """One bounded result for explicit console materialization, no source writes."""
+        if type(limit) is not int or not 1 <= limit <= 10000:
+            raise ValueError("invalid bounded snapshot query")
+        result = await self._client().query(
+            CLOSED_HISTORY_QUERY,
+            parameters={"symbol": "", "limit": limit + 1, "offset": 0},
+        )
+        # Validate the extra row too; never hide a known revision conflict.
+        payloads = [_closed_payload(row) for row in result.result_rows]
+        return {"rows": payloads[:limit], "truncated": len(payloads) > limit}
+
     async def query_closed_performance(self, *, limit: int = 1000) -> dict:
         """One bounded query, not a loop over offset pages of a changing ledger."""
         from aitos.trading.performance import analyze_closed_trades

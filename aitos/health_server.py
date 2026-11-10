@@ -38,6 +38,7 @@ class HealthServer:
         console_projection_observer=None,
         console_account_observer=None,
         console_protection_observer=None,
+        console_history_pages=None,
     ) -> None:
         self._modules: list[AITOSModule] = list(modules)
         self._host = host
@@ -49,6 +50,7 @@ class HealthServer:
         self._console_projection_observer = console_projection_observer
         self._console_account_observer = console_account_observer
         self._console_protection_observer = console_protection_observer
+        self._console_history_pages = console_history_pages
 
     def set_rate_limiter(self, rate_limiter) -> None:
         """Attach the exchange rate limiter for health/metrics reporting."""
@@ -109,6 +111,7 @@ class HealthServer:
                 projection_observer=self._console_projection_observer,
                 account_observer=self._console_account_observer,
                 protection_observer=self._console_protection_observer,
+                history_pages=self._console_history_pages,
             )
         return app
 
