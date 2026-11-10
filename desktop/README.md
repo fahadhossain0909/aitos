@@ -76,15 +76,25 @@ libraries may be absent. The sandbox smoke used the libraries shipped inside
 `@sparticuz/chromium/bin/al2023.tar.br`, extracted outside source and supplied
 through `LD_LIBRARY_PATH`; normal desktops may already provide them.
 
-## Packaging status
+## Native desktop installation
 
-Manifest, PNG icons and a network-only service worker support an installable-web
-starting point on supporting secure-context browsers. No financial/API responses
-are cached, and **offline functionality is not provided**. Browser installation
-was not independently certified. No native Tauri/Electron installer, credential
-vault, updater, Windows/macOS signing or one-click runtime bootstrap exists yet.
-`vite preview` serves the built UI but does not provide the dev API proxy; a
-production server must explicitly implement secure routing/authentication.
+Native Windows x64 and Linux Debian-family packages are now built by the
+repository's packaging workflows. They are read-only session managers that bundle
+the console frontend, open it in the default browser, and connect to an existing
+backend. They do not install or start AITOS trading services. Windows stores
+operator/backend credentials in Windows Credential Manager; Linux requires an
+unlocked Secret Service keyring. Both fail closed if the OS vault is unavailable.
+
+Current packages are **unsigned test software**, not signed/trusted releases.
+There is no automatic updater, macOS installer, one-click backend bootstrap or
+Tauri-based installer claim. See the canonical [Installation & Deployment
+Guide](../INSTALLATION.md) for artifact retrieval, build prerequisites, step-by-step
+Windows/Linux installation, local backend setup and SSH-tunnel access to a VPS.
+
+The installable-web manifest/service worker remain a browser starting point only;
+no financial/API responses are cached and offline functionality is not provided.
+`vite preview` does not provide the development API proxy; a production server
+must implement secure routing/authentication.
 
 ## Quality workspace update (2026-11-07)
 
