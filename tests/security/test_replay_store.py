@@ -250,3 +250,26 @@ def test_paper_processor_rejects_market_policy_and_non_paper_adapter(tmp_path):
                 replay_store=store,
                 adapter=NonPaperAdapter(),
             )
+
+
+
+def test_replay_store_fails_closed_at_capacity(tmp_path):
+    database = tmp_path / "ledger.sqlite3"
+    with SQLiteReplayStore(database, max_records=1) as store:
+        store.reserve(make_intent(), now_ms=NOW)
+        second = make_intent(
+            intent_id="intent-replay-002",
+            nonce="AQECAwQFBgcICQoLDA0ODw",
+            client_order_id="aitos-replay-002",
+        )
+        with pytest.raises(ReplayStoreError, match="capacity_reached"):
+            store.reserve(second, now_ms=NOW + 1)
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX directory mode check")
+def test_replay_store_rejects_group_or_world_accessible_parent(tmp_path):
+    private_dir = tmp_path / "private"
+    private_dir.mkdir(mode=0o700)
+    os.chmod(private_dir, 0o755)
+    with pytest.raises(ValueError, match="directory_must_be_private"):
+        SQLiteReplayStore(private_dir / "ledger.sqlite3")
