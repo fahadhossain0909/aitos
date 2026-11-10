@@ -68,6 +68,7 @@ def register_console_routes(
     runtime_mode: str = "unknown",
     projection_observer=None,
     account_observer=None,
+    protection_observer=None,
 ) -> None:
     modules = list(modules)
     if runtime_mode not in {"unknown", "paper", "live", "backtest"}:
@@ -77,6 +78,7 @@ def register_console_routes(
         or state_store is not None
         or projection_observer is not None
         or account_observer is not None
+        or protection_observer is not None
     ) and (not token or len(token) < 32):
         raise ValueError(
             "attached operator console requires a bearer token of at least 32 characters"
@@ -249,6 +251,29 @@ def register_console_routes(
             raise web.HTTPBadRequest(text="Invalid bounded research plan") from None
         return web.json_response(report, headers={"Cache-Control": "no-store"})
 
+    async def protection_observation(request):
+        authorize(request)
+        if request.query:
+            raise web.HTTPBadRequest(
+                text="Protection query parameters are not supported"
+            )
+        headers = {"Cache-Control": "no-store"}
+        if protection_observer is None:
+            return web.json_response(
+                {"available": False, "error": "Protection observer not attached"},
+                status=503,
+                headers=headers,
+            )
+        try:
+            result = await asyncio.wait_for(protection_observer.observe(), timeout=10)
+        except Exception:
+            return web.json_response(
+                {"available": False, "error": "Protection evidence unavailable"},
+                status=503,
+                headers=headers,
+            )
+        return web.json_response(result, headers=headers)
+
     async def account_timeline(request):
         authorize(request)
         headers = {"Cache-Control": "no-store"}
@@ -322,6 +347,7 @@ def register_console_routes(
             headers={"Cache-Control": "no-store"},
         )
 
+    app.router.add_get("/console/v1/protection", protection_observation)
     app.router.add_get("/console/v1/account/timeline", account_timeline)
     app.router.add_get("/console/v1/account", account_observation)
     app.router.add_get("/console/v1/capabilities", capabilities)
