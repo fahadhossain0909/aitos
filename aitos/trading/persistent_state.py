@@ -1214,9 +1214,47 @@ class IdempotentOrderExecutor(OrderExecutor):
                 )
             state = str(record.get("state", "")).upper()
             if state in {"ACKNOWLEDGED", "REJECTED"}:
+                try:
+                    replay = self._result_from_payload(record.get("result", {}), request)
+                    valid_quantity = (
+                        math.isfinite(replay.filled_quantity)
+                        and replay.filled_quantity >= 0
+                        and replay.filled_quantity <= request.quantity * (1 + 1e-9)
+                    )
+                    valid_price = math.isfinite(replay.fill_price) and replay.fill_price >= 0
+                    if (
+                        replay.symbol != request.symbol
+                        or replay.side != request.side
+                        or not valid_quantity
+                        or not valid_price
+                        or (
+                            state == "ACKNOWLEDGED"
+                            and (
+                                not replay.success
+                                or replay.filled_quantity <= 0
+                                or replay.fill_price <= 0
+                                or not replay.order_id
+                            )
+                        )
+                        or (
+                            state == "REJECTED"
+                            and (
+                                replay.success
+                                or replay.filled_quantity != 0
+                                or replay.fill_price != 0
+                            )
+                        )
+                    ):
+                        raise ValueError("durable result does not match its terminal state")
+                except (TypeError, ValueError, OverflowError):
+                    self._blocked_reason = "durable terminal order evidence is invalid"
+                    self._blocked_client_order_id = key
+                    raise AmbiguousOrderSubmissionError(
+                        f"order {key} has invalid durable terminal evidence; manual reconciliation required"
+                    ) from None
                 self._blocked_reason = None
                 self._blocked_client_order_id = None
-                return self._result_from_payload(record.get("result", {}), request)
+                return replay
             if state == "SUBMITTING":
                 try:
                     recovered = await self._recover_ambiguous(key, request)
