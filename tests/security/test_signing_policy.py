@@ -187,7 +187,6 @@ def test_json_parser_accepts_valid_utf8_object():
     assert parsed == {"symbol": "BTCUSDT", "quantity": "0.01"}
 
 
-
 def test_policy_requires_strict_boolean_flags_and_valid_account_alias():
     with pytest.raises(ValueError, match="boolean_policy_flags"):
         OrderIntentPolicy(
