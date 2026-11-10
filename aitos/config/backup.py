@@ -34,9 +34,7 @@ def _regular(path):
 
 
 def _schema(path):
-    uri = (
-        "file:" + quote(str(path.resolve()).replace("\\", "/"), safe="/:") + "?mode=ro"
-    )
+    uri = path.resolve().as_uri() + "?mode=ro"
     with contextlib.closing(sqlite3.connect(uri, uri=True)) as connection:
         return connection.execute("PRAGMA user_version").fetchone()[0]
 
