@@ -149,7 +149,10 @@ def test_in_memory_database_and_symlink_are_rejected(tmp_path):
     target = tmp_path / "real.sqlite3"
     target.touch()
     link = tmp_path / "linked.sqlite3"
-    link.symlink_to(target)
+    try:
+        link.symlink_to(target)
+    except OSError:
+        pytest.skip("symlink creation is not available on this runner")
     with pytest.raises(ValueError, match="must_not_be_symlink"):
         SQLiteReplayStore(link)
 
