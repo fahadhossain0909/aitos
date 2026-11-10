@@ -217,10 +217,10 @@ def validate_order_intent(
         raise IntentRejected("symbol_not_allowed")
 
     side = payload["side"]
-    if side not in policy.allowed_sides:
+    if not isinstance(side, str) or side not in policy.allowed_sides:
         raise IntentRejected("side_not_allowed")
     order_type = payload["order_type"]
-    if order_type not in policy.allowed_order_types:
+    if not isinstance(order_type, str) or order_type not in policy.allowed_order_types:
         raise IntentRejected("order_type_not_allowed")
 
     quantity = _decimal(payload["quantity"], "quantity")
