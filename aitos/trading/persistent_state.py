@@ -1198,6 +1198,20 @@ class IdempotentOrderExecutor(OrderExecutor):
 
         record = await self._state_store.load_order_record(key)
         if record is not None:
+            # A durable client ID is an immutable request identity across
+            # process restarts, not merely a lookup key. Never replay an old
+            # acknowledgement against changed economics or position intent.
+            stored_request = record.get("request")
+            if (
+                not isinstance(stored_request, Mapping)
+                or dict(stored_request) != self._request_payload(request)
+                or record.get("symbol") != request.symbol
+            ):
+                self._blocked_reason = "durable client order ID conflicts with request"
+                self._blocked_client_order_id = key
+                raise AmbiguousOrderSubmissionError(
+                    f"order {key} is bound to a different durable request; manual reconciliation required"
+                )
             state = str(record.get("state", "")).upper()
             if state in {"ACKNOWLEDGED", "REJECTED"}:
                 self._blocked_reason = None
