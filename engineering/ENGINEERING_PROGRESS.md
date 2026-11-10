@@ -488,3 +488,13 @@ PASS. This resolves the earlier blocker specifically for this PR; no VPS setting
 secrets or remote runtime were accessed. Existing runtime validation remains pinned
 to 58807516; subsequent changes are workflow guards/documentation only. PR checks
 will be fresh evidence, not presumed passing or independent review.
+
+## PR #248 — bounded consistent trade-history follow-up
+
+VERIFIED: opt-in durable history materialization, hash-bound scoped HMAC cursors,
+TTL/quota/error contracts, authenticated gateway route and negotiated journal UI
+with forward/back replay. Full backend 2367 PASS / 2 SKIP; frontend 113 PASS;
+build PASS; synthetic built browser PASS. Details, limitations and rollback:
+`engineering/PORTABLE_DESKTOP_AND_STORAGE.md`, consistent materialization section.
+Production/live-provider/signing/multi-user/update/fresh-install gates remain
+NOT TESTED or unimplemented; no all-five-phases completion claim is warranted.

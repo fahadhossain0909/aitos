@@ -75,6 +75,14 @@ const timelinePanel = page.getByRole("region", { name: "Durable account timeline
 await timelinePanel.getByRole("cell", { name: "99.00000001", exact: true }).first().waitFor();
 if ((await page.request.get(url + "/console/v1/account/timeline?cursor=bad")).status() !== 400)
   throw Error("Tampered account timeline cursor accepted");
+await page.locator("nav").getByRole("button", { name: "Trade journal" }).click();
+await page.getByText(/105 captured/).waitFor();
+await page.getByText(/100 loaded records/).waitFor();
+await page.getByRole("button", { name: "Next batch" }).click();
+await page.getByText(/5 loaded records/).waitFor();
+await page.getByRole("button", { name: "Previous batch" }).click();
+await page.getByText(/100 loaded records/).waitFor();
+console.log("PASS: pinned materialized history forward/back pages reached built UI");
 console.log("PASS: synthetic account GET adapter -> durable timeline -> authenticated gateway -> built observation/timeline UI; decimal strings preserved");
 await page.getByRole("button", { name: "Sign out", exact: true }).click();
 await page.getByLabel("Operator password").waitFor();

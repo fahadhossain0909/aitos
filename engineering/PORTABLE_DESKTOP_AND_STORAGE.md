@@ -356,3 +356,70 @@ Verification:
 Rollback: omit the protection observer; the route returns unavailable. Existing
 account/ledger stores and execution behavior are unchanged. Preserve all journals;
 never delete intents or replace orders to clear a finding.
+
+### Consistent bounded trade-history materialization
+
+VERIFIED — `HistoryPages` captures one bounded `query_closed_snapshot` result
+from the existing closed ledger, persists an allowlisted public-trade document
+atomically in an explicitly owned durable directory and serves fixed pages from
+that document. Source queries use static driver-bound SQL and validate all rows,
+including the extra truncation/conflict sentinel. No trading ledger is rewritten.
+Default capture is 2,000 rows; owner may explicitly choose 1–10,000. Documents
+remain bounded to the existing atomic JSON 4 MiB limit; oversize fails closed.
+
+HMAC continuations bind random result identity, page size, index and SHA-256 of
+the retained bytes. Stored hashed scope rejects cross-scope use. Current-page
+cursors allow backwards/first-page replay without recapturing changing source
+rows. TTL is 15 minutes. Tampering, changed files, expiry, unavailable storage,
+quota exhaustion and overlapping capture fail closed. Materialization is on
+explicit read only, not default runtime activation, migration or financial
+recovery authority. No disk-to-memory fallback exists.
+
+Owner integration:
+
+```python
+from aitos.trading.history_pages import HistoryPages
+pages = HistoryPages(state_store, directory, cursor_key=cursor_key,
+                     scope=account_ledger_scope, capture_limit=2000)
+# HealthServer(..., console_token=token, console_history_pages=pages)
+```
+
+Use a private dedicated directory and per-account/ledger key and scope. No
+credentials belong in JavaScript. Fixed bearer/session-authenticated route:
+`GET /console/v1/history/cursor?limit=100&cursor=...`; unknown/duplicate parameters,
+mutation verbs and invalid cursors are rejected. Responses are no-store. Explicit
+attachment sets `ledger.consistent_cursor` availability true, not runtime health
+or completeness. Legacy `/history` remains available with its offset limitation.
+The trade-journal UI selects materialized paging only when negotiated, offers
+Start new cut / Previous / Next and displays capture size/truncation/limitations.
+No silent fallback to changing offset pages after a cursor failure.
+
+Retention is deliberately bounded: 32 documents, no automatic deletion, 4 MiB
+per document. Expired documents remain for owner inspection; quota exhaustion
+returns unavailable. This requires an independently approved retention/archival
+policy before unattended production use. Files and lock files must not be
+removed while active. Hashes detect accidental changes, not a compromised local
+owner. Existing Windows ACL and parent/symlink race acceptance gaps still apply.
+
+**Scope:** consistent pages of one retained query result, NOT an exchange-atomic
+or transactional cross-system snapshot and NOT all-time completeness. Truncated
+source windows are explicitly marked. It does not grant resume/live authority.
+
+Evidence:
+- VERIFIED — final full backend: **2367 passed, 2 skipped, 38 deselected (80.23s)**.
+- VERIFIED — **113 frontend tests / 12 files**, production build PASS.
+- VERIFIED — retained paging, source revisions, reopen, current-page replay,
+  checksum tampering, expiry, scope/page binding, quota, auth and fixed SQL tests.
+- VERIFIED — synthetic built Chromium forward/back 100+5 retained trade rows,
+  account/timeline/protection and existing auth lifecycle: **1 passed (11.15s)**.
+- VERIFIED — changed Python F-lint and `git diff --check` PASS.
+- NOT TESTED — new source method against hosted real ClickHouse after this patch;
+  synthetic contract tests do not replace native/hosted/provider acceptance.
+
+Still uncompleted: authenticated live-provider provenance/activation, externally
+delivered alerts, audited multi-user control, secure update installation, signed
+releases, fresh-user/reboot acceptance and independent review. No main merge,
+VPS deployment, live order or active financial restore was performed.
+Rollback: omit console_history_pages to retain the explicitly labelled legacy
+route; preserve retained documents and all financial stores. Do not destroy data
+or transfer recovery authority to clear a pagination failure.

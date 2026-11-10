@@ -273,3 +273,15 @@ AUD-20261106-54 — P2 validation coverage gap, ROOT CAUSE CONFIRMED: iterations
 ## Advanced-main source integration
 
 INT-MAIN-01 — REPRODUCED integration incompatibility: random trade ID failed stable logical-entry regression and old hash-only client ID could not satisfy main orphan suffix mapping. One opportunity-derived trade ID and matching client suffix verified. INT-MAIN-02 — journal capability selection/cleanup integration initially failed six ownership cases; restored independent cleanup and cancellation propagation, updated test expectation for sanitized new selection error layer. INT-MAIN-03 — combined drift/shadow teardown verified with actual-AST drift failure and cancellation tests. No production incident or independent review asserted. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.
+
+## PR248-HISTORY-PAGING — changing offset pages
+
+ROOT CAUSE CONFIRMED (source contract): separate offset queries sort current
+latest revisions, so later inserts/revisions can change the row set/order between
+requests. A query limit alone is not a consistent multi-page view. Implemented
+opt-in retained bounded results with scoped/checksummed signed continuations;
+regressions prove retained rows remain stable after source revision and reopen.
+First-page/back navigation reuses a signed current-page token rather than silently
+recapturing the source. Legacy offset API remains explicitly limited. Real hosted
+ClickHouse/native acceptance of this new path is NOT TESTED. Rollback removes the
+optional pager attachment, not ledger/user data. No execution authority changed.

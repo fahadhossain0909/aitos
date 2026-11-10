@@ -130,12 +130,47 @@ async def test_built_operator_browser_authentication(tmp_path, monkeypatch):
     protection = ExportedProtectionObserver(
         capture_protection, scope="synthetic-browser"
     )
+    from aitos.trading import history_pages
+
+    history_directory = tmp_path / "synthetic-materialized-history"
+    history_directory.mkdir(mode=0o700)
+    monkeypatch.setattr(history_pages, "prepare_durable_directory", lambda p: p)
+
+    async def capture_closed(*, limit):
+        return dict(
+            rows=[
+                dict(
+                    trade_id=f"synthetic-closed-{i}",
+                    symbol="BTCUSDT",
+                    side="LONG",
+                    state="closed",
+                    quantity=1,
+                    entry_price=100,
+                    exit_price=105,
+                    position_size_usd=100,
+                    risk_amount_usd=1,
+                    pnl=5,
+                    entry_time="2026-11-06T12:00:00+00:00",
+                    exit_time="2026-11-06T13:00:00+00:00",
+                )
+                for i in range(105)
+            ],
+            truncated=False,
+        )
+
+    materialized = history_pages.HistoryPages(
+        SimpleNamespace(query_closed_snapshot=capture_closed),
+        history_directory,
+        cursor_key=b"synthetic-history-key-not-real-32-bytes",
+        scope="synthetic-ledger",
+    )
     register_console_routes(
         upstream_app,
         projection_observer=projector,
         token=upstream_token,
         account_observer=observer,
         protection_observer=protection,
+        history_pages=materialized,
     )
     upstream = TestServer(upstream_app)
     await upstream.start_server()

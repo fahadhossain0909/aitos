@@ -1,3 +1,4 @@
+import { parseHistoryCut } from "./historyCursorClient";
 import ProtectionPanel from "./ProtectionPanel";
 import AccountPanel from "./AccountPanel";
 import { parseRuntimeCapabilities, type RuntimeCapabilities } from "./runtimeCapabilities";
@@ -435,6 +436,11 @@ export default function App() {
   const [historyError, setHistoryError] = useState(false);
   const [historyOffset, setHistoryOffset] = useState(0);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyCursors, setHistoryCursors] = useState<(string | undefined)[]>([undefined]);
+  const [historyNext, setHistoryNext] = useState<string | null>(null);
+  const [historyCut, setHistoryCut] = useState("");
+  const [historyRefresh, setHistoryRefresh] = useState(0);
+  const consistentHistory = !!capabilities?.capabilities.some(c => c.id === "ledger.consistent_cursor" && c.available);
   const [modal, setModal] = useState<Modal>(null);
   const [selected, setSelected] = useState<Position | null>(null);
   const [range, setRange] = useState("1M");
@@ -549,7 +555,13 @@ export default function App() {
     setHistoryError(false);
     setHistoryLoading(true);
     setHistory([]);
-    consoleFetch(`/console/v1/history?limit=100&offset=${historyOffset}`, {
+    const query = new URLSearchParams({limit: "100"});
+    const cursor = historyCursors[Math.floor(historyOffset / 100)];
+    if (consistentHistory && historyOffset > 0 && !cursor) {
+      setHistoryError(true); setHistoryLoading(false); clearTimeout(timeout); return;
+    }
+    if (consistentHistory && cursor) query.set("cursor", cursor);
+    consoleFetch(consistentHistory ? `/console/v1/history/cursor?${query}` : `/console/v1/history?limit=100&offset=${historyOffset}`, {
       signal: c.signal,
       cache: "no-store",
     })
@@ -558,7 +570,14 @@ export default function App() {
         return r.json();
       })
       .then((d) => {
-        if (!disposed) setHistory(parseHistory(d));
+        if (!disposed) {
+          if (consistentHistory) {
+            const cut = parseHistoryCut(d);
+            setHistory(cut.rows); setHistoryNext(cut.next_cursor);
+            setHistoryCursors(previous => { const next = [...previous]; next[historyOffset / 100] = cut.page_cursor; return next; });
+            setHistoryCut(`Pinned query ${cut.snapshot_id.slice(0, 8)} · ${cut.total_captured} captured${cut.truncated ? " · truncated source window" : ""} · not an exchange-atomic cut`);
+          } else { setHistory(parseHistory(d)); setHistoryNext(null); setHistoryCut(""); }
+        }
       })
       .catch(() => {
         if (!disposed) {
@@ -575,7 +594,7 @@ export default function App() {
       clearTimeout(timeout);
       c.abort();
     };
-  }, [demo, page, historyOffset, apiError]);
+  }, [demo, page, historyOffset, apiError, consistentHistory, historyRefresh]);
   useEffect(() => {
     const t = setInterval(() => setClock(new Date()), 1000);
     return () => clearInterval(t);
@@ -1416,10 +1435,10 @@ export default function App() {
               {!demo && (
                 <div className="section-toolbar">
                   <span className="dim">
-                    Offset pagination is not a stable snapshot while the ledger
-                    changes.
+                    {consistentHistory ? historyCut || "Materialized query cut not loaded" : "Offset pagination is not a stable snapshot while the ledger changes."}
                   </span>
                   <div className="inline">
+                    {consistentHistory && <button className="button secondary" disabled={historyLoading} onClick={() => {setHistoryOffset(0);setHistoryCursors([undefined]);setHistoryNext(null);setHistoryCut("");setHistoryRefresh(v => v + 1);}}>Start new cut</button>}
                     <button
                       className="button secondary"
                       disabled={historyLoading || historyOffset === 0}
@@ -1435,10 +1454,13 @@ export default function App() {
                       disabled={
                         historyLoading ||
                         historyError ||
-                        history.length < 100 ||
+                        (consistentHistory ? !historyNext : history.length < 100) ||
                         historyOffset >= 100000
                       }
-                      onClick={() => setHistoryOffset(historyOffset + 100)}
+                      onClick={() => {
+                        if (consistentHistory) setHistoryCursors([...historyCursors.slice(0, historyOffset / 100 + 1), historyNext!]);
+                        setHistoryOffset(historyOffset + 100);
+                      }}
                     >
                       Next batch
                       <ChevronRight size={14} />
