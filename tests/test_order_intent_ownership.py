@@ -356,3 +356,50 @@ async def test_durable_ack_cannot_be_replayed_for_changed_request_after_restart(
     assert inner.calls == 0
     assert wrapper._blocked_client_order_id == "intent-a"
 
+@pytest.mark.parametrize(
+    "result",
+    [
+        {
+            "order_id": "old-order",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "filled_quantity": 2,
+            "fill_price": 101,
+            "success": True,
+        },
+        {
+            "order_id": "",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "filled_quantity": 1,
+            "fill_price": 101,
+            "success": True,
+        },
+        {
+            "order_id": "old-order",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "filled_quantity": 1,
+            "fill_price": float("nan"),
+            "success": True,
+        },
+        {},
+    ],
+)
+async def test_corrupt_acknowledged_result_never_releases_durable_recovery(result):
+    from aitos.trading.persistent_state import AmbiguousOrderSubmissionError
+
+    original = request()
+    record = {
+        "symbol": "BTCUSDT",
+        "state": "ACKNOWLEDGED",
+        "request": IdempotentOrderExecutor._request_payload(original),
+        "result": result,
+    }
+    inner = BlockingExecutor()
+    wrapper = IdempotentOrderExecutor(inner, DurableReplayStore(record))
+    with pytest.raises(AmbiguousOrderSubmissionError, match="invalid durable terminal"):
+        await wrapper._submit_with_recovery("intent-a", original)
+    assert inner.calls == 0
+    assert wrapper._blocked_client_order_id == "intent-a"
+
