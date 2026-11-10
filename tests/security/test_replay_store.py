@@ -252,7 +252,6 @@ def test_paper_processor_rejects_market_policy_and_non_paper_adapter(tmp_path):
             )
 
 
-
 def test_replay_store_fails_closed_at_capacity(tmp_path):
     database = tmp_path / "ledger.sqlite3"
     with SQLiteReplayStore(database, max_records=1) as store:
