@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import json
 import re
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -16,6 +17,42 @@ from typing import Any, FrozenSet, Mapping
 
 class IntentRejected(ValueError):
     """An order intent failed the local schema or configured policy."""
+
+
+def _unique_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise IntentRejected("duplicate_json_key")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(_value):
+    raise IntentRejected("non_finite_json_number")
+
+
+def parse_order_intent_json(raw: str | bytes, *, max_bytes: int = 4096) -> Mapping[str, Any]:
+    """Parse a bounded UTF-8 JSON object and reject duplicate keys/constants."""
+    if not isinstance(raw, (str, bytes)):
+        raise IntentRejected("invalid_json_payload")
+    try:
+        encoded = raw.encode("utf-8") if isinstance(raw, str) else raw
+        if len(encoded) > max_bytes:
+            raise IntentRejected("intent_body_too_large")
+        decoded = encoded.decode("utf-8")
+        value = json.loads(
+            decoded,
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_json_constant,
+        )
+    except IntentRejected:
+        raise
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
+        raise IntentRejected("invalid_json_payload") from None
+    if not isinstance(value, dict):
+        raise IntentRejected("intent_must_be_json_object")
+    return value
 
 
 _DECIMAL_RE = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]{1,18})?\Z")
