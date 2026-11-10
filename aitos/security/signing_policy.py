@@ -36,6 +36,8 @@ def parse_order_intent_json(raw: str | bytes, *, max_bytes: int = 4096) -> Mappi
     """Parse a bounded UTF-8 JSON object and reject duplicate keys/constants."""
     if not isinstance(raw, (str, bytes)):
         raise IntentRejected("invalid_json_payload")
+    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= 65_536:
+        raise IntentRejected("invalid_body_limit")
     try:
         encoded = raw.encode("utf-8") if isinstance(raw, str) else raw
         if len(encoded) > max_bytes:
@@ -48,7 +50,7 @@ def parse_order_intent_json(raw: str | bytes, *, max_bytes: int = 4096) -> Mappi
         )
     except IntentRejected:
         raise
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
+    except (UnicodeError, json.JSONDecodeError, RecursionError, ValueError):
         raise IntentRejected("invalid_json_payload") from None
     if not isinstance(value, dict):
         raise IntentRejected("intent_must_be_json_object")
