@@ -194,8 +194,8 @@ class SQLiteReplayStore:
                         or existing[0]["fingerprint_sha256"] != fingerprint
                     ):
                         raise ReplayConflict(
-                        "intent_identity_reused_with_different_content"
-                    )
+                            "intent_identity_reused_with_different_content"
+                        )
                     row = existing[0]
                     self._connection.execute("COMMIT")
                     return self._reservation(row, created=False)
