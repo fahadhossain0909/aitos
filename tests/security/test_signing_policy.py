@@ -149,9 +149,7 @@ def test_reduce_only_policy_can_be_disabled():
         allow_reduce_only=False,
     )
     with pytest.raises(IntentRejected, match="reduce_only_not_allowed"):
-        validate_order_intent(
-            intent(reduce_only=True), policy=policy, now_ms=NOW
-        )
+        validate_order_intent(intent(reduce_only=True), policy=policy, now_ms=NOW)
 
 
 def test_policy_rejects_unsafe_configuration():
