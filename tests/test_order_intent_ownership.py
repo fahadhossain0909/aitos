@@ -245,3 +245,74 @@ async def test_invalid_economics_fail_before_identity_registration_or_submission
     assert not wrapper._requests
     # Rejection cannot poison the valid logical intent with the same ID.
     assert (await wrapper.submit_order(request())).success
+
+class RecoveryStore:
+    def __init__(self):
+        self.saved = []
+
+    async def save_order_result(self, *args):
+        self.saved.append(args)
+
+
+class LookupExecutor(SimulatedOrderExecutor):
+    def __init__(self, evidence):
+        super().__init__()
+        self.evidence = evidence
+
+    async def get_order_by_client_id(self, symbol, client_order_id):
+        return self.evidence
+
+
+def recovery_evidence(**overrides):
+    value = dict(
+        symbol="BTCUSDT",
+        side="BUY",
+        clientOrderId="intent-a",
+        orderId=123,
+        status="PARTIALLY_FILLED",
+        executedQty="0.5",
+        avgPrice="101",
+    )
+    value.update(overrides)
+    return value
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"symbol": "ETHUSDT"},
+        {"side": "SELL"},
+        {"clientOrderId": "another-intent"},
+        {"executedQty": "1.01"},
+        {"executedQty": "-0.01"},
+        {"executedQty": "NaN"},
+        {"executedQty": "Infinity"},
+        {"avgPrice": "0"},
+        {"avgPrice": "Infinity"},
+        {"orderId": ""},
+    ],
+)
+async def test_ambiguous_recovery_rejects_unbound_or_invalid_fill_evidence(overrides):
+    from aitos.trading.persistent_state import AmbiguousOrderSubmissionError
+
+    store = RecoveryStore()
+    wrapper = IdempotentOrderExecutor(
+        LookupExecutor(recovery_evidence(**overrides)), store
+    )
+    with pytest.raises(AmbiguousOrderSubmissionError):
+        await wrapper._recover_ambiguous("intent-a", request())
+    # Invalid evidence must leave the durable SUBMITTING record untouched.
+    assert store.saved == []
+
+
+async def test_ambiguous_recovery_persists_only_identity_bound_partial_fill():
+    store = RecoveryStore()
+    wrapper = IdempotentOrderExecutor(
+        LookupExecutor(recovery_evidence()), store
+    )
+    result = await wrapper._recover_ambiguous("intent-a", request())
+    assert result.success and result.filled_quantity == 0.5
+    assert result.fill_price == 101
+    assert len(store.saved) == 1
+    assert store.saved[0][0:2] == ("intent-a", "BTCUSDT")
+
