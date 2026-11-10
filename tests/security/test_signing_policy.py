@@ -5,6 +5,7 @@ import pytest
 from aitos.security.signing_policy import (
     IntentRejected,
     OrderIntentPolicy,
+    parse_order_intent_json,
     validate_order_intent,
 )
 
@@ -167,3 +168,22 @@ def test_policy_rejects_unsafe_configuration():
             max_order_notional=Decimal("1000"),
             allowed_order_types=frozenset({"MARKET"}),
         )
+
+
+
+def test_json_parser_rejects_duplicate_keys_non_finite_and_oversized_body():
+    with pytest.raises(IntentRejected, match="duplicate_json_key"):
+        parse_order_intent_json('{"symbol":"BTCUSDT","symbol":"ETHUSDT"}')
+    with pytest.raises(IntentRejected, match="non_finite_json_number"):
+        parse_order_intent_json('{"quantity":NaN}')
+    with pytest.raises(IntentRejected, match="intent_body_too_large"):
+        parse_order_intent_json(" " * 4097)
+    with pytest.raises(IntentRejected):
+        parse_order_intent_json(b"\xff")
+    with pytest.raises(IntentRejected, match="intent_must_be_json_object"):
+        parse_order_intent_json("[]")
+
+
+def test_json_parser_accepts_valid_utf8_object():
+    parsed = parse_order_intent_json('{"symbol":"BTCUSDT","quantity":"0.01"}')
+    assert parsed == {"symbol": "BTCUSDT", "quantity": "0.01"}
