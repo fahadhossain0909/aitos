@@ -11,7 +11,6 @@ import json
 from pathlib import Path
 import sqlite3
 import contextlib
-from urllib.parse import quote
 
 from aitos.config.durable_files import (
     StorageUnavailable,
