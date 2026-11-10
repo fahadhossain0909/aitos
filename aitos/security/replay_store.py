@@ -84,7 +84,9 @@ class SQLiteReplayStore:
     backups and exclusive process ownership. This store is not a distributed lock.
     """
 
-    def __init__(self, database_path: str | os.PathLike[str], *, busy_timeout_ms: int = 5000):
+    def __init__(
+        self, database_path: str | os.PathLike[str], *, busy_timeout_ms: int = 5000
+    ):
         if (
             isinstance(busy_timeout_ms, bool)
             or not isinstance(busy_timeout_ms, int)
@@ -100,7 +102,6 @@ class SQLiteReplayStore:
             raise ValueError("replay_database_must_not_be_symlink")
         self._lock = threading.RLock()
         try:
-            existed = self.path.exists()
             self._connection = sqlite3.connect(
                 str(self.path),
                 timeout=busy_timeout_ms / 1000,
@@ -234,7 +235,10 @@ class SQLiteReplayStore:
     ) -> None:
         if status not in _TERMINAL:
             raise ValueError("invalid_terminal_status")
-        if not isinstance(outcome_code, str) or not _SAFE_CODE.fullmatch(outcome_code):
+        if (
+            not isinstance(outcome_code, str)
+            or not _SAFE_CODE.fullmatch(outcome_code)
+        ):
             raise ValueError("invalid_outcome_code")
         self._transition(
             intent_id,
