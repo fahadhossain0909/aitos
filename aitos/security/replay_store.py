@@ -115,6 +115,18 @@ class SQLiteReplayStore:
         self.max_records = max_records
         self._lock = threading.RLock()
         try:
+            if os.name == "posix":
+                fd = os.open(
+                    self.path,
+                    os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
+                )
+                try:
+                    if not stat.S_ISREG(os.fstat(fd).st_mode):
+                        raise ValueError("replay_database_must_be_regular_file")
+                    os.fchmod(fd, 0o600)
+                finally:
+                    os.close(fd)
             self._connection = sqlite3.connect(
                 str(self.path),
                 timeout=busy_timeout_ms / 1000,
