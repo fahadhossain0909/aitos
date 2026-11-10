@@ -85,7 +85,11 @@ class SQLiteReplayStore:
     """
 
     def __init__(
-        self, database_path: str | os.PathLike[str], *, busy_timeout_ms: int = 5000
+        self,
+        database_path: str | os.PathLike[str],
+        *,
+        busy_timeout_ms: int = 5000,
+        max_records: int = 2_000_000,
     ):
         if (
             isinstance(busy_timeout_ms, bool)
@@ -93,13 +97,22 @@ class SQLiteReplayStore:
             or not 1 <= busy_timeout_ms <= 60_000
         ):
             raise ValueError("invalid_busy_timeout")
+        if (
+            isinstance(max_records, bool)
+            or not isinstance(max_records, int)
+            or not 1 <= max_records <= 10_000_000
+        ):
+            raise ValueError("invalid_replay_capacity")
         raw_path = os.fspath(database_path)
         if raw_path == ":memory:":
             raise ValueError("durable_database_path_required")
         self.path = Path(raw_path).expanduser()
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+        if os.name == "posix" and self.path.parent.stat().st_mode & 0o077:
+            raise ValueError("replay_directory_must_be_private")
         if self.path.is_symlink():
             raise ValueError("replay_database_must_not_be_symlink")
+        self.max_records = max_records
         self._lock = threading.RLock()
         try:
             self._connection = sqlite3.connect(
@@ -185,6 +198,11 @@ class SQLiteReplayStore:
                     self._connection.execute("COMMIT")
                     return self._reservation(row, created=False)
 
+                row_count = self._connection.execute(
+                    "SELECT COUNT(*) FROM signer_intent_ledger"
+                ).fetchone()[0]
+                if row_count >= self.max_records:
+                    raise ReplayStoreError("replay_ledger_capacity_reached")
                 self._connection.execute(
                     """
                     INSERT INTO signer_intent_ledger (
@@ -209,7 +227,7 @@ class SQLiteReplayStore:
                 ).fetchone()
                 self._connection.execute("COMMIT")
                 return self._reservation(row, created=True)
-            except ReplayConflict:
+            except (ReplayConflict, ReplayStoreError):
                 self._rollback()
                 raise
             except sqlite3.Error as exc:
