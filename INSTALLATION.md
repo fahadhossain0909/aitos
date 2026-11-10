@@ -9,6 +9,8 @@ These are different layers, not competing installers. The desktop application is
 
 > **Safety:** the desktop console is read-only. The standard VPS deployment starts the paper-trading runtime using public market data and simulated orders. It does not authorize live trading. Do not expose database ports or the backend health/API port directly to the public Internet.
 
+> **Credential warning for provider-hosted RDP/VPS:** do not enter an exchange API Secret on an RDP/VPS if the hosting provider's administrators are outside your trust boundary. Windows Credential Manager or Linux Secret Service does not protect a secret from a privileged administrator of that same host. The current desktop app stores only its operator password/backend bearer; it has no exchange-key entry flow. Existing live execution configuration that places `BINANCE_API_KEY` / `BINANCE_API_SECRET` in the VPS environment is visible to sufficiently privileged host administrators. Review the [Credential Security & Remote Signing RFC](docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md); the separate remote signer is not yet implemented.
+
 ## Which method should I choose?
 
 | Goal | Choose |
