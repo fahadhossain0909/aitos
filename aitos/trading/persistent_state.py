@@ -1371,9 +1371,9 @@ class IdempotentOrderExecutor(OrderExecutor):
         # the lookup result back to the exact intent before it can be persisted
         # as acknowledged exposure.
         expected_side = (
-            "SELL" if request.side == TradeSide.LONG else "BUY"
-        ) if request.reduce_only else (
-            "BUY" if request.side == TradeSide.LONG else "SELL"
+            ("SELL" if request.side == TradeSide.LONG else "BUY")
+            if request.reduce_only
+            else ("BUY" if request.side == TradeSide.LONG else "SELL")
         )
         if (
             status.get("symbol") != request.symbol
