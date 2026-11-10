@@ -193,7 +193,9 @@ class SQLiteReplayStore:
                         or existing[0]["client_order_id"] != intent.client_order_id
                         or existing[0]["fingerprint_sha256"] != fingerprint
                     ):
-                        raise ReplayConflict("intent_identity_reused_with_different_content")
+                        raise ReplayConflict(
+                        "intent_identity_reused_with_different_content"
+                    )
                     row = existing[0]
                     self._connection.execute("COMMIT")
                     return self._reservation(row, created=False)
@@ -253,10 +255,7 @@ class SQLiteReplayStore:
     ) -> None:
         if status not in _TERMINAL:
             raise ValueError("invalid_terminal_status")
-        if (
-            not isinstance(outcome_code, str)
-            or not _SAFE_CODE.fullmatch(outcome_code)
-        ):
+        if not isinstance(outcome_code, str) or not _SAFE_CODE.fullmatch(outcome_code):
             raise ValueError("invalid_outcome_code")
         self._transition(
             intent_id,
