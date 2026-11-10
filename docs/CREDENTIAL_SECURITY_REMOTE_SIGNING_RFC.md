@@ -230,7 +230,7 @@ A reduce-only flag is not sufficient proof. For a long position, a sell quantity
 
 - Use TLS 1.3 where available. Prefer mutual TLS with a dedicated client certificate per runtime/environment. Pin/rotate trust roots through an authenticated administrative process.
 - Bind certificate identity to the runtime ID, environment, allowed account alias and policy version.
-- The signer validates the canonical request structure and authenticated transport identity before policy evaluation.
+- The signer validates the canonical request structure and authenticated transport identity before policy evaluation. A client certificate stored on the VPS can itself be copied by a provider administrator; mTLS identifies the runtime credential, but does not make that identity resistant to a hostile host administrator. The signer must assume that an attacker may fully impersonate the VPS client and rely on independent signer-side policy and limits.
 - Use a durable atomic uniqueness constraint for `(client_identity, nonce)`, `intent_id` and `client_order_id`. In-memory-only replay protection is not production-safe across restarts or multiple signer replicas.
 - Store the idempotency state before dispatch. States include `RECEIVED`, `AUTHORIZED`, `DISPATCHING`, `CONFIRMED`, `REJECTED`, `UNKNOWN`, and `RECONCILED`.
 - If the signer crashes after sending but before receiving a response, mark the outcome `UNKNOWN`; query/reconcile by client order ID before any retry. Never blindly resend an exposure-increasing request.
