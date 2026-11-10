@@ -65,6 +65,7 @@ def test_valid_limit_intent_returns_decimal_normalized_contract():
         {"nonce": "short"},
         {"intent_id": "../unsafe"},
         {"schema_version": True},
+        {"schema_version": 1.0},
     ],
 )
 def test_malformed_or_unknown_intents_fail_closed(overrides):
@@ -184,3 +185,20 @@ def test_json_parser_rejects_duplicate_keys_non_finite_and_oversized_body():
 def test_json_parser_accepts_valid_utf8_object():
     parsed = parse_order_intent_json('{"symbol":"BTCUSDT","quantity":"0.01"}')
     assert parsed == {"symbol": "BTCUSDT", "quantity": "0.01"}
+
+
+
+def test_policy_requires_strict_boolean_flags_and_valid_account_alias():
+    with pytest.raises(ValueError, match="boolean_policy_flags"):
+        OrderIntentPolicy(
+            account_alias="paper-primary",
+            allowed_symbols=frozenset({"BTCUSDT"}),
+            max_order_notional=Decimal("1000"),
+            allow_market_orders="yes",
+        )
+    with pytest.raises(ValueError, match="account_alias_required"):
+        OrderIntentPolicy(
+            account_alias="bad alias",
+            allowed_symbols=frozenset({"BTCUSDT"}),
+            max_order_notional=Decimal("1000"),
+        )
