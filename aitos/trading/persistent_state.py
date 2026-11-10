@@ -1235,7 +1235,9 @@ class IdempotentOrderExecutor(OrderExecutor):
                         and replay.filled_quantity >= 0
                         and replay.filled_quantity <= request.quantity * (1 + 1e-9)
                     )
-                    valid_price = math.isfinite(replay.fill_price) and replay.fill_price >= 0
+                    valid_price = (
+                        math.isfinite(replay.fill_price) and replay.fill_price >= 0
+                    )
                     if (
                         replay.symbol != request.symbol
                         or replay.side != request.side
@@ -1259,7 +1261,9 @@ class IdempotentOrderExecutor(OrderExecutor):
                             )
                         )
                     ):
-                        raise ValueError("durable result does not match its terminal state")
+                        raise ValueError(
+                            "durable result does not match its terminal state"
+                        )
                 except (TypeError, ValueError, OverflowError):
                     self._blocked_reason = "durable terminal order evidence is invalid"
                     self._blocked_client_order_id = key
