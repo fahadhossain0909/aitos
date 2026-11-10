@@ -1284,6 +1284,10 @@ class IdempotentOrderExecutor(OrderExecutor):
                 f"order {key} remains ambiguous: venue lookup returned no authoritative result; "
                 "automatic resubmission blocked"
             )
+        if not isinstance(status, Mapping):
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} lookup returned malformed evidence; manual reconciliation required"
+            )
         venue_state = str(status.get("status", "")).upper()
         terminal_states = {
             "FILLED",
@@ -1296,11 +1300,48 @@ class IdempotentOrderExecutor(OrderExecutor):
             raise AmbiguousOrderSubmissionError(
                 f"order {key} is still {venue_state or 'unknown'}; automatic resubmission blocked"
             )
-        filled = float(status.get("executedQty", status.get("filled_quantity", 0)) or 0)
-        price = float(status.get("avgPrice", status.get("fill_price", 0)) or 0)
-        accepted = filled > 0 and price > 0
+
+        # Recovery bypasses the normal Binance submit-response validator. Bind
+        # the lookup result back to the exact intent before it can be persisted
+        # as acknowledged exposure.
+        expected_side = (
+            "SELL" if request.side == TradeSide.LONG else "BUY"
+        ) if request.reduce_only else (
+            "BUY" if request.side == TradeSide.LONG else "SELL"
+        )
+        if (
+            status.get("symbol") != request.symbol
+            or status.get("clientOrderId", status.get("client_order_id")) != key
+            or str(status.get("side", "")).upper() != expected_side
+        ):
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} lookup identity does not match the durable request"
+            )
+        try:
+            filled = float(
+                status.get("executedQty", status.get("filled_quantity", 0)) or 0
+            )
+            price = float(status.get("avgPrice", status.get("fill_price", 0)) or 0)
+        except (TypeError, ValueError, OverflowError):
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} lookup returned invalid fill economics"
+            ) from None
+        order_id = str(status.get("orderId", status.get("order_id", "")))
+        if (
+            not math.isfinite(filled)
+            or not math.isfinite(price)
+            or filled < 0
+            or filled > request.quantity * (1 + 1e-9)
+            or price < 0
+            or (filled > 0 and (price <= 0 or not order_id))
+            or (filled == 0 and price != 0)
+        ):
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} lookup returned invalid or out-of-bounds fill evidence"
+            )
+        accepted = filled > 0
         result = OrderResult(
-            order_id=str(status.get("orderId", status.get("order_id", ""))),
+            order_id=order_id,
             symbol=request.symbol,
             side=request.side,
             filled_quantity=filled,
