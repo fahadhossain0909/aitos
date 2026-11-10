@@ -11,7 +11,7 @@ import binascii
 import json
 import re
 from dataclasses import dataclass
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, InvalidOperation, localcontext
 from typing import Any, FrozenSet, Mapping
 
 
@@ -32,11 +32,17 @@ def _reject_json_constant(_value):
     raise IntentRejected("non_finite_json_number")
 
 
-def parse_order_intent_json(raw: str | bytes, *, max_bytes: int = 4096) -> Mapping[str, Any]:
+def parse_order_intent_json(
+    raw: str | bytes, *, max_bytes: int = 4096
+) -> Mapping[str, Any]:
     """Parse a bounded UTF-8 JSON object and reject duplicate keys/constants."""
     if not isinstance(raw, (str, bytes)):
         raise IntentRejected("invalid_json_payload")
-    if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or not 1 <= max_bytes <= 65_536:
+    if (
+        isinstance(max_bytes, bool)
+        or not isinstance(max_bytes, int)
+        or not 1 <= max_bytes <= 65_536
+    ):
         raise IntentRejected("invalid_body_limit")
     try:
         encoded = raw.encode("utf-8") if isinstance(raw, str) else raw
@@ -148,7 +154,7 @@ class OrderIntentPolicy:
     def __post_init__(self) -> None:
         if not isinstance(self.account_alias, str) or not self.account_alias:
             raise ValueError("account_alias_required")
-        if not self.allowed_symbols or any(
+        if not isinstance(self.allowed_symbols, frozenset) or not self.allowed_symbols or any(
             not isinstance(s, str) or not _SYMBOL_RE.fullmatch(s)
             for s in self.allowed_symbols
         ):
@@ -158,12 +164,17 @@ class OrderIntentPolicy:
             or self.max_order_notional <= 0
         ):
             raise ValueError("positive_decimal_notional_required")
-        if not self.allowed_sides or not self.allowed_sides <= {"BUY", "SELL"}:
+        if (
+            not isinstance(self.allowed_sides, frozenset)
+            or not self.allowed_sides
+            or not self.allowed_sides <= {"BUY", "SELL"}
+        ):
             raise ValueError("invalid_side_policy")
-        if not self.allowed_order_types or not self.allowed_order_types <= {
-            "LIMIT",
-            "MARKET",
-        }:
+        if (
+            not isinstance(self.allowed_order_types, frozenset)
+            or not self.allowed_order_types
+            or not self.allowed_order_types <= {"LIMIT", "MARKET"}
+        ):
             raise ValueError("invalid_order_type_policy")
         if "MARKET" in self.allowed_order_types and not self.allow_market_orders:
             raise ValueError("market_order_requires_explicit_enablement")
@@ -259,7 +270,10 @@ def validate_order_intent(
     if not isinstance(side, str) or side not in policy.allowed_sides:
         raise IntentRejected("side_not_allowed")
     order_type = payload["order_type"]
-    if not isinstance(order_type, str) or order_type not in policy.allowed_order_types:
+    if (
+        not isinstance(order_type, str)
+        or order_type not in policy.allowed_order_types
+    ):
         raise IntentRejected("order_type_not_allowed")
 
     quantity = _decimal(payload["quantity"], "quantity")
@@ -290,8 +304,13 @@ def validate_order_intent(
             raise IntentRejected("trusted_market_price_required")
         valuation_price = trusted_market_price
 
-    notional = quantity * valuation_price
-    if not notional.is_finite() or notional > policy.max_order_notional:
+    try:
+        with localcontext() as context:
+            context.prec = 60
+            notional = quantity * valuation_price
+    except DecimalException:
+        raise IntentRejected("invalid_order_notional") from None
+    if notional > policy.max_order_notional:
         raise IntentRejected("order_notional_exceeded")
 
     optional = {}
