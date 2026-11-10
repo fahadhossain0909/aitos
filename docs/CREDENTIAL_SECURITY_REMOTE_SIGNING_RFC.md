@@ -452,8 +452,8 @@ Audit storage should be append-only or tamper-evident, access-controlled, time-s
 
 The branch now includes a deliberately limited local/paper reference implementation:
 
-- `aitos/security/signing_policy.py`: bounded JSON parser and pure, fail-closed intent policy validation.
-- `aitos/security/replay_store.py`: SQLite ledger with `BEGIN IMMEDIATE`, WAL, `synchronous=FULL`, unique account-scoped nonce and client-order identities, SHA-256 nonce/fingerprint storage, private POSIX database-file mode, and monotonic state transitions.
+- `aitos/security/signing_policy.py`: bounded JSON parser and pure, fail-closed intent policy validation with strict integer/boolean types and sufficient Decimal precision for the accepted input bounds.
+- `aitos/security/replay_store.py`: SQLite ledger with `BEGIN IMMEDIATE`, WAL, `synchronous=FULL`, unique account-scoped nonce and client-order identities, SHA-256 nonce/fingerprint storage, private POSIX parent/database permissions, a configurable hard capacity ceiling, and monotonic state transitions.
 - `aitos/security/paper_processor.py`: in-process paper-only intent processor. It has no HTTP listener, credential provider, cryptographic signing, exchange client or network dispatch.
 - `tests/security/test_signing_policy.py` and `tests/security/test_replay_store.py`: schema/policy, duplicate-key, durable reopen, collision, concurrent reservation, state-transition, ambiguous-dispatch and no-auto-retry tests.
 
@@ -470,7 +470,7 @@ A crash after the durable `DISPATCHING` transition leaves the intent ambiguous. 
 ### Important implementation limits
 
 - SQLite is a single-host durable ledger, not a multi-host consensus system or distributed lock. Do not put it on a shared network filesystem or run multiple active signer hosts against copied databases.
-- The database file is chmod 0600 on POSIX; production must also secure its parent directory, WAL/SHM files, backups, service account and host. Windows ACL hardening is a separate platform adapter.
+- The database parent directory must be private on POSIX and the database file is chmod 0600; the ledger fails closed at its configured record ceiling rather than deleting replay history. Production must also secure WAL/SHM files, backups, service account and host. Windows ACL hardening is a separate platform adapter.
 - The paper processor accepts LIMIT intents only and uses an adapter marked paper-only. It is not a remotely reachable service.
 - No production nonce store, mTLS transport, caller identity authentication, trusted account/position reconciliation, daily-loss/exposure ledger, exchange credential binding, HSM/KMS integration or live exchange dispatch is implemented.
 - A durable local reservation is not proof of exactly-once execution at an exchange. Venue-side idempotency and independent reconciliation are still required.
