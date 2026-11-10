@@ -157,7 +157,10 @@ class OrderIntentPolicy:
     clock_skew_ms: int = 5_000
 
     def __post_init__(self) -> None:
-        if not isinstance(self.account_alias, str) or not _ID_RE.fullmatch(self.account_alias):
+        if (
+            not isinstance(self.account_alias, str)
+            or not _ID_RE.fullmatch(self.account_alias)
+        ):
             raise ValueError("account_alias_required")
         if (
             not isinstance(self.allowed_symbols, frozenset)
@@ -184,7 +187,10 @@ class OrderIntentPolicy:
             or not self.allowed_order_types <= {"LIMIT", "MARKET"}
         ):
             raise ValueError("invalid_order_type_policy")
-        if type(self.allow_market_orders) is not bool or type(self.allow_reduce_only) is not bool:
+        if (
+            type(self.allow_market_orders) is not bool
+            or type(self.allow_reduce_only) is not bool
+        ):
             raise ValueError("boolean_policy_flags_required")
         if "MARKET" in self.allowed_order_types and not self.allow_market_orders:
             raise ValueError("market_order_requires_explicit_enablement")
