@@ -24,7 +24,7 @@ from aitos.security.signing_policy import ValidatedOrderIntent
 
 IntentStatus = Literal["reserved", "dispatching", "accepted", "rejected", "unknown"]
 _TERMINAL = frozenset({"accepted", "rejected", "unknown"})
-_SAFE_CODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
+_SAFE_CODE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 
 
 class ReplayConflict(RuntimeError):
