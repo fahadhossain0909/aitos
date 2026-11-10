@@ -316,3 +316,43 @@ async def test_ambiguous_recovery_persists_only_identity_bound_partial_fill():
     assert len(store.saved) == 1
     assert store.saved[0][0:2] == ("intent-a", "BTCUSDT")
 
+class DurableReplayStore:
+    def __init__(self, record):
+        self.record = record
+
+    async def load_order_record(self, client_order_id):
+        return self.record
+
+    async def save_order_intent(self, *args):
+        raise AssertionError("existing durable identity must not be resubmitted")
+
+    async def save_order_result(self, *args):
+        raise AssertionError("conflicting evidence must not be overwritten")
+
+
+async def test_durable_ack_cannot_be_replayed_for_changed_request_after_restart():
+    from aitos.trading.persistent_state import AmbiguousOrderSubmissionError
+
+    original = request()
+    stored = IdempotentOrderExecutor._request_payload(original)
+    stored["quantity"] = 0.5
+    record = {
+        "symbol": "BTCUSDT",
+        "state": "ACKNOWLEDGED",
+        "request": stored,
+        "result": {
+            "order_id": "old-order",
+            "symbol": "BTCUSDT",
+            "side": "LONG",
+            "filled_quantity": 0.5,
+            "fill_price": 101,
+            "success": True,
+        },
+    }
+    inner = BlockingExecutor()
+    wrapper = IdempotentOrderExecutor(inner, DurableReplayStore(record))
+    with pytest.raises(AmbiguousOrderSubmissionError, match="different durable request"):
+        await wrapper._submit_with_recovery("intent-a", original)
+    assert inner.calls == 0
+    assert wrapper._blocked_client_order_id == "intent-a"
+
