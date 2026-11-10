@@ -1215,7 +1215,21 @@ class IdempotentOrderExecutor(OrderExecutor):
             state = str(record.get("state", "")).upper()
             if state in {"ACKNOWLEDGED", "REJECTED"}:
                 try:
-                    replay = self._result_from_payload(record.get("result", {}), request)
+                    raw_result = record.get("result")
+                    if (
+                        not isinstance(raw_result, Mapping)
+                        or type(raw_result.get("success")) is not bool
+                        or not isinstance(raw_result.get("symbol"), str)
+                        or not isinstance(raw_result.get("side"), str)
+                        or any(
+                            isinstance(raw_result.get(field), bool)
+                            or not isinstance(raw_result.get(field), Real)
+                            or not math.isfinite(float(raw_result.get(field)))
+                            for field in ("filled_quantity", "fill_price")
+                        )
+                    ):
+                        raise ValueError("durable result schema is incomplete")
+                    replay = self._result_from_payload(raw_result, request)
                     valid_quantity = (
                         math.isfinite(replay.filled_quantity)
                         and replay.filled_quantity >= 0
