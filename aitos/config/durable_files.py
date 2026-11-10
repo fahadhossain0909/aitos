@@ -142,11 +142,7 @@ def stage_sqlite_snapshot(source, destination, *, timeout_seconds=10):
                 raise StorageUnavailable("backup deadline exceeded")
 
         try:
-            uri = (
-                "file:"
-                + quote(str(source.resolve()).replace("\\", "/"), safe="/:")
-                + "?mode=ro"
-            )
+            uri = source.resolve().as_uri() + "?mode=ro"
             with contextlib.closing(
                 sqlite3.connect(uri, uri=True, timeout=3)
             ) as original:
