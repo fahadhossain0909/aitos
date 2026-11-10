@@ -168,7 +168,6 @@ def test_policy_rejects_unsafe_configuration():
         )
 
 
-
 def test_json_parser_rejects_duplicate_keys_non_finite_and_oversized_body():
     with pytest.raises(IntentRejected, match="duplicate_json_key"):
         parse_order_intent_json('{"symbol":"BTCUSDT","symbol":"ETHUSDT"}')
