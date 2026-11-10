@@ -154,9 +154,13 @@ class OrderIntentPolicy:
     def __post_init__(self) -> None:
         if not isinstance(self.account_alias, str) or not self.account_alias:
             raise ValueError("account_alias_required")
-        if not isinstance(self.allowed_symbols, frozenset) or not self.allowed_symbols or any(
-            not isinstance(s, str) or not _SYMBOL_RE.fullmatch(s)
-            for s in self.allowed_symbols
+        if (
+            not isinstance(self.allowed_symbols, frozenset)
+            or not self.allowed_symbols
+            or any(
+                not isinstance(s, str) or not _SYMBOL_RE.fullmatch(s)
+                for s in self.allowed_symbols
+            )
         ):
             raise ValueError("valid_symbol_allowlist_required")
         if not isinstance(self.max_order_notional, Decimal) or (
