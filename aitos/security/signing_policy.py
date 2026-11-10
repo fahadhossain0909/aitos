@@ -164,8 +164,7 @@ class OrderIntentPolicy:
         ):
             raise ValueError("valid_symbol_allowlist_required")
         if not isinstance(self.max_order_notional, Decimal) or (
-            not self.max_order_notional.is_finite()
-            or self.max_order_notional <= 0
+            not self.max_order_notional.is_finite() or self.max_order_notional <= 0
         ):
             raise ValueError("positive_decimal_notional_required")
         if (
@@ -274,10 +273,7 @@ def validate_order_intent(
     if not isinstance(side, str) or side not in policy.allowed_sides:
         raise IntentRejected("side_not_allowed")
     order_type = payload["order_type"]
-    if (
-        not isinstance(order_type, str)
-        or order_type not in policy.allowed_order_types
-    ):
+    if not isinstance(order_type, str) or order_type not in policy.allowed_order_types:
         raise IntentRejected("order_type_not_allowed")
 
     quantity = _decimal(payload["quantity"], "quantity")
