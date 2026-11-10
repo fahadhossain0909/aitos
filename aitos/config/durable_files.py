@@ -14,7 +14,6 @@ import shutil
 import sqlite3
 import tempfile
 import time
-from urllib.parse import quote
 
 from aitos.config.paths import get_cache_dir, get_project_root
 
