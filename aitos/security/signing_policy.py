@@ -63,7 +63,7 @@ def parse_order_intent_json(
     return value
 
 
-_DECIMAL_RE = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]{1,18})?\Z")
+_DECIMAL_RE = re.compile(r"(?:0|[1-9][0-9]{0,29})(?:\.[0-9]{1,18})?\Z")
 _ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _SYMBOL_RE = re.compile(r"[A-Z0-9]{2,30}\Z")
 _NONCE_RE = re.compile(r"[A-Za-z0-9_-]{22,86}\Z")
