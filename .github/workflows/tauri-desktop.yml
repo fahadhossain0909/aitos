@@ -64,7 +64,9 @@ jobs:
         shell: bash
         run: PYTHONPATH="$GITHUB_WORKSPACE" python native/shared/test_real_vault.py
       - name: Backup staging and storage regression tests
-        run: python -m pytest tests/test_backup_bundle.py tests/test_durable_files.py -q
+        # These two modules use only built-in pytest fixtures; skip the unrelated
+        # repository-wide conftest, which imports the full trading test stack.
+        run: python -m pytest --noconftest tests/test_backup_bundle.py tests/test_durable_files.py -q
       - name: Frozen gateway auth and revocation smoke (synthetic, no vault)
         shell: bash
         run: |
