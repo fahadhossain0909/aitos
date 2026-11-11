@@ -89,7 +89,7 @@ export function WorkspaceStudio({
         <div>
           <span className="small-cap">PERSONAL WORKSPACE CONTROL</span>
           <h2>One application. Six focused environments.</h2>
-          <p>Choose a workspace, arrange its panels and keep the layout on this device.</p>
+          <p>Choose a workspace, arrange its panels and persist the layout in your OS configuration folder.</p>
         </div>
         <button className="button secondary" onClick={() => setPaletteOpen(true)} aria-keyshortcuts="Control+K Meta+K">
           <span>⌘</span> Command palette <kbd>Ctrl K</kbd>
@@ -115,7 +115,7 @@ export function WorkspaceStudio({
         <div className="workspace-editor">
           <div className="workspace-editor-heading">
             <div><span className="small-cap">ACTIVE ENVIRONMENT</span><h3>{active.label}</h3><p>{active.description}</p></div>
-            <span className="workspace-local-badge">{storageAvailable ? "SAVED ON DEVICE" : "LOCAL STORAGE UNAVAILABLE"}</span>
+            <span className="workspace-local-badge">{storageAvailable ? "SAVED ON DEVICE" : "LOCAL SETTINGS UNAVAILABLE"}</span>
           </div>
           <div className="workspace-panel-heading">
             <strong>Docked panels</strong><span>{activePanels.length} active · {PANELS.length} available</span>

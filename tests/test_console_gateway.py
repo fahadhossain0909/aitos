@@ -40,7 +40,7 @@ def test_operator_password_validation_uses_utf8_byte_contract(password, valid):
 
 
 @pytest.fixture
-async def harness(tmp_path):
+async def harness(tmp_path, monkeypatch):
     root = tmp_path / "dist"
     root.mkdir()
     (root / "index.html").write_text("<html>operator console</html>")
@@ -93,6 +93,13 @@ async def harness(tmp_path):
     app.router.add_route("*", "/{path:.*}", backend)
     upstream = TestServer(app)
     await upstream.start_server()
+    def prepare_test_directory(path, **_):
+        path.mkdir(parents=True, mode=0o700, exist_ok=True)
+        return path
+
+    monkeypatch.setattr(
+        "aitos.console_gateway.prepare_durable_directory", prepare_test_directory
+    )
     config = GatewayConfig(
         ORIGIN, str(upstream.make_url("")).rstrip("/"), root, TOKEN, session_seconds=120
     )
