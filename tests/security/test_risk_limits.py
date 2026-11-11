@@ -126,7 +126,6 @@ def test_reduce_only_wrong_side_is_rejected():
         )
 
 
-
 def test_account_snapshot_copies_and_freezes_exposure_mappings():
     positions = {"BTCUSDT": Decimal("0.01")}
     exposure = {"BTCUSDT": Decimal("50")}
