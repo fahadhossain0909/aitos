@@ -76,7 +76,11 @@ class SignerRPCClient:
         sent_at_ms: int,
         request_id: str | None = None,
     ) -> SignerRPCReceipt:
-        if not isinstance(intent, Mapping) or not isinstance(account_alias, str) or not account_alias:
+        if (
+            not isinstance(intent, Mapping)
+            or not isinstance(account_alias, str)
+            or not account_alias
+        ):
             raise ValueError("signer_rpc_intent_and_account_required")
         if type(sent_at_ms) is not int or sent_at_ms < 0:
             raise ValueError("invalid_signer_rpc_timestamp")
@@ -147,11 +151,15 @@ class SignerRPCClient:
             )
         except asyncio.TimeoutError:
             if sent:
-                raise SignerRPCClientError("signer_response_timeout_ambiguous") from None
+                raise SignerRPCClientError(
+                    "signer_response_timeout_ambiguous"
+                ) from None
             raise SignerRPCClientError("signer_connection_timeout") from None
         except (OSError, ssl.SSLError, asyncio.IncompleteReadError, ValueError):
             if sent:
-                raise SignerRPCClientError("signer_transport_failure_ambiguous") from None
+                raise SignerRPCClientError(
+                    "signer_transport_failure_ambiguous"
+                ) from None
             raise SignerRPCClientError("signer_connection_unavailable") from None
         finally:
             if writer is not None:
