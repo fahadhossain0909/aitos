@@ -170,7 +170,7 @@ export default function SignerSettings() {
       <section className="signer-warning" role="note">
         <strong>Trust boundary</strong>
         <p>Never run the signer or unlock Bitwarden/1Password on a provider-managed RDP/VPS. Its administrator may inspect process memory and unlocked vault sessions. Keep this signer on a separately controlled device.</p>
-        <label className="signer-trust-confirm"><input type="checkbox" checked={trustedHostConfirmed} onChange={e => setTrustedHostConfirmed(e.target.checked)} /> I confirm this is a user-controlled trusted device, not a provider-managed RDP/VPS.</label>
+        <label className="signer-trust-confirm"><input type="checkbox" checked={trustedHostConfirmed} onChange={e => { setTrustedHostConfirmed(e.target.checked); if (!e.target.checked) { setKeyId(""); setApiSecret(""); setConfirmSecret(""); } }} /> I confirm this is a user-controlled trusted device, not a provider-managed RDP/VPS.</label>
       </section>
       {!nativeApiAvailable && <div className="signer-error">Native signer commands are unavailable. Open this page from the installed AITOS Desktop application.</div>}
       {nativeApiAvailable && !trustedHostConfirmed && <div className="signer-error">Confirm the trusted-host boundary before enabling credential operations.</div>}
