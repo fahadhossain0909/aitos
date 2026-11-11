@@ -526,3 +526,24 @@ The risk preflight currently checks account alias, evidence freshness, gross/sym
 - **Execution status:** no live exchange adapter, real order dispatch, production credential migration, deployment or live activation is included in this change. The processor remains paper-only.
 
 A separately deployed signer is not complete until the missing controls above have been implemented, integration-tested and independently reviewed. Do not treat the current paper implementation or green unit tests as production authorization.
+
+
+## 15. Bounded signer RPC contract and certificate authorization (2026-11-11)
+
+The branch adds `aitos/security/signer_rpc_protocol.py`, a pure protocol-validation layer. It is deliberately **not** an HTTP/gRPC listener and does not create a socket.
+
+Implemented controls:
+- exact URI-SAN identity selection from the TLS-verified peer certificate;
+- identity-to-account and symbol allowlist grants;
+- certificate serial allowlisting, explicit serial revocation, enabled/disabled grants and validity windows;
+- overlapping allowed serials to support controlled certificate rotation, followed by explicit removal of the old serial;
+- bounded UTF-8 JSON envelope parsing, duplicate-key rejection, strict protocol version and request ID;
+- request timestamp skew checks and account/symbol scope enforcement;
+- explicit rejection of API secrets, private keys, signatures and reusable signed-request fields;
+- immutable parsed intent mapping.
+
+The protocol hands the intent to the existing strict intent validator and durable replay processor; it does not replace their validation or consume a nonce itself. The authenticated identity parameter is expected to be supplied by the TLS connection handler after certificate verification. A future listener must make that call path unforgeable by deriving identity directly from the accepted TLS socket, never from an HTTP header or request JSON.
+
+Certificate lifecycle limitation: this code supports a static, in-memory authorization snapshot and serial revocation policy. It does not issue certificates, persist registry updates, watch a revocation feed/CRL/OCSP, rotate private keys, or expose an operator enrollment workflow. A process restart reloads policy from trusted deployment configuration, which is not yet implemented here.
+
+No live signing, exchange dispatch, account API adapter, production listener, deployment or credential migration is included.
