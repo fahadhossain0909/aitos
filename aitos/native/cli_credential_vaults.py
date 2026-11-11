@@ -69,7 +69,7 @@ class BitwardenCLIVault:
     @staticmethod
     def _item(reference: str) -> str:
         if type(reference) is not str or not re.fullmatch(
-            r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            (r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"),
             reference,
         ):
             raise ProviderVaultError("bitwarden_item_reference_invalid")
@@ -102,7 +102,11 @@ class BitwardenCLIVault:
         item_id = self._item(reference.rsplit("/", 1)[0])
         label = self._field(reference)
         item = self._get_item(item_id)
-        matches = [f for f in item["fields"] if isinstance(f, dict) and f.get("name") == label]
+        matches = [
+            f
+            for f in item["fields"]
+            if isinstance(f, dict) and f.get("name") == label
+        ]
         if len(matches) > 1:
             raise ProviderVaultError("bitwarden_duplicate_credential_field")
         value = matches[0].get("value") if matches else None
@@ -120,8 +124,12 @@ class BitwardenCLIVault:
         if matches:
             matches[0].update({"type": 1, "value": secret})
         else:
-            item["fields"].append({"name": label, "value": secret, "type": 1, "linkedId": None})
-        encoded = self._cli.run(["encode"], stdin=json.dumps(item, separators=(",", ":")))
+            item["fields"].append(
+                {"name": label, "value": secret, "type": 1, "linkedId": None}
+            )
+        encoded = self._cli.run(
+            ["encode"], stdin=json.dumps(item, separators=(",", ":"))
+        )
         if not encoded.strip():
             raise ProviderVaultError("bitwarden_encode_failed")
         # bw edit accepts the encoded JSON on stdin; no secret-bearing argv.
@@ -132,7 +140,11 @@ class BitwardenCLIVault:
         label = self._field(reference)
         item = self._get_item(item_id)
         old = item["fields"]
-        item["fields"] = [f for f in old if not (isinstance(f, dict) and f.get("name") == label)]
+        item["fields"] = [
+            f
+            for f in old
+            if not (isinstance(f, dict) and f.get("name") == label)
+        ]
         if len(item["fields"]) == len(old):
             return False
         encoded = self._cli.run(["encode"], stdin=json.dumps(item, separators=(",", ":")))
@@ -174,7 +186,16 @@ class OnePasswordCLIVault:
 
     def _get_item(self, vault_id: str, item_id: str) -> dict:
         raw = self._cli.run(
-            ["item", "get", item_id, "--vault", vault_id, "--format", "json", "--reveal"]
+            [
+                "item",
+                "get",
+                item_id,
+                "--vault",
+                vault_id,
+                "--format",
+                "json",
+                "--reveal",
+            ]
         )
         try:
             item = json.loads(raw)
@@ -193,7 +214,11 @@ class OnePasswordCLIVault:
         vault_id, item_id, part = self._reference(reference)
         item = self._get_item(vault_id, item_id)
         label = self._label(part)
-        matches = [f for f in item["fields"] if isinstance(f, dict) and f.get("label") == label]
+        matches = [
+            f
+            for f in item["fields"]
+            if isinstance(f, dict) and f.get("label") == label
+        ]
         if len(matches) > 1:
             raise ProviderVaultError("onepassword_duplicate_credential_field")
         value = matches[0].get("value") if matches else None
@@ -211,16 +236,25 @@ class OnePasswordCLIVault:
         if matches:
             matches[0].update({"type": "CONCEALED", "value": secret})
         else:
-            item["fields"].append({"label": label, "type": "CONCEALED", "value": secret})
-        # 1Password CLI accepts an item JSON template on stdin. Keep secrets out of argv.
-        self._cli.run(["item", "edit", item_id, "--vault", vault_id], stdin=json.dumps(item))
+            item["fields"].append(
+                {"label": label, "type": "CONCEALED", "value": secret}
+            )
+        # 1Password CLI accepts an item JSON template on stdin.
+        # Keep secrets out of argv.
+        self._cli.run(
+            ["item", "edit", item_id, "--vault", vault_id], stdin=json.dumps(item)
+        )
 
     def delete_secret(self, reference: str) -> bool:
         vault_id, item_id, part = self._reference(reference)
         item = self._get_item(vault_id, item_id)
         label = self._label(part)
         old = item["fields"]
-        item["fields"] = [f for f in old if not (isinstance(f, dict) and f.get("label") == label)]
+        item["fields"] = [
+            f
+            for f in old
+            if not (isinstance(f, dict) and f.get("label") == label)
+        ]
         if len(item["fields"]) == len(old):
             return False
         self._cli.run(["item", "edit", item_id, "--vault", vault_id], stdin=json.dumps(item))
