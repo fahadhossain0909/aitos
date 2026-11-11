@@ -1,4 +1,5 @@
 import { WorkspaceStudio } from "./WorkspaceStudio";
+import type { PanelId } from "./workspaceModel";
 import { parseHistoryCut } from "./historyCursorClient";
 import ProtectionPanel from "./ProtectionPanel";
 import AccountPanel from "./AccountPanel";
@@ -665,6 +666,25 @@ export default function App() {
     setSidebar(false);
     setQuery("");
   };
+  const openWorkspacePanel = (panel: PanelId) => {
+    const destinations: Record<PanelId, Page> = {
+      watchlist: "overview",
+      charts: "overview",
+      orderflow: "telemetry",
+      execution: "positions",
+      copilot: "research",
+      conversations: "research",
+      experiments: "research",
+      regimes: "research",
+      strategy: "settings",
+      terminal: "telemetry",
+      datasets: "persistence",
+      dataquality: "readiness",
+      exposure: "positions",
+      audit: "history",
+    };
+    navigate(destinations[panel]);
+  };
   const notice = (s: string) => setToast(s);
   const exportJournal = () => {
     if (!journal.length) return notice("No history rows to export.");
@@ -973,7 +993,7 @@ export default function App() {
           {page === "persistence" && (
             <PersistencePanel snapshot={apiError ? null : snapshot} />
           )}
-          {page === "workspaces" && <WorkspaceStudio /> }
+          {page === "workspaces" && <WorkspaceStudio onOpenPanel={openWorkspacePanel} /> }
           {page === "readiness" && (
             <ReadinessPanel snapshot={apiError ? null : snapshot} />
           )}

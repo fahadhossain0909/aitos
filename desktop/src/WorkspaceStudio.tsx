@@ -9,6 +9,7 @@ import {
   WORKSPACES,
   type WorkspaceId,
   type WorkspaceLayout,
+  type PanelId,
 } from "./workspaceModel";
 
 const STORAGE_KEY = "aitos.workspace-layout.v1";
@@ -22,7 +23,11 @@ function readLayout(): WorkspaceLayout {
   }
 }
 
-export function WorkspaceStudio() {
+export function WorkspaceStudio({
+  onOpenPanel,
+}: {
+  onOpenPanel: (panel: PanelId) => void;
+}) {
   const [layout, setLayout] = useState<WorkspaceLayout>(() => readLayout());
   const [query, setQuery] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -123,6 +128,7 @@ export function WorkspaceStudio() {
                   <span className="workspace-panel-grip" aria-hidden="true">⠿</span>
                   <span className="workspace-panel-order">{String(index + 1).padStart(2, "0")}</span>
                   <span className="workspace-panel-name"><strong>{panel.label}</strong><small>{panel.group}</small></span>
+                  <button className="icon-button" onClick={() => onOpenPanel(panelId)} aria-label={`Open ${panel.label}`} title="Open panel">↗</button>
                   <button className="icon-button" onClick={() => update(movePanel(layout, layout.activeWorkspace, panelId, -1))} disabled={index === 0} aria-label={`Move ${panel.label} up`}>↑</button>
                   <button className="icon-button" onClick={() => update(movePanel(layout, layout.activeWorkspace, panelId, 1))} disabled={index === activePanels.length - 1} aria-label={`Move ${panel.label} down`}>↓</button>
                   <button className="icon-button" onClick={() => update(togglePanel(layout, layout.activeWorkspace, panelId))} aria-label={`Remove ${panel.label}`}>×</button>
