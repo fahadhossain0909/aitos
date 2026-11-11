@@ -27,7 +27,8 @@ def test_only_bundled_signer_window_receives_native_ipc_capability():
 def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
     app = (ROOT / "desktop" / "src" / "App.tsx").read_text(encoding="utf-8")
     assert "invoke(" not in app
-    assert "UNAPPLIED_CREDENTIAL_POLICY_DRAFT" in app
+    assert "aitos-credential-policy-draft-v1" not in app
+    assert "Trusted Signer Settings" in app
 
     html = (ROOT / "desktop" / "signer.html").read_text(encoding="utf-8")
     assert 'src="/src/signer.tsx"' in html
