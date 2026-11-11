@@ -137,3 +137,20 @@ def test_account_snapshot_copies_and_freezes_exposure_mappings():
     assert evidence.symbol_exposure["BTCUSDT"] == Decimal("50")
     with pytest.raises(TypeError):
         evidence.positions["BTCUSDT"] = Decimal("1")
+
+
+def test_reduce_only_remains_available_when_growth_limits_are_exceeded():
+    reduce = make_intent(
+        intent_id="intent-risk-reduce-over-limit",
+        nonce="BAECAwQFBgcICQoLDA0ODw",
+        client_order_id="aitos-risk-reduce-over-limit",
+        side="SELL",
+        quantity="0.005",
+        reduce_only=True,
+    )
+    over_limit = snapshot(
+        gross_exposure=Decimal("1500"),
+        daily_loss=Decimal("150"),
+        order_count_window=25,
+    )
+    LIMITS.authorize(reduce, over_limit, now_ms=NOW)
