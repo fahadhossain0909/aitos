@@ -73,7 +73,6 @@ async def test_live_universe_path_uses_tickers_then_deep_scans_top_ten_only():
     assert stages[-1][1] == ["S9", "S8"]
 
 
-
 class BatchScanner(Scanner):
     async def _lightweight_rank_symbols(self, limit=None):
         raise AssertionError("legacy candle-based universe ranking must not run")
