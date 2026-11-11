@@ -484,3 +484,27 @@ A crash after the durable `DISPATCHING` transition leaves the intent ambiguous. 
 5. Independent account/position/order reconciliation and explicit operator resolution of UNKNOWN intents.
 6. Redacted audit retention, key rotation/revocation, recovery drills and monitoring.
 7. Separate written approval before enabling any live dispatch. Paper-only behavior remains the default.
+
+
+## 12. Implemented paper-only foundation (2026-11-11)
+
+The current branch contains a deliberately non-live reference implementation:
+
+- `aitos/security/signing_policy.py`: bounded, strict order-intent parser and per-order allowlist.
+- `aitos/security/replay_store.py`: SQLite WAL/FULL durable idempotency ledger. Ambiguous DISPATCHING rows are never automatically resubmitted. Capacity exhaustion fails closed; POSIX parent/database permissions are checked.
+- `aitos/security/paper_processor.py`: in-process paper adapter only; it has no HTTP listener, credential access, signature generation or exchange connectivity.
+- `aitos/security/risk_limits.py`: independent risk preflight requires fresh, account-matched evidence and enforces gross exposure, symbol exposure, daily-loss and order-rate ceilings. Reduce-only requires a matching position and cannot flip exposure. This is a pure gate; the evidence source is not yet a production exchange reconciler.
+- `aitos/security/mtls.py`: TLS 1.3 mutual-authentication context builders and exact URI-SAN client identity pinning. This is transport configuration only, not a deployed remote signer service.
+- `aitos/native/credential_vault.py` and `aitos/native/windows_vault.py`: existing OS-vault adapters (Linux Secret Service, macOS Keychain backend, Windows Credential Manager). These are local credential-store primitives, not proof against an administrator of the same host.
+
+### 12.1 Required production gaps
+
+1. Implement a separate signer process/service on a user-controlled device, with a narrowly scoped authenticated protocol and certificate enrollment/rotation/revocation.
+2. Implement a trusted exchange account adapter that fetches balances, open orders, positions, fills and realized PnL, then reconciles evidence freshness, sequence and completeness. Never accept VPS-supplied position or balance claims as signer evidence.
+3. Persist risk state and order-rate windows durably across restart; define UTC trading-day boundaries, fee/funding treatment, equity high-water mark and loss accounting.
+4. Integrate the signer with a user-approved OS vault slot and exchange-specific signing adapter. Do not expose signatures or signed URLs to the VPS.
+5. Add multi-process contention, forced termination at every state boundary, disk-full, read-only filesystem, WAL recovery, backup/restore and capacity-exhaustion drills.
+6. Add certificate provisioning and rotation tests, TLS handshake integration tests, authorization binding from certificate identity to runtime/account, and network timeout/replay tests.
+7. Conduct independent security review and explicitly approve any future live capability. Until then the processor and adapters remain paper-only.
+
+**Important:** the risk snapshot type is an evidence contract, not an evidence collector. Passing fabricated or stale account data is not secure. A production signer must populate it from its own authenticated exchange session and fail closed if reconciliation is incomplete.
