@@ -207,3 +207,29 @@ def parse_signer_request(
         account_alias=grant.account_alias,
         intent=MappingProxyType(dict(intent)),
     )
+
+
+def authenticate_signer_request(
+    raw: str | bytes,
+    *,
+    peer_certificate: Mapping[str, object],
+    registry: ClientAuthorizationRegistry,
+    now_ms: int,
+    max_clock_skew_ms: int = 5_000,
+    max_body_bytes: int = 16_384,
+) -> SignerRequest:
+    """Authenticate from the TLS peer certificate, then validate its request.
+
+    A future socket handler should pass only SSLSocket.getpeercert() from the
+    accepted TLS connection. It must not construct this mapping from headers,
+    JSON fields, forwarded client-certificate headers, or caller parameters.
+    """
+    identity, grant = registry.authorize(peer_certificate, now_ms=now_ms)
+    return parse_signer_request(
+        raw,
+        authenticated_identity=identity,
+        grant=grant,
+        now_ms=now_ms,
+        max_clock_skew_ms=max_clock_skew_ms,
+        max_body_bytes=max_body_bytes,
+    )
