@@ -4,6 +4,7 @@ This module is intentionally pure: evidence must come from a separately
 authenticated exchange/account adapter. Missing, stale or inconsistent evidence
 is a hard rejection. It does not submit orders or claim venue reconciliation.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -31,7 +32,9 @@ class AccountRiskSnapshot:
                 self, "symbol_exposure", MappingProxyType(dict(self.symbol_exposure))
             )
         if isinstance(self.positions, Mapping):
-            object.__setattr__(self, "positions", MappingProxyType(dict(self.positions)))
+            object.__setattr__(
+                self, "positions", MappingProxyType(dict(self.positions))
+            )
 
 
 @dataclass(frozen=True)
@@ -156,8 +159,6 @@ class SignerRiskLimits:
 class AccountEvidenceProvider(Protocol):
     """Trusted local adapter; implementations must query the exchange directly."""
 
-    def get_snapshot(
-        self, account_alias: str, *, now_ms: int
-    ) -> AccountRiskSnapshot:
+    def get_snapshot(self, account_alias: str, *, now_ms: int) -> AccountRiskSnapshot:
         """Return reconciled account evidence or raise; never use VPS claims."""
         ...
