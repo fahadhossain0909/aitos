@@ -80,6 +80,7 @@ class FakeTransport:
                     "symbol": "BTCUSDT",
                     "origQty": "0.001",
                     "price": "60000",
+                    "type": "LIMIT",
                     "reduceOnly": False,
                 }
             ]
