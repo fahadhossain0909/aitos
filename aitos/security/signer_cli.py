@@ -26,6 +26,7 @@ from aitos.native.credential_profiles import (
     CredentialProfileStore,
     CredentialProfileError,
     CredentialProviderRouter,
+    LazyNativeCredentialStore,
     discover_external_vault_backends,
 )
 from aitos.security.mtls import build_server_context
@@ -95,7 +96,7 @@ def _slots() -> SignerCredentialSlots:
         )
         router = CredentialProviderRouter(
             profiles=profiles,
-            native_store=get_credential_vault(),
+            native_store=LazyNativeCredentialStore(get_credential_vault),
             external_backends=backends,
         )
         return SignerCredentialSlots(router)
