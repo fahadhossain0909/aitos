@@ -121,6 +121,7 @@ class FakeTransport:
             return {
                 "orderId": 123,
                 "clientOrderId": "aitos-testnet-001",
+                "symbol": "BTCUSDT",
                 "status": self.order_status,
                 "executedQty": self.executed_qty,
             }
