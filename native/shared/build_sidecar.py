@@ -40,6 +40,8 @@ def main():
             "keyring.backends.SecretService",
             "--hidden-import",
             "keyring.backends.macOS",
+            "--hidden-import",
+            "aitos.native.windows_vault",
             "--add-data",
             str(root / "desktop/dist") + separator + "console_dist",
             str(root / "native/shared/sidecar.py"),
