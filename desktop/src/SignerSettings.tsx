@@ -177,7 +177,7 @@ export default function SignerSettings() {
       <section className="signer-card">
         <div className="signer-card-heading"><div><span className="signer-eyebrow">01 / ACCOUNT</span><h2>Choose the account</h2></div><span className="signer-step">01</span></div>
         <label htmlFor="account-alias">Account alias</label>
-        <input id="account-alias" value={account} onChange={e => { setAccount(e.target.value); if (scope === "account") setPolicySaved(false); setStatus(null); }} placeholder="e.g. binance-testnet-primary" autoComplete="off" spellCheck={false} maxLength={64}/>
+        <input id="account-alias" value={account} onChange={e => { setAccount(e.target.value); setKeyId(""); setApiSecret(""); setConfirmSecret(""); if (scope === "account") setPolicySaved(false); setStatus(null); }} placeholder="e.g. binance-testnet-primary" autoComplete="off" spellCheck={false} maxLength={64}/>
         <p className="signer-help">Use the exact same alias as AITOS_SIGNER_ACCOUNT_ALIAS in the signer service configuration. The desktop and signer service must run as the same OS user and use the same AITOS_SIGNER_DATA_DIR.</p>
         <div className="signer-actions">
           <button className="signer-button secondary" disabled={!ready || busy || !available} onClick={() => void loadStatus()}>Load current policy</button>
@@ -212,11 +212,11 @@ export default function SignerSettings() {
         <div className="signer-card-heading"><div><span className="signer-eyebrow">03 / PROVISION</span><h2>Store Testnet credentials</h2></div><span className="signer-step">03</span></div>
         <form onSubmit={storeCredentials}>
           <label htmlFor="exchange-key">Binance Futures Testnet API key</label>
-          <input id="exchange-key" type="password" autoComplete="new-password" value={keyId} onChange={e => setKeyId(e.target.value)} spellCheck={false} maxLength={128} required/>
+          <input id="exchange-key" type="password" autoComplete="new-password" value={keyId} onChange={e => setKeyId(e.target.value)} spellCheck={false} maxLength={128} required disabled={!available || busy}/>
           <label htmlFor="exchange-secret">API secret</label>
-          <input id="exchange-secret" type="password" value={apiSecret} onChange={e => setApiSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required/>
+          <input id="exchange-secret" type="password" value={apiSecret} onChange={e => setApiSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required disabled={!available || busy}/>
           <label htmlFor="exchange-secret-confirm">Confirm API secret</label>
-          <input id="exchange-secret-confirm" type="password" value={confirmSecret} onChange={e => setConfirmSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required/>
+          <input id="exchange-secret-confirm" type="password" value={confirmSecret} onChange={e => setConfirmSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required disabled={!available || busy}/>
           <div className="signer-help">Secrets are sent only to the local native signer command over Tauri IPC, then passed to the credential sidecar via stdin. They are never placed in command-line arguments, browser storage, logs or the operator console. Fields clear after the operation.</div>
           <div className="signer-actions"><button className="signer-button primary" type="submit" disabled={!ready || !policySaved || busy || !available || !keyId || !apiSecret || !confirmSecret}>{busy ? "Storing securely…" : "Store and verify credential pair"}</button></div>
         </form>
