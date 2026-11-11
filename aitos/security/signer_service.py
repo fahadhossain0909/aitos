@@ -213,6 +213,8 @@ class SQLiteSignerRegistry:
         return self.get_registry()._grants[identity]
 
     def revoke(self, identity: str, certificate_serial: str, *, now_ms: int) -> None:
+        if type(now_ms) is not int or now_ms < 0:
+            raise ValueError("invalid_signer_registry_clock")
         if type(certificate_serial) is not str or not re.fullmatch(
             r"[0-9A-Fa-f]{1,64}", certificate_serial
         ):
@@ -225,6 +227,9 @@ class SQLiteSignerRegistry:
                 ).fetchone()
                 if row is None:
                     raise ValueError("signer_identity_not_enrolled")
+                serials = set(json.loads(row["serials_json"]))
+                if certificate_serial.upper() not in serials:
+                    raise ValueError("signer_certificate_serial_not_enrolled")
                 revoked = set(json.loads(row["revoked_json"]))
                 revoked.add(certificate_serial.upper())
                 self._write(
@@ -245,6 +250,8 @@ class SQLiteSignerRegistry:
                 raise
 
     def disable(self, identity: str, *, now_ms: int) -> None:
+        if type(now_ms) is not int or now_ms < 0:
+            raise ValueError("invalid_signer_registry_clock")
         with self._lock:
             try:
                 self._db.execute("BEGIN IMMEDIATE")
