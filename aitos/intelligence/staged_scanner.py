@@ -392,6 +392,19 @@ async def install_staged_scan(
                 top2 = ranked[:TOP_2]
                 await on_subscription_change(top5, "TOP_5")
                 await on_subscription_change([item.symbol for item in top2], "TOP_2")
+                promoted = {item.candidate_id for item in top2}
+                for item in candidates:
+                    if item.candidate_id not in promoted:
+                        object.__setattr__(
+                            item,
+                            "_aitos_historical_context",
+                            {
+                                "available": False,
+                                "reason": "not_promoted_for_deep_history",
+                                "candidate_id": item.candidate_id,
+                                "evidence_only": True,
+                            },
+                        )
                 await _enrich_promoted_candidates(scanner, top2)
             for batch in batches:
                 yield batch
