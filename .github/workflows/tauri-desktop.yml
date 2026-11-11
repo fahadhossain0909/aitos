@@ -52,13 +52,6 @@ jobs:
           npm --prefix desktop ci
           npm --prefix desktop test
           npm --prefix desktop run build
-      - name: Frozen local signer admin protocol smoke (no vault)
-        shell: bash
-        run: |
-          binary="desktop/src-tauri/binaries/aitos-gateway-${AITOS_TARGET}"
-          if [[ "${RUNNER_OS}" == "Windows" ]]; then binary+=".exe"; fi
-          printf '%s\n' '{"action":"status"}' | "$binary" --credential-admin > signer-admin-smoke.json
-          python -c "import json; assert json.load(open('signer-admin-smoke.json', encoding='utf-8')) == {'ok': False, 'error': 'invalid_signer_admin_request'}"
       - name: Determine real host target and freeze the read-only sidecar
         shell: bash
         run: |
@@ -66,6 +59,13 @@ jobs:
           test -n "$target"
           echo "AITOS_TARGET=$target" >> "$GITHUB_ENV"
           python native/shared/build_sidecar.py --target "$target"
+      - name: Frozen local signer admin protocol smoke (no vault)
+        shell: bash
+        run: |
+          binary="desktop/src-tauri/binaries/aitos-gateway-${AITOS_TARGET}"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then binary+=".exe"; fi
+          printf '%s\n' '{"action":"status"}' | "$binary" --credential-admin > signer-admin-smoke.json
+          python -c "import json; assert json.load(open('signer-admin-smoke.json', encoding='utf-8')) == {'ok': False, 'error': 'invalid_signer_admin_request'}"
       - name: Real Windows Credential Manager acceptance (synthetic only)
         if: runner.os == 'Windows'
         shell: bash
