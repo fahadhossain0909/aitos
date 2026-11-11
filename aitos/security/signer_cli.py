@@ -86,7 +86,13 @@ def _profiles() -> CredentialProfileStore:
 def _slots() -> SignerCredentialSlots:
     profiles = _profiles()
     try:
-        backends = discover_external_vault_backends()
+        account = _required("AITOS_SIGNER_ACCOUNT_ALIAS")
+        profile = profiles.resolve(account)
+        backends = (
+            discover_external_vault_backends()
+            if profile.mode == "external"
+            else {}
+        )
         router = CredentialProviderRouter(
             profiles=profiles,
             native_store=get_credential_vault(),
