@@ -12,7 +12,6 @@ def test_unknown_args_never_start_gateway(monkeypatch):
     assert gateway.main() == 2
 
 
-
 def test_credential_admin_mode_dispatches_only_the_local_admin_handler(monkeypatch):
     from aitos.native import signer_admin
 
@@ -22,6 +21,7 @@ def test_credential_admin_mode_dispatches_only_the_local_admin_handler(monkeypat
         gateway, "run_embedded", lambda: pytest.fail("operator gateway must not start")
     )
     assert gateway.main() == 0
+
 
 def test_cancel_does_not_start_or_emit_origin(monkeypatch, capsys):
     monkeypatch.setattr(gateway, "read_native_credentials", lambda: None)
