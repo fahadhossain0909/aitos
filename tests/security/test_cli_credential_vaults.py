@@ -132,3 +132,42 @@ def test_provider_child_environment_excludes_exchange_credentials(monkeypatch):
     child_env = runner.calls[0][1]["env"]
     assert child_env["BW_SESSION"] == "provider-session"
     assert "BINANCE_API_SECRET" not in child_env
+
+
+@pytest.mark.parametrize(
+    "vault,reference,item",
+    [
+        (
+            "bitwarden",
+            "12345678-1234-1234-1234-123456789abc/api-secret",
+            {
+                "id": "12345678-1234-1234-1234-123456789abc",
+                "fields": [
+                    {"name": BitwardenCLIVault.FIELD_SECRET, "value": "one"},
+                    {"name": BitwardenCLIVault.FIELD_SECRET, "value": "two"},
+                ],
+            },
+        ),
+        (
+            "onepassword",
+            "vault1234/item1234/api-secret",
+            {
+                "id": "item1234",
+                "fields": [
+                    {"label": OnePasswordCLIVault.FIELD_SECRET, "value": "one"},
+                    {"label": OnePasswordCLIVault.FIELD_SECRET, "value": "two"},
+                ],
+            },
+        ),
+    ],
+)
+def test_delete_rejects_duplicate_provider_fields(vault, reference, item):
+    runner = FakeRunner([(0, json.dumps(item))])
+    provider = (
+        BitwardenCLIVault(runner=runner)
+        if vault == "bitwarden"
+        else OnePasswordCLIVault(runner=runner)
+    )
+    with pytest.raises(ProviderVaultError, match="duplicate_credential_field"):
+        provider.delete_secret(reference)
+    assert len(runner.calls) == 1
