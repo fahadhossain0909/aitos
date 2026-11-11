@@ -615,7 +615,9 @@ class PaperSignerRPCServer:
                 if isinstance(intent_id, str)
                 else None
             )
-            if existing is None and self.processor.replay_store.list_unresolved(limit=1):
+            if existing is None and self.processor.replay_store.list_unresolved(
+                limit=1
+            ):
                 raise SignerProtocolRejected(
                     "unresolved_execution_requires_reconciliation"
                 )
