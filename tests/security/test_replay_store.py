@@ -327,10 +327,32 @@ def test_paper_processor_runs_independent_risk_gate_before_reservation(tmp_path)
         order_count_window=0,
         positions={},
     )
+    class StaleEvidenceProvider:
+        def get_snapshot(self, account_alias, *, now_ms):
+            assert account_alias == "paper-primary"
+            return stale
+
     with SQLiteReplayStore(tmp_path / "ledger.sqlite3") as store:
         processor = PaperOnlyIntentProcessor(
-            policy=POLICY, replay_store=store, risk_limits=limits
+            policy=POLICY,
+            replay_store=store,
+            risk_limits=limits,
+            account_evidence_provider=StaleEvidenceProvider(),
         )
         with pytest.raises(IntentRejected, match="account_evidence_stale"):
-            processor.process(intent_payload(), now_ms=NOW, account_snapshot=stale)
+            processor.process(intent_payload(), now_ms=NOW)
         assert store.get("intent-replay-001") is None
+
+
+def test_risk_gate_requires_provider_and_limits_as_a_pair(tmp_path):
+    limits = SignerRiskLimits(
+        max_gross_exposure=Decimal("1000"),
+        max_symbol_exposure=Decimal("500"),
+        max_daily_loss=Decimal("100"),
+        max_orders_per_window=10,
+    )
+    with SQLiteReplayStore(tmp_path / "ledger.sqlite3") as store:
+        with pytest.raises(ValueError, match="must_be_paired"):
+            PaperOnlyIntentProcessor(
+                policy=POLICY, replay_store=store, risk_limits=limits
+            )
