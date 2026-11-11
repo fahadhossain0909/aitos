@@ -109,3 +109,10 @@ def test_provider_timeout_is_redacted():
 def test_provider_rejects_invalid_item_reference_before_cli(vault, reference):
     with pytest.raises(ProviderVaultError):
         vault.get_secret(reference)
+
+
+def test_first_party_provider_factories_are_registered_without_cli_execution():
+    from aitos.native.credential_profiles import discover_external_vault_backends
+
+    providers = discover_external_vault_backends()
+    assert {"bitwarden", "onepassword"}.issubset(providers)
