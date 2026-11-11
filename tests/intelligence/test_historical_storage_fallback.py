@@ -79,4 +79,4 @@ async def test_insufficient_clickhouse_history_uses_rest_and_merges():
     )
     assert calls == 1
     assert len(result) == 60
-    assert result[-1].close == remote[-1].close
+    assert result[-1].open_time > remote[-1].open_time
