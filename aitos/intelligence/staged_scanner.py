@@ -33,18 +33,29 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
     semaphore = asyncio.Semaphore(2)
 
     async def enrich(candidate: Any) -> None:
-        async with semaphore:
-            rows, evidence = await service.analyze(
-                candidate.symbol, scanner._timeframe,
-                limit=max(300, min(1000, int(scanner._kline_lookback) * 2)),
-            )
-        object.__setattr__(candidate, "_aitos_historical_context", evidence)
-        if rows and len(rows) >= 20:
-            object.__setattr__(candidate, "_aitos_klines", tuple(rows))
-            flow_score = float(candidate.component_scores.get("order_flow_bias", 5.0))
-            object.__setattr__(
-                candidate, "_aitos_advanced_context",
-                build_advanced_context(rows, current_cvd_score=flow_score, oi_change=None),
+        try:
+            async with semaphore:
+                rows, evidence = await service.analyze(
+                    candidate.symbol, scanner._timeframe,
+                    limit=max(300, min(1000, int(scanner._kline_lookback) * 2)),
+                )
+            object.__setattr__(candidate, "_aitos_historical_context", evidence)
+            if rows and len(rows) >= 20:
+                object.__setattr__(candidate, "_aitos_klines", tuple(rows))
+                scores = getattr(candidate, "component_scores", {}) or {}
+                flow_score = float(scores.get("order_flow_bias", 5.0))
+                try:
+                    advanced = build_advanced_context(
+                        rows, current_cvd_score=flow_score, oi_change=None
+                    )
+                except (AttributeError, TypeError, ValueError):
+                    return
+                object.__setattr__(candidate, "_aitos_advanced_context", advanced)
+        except Exception as exc:
+            # Historical context is optional evidence; never fail candidate scan.
+            logger.warning(
+                "promoted candidate historical enrichment unavailable",
+                extra={"aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}},
             )
 
     await asyncio.gather(*(enrich(candidate) for candidate in candidates))
@@ -244,10 +255,15 @@ async def install_staged_scan(
     if callable(original_iter_candidate_batches):
 
         async def _iter_candidate_batches_with_subscriptions(*args: Any, **kwargs: Any):
+            # Buffer the finite scan so the global Top-2 is known before any
+            # candidate reaches decision evaluation. This is the promotion
+            # boundary for deep historical retrieval.
+            batches: list[list[Any]] = []
             candidates: list[Any] = []
             async for batch in original_iter_candidate_batches(*args, **kwargs):
-                candidates.extend(batch)
-                yield batch
+                current = list(batch)
+                batches.append(current)
+                candidates.extend(current)
 
             if candidates:
                 ranked = sorted(
@@ -260,6 +276,9 @@ async def install_staged_scan(
                 await on_subscription_change(top5, "TOP_5")
                 await on_subscription_change(top2, "TOP_2")
                 await _enrich_promoted_candidates(scanner, ranked[:TOP_2])
+
+            for batch in batches:
+                yield batch
 
         scanner.iter_candidate_batches = _iter_candidate_batches_with_subscriptions
     scanner.scan_all = _staged_scan_all

@@ -10,7 +10,7 @@ import asyncio
 import time
 from collections import OrderedDict, deque
 from dataclasses import dataclass
-from statistics import mean, pstdev
+from statistics import pstdev
 from typing import Any, Awaitable, Callable
 
 from aitos.intelligence.historical_analogue import search_historical_analogues
