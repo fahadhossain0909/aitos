@@ -281,6 +281,12 @@ class SQLiteSignerRegistry:
         with self._lock:
             self._db.close()
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+
 
 class SQLiteSignerRateLimiter:
     """Atomic, restart-safe fixed-window limiter scoped by identity and account."""
@@ -364,6 +370,12 @@ class SQLiteSignerRateLimiter:
     def close(self) -> None:
         with self._lock:
             self._db.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
 
 
 class PaperSignerRPCServer:
