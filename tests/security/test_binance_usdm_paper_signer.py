@@ -85,9 +85,9 @@ class FakeTransport:
             ]
         if parsed.path.endswith("/fapi/v1/income"):
             return [
-                {"incomeType": "REALIZED_PNL", "income": "-10"},
-                {"incomeType": "COMMISSION", "income": "-1"},
-                {"incomeType": "FUNDING_FEE", "income": "2"},
+                {"incomeType": "REALIZED_PNL", "income": "-10", "time": NOW, "tranId": 1},
+                {"incomeType": "COMMISSION", "income": "-1", "time": NOW, "tranId": 2},
+                {"incomeType": "FUNDING_FEE", "income": "2", "time": NOW, "tranId": 3},
             ][: self.income_count]
         if parsed.path.endswith("/fapi/v1/order"):
             if self.fail_order:
