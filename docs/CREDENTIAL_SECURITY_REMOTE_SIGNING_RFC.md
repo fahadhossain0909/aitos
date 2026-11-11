@@ -508,3 +508,21 @@ The current branch contains a deliberately non-live reference implementation:
 7. Conduct independent security review and explicitly approve any future live capability. Until then the processor and adapters remain paper-only.
 
 **Important:** the risk snapshot type is an evidence contract, not an evidence collector. Passing fabricated or stale account data is not secure. A production signer must populate it from its own authenticated exchange session and fail closed if reconciliation is incomplete.
+
+
+## 13. Signer-side paper preflight wiring
+
+The paper-only processor now supports a paired `SignerRiskLimits` + `AccountEvidenceProvider` configuration. When enabled, it calls the injected provider from inside the processor using the intent's account alias and signer clock, then validates the returned snapshot **before** reserving the nonce or dispatching to the paper adapter. The order-intent JSON schema has no account-snapshot field; the VPS cannot attach its own balance/position claims to the intent.
+
+The provider contract is intentionally an interface, not a production exchange adapter. A production implementation must execute authenticated account reads from the signer-owned credential session and reconcile balances, open orders, positions, fills, realized PnL, fees and funding. It must reject partial pagination, stale timestamps, inconsistent snapshots, unknown symbol metadata and incomplete exchange responses. Provider errors propagate and prevent reservation/execution. The current risk snapshot's order counter must be backed by a durable signer-owned rate window; a caller-supplied counter is not acceptable.
+
+The risk preflight currently checks account alias, evidence freshness, gross/symbol exposure, daily-loss ceiling, order-rate ceiling and reduce-only position direction/quantity. It is a conservative pre-trade gate, not a complete portfolio margin/liquidation engine. It does not yet calculate multi-asset correlated exposure, available margin, maintenance margin, liquidation distance, pending-order commitments or fee/funding-adjusted daily equity.
+
+## 14. Implementation status and non-claims
+
+- **Implemented in source:** TLS 1.3 mTLS context builders and URI-SAN allowlist matching helper; OS-vault-backed signer credential slots; durable local replay ledger; strict intent schema; paper-only processor; optional signer-side risk preflight with a provider interface; tests for crash/duplicate and provider-unavailable behavior.
+- **Not implemented / not production-ready:** network listener or remote signing RPC, certificate issuance/rotation/revocation, binding mTLS identity to account authorization at a running endpoint, exchange-specific signer/dispatch adapter, trusted exchange account-evidence implementation, durable rate-window aggregator, multi-process single-writer service ownership, operator approval UX, HSM support, high-availability failover, backup/restore drills and live reconciliation.
+- **Security boundary:** the credential-slot helper must execute only on the user-controlled signer host. It does not encrypt credentials against an administrator of the same host. The provider-hosted VPS must never receive the secret, signer private key, or reusable signed request.
+- **Execution status:** no live exchange adapter, real order dispatch, production credential migration, deployment or live activation is included in this change. The processor remains paper-only.
+
+A separately deployed signer is not complete until the missing controls above have been implemented, integration-tested and independently reviewed. Do not treat the current paper implementation or green unit tests as production authorization.
