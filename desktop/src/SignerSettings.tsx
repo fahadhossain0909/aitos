@@ -117,7 +117,9 @@ export default function SignerSettings() {
         setPolicySaved(true);
         return result;
       },
-      "Credential policy saved for this account. Existing credentials were not migrated.",
+      scope === "global"
+        ? "Global credential default saved. Existing account overrides were not changed."
+        : "Account credential policy saved. Existing credentials were not migrated.",
     );
   }
 
