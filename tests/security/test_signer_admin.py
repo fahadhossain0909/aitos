@@ -105,6 +105,22 @@ def test_unconfigured_account_status_is_non_mutating(tmp_path, monkeypatch):
     assert result["credential_pair_ready"] is False
 
 
+def test_status_rejects_secret_fields_even_if_they_are_ignored(tmp_path, monkeypatch):
+    monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
+    try:
+        signer_admin.handle_request(
+            {
+                "action": "status",
+                "account_alias": "safe",
+                "api_secret": "must-not-be-accepted",
+            }
+        )
+    except ValueError as exc:
+        assert str(exc) == "invalid_signer_admin_request"
+    else:
+        raise AssertionError("status must not accept credential material")
+
+
 def test_unknown_fields_and_actions_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
     try:
