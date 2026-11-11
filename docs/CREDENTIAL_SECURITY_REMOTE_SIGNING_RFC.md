@@ -1,6 +1,6 @@
 # AITOS Credential Security & Remote Signing RFC
 
-- **Status:** Proposed architecture; policy-validation reference implementation is included, but no signer, exchange dispatch, or live capability is enabled.
+- **Status:** Executable paper-only signer, mTLS RPC, Testnet-only exchange adapter, and credential-provider adapters are present. Production signing, trusted-host acceptance, and live capability remain disabled and unapproved.
 - **Date:** 2026-11-10
 - **Scope:** Desktop credential handling, provider-hosted RDP/VPS threat boundary, remote order-intent authorization, replay protection, failure behavior, rollout and verification.
 - **Related:** `aitos/native/credential_vault.py`, `aitos/native/windows_vault.py`, `aitos/security/secrets.py`, `docs/OPERATOR_GATEWAY.md`, `INSTALLATION.md`.
@@ -580,10 +580,13 @@ when that account has no explicit override.
 - The local SQLite profile database stores only mode, provider ID, and opaque
   vault reference metadata. It does not store exchange secrets or provider
   authentication tokens.
-- No provider-specific Bitwarden, 1Password, or hosted-vault adapter is bundled
-  by this tranche. Installing/configuring a concrete adapter and testing its
-  authentication, unlock, rotation and failure behavior are separate required
-  integration work.
+- First-party Bitwarden CLI and 1Password CLI adapters are bundled in
+  `aitos/native/cli_credential_vaults.py`. They operate only on explicitly
+  configured, operator-created item references and fail closed on malformed
+  items, duplicate fields, locked sessions, timeouts or provider errors.
+- The adapters are not equivalent to an HSM and do not make an untrusted host
+  safe. Provider CLI session tokens and decrypted exchange credentials are
+  accessible to a sufficiently privileged administrator of the signer host.
 
 ### Routing and failure behavior
 
@@ -600,6 +603,13 @@ when that account has no explicit override.
 - API credentials remain signer-local. The remote runtime receives only the
   bounded authenticated order-intent protocol, never API secrets, vault tokens,
   signatures or reusable signed requests.
+- **Trust boundary invariant:** Native and External modes are both valid only
+  when the signer process itself runs on a user-controlled trusted host. If the
+  desktop/operator console is installed on a provider-managed RDP/VPS, it must
+  remain a credential-free intent client. Selecting Bitwarden or 1Password does
+  not protect credentials from that RDP/VPS administrator if the signer or the
+  provider CLI session runs there. The signer must instead run on a separate
+  trusted device or customer-controlled HSM/KMS service.
 
 ### Operator commands
 
@@ -715,8 +725,13 @@ Bitwarden or 1Password accounts. Real vault unlock/lock, provider-side
 permission scopes, service-account/desktop-session behavior, network outages,
 restart recovery and actual credential rotation remain cross-platform
 acceptance tests. The desktop Settings screen currently saves only a local, unapplied policy
-draft; it is not connected to the signer profile database. The adapters are
-currently configurable through the signer CLI only.
+draft; it is not connected to the signer profile database. This is intentional:
+the desktop window loads the local gateway as an external WebView origin and
+must not receive native credential-store IPC privileges. The adapters are
+configurable through `aitos.security.signer_cli` on the trusted signer host.
+A future trusted-signer UI must be a separate local-only application surface
+with narrow, audited native commands; it must not reuse the provider-hosted
+operator console or expose credential operations to remote web content.
 
 No provider account was logged into, no exchange credential was imported, and
 no exchange order or deployment was performed by this change.
