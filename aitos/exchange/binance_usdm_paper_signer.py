@@ -197,6 +197,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
     def get_snapshot(self, account_alias: str, *, now_ms: int) -> AccountRiskSnapshot:
         if account_alias != self.client.account_alias:
             raise BinancePaperExchangeError("binance_account_alias_mismatch")
+        request_started_ms = self.client.clock_ms()
         server_ms = self.client.server_time_ms()
         account = self.client.signed_request(
             "GET", "/fapi/v2/account", timestamp_ms=server_ms
@@ -314,13 +315,22 @@ class BinanceUSDMPaperAccountEvidenceProvider:
                 net_income += self._decimal(row.get("income"), "income_amount")
         daily_loss = max(Decimal("0"), -net_income)
 
-        captured_at_ms = self.client.clock_ms()
+        request_finished_ms = self.client.clock_ms()
         if (
             type(now_ms) is not int
-            or type(captured_at_ms) is not int
-            or captured_at_ms < 0
-            or captured_at_ms > now_ms
+            or type(request_started_ms) is not int
+            or type(request_finished_ms) is not int
+            or request_started_ms < 0
+            or request_finished_ms < request_started_ms
+            or now_ms < 0
         ):
+            raise BinancePaperExchangeError("binance_evidence_clock_invalid")
+        # Account/position calls span a window. Age the evidence by the full
+        # request duration rather than stamping it at the end and overstating
+        # freshness. A slow or clock-skewed read therefore fails closed.
+        request_duration_ms = request_finished_ms - request_started_ms
+        captured_at_ms = min(now_ms - request_duration_ms, server_ms)
+        if captured_at_ms < 0:
             raise BinancePaperExchangeError("binance_evidence_clock_invalid")
         return AccountRiskSnapshot(
             account_alias=account_alias,
