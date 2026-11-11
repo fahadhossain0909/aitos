@@ -66,9 +66,9 @@ async def test_real_lifecycle_event_to_shadow_and_projector(setup):
     await setup.start()
     try:
         for _ in range(100):
-            delivered = setup.store.journal.outbox_counts(
-                setup.store.writer.scope
-            )["delivered"]
+            delivered = setup.store.journal.outbox_counts(setup.store.writer.scope)[
+                "delivered"
+            ]
             if delivered == 1 and setup.public_status()["available"]:
                 break
             await asyncio.sleep(0.01)
