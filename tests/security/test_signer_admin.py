@@ -37,6 +37,7 @@ def test_native_mode_store_and_status_never_return_secret_values(tmp_path, monke
     policy = signer_admin.handle_request(
         {
             "action": "set-mode",
+            "scope": "account",
             "account_alias": "testnet-primary",
             "mode": "native",
         }
@@ -97,6 +98,65 @@ def test_external_mode_routes_pair_to_only_selected_provider(tmp_path, monkeypat
         "00000000-0000-4000-8000-000000000001/api-secret": "synthetic-external-secret",
     }
 
+
+
+def test_global_native_policy_is_used_by_accounts_without_overrides(tmp_path, monkeypatch):
+    vault = MemoryVault()
+    monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(signer_admin, "get_credential_vault", lambda: vault)
+
+    result = signer_admin.handle_request(
+        {"action": "set-mode", "scope": "global", "mode": "native"}
+    )
+    assert result["scope"] == "global"
+    assert result["account_alias"] is None
+
+    signer_admin.handle_request(
+        {
+            "action": "store-credentials",
+            "account_alias": "account-from-global-default",
+            "key_id": "synthetic-global-key",
+            "api_secret": "synthetic-global-secret",
+        }
+    )
+    assert vault.get("signer/account-from-global-default/api-secret") == (
+        "synthetic-global-secret"
+    )
+
+
+def test_global_external_policy_uses_the_explicit_shared_default_item(
+    tmp_path, monkeypatch
+):
+    provider = MemoryExternalVault()
+    monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(
+        signer_admin,
+        "discover_external_vault_backends",
+        lambda: {"bitwarden": provider},
+    )
+
+    result = signer_admin.handle_request(
+        {
+            "action": "set-mode",
+            "scope": "global",
+            "mode": "external",
+            "provider_id": "bitwarden",
+            "secret_ref": "00000000-0000-4000-8000-000000000002",
+        }
+    )
+    assert result["scope"] == "global"
+    signer_admin.handle_request(
+        {
+            "action": "store-credentials",
+            "account_alias": "account-one",
+            "key_id": "shared-key-id",
+            "api_secret": "shared-api-secret",
+        }
+    )
+    assert (
+        provider.values["00000000-0000-4000-8000-000000000002/api-secret"]
+        == "shared-api-secret"
+    )
 
 def test_unconfigured_account_status_is_non_mutating(tmp_path, monkeypatch):
     monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
