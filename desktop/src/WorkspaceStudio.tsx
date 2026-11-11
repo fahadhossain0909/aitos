@@ -23,6 +23,7 @@ export function WorkspaceStudio({
   const [query, setQuery] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
+  const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -47,7 +48,12 @@ export function WorkspaceStudio({
 
   useEffect(() => {
     if (!layoutLoaded || !storageAvailable) return;
-    saveWorkspaceLayout(layout).catch(() => setStorageAvailable(false));
+    saveQueue.current = saveQueue.current
+      .catch(() => undefined)
+      .then(async () => {
+        await saveWorkspaceLayout(layout);
+      })
+      .catch(() => setStorageAvailable(false));
   }, [layout, layoutLoaded, storageAvailable]);
 
   useEffect(() => {

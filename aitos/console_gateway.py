@@ -187,7 +187,9 @@ class GatewayConfig:
         workspace_file = self.workspace_file
         if workspace_file is None:
             workspace_file = get_config_dir() / "desktop" / "workspace-layout.json"
-        object.__setattr__(self, "workspace_file", Path(workspace_file).expanduser().resolve())
+        object.__setattr__(
+            self, "workspace_file", Path(workspace_file).expanduser().resolve()
+        )
 
 
 class OperatorSessions:
@@ -252,7 +254,6 @@ class OperatorSessions:
         async with self.hash_lock:
             derived = await asyncio.to_thread(self._derive, password)
             return hmac.compare_digest(derived, self.digest)
-
 
 
 WORKSPACE_IDS = frozenset({"trading", "ai", "quant", "developer", "data", "risk"})
