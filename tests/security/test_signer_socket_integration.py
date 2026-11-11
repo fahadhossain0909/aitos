@@ -12,6 +12,7 @@ from aitos.security.paper_processor import PaperOnlyIntentProcessor
 from aitos.security.replay_store import SQLiteReplayStore
 from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits
 from aitos.security.signing_policy import OrderIntentPolicy
+from aitos.security.signer_rpc_client import SignerRPCClient
 from aitos.security.signer_service import (
     PaperSignerRPCServer,
     SQLiteSignerRateLimiter,
@@ -173,8 +174,11 @@ def test_real_tls13_mtls_socket_accepts_only_enrolled_paper_intents(tmp_path):
         try:
             await server.start("127.0.0.1", 0)
             port = server._server.sockets[0].getsockname()[1]
-            reader, writer = await asyncio.open_connection(
-                "127.0.0.1", port, ssl=client_context, server_hostname="localhost"
+            client = SignerRPCClient(
+                ssl_context=client_context,
+                host="127.0.0.1",
+                port=port,
+                server_hostname="localhost",
             )
             intent = {
                 "schema_version": 1,
