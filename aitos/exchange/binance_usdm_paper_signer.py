@@ -383,6 +383,7 @@ class BinanceUSDMPaperExecutionAdapter:
             return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
         if (
             result.get("clientOrderId") != intent.client_order_id
+            or result.get("symbol") != intent.symbol
             or type(result.get("orderId")) is not int
         ):
             return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
@@ -433,6 +434,7 @@ class BinanceUSDMPaperExecutionAdapter:
         if (
             not isinstance(result, dict)
             or result.get("clientOrderId") != reservation.client_order_id
+            or result.get("symbol") != reservation.symbol
             or type(result.get("orderId")) is not int
         ):
             return PaperExecutionReceipt(
