@@ -39,7 +39,7 @@ class FakeTransport:
         self,
         *,
         hedge=False,
-        income_count=2,
+        income_count=3,
         fail_order=False,
         order_status="NEW",
         executed_qty="0",
