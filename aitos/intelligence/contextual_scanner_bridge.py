@@ -86,6 +86,7 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
             "entry_price": candidate.entry_price,
             "klines": [k.to_dict() for k in getattr(candidate, "_aitos_klines", ())],
             "advanced_context": advanced,
+            "candidate_id": getattr(candidate, "_aitos_candidate_id", None),
             "historical_intelligence": getattr(candidate, "_aitos_historical_context", None),
             "historical_evidence_id": getattr(candidate, "_aitos_historical_evidence_id", None),
             "positioning": positioning,
