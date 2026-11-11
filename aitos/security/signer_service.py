@@ -408,6 +408,8 @@ class PaperSignerRPCServer:
             raise TypeError("paper_only_processor_required")
         if not getattr(processor.adapter, "paper_only", False):
             raise ValueError("non_paper_dispatch_forbidden")
+        if processor.risk_limits is None or processor.account_evidence_provider is None:
+            raise ValueError("independent_signer_risk_evidence_required")
         if type(max_body_bytes) is not int or not 256 <= max_body_bytes <= 65_536:
             raise ValueError("invalid_signer_rpc_body_limit")
         if not 0.1 <= request_timeout_seconds <= 30:
