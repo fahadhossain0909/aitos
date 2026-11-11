@@ -78,6 +78,7 @@ def test_external_mode_routes_pair_to_only_selected_provider(tmp_path, monkeypat
     signer_admin.handle_request(
         {
             "action": "set-mode",
+            "scope": "account",
             "account_alias": "testnet-secondary",
             "mode": "external",
             "provider_id": "bitwarden",
@@ -195,6 +196,7 @@ def test_stdin_protocol_returns_only_metadata_and_never_secret_material(
     signer_admin.handle_request(
         {
             "action": "set-mode",
+            "scope": "account",
             "account_alias": "stdin-account",
             "mode": "native",
         }
