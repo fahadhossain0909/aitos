@@ -1,7 +1,5 @@
 name: Secure signing intent quality (paper-only)
 on:
-  push:
-    branches: [arena/ed127d35-aitos]
   pull_request:
     paths:
       - 'aitos/security/**'
