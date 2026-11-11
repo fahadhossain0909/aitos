@@ -76,6 +76,12 @@ async def test_cache_is_bounded_by_entry_and_candle_count():
 @pytest.mark.asyncio
 async def test_shared_redis_budget_fails_closed_if_unavailable():
     class BrokenRedis:
+        async def get(self, *args):
+            return None
+
+        async def set(self, *args, **kwargs):
+            return True
+
         async def eval(self, *args):
             raise RuntimeError("redis unavailable")
 
