@@ -390,6 +390,20 @@ class BinanceUSDMPaperExecutionAdapter:
         if status in {"NEW", "PARTIALLY_FILLED", "FILLED"}:
             return PaperExecutionReceipt("accepted", "testnet_order_accepted")
         if status in {"REJECTED", "EXPIRED", "CANCELED"}:
+            try:
+                executed = Decimal(str(result.get("executedQty", "0")))
+            except InvalidOperation:
+                return PaperExecutionReceipt(
+                    "unknown", "testnet_response_unrecognized"
+                )
+            if not executed.is_finite() or executed < 0:
+                return PaperExecutionReceipt(
+                    "unknown", "testnet_response_unrecognized"
+                )
+            if executed > 0:
+                return PaperExecutionReceipt(
+                    "accepted", "testnet_order_partially_executed"
+                )
             return PaperExecutionReceipt("rejected", "testnet_order_rejected")
         return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
 
