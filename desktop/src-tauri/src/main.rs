@@ -30,10 +30,11 @@ fn is_local_signer_url(url: &tauri::Url) -> bool {
     let host = url.host_str();
     let production_origin = (url.scheme() == "tauri" && host == Some("localhost"))
         || (url.scheme() == "http" && host == Some("tauri.localhost"));
+    let production_origin = production_origin && url.port().is_none();
     let development_origin = cfg!(debug_assertions)
         && url.scheme() == "http"
         && matches!(host, Some("localhost") | Some("127.0.0.1"))
-        && url.port().is_some();
+        && url.port() == Some(1420);
     (production_origin || development_origin)
         && url.path() == "/signer.html"
         && url.query().is_none()
