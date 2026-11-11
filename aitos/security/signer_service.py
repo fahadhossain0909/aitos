@@ -510,6 +510,7 @@ class PaperSignerRPCServer:
         self.request_timeout_seconds = request_timeout_seconds
         self.clock_ms = clock_ms or (lambda: __import__("time").time_ns() // 1_000_000)
         self._server = None
+        self._connection_slots = asyncio.Semaphore(32)
 
     async def start(self, host: str, port: int) -> None:
         if self._server is not None:
@@ -540,6 +541,12 @@ class PaperSignerRPCServer:
             self._server = None
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        async with self._connection_slots:
+            await self._handle_request(reader, writer)
+
+    async def _handle_request(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ):
         response = {"status": "rejected", "outcome_code": "signer_request_rejected"}
         try:
             tls_object = writer.get_extra_info("ssl_object")
