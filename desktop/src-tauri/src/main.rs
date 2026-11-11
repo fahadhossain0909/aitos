@@ -16,6 +16,16 @@ use tauri_plugin_shell::{
 
 struct Gateway(Mutex<Option<CommandChild>>);
 
+struct AdminChild(Option<CommandChild>);
+
+impl Drop for AdminChild {
+    fn drop(&mut self) {
+        if let Some(child) = self.0.take() {
+            let _ = child.kill();
+        }
+    }
+}
+
 fn is_local_signer_url(url: &tauri::Url) -> bool {
     let host = url.host_str();
     let production_origin = (url.scheme() == "tauri" && host == Some("localhost"))
@@ -50,19 +60,22 @@ async fn signer_credential_admin(
         return Err("signer_admin_request_size_invalid".into());
     }
 
-    let (mut events, mut child) = app
+    let (mut events, child) = app
         .shell()
         .sidecar("aitos-gateway")
         .map_err(|_| "signer_admin_sidecar_unavailable")?
         .args(["--credential-admin"])
         .spawn()
         .map_err(|_| "signer_admin_sidecar_unavailable")?;
+    let mut child = AdminChild(Some(child));
     let mut input = request.as_bytes().to_vec();
     input.push(b'\n');
-    let write_failed = child.write(&input).is_err();
+    let write_failed = child
+        .0
+        .as_mut()
+        .is_none_or(|process| process.write(&input).is_err());
     input.zeroize();
     if write_failed {
-        let _ = child.kill();
         return Err("signer_admin_request_delivery_failed".into());
     }
 
@@ -95,10 +108,8 @@ async fn signer_credential_admin(
     .await;
 
     if result.is_err() {
-        let _ = child.kill();
         return Err("signer_admin_operation_timeout".into());
     }
-    let _ = child.kill();
     result
         .map_err(|_| "signer_admin_operation_timeout")?
         .map_err(str::to_owned)
