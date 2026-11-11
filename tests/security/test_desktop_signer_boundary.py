@@ -19,6 +19,8 @@ def test_only_bundled_signer_window_receives_native_ipc_capability():
     rust = (TAURI / "src" / "main.rs").read_text(encoding="utf-8")
     assert 'window.label() != "signer"' in rust
     assert 'url.path() == "/signer.html"' in rust
+    assert "url.port().is_none()" in rust
+    assert "url.port() == Some(1420)" in rust
     assert "trusted_local_signer_origin_required" in rust
     assert "WebviewUrl::External(url)" in rust
     assert "invoke_handler" in rust
