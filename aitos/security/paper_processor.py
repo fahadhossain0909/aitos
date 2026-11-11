@@ -60,12 +60,16 @@ class PaperOnlyIntentProcessor:
         policy: OrderIntentPolicy,
         replay_store: SQLiteReplayStore,
         adapter: PaperExecutionAdapter | None = None,
+        risk_limits: SignerRiskLimits | None = None,
     ) -> None:
         if policy.allow_market_orders or "MARKET" in policy.allowed_order_types:
             raise ValueError("paper_skeleton_supports_limit_orders_only")
         self.policy = policy
         self.replay_store = replay_store
         self.adapter = adapter or PaperExecutionAdapter()
+        if risk_limits is not None and not isinstance(risk_limits, SignerRiskLimits):
+            raise TypeError("signer_risk_limits_required")
+        self.risk_limits = risk_limits
         if not getattr(self.adapter, "paper_only", False):
             raise ValueError("non_paper_adapter_forbidden")
 
@@ -74,6 +78,7 @@ class PaperOnlyIntentProcessor:
         payload: str | bytes | Mapping[str, Any],
         *,
         now_ms: int,
+        account_snapshot: AccountRiskSnapshot | None = None,
     ) -> PaperIntentResult:
         parsed = (
             parse_order_intent_json(payload)
@@ -85,6 +90,10 @@ class PaperOnlyIntentProcessor:
             policy=self.policy,
             now_ms=now_ms,
         )
+        # Independent signer-side preflight occurs before consuming an intent nonce.
+        # The caller must obtain this evidence from a separately authenticated source.
+        if self.risk_limits is not None:
+            self.risk_limits.authorize(intent, account_snapshot, now_ms=now_ms)
         reservation = self.replay_store.reserve(intent, now_ms=now_ms)
         if not reservation.created:
             return self._duplicate_result(reservation)
