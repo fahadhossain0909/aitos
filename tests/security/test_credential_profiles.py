@@ -60,9 +60,7 @@ def test_default_native_and_per_account_external_override(tmp_path):
     router.put("signer/remote/api-secret", "remote-secret")
 
     assert native.get("signer/local/api-secret") == "local-secret"
-    assert (
-        external.get_secret("aitos/exchanges/remote/api-secret") == "remote-secret"
-    )
+    assert external.get_secret("aitos/exchanges/remote/api-secret") == "remote-secret"
     assert router.get("signer/remote/key-id") == "remote-key"
     assert "signer/remote/api-secret" not in native.values
     assert router.delete("signer/remote/api-secret")
@@ -73,9 +71,7 @@ def test_default_native_and_per_account_external_override(tmp_path):
 def test_global_external_policy_routes_accounts_without_overrides(tmp_path):
     profiles = CredentialProfileStore(tmp_path / "profiles.sqlite3")
     external = MemoryExternalVault()
-    profiles.set_default(
-        "external", provider_id="vaultx", secret_ref="trading/default"
-    )
+    profiles.set_default("external", provider_id="vaultx", secret_ref="trading/default")
     router = CredentialProviderRouter(
         profiles=profiles,
         native_store=MemoryNativeVault(),
@@ -89,9 +85,7 @@ def test_global_external_policy_routes_accounts_without_overrides(tmp_path):
 def test_no_implicit_native_fallback_when_external_provider_missing(tmp_path):
     profiles = CredentialProfileStore(tmp_path / "profiles.sqlite3")
     native = MemoryNativeVault()
-    profiles.set_default(
-        "external", provider_id="missing", secret_ref="vault/account"
-    )
+    profiles.set_default("external", provider_id="missing", secret_ref="vault/account")
     router = CredentialProviderRouter(profiles=profiles, native_store=native)
     with pytest.raises(VaultUnavailable, match="provider unavailable"):
         router.put("signer/account/api-secret", "secret")
@@ -148,13 +142,10 @@ def test_profiles_persist_without_persisting_secret_values(tmp_path):
     reopened.close()
 
 
-
 def test_external_mode_does_not_initialize_native_vault(tmp_path):
     profiles = CredentialProfileStore(tmp_path / "profiles.sqlite3")
     external = MemoryExternalVault()
-    profiles.set_default(
-        "external", provider_id="vaultx", secret_ref="trading/account"
-    )
+    profiles.set_default("external", provider_id="vaultx", secret_ref="trading/account")
 
     def native_factory():
         raise AssertionError("native provider must not initialize")
