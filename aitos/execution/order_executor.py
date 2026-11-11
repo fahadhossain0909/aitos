@@ -145,11 +145,11 @@ class SimulatedOrderExecutor(OrderExecutor):
             "side": (
                 "SELL"
                 if request.reduce_only and request.side == TradeSide.LONG
-                else "BUY"
-                if request.reduce_only
-                else "BUY"
-                if request.side == TradeSide.LONG
-                else "SELL"
+                else (
+                    "BUY"
+                    if request.reduce_only
+                    else "BUY" if request.side == TradeSide.LONG else "SELL"
+                )
             ),
             "status": "FILLED",
             "executedQty": str(request.quantity),
