@@ -165,7 +165,7 @@ export default function SignerSettings() {
       <section className="signer-hero">
         <div className="signer-eyebrow">CREDENTIAL CUSTODY · ACCOUNT POLICY</div>
         <h1>Signer settings</h1>
-        <p>Manage exchange credentials on this trusted device. This window is separate from the remote operator console.</p>
+        <p>Manage exchange credentials on this trusted device. This window is separate from the loopback read-only Operator Console.</p>
       </section>
       <section className="signer-warning" role="note">
         <strong>Trust boundary</strong>
