@@ -303,9 +303,7 @@ def discover_external_vault_backends() -> dict[str, ExternalVaultBackend]:
         for point in points:
             provider_id = point.name
             if not re.fullmatch(r"[a-z][a-z0-9_-]{1,31}", provider_id):
-                raise CredentialProfileError(
-                    "invalid_external_provider_registration"
-                )
+                raise CredentialProfileError("invalid_external_provider_registration")
             if provider_id in discovered:
                 raise CredentialProfileError("duplicate_external_provider_registration")
             factory = point.load()
