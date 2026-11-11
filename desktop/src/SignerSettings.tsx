@@ -69,7 +69,10 @@ export default function SignerSettings() {
       ? /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(reference.trim())
       : /^[A-Za-z0-9_-]{4,64}\/[A-Za-z0-9_-]{4,64}$/.test(reference.trim());
 
-  async function run(operation: () => Promise<AdminResponse>, success: string) {
+  async function run(
+    operation: () => Promise<AdminResponse>,
+    success: string,
+  ): Promise<AdminResponse | null> {
     setBusy(true);
     setError("");
     setMessage("");
@@ -77,8 +80,10 @@ export default function SignerSettings() {
       const result = await operation();
       setStatus(result);
       setMessage(success);
+      return result;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Credential operation failed.");
+      return null;
     } finally {
       setBusy(false);
     }
@@ -138,10 +143,13 @@ export default function SignerSettings() {
           api_secret: apiSecret,
         }),
       "Credential pair stored and read back through the selected provider.",
-    ).then(() => {
-      setKeyId("");
-      setApiSecret("");
-      setConfirmSecret("");
+    ).then((result) => {
+      // Clear the secret fields only after the signer confirms read-back.
+      if (result) {
+        setKeyId("");
+        setApiSecret("");
+        setConfirmSecret("");
+      }
     });
   }
 
