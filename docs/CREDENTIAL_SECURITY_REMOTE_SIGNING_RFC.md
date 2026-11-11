@@ -655,8 +655,9 @@ token is persisted by AITOS.
 
 ### Provider item layout
 
-Both adapters require an operator-created item in the selected vault. AITOS
-does not search the entire vault or create an item implicitly.
+Both adapters require an operator-created, dedicated item in the selected
+vault. AITOS does not search the entire vault or create an item implicitly;
+the adapter creates or updates only the two named custom fields in that item.
 
 - Bitwarden: set the profile secret_ref to the exact item UUID. The item must
   contain custom fields named aitos_exchange_key_id and
