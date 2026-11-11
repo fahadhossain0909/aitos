@@ -4,10 +4,31 @@ from aitos.intelligence.staged_scanner import install_staged_scan
 
 
 class LiveUniverse:
-    async def rank(self):
-        return [("UNCONFIGURED", 1000.0)] + [
-            (f"S{i}", float(100 - i)) for i in range(60)
-        ]
+    async def snapshot(self):
+        rows = {
+            "UNCONFIGURED": {
+                "last_price": 100.0,
+                "change_pct_24h": 0.0,
+                "quote_volume_24h": 1e12,
+                "range_pct_24h": 1.0,
+            }
+        }
+        rows.update(
+            {
+                f"S{i}": {
+                    "last_price": 100.0 + i,
+                    "change_pct_24h": float(i),
+                    "quote_volume_24h": float(100 - i) * 1e8,
+                    "range_pct_24h": 1.0,
+                }
+                for i in range(60)
+            }
+        )
+        return rows
+
+    @staticmethod
+    def score(row):
+        return row["quote_volume_24h"] / (1.0 + row["range_pct_24h"])
 
 
 class NoHistory:
