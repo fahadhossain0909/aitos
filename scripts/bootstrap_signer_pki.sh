@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 umask 077
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [[ $# -ne 2 ]]; then
   echo "Usage: $0 DNS:signer.example.com|IP:10.0.0.10 spiffe://aitos/runtime/paper" >&2
@@ -132,7 +133,7 @@ Copy only the client certificate and client private key to the AITOS runtime hos
   Client private key: ${client_key} (0600)
 
 Enroll this client certificate in the persistent signer registry:
-  python -m aitos.security.signer_cli enroll-client \\
+  PYTHONPATH="${repo_root}" python -m aitos.security.signer_cli enroll-client \\
     --identity ${client_identity} \\
     --account-alias paper-primary \\
     --symbols BTCUSDT \\
