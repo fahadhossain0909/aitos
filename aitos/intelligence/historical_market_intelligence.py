@@ -57,6 +57,70 @@ def kline_request_weight(limit: int) -> int:
     return 1 if limit < 100 else 2 if limit < 500 else 5 if limit <= 1000 else 10
 
 
+_TIMEFRAME_SECONDS = {
+    "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800,
+    "1h": 3600, "2h": 7200, "4h": 14400, "6h": 21600, "8h": 28800,
+    "12h": 43200, "1d": 86400, "3d": 259200, "1w": 604800, "1M": 2592000,
+}
+
+
+async def fetch_historical_klines(
+    symbol: str,
+    timeframe: str,
+    *,
+    limit: int,
+    exchange_fetcher: Callable[..., Awaitable[list[Kline]]],
+    repository: Any | None = None,
+    minimum_history: int = 53,
+) -> list[Kline]:
+    """Read durable ClickHouse history first, then merge a bounded REST fallback."""
+    from datetime import datetime, timedelta, timezone
+
+    seconds = _TIMEFRAME_SECONDS.get(timeframe, 60)
+    stored: dict[datetime, Kline] = {}
+    if repository is not None:
+        try:
+            records = await repository.get_recent_klines(symbol, timeframe, limit=limit)
+            for row in records:
+                opened = row["time"]
+                if isinstance(opened, str):
+                    opened = datetime.fromisoformat(opened.replace("Z", "+00:00"))
+                if opened.tzinfo is None:
+                    opened = opened.replace(tzinfo=timezone.utc)
+                opened = opened.astimezone(timezone.utc)
+                stored[opened] = Kline(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    open_time=opened,
+                    close_time=opened + timedelta(seconds=seconds),
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=float(row["close"]),
+                    volume=float(row["volume"]),
+                    quote_volume=float(row.get("quote_volume", 0.0)),
+                    trades_count=int(row.get("trades_count", 0)),
+                    taker_buy_volume=float(row.get("taker_buy_volume", 0.0)),
+                    taker_buy_quote_volume=float(row.get("taker_buy_quote_volume", 0.0)),
+                    is_closed=True,
+                )
+        except Exception:
+            # The repository is an optimization/source of truth when available;
+            # a bounded REST read is the recovery path for missing/stale history.
+            stored.clear()
+    if len(stored) >= minimum_history:
+        return sorted(stored.values(), key=lambda item: item.open_time)[-limit:]
+    remote = await exchange_fetcher(symbol, timeframe, limit=limit)
+    merged = dict(stored)
+    for row in remote:
+        if getattr(row, "is_closed", True):
+            merged[row.open_time] = row
+    result = sorted(merged.values(), key=lambda item: item.open_time)[-limit:]
+    if result:
+        return result
+    raise RuntimeError(f"no historical candles available for {symbol} {timeframe}")
+
+
 class HistoricalEvidenceStore:
     """Durable, append-only selected-candidate evidence in ClickHouse."""
 
