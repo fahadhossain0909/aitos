@@ -17,6 +17,7 @@ type AdminResponse = {
   error?: string;
   account_alias?: string;
   configured?: boolean;
+  scope?: "account" | "global";
   mode?: "native" | "external";
   provider_id?: "bitwarden" | "onepassword" | null;
   secret_ref?: string | null;
@@ -91,6 +92,7 @@ export default function SignerSettings() {
           account_alias: account.trim(),
         });
         setPolicySaved(Boolean(result.configured));
+        if (result.scope) setScope(result.scope);
         if (result.configured && result.mode) setMode(result.mode);
         if (result.provider_id) setProvider(result.provider_id);
         if (result.secret_ref) setReference(result.secret_ref);
