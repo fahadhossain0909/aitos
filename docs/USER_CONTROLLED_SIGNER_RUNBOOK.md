@@ -38,6 +38,9 @@ For rotation, issue a new certificate with the same URI SAN, enroll the new seri
 
 Create a **Binance USD-M Futures Testnet** API key with the minimum permissions required for Testnet account reads and order placement. On the signer host, run:
 
+    set -a
+    source ~/.config/aitos-signer/signer.env
+    set +a
     PYTHONPATH=/path/to/aitos /path/to/aitos-signer-venv/bin/python -m aitos.security.signer_cli store-testnet-credential
 
 The key ID is entered interactively and the secret is entered through a hidden prompt, then stored via the platform credential vault. Do not put either value in signer.env, shell arguments, repository files, CI variables or the runtime VPS.
