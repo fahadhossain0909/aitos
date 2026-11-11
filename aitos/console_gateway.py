@@ -498,17 +498,33 @@ def create_gateway(
             prepare_durable_directory(path.parent, reserve_bytes=1024 * 1024)
             if path.is_symlink():
                 raise StorageUnavailable("workspace layout symlink forbidden")
-            atomic_write_json(path, layout)
+            # Compare-and-swap is serialized across all local desktop windows.
+            with exclusive_file_lock(path.with_name(path.name + ".revision.lock")):
+                current = read_workspace_layout()
+                current_etag = workspace_layout_etag(current)
+                if not hmac.compare_digest(expected_etag, current_etag):
+                    return current, current_etag, False
+                atomic_write_json(path, layout)
+                return layout, workspace_layout_etag(layout), True
 
         try:
-            await asyncio.to_thread(persist)
+            saved_layout, saved_etag, did_save = await asyncio.to_thread(persist)
         except (OSError, ValueError, StorageUnavailable):
             return web.json_response(
                 {"error": "Workspace preferences could not be saved"},
                 status=503,
                 headers={"Cache-Control": "no-store"},
             )
-        return web.json_response(layout, headers={"Cache-Control": "no-store"})
+        if not did_save:
+            return web.json_response(
+                saved_layout,
+                status=409,
+                headers={"Cache-Control": "no-store", "ETag": saved_etag},
+            )
+        return web.json_response(
+            saved_layout,
+            headers={"Cache-Control": "no-store", "ETag": saved_etag},
+        )
 
     async def session_status(request):
         remaining = state.remaining(request.cookies.get(cookie_name))
