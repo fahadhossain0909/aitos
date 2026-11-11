@@ -634,3 +634,14 @@ provider authentication UX is complete, or that any live exchange credential
 has been imported. The exchange adapter remains Binance Futures Testnet only.
 No live order, production credential, deployment, or activation is authorized
 by this work.
+
+
+### Mode changes and credential migration
+
+Changing a global or per-account profile changes only the selected provider
+route; it does not copy, delete, rotate, or revoke credentials in either store.
+After selecting a new mode, the operator must provision the same exchange key
+pair into the newly selected provider and run the signer's read-only startup
+preflight. Only after the new provider is verified may the old copy be removed
+or the exchange key rotated/revoked. A missing credential after a mode change
+must stop signer startup; it must never trigger a search in the previous store.
