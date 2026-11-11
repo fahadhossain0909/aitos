@@ -12,8 +12,8 @@ export default defineConfig(() => {
     build: {
       rollupOptions: {
         input: {
-          operator: resolve(__dirname, "index.html"),
-          signer: resolve(__dirname, "signer.html"),
+          operator: resolve("index.html"),
+          signer: resolve("signer.html"),
         },
       },
     },
