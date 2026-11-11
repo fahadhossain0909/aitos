@@ -181,8 +181,8 @@ class SQLiteSignerRiskState:
         local_daily_loss = max(Decimal("0"), -local_net)
         return replace(
             snapshot,
-            daily_loss=max(snapshot.daily_loss, local_daily_loss),
-            order_count_window=max(snapshot.order_count_window, count),
+            daily_loss=snapshot.daily_loss + local_daily_loss,
+            order_count_window=snapshot.order_count_window + count,
         )
 
     def record_realized_pnl(
