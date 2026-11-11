@@ -159,6 +159,7 @@ export default function SignerSettings() {
         <div className="signer-card-heading"><div><span className="signer-eyebrow">01 / ACCOUNT</span><h2>Choose the account</h2></div><span className="signer-step">01</span></div>
         <label htmlFor="account-alias">Account alias</label>
         <input id="account-alias" value={account} onChange={e => { setAccount(e.target.value); setPolicySaved(false); setStatus(null); }} placeholder="e.g. binance-testnet-primary" autoComplete="off" spellCheck={false} maxLength={64}/>
+        <p className="signer-help">Use the exact same alias as AITOS_SIGNER_ACCOUNT_ALIAS in the signer service configuration. The desktop and signer service must run as the same OS user and use the same AITOS_SIGNER_DATA_DIR.</p>
         <div className="signer-actions">
           <button className="signer-button secondary" disabled={!ready || busy || !available} onClick={() => void loadStatus()}>Load current policy</button>
         </div>
