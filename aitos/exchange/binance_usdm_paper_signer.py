@@ -38,8 +38,7 @@ class BinancePaperExchangeError(RuntimeError):
 class HttpTransport(Protocol):
     def request(
         self, method: str, url: str, *, headers: Mapping[str, str], timeout: float
-    ) -> object:
-        ...
+    ) -> object: ...
 
 
 class UrllibJsonTransport:
@@ -56,13 +55,17 @@ class UrllibJsonTransport:
             # Never surface the response body: exchange errors can echo request data.
             raise BinancePaperExchangeError("binance_testnet_http_rejected") from exc
         except (URLError, TimeoutError, OSError) as exc:
-            raise BinancePaperExchangeError("binance_testnet_transport_unavailable") from exc
+            raise BinancePaperExchangeError(
+                "binance_testnet_transport_unavailable"
+            ) from exc
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise BinancePaperExchangeError("binance_testnet_response_too_large")
         try:
             return json.loads(raw.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError, RecursionError):
-            raise BinancePaperExchangeError("binance_testnet_response_invalid") from None
+            raise BinancePaperExchangeError(
+                "binance_testnet_response_invalid"
+            ) from None
 
 
 class BinanceUSDMPaperClient:
@@ -115,7 +118,11 @@ class BinanceUSDMPaperClient:
             url = f"{_TESTNET_BASE}{path}?{query}&signature={signature}"
             headers["X-MBX-APIKEY"] = key_id
         else:
-            url = f"{_TESTNET_BASE}{path}?{urlencode(values)}" if values else f"{_TESTNET_BASE}{path}"
+            url = (
+                f"{_TESTNET_BASE}{path}?{urlencode(values)}"
+                if values
+                else f"{_TESTNET_BASE}{path}"
+            )
         try:
             result = self.transport.request(
                 method, url, headers=headers, timeout=self.timeout_seconds
@@ -123,7 +130,9 @@ class BinanceUSDMPaperClient:
         except BinancePaperExchangeError:
             raise
         except Exception:
-            raise BinancePaperExchangeError("binance_testnet_transport_unavailable") from None
+            raise BinancePaperExchangeError(
+                "binance_testnet_transport_unavailable"
+            ) from None
         if not isinstance(result, (dict, list)):
             raise BinancePaperExchangeError("binance_testnet_response_invalid")
         return result
@@ -136,8 +145,12 @@ class BinanceUSDMPaperClient:
         return value
 
     def signed_request(
-        self, method: str, path: str, params: Mapping[str, object] | None = None,
-        *, timestamp_ms: int | None = None,
+        self,
+        method: str,
+        path: str,
+        params: Mapping[str, object] | None = None,
+        *,
+        timestamp_ms: int | None = None,
     ):
         return self._request(
             method, path, params, signed=True, timestamp_ms=timestamp_ms
@@ -206,15 +219,19 @@ class BinanceUSDMPaperAccountEvidenceProvider:
             if not isinstance(asset, dict):
                 raise BinancePaperExchangeError("binance_balance_row_invalid")
             code = asset.get("asset")
-            if type(code) is not str or not re.fullmatch(r"[A-Z0-9]{1,20}", code) or code in seen_assets:
+            if (
+                type(code) is not str
+                or not re.fullmatch(r"[A-Z0-9]{1,20}", code)
+                or code in seen_assets
+            ):
                 raise BinancePaperExchangeError("binance_balance_asset_invalid")
             seen_assets.add(code)
             self._decimal(asset.get("walletBalance"), "wallet_balance")
             self._decimal(asset.get("availableBalance"), "available_balance")
 
-        midnight = datetime.fromtimestamp(
-            server_ms / 1000, tz=timezone.utc
-        ).replace(hour=0, minute=0, second=0, microsecond=0)
+        midnight = datetime.fromtimestamp(server_ms / 1000, tz=timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0
+        )
         start_ms = int(midnight.timestamp() * 1000)
         income = self.client.signed_request(
             "GET",
@@ -239,12 +256,16 @@ class BinanceUSDMPaperAccountEvidenceProvider:
             if row.get("positionSide") != "BOTH":
                 raise BinancePaperExchangeError("binance_hedge_mode_not_supported")
             quantity = self._decimal(row.get("positionAmt"), "position_quantity")
-            notional = self._decimal(row.get("notional"), "position_notional").copy_abs()
+            notional = self._decimal(
+                row.get("notional"), "position_notional"
+            ).copy_abs()
             if symbol in positions:
                 raise BinancePaperExchangeError("binance_duplicate_position_symbol")
             positions[symbol] = quantity
             gross += notional
-            symbol_exposure[symbol] = symbol_exposure.get(symbol, Decimal("0")) + notional
+            symbol_exposure[symbol] = (
+                symbol_exposure.get(symbol, Decimal("0")) + notional
+            )
 
         for row in open_orders:
             if not isinstance(row, dict):
@@ -262,7 +283,9 @@ class BinanceUSDMPaperAccountEvidenceProvider:
                 raise BinancePaperExchangeError("binance_open_order_notional_invalid")
             notional = quantity * price
             gross += notional
-            symbol_exposure[symbol] = symbol_exposure.get(symbol, Decimal("0")) + notional
+            symbol_exposure[symbol] = (
+                symbol_exposure.get(symbol, Decimal("0")) + notional
+            )
 
         net_income = Decimal("0")
         seen_receipts = set()
@@ -279,7 +302,9 @@ class BinanceUSDMPaperAccountEvidenceProvider:
                 or type(receipt_id) not in (str, int)
                 or not str(receipt_id).isdigit()
             ):
-                raise BinancePaperExchangeError("binance_income_receipt_identity_invalid")
+                raise BinancePaperExchangeError(
+                    "binance_income_receipt_identity_invalid"
+                )
             identity = (kind, str(receipt_id))
             if identity in seen_receipts:
                 raise BinancePaperExchangeError("binance_duplicate_income_receipt")
