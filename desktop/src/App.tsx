@@ -1972,7 +1972,7 @@ export default function App() {
                 </div>
                 <div className="notice-box">
                   <ShieldCheck size={16} />
-                  <span>Use the native application menu → “Open Trusted Signer Settings” to choose Native OS vault or Bitwarden/1Password, configure a global default or per-account policy, and store and verify a Binance Futures Testnet credential pair. Closing the signer window hides it; the native menu can reopen it.</span>
+                  <span>Use the native application menu → “Open Trusted Signer Settings” (or press Ctrl/Cmd+Shift+S) to choose Native OS vault or Bitwarden/1Password, configure a global default or per-account policy, and store and verify a Binance Futures Testnet credential pair. Closing the signer window hides it; the native menu can reopen it.</span>
                 </div>
               </section>
             </>
