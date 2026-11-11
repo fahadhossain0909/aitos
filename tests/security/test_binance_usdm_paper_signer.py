@@ -86,7 +86,12 @@ class FakeTransport:
             ]
         if parsed.path.endswith("/fapi/v1/income"):
             return [
-                {"incomeType": "REALIZED_PNL", "income": "-10", "time": NOW, "tranId": 1},
+                {
+                    "incomeType": "REALIZED_PNL",
+                    "income": "-10",
+                    "time": NOW,
+                    "tranId": 1,
+                },
                 {"incomeType": "COMMISSION", "income": "-1", "time": NOW, "tranId": 2},
                 {"incomeType": "FUNDING_FEE", "income": "2", "time": NOW, "tranId": 3},
             ][: self.income_count]
@@ -123,7 +128,10 @@ def test_account_evidence_uses_signed_testnet_account_and_position_data(tmp_path
     assert snapshot.positions["BTCUSDT"] == Decimal("0.01")
     assert snapshot.daily_loss == Decimal("9")
     assert snapshot.order_count_window == 1
-    assert all(urlsplit(call[1]).netloc == "testnet.binancefuture.com" for call in transport.calls)
+    assert all(
+        urlsplit(call[1]).netloc == "testnet.binancefuture.com"
+        for call in transport.calls
+    )
 
 
 def test_hedge_mode_and_incomplete_income_fail_closed(tmp_path):
@@ -176,9 +184,7 @@ def _intent():
 
 def test_signer_dispatches_limit_order_only_to_testnet(tmp_path):
     transport = FakeTransport()
-    adapter = BinanceUSDMPaperExecutionAdapter(
-        client=make_client(tmp_path, transport)
-    )
+    adapter = BinanceUSDMPaperExecutionAdapter(client=make_client(tmp_path, transport))
     receipt = adapter.execute(_intent())
     assert adapter.paper_only is True
     assert adapter.testnet_only is True
