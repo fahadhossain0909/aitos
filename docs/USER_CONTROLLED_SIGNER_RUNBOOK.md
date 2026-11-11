@@ -18,6 +18,36 @@ The installer creates a private virtual environment, installs the keyring packag
 
 Review ~/.config/aitos-signer/signer.env. Keep AITOS_SIGNER_BIND_HOST=127.0.0.1 unless a private VPN/interface path has been configured and firewall-reviewed. Do not expose the listener to the public internet. If wildcard binding is unavoidable, the CLI requires the explicit AITOS_SIGNER_ALLOW_WILDCARD_BIND=1 setting; this is not a substitute for a firewall or network review.
 
+## Desktop signer settings
+
+The Tauri desktop application opens a separate **AITOS — Trusted Signer Settings**
+window alongside the read-only Operator Console. Use this local signer window
+only on the trusted device that will own the exchange credential pair.
+
+1. Enter an account alias (for example, `binance-testnet-primary`) and load
+   its current policy.
+2. Select **Native OS vault** or **External password manager**.
+3. For External, choose Bitwarden or 1Password and enter the reference for a
+   dedicated, operator-created item.
+4. Save the account custody policy.
+5. Enter the Binance Futures Testnet API key and secret, confirm the secret,
+   then choose **Store and verify credential pair**. The UI clears the fields
+   after the operation and reports only whether read-back succeeded.
+6. Re-load account status to verify the selected mode and credential-pair
+   availability. This is a local vault read check, not an exchange connectivity
+   test or permission to submit orders.
+
+The operator console is a different WebView loaded from the loopback gateway.
+It receives no signer IPC capability. Native credential commands are accepted
+only from the bundled local `signer.html` window. Do not expose the signer UI
+over a remote desktop, remote WebView, browser tab, or reverse proxy.
+
+For Bitwarden/1Password, authenticate/unlock the provider CLI before launching
+AITOS Desktop, from the same OS user session. The desktop sidecar inherits the
+provider CLI session environment but AITOS does not save that token. A locked,
+expired or unavailable provider fails closed; it never falls back to the
+native vault automatically.
+
 ## Credential custody selection
 
 Choose the credential mode on the **trusted signer host**, before storing the Testnet key:
