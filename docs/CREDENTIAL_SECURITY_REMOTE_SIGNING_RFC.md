@@ -659,13 +659,11 @@ Both adapters require an operator-created, dedicated item in the selected
 vault. AITOS does not search the entire vault or create an item implicitly;
 the adapter creates or updates only the two named custom fields in that item.
 
-- Bitwarden: set the profile secret_ref to the exact item UUID. The item must
-  contain custom fields named aitos_exchange_key_id and
-  aitos_exchange_api_secret. The adapter writes both as hidden custom fields
+- Bitwarden: set the profile secret_ref to the exact item UUID. The item is used to hold custom fields named aitos_exchange_key_id and
+  aitos_exchange_api_secret. The adapter creates or updates them as hidden custom fields
   (Bitwarden field type 1).
-- 1Password: set secret_ref to <vault-id>/<item-id>. The item must contain
-  custom fields named aitos_exchange_key_id and aitos_exchange_api_secret.
-  The adapter writes them as CONCEALED fields.
+- 1Password: set secret_ref to <vault-id>/<item-id>. The item holds custom fields named aitos_exchange_key_id and
+  aitos_exchange_api_secret. The adapter creates or updates them as CONCEALED fields.
 
 The credential router appends /key-id and /api-secret to this base reference.
 The adapter rejects malformed references, mismatched item IDs, duplicate
@@ -678,8 +676,9 @@ python -m aitos.security.signer_cli set-credential-mode --mode external --provid
 python -m aitos.security.signer_cli set-credential-mode --mode external --provider-id onepassword --secret-ref <vault-id>/<item-id> --account-alias primary
 ```
 
-The CLI command changes routing metadata only. Provision the item fields and
-run the signer's read-only credential preflight before allowing the signer to
+The CLI command changes routing metadata only. The adapter provisions the two
+fields inside the dedicated item when credentials are stored; run the signer's
+read-only credential preflight before allowing the signer to
 accept intents.
 
 ### Session, lock and timeout behavior
