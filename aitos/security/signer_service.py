@@ -578,6 +578,7 @@ class PaperSignerRPCServer:
         self.clock_ms = clock_ms or (lambda: __import__("time").time_ns() // 1_000_000)
         self._server = None
         self._connection_slots = asyncio.Semaphore(32)
+        self._intent_lock = asyncio.Lock()
 
     async def start(self, host: str, port: int) -> None:
         if self._server is not None:
@@ -645,39 +646,39 @@ class PaperSignerRPCServer:
                 now_ms=now_ms,
                 is_reduce_only=is_reduce_only,
             )
-            intent_id = request.intent.get("intent_id")
-            existing = (
-                self.processor.replay_store.get(intent_id)
-                if isinstance(intent_id, str)
-                else None
-            )
-            if (
-                existing is None
-                and self.processor.replay_store.list_unresolved(limit=1)
-            ):
-                raise SignerProtocolRejected(
-                    "unresolved_execution_requires_reconciliation"
+            async with self._intent_lock:
+                intent_id = request.intent.get("intent_id")
+                existing = (
+                    self.processor.replay_store.get(intent_id)
+                    if isinstance(intent_id, str)
+                    else None
                 )
-            try:
-                result = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        self.processor.process, dict(request.intent), now_ms=now_ms
-                    ),
-                    timeout=self.request_timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                # The worker thread may still finish after the client timeout.
-                # The durable replay row prevents a retry from dispatching twice.
-                response = {
-                    "status": "unknown",
-                    "outcome_code": "paper_dispatch_timeout_ambiguous",
-                }
-            else:
-                response = {
-                    "status": result.status,
-                    "outcome_code": result.outcome_code or "none",
-                    "duplicate": result.duplicate,
-                }
+                if existing is None and self.processor.replay_store.list_unresolved(
+                    limit=1
+                ):
+                    raise SignerProtocolRejected(
+                        "unresolved_execution_requires_reconciliation"
+                    )
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            self.processor.process, dict(request.intent), now_ms=now_ms
+                        ),
+                        timeout=self.request_timeout_seconds,
+                    )
+                except asyncio.TimeoutError:
+                    # The worker thread may still finish after the client timeout.
+                    # The durable replay row prevents a retry from dispatching twice.
+                    response = {
+                        "status": "unknown",
+                        "outcome_code": "paper_dispatch_timeout_ambiguous",
+                    }
+                else:
+                    response = {
+                        "status": result.status,
+                        "outcome_code": result.outcome_code or "none",
+                        "duplicate": result.duplicate,
+                    }
         except (
             asyncio.IncompleteReadError,
             asyncio.LimitOverrunError,
