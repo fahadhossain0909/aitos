@@ -155,9 +155,7 @@ class CredentialProfileStore:
             (alias, profile.mode, profile.provider_id, profile.secret_ref),
         )
 
-    def resolve_with_scope(
-        self, account_alias: str
-    ) -> tuple[CredentialProfile, str]:
+    def resolve_with_scope(self, account_alias: str) -> tuple[CredentialProfile, str]:
         alias = self._account(account_alias)
         row = self._db.execute(
             "SELECT mode, provider_id, secret_ref "

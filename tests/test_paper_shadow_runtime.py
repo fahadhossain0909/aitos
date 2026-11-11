@@ -66,15 +66,14 @@ async def test_real_lifecycle_event_to_shadow_and_projector(setup):
     await setup.start()
     try:
         for _ in range(100):
-            if (
-                setup.store.journal.outbox_counts(setup.store.writer.scope)["delivered"]
-                == 1
-            ):
+            delivered = setup.store.journal.outbox_counts(
+                setup.store.writer.scope
+            )["delivered"]
+            if delivered == 1 and setup.public_status()["available"]:
                 break
             await asyncio.sleep(0.01)
         else:
-            pytest.fail("worker never acknowledged persisted event")
-        assert setup.public_status()["available"]
+            pytest.fail("worker never published verified projection status")
     finally:
         await setup.stop()
     assert setup._task.done()

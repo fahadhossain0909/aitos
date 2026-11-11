@@ -102,7 +102,9 @@ def test_external_mode_routes_pair_to_only_selected_provider(tmp_path, monkeypat
 
 
 
-def test_global_native_policy_is_used_by_accounts_without_overrides(tmp_path, monkeypatch):
+def test_global_native_policy_is_used_by_accounts_without_overrides(
+    tmp_path, monkeypatch
+):
     vault = MemoryVault()
     monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
     monkeypatch.setattr(signer_admin, "get_credential_vault", lambda: vault)
@@ -163,6 +165,7 @@ def test_global_external_policy_uses_the_explicit_shared_default_item(
         provider.values["00000000-0000-4000-8000-000000000002/api-secret"]
         == "shared-api-secret"
     )
+
 
 def test_unconfigured_account_status_is_non_mutating(tmp_path, monkeypatch):
     monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
