@@ -98,8 +98,21 @@ def handle_request(request: object) -> dict:
                 raise ValueError("invalid_credential_mode")
             return {"ok": True, "action": action, "account_alias": account}
 
-        slots = SignerCredentialSlots(_router(profiles, account))
+        try:
+            profile = profiles.resolve(account)
+        except CredentialProfileError:
+            if action == "status":
+                return {
+                    "ok": True,
+                    "action": action,
+                    "account_alias": account,
+                    "configured": False,
+                    "credential_pair_ready": False,
+                }
+            raise
+
         if action == "store-credentials":
+            slots = SignerCredentialSlots(_router(profiles, account))
             key_id = request.get("key_id")
             secret = request.get("api_secret")
             slots.save(account, key_id=key_id, api_secret=secret)
@@ -108,16 +121,17 @@ def handle_request(request: object) -> dict:
                 raise RuntimeError("credential_pair_readback_mismatch")
             return {"ok": True, "action": action, "account_alias": account}
 
+        slots = SignerCredentialSlots(_router(profiles, account))
         try:
             slots.resolve(account)
             ready = True
         except Exception:
             ready = False
-        profile = profiles.resolve(account)
         return {
             "ok": True,
             "action": action,
             "account_alias": account,
+            "configured": True,
             "mode": profile.mode,
             "provider_id": profile.provider_id,
             "secret_ref": profile.secret_ref,
@@ -143,7 +157,7 @@ def main() -> int:
             response = {"ok": False, "error": "credential_operation_failed"}
     sys.stdout.write(json.dumps(response, separators=(",", ":")) + "\n")
     sys.stdout.flush()
-    return 0 if response.get("ok") else 2
+    return 0
 
 
 if __name__ == "__main__":
