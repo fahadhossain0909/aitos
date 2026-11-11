@@ -159,7 +159,7 @@ def handle_request(request: object) -> dict:
             }
 
         try:
-            profile = profiles.resolve(account)
+            profile, resolved_scope = profiles.resolve_with_scope(account)
         except CredentialProfileError:
             if action == "status":
                 return {
@@ -192,6 +192,7 @@ def handle_request(request: object) -> dict:
             "action": action,
             "account_alias": account,
             "configured": True,
+            "scope": resolved_scope,
             "mode": profile.mode,
             "provider_id": profile.provider_id,
             "secret_ref": profile.secret_ref,
