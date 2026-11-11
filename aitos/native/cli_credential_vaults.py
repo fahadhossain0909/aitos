@@ -22,6 +22,37 @@ class ProviderVaultError(RuntimeError):
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
+def _provider_environment() -> dict[str, str]:
+    """Pass only OS runtime and provider-session variables to the CLI child."""
+    allowed = {
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "SYSTEMROOT",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "XDG_RUNTIME_DIR",
+        "DBUS_SESSION_BUS_ADDRESS",
+    }
+    environment = {
+        key: value for key, value in os.environ.items() if key in allowed
+    }
+    for key, value in os.environ.items():
+        if (
+            key == "BW_SESSION"
+            or key == "OP_SERVICE_ACCOUNT_TOKEN"
+            or key.startswith("OP_SESSION_")
+        ):
+            environment[key] = value
+    return environment
+
+
 @dataclass(frozen=True)
 class _CLI:
     executable: str
@@ -39,7 +70,7 @@ class _CLI:
                 text=True,
                 timeout=self.timeout_seconds,
                 check=False,
-                env=os.environ.copy(),
+                env=_provider_environment(),
             )
         except subprocess.TimeoutExpired:
             raise ProviderVaultError("provider_command_timeout") from None
