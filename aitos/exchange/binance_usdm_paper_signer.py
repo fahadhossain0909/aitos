@@ -396,9 +396,7 @@ class BinanceUSDMPaperExecutionAdapter:
             except InvalidOperation:
                 return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
             if not executed.is_finite() or executed < 0:
-                return PaperExecutionReceipt(
-                    "unknown", "testnet_response_unrecognized"
-                )
+                return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
             if executed > 0:
                 return PaperExecutionReceipt(
                     "accepted", "testnet_order_partially_executed"
