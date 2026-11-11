@@ -39,7 +39,7 @@ jobs:
       - name: Run signer and credential policy tests
         env:
           PYTHONPATH: .
-        run: python -m pytest --confcutdir=tests/security tests/security/test_cli_credential_vaults.py tests/security/test_credential_profiles.py tests/security/test_signer_credentials.py tests/security/test_signer_rpc_protocol.py tests/security/test_signer_service.py tests/security/test_signer_socket_integration.py tests/security/test_risk_state.py tests/security/test_binance_usdm_paper_signer.py -q
+        run: python -m pytest --confcutdir=tests/security tests/security/test_cli_credential_vaults.py tests/security/test_credential_profiles.py tests/security/test_signer_credentials.py tests/security/test_signer_rpc_protocol.py tests/security/test_signer_service.py tests/security/test_signer_socket_integration.py tests/security/test_desktop_signer_boundary.py tests/security/test_risk_state.py tests/security/test_binance_usdm_paper_signer.py -q
 
   provider-adapter-platform-contract:
     strategy:
