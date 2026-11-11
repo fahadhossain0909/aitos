@@ -29,21 +29,8 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
         candidate = await original_scan(self, symbol, reference_klines)
         if candidate is None:
             return None
-        try:
-            klines = await self._exchange.fetch_klines(
-                symbol, self._timeframe, limit=self._kline_lookback
-            )
-            if len(klines) >= 20:
-                flow_score = float(
-                    candidate.component_scores.get("order_flow_bias", 5.0)
-                )
-                advanced = build_advanced_context(
-                    klines, current_cvd_score=flow_score, oi_change=None
-                )
-                object.__setattr__(candidate, "_aitos_klines", tuple(klines))
-                object.__setattr__(candidate, "_aitos_advanced_context", advanced)
-        except Exception:
-            pass
+        # Deep history is fetched only after global Top-2 promotion.
+        # Never fan out historical REST calls for every candidate symbol.
         return candidate
 
     async def decide_with_kernel(self: Any, candidate: Any, kernel: Any):
@@ -99,6 +86,8 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
             "entry_price": candidate.entry_price,
             "klines": [k.to_dict() for k in getattr(candidate, "_aitos_klines", ())],
             "advanced_context": advanced,
+            "historical_intelligence": getattr(candidate, "_aitos_historical_context", None),
+            "historical_evidence_id": getattr(candidate, "_aitos_historical_evidence_id", None),
             "positioning": positioning,
             "graph_context": graph_context,
         }
