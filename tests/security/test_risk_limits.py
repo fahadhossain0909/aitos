@@ -124,3 +124,16 @@ def test_reduce_only_wrong_side_is_rejected():
             snapshot(),
             now_ms=NOW,
         )
+
+
+
+def test_account_snapshot_copies_and_freezes_exposure_mappings():
+    positions = {"BTCUSDT": Decimal("0.01")}
+    exposure = {"BTCUSDT": Decimal("50")}
+    evidence = snapshot(positions=positions, symbol_exposure=exposure)
+    positions["BTCUSDT"] = Decimal("99")
+    exposure.clear()
+    assert evidence.positions["BTCUSDT"] == Decimal("0.01")
+    assert evidence.symbol_exposure["BTCUSDT"] == Decimal("50")
+    with pytest.raises(TypeError):
+        evidence.positions["BTCUSDT"] = Decimal("1")
