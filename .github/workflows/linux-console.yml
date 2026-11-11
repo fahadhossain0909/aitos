@@ -16,7 +16,7 @@ permissions:
   contents: read
 concurrency:
   group: linux-console-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   linux-package:
     runs-on: ubuntu-24.04
