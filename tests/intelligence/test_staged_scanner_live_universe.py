@@ -58,6 +58,11 @@ class ExchangeMustNotFetch:
         return ["anchor-reference"]
 
 
+class Cooldown:
+    def should_skip(self, symbol, fingerprint):
+        return symbol == "S1"
+
+
 class Scanner:
     def __init__(self):
         self._staged_scan_installed = False
@@ -120,10 +125,11 @@ async def test_runtime_batch_path_uses_live_rank_and_enriches_only_promoted_top_
         stages.append((stage, list(symbols)))
 
     await install_staged_scan(scanner, changed)
+    scanner._candidate_rotation = Cooldown()
     selected = await scanner._lightweight_rank_symbols(limit=10)
     batches = [batch async for batch in scanner.iter_candidate_batches()]
 
-    assert selected[:2] == ["S0", "S1"]
+    assert selected[:2] == ["S0", "S2"]
     assert len(batches) == 1
     assert scanner._aitos_historical_intelligence.calls == ["S3", "S2"]
     by_symbol = {item.symbol: item for item in batches[0]}
