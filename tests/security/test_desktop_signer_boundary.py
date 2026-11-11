@@ -25,6 +25,8 @@ def test_only_bundled_signer_window_receives_native_ipc_capability():
     assert "WebviewUrl::External(url)" in rust
     assert "invoke_handler" in rust
     assert "open_signer_settings" in rust
+    assert "CmdOrCtrl+Shift+S" in rust
+    assert "Submenu::with_items" in rust
     assert "api.prevent_close()" in rust
     assert "window.hide()" in rust
     assert "window.set_focus()" in rust
