@@ -209,4 +209,9 @@ def test_real_tls13_mtls_socket_accepts_only_enrolled_paper_intents(tmp_path):
             replay.close()
             registry.close()
 
+        with pytest.raises(
+            ValueError, match="ephemeral_signer_rpc_port_loopback_only"
+        ):
+            await server.start("0.0.0.0", 0)
+
     asyncio.run(scenario())
