@@ -645,3 +645,67 @@ pair into the newly selected provider and run the signer's read-only startup
 preflight. Only after the new provider is verified may the old copy be removed
 or the exchange key rotated/revoked. A missing credential after a mode change
 must stop signer startup; it must never trigger a search in the previous store.
+
+## 17. First-party password-manager CLI adapters (2026-11-11)
+
+The signer now includes first-party Bitwarden and 1Password provider factories
+in aitos/native/cli_credential_vaults.py. They are registered by
+discover_external_vault_backends(); no third-party Python package or provider
+token is persisted by AITOS.
+
+### Provider item layout
+
+Both adapters require an operator-created item in the selected vault. AITOS
+does not search the entire vault or create an item implicitly.
+
+- Bitwarden: set the profile secret_ref to the exact item UUID. The item must
+  contain custom fields named aitos_exchange_key_id and
+  aitos_exchange_api_secret. The adapter writes both as hidden custom fields
+  (Bitwarden field type 1).
+- 1Password: set secret_ref to <vault-id>/<item-id>. The item must contain
+  custom fields named aitos_exchange_key_id and aitos_exchange_api_secret.
+  The adapter writes them as CONCEALED fields.
+
+The credential router appends /key-id and /api-secret to this base reference.
+The adapter rejects malformed references, mismatched item IDs, duplicate
+field labels and malformed provider responses.
+
+### Session, lock and timeout behavior
+
+- The signer invokes the installed bw or op executable without a shell.
+- Provider CLI authentication remains the provider's responsibility (for
+  example, an unlocked Bitwarden CLI session or 1Password desktop/service
+  account session). AITOS does not prompt for, store, or log provider master
+  passwords, session keys or service-account tokens.
+- Each provider operation has an 8-second default process timeout. Non-zero
+  exit, locked vault, expired session, missing executable and timeout all
+  become redacted provider errors. No native-vault fallback is attempted.
+- Secret-bearing JSON is passed through standard input for encode/edit
+  operations; secrets are not placed in command-line arguments.
+- An item reference must identify a dedicated AITOS credential item. Do not
+  reuse an item containing unrelated fields or share it with untrusted users.
+
+### Rotation and restart procedure
+
+Do not rotate a key pair in place while the signer is accepting intents. Stop
+the signer first. Create a separate new item in the selected provider, populate
+the two AITOS fields, point the account profile at the new item, and run the
+read-only signer preflight. Retain the old item until the new pair is verified
+and the operator has reconciled outstanding orders. Only then remove the old
+item or revoke the old exchange key. A partial provider write must be treated
+as incomplete; it must not be interpreted as a successful pair rotation.
+
+### Verification boundary
+
+The dedicated tests use a deterministic fake subprocess runner to verify
+argument construction, stdin handling, field mapping, malformed references,
+duplicate fields and timeout redaction. They do not authenticate to real
+Bitwarden or 1Password accounts. Real vault unlock/lock, provider-side
+permission scopes, service-account/desktop-session behavior, network outages,
+restart recovery and actual credential rotation remain cross-platform
+acceptance tests. The desktop Settings screen is not yet connected to the
+signer profile database; the adapters are currently configurable through the
+signer CLI only.
+
+No provider account was logged into, no exchange credential was imported, and
+no exchange order or deployment was performed by this change.
