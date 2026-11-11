@@ -161,6 +161,7 @@ class ClientAuthorizationRegistry:
         serial = peer_certificate.get("serialNumber")
         if not isinstance(serial, str) or not _SERIAL.fullmatch(serial):
             raise SignerProtocolRejected("client_certificate_serial_missing")
+        serial = serial.upper()
         serial_window = grant.serial_validity.get(
             serial, (grant.valid_from_ms, grant.valid_until_ms)
         )
