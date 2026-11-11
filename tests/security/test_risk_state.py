@@ -105,7 +105,9 @@ def test_reduce_only_snapshot_does_not_consume_growth_order_budget(tmp_path):
             reduce_only=True,
         )
         assert (
-            state.get_snapshot_for_intent(exit_intent, now_ms=NOW + 1).order_count_window
+            state.get_snapshot_for_intent(
+                exit_intent, now_ms=NOW + 1
+            ).order_count_window
             == 1
         )
         with pytest.raises(IntentRejected, match="order_rate_limit_reached"):
