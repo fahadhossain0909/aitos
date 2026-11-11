@@ -23,3 +23,8 @@ button,input,select{font:inherit}
 @media(max-width:620px){.signer-page{padding:18px 14px 30px}.signer-card{padding:17px}.signer-mode-grid{grid-template-columns:1fr}.signer-mode{min-height:78px}.signer-header{padding-bottom:20px}.signer-local-badge{font-size:9px}}
 
 .signer-trust-confirm{display:flex;align-items:flex-start;gap:9px;margin-top:12px;color:#f0e1bd;font-size:11px;line-height:1.5}.signer-trust-confirm input{margin:2px 0 0;accent-color:#c8eaa7}
+
+.signer-scope-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.signer-scope{min-height:38px;border:1px solid #3a4234;border-radius:8px;background:#151a13;color:#aeb7a3;font-size:11px;font-weight:700;cursor:pointer}
+.signer-scope.selected{border-color:#a6cb82;background:#202a1a;color:#e4f1d5}
+.signer-shared-warning{margin:12px 0 0;padding:12px;border:1px solid #795d32;border-radius:8px;background:#2a2417;color:#e8d29f;font-size:11px;line-height:1.6}
