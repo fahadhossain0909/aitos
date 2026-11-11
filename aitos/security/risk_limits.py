@@ -98,11 +98,19 @@ class SignerRiskLimits:
             raise IntentRejected("order_rate_limit_reached")
 
         current_symbol = snapshot.symbol_exposure.get(intent.symbol, Decimal("0"))
-        if not isinstance(current_symbol, Decimal) or not current_symbol.is_finite() or current_symbol < 0:
+        if (
+            not isinstance(current_symbol, Decimal)
+            or not current_symbol.is_finite()
+            or current_symbol < 0
+        ):
             raise IntentRejected("account_evidence_invalid")
         if intent.reduce_only:
             position = snapshot.positions.get(intent.symbol)
-            if not isinstance(position, Decimal) or not position.is_finite() or position == 0:
+            if (
+                not isinstance(position, Decimal)
+                or not position.is_finite()
+                or position == 0
+            ):
                 raise IntentRejected("reduce_only_position_evidence_required")
             if (position > 0 and intent.side != "SELL") or (
                 position < 0 and intent.side != "BUY"
