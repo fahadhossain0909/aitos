@@ -1,6 +1,7 @@
 """On-demand historical evidence with bounded cache and shared Redis budget."""
 from __future__ import annotations
 import asyncio, hashlib, json, time, uuid
+from datetime import datetime, timezone
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -144,5 +145,7 @@ class OnDemandHistoricalIntelligence:
         if rows is None:return None,{"available":False,"reason":"historical_fetch_unavailable","symbol":symbol.upper(),"timeframe":timeframe,"evidence_only":True}
         return rows,self.build_context(symbol,timeframe,rows)
     async def persist(self,candidate_id:str,evidence:dict[str,Any])->str|None:
-        if self.evidence_store is None or not evidence.get("available"):return None
-        return await self.evidence_store.append(candidate_id,evidence)
+        if self.evidence_store is None:return None
+        snapshot=dict(evidence)
+        snapshot.setdefault("captured_at",datetime.now(timezone.utc).isoformat())
+        return await self.evidence_store.append(candidate_id,snapshot)
