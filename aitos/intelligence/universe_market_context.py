@@ -34,7 +34,7 @@ class UniverseMarketContext:
         if self.redis is not None:
             try:await self.redis.hset(KEY,event.symbol.upper(),json.dumps(row,separators=(",",":"))); await self.redis.expire(KEY,self.ttl_seconds)
             except Exception:self.metrics["redis_errors"]+=1
-    async def snapshot(self,*,max_age_seconds:int=20):
+    async def snapshot(self,*,max_age_seconds:int=120):
         now=time.time(); result={}
         if self.redis is not None:
             try:
