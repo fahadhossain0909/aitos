@@ -550,3 +550,87 @@ No live signing, exchange dispatch, account API adapter, production listener, de
 
 
 The request parser is paired with `authenticate_signer_request`, which obtains the identity/grant from the supplied TLS peer certificate and then parses the bounded request. A future socket handler must pass only the peer certificate returned by the accepted TLS socket. Forwarded certificate headers, JSON identity claims and caller-selected account grants are not trusted identity sources. This remains a callable protocol helper, not a running listener.
+
+
+## 16. Dual-mode credential custody (2026-11-11)
+
+AITOS supports two credential-custody modes behind one signer credential interface.
+The selected policy is resolved by account alias; a global default applies only
+when that account has no explicit override.
+
+### Native mode
+
+- The signer host stores the exchange key ID and API secret in its pinned OS
+  credential store: Windows Credential Manager, Linux Secret Service, or the
+  macOS Keychain backend.
+- Native mode is intended only for a user-controlled, trusted signer device.
+  It does not protect against a compromised OS or an administrator of that
+  same host.
+- A provider-managed RDP/VPS is not a trusted signer host merely because the
+  desktop application is installed there.
+
+### External mode
+
+- The signer resolves credentials through an explicitly installed external
+  vault adapter. Adapters are discovered only inside the signer process through
+  the `aitos.credential_vaults` Python entry-point group.
+- Each adapter must implement `get_secret`, `put_secret`, and
+  `delete_secret`; the adapter owns provider authentication and must never
+  return access tokens or diagnostics to AITOS logs.
+- The local SQLite profile database stores only mode, provider ID, and opaque
+  vault reference metadata. It does not store exchange secrets or provider
+  authentication tokens.
+- No provider-specific Bitwarden, 1Password, or hosted-vault adapter is bundled
+  by this tranche. Installing/configuring a concrete adapter and testing its
+  authentication, unlock, rotation and failure behavior are separate required
+  integration work.
+
+### Routing and failure behavior
+
+- `aitos/native/credential_profiles.py` implements durable global and
+  per-account policy, external adapter discovery, and a credential-store router.
+- `aitos/security/signer_cli.py set-credential-mode` configures the global
+  default or one account override. The mode must be explicit; an absent profile
+  fails closed.
+- If an External provider is unavailable, locked, or fails authentication,
+  AITOS fails closed. It does not silently copy credentials into the native
+  vault or use environment variables/files as a fallback.
+- The existing `SignerCredentialSlots` API is unchanged; the router is injected
+  beneath it, so exchange clients do not need to know which custody mode is in use.
+- API credentials remain signer-local. The remote runtime receives only the
+  bounded authenticated order-intent protocol, never API secrets, vault tokens,
+  signatures or reusable signed requests.
+
+### Operator commands
+
+Set a native global default:
+
+```bash
+python -m aitos.security.signer_cli set-credential-mode --mode native
+```
+
+Override one account to native mode:
+
+```bash
+python -m aitos.security.signer_cli set-credential-mode --mode native --account-alias primary
+```
+
+Set an external global default after installing a provider adapter:
+
+```bash
+python -m aitos.security.signer_cli set-credential-mode --mode external --provider-id <installed-provider-id> --secret-ref <opaque-vault-reference>
+```
+
+Set an external mode for one account by adding `--account-alias <alias>`.
+The `store-testnet-credential` command writes through the selected provider;
+it never changes the selected custody mode.
+
+### Verification boundary
+
+The current code tranche implements the profile database, router, adapter
+contract/discovery, CLI configuration and deterministic fake-provider tests.
+It does **not** claim that a concrete third-party vault is integrated, that
+provider authentication UX is complete, or that any live exchange credential
+has been imported. The exchange adapter remains Binance Futures Testnet only.
+No live order, production credential, deployment, or activation is authorized
+by this work.
