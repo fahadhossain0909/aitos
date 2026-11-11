@@ -62,6 +62,7 @@ def test_native_mode_store_and_status_never_return_secret_values(tmp_path, monke
         {"action": "status", "account_alias": "testnet-primary"}
     )
     assert status["credential_pair_ready"] is True
+    assert status["scope"] == "account"
     assert "synthetic-key-id" not in repr(status)
     assert "synthetic-api-secret" not in repr(status)
 
@@ -111,6 +112,10 @@ def test_global_native_policy_is_used_by_accounts_without_overrides(tmp_path, mo
     )
     assert result["scope"] == "global"
     assert result["account_alias"] is None
+    status = signer_admin.handle_request(
+        {"action": "status", "account_alias": "account-from-global-default"}
+    )
+    assert status["scope"] == "global"
 
     signer_admin.handle_request(
         {
