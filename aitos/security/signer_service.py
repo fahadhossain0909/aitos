@@ -659,20 +659,28 @@ class PaperSignerRPCServer:
                     raise SignerProtocolRejected(
                         "unresolved_execution_requires_reconciliation"
                     )
+                processing = asyncio.create_task(
+                    asyncio.to_thread(
+                        self.processor.process, dict(request.intent), now_ms=now_ms
+                    )
+                )
                 try:
                     result = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            self.processor.process, dict(request.intent), now_ms=now_ms
-                        ),
+                        asyncio.shield(processing),
                         timeout=self.request_timeout_seconds,
                     )
                 except asyncio.TimeoutError:
-                    # The worker thread may still finish after the client timeout.
-                    # The durable replay row prevents a retry from dispatching twice.
+                    # Keep the single-flight lock until the worker finishes. The
+                    # client may time out, but another intent cannot race the still
+                    # running dispatch. The durable ledger records its final state.
                     response = {
                         "status": "unknown",
                         "outcome_code": "paper_dispatch_timeout_ambiguous",
                     }
+                    try:
+                        await processing
+                    except Exception:
+                        pass
                 else:
                     response = {
                         "status": result.status,
