@@ -35,7 +35,7 @@ jobs:
           trap 'rm -rf "$cert_dir"' EXIT
           AITOS_SIGNER_CERT_DIR="$cert_dir" bash scripts/bootstrap_signer_pki.sh DNS:localhost spiffe://aitos/runtime/paper
           AITOS_SIGNER_CERT_DIR="$cert_dir" bash scripts/bootstrap_signer_pki.sh DNS:localhost spiffe://aitos/runtime/paper
-          test "$(find "$cert_dir" -maxdepth 1 -name 'client-*.crt' | wc -l)" -eq 2
+          test "$(find "$cert_dir" -maxdepth 1 -type f -name 'client-*.crt' ! -name 'client-ca.crt' | wc -l)" -eq 2
       - name: Run signer and credential policy tests
         env:
           PYTHONPATH: .
