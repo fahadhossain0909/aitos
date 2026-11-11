@@ -309,6 +309,7 @@ class DataIngestionService(_LegacyDataIngestionService):
             if self._scanner is not None:
                 self._scanner._aitos_universe_market_context = self._universe_market_context
                 self._scanner._aitos_historical_redis = getattr(self._event_bus, "_redis", None)
+                self._scanner._aitos_historical_repository = self._repository
             client = getattr(self._repository, "_client", None)
             if client is not None:
                 self._historical_evidence_store = HistoricalEvidenceStore(client)
