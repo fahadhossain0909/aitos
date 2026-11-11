@@ -32,10 +32,14 @@ credential pair.
    `binance-testnet-primary`) and load its current policy. The desktop and
    signer service must run as the same OS user and share the same
    `AITOS_SIGNER_DATA_DIR` (or both use the default data directory).
-2. Select **Native OS vault** or **External password manager**.
+2. Choose **Global default** or **Per-account override**, then select
+   **Native OS vault** or **External password manager**.
 3. For External, choose Bitwarden or 1Password and enter the reference for a
-   dedicated, operator-created item.
-4. Save the account custody policy.
+   dedicated, operator-created item. A global External reference is shared by
+   all accounts without an explicit override; use per-account overrides and
+   dedicated items when different exchange accounts use different API keys.
+   A global Native policy still stores separate OS-vault slots per account.
+4. Save the custody policy for the selected scope.
 5. Enter the Binance Futures Testnet API key and secret, confirm the secret,
    then choose **Store and verify credential pair**. The UI clears the fields
    after the operation and reports only whether read-back succeeded.
