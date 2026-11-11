@@ -714,9 +714,9 @@ duplicate fields and timeout redaction. They do not authenticate to real
 Bitwarden or 1Password accounts. Real vault unlock/lock, provider-side
 permission scopes, service-account/desktop-session behavior, network outages,
 restart recovery and actual credential rotation remain cross-platform
-acceptance tests. The desktop Settings screen is not yet connected to the
-signer profile database; the adapters are currently configurable through the
-signer CLI only.
+acceptance tests. The desktop Settings screen currently saves only a local, unapplied policy
+draft; it is not connected to the signer profile database. The adapters are
+currently configurable through the signer CLI only.
 
 No provider account was logged into, no exchange credential was imported, and
 no exchange order or deployment was performed by this change.
