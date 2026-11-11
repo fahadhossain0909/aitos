@@ -163,8 +163,13 @@ def handle_request(request: object) -> dict:
 
 
 def main() -> int:
-    raw = sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 1)
-    if not raw or len(raw) > MAX_REQUEST_BYTES or not raw.endswith(b"\n"):
+    raw = sys.stdin.buffer.readline(MAX_REQUEST_BYTES + 2)
+    if (
+        not raw
+        or len(raw) > MAX_REQUEST_BYTES + 1
+        or not raw.endswith(b"\n")
+        or len(raw[:-1]) > MAX_REQUEST_BYTES
+    ):
         response = {"ok": False, "error": "invalid_signer_admin_request"}
     else:
         try:
