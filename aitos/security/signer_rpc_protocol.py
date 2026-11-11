@@ -9,7 +9,7 @@ paper/signer processor after all authentication and policy checks pass.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 
@@ -48,6 +48,7 @@ class ClientGrant:
     enabled: bool = True
     valid_from_ms: int = 0
     valid_until_ms: int = 9_223_372_036_854_775_807
+    serial_validity: Mapping[str, tuple[int, int]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.identity, str) or not self.identity.startswith(
@@ -89,6 +90,24 @@ class ClientGrant:
             or self.valid_until_ms <= self.valid_from_ms
         ):
             raise ValueError("client_grant_validity_invalid")
+        if not isinstance(self.serial_validity, Mapping):
+            raise ValueError("client_grant_serial_validity_invalid")
+        validity = {}
+        for serial, window in self.serial_validity.items():
+            if (
+                not isinstance(serial, str)
+                or not _SERIAL.fullmatch(serial)
+                or serial not in self.allowed_serials
+                or type(window) not in (tuple, list)
+                or len(window) != 2
+                or type(window[0]) is not int
+                or type(window[1]) is not int
+                or window[0] < 0
+                or window[1] <= window[0]
+            ):
+                raise ValueError("client_grant_serial_validity_invalid")
+            validity[serial] = (window[0], window[1])
+        object.__setattr__(self, "serial_validity", MappingProxyType(validity))
 
 
 @dataclass(frozen=True)
@@ -142,11 +161,14 @@ class ClientAuthorizationRegistry:
         serial = peer_certificate.get("serialNumber")
         if not isinstance(serial, str) or not _SERIAL.fullmatch(serial):
             raise SignerProtocolRejected("client_certificate_serial_missing")
+        serial_window = grant.serial_validity.get(
+            serial, (grant.valid_from_ms, grant.valid_until_ms)
+        )
         if (
             not grant.enabled
             or serial in grant.revoked_serials
             or serial not in grant.allowed_serials
-            or not grant.valid_from_ms <= now_ms < grant.valid_until_ms
+            or not serial_window[0] <= now_ms < serial_window[1]
         ):
             raise SignerProtocolRejected("client_certificate_not_authorized")
         return identity, grant
