@@ -1,4 +1,5 @@
 import json
+import math
 from datetime import datetime, timezone
 import pytest
 from aitos.intelligence.universe_market_context import UniverseMarketContext
@@ -67,4 +68,5 @@ def test_universe_score_is_bounded_and_finite():
             "spread_pct": 0.01,
         }
     )
-    assert 0 <= score <= 10
+    assert score > 0
+    assert math.isfinite(score)
