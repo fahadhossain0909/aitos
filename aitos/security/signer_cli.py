@@ -175,6 +175,9 @@ async def _serve() -> None:
         data / "rpc-rate-limit.sqlite3",
         limit=int(os.environ.get("AITOS_SIGNER_RPC_RATE_LIMIT", str(max_orders))),
         window_ms=int(os.environ.get("AITOS_SIGNER_RPC_RATE_WINDOW_MS", "60000")),
+        reduce_only_limit=int(
+            os.environ.get("AITOS_SIGNER_REDUCE_ONLY_RPC_RATE_LIMIT", "100")
+        ),
     )
     adapter = BinanceUSDMPaperExecutionAdapter(client=client)
     processor = PaperOnlyIntentProcessor(
