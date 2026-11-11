@@ -358,6 +358,12 @@ class DataIngestionService(_LegacyDataIngestionService):
             )
         if self._auxiliary_runtime is not None:
             status.details["auxiliary_market_data"] = self._auxiliary_runtime.snapshot()
+        if self._universe_market_context is not None:
+            status.details["universe_market_context"] = self._universe_market_context.health_snapshot()
+        if self._scanner is not None:
+            hmie = getattr(self._scanner, "_aitos_historical_intelligence", None)
+            if hmie is not None:
+                status.details["historical_intelligence"] = dict(hmie.metrics)
         status.details["deep_history_enabled"] = self._deep_history_enabled
         if self._deep_runtime is not None:
             status.details["deep_market_data"] = self._deep_runtime.gateway.snapshot()
