@@ -65,6 +65,22 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
             evidence_id = await service.persist(candidate_id, evidence)
             if evidence_id:
                 object.__setattr__(candidate, "_aitos_historical_evidence_id", evidence_id)
+            record = getattr(scanner, "_record_funnel", None)
+            if callable(record):
+                await record(
+                    symbol=candidate.symbol,
+                    side=getattr(getattr(candidate, "direction", None), "value", "UNKNOWN"),
+                    stage="historical_intelligence",
+                    accepted=bool(evidence.get("available")),
+                    reason=str(evidence.get("reason") or "historical_evidence_available"),
+                    details={
+                        "candidate_id": candidate_id,
+                        "historical_evidence_id": evidence_id,
+                        "sample_count": int(evidence.get("sample_count", 0)),
+                        "analogue_count": int(evidence.get("analogue_count", 0)),
+                        "evidence_only": True,
+                    },
+                )
         except Exception as exc:
             logger.warning(
                 "promoted candidate historical enrichment unavailable",
@@ -296,7 +312,17 @@ async def install_staged_scan(
     if callable(original_lightweight_rank):
 
         async def _rank_and_subscribe(*args: Any, **kwargs: Any) -> list[str]:
-            selected = await original_lightweight_rank(*args, **kwargs)
+            universe = getattr(scanner, "_aitos_universe_market_context", None)
+            if universe is not None:
+                ranked = await universe.rank()
+                requested = kwargs.get("limit", args[0] if args else None)
+                limit = max(1, min(TOP_50, int(requested))) if requested else TOP_50
+                selected = [symbol for symbol, _score in ranked[:limit]]
+                anchor = getattr(scanner, "_reference_symbol", None) or "BTCUSDT"
+                if anchor in {symbol for symbol, _score in ranked} and anchor not in selected:
+                    selected = [anchor, *selected[: limit - 1]]
+            else:
+                selected = await original_lightweight_rank(*args, **kwargs)
             await on_subscription_change(list(selected), "TOP_50")
             return selected
 
