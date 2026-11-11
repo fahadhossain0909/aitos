@@ -31,8 +31,20 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
         return
     service = getattr(scanner, "_aitos_historical_intelligence", None)
     if service is None:
+        async def historical_fetcher(symbol: str, timeframe: str, *, limit: int):
+            return await fetch_historical_klines(
+                symbol,
+                timeframe,
+                limit=limit,
+                exchange_fetcher=scanner._exchange.fetch_klines,
+                repository=getattr(scanner, "_aitos_historical_repository", None),
+                minimum_history=(
+                    2 * 20 + 12 + 1
+                ),
+            )
+
         service = OnDemandHistoricalIntelligence(
-            scanner._exchange.fetch_klines,
+            historical_fetcher,
             redis_client=getattr(scanner, "_aitos_historical_redis", None),
             evidence_store=getattr(scanner, "_aitos_historical_evidence_store", None),
         )
