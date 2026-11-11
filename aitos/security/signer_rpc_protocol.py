@@ -189,6 +189,7 @@ def parse_signer_request(
     if (
         isinstance(now_ms, bool)
         or not isinstance(now_ms, int)
+        or now_ms < 0
         or isinstance(max_clock_skew_ms, bool)
         or not isinstance(max_clock_skew_ms, int)
         or not 0 <= max_clock_skew_ms <= 60_000
