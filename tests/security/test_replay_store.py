@@ -272,3 +272,37 @@ def test_replay_store_rejects_group_or_world_accessible_parent(tmp_path):
     os.chmod(private_dir, 0o755)
     with pytest.raises(ValueError, match="directory_must_be_private"):
         SQLiteReplayStore(private_dir / "ledger.sqlite3")
+
+
+class SimulatedProcessTermination(BaseException):
+    pass
+
+
+class KillAfterDispatchAdapter(PaperExecutionAdapter):
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, intent):
+        self.calls += 1
+        raise SimulatedProcessTermination()
+
+
+def test_process_termination_after_dispatching_is_not_replayed(tmp_path):
+    database = tmp_path / "ledger.sqlite3"
+    adapter = KillAfterDispatchAdapter()
+    with SQLiteReplayStore(database) as store:
+        processor = PaperOnlyIntentProcessor(
+            policy=POLICY, replay_store=store, adapter=adapter
+        )
+        with pytest.raises(SimulatedProcessTermination):
+            processor.process(intent_payload(), now_ms=NOW)
+
+    with SQLiteReplayStore(database) as reopened:
+        processor = PaperOnlyIntentProcessor(
+            policy=POLICY, replay_store=reopened, adapter=adapter
+        )
+        retry = processor.process(intent_payload(), now_ms=NOW + 1)
+
+    assert retry.status == "dispatching"
+    assert retry.duplicate is True
+    assert adapter.calls == 1
