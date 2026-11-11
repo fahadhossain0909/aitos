@@ -31,6 +31,7 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
         return
     service = getattr(scanner, "_aitos_historical_intelligence", None)
     if service is None:
+
         async def historical_fetcher(symbol: str, timeframe: str, *, limit: int):
             return await fetch_historical_klines(
                 symbol,
@@ -38,9 +39,7 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                 limit=limit,
                 exchange_fetcher=scanner._exchange.fetch_klines,
                 repository=getattr(scanner, "_aitos_historical_repository", None),
-                minimum_history=(
-                    2 * 20 + 12 + 1
-                ),
+                minimum_history=(2 * 20 + 12 + 1),
             )
 
         service = OnDemandHistoricalIntelligence(
@@ -85,7 +84,9 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
             except Exception as exc:
                 logger.warning(
                     "historical evidence snapshot persistence failed",
-                    extra={"aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}},
+                    extra={
+                        "aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}
+                    },
                 )
             if evidence_id:
                 object.__setattr__(
@@ -121,7 +122,12 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                 except Exception as exc:
                     logger.warning(
                         "historical evidence decision attribution failed",
-                        extra={"aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}},
+                        extra={
+                            "aitos_extra": {
+                                "symbol": candidate.symbol,
+                                "error": str(exc),
+                            }
+                        },
                     )
         except Exception as exc:
             logger.warning(
