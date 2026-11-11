@@ -108,8 +108,13 @@ async def fetch_historical_klines(
             # The repository is an optimization/source of truth when available;
             # a bounded REST read is the recovery path for missing/stale history.
             stored.clear()
-    if len(stored) >= minimum_history:
-        return sorted(stored.values(), key=lambda item: item.open_time)[-limit:]
+    ordered_stored = sorted(stored.values(), key=lambda item: item.open_time)
+    if len(ordered_stored) >= minimum_history:
+        age_seconds = (
+            datetime.now(timezone.utc) - ordered_stored[-1].close_time
+        ).total_seconds()
+        if 0 <= age_seconds <= max(2 * seconds, 120):
+            return ordered_stored[-limit:]
     remote = await exchange_fetcher(symbol, timeframe, limit=limit)
     merged = dict(stored)
     for row in remote:
