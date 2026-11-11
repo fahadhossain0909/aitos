@@ -16,7 +16,6 @@ import sqlite3
 import stat
 import ssl
 import threading
-from dataclasses import asdict
 from pathlib import Path
 from typing import Callable
 
@@ -28,9 +27,9 @@ from aitos.security.signer_rpc_protocol import (
     authenticate_signer_request,
 )
 
-_IDENTITY = re.compile(r"spiffe://[A-Za-z0-9._/-]{1,200}\\Z")
-_ALIAS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\\Z")
-_SYMBOL = re.compile(r"[A-Z0-9]{2,30}\\Z")
+_IDENTITY = re.compile(r"spiffe://[A-Za-z0-9._/-]{1,200}\Z")
+_ALIAS = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}\Z")
+_SYMBOL = re.compile(r"[A-Z0-9]{2,30}\Z")
 
 
 class SignerServiceError(RuntimeError):
@@ -160,8 +159,9 @@ class SQLiteSignerRegistry:
                         raise ValueError("use_replace_grant_for_scope_change")
                     serials = set(json.loads(row["serials_json"]))
                     revoked = set(json.loads(row["revoked_json"]))
+                    if certificate_serial.upper() in revoked:
+                        raise ValueError("revoked_certificate_serial_cannot_be_reenrolled")
                     serials.add(certificate_serial.upper())
-                    revoked.discard(certificate_serial.upper())
                     self._write(
                         identity, account_alias, symbols, serials, revoked, True,
                         min(valid_from_ms, row["valid_from_ms"]),
@@ -433,8 +433,7 @@ class PaperSignerRPCServer:
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         response = {"status": "rejected", "outcome_code": "signer_request_rejected"}
         try:
-            async with asyncio.timeout(self.request_timeout_seconds):
-                tls_object = writer.get_extra_info("ssl_object")
+            tls_object = writer.get_extra_info("ssl_object")
                 if tls_object is None:
                     raise SignerProtocolRejected("mutual_tls_required")
                 peer = tls_object.getpeercert()
@@ -454,9 +453,12 @@ class PaperSignerRPCServer:
                 self.rate_limiter.consume(
                     request.authenticated_identity, request.account_alias, now_ms=now_ms
                 )
-                result = await asyncio.to_thread(
+            result = await asyncio.wait_for(
+                asyncio.to_thread(
                     self.processor.process, dict(request.intent), now_ms=now_ms
-                )
+                ),
+                timeout=self.request_timeout_seconds,
+            )
                 response = {
                     "status": result.status,
                     "outcome_code": result.outcome_code or "none",
