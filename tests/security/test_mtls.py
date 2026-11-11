@@ -29,7 +29,12 @@ def test_client_identity_requires_exact_pinned_uri_san():
             "client_identity_allowlist_required",
         ),
         (
-            {"subjectAltName": [("URI", IDENTITY), ("URI", "spiffe://aitos/signer/other")]},
+            {
+                "subjectAltName": [
+                    ("URI", IDENTITY),
+                    ("URI", "spiffe://aitos/signer/other"),
+                ]
+            },
             frozenset({IDENTITY, "spiffe://aitos/signer/other"}),
             "client_identity_not_pinned",
         ),
