@@ -169,7 +169,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
 
     @staticmethod
     def _decimal(value: object, field: str) -> Decimal:
-        if type(value) not in (str, int, float):
+        if type(value) not in (str, int):
             raise BinancePaperExchangeError(f"binance_{field}_invalid")
         try:
             result = Decimal(str(value))
@@ -192,11 +192,24 @@ class BinanceUSDMPaperAccountEvidenceProvider:
         if (
             not isinstance(account, dict)
             or account.get("canTrade") is not True
+            or not isinstance(account.get("assets"), list)
+            or len(account["assets"]) > 1000
             or not isinstance(account.get("positions"), list)
             or not isinstance(open_orders, list)
             or len(open_orders) > self.max_open_orders
         ):
             raise BinancePaperExchangeError("binance_account_evidence_incomplete")
+
+        seen_assets = set()
+        for asset in account["assets"]:
+            if not isinstance(asset, dict):
+                raise BinancePaperExchangeError("binance_balance_row_invalid")
+            code = asset.get("asset")
+            if type(code) is not str or not code.isalnum() or code in seen_assets:
+                raise BinancePaperExchangeError("binance_balance_asset_invalid")
+            seen_assets.add(code)
+            self._decimal(asset.get("walletBalance"), "wallet_balance")
+            self._decimal(asset.get("availableBalance"), "available_balance")
 
         midnight = datetime.fromtimestamp(
             server_ms / 1000, tz=timezone.utc
@@ -247,10 +260,25 @@ class BinanceUSDMPaperAccountEvidenceProvider:
             symbol_exposure[symbol] = symbol_exposure.get(symbol, Decimal("0")) + notional
 
         net_income = Decimal("0")
+        seen_receipts = set()
         for row in income:
             if not isinstance(row, dict):
                 raise BinancePaperExchangeError("binance_income_row_invalid")
             kind = row.get("incomeType")
+            receipt_time = row.get("time")
+            receipt_id = row.get("tranId")
+            if (
+                type(kind) is not str
+                or type(receipt_time) is not int
+                or not start_ms <= receipt_time <= server_ms
+                or type(receipt_id) not in (str, int)
+                or not str(receipt_id).isdigit()
+            ):
+                raise BinancePaperExchangeError("binance_income_receipt_identity_invalid")
+            identity = (kind, str(receipt_id))
+            if identity in seen_receipts:
+                raise BinancePaperExchangeError("binance_duplicate_income_receipt")
+            seen_receipts.add(identity)
             if kind in _INCOME_TYPES:
                 net_income += self._decimal(row.get("income"), "income_amount")
         daily_loss = max(Decimal("0"), -net_income)
