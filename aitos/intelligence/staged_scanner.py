@@ -414,7 +414,9 @@ async def install_staged_scan(
             if universe is not None:
                 ranked = await _rank_live_universe(scanner, universe)
                 requested = kwargs.get("limit", args[0] if args else None)
-                limit = max(1, min(TOP_50, int(requested))) if requested else TOP_50
+                if requested is None:
+                    requested = scanner._tuning.analysis.expensive_analysis_limit
+                limit = max(1, min(TOP_50, int(requested)))
                 selected = [symbol for symbol, _score in ranked[:limit]]
                 anchor = getattr(scanner, "_reference_symbol", None) or "BTCUSDT"
                 if (
