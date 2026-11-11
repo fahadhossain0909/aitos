@@ -53,6 +53,10 @@ def test_default_native_and_per_account_external_override(tmp_path):
         native_store=native,
         external_backends={"bitwarden": external},
     )
+    _account_profile, account_scope = profiles.resolve_with_scope("remote")
+    _default_profile, default_scope = profiles.resolve_with_scope("local")
+    assert account_scope == "account"
+    assert default_scope == "global"
 
     router.put("signer/local/key-id", "local-key")
     router.put("signer/local/api-secret", "local-secret")
