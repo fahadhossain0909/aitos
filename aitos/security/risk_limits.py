@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Mapping
+from typing import Mapping, Protocol
 
 from aitos.security.signing_policy import IntentRejected, ValidatedOrderIntent
 
@@ -140,3 +140,14 @@ class SignerRiskLimits:
             raise IntentRejected("gross_exposure_limit_exceeded")
         if current_symbol + intent.notional > self.max_symbol_exposure:
             raise IntentRejected("symbol_exposure_limit_exceeded")
+
+
+
+class AccountEvidenceProvider(Protocol):
+    """Trusted local adapter; implementations must query the exchange directly."""
+
+    def get_snapshot(
+        self, account_alias: str, *, now_ms: int
+    ) -> AccountRiskSnapshot:
+        """Return reconciled account evidence or raise; never use VPS claims."""
+        ...
