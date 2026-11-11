@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use zeroize::{Zeroize, Zeroizing};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
@@ -37,6 +38,7 @@ async fn signer_credential_admin(
     app: AppHandle,
     request: String,
 ) -> Result<String, String> {
+    let request = Zeroizing::new(request);
     if window.label() != "signer" {
         return Err("signer_window_required".into());
     }
@@ -55,9 +57,11 @@ async fn signer_credential_admin(
         .args(["--credential-admin"])
         .spawn()
         .map_err(|_| "signer_admin_sidecar_unavailable")?;
-    let mut input = request.into_bytes();
+    let mut input = request.as_bytes().to_vec();
     input.push(b'\n');
-    if child.write(&input).is_err() {
+    let write_failed = child.write(&input).is_err();
+    input.zeroize();
+    if write_failed {
         let _ = child.kill();
         return Err("signer_admin_request_delivery_failed".into());
     }
