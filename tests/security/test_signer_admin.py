@@ -69,7 +69,9 @@ def test_external_mode_routes_pair_to_only_selected_provider(tmp_path, monkeypat
     provider = MemoryExternalVault()
     monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
     monkeypatch.setattr(
-        signer_admin, "discover_external_vault_backends", lambda: {"bitwarden": provider}
+        signer_admin,
+        "discover_external_vault_backends",
+        lambda: {"bitwarden": provider},
     )
 
     signer_admin.handle_request(
@@ -121,7 +123,6 @@ def test_status_rejects_secret_fields_even_if_they_are_ignored(tmp_path, monkeyp
         raise AssertionError("status must not accept credential material")
 
 
-
 def test_stdin_protocol_returns_only_metadata_and_never_secret_material(
     tmp_path, monkeypatch
 ):
@@ -149,11 +150,18 @@ def test_stdin_protocol_returns_only_metadata_and_never_secret_material(
     monkeypatch.setattr(
         signer_admin.sys,
         "stdin",
-        type("Input", (), {"buffer": io.BytesIO(
-            json.dumps(
-                {"action": "status", "account_alias": "stdin-account"}
-            ).encode("utf-8") + b"\\n"
-        )})(),
+        type(
+            "Input",
+            (),
+            {
+                "buffer": io.BytesIO(
+                    json.dumps(
+                        {"action": "status", "account_alias": "stdin-account"}
+                    ).encode("utf-8")
+                    + b"\\n"
+                )
+            },
+        )(),
     )
     output = io.StringIO()
     monkeypatch.setattr(signer_admin.sys, "stdout", output)
@@ -163,6 +171,7 @@ def test_stdin_protocol_returns_only_metadata_and_never_secret_material(
     assert json.loads(rendered)["credential_pair_ready"] is True
     assert "synthetic-stdin-key" not in rendered
     assert "synthetic-stdin-secret" not in rendered
+
 
 def test_unknown_fields_and_actions_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
@@ -180,9 +189,7 @@ def test_unknown_fields_and_actions_fail_closed(tmp_path, monkeypatch):
         raise AssertionError("unknown request fields must be rejected")
 
     try:
-        signer_admin.handle_request(
-            {"action": "delete-all", "account_alias": "safe"}
-        )
+        signer_admin.handle_request({"action": "delete-all", "account_alias": "safe"})
     except ValueError as exc:
         assert str(exc) == "signer_admin_action_not_allowed"
     else:
