@@ -135,6 +135,9 @@ async def _serve() -> None:
     cert = Path(_required("AITOS_SIGNER_SERVER_CERT")).expanduser()
     key = Path(_required("AITOS_SIGNER_SERVER_KEY")).expanduser()
     client_ca = Path(_required("AITOS_SIGNER_CLIENT_CA")).expanduser()
+    for material in (cert, key, client_ca):
+        if material.is_symlink() or not material.is_file():
+            raise RuntimeError("signer_tls_material_must_be_regular_files")
     if os.name == "posix" and key.stat().st_mode & 0o077:
         raise RuntimeError("signer_server_private_key_must_be_mode_0600")
 
