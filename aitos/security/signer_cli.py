@@ -101,7 +101,9 @@ def enroll_client(args) -> int:
             valid_until_ms=args.valid_until_ms,
             now_ms=args.now_ms,
         )
-    print("Client certificate enrolled. No private key or exchange credential was imported.")
+    print(
+        "Client certificate enrolled. No private key or exchange credential was imported."
+    )
     return 0
 
 
@@ -127,9 +129,10 @@ async def _serve() -> None:
     symbols = _symbols()
     host = os.environ.get("AITOS_SIGNER_BIND_HOST", "127.0.0.1")
     port = int(os.environ.get("AITOS_SIGNER_PORT", "9443"))
-    if host in {"0.0.0.0", "::", ""} and os.environ.get(
-        "AITOS_SIGNER_ALLOW_WILDCARD_BIND"
-    ) != "1":
+    if (
+        host in {"0.0.0.0", "::", ""}
+        and os.environ.get("AITOS_SIGNER_ALLOW_WILDCARD_BIND") != "1"
+    ):
         raise RuntimeError("wildcard_bind_requires_explicit_network_review")
 
     cert = Path(_required("AITOS_SIGNER_SERVER_CERT")).expanduser()
@@ -195,9 +198,7 @@ async def _serve() -> None:
 
     async def recovery_loop():
         while True:
-            await asyncio.to_thread(
-                recovery.run_once, now_ms=client.clock_ms()
-            )
+            await asyncio.to_thread(recovery.run_once, now_ms=client.clock_ms())
             await asyncio.sleep(15)
 
     recovery_task = None
@@ -230,13 +231,19 @@ def serve(_args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("store-testnet-credential").set_defaults(handler=store_exchange_credential)
+    commands.add_parser("store-testnet-credential").set_defaults(
+        handler=store_exchange_credential
+    )
 
     enroll = commands.add_parser("enroll-client")
     enroll.add_argument("--identity", required=True)
     enroll.add_argument("--account-alias", required=True)
-    enroll.add_argument("--symbols", required=True, help="Comma-separated uppercase symbols")
-    enroll.add_argument("--serial", required=True, help="CA-issued certificate serial in hex")
+    enroll.add_argument(
+        "--symbols", required=True, help="Comma-separated uppercase symbols"
+    )
+    enroll.add_argument(
+        "--serial", required=True, help="CA-issued certificate serial in hex"
+    )
     enroll.add_argument("--valid-from-ms", required=True, type=int)
     enroll.add_argument("--valid-until-ms", required=True, type=int)
     enroll.add_argument("--now-ms", required=True, type=int)
