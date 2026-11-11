@@ -52,6 +52,7 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
     assert "if (result)" in ui
     assert "setApiSecret(\"\")" in ui
     assert "trustedHostConfirmed" in ui
+    assert "if (!e.target.checked)" in ui
     assert "Global default" in ui
     assert "Per-account override" in ui
     assert "shared by every account" in ui
