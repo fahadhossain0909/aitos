@@ -6,6 +6,7 @@ from aitos.security.signer_rpc_protocol import (
     ClientAuthorizationRegistry,
     ClientGrant,
     SignerProtocolRejected,
+    authenticate_signer_request,
     parse_signer_request,
 )
 
@@ -170,3 +171,15 @@ def test_authenticated_identity_must_match_the_authorized_grant():
             grant=GRANT,
             now_ms=1_800_000_000_000,
         )
+
+
+def test_tls_peer_authentication_helper_binds_certificate_to_request():
+    registry = ClientAuthorizationRegistry({IDENTITY: GRANT})
+    parsed = authenticate_signer_request(
+        request(),
+        peer_certificate=CERT,
+        registry=registry,
+        now_ms=1_800_000_000_000,
+    )
+    assert parsed.authenticated_identity == IDENTITY
+    assert parsed.account_alias == "paper-primary"
