@@ -26,6 +26,38 @@ CHEAP_KLINE_CONCURRENCY = 6
 SubscriptionCallback = Callable[[list[str], str], Awaitable[None]]
 
 
+async def _rank_live_universe(scanner: Any, universe: Any) -> list[tuple[str, float]]:
+    """Rank configured symbols and preserve the scanner's cooldown policy."""
+    allowed = set(scanner._symbols)
+    anchor = getattr(scanner, "_reference_symbol", None) or "BTCUSDT"
+    fingerprints = getattr(scanner, "_lightweight_fingerprints", None)
+    if fingerprints is None:
+        fingerprints = {}
+        scanner._lightweight_fingerprints = fingerprints
+    rotation = getattr(scanner, "_candidate_rotation", None)
+    snapshots = await universe.snapshot()
+    ranked: list[tuple[str, float]] = []
+    for symbol, row in snapshots.items():
+        if symbol not in allowed:
+            continue
+        score = float(universe.score(row))
+        if score < 0:
+            continue
+        fingerprints[symbol] = (
+            f"{round(float(row.get('last_price', 0.0)), 10)}:"
+            f"{round(float(row.get('change_pct_24h', 0.0)), 5)}:"
+            f"{round(float(row.get('quote_volume_24h', 0.0)), 2)}"
+        )
+        if (
+            rotation is not None
+            and symbol != anchor
+            and rotation.should_skip(symbol, fingerprints[symbol])
+        ):
+            continue
+        ranked.append((symbol, score))
+    return sorted(ranked, key=lambda item: (-item[1], item[0]))
+
+
 async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> None:
     if not candidates:
         return
@@ -209,10 +241,7 @@ async def install_staged_scan(
         universe = getattr(scanner, "_aitos_universe_market_context", None)
         if universe is not None:
             # Production path: full-universe live tickers, no historical candle fan-out.
-            allowed_symbols = set(scanner._symbols)
-            ranked = [
-                item for item in await universe.rank() if item[0] in allowed_symbols
-            ]
+            ranked = await _rank_live_universe(scanner, universe)
             if not ranked:
                 logger.warning("no fresh all-market ticker context; skipping scan")
                 scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
@@ -383,10 +412,7 @@ async def install_staged_scan(
         async def _rank_and_subscribe(*args: Any, **kwargs: Any) -> list[str]:
             universe = getattr(scanner, "_aitos_universe_market_context", None)
             if universe is not None:
-                allowed_symbols = set(scanner._symbols)
-                ranked = [
-                    item for item in await universe.rank() if item[0] in allowed_symbols
-                ]
+                ranked = await _rank_live_universe(scanner, universe)
                 requested = kwargs.get("limit", args[0] if args else None)
                 limit = max(1, min(TOP_50, int(requested))) if requested else TOP_50
                 selected = [symbol for symbol, _score in ranked[:limit]]
