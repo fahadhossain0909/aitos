@@ -55,6 +55,7 @@ export default function SignerSettings() {
   const [confirmSecret, setConfirmSecret] = useState("");
   const [status, setStatus] = useState<AdminResponse | null>(null);
   const [policySaved, setPolicySaved] = useState(false);
+  const [trustedHostConfirmed, setTrustedHostConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -137,7 +138,8 @@ export default function SignerSettings() {
     });
   }
 
-  const available = Boolean(window.__TAURI__?.core?.invoke);
+  const nativeApiAvailable = Boolean(window.__TAURI__?.core?.invoke);
+  const available = nativeApiAvailable && trustedHostConfirmed;
 
   return (
     <main className="signer-page">
@@ -153,8 +155,10 @@ export default function SignerSettings() {
       <section className="signer-warning" role="note">
         <strong>Trust boundary</strong>
         <p>Never run the signer or unlock Bitwarden/1Password on a provider-managed RDP/VPS. Its administrator may inspect process memory and unlocked vault sessions. Keep this signer on a separately controlled device.</p>
+        <label className="signer-trust-confirm"><input type="checkbox" checked={trustedHostConfirmed} onChange={e => setTrustedHostConfirmed(e.target.checked)} /> I confirm this is a user-controlled trusted device, not a provider-managed RDP/VPS.</label>
       </section>
-      {!available && <div className="signer-error">Native signer commands are unavailable. Open this page from the installed desktop application.</div>}
+      {!nativeApiAvailable && <div className="signer-error">Native signer commands are unavailable. Open this page from the installed AITOS Desktop application.</div>}
+      {nativeApiAvailable && !trustedHostConfirmed && <div className="signer-error">Confirm the trusted-host boundary before enabling credential operations.</div>}
       <section className="signer-card">
         <div className="signer-card-heading"><div><span className="signer-eyebrow">01 / ACCOUNT</span><h2>Choose the account</h2></div><span className="signer-step">01</span></div>
         <label htmlFor="account-alias">Account alias</label>
