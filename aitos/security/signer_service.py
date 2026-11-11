@@ -404,13 +404,23 @@ class SQLiteSignerRateLimiter:
     """Atomic, restart-safe fixed-window limiter scoped by identity and account."""
 
     def __init__(
-        self, database_path: str | os.PathLike[str], *, limit: int, window_ms: int
+        self,
+        database_path: str | os.PathLike[str],
+        *,
+        limit: int,
+        window_ms: int,
+        reduce_only_limit: int | None = None,
     ):
         if type(limit) is not int or not 1 <= limit <= 100_000:
             raise ValueError("invalid_signer_rate_limit")
         if type(window_ms) is not int or not 100 <= window_ms <= 86_400_000:
             raise ValueError("invalid_signer_rate_window")
+        if reduce_only_limit is None:
+            reduce_only_limit = max(limit * 10, 100)
+        if type(reduce_only_limit) is not int or not 1 <= reduce_only_limit <= 100_000:
+            raise ValueError("invalid_reduce_only_rate_limit")
         self.limit, self.window_ms = limit, window_ms
+        self.reduce_only_limit = reduce_only_limit
         self.path = Path(database_path).expanduser()
         self.path.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         if self.path.is_symlink():
@@ -446,7 +456,16 @@ class SQLiteSignerRateLimiter:
                 "signer_rate_limiter_initialization_failed"
             ) from exc
 
-    def consume(self, identity: str, account_alias: str, *, now_ms: int) -> None:
+    def consume(
+        self,
+        identity: str,
+        account_alias: str,
+        *,
+        now_ms: int,
+        is_reduce_only: bool = False,
+    ) -> None:
+        if type(is_reduce_only) is not bool:
+            raise ValueError("invalid_signer_rate_class")
         if (
             type(identity) is not str
             or not _IDENTITY.fullmatch(identity)
@@ -457,27 +476,33 @@ class SQLiteSignerRateLimiter:
         ):
             raise ValueError("invalid_signer_rate_key")
         start = now_ms - (now_ms % self.window_ms)
+        table = (
+            "signer_reduce_only_rate_windows"
+            if is_reduce_only
+            else "signer_rate_windows"
+        )
+        limit = self.reduce_only_limit if is_reduce_only else self.limit
         with self._lock:
             try:
                 self._db.execute("BEGIN IMMEDIATE")
                 row = self._db.execute(
-                    """SELECT request_count FROM signer_rate_windows
+                    f"""SELECT request_count FROM {table}
                     WHERE identity=? AND account_alias=? AND window_start_ms=?""",
                     (identity, account_alias, start),
                 ).fetchone()
                 count = row[0] if row else 0
-                if count >= self.limit:
+                if count >= limit:
                     self._db.execute("ROLLBACK")
                     raise SignerProtocolRejected("signer_rate_limit_exceeded")
                 self._db.execute(
-                    """INSERT INTO signer_rate_windows VALUES (?,?,?,1)
+                    f"""INSERT INTO {table} VALUES (?,?,?,1)
                     ON CONFLICT(identity,account_alias,window_start_ms)
                     DO UPDATE SET request_count=request_count+1""",
                     (identity, account_alias, start),
                 )
                 # Retain the active window and one previous window for audit/debug.
                 self._db.execute(
-                    "DELETE FROM signer_rate_windows WHERE window_start_ms < ?",
+                    f"DELETE FROM {table} WHERE window_start_ms < ?",
                     (start - self.window_ms,),
                 )
                 self._db.execute("COMMIT")
