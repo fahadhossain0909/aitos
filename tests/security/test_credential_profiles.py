@@ -4,6 +4,7 @@ from aitos.native.credential_profiles import (
     CredentialProfileError,
     CredentialProfileStore,
     CredentialProviderRouter,
+    LazyNativeCredentialStore,
 )
 from aitos.native.credential_vault import VaultUnavailable
 
@@ -145,3 +146,46 @@ def test_profiles_persist_without_persisting_secret_values(tmp_path):
     assert profile.secret_ref == "vault/item-123"
     assert b"exchange-secret" not in path.read_bytes()
     reopened.close()
+
+
+
+def test_external_mode_does_not_initialize_native_vault(tmp_path):
+    profiles = CredentialProfileStore(tmp_path / "profiles.sqlite3")
+    external = MemoryExternalVault()
+    profiles.set_default(
+        "external", provider_id="vaultx", secret_ref="trading/account"
+    )
+
+    def native_factory():
+        raise AssertionError("native provider must not initialize")
+
+    router = CredentialProviderRouter(
+        profiles=profiles,
+        native_store=LazyNativeCredentialStore(native_factory),
+        external_backends={"vaultx": external},
+    )
+    router.put("signer/account/api-secret", "external-secret")
+    assert router.get("signer/account/api-secret") == "external-secret"
+    profiles.close()
+
+
+def test_native_mode_initializes_os_vault_only_when_used(tmp_path):
+    profiles = CredentialProfileStore(tmp_path / "profiles.sqlite3")
+    native = MemoryNativeVault()
+    calls = []
+
+    def native_factory():
+        calls.append("initialized")
+        return native
+
+    profiles.set_default("native")
+    router = CredentialProviderRouter(
+        profiles=profiles,
+        native_store=LazyNativeCredentialStore(native_factory),
+    )
+    assert calls == []
+    router.put("signer/account/api-secret", "native-secret")
+    assert calls == ["initialized"]
+    assert router.get("signer/account/api-secret") == "native-secret"
+    assert calls == ["initialized"]
+    profiles.close()
