@@ -195,7 +195,7 @@ export default function SignerSettings() {
           <p className="signer-help">Create a dedicated item first. AITOS uses only its concealed fields <code>aitos_exchange_key_id</code> and <code>aitos_exchange_api_secret</code>. Launch AITOS Desktop from a shell/session where the provider CLI authentication is already available; its session environment is passed only to the provider child process.</p>
         </div>}
         <div className="signer-actions">
-          <button className="signer-button primary" disabled={!policyTargetReady || busy || !available || (mode === "external" && !referenceValid)} onClick={() => void applyMode()}>{busy ? "Working…" : "Save account custody policy"}</button>
+          <button className="signer-button primary" disabled={!policyTargetReady || busy || !available || (mode === "external" && !referenceValid)} onClick={() => void applyMode()}>{busy ? "Working…" : scope === "global" ? "Save global default" : "Save account override"}</button>
         </div>
         {mode === "external" && scope === "global" && <p className="signer-shared-warning">A global External reference is shared by every account without its own override. Use a dedicated per-account override when accounts have different exchange API keys.</p>}
         <p className="signer-help">Changing this policy does not copy or delete credentials in the previous vault. Store and verify a credential pair below before restarting the signer.</p>
@@ -204,7 +204,7 @@ export default function SignerSettings() {
         <div className="signer-card-heading"><div><span className="signer-eyebrow">03 / PROVISION</span><h2>Store Testnet credentials</h2></div><span className="signer-step">03</span></div>
         <form onSubmit={storeCredentials}>
           <label htmlFor="exchange-key">Binance Futures Testnet API key</label>
-          <input id="exchange-key" type="password" autoComplete="new-password" value={keyId} onChange={e => setKeyId(e.target.value)} autoComplete="off" spellCheck={false} maxLength={128} required/>
+          <input id="exchange-key" type="password" autoComplete="new-password" value={keyId} onChange={e => setKeyId(e.target.value)} spellCheck={false} maxLength={128} required/>
           <label htmlFor="exchange-secret">API secret</label>
           <input id="exchange-secret" type="password" value={apiSecret} onChange={e => setApiSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required/>
           <label htmlFor="exchange-secret-confirm">Confirm API secret</label>
