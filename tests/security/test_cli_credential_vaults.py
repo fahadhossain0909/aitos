@@ -69,11 +69,23 @@ def test_onepassword_put_uses_stdin_and_concealed_field():
     vault.put_secret("vault1234/item1234/api-secret", "secret-value")
 
     assert runner.calls[0][0] == [
-        "op", "item", "get", "item1234", "--vault", "vault1234",
-        "--format", "json", "--reveal",
+        "op",
+        "item",
+        "get",
+        "item1234",
+        "--vault",
+        "vault1234",
+        "--format",
+        "json",
+        "--reveal",
     ]
     assert runner.calls[1][0] == [
-        "op", "item", "edit", "item1234", "--vault", "vault1234"
+        "op",
+        "item",
+        "edit",
+        "item1234",
+        "--vault",
+        "vault1234",
     ]
     edited = json.loads(runner.calls[1][1]["input"])
     assert edited["fields"][0]["type"] == "CONCEALED"
