@@ -11,7 +11,9 @@ IDENTITY = "spiffe://aitos/signer/client-01"
 NOW = 1_800_000_000_000
 
 
-def enroll(registry, serial="A1B2", valid_from_ms=NOW - 1000, valid_until_ms=NOW + 100_000):
+def enroll(
+    registry, serial="A1B2", valid_from_ms=NOW - 1000, valid_until_ms=NOW + 100_000
+):
     return registry.enroll(
         identity=IDENTITY,
         account_alias="paper-primary",
@@ -28,9 +30,7 @@ def test_enrollment_survives_restart_and_rotation_overlaps(tmp_path):
     first = SQLiteSignerRegistry(path)
     grant = enroll(first)
     assert grant.allowed_serials == frozenset({"A1B2"})
-    rotated = enroll(
-        first, "C3D4", valid_from_ms=NOW + 10, valid_until_ms=NOW + 20_000
-    )
+    rotated = enroll(first, "C3D4", valid_from_ms=NOW + 10, valid_until_ms=NOW + 20_000)
     assert rotated.allowed_serials == frozenset({"A1B2", "C3D4"})
     assert rotated.serial_validity["A1B2"] == (NOW - 1000, NOW + 100_000)
     assert rotated.serial_validity["C3D4"] == (NOW + 10, NOW + 20_000)
@@ -46,7 +46,9 @@ def test_enrollment_survives_restart_and_rotation_overlaps(tmp_path):
         {"subjectAltName": [("URI", IDENTITY)], "serialNumber": "A1B2"},
         now_ms=NOW + 50_000,
     )
-    with pytest.raises(SignerProtocolRejected, match="client_certificate_not_authorized"):
+    with pytest.raises(
+        SignerProtocolRejected, match="client_certificate_not_authorized"
+    ):
         registry.authorize(
             {"subjectAltName": [("URI", IDENTITY)], "serialNumber": "C3D4"},
             now_ms=NOW + 50_000,
