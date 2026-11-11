@@ -434,37 +434,42 @@ class PaperSignerRPCServer:
         response = {"status": "rejected", "outcome_code": "signer_request_rejected"}
         try:
             tls_object = writer.get_extra_info("ssl_object")
-                if tls_object is None:
-                    raise SignerProtocolRejected("mutual_tls_required")
-                peer = tls_object.getpeercert()
-                if not peer:
-                    raise SignerProtocolRejected("client_certificate_required")
-                raw = await reader.readuntil(b"\\n")
-                if len(raw) - 1 > self.max_body_bytes:
-                    raise SignerProtocolRejected("signer_request_too_large")
-                registry = self.registry.get_registry()
-                if registry is None:
-                    raise SignerProtocolRejected("no_signer_clients_enrolled")
-                now_ms = self.clock_ms()
-                request = authenticate_signer_request(
-                    raw[:-1], peer_certificate=peer, registry=registry, now_ms=now_ms,
-                    max_body_bytes=self.max_body_bytes,
-                )
-                self.rate_limiter.consume(
-                    request.authenticated_identity, request.account_alias, now_ms=now_ms
-                )
+            if tls_object is None:
+                raise SignerProtocolRejected("mutual_tls_required")
+            peer = tls_object.getpeercert()
+            if not peer:
+                raise SignerProtocolRejected("client_certificate_required")
+            raw = await asyncio.wait_for(
+                reader.readuntil(b"\n"), timeout=self.request_timeout_seconds
+            )
+            if len(raw) - 1 > self.max_body_bytes:
+                raise SignerProtocolRejected("signer_request_too_large")
+            registry = self.registry.get_registry()
+            if registry is None:
+                raise SignerProtocolRejected("no_signer_clients_enrolled")
+            now_ms = self.clock_ms()
+            request = authenticate_signer_request(
+                raw[:-1],
+                peer_certificate=peer,
+                registry=registry,
+                now_ms=now_ms,
+                max_body_bytes=self.max_body_bytes,
+            )
+            self.rate_limiter.consume(
+                request.authenticated_identity, request.account_alias, now_ms=now_ms
+            )
             result = await asyncio.wait_for(
                 asyncio.to_thread(
                     self.processor.process, dict(request.intent), now_ms=now_ms
                 ),
                 timeout=self.request_timeout_seconds,
             )
-                response = {
-                    "status": result.status,
-                    "outcome_code": result.outcome_code or "none",
-                    "duplicate": result.duplicate,
-                }
-        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, TimeoutError):
+            response = {
+                "status": result.status,
+                "outcome_code": result.outcome_code or "none",
+                "duplicate": result.duplicate,
+            }
+        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError):
             response = {"status": "rejected", "outcome_code": "request_incomplete_or_timeout"}
         except (SignerProtocolRejected, ValueError):
             response = {"status": "rejected", "outcome_code": "signer_policy_rejected"}
@@ -472,7 +477,7 @@ class PaperSignerRPCServer:
             # Never return exception strings, account data, credentials or stack traces.
             response = {"status": "unknown", "outcome_code": "signer_internal_failure"}
         try:
-            writer.write((json.dumps(response, separators=(",", ":")) + "\\n").encode())
+            writer.write((json.dumps(response, separators=(",", ":")) + "\n").encode())
             await writer.drain()
         except (ConnectionError, OSError):
             pass
