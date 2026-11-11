@@ -58,11 +58,17 @@ def test_certificate_revocation_and_unknown_serial_fail_closed(cert):
                 account_alias="paper-primary",
                 allowed_symbols=frozenset({"BTCUSDT"}),
                 allowed_serials=frozenset({"A1B2"}),
-                revoked_serials=frozenset({"A1B2"}) if cert["serialNumber"] == "A1B2" else frozenset(),
+                revoked_serials=(
+                    frozenset({"A1B2"})
+                    if cert["serialNumber"] == "A1B2"
+                    else frozenset()
+                ),
             )
         }
     )
-    with pytest.raises(SignerProtocolRejected, match="client_certificate_not_authorized"):
+    with pytest.raises(
+        SignerProtocolRejected, match="client_certificate_not_authorized"
+    ):
         registry.authorize(cert, now_ms=1_800_000_000_000)
 
 
@@ -136,7 +142,9 @@ def test_credentials_and_reusable_signatures_are_never_accepted():
             "api_secret": "never-send-this",
         },
     }
-    with pytest.raises(SignerProtocolRejected, match="credential_or_signature_field_forbidden"):
+    with pytest.raises(
+        SignerProtocolRejected, match="credential_or_signature_field_forbidden"
+    ):
         parse_signer_request(
             json.dumps(body),
             authenticated_identity=IDENTITY,
@@ -164,7 +172,9 @@ def test_duplicate_json_keys_and_oversized_body_are_rejected():
 
 
 def test_authenticated_identity_must_match_the_authorized_grant():
-    with pytest.raises(SignerProtocolRejected, match="authenticated_client_identity_mismatch"):
+    with pytest.raises(
+        SignerProtocolRejected, match="authenticated_client_identity_mismatch"
+    ):
         parse_signer_request(
             request(),
             authenticated_identity="spiffe://aitos/runtime/attacker",
