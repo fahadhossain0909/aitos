@@ -24,6 +24,10 @@ def test_only_bundled_signer_window_receives_native_ipc_capability():
     assert "trusted_local_signer_origin_required" in rust
     assert "WebviewUrl::External(url)" in rust
     assert "invoke_handler" in rust
+    assert "open_signer_settings" in rust
+    assert "api.prevent_close()" in rust
+    assert "window.hide()" in rust
+    assert "window.set_focus()" in rust
 
 
 def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
@@ -31,6 +35,9 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
     assert "invoke(" not in app
     assert "aitos-credential-policy-draft-v1" not in app
     assert "Trusted Signer Settings" in app
+    assert "Open Trusted Signer Settings" in app
+    assert "Native desktop application" in app
+    assert "Native packages are not built yet" not in app
 
     html = (ROOT / "desktop" / "signer.html").read_text(encoding="utf-8")
     assert 'src="/src/signer.tsx"' in html
@@ -40,6 +47,8 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
 
     ui = (ROOT / "desktop" / "src" / "SignerSettings.tsx").read_text(encoding="utf-8")
     assert 'invoke<string>("signer_credential_admin"' in ui
+    assert "if (result)" in ui
+    assert "setApiSecret(\"\")" in ui
     assert "trustedHostConfirmed" in ui
     assert "Global default" in ui
     assert "Per-account override" in ui
