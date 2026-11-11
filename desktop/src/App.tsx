@@ -460,8 +460,20 @@ export default function App() {
       return "bitwarden";
     }
   });
-  const [credentialAccount, setCredentialAccount] = useState("");
-  const [credentialReference, setCredentialReference] = useState("");
+  const [credentialAccount, setCredentialAccount] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("aitos-credential-policy-draft-v1") || "null")?.account_alias || "";
+    } catch {
+      return "";
+    }
+  });
+  const [credentialReference, setCredentialReference] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("aitos-credential-policy-draft-v1") || "null")?.secret_ref || "";
+    } catch {
+      return "";
+    }
+  });
   const [query, setQuery] = useState("");
   const [journalSide, setJournalSide] = useState("All directions");
   const [toast, setToast] = useState("");
