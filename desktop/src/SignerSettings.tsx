@@ -47,6 +47,7 @@ async function requestSignerAdmin(payload: Record<string, unknown>) {
 
 export default function SignerSettings() {
   const [account, setAccount] = useState("");
+  const [scope, setScope] = useState<"account" | "global">("account");
   const [mode, setMode] = useState<"native" | "external">("native");
   const [provider, setProvider] = useState<"bitwarden" | "onepassword">("bitwarden");
   const [reference, setReference] = useState("");
@@ -61,6 +62,7 @@ export default function SignerSettings() {
   const [error, setError] = useState("");
 
   const ready = Boolean(account.trim()) && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(account.trim());
+  const policyTargetReady = scope === "global" || ready;
   const referenceValid =
     provider === "bitwarden"
       ? /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(reference.trim())
@@ -103,7 +105,8 @@ export default function SignerSettings() {
       async () => {
         const result = await requestSignerAdmin({
           action: "set-mode",
-          account_alias: account.trim(),
+          scope,
+          ...(scope === "account" ? { account_alias: account.trim() } : {}),
           mode,
           ...(mode === "external"
             ? { provider_id: provider, secret_ref: reference.trim() }
@@ -162,7 +165,7 @@ export default function SignerSettings() {
       <section className="signer-card">
         <div className="signer-card-heading"><div><span className="signer-eyebrow">01 / ACCOUNT</span><h2>Choose the account</h2></div><span className="signer-step">01</span></div>
         <label htmlFor="account-alias">Account alias</label>
-        <input id="account-alias" value={account} onChange={e => { setAccount(e.target.value); setPolicySaved(false); setStatus(null); }} placeholder="e.g. binance-testnet-primary" autoComplete="off" spellCheck={false} maxLength={64}/>
+        <input id="account-alias" value={account} onChange={e => { setAccount(e.target.value); if (scope === "account") setPolicySaved(false); setStatus(null); }} placeholder="e.g. binance-testnet-primary" autoComplete="off" spellCheck={false} maxLength={64}/>
         <p className="signer-help">Use the exact same alias as AITOS_SIGNER_ACCOUNT_ALIAS in the signer service configuration. The desktop and signer service must run as the same OS user and use the same AITOS_SIGNER_DATA_DIR.</p>
         <div className="signer-actions">
           <button className="signer-button secondary" disabled={!ready || busy || !available} onClick={() => void loadStatus()}>Load current policy</button>
@@ -171,6 +174,11 @@ export default function SignerSettings() {
       </section>
       <section className="signer-card">
         <div className="signer-card-heading"><div><span className="signer-eyebrow">02 / CUSTODY</span><h2>Choose where credentials live</h2></div><span className="signer-step">02</span></div>
+        <div className="signer-scope-grid">
+          <button type="button" className={scope === "account" ? "signer-scope selected" : "signer-scope"} onClick={() => { setScope("account"); setPolicySaved(false); }} aria-pressed={scope === "account"}>Per-account override</button>
+          <button type="button" className={scope === "global" ? "signer-scope selected" : "signer-scope"} onClick={() => { setScope("global"); setPolicySaved(false); }} aria-pressed={scope === "global"}>Global default</button>
+        </div>
+        <p className="signer-help">{scope === "account" ? "Applies only to the account alias above. Other accounts keep their own policy or the global default." : "Applies to accounts without an explicit per-account override. Native OS slots remain account-specific."}</p>
         <div className="signer-mode-grid">
           <button type="button" className={mode === "native" ? "signer-mode selected" : "signer-mode"} onClick={() => { setMode("native"); setPolicySaved(false); }} aria-pressed={mode === "native"}><strong>Native OS vault</strong><span>Windows Credential Manager · macOS Keychain · Linux Secret Service</span></button>
           <button type="button" className={mode === "external" ? "signer-mode selected" : "signer-mode"} onClick={() => { setMode("external"); setPolicySaved(false); }} aria-pressed={mode === "external"}><strong>External password manager</strong><span>Bitwarden CLI or 1Password CLI on this trusted device</span></button>
@@ -183,8 +191,9 @@ export default function SignerSettings() {
           <p className="signer-help">Create a dedicated item first. AITOS uses only its concealed fields <code>aitos_exchange_key_id</code> and <code>aitos_exchange_api_secret</code>. Launch AITOS Desktop from a shell/session where the provider CLI authentication is already available; its session environment is passed only to the provider child process.</p>
         </div>}
         <div className="signer-actions">
-          <button className="signer-button primary" disabled={!ready || busy || !available || (mode === "external" && !referenceValid)} onClick={() => void applyMode()}>{busy ? "Working…" : "Save account custody policy"}</button>
+          <button className="signer-button primary" disabled={!policyTargetReady || busy || !available || (mode === "external" && !referenceValid)} onClick={() => void applyMode()}>{busy ? "Working…" : "Save account custody policy"}</button>
         </div>
+        {mode === "external" && scope === "global" && <p className="signer-shared-warning">A global External reference is shared by every account without its own override. Use a dedicated per-account override when accounts have different exchange API keys.</p>}
         <p className="signer-help">Changing this policy does not copy or delete credentials in the previous vault. Store and verify a credential pair below before restarting the signer.</p>
       </section>
       <section className="signer-card">
