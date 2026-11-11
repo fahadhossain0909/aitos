@@ -119,8 +119,11 @@ def atomic_write_json(path, value):
                 "durable write failed; inspect outcome before retry"
             ) from None
         finally:
-            if os.path.exists(temporary):
-                os.unlink(temporary)
+            Path(temporary).unlink(missing_ok=True)
+
+
+def _is_windows():
+    return os.name == "nt"
 
 
 def stage_sqlite_snapshot(source, destination, *, timeout_seconds=10):
@@ -153,7 +156,7 @@ def stage_sqlite_snapshot(source, destination, *, timeout_seconds=10):
             # read-only descriptor. Keep publication atomic and no-clobber.
             with open(temporary, "r+b") as stream:
                 os.fsync(stream.fileno())
-            if os.name == "nt":
+            if _is_windows():
                 # Windows rename fails if the destination already exists.
                 os.rename(temporary, destination)
             else:
@@ -165,5 +168,5 @@ def stage_sqlite_snapshot(source, destination, *, timeout_seconds=10):
                 "snapshot unavailable; no authority changed"
             ) from None
         finally:
-            os.unlink(temporary)
+            Path(temporary).unlink(missing_ok=True)
     return destination
