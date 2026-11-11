@@ -47,7 +47,7 @@ def _certificates(directory: Path):
         "-subj",
         "/CN=AITOS-Test-CA",
         "-days",
-        "2",
+        "365",
     )
     for role, serial, san, usage in (
         ("server", "0xAABB", "DNS:localhost", "serverAuth"),
@@ -90,7 +90,7 @@ def _certificates(directory: Path):
             "-out",
             cert,
             "-days",
-            "2",
+            "365",
             "-extfile",
             ext,
         )
