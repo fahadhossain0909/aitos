@@ -85,9 +85,21 @@ class SQLiteSignerRegistry:
                     enabled INTEGER NOT NULL CHECK(enabled IN (0,1)),
                     valid_from_ms INTEGER NOT NULL,
                     valid_until_ms INTEGER NOT NULL,
-                    updated_at_ms INTEGER NOT NULL
+                    updated_at_ms INTEGER NOT NULL,
+                    serial_validity_json TEXT NOT NULL DEFAULT '{}'
                 )"""
             )
+            columns = {
+                row["name"]
+                for row in self._db.execute(
+                    "PRAGMA table_info(signer_client_grants)"
+                ).fetchall()
+            }
+            if "serial_validity_json" not in columns:
+                self._db.execute(
+                    "ALTER TABLE signer_client_grants ADD COLUMN "
+                    "serial_validity_json TEXT NOT NULL DEFAULT '{}'"
+                )
             if os.name == "posix":
                 os.chmod(self.path, stat.S_IRUSR | stat.S_IWUSR)
         except (OSError, sqlite3.Error) as exc:
@@ -159,17 +171,31 @@ class SQLiteSignerRegistry:
                         raise ValueError("use_replace_grant_for_scope_change")
                     serials = set(json.loads(row["serials_json"]))
                     revoked = set(json.loads(row["revoked_json"]))
-                    if certificate_serial.upper() in revoked:
+                    serial = certificate_serial.upper()
+                    if serial in revoked:
                         raise ValueError(
                             "revoked_certificate_serial_cannot_be_reenrolled"
                         )
-                    serials.add(certificate_serial.upper())
+                    if serial in serials:
+                        raise ValueError("certificate_serial_already_enrolled")
+                    validity = json.loads(row["serial_validity_json"] or "{}")
+                    if not validity:
+                        validity = {
+                            old_serial: [
+                                row["valid_from_ms"],
+                                row["valid_until_ms"],
+                            ]
+                            for old_serial in serials
+                        }
+                    serials.add(serial)
+                    validity[serial] = [valid_from_ms, valid_until_ms]
                     self._write(
                         identity,
                         account_alias,
                         symbols,
                         serials,
                         revoked,
+                        validity,
                         True,
                         min(valid_from_ms, row["valid_from_ms"]),
                         max(valid_until_ms, row["valid_until_ms"]),
@@ -182,6 +208,7 @@ class SQLiteSignerRegistry:
                         set(allowed_symbols),
                         {certificate_serial.upper()},
                         set(),
+                        {certificate_serial.upper(): [valid_from_ms, valid_until_ms]},
                         True,
                         valid_from_ms,
                         valid_until_ms,
@@ -214,6 +241,7 @@ class SQLiteSignerRegistry:
                     set(json.loads(row["symbols_json"])),
                     set(json.loads(row["serials_json"])),
                     revoked,
+                    json.loads(row["serial_validity_json"] or "{}"),
                     bool(row["enabled"]),
                     row["valid_from_ms"],
                     row["valid_until_ms"],
@@ -239,6 +267,7 @@ class SQLiteSignerRegistry:
                     set(json.loads(row["symbols_json"])),
                     set(json.loads(row["serials_json"])),
                     set(json.loads(row["revoked_json"])),
+                    json.loads(row["serial_validity_json"] or "{}"),
                     False,
                     row["valid_from_ms"],
                     row["valid_until_ms"],
@@ -256,13 +285,18 @@ class SQLiteSignerRegistry:
         symbols,
         serials,
         revoked,
+        serial_validity,
         enabled,
         valid_from,
         valid_until,
         now_ms,
     ):
         self._db.execute(
-            """INSERT INTO signer_client_grants VALUES (?,?,?,?,?,?,?,?,?)
+            """INSERT INTO signer_client_grants (
+                identity, account_alias, symbols_json, serials_json, revoked_json,
+                enabled, valid_from_ms, valid_until_ms, updated_at_ms,
+                serial_validity_json
+            ) VALUES (?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(identity) DO UPDATE SET
               account_alias=excluded.account_alias,
               symbols_json=excluded.symbols_json,
@@ -271,7 +305,8 @@ class SQLiteSignerRegistry:
               enabled=excluded.enabled,
               valid_from_ms=excluded.valid_from_ms,
               valid_until_ms=excluded.valid_until_ms,
-              updated_at_ms=excluded.updated_at_ms""",
+              updated_at_ms=excluded.updated_at_ms,
+              serial_validity_json=excluded.serial_validity_json""",
             (
                 identity,
                 account,
@@ -282,6 +317,7 @@ class SQLiteSignerRegistry:
                 valid_from,
                 valid_until,
                 now_ms,
+                json.dumps(serial_validity, sort_keys=True),
             ),
         )
 
@@ -299,6 +335,19 @@ class SQLiteSignerRegistry:
                         enabled=bool(row["enabled"]),
                         valid_from_ms=row["valid_from_ms"],
                         valid_until_ms=row["valid_until_ms"],
+                        serial_validity={
+                            serial: tuple(window)
+                            for serial, window in (
+                                json.loads(row["serial_validity_json"] or "{}")
+                                or {
+                                    serial: [
+                                        row["valid_from_ms"],
+                                        row["valid_until_ms"],
+                                    ]
+                                    for serial in json.loads(row["serials_json"])
+                                }
+                            ).items()
+                        },
                     )
                     for row in rows
                 }
