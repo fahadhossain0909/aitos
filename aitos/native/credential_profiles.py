@@ -220,16 +220,20 @@ class CredentialProviderRouter:
         account, part = self._slot_parts(slot)
         profile = self._profiles.resolve(account)
         if profile.mode == "native":
-            return self._native, slot
+            return profile.mode, self._native, slot
         backend = self._external.get(profile.provider_id or "")
         if backend is None:
             raise VaultUnavailable(
                 "configured external credential provider unavailable"
             )
-        return backend, f"{profile.secret_ref.rstrip('/')}/{part}"
+        return (
+            profile.mode,
+            backend,
+            f"{profile.secret_ref.rstrip('/')}/{part}",
+        )
 
     def put(self, slot: str, secret: str) -> None:
-        backend, reference = self._route(slot)
+        mode, backend, reference = self._route(slot)
         if (
             type(secret) is not str
             or not secret
@@ -237,14 +241,14 @@ class CredentialProviderRouter:
             or len(secret.encode("utf-8")) > 2560
         ):
             raise ValueError("invalid_credential_value")
-        if backend is self._native:
+        if mode == "native":
             backend.put(reference, secret)
         else:
             backend.put_secret(reference, secret)
 
     def get(self, slot: str) -> str | None:
-        backend, reference = self._route(slot)
-        if backend is self._native:
+        mode, backend, reference = self._route(slot)
+        if mode == "native":
             value = backend.get(reference)
         else:
             value = backend.get_secret(reference)
@@ -258,8 +262,8 @@ class CredentialProviderRouter:
         return value
 
     def delete(self, slot: str) -> bool:
-        backend, reference = self._route(slot)
-        if backend is self._native:
+        mode, backend, reference = self._route(slot)
+        if mode == "native":
             return backend.delete(reference)
         return backend.delete_secret(reference)
 
