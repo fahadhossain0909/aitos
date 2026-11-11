@@ -79,31 +79,50 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                     object.__setattr__(candidate, "_aitos_advanced_context", advanced)
                 except (AttributeError, TypeError, ValueError):
                     pass
-            evidence_id = await service.persist(candidate_id, evidence)
+            evidence_id = None
+            try:
+                evidence_id = await service.persist(candidate_id, evidence)
+            except Exception as exc:
+                logger.warning(
+                    "historical evidence snapshot persistence failed",
+                    extra={"aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}},
+                )
             if evidence_id:
                 object.__setattr__(
                     candidate, "_aitos_historical_evidence_id", evidence_id
                 )
             record = getattr(scanner, "_record_funnel", None)
             if callable(record):
-                await record(
-                    symbol=candidate.symbol,
-                    side=getattr(
-                        getattr(candidate, "direction", None), "value", "UNKNOWN"
-                    ),
-                    stage="historical_intelligence",
-                    accepted=bool(evidence.get("available")),
-                    reason=str(
-                        evidence.get("reason") or "historical_evidence_available"
-                    ),
-                    details={
-                        "candidate_id": candidate_id,
-                        "historical_evidence_id": evidence_id,
-                        "sample_count": int(evidence.get("sample_count", 0)),
-                        "analogue_count": int(evidence.get("analogue_count", 0)),
-                        "evidence_only": True,
-                    },
-                )
+                try:
+                    await record(
+                        symbol=candidate.symbol,
+                        side=getattr(
+                            getattr(candidate, "direction", None), "value", "UNKNOWN"
+                        ),
+                        stage="historical_intelligence",
+                        accepted=True,
+                        reason=(
+                            "historical_evidence_available"
+                            if evidence.get("available")
+                            else str(
+                                evidence.get("reason")
+                                or "historical_evidence_unavailable"
+                            )
+                        ),
+                        details={
+                            "candidate_id": candidate_id,
+                            "historical_evidence_id": evidence_id,
+                            "historical_available": bool(evidence.get("available")),
+                            "sample_count": int(evidence.get("sample_count", 0)),
+                            "analogue_count": int(evidence.get("analogue_count", 0)),
+                            "evidence_only": True,
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "historical evidence decision attribution failed",
+                        extra={"aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}},
+                    )
         except Exception as exc:
             logger.warning(
                 "promoted candidate historical enrichment unavailable",
