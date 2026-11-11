@@ -121,6 +121,49 @@ def test_status_rejects_secret_fields_even_if_they_are_ignored(tmp_path, monkeyp
         raise AssertionError("status must not accept credential material")
 
 
+
+def test_stdin_protocol_returns_only_metadata_and_never_secret_material(
+    tmp_path, monkeypatch
+):
+    import io
+    import json
+
+    vault = MemoryVault()
+    monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
+    monkeypatch.setattr(signer_admin, "get_credential_vault", lambda: vault)
+    signer_admin.handle_request(
+        {
+            "action": "set-mode",
+            "account_alias": "stdin-account",
+            "mode": "native",
+        }
+    )
+    signer_admin.handle_request(
+        {
+            "action": "store-credentials",
+            "account_alias": "stdin-account",
+            "key_id": "synthetic-stdin-key",
+            "api_secret": "synthetic-stdin-secret",
+        }
+    )
+    monkeypatch.setattr(
+        signer_admin.sys,
+        "stdin",
+        type("Input", (), {"buffer": io.BytesIO(
+            json.dumps(
+                {"action": "status", "account_alias": "stdin-account"}
+            ).encode("utf-8") + b"\\n"
+        )})(),
+    )
+    output = io.StringIO()
+    monkeypatch.setattr(signer_admin.sys, "stdout", output)
+
+    assert signer_admin.main() == 0
+    rendered = output.getvalue()
+    assert json.loads(rendered)["credential_pair_ready"] is True
+    assert "synthetic-stdin-key" not in rendered
+    assert "synthetic-stdin-secret" not in rendered
+
 def test_unknown_fields_and_actions_fail_closed(tmp_path, monkeypatch):
     monkeypatch.setattr(signer_admin, "_data_dir", lambda: tmp_path)
     try:
