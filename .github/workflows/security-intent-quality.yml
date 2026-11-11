@@ -24,7 +24,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Install isolated test tools
-        run: python -m pip install pytest black==25.12.0
+        run: python -m pip install pytest pytest-asyncio aiohttp cryptography black==25.12.0
       - name: Verify formatting
         run: black --check --diff aitos/native/cli_credential_vaults.py aitos/native/credential_profiles.py aitos/native/signer_admin.py aitos/security/signing_policy.py aitos/security/replay_store.py aitos/security/paper_processor.py aitos/security/risk_limits.py aitos/security/mtls.py aitos/security/signer_credentials.py aitos/security/signer_rpc_protocol.py aitos/security/signer_service.py aitos/security/risk_state.py aitos/security/signer_cli.py aitos/security/signer_rpc_client.py aitos/exchange/binance_usdm_paper_signer.py tests/security
       - name: Validate trusted-host installer and PKI bootstrap
