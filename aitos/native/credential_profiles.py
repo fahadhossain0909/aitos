@@ -124,9 +124,13 @@ class CredentialProfileStore:
     ) -> None:
         profile = self._profile(mode, provider_id, secret_ref)
         self._db.execute(
-            """INSERT INTO credential_default(singleton, mode, provider_id, secret_ref)
-               VALUES(1, ?, ?, ?) ON CONFLICT(singleton) DO UPDATE SET
-               mode=excluded.mode, provider_id=excluded.provider_id, secret_ref=excluded.secret_ref""",
+            """INSERT INTO credential_default(
+                   singleton, mode, provider_id, secret_ref
+               ) VALUES(1, ?, ?, ?)
+               ON CONFLICT(singleton) DO UPDATE SET
+                   mode=excluded.mode,
+                   provider_id=excluded.provider_id,
+                   secret_ref=excluded.secret_ref""",
             (profile.mode, profile.provider_id, profile.secret_ref),
         )
 
@@ -141,9 +145,13 @@ class CredentialProfileStore:
         alias = self._account(account_alias)
         profile = self._profile(mode, provider_id, secret_ref)
         self._db.execute(
-            """INSERT INTO credential_account_profiles(account_alias, mode, provider_id, secret_ref)
-               VALUES(?, ?, ?, ?) ON CONFLICT(account_alias) DO UPDATE SET
-               mode=excluded.mode, provider_id=excluded.provider_id, secret_ref=excluded.secret_ref""",
+            """INSERT INTO credential_account_profiles(
+                   account_alias, mode, provider_id, secret_ref
+               ) VALUES(?, ?, ?, ?)
+               ON CONFLICT(account_alias) DO UPDATE SET
+                   mode=excluded.mode,
+                   provider_id=excluded.provider_id,
+                   secret_ref=excluded.secret_ref""",
             (alias, profile.mode, profile.provider_id, profile.secret_ref),
         )
 
@@ -179,7 +187,9 @@ class LazyNativeCredentialStore:
             try:
                 self._store = self._factory()
             except Exception:
-                raise VaultUnavailable("native credential provider unavailable") from None
+                raise VaultUnavailable(
+                    "native credential provider unavailable"
+                ) from None
         return self._store
 
     def put(self, slot: str, secret: str) -> None:
