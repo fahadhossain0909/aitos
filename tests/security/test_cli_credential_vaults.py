@@ -43,7 +43,9 @@ def test_bitwarden_put_sends_encoded_item_over_stdin_not_argv():
     assert "exchange-secret-value" in runner.calls[1][1]["input"]
     assert runner.calls[2][0] == ["bw", "edit", "item", item_id]
     assert runner.calls[2][1]["input"] == encoded
-    assert all(\n        "exchange-secret-value" not in " ".join(call[0]) for call in runner.calls\n    )
+    assert all(
+        "exchange-secret-value" not in " ".join(call[0]) for call in runner.calls
+    )
 
 
 def test_bitwarden_get_reads_only_named_field():
