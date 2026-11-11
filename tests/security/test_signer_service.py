@@ -124,7 +124,6 @@ def test_registry_requires_private_durable_storage(tmp_path):
         SQLiteSignerRateLimiter(tmp_path / "rate.sqlite3", limit=1, window_ms=1)
 
 
-
 def test_reduce_only_rpc_has_separate_bounded_rate_bucket(tmp_path):
     limiter = SQLiteSignerRateLimiter(
         tmp_path / "rate.sqlite3",
