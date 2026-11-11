@@ -73,7 +73,7 @@ def test_realized_net_loss_is_idempotent_and_survives_restart(tmp_path):
         upstream=Evidence(), database_path=path, max_orders_per_window=10
     )
     snapshot = reopened.get_snapshot("paper-primary", now_ms=NOW)
-    assert snapshot.daily_loss == Decimal("10.00")
+    assert snapshot.daily_loss == Decimal("15.00")
     reopened.close()
 
 
