@@ -327,7 +327,9 @@ def validate_workspace_layout(value):
 
 
 def workspace_layout_etag(layout):
-    canonical = json.dumps(layout, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    canonical = json.dumps(
+        layout, sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
     return '"' + hashlib.sha256(canonical.encode("utf-8")).hexdigest() + '"'
 
 
@@ -470,7 +472,10 @@ def create_gateway(
             )
         return web.json_response(
             layout,
-            headers={"Cache-Control": "no-store", "ETag": workspace_layout_etag(layout)},
+            headers={
+                "Cache-Control": "no-store",
+                "ETag": workspace_layout_etag(layout),
+            },
         )
 
     async def put_workspace_layout(request):

@@ -184,7 +184,7 @@ async def test_workspace_layout_is_authenticated_and_survives_gateway_restart(
         await client.close()
 
 
-async def test_workspace_layout_uses_compare_and_swap_between_operator_windows(harness):
+async def test_workspace_layout_compare_and_swap_between_windows(harness):
     h = harness
     await login(h)
     first = await h.client.get("/operator/v1/workspace-layout")
