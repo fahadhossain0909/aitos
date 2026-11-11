@@ -35,11 +35,21 @@ class MemoryVault:
 
 
 class FakeTransport:
-    def __init__(self, *, hedge=False, income_count=2, fail_order=False):
+    def __init__(
+        self,
+        *,
+        hedge=False,
+        income_count=2,
+        fail_order=False,
+        order_status="NEW",
+        executed_qty="0",
+    ):
         self.calls = []
         self.hedge = hedge
         self.income_count = income_count
         self.fail_order = fail_order
+        self.order_status = order_status
+        self.executed_qty = executed_qty
 
     def request(self, method, url, *, headers, timeout):
         self.calls.append((method, url, dict(headers), timeout))
@@ -110,7 +120,8 @@ class FakeTransport:
             return {
                 "orderId": 123,
                 "clientOrderId": "aitos-testnet-001",
-                "status": "NEW",
+                "status": self.order_status,
+                "executedQty": self.executed_qty,
             }
         raise AssertionError(f"unexpected endpoint: {parsed.path}")
 
@@ -248,3 +259,16 @@ def test_recovery_worker_keeps_unknown_when_exchange_lookup_is_unavailable(tmp_p
         ).run_once(now_ms=NOW + 2)
         assert result == {"resolved": 0, "unresolved": 1}
         assert replay.get(intent.intent_id).status == "dispatching"
+
+
+
+def test_canceled_order_with_partial_fill_is_not_reported_as_rejected(tmp_path):
+    adapter = BinanceUSDMPaperExecutionAdapter(
+        client=make_client(
+            tmp_path,
+            FakeTransport(order_status="CANCELED", executed_qty="0.0005"),
+        )
+    )
+    receipt = adapter.execute(_intent())
+    assert receipt.status == "accepted"
+    assert receipt.outcome_code == "testnet_order_partially_executed"
