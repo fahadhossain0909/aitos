@@ -393,7 +393,6 @@ class BinanceUSDMPaperExecutionAdapter:
             return PaperExecutionReceipt("rejected", "testnet_order_rejected")
         return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
 
-
     def reconcile(self, reservation: IntentReservation) -> PaperExecutionReceipt:
         """Read exchange order state by durable client ID; never resubmit an order."""
         if (
@@ -401,7 +400,9 @@ class BinanceUSDMPaperExecutionAdapter:
             or not reservation.symbol
             or not reservation.client_order_id
         ):
-            return PaperExecutionReceipt("unknown", "testnet_reconciliation_scope_missing")
+            return PaperExecutionReceipt(
+                "unknown", "testnet_reconciliation_scope_missing"
+            )
         try:
             timestamp = self.client.server_time_ms()
             result = self.client.signed_request(
@@ -414,13 +415,17 @@ class BinanceUSDMPaperExecutionAdapter:
                 timestamp_ms=timestamp,
             )
         except BinancePaperExchangeError:
-            return PaperExecutionReceipt("unknown", "testnet_reconciliation_unavailable")
+            return PaperExecutionReceipt(
+                "unknown", "testnet_reconciliation_unavailable"
+            )
         if (
             not isinstance(result, dict)
             or result.get("clientOrderId") != reservation.client_order_id
             or type(result.get("orderId")) is not int
         ):
-            return PaperExecutionReceipt("unknown", "testnet_reconciliation_unrecognized")
+            return PaperExecutionReceipt(
+                "unknown", "testnet_reconciliation_unrecognized"
+            )
         status = result.get("status")
         if status in {"NEW", "PARTIALLY_FILLED", "FILLED"}:
             return PaperExecutionReceipt("accepted", "testnet_order_reconciled")
@@ -428,11 +433,17 @@ class BinanceUSDMPaperExecutionAdapter:
             try:
                 executed = Decimal(str(result.get("executedQty", "0")))
             except InvalidOperation:
-                return PaperExecutionReceipt("unknown", "testnet_reconciliation_unrecognized")
+                return PaperExecutionReceipt(
+                "unknown", "testnet_reconciliation_unrecognized"
+            )
             if not executed.is_finite() or executed < 0:
-                return PaperExecutionReceipt("unknown", "testnet_reconciliation_unrecognized")
+                return PaperExecutionReceipt(
+                "unknown", "testnet_reconciliation_unrecognized"
+            )
             if executed > 0:
-                return PaperExecutionReceipt("accepted", "testnet_order_partially_executed")
+                return PaperExecutionReceipt(
+                    "accepted", "testnet_order_partially_executed"
+                )
             return PaperExecutionReceipt("rejected", "testnet_order_not_executed")
         return PaperExecutionReceipt("unknown", "testnet_reconciliation_unrecognized")
 
