@@ -11,7 +11,7 @@ permissions:
   contents: read
 concurrency:
   group: console-quality-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   frontend-contracts:
     runs-on: ubuntu-latest
