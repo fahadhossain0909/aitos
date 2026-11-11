@@ -155,21 +155,28 @@ class CredentialProfileStore:
             (alias, profile.mode, profile.provider_id, profile.secret_ref),
         )
 
-    def resolve(self, account_alias: str) -> CredentialProfile:
+    def resolve_with_scope(
+        self, account_alias: str
+    ) -> tuple[CredentialProfile, str]:
         alias = self._account(account_alias)
         row = self._db.execute(
             "SELECT mode, provider_id, secret_ref "
             "FROM credential_account_profiles WHERE account_alias=?",
             (alias,),
         ).fetchone()
-        if row is None:
-            row = self._db.execute(
-                "SELECT mode, provider_id, secret_ref "
-                "FROM credential_default WHERE singleton=1"
-            ).fetchone()
+        if row is not None:
+            return self._profile(*row), "account"
+        row = self._db.execute(
+            "SELECT mode, provider_id, secret_ref "
+            "FROM credential_default WHERE singleton=1"
+        ).fetchone()
         if row is None:
             raise CredentialProfileError("credential_profile_not_configured")
-        return self._profile(*row)
+        return self._profile(*row), "global"
+
+    def resolve(self, account_alias: str) -> CredentialProfile:
+        profile, _scope = self.resolve_with_scope(account_alias)
+        return profile
 
     def close(self) -> None:
         self._db.close()
