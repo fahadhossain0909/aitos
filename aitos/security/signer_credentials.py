@@ -23,7 +23,9 @@ class SignerCredentialReference:
 
 class SignerCredentialSlots:
     def __init__(self, store: CredentialStore) -> None:
-        if not all(callable(getattr(store, name, None)) for name in ("put", "get", "delete")):
+        if not all(
+            callable(getattr(store, name, None)) for name in ("put", "get", "delete")
+        ):
             raise TypeError("native_credential_store_required")
         self._store = store
 
@@ -35,9 +37,13 @@ class SignerCredentialSlots:
             raise ValueError("invalid_account_alias")
         return account_alias
 
-    def save(self, account_alias: str, *, key_id: str, api_secret: str) -> SignerCredentialReference:
+    def save(
+        self, account_alias: str, *, key_id: str, api_secret: str
+    ) -> SignerCredentialReference:
         alias = self._alias(account_alias)
-        if type(key_id) is not str or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", key_id):
+        if type(key_id) is not str or not re.fullmatch(
+            r"[A-Za-z0-9._:-]{1,128}", key_id
+        ):
             raise ValueError("invalid_exchange_key_id")
         if type(api_secret) is not str or not api_secret or "\x00" in api_secret:
             raise ValueError("invalid_exchange_secret")
