@@ -1,4 +1,5 @@
 from decimal import Decimal
+from types import SimpleNamespace
 
 import pytest
 
@@ -88,3 +89,24 @@ def test_evidence_provider_mismatch_fails_closed(tmp_path):
     ) as state:
         with pytest.raises(IntentRejected, match="account_evidence_mismatch"):
             state.get_snapshot("paper-primary", now_ms=NOW)
+
+
+
+def test_reduce_only_snapshot_does_not_consume_growth_order_budget(tmp_path):
+    with SQLiteSignerRiskState(
+        upstream=Evidence(),
+        database_path=tmp_path / "risk.sqlite3",
+        max_orders_per_window=1,
+        window_ms=1000,
+    ) as state:
+        assert state.get_snapshot("paper-primary", now_ms=NOW).order_count_window == 0
+        exit_intent = SimpleNamespace(
+            account_alias="paper-primary",
+            reduce_only=True,
+        )
+        assert (
+            state.get_snapshot_for_intent(exit_intent, now_ms=NOW + 1).order_count_window
+            == 1
+        )
+        with pytest.raises(IntentRejected, match="order_rate_limit_reached"):
+            state.get_snapshot("paper-primary", now_ms=NOW + 2)
