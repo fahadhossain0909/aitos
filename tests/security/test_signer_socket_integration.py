@@ -1,5 +1,4 @@
 import asyncio
-import json
 import shutil
 import subprocess
 from decimal import Decimal
@@ -195,23 +194,15 @@ def test_real_tls13_mtls_socket_accepts_only_enrolled_paper_intents(tmp_path):
                 "reduce_only": False,
                 "client_order_id": "aitos-mtls-001",
             }
-            envelope = {
-                "protocol_version": 1,
-                "request_id": "rpc-mtls-001",
-                "sent_at_ms": NOW,
-                "account_alias": "paper-primary",
-                "intent": intent,
-            }
-            writer.write((json.dumps(envelope) + "\n").encode())
-            await writer.drain()
-            response = json.loads(await asyncio.wait_for(reader.readline(), timeout=3))
-            writer.close()
-            await writer.wait_closed()
-            assert response == {
-                "status": "accepted",
-                "outcome_code": "paper_order_recorded",
-                "duplicate": False,
-            }
+            response = await client.submit(
+                intent,
+                account_alias="paper-primary",
+                sent_at_ms=NOW,
+                request_id="rpc-mtls-001",
+            )
+            assert response.status == "accepted"
+            assert response.outcome_code == "paper_order_recorded"
+            assert response.duplicate is False
         finally:
             await server.close()
             limiter.close()
