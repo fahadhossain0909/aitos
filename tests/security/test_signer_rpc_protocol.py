@@ -11,6 +11,7 @@ from aitos.security.signer_rpc_protocol import (
 
 IDENTITY = "spiffe://aitos/runtime/paper-01"
 GRANT = ClientGrant(
+    identity=IDENTITY,
     account_alias="paper-primary",
     allowed_symbols=frozenset({"BTCUSDT"}),
     allowed_serials=frozenset({"A1B2"}),
@@ -52,6 +53,8 @@ def test_certificate_revocation_and_unknown_serial_fail_closed(cert):
     registry = ClientAuthorizationRegistry(
         {
             IDENTITY: ClientGrant(
+                identity=IDENTITY,
+                identity=IDENTITY,
                 account_alias="paper-primary",
                 allowed_symbols=frozenset({"BTCUSDT"}),
                 allowed_serials=frozenset({"A1B2"}),
@@ -154,6 +157,16 @@ def test_duplicate_json_keys_and_oversized_body_are_rejected():
         parse_signer_request(
             " " * 20_000,
             authenticated_identity=IDENTITY,
+            grant=GRANT,
+            now_ms=1_800_000_000_000,
+        )
+
+
+def test_authenticated_identity_must_match_the_authorized_grant():
+    with pytest.raises(SignerProtocolRejected, match="authenticated_client_identity_mismatch"):
+        parse_signer_request(
+            request(),
+            authenticated_identity="spiffe://aitos/runtime/attacker",
             grant=GRANT,
             now_ms=1_800_000_000_000,
         )
