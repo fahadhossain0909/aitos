@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
-import ipaddress
 import os
 import sys
 from decimal import Decimal, InvalidOperation
@@ -28,7 +27,6 @@ from aitos.security.replay_store import SQLiteReplayStore
 from aitos.security.risk_limits import SignerRiskLimits
 from aitos.security.risk_state import SQLiteSignerRiskState
 from aitos.security.signer_credentials import SignerCredentialSlots
-from aitos.security.signer_rpc_protocol import ClientGrant
 from aitos.security.signer_service import (
     PaperSignerRPCServer,
     SQLiteSignerRateLimiter,
