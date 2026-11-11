@@ -103,6 +103,23 @@ class SQLiteSignerRiskState:
             raise RuntimeError("signer_risk_state_initialization_failed") from exc
 
     def get_snapshot(self, account_alias: str, *, now_ms: int) -> AccountRiskSnapshot:
+        return self._get_snapshot(account_alias, now_ms=now_ms, count_order=True)
+
+    def get_snapshot_for_intent(self, intent, *, now_ms: int) -> AccountRiskSnapshot:
+        if (
+            not isinstance(getattr(intent, "account_alias", None), str)
+            or type(getattr(intent, "reduce_only", None)) is not bool
+        ):
+            raise ValueError("invalid_signer_risk_intent")
+        return self._get_snapshot(
+            intent.account_alias,
+            now_ms=now_ms,
+            count_order=not intent.reduce_only,
+        )
+
+    def _get_snapshot(
+        self, account_alias: str, *, now_ms: int, count_order: bool
+    ) -> AccountRiskSnapshot:
         if (
             type(account_alias) is not str
             or not account_alias
@@ -133,15 +150,16 @@ class SQLiteSignerRiskState:
                     (account_alias, window_start),
                 ).fetchone()
                 count = row[0] if row else 0
-                if count >= self.max_orders_per_window:
+                if count_order and count >= self.max_orders_per_window:
                     self._db.execute("ROLLBACK")
                     raise IntentRejected("order_rate_limit_reached")
-                self._db.execute(
-                    """INSERT INTO signer_order_windows VALUES (?,?,1)
-                    ON CONFLICT(account_alias,window_start_ms)
-                    DO UPDATE SET order_count=order_count+1""",
-                    (account_alias, window_start),
-                )
+                if count_order:
+                    self._db.execute(
+                        """INSERT INTO signer_order_windows VALUES (?,?,1)
+                        ON CONFLICT(account_alias,window_start_ms)
+                        DO UPDATE SET order_count=order_count+1""",
+                        (account_alias, window_start),
+                    )
                 pnl_rows = self._db.execute(
                     """SELECT net_amount FROM signer_realized_pnl
                     WHERE account_alias=? AND occurred_at_ms>=? AND occurred_at_ms<=?""",
