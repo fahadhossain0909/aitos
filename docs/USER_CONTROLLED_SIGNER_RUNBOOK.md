@@ -4,7 +4,7 @@
 
 Run the signer on a device or host whose operating system, administrator account, disk and credential vault are controlled by the AITOS owner. **Do not install the signer or place exchange credentials on a provider-managed VPS/RDP that hosts the AITOS runtime.**
 
-The remote runtime receives only a bounded intent API. The signer owns the Binance Futures Testnet API key and secret in the native OS credential vault, authenticates the runtime with TLS 1.3 mutual TLS, independently fetches account/position evidence, applies local risk limits, and sends LIMIT orders only to the fixed Futures Testnet endpoint.
+The remote runtime receives only a bounded intent API. The signer owns the Binance Futures Testnet API key and secret through either the native OS credential vault or an explicitly selected external password-manager adapter, authenticates the runtime with TLS 1.3 mutual TLS, independently fetches account/position evidence, applies local risk limits, and sends LIMIT orders only to the fixed Futures Testnet endpoint.
 
 No production Binance endpoint, withdrawal API, live order mode, or automatic retry is included.
 
@@ -17,6 +17,41 @@ From a trusted Linux host with Python 3, OpenSSL, systemd user services and an u
 The installer creates a private virtual environment, installs the keyring package, prepares a mode-0700 data directory and writes a user systemd unit. It does **not** start the service, create firewall rules, or install exchange credentials.
 
 Review ~/.config/aitos-signer/signer.env. Keep AITOS_SIGNER_BIND_HOST=127.0.0.1 unless a private VPN/interface path has been configured and firewall-reviewed. Do not expose the listener to the public internet. If wildcard binding is unavoidable, the CLI requires the explicit AITOS_SIGNER_ALLOW_WILDCARD_BIND=1 setting; this is not a substitute for a firewall or network review.
+
+## Credential custody selection
+
+Choose the credential mode on the **trusted signer host**, before storing the Testnet key:
+
+### Native OS vault
+
+This is the default for a trusted personal Windows, Linux or macOS device:
+
+    PYTHONPATH=/path/to/aitos python -m aitos.security.signer_cli set-credential-mode --mode native
+
+The native backend uses the operating system credential vault. The signer host's OS account and administrator boundary must be trusted.
+
+### External password manager
+
+First create a dedicated, empty item in the password manager. Do not reuse an item containing unrelated secrets.
+
+- **Bitwarden CLI:** install and authenticate the official `bw` CLI on the trusted signer host, unlock the vault for the signer user's session, and use the item's UUID as the reference.
+- **1Password CLI:** install and authenticate the official `op` CLI on the trusted signer host, and use `<vault-id>/<item-id>` as the reference.
+- The adapters use the concealed custom fields `aitos_exchange_key_id` and `aitos_exchange_api_secret`. AITOS does not persist the provider session token in its profile database.
+- Keep provider CLI session material in the signer user's protected session environment only. Do not put it in the repository, runtime VPS, desktop draft, or signer.env.
+
+Configure a global external default (Bitwarden example):
+
+    PYTHONPATH=/path/to/aitos python -m aitos.security.signer_cli set-credential-mode --mode external --provider-id bitwarden --secret-ref <bitwarden-item-uuid>
+
+For 1Password, use `--provider-id onepassword --secret-ref <vault-id>/<item-id>`. Add `--account-alias <alias>` to apply the policy only to one account; without it, the command changes the global default.
+
+Then enter the Testnet key and secret interactively:
+
+    PYTHONPATH=/path/to/aitos python -m aitos.security.signer_cli store-testnet-credential
+
+The provider item must be dedicated to AITOS exchange credentials. The CLI adapters read/update only the two named concealed fields and fail closed on duplicate fields, malformed references, locked sessions, timeouts or provider errors. Switching modes changes routing metadata only; it does not copy or delete credentials in the previous vault. For rotation, stop the signer, provision a new dedicated item, update the reference, store the new credential pair, verify the read-only preflight, and only then retire the old item.
+
+**Critical limitation:** an external password manager does not make a provider-controlled RDP/VPS trustworthy. If the signer process or Bitwarden/1Password CLI session runs on that RDP/VPS, its administrator may inspect process memory, session tokens or decrypted credentials. The signer must still run on a separate user-controlled trusted device (or customer-controlled HSM/KMS service). The RDP/VPS should run only the credential-free AITOS runtime and mTLS intent client.
 
 ## Local certificate authority and mTLS certificates
 
