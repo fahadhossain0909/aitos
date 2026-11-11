@@ -48,7 +48,7 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
 def test_signer_command_payload_is_stdin_only_and_not_forwarded_to_operator():
     rust = (TAURI / "src" / "main.rs").read_text(encoding="utf-8")
     assert '.args(["--credential-admin"])' in rust
-    assert "child.write(&input)" in rust
+    assert "process.write(&input)" in rust
     assert "request.len() > 8192" in rust
     assert "struct AdminChild" in rust
     assert "impl Drop for AdminChild" in rust
