@@ -175,7 +175,7 @@ export default function SignerSettings() {
           <select id="provider" value={provider} onChange={e => { setProvider(e.target.value as "bitwarden" | "onepassword"); setPolicySaved(false); }}><option value="bitwarden">Bitwarden</option><option value="onepassword">1Password</option></select>
           <label htmlFor="secret-reference">Dedicated item reference</label>
           <input id="secret-reference" value={reference} onChange={e => { setReference(e.target.value); setPolicySaved(false); }} placeholder={provider === "bitwarden" ? "Bitwarden item UUID" : "vault-id/item-id"} autoComplete="off" spellCheck={false}/>
-          <p className="signer-help">Create a dedicated item first. AITOS uses only its concealed fields <code>aitos_exchange_key_id</code> and <code>aitos_exchange_api_secret</code>. Unlock the provider CLI in this OS user session before storing credentials.</p>
+          <p className="signer-help">Create a dedicated item first. AITOS uses only its concealed fields <code>aitos_exchange_key_id</code> and <code>aitos_exchange_api_secret</code>. Launch AITOS Desktop from a shell/session where the provider CLI authentication is already available; its session environment is passed only to the provider child process.</p>
         </div>}
         <div className="signer-actions">
           <button className="signer-button primary" disabled={!ready || busy || !available || (mode === "external" && !referenceValid)} onClick={() => void applyMode()}>{busy ? "Working…" : "Save account custody policy"}</button>
