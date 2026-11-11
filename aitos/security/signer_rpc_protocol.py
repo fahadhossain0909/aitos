@@ -24,8 +24,8 @@ class SignerProtocolRejected(ValueError):
     """A remote request failed the signer transport contract."""
 
 
-_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\\Z")
-_SERIAL = re.compile(r"[0-9A-Fa-f]{1,64}\\Z")
+_REQUEST_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
+_SERIAL = re.compile(r"[0-9A-Fa-f]{1,64}\Z")
 _ALLOWED_ENVELOPE_FIELDS = frozenset(
     {"protocol_version", "request_id", "sent_at_ms", "account_alias", "intent"}
 )
@@ -40,6 +40,7 @@ class ClientGrant:
     verified. A revoked serial always overrides the allowlist.
     """
 
+    identity: str
     account_alias: str
     allowed_symbols: frozenset[str]
     allowed_serials: frozenset[str]
@@ -49,6 +50,8 @@ class ClientGrant:
     valid_until_ms: int = 9_223_372_036_854_775_807
 
     def __post_init__(self) -> None:
+        if not isinstance(self.identity, str) or not self.identity.startswith("spiffe://"):
+            raise ValueError("client_grant_identity_required")
         if not isinstance(self.account_alias, str) or not self.account_alias:
             raise ValueError("client_grant_account_required")
         if (
@@ -85,6 +88,7 @@ class ClientGrant:
 
 @dataclass(frozen=True)
 class SignerRequest:
+    authenticated_identity: str
     request_id: str
     sent_at_ms: int
     account_alias: str
@@ -102,6 +106,7 @@ class ClientAuthorizationRegistry:
             not isinstance(identity, str)
             or not identity.startswith("spiffe://")
             or not isinstance(grant, ClientGrant)
+            or identity != grant.identity
             for identity, grant in normalized.items()
         ):
             raise ValueError("client_grant_mapping_invalid")
@@ -193,9 +198,10 @@ def parse_signer_request(
     forbidden = {"api_key", "api_secret", "private_key", "signature", "signed_request"}
     if forbidden.intersection(intent):
         raise SignerProtocolRejected("credential_or_signature_field_forbidden")
-    if not isinstance(authenticated_identity, str) or not authenticated_identity:
-        raise SignerProtocolRejected("authenticated_client_identity_required")
+    if authenticated_identity != grant.identity:
+        raise SignerProtocolRejected("authenticated_client_identity_mismatch")
     return SignerRequest(
+        authenticated_identity=authenticated_identity,
         request_id=request_id,
         sent_at_ms=sent_at_ms,
         account_alias=grant.account_alias,
