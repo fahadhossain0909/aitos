@@ -3,6 +3,7 @@
 Instantiate this helper only inside the user-controlled signer boundary. Never
 run it on a provider-managed VPS/RDP when the provider-admin threat is in scope.
 """
+
 from __future__ import annotations
 
 import re
