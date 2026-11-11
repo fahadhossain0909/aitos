@@ -21,8 +21,14 @@ class NoHistory:
 
 
 class ExchangeMustNotFetch:
-    async def fetch_klines(self, *args, **kwargs):
-        raise AssertionError("universe-wide candle fetch must not occur")
+    def __init__(self):
+        self.calls = []
+
+    async def fetch_klines(self, symbol, *args, **kwargs):
+        if symbol != "S0":
+            raise AssertionError("only the BTC/reference anchor may be fetched")
+        self.calls.append(symbol)
+        return ["anchor-reference"]
 
 
 class Scanner:
@@ -38,7 +44,7 @@ class Scanner:
         self.scan_calls = []
 
     async def scan_symbol(self, symbol, reference_klines):
-        assert reference_klines is None
+        assert reference_klines == ["anchor-reference"]
         self.scan_calls.append(symbol)
         return SimpleNamespace(symbol=symbol, composite_score=float(symbol[1:]))
 
@@ -53,6 +59,7 @@ async def test_live_universe_path_uses_tickers_then_deep_scans_top_ten_only():
 
     await install_staged_scan(scanner, changed)
     result = await scanner.scan_all()
+    assert scanner._exchange.calls == ["S0"]
     assert len(scanner.scan_calls) == 10
     assert len(result) == 2
     assert [s for s, _ in stages] == ["TOP_50", "TOP_25", "TOP_10", "TOP_5", "TOP_2"]
