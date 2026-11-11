@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from aitos.intelligence.historical_market_intelligence import fetch_historical_klines
 from aitos.models.market import Kline
+import pytest
 
 
 def _row(index, opened):
@@ -37,6 +38,7 @@ def _kline(index, opened):
     )
 
 
+@pytest.mark.asyncio
 async def test_clickhouse_history_is_used_before_rest():
     now = datetime.now(timezone.utc)
     rows = [_row(i, now - timedelta(minutes=60 - i)) for i in range(60)]
@@ -58,6 +60,7 @@ async def test_clickhouse_history_is_used_before_rest():
     assert repository.calls == [("BTCUSDT", "1m", 60)]
 
 
+@pytest.mark.asyncio
 async def test_insufficient_clickhouse_history_uses_rest_and_merges():
     now = datetime.now(timezone.utc)
     stored = [_row(i, now - timedelta(minutes=20 - i)) for i in range(20)]
