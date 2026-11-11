@@ -155,7 +155,6 @@ class SignerRiskLimits:
             raise IntentRejected("symbol_exposure_limit_exceeded")
 
 
-
 class AccountEvidenceProvider(Protocol):
     """Trusted local adapter; implementations must query the exchange directly."""
 
