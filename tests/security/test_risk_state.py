@@ -45,7 +45,10 @@ def test_order_window_is_durable_and_atomically_enforced(tmp_path):
     )
     with pytest.raises(IntentRejected, match="order_rate_limit_reached"):
         reopened.get_snapshot("paper-primary", now_ms=NOW + 3)
-    assert reopened.get_snapshot("paper-primary", now_ms=NOW + 1000).order_count_window == 0
+    assert (
+        reopened.get_snapshot("paper-primary", now_ms=NOW + 1000).order_count_window
+        == 0
+    )
     reopened.close()
 
 
