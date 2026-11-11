@@ -16,6 +16,7 @@ type AdminResponse = {
   action?: string;
   error?: string;
   account_alias?: string;
+  configured?: boolean;
   mode?: "native" | "external";
   provider_id?: "bitwarden" | "onepassword" | null;
   secret_ref?: string | null;
