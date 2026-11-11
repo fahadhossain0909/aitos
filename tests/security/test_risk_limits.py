@@ -3,7 +3,11 @@ from decimal import Decimal
 import pytest
 
 from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits
-from aitos.security.signing_policy import IntentRejected, OrderIntentPolicy, validate_order_intent
+from aitos.security.signing_policy import (
+    IntentRejected,
+    OrderIntentPolicy,
+    validate_order_intent,
+)
 
 
 NOW = 1_800_000_000_000
@@ -69,7 +73,10 @@ def test_fresh_account_evidence_passes_independent_risk_gate():
         (snapshot(daily_loss=Decimal("100")), "daily_loss_limit_reached"),
         (snapshot(order_count_window=10), "order_rate_limit_reached"),
         (snapshot(gross_exposure=Decimal("970")), "gross_exposure_limit_exceeded"),
-        (snapshot(symbol_exposure={"BTCUSDT": Decimal("490")}), "symbol_exposure_limit_exceeded"),
+        (
+            snapshot(symbol_exposure={"BTCUSDT": Decimal("490")}),
+            "symbol_exposure_limit_exceeded",
+        ),
         (snapshot(gross_exposure=float("nan")), "account_evidence_invalid"),
     ],
 )
@@ -104,7 +111,9 @@ def test_reduce_only_requires_matching_position_and_cannot_flip():
 
 
 def test_reduce_only_wrong_side_is_rejected():
-    with pytest.raises(IntentRejected, match="reduce_only_side_would_increase_exposure"):
+    with pytest.raises(
+        IntentRejected, match="reduce_only_side_would_increase_exposure"
+    ):
         LIMITS.authorize(
             make_intent(
                 intent_id="intent-risk-side",
