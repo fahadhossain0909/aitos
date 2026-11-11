@@ -10,6 +10,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from aitos.console_gateway import (
+    DEFAULT_WORKSPACE_LAYOUT,
     GATEWAY_STATE,
     GatewayConfig,
     create_gateway,
@@ -93,6 +94,7 @@ async def harness(tmp_path, monkeypatch):
     app.router.add_route("*", "/{path:.*}", backend)
     upstream = TestServer(app)
     await upstream.start_server()
+
     def prepare_test_directory(path, **_):
         path.mkdir(parents=True, mode=0o700, exist_ok=True)
         return path
@@ -101,7 +103,12 @@ async def harness(tmp_path, monkeypatch):
         "aitos.console_gateway.prepare_durable_directory", prepare_test_directory
     )
     config = GatewayConfig(
-        ORIGIN, str(upstream.make_url("")).rstrip("/"), root, TOKEN, session_seconds=120
+        ORIGIN,
+        str(upstream.make_url("")).rstrip("/"),
+        root,
+        TOKEN,
+        session_seconds=120,
+        workspace_file=tmp_path / "config" / "workspace-layout.json",
     )
     clock = SimpleNamespace(now=1000.0)
     gateway = create_gateway(config, password=PASSWORD, clock=lambda: clock.now)
