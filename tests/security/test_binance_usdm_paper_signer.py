@@ -212,12 +212,9 @@ def test_order_dispatch_timeout_is_ambiguous_not_rejected(tmp_path):
     assert receipt.outcome_code == "testnet_dispatch_ambiguous"
 
 
-
 def test_recovery_worker_reconciles_dispatching_order_without_resubmission(tmp_path):
     transport = FakeTransport()
-    adapter = BinanceUSDMPaperExecutionAdapter(
-        client=make_client(tmp_path, transport)
-    )
+    adapter = BinanceUSDMPaperExecutionAdapter(client=make_client(tmp_path, transport))
     with SQLiteReplayStore(tmp_path / "replay.sqlite3") as replay:
         intent = _intent()
         replay.reserve(intent, now_ms=NOW)
