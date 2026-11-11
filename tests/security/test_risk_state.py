@@ -91,7 +91,6 @@ def test_evidence_provider_mismatch_fails_closed(tmp_path):
             state.get_snapshot("paper-primary", now_ms=NOW)
 
 
-
 def test_reduce_only_snapshot_does_not_consume_growth_order_budget(tmp_path):
     with SQLiteSignerRiskState(
         upstream=Evidence(),
