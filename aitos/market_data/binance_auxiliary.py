@@ -61,6 +61,13 @@ class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
             for item in items:
                 if not isinstance(item, dict):
                     continue
+                # Binance merges UM+CM instruments on this stream; keep
+                # the USD-M runtime scoped to UM contracts.
+                try:
+                    if int(item.get("st", 1)) != 1:
+                        continue
+                except (TypeError, ValueError):
+                    continue
                 symbol = str(item.get("s", "")).upper()
                 if symbol:
                     yield _event(MarketEventType.TICKER, symbol, dict(item), _dt(item.get("E")))
