@@ -76,25 +76,53 @@ libraries may be absent. The sandbox smoke used the libraries shipped inside
 `@sparticuz/chromium/bin/al2023.tar.br`, extracted outside source and supplied
 through `LD_LIBRARY_PATH`; normal desktops may already provide them.
 
-## Native desktop installation
+## Native desktop application
 
-Native Windows x64 and Linux Debian-family packages are now built by the
-repository's packaging workflows. They are read-only session managers that bundle
-the console frontend, open it in the default browser, and connect to an existing
-backend. They do not install or start AITOS trading services. Windows stores
-operator/backend credentials in Windows Credential Manager; Linux requires an
-unlocked Secret Service keyring. Both fail closed if the OS vault is unavailable.
+The Tauri 2 desktop shell packages the React operator workspace and a separate
+bundled **AITOS — Trusted Signer Settings** WebView. The read-only operator
+console is loaded from the embedded loopback gateway as an external origin and
+does not receive native credential IPC. The signer page is bundled locally,
+uses a restrictive CSP, is pinned to the exact local app origin, and is the only
+window granted the signer-local Tauri capability.
 
-Current packages are **unsigned test software**, not signed/trusted releases.
-There is no automatic updater, macOS installer, one-click backend bootstrap or
-Tauri-based installer claim. See the canonical [Installation & Deployment
-Guide](../INSTALLATION.md) for artifact retrieval, build prerequisites, step-by-step
-Windows/Linux installation, local backend setup and SSH-tunnel access to a VPS.
+The native application menu contains **Open Trusted Signer Settings**. Closing
+the signer window hides it rather than terminating the desktop session; the
+native menu can reopen it. Closing the operator window exits the app and stops
+the embedded gateway sidecar. Signer credential requests are bounded JSON
+messages sent to the packaged sidecar over stdin, never command-line arguments.
+Credential values are not returned to the WebView, persisted in browser storage,
+or logged. The UI clears secret fields only after the signer confirms a
+successful read-back.
 
-The installable-web manifest/service worker remain a browser starting point only;
-no financial/API responses are cached and offline functionality is not provided.
-`vite preview` does not provide the development API proxy; a production server
-must implement secure routing/authentication.
+The signer settings UI supports global credential defaults and per-account
+overrides, Native OS vault, Bitwarden CLI and 1Password CLI, account status,
+and Binance Futures Testnet credential-pair provisioning. The app never stores
+exchange credentials in the operator console. A trusted-host acknowledgement
+is an operator warning, not technical proof of host ownership. Do not run the
+signer or unlock a password manager on a provider-managed RDP/VPS.
+
+The packaging workflow `.github/workflows/tauri-desktop.yml` builds unsigned
+test candidates on Windows x64 (NSIS), Linux x64 (AppImage and deb), and macOS
+(DMG). It includes frontend tests/build, a frozen sidecar protocol smoke, real
+synthetic-only Windows Credential Manager and Linux Secret Service checks, and
+per-platform packaging smoke. CI packages are **unsigned test software**, not
+signed/trusted releases. No automatic updater, backend bootstrap, live trading
+activation, or production release signing is included.
+
+Build locally from `desktop/` with Node.js 22 and the platform Tauri
+prerequisites:
+
+```sh
+npm ci
+npm test
+npm run build
+npm run tauri -- build
+```
+
+See the canonical [Installation & Deployment Guide](../INSTALLATION.md) for
+runtime setup, backend connection and SSH-tunnel access. The browser/PWA
+manifest remains a separate browser starting point; it does not grant native
+signer access and does not cache financial/API responses.
 
 ## Quality workspace update (2026-11-07)
 
