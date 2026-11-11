@@ -724,14 +724,29 @@ duplicate fields and timeout redaction. They do not authenticate to real
 Bitwarden or 1Password accounts. Real vault unlock/lock, provider-side
 permission scopes, service-account/desktop-session behavior, network outages,
 restart recovery and actual credential rotation remain cross-platform
-acceptance tests. The desktop Settings screen currently saves only a local, unapplied policy
-draft; it is not connected to the signer profile database. This is intentional:
-the desktop window loads the local gateway as an external WebView origin and
-must not receive native credential-store IPC privileges. The adapters are
-configurable through `aitos.security.signer_cli` on the trusted signer host.
-A future trusted-signer UI must be a separate local-only application surface
-with narrow, audited native commands; it must not reuse the provider-hosted
-operator console or expose credential operations to remote web content.
+acceptance tests. The desktop application now opens two separate windows:
+- `operator` loads the authenticated loopback gateway as an external WebView
+  origin and receives no Tauri capability or native signer command.
+- `signer` loads the bundled `signer.html` app origin. The only declared
+  capability is `signer-local`, scoped to that exact window label. The Rust
+  command additionally checks the window label, local app origin and
+  `/signer.html` path before accepting a request.
+
+The local signer UI supports per-account Native/External policy selection,
+Bitwarden/1Password item references, Testnet key/secret provisioning, and a
+read-back status that never returns secret values. The UI sends a bounded JSON
+request through the Tauri command; Rust zeroizes its request buffers and passes
+the request to the frozen Python sidecar over stdin (never argv). The sidecar
+accepts an exact allowlisted action/schema, stores only profile metadata in
+SQLite, routes the credential pair through the selected provider, verifies
+read-back, and returns status only. The operator console has no credential IPC
+and remains read-only.
+
+The local signer UI is bundled as a separate Vite entry point and is not served
+from the remote gateway. Provider CLI authentication must already be available
+in the desktop process environment/session on the trusted signer device; AITOS
+does not persist Bitwarden/1Password session tokens. The UI is per-account;
+global defaults remain configurable with `aitos.security.signer_cli`.
 
 No provider account was logged into, no exchange credential was imported, and
 no exchange order or deployment was performed by this change.
