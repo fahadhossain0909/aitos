@@ -10,8 +10,6 @@ import uuid
 from dataclasses import dataclass
 from typing import Mapping
 
-from aitos.security.signing_policy import IntentRejected
-
 _OUTCOME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _STATUSES = frozenset({"accepted", "rejected", "unknown", "reserved", "dispatching"})
 
@@ -121,8 +119,8 @@ class SignerRPCClient:
                 timeout=self.timeout_seconds,
             )
             writer.write(body + b"\n")
-            await writer.drain()
             sent = True
+            await writer.drain()
             raw = await asyncio.wait_for(
                 reader.readline(), timeout=self.timeout_seconds
             )
@@ -151,7 +149,7 @@ class SignerRPCClient:
             if sent:
                 raise SignerRPCClientError("signer_response_timeout_ambiguous") from None
             raise SignerRPCClientError("signer_connection_timeout") from None
-        except (OSError, ssl.SSLError, asyncio.IncompleteReadError):
+        except (OSError, ssl.SSLError, asyncio.IncompleteReadError, ValueError):
             if sent:
                 raise SignerRPCClientError("signer_transport_failure_ambiguous") from None
             raise SignerRPCClientError("signer_connection_unavailable") from None
@@ -160,5 +158,5 @@ class SignerRPCClient:
                 writer.close()
                 try:
                     await writer.wait_closed()
-                except (ConnectionError, OSError):
+                except (ConnectionError, OSError, ssl.SSLError):
                     pass
