@@ -5,7 +5,9 @@ from aitos.intelligence.staged_scanner import install_staged_scan
 
 class LiveUniverse:
     async def rank(self):
-        return [(f"S{i}", float(100 - i)) for i in range(60)]
+        return [("UNCONFIGURED", 1000.0)] + [
+            (f"S{i}", float(100 - i)) for i in range(60)
+        ]
 
 
 class NoHistory:
