@@ -1,6 +1,3 @@
-import asyncio
-import json
-
 import pytest
 
 from aitos.security.signer_rpc_protocol import SignerProtocolRejected
