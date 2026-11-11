@@ -56,8 +56,8 @@ else
     -addext "basicConstraints=critical,CA:TRUE" \
     -addext "keyUsage=critical,keyCertSign,cRLSign" \
     -out "$ca_cert"
-  chmod 600 "$ca_key"
 fi
+chmod 600 "$ca_key"
 
 if [[ ! -e "$server_key" && ! -e "$server_cert" ]]; then
   server_csr="${cert_dir}/server.csr"
