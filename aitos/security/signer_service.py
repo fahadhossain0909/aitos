@@ -416,7 +416,7 @@ class SQLiteSignerRateLimiter:
         if type(window_ms) is not int or not 100 <= window_ms <= 86_400_000:
             raise ValueError("invalid_signer_rate_window")
         if reduce_only_limit is None:
-            reduce_only_limit = max(limit * 10, 100)
+            reduce_only_limit = min(max(limit * 10, 100), 100_000)
         if type(reduce_only_limit) is not int or not 1 <= reduce_only_limit <= 100_000:
             raise ValueError("invalid_reduce_only_rate_limit")
         self.limit, self.window_ms = limit, window_ms
