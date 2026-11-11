@@ -285,7 +285,20 @@ def discover_external_vault_backends() -> dict[str, ExternalVaultBackend]:
     provider ID and must load a zero-argument factory returning a backend.
     """
     discovered: dict[str, ExternalVaultBackend] = {}
+    # First-party CLI adapters are available without a separate Python package.
+    # Their provider CLIs must already be installed and unlocked on the signer host.
+    from aitos.native.cli_credential_vaults import (
+        bitwarden_vault_factory,
+        onepassword_vault_factory,
+    )
+
+    builtin_factories = {
+        "bitwarden": bitwarden_vault_factory,
+        "onepassword": onepassword_vault_factory,
+    }
     try:
+        for provider_id, factory in builtin_factories.items():
+            discovered[provider_id] = factory()
         points = entry_points(group="aitos.credential_vaults")
         for point in points:
             provider_id = point.name
