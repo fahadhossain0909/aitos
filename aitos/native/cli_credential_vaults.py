@@ -5,6 +5,7 @@ already-unlocked provider CLI session and a pre-created item reference. Secret
 values are sent over stdin wherever the CLI supports it; command output and
 errors are never copied into exception messages or logs.
 """
+
 from __future__ import annotations
 
 import json
@@ -40,9 +41,7 @@ def _provider_environment(session_env: tuple[str, ...]) -> dict[str, str]:
         "XDG_RUNTIME_DIR",
         "DBUS_SESSION_BUS_ADDRESS",
     }
-    environment = {
-        key: value for key, value in os.environ.items() if key in allowed
-    }
+    environment = {key: value for key, value in os.environ.items() if key in allowed}
     for key, value in os.environ.items():
         if any(
             key == allowed_key or key.startswith(allowed_key)
@@ -95,9 +94,7 @@ class BitwardenCLIVault:
         timeout_seconds: float = 8.0,
         runner: Runner = subprocess.run,
     ) -> None:
-        self._cli = _CLI(
-            executable, timeout_seconds, runner, ("BW_SESSION",)
-        )
+        self._cli = _CLI(executable, timeout_seconds, runner, ("BW_SESSION",))
 
     @staticmethod
     def _item(reference: str) -> str:
@@ -139,9 +136,7 @@ class BitwardenCLIVault:
         label = self._field(reference)
         item = self._get_item(item_id)
         matches = [
-            f
-            for f in item["fields"]
-            if isinstance(f, dict) and f.get("name") == label
+            f for f in item["fields"] if isinstance(f, dict) and f.get("name") == label
         ]
         if len(matches) > 1:
             raise ProviderVaultError("bitwarden_duplicate_credential_field")
@@ -155,9 +150,7 @@ class BitwardenCLIVault:
         label = self._field(reference)
         item = self._get_item(item_id)
         matches = [
-            f
-            for f in item["fields"]
-            if isinstance(f, dict) and f.get("name") == label
+            f for f in item["fields"] if isinstance(f, dict) and f.get("name") == label
         ]
         if len(matches) > 1:
             raise ProviderVaultError("bitwarden_duplicate_credential_field")
@@ -180,17 +173,11 @@ class BitwardenCLIVault:
         label = self._field(reference)
         item = self._get_item(item_id)
         old = item["fields"]
-        matches = [
-            f
-            for f in old
-            if isinstance(f, dict) and f.get("name") == label
-        ]
+        matches = [f for f in old if isinstance(f, dict) and f.get("name") == label]
         if len(matches) > 1:
             raise ProviderVaultError("bitwarden_duplicate_credential_field")
         item["fields"] = [
-            f
-            for f in old
-            if not (isinstance(f, dict) and f.get("name") == label)
+            f for f in old if not (isinstance(f, dict) and f.get("name") == label)
         ]
         if len(item["fields"]) == len(old):
             return False
@@ -269,9 +256,7 @@ class OnePasswordCLIVault:
         item = self._get_item(vault_id, item_id)
         label = self._label(part)
         matches = [
-            f
-            for f in item["fields"]
-            if isinstance(f, dict) and f.get("label") == label
+            f for f in item["fields"] if isinstance(f, dict) and f.get("label") == label
         ]
         if len(matches) > 1:
             raise ProviderVaultError("onepassword_duplicate_credential_field")
@@ -285,9 +270,7 @@ class OnePasswordCLIVault:
         item = self._get_item(vault_id, item_id)
         label = self._label(part)
         matches = [
-            f
-            for f in item["fields"]
-            if isinstance(f, dict) and f.get("label") == label
+            f for f in item["fields"] if isinstance(f, dict) and f.get("label") == label
         ]
         if len(matches) > 1:
             raise ProviderVaultError("onepassword_duplicate_credential_field")
@@ -308,17 +291,11 @@ class OnePasswordCLIVault:
         item = self._get_item(vault_id, item_id)
         label = self._label(part)
         old = item["fields"]
-        matches = [
-            f
-            for f in old
-            if isinstance(f, dict) and f.get("label") == label
-        ]
+        matches = [f for f in old if isinstance(f, dict) and f.get("label") == label]
         if len(matches) > 1:
             raise ProviderVaultError("onepassword_duplicate_credential_field")
         item["fields"] = [
-            f
-            for f in old
-            if not (isinstance(f, dict) and f.get("label") == label)
+            f for f in old if not (isinstance(f, dict) and f.get("label") == label)
         ]
         if len(item["fields"]) == len(old):
             return False
