@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 use zeroize::{Zeroize, Zeroizing};
@@ -139,11 +139,17 @@ fn main() {
                 "open_signer_settings",
                 "Open Trusted Signer Settings",
                 true,
-                None::<&str>,
+                Some("CmdOrCtrl+Shift+S"),
             )?;
             let separator = PredefinedMenuItem::separator(app)?;
             let quit = PredefinedMenuItem::quit(app, None)?;
-            let menu = Menu::with_items(app, &[&open_signer, &separator, &quit])?;
+            let app_menu = Submenu::with_items(
+                app,
+                "AITOS",
+                true,
+                &[&open_signer, &separator, &quit],
+            )?;
+            let menu = Menu::with_items(app, &[&app_menu])?;
             app.set_menu(menu)?;
             app.on_menu_event(|app, event| {
                 if event.id() == "open_signer_settings" {
