@@ -326,9 +326,12 @@ def validate_workspace_layout(value):
     }
 
 
-def workspace_layout_etag(layout):
+def workspace_layout_etag(layout, revision):
     canonical = json.dumps(
-        layout, sort_keys=True, separators=(",", ":"), allow_nan=False
+        {"layout": layout, "revision": revision},
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
     )
     return '"' + hashlib.sha256(canonical.encode("utf-8")).hexdigest() + '"'
 
@@ -444,13 +447,13 @@ def create_gateway(
     def workspace_layout_path():
         return config.workspace_file
 
-    def read_workspace_layout():
+    def read_workspace_document():
         path = workspace_layout_path()
         prepare_durable_directory(path.parent, reserve_bytes=1024 * 1024)
         if path.is_symlink():
             raise StorageUnavailable("workspace layout symlink forbidden")
         if not path.exists():
-            return DEFAULT_WORKSPACE_LAYOUT
+            return DEFAULT_WORKSPACE_LAYOUT, 0
         if path.stat().st_size > 4096:
             raise StorageUnavailable("workspace layout exceeds size limit")
         raw = json.loads(
@@ -458,12 +461,19 @@ def create_gateway(
             object_pairs_hook=_unique_json_object,
             parse_constant=_reject_json_constant,
         )
-        return validate_workspace_layout(raw)
+        # Read legacy v1 layout files once; subsequent saves atomically store
+        # the layout and monotonic revision together to prevent ABA conflicts.
+        if isinstance(raw, dict) and set(raw) == {"layout", "revision"}:
+            revision = raw["revision"]
+            if type(revision) is not int or not 1 <= revision < 2**63:
+                raise StorageUnavailable("workspace revision invalid")
+            return validate_workspace_layout(raw["layout"]), revision
+        return validate_workspace_layout(raw), 0
 
     async def get_workspace_layout(request):
         require_operator_session(request)
         try:
-            layout = await asyncio.to_thread(read_workspace_layout)
+            layout, revision = await asyncio.to_thread(read_workspace_document)
         except (OSError, ValueError, StorageUnavailable):
             return web.json_response(
                 {"error": "Workspace preferences unavailable"},
@@ -474,7 +484,7 @@ def create_gateway(
             layout,
             headers={
                 "Cache-Control": "no-store",
-                "ETag": workspace_layout_etag(layout),
+                "ETag": workspace_layout_etag(layout, revision),
             },
         )
 
@@ -505,12 +515,17 @@ def create_gateway(
                 raise StorageUnavailable("workspace layout symlink forbidden")
             # Compare-and-swap is serialized across all local desktop windows.
             with exclusive_file_lock(path.with_name(path.name + ".revision.lock")):
-                current = read_workspace_layout()
-                current_etag = workspace_layout_etag(current)
+                current, revision = read_workspace_document()
+                current_etag = workspace_layout_etag(current, revision)
                 if not hmac.compare_digest(expected_etag, current_etag):
                     return current, current_etag, False
-                atomic_write_json(path, layout)
-                return layout, workspace_layout_etag(layout), True
+                if revision >= 2**63 - 1:
+                    raise StorageUnavailable("workspace revision exhausted")
+                next_revision = revision + 1
+                atomic_write_json(
+                    path, {"layout": layout, "revision": next_revision}
+                )
+                return layout, workspace_layout_etag(layout, next_revision), True
 
         try:
             saved_layout, saved_etag, did_save = await asyncio.to_thread(persist)

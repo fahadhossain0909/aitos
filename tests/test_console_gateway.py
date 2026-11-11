@@ -198,12 +198,27 @@ async def test_workspace_layout_compare_and_swap_between_windows(harness):
     assert saved.status == 200 and saved.headers["ETag"] != stale_etag
     stale = {**DEFAULT_WORKSPACE_LAYOUT, "activeWorkspace": "developer"}
     conflict = await h.client.put(
-        "/operator/v1/workspace-layout", json=stale,
+        "/operator/v1/workspace-layout",
+        json=stale,
         headers={"Origin": ORIGIN, "If-Match": stale_etag},
     )
     assert conflict.status == 409
     assert conflict.headers["ETag"] == saved.headers["ETag"]
     assert await conflict.json() == updated
+
+    restored = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=DEFAULT_WORKSPACE_LAYOUT,
+        headers={"Origin": ORIGIN, "If-Match": saved.headers["ETag"]},
+    )
+    assert restored.status == 200
+    aba_conflict = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=stale,
+        headers={"Origin": ORIGIN, "If-Match": stale_etag},
+    )
+    assert aba_conflict.status == 409
+    assert await aba_conflict.json() == DEFAULT_WORKSPACE_LAYOUT
 
 
 async def test_workspace_layout_requires_revision_for_mutation(harness):
