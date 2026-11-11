@@ -16,7 +16,8 @@ from aitos.security.replay_store import (
     ReplayStoreError,
     SQLiteReplayStore,
 )
-from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits\nfrom aitos.security.signing_policy import (
+from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits
+from aitos.security.signing_policy import (
     OrderIntentPolicy,
     ValidatedOrderIntent,
     parse_order_intent_json,
