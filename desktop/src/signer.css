@@ -21,3 +21,5 @@ button,input,select{font:inherit}
 .signer-success,.signer-error{padding:13px 15px;border-radius:9px;font-size:12px;line-height:1.5;margin:14px 0}.signer-success{border:1px solid #4a6940;background:#1b2a18;color:#d2efbb}.signer-error{border:1px solid #795044;background:#2c1d19;color:#f1c0b2}
 .signer-footer{text-align:center;padding:26px 0 0;color:#727b6b}
 @media(max-width:620px){.signer-page{padding:18px 14px 30px}.signer-card{padding:17px}.signer-mode-grid{grid-template-columns:1fr}.signer-mode{min-height:78px}.signer-header{padding-bottom:20px}.signer-local-badge{font-size:9px}}
+
+.signer-trust-confirm{display:flex;align-items:flex-start;gap:9px;margin-top:12px;color:#f0e1bd;font-size:11px;line-height:1.5}.signer-trust-confirm input{margin:2px 0 0;accent-color:#c8eaa7}
