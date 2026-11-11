@@ -103,6 +103,7 @@ def test_reduce_only_requires_matching_position_and_cannot_flip():
                 client_order_id="aitos-risk-too-large",
                 side="SELL",
                 quantity="0.02",
+                limit_price="40000",
                 reduce_only=True,
             ),
             snapshot(),
