@@ -73,6 +73,26 @@ def handle_request(request: object) -> dict:
     action = request.get("action")
     if action not in ACTIONS:
         raise ValueError("signer_admin_action_not_allowed")
+    expected_fields = {
+        "status": {"action", "account_alias"},
+        "set-mode": {
+            "action",
+            "account_alias",
+            "mode",
+            "provider_id",
+            "secret_ref",
+        }
+        if request.get("mode") == "external"
+        else {"action", "account_alias", "mode"},
+        "store-credentials": {
+            "action",
+            "account_alias",
+            "key_id",
+            "api_secret",
+        },
+    }[action]
+    if set(request) != expected_fields:
+        raise ValueError("invalid_signer_admin_request")
     account = _account(request.get("account_alias"))
     profiles = CredentialProfileStore(_data_dir() / "credential-profiles.sqlite3")
     try:
