@@ -24,8 +24,11 @@ The Tauri desktop application opens a separate **AITOS — Trusted Signer Settin
 window alongside the read-only Operator Console. Use this local signer window
 only on the trusted device that will own the exchange credential pair.
 
-1. Enter an account alias (for example, `binance-testnet-primary`) and load
-   its current policy.
+1. Enter the exact account alias configured as
+   `AITOS_SIGNER_ACCOUNT_ALIAS` for the signer service (for example,
+   `binance-testnet-primary`) and load its current policy. The desktop and
+   signer service must run as the same OS user and share the same
+   `AITOS_SIGNER_DATA_DIR` (or both use the default data directory).
 2. Select **Native OS vault** or **External password manager**.
 3. For External, choose Bitwarden or 1Password and enter the reference for a
    dedicated, operator-created item.
