@@ -75,7 +75,10 @@ def test_disable_persists_and_invalid_enrollment_is_rejected(tmp_path):
     registry = SQLiteSignerRegistry(tmp_path / "registry.sqlite3")
     enroll(registry)
     registry.disable(IDENTITY, now_ms=NOW + 1)
+    enroll(registry, "C3D4")
     assert registry.get_registry()._grants[IDENTITY].enabled is False
+    registry.enable(IDENTITY, now_ms=NOW + 2)
+    assert registry.get_registry()._grants[IDENTITY].enabled is True
     with pytest.raises(ValueError, match="invalid_signer_symbol_grant"):
         registry.enroll(
             identity=IDENTITY,
