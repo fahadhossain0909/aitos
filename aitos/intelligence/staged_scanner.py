@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aitos.intelligence import indicators
+from aitos.intelligence.advanced_context import build_advanced_context
+from aitos.intelligence.historical_market_intelligence import OnDemandHistoricalIntelligence
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.intelligence.staged_scanner")
@@ -20,6 +22,32 @@ TOP_2 = 2
 CHEAP_KLINE_CONCURRENCY = 6
 
 SubscriptionCallback = Callable[[list[str], str], Awaitable[None]]
+
+
+async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> None:
+    """Fetch deep history only for final promoted candidates; never block execution."""
+    service = getattr(scanner, "_aitos_historical_intelligence", None)
+    if service is None:
+        service = OnDemandHistoricalIntelligence(scanner._exchange.fetch_klines)
+        scanner._aitos_historical_intelligence = service
+    semaphore = asyncio.Semaphore(2)
+
+    async def enrich(candidate: Any) -> None:
+        async with semaphore:
+            rows, evidence = await service.analyze(
+                candidate.symbol, scanner._timeframe,
+                limit=max(300, min(1000, int(scanner._kline_lookback) * 2)),
+            )
+        object.__setattr__(candidate, "_aitos_historical_context", evidence)
+        if rows and len(rows) >= 20:
+            object.__setattr__(candidate, "_aitos_klines", tuple(rows))
+            flow_score = float(candidate.component_scores.get("order_flow_bias", 5.0))
+            object.__setattr__(
+                candidate, "_aitos_advanced_context",
+                build_advanced_context(rows, current_cvd_score=flow_score, oi_change=None),
+            )
+
+    await asyncio.gather(*(enrich(candidate) for candidate in candidates))
 
 
 def _cheap_score(klines: list[Any]) -> float:
@@ -174,6 +202,7 @@ async def install_staged_scan(
         await on_subscription_change([c.symbol for c in top5], "TOP_5")
         top2 = top5[:TOP_2]
         await on_subscription_change([c.symbol for c in top2], "TOP_2")
+        await _enrich_promoted_candidates(scanner, top2)
 
         scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
         scanner._last_candidate_count = len(top2)
@@ -230,6 +259,7 @@ async def install_staged_scan(
                 top2 = top5[:TOP_2]
                 await on_subscription_change(top5, "TOP_5")
                 await on_subscription_change(top2, "TOP_2")
+                await _enrich_promoted_candidates(scanner, ranked[:TOP_2])
 
         scanner.iter_candidate_batches = _iter_candidate_batches_with_subscriptions
     scanner.scan_all = _staged_scan_all
