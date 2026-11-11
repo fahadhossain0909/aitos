@@ -147,6 +147,8 @@ async def test_workspace_layout_is_authenticated_and_survives_gateway_restart(
     initial = await h.client.get("/operator/v1/workspace-layout")
     assert initial.status == 200
     assert initial.headers["Cache-Control"] == "no-store"
+    initial_etag = initial.headers["ETag"]
+    assert len(initial_etag) == 66
     assert await initial.json() == DEFAULT_WORKSPACE_LAYOUT
 
     updated = {
@@ -160,7 +162,7 @@ async def test_workspace_layout_is_authenticated_and_survives_gateway_restart(
     saved = await h.client.put(
         "/operator/v1/workspace-layout",
         json=updated,
-        headers={"Origin": ORIGIN},
+        headers={"Origin": ORIGIN, "If-Match": initial_etag},
     )
     assert saved.status == 200
     assert await saved.json() == updated
@@ -182,11 +184,43 @@ async def test_workspace_layout_is_authenticated_and_survives_gateway_restart(
         await client.close()
 
 
+async def test_workspace_layout_uses_compare_and_swap_between_operator_windows(harness):
+    h = harness
+    await login(h)
+    first = await h.client.get("/operator/v1/workspace-layout")
+    second = await h.client.get("/operator/v1/workspace-layout")
+    stale_etag = second.headers["ETag"]
+    updated = {**DEFAULT_WORKSPACE_LAYOUT, "activeWorkspace": "risk"}
+    saved = await h.client.put(
+        "/operator/v1/workspace-layout", json=updated,
+        headers={"Origin": ORIGIN, "If-Match": first.headers["ETag"]},
+    )
+    assert saved.status == 200 and saved.headers["ETag"] != stale_etag
+    stale = {**DEFAULT_WORKSPACE_LAYOUT, "activeWorkspace": "developer"}
+    conflict = await h.client.put(
+        "/operator/v1/workspace-layout", json=stale,
+        headers={"Origin": ORIGIN, "If-Match": stale_etag},
+    )
+    assert conflict.status == 409
+    assert conflict.headers["ETag"] == saved.headers["ETag"]
+    assert await conflict.json() == updated
+
+
+async def test_workspace_layout_requires_revision_for_mutation(harness):
+    await login(harness)
+    response = await h.client.put(
+        "/operator/v1/workspace-layout", json=DEFAULT_WORKSPACE_LAYOUT,
+        headers={"Origin": ORIGIN},
+    )
+    assert response.status == 428
+
+
 async def test_workspace_layout_rejects_unknown_panels_without_overwriting(harness):
     h = harness
     await login(h)
     initial = await h.client.get("/operator/v1/workspace-layout")
     original = await initial.json()
+    etag = initial.headers["ETag"]
     invalid = {
         **original,
         "panels": {
@@ -197,7 +231,7 @@ async def test_workspace_layout_rejects_unknown_panels_without_overwriting(harne
     response = await h.client.put(
         "/operator/v1/workspace-layout",
         json=invalid,
-        headers={"Origin": ORIGIN},
+        headers={"Origin": ORIGIN, "If-Match": etag},
     )
     assert response.status == 400
     restored = await h.client.get("/operator/v1/workspace-layout")

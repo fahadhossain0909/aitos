@@ -28,6 +28,7 @@ from yarl import URL
 from aitos.config.durable_files import (
     StorageUnavailable,
     atomic_write_json,
+    exclusive_file_lock,
     prepare_durable_directory,
 )
 from aitos.config.paths import get_config_dir
@@ -325,6 +326,11 @@ def validate_workspace_layout(value):
     }
 
 
+def workspace_layout_etag(layout):
+    canonical = json.dumps(layout, sort_keys=True, separators=(",", ":"), allow_nan=False)
+    return '"' + hashlib.sha256(canonical.encode("utf-8")).hexdigest() + '"'
+
+
 def _unique_json_object(pairs):
     result = {}
     for key, value in pairs:
@@ -462,12 +468,18 @@ def create_gateway(
                 status=503,
                 headers={"Cache-Control": "no-store"},
             )
-        return web.json_response(layout, headers={"Cache-Control": "no-store"})
+        return web.json_response(
+            layout,
+            headers={"Cache-Control": "no-store", "ETag": workspace_layout_etag(layout)},
+        )
 
     async def put_workspace_layout(request):
         require_operator_session(request)
         if request.content_type != "application/json":
             raise web.HTTPUnsupportedMediaType()
+        expected_etag = request.headers.get("If-Match", "")
+        if not re.fullmatch(r'"[0-9a-f]{64}"', expected_etag):
+            raise web.HTTPPreconditionRequired(text="Workspace revision required")
         try:
             raw = await request.read()
             if len(raw) > 4096:

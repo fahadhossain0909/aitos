@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadWorkspaceLayout, saveWorkspaceLayout } from "./workspaceStore";
+import { loadWorkspaceLayout, saveWorkspaceLayout, subscribeWorkspaceLayout } from "./workspaceStore";
 import {
   activateWorkspace,
   DEFAULT_LAYOUT,
@@ -24,6 +24,10 @@ export function WorkspaceStudio({
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
+  const etag = useRef("");
+  const skipNextSave = useRef(false);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -31,7 +35,10 @@ export function WorkspaceStudio({
     loadWorkspaceLayout()
       .then((saved) => {
         if (active) {
-          setLayout(saved);
+          etag.current = saved.etag;
+          skipNextSave.current = true;
+          layoutRef.current = saved.layout;
+          setLayout(saved.layout);
           setStorageAvailable(true);
         }
       })
@@ -48,13 +55,40 @@ export function WorkspaceStudio({
 
   useEffect(() => {
     if (!layoutLoaded || !storageAvailable) return;
+    if (skipNextSave.current) {
+      skipNextSave.current = false;
+      return;
+    }
     saveQueue.current = saveQueue.current
       .catch(() => undefined)
       .then(async () => {
-        await saveWorkspaceLayout(layout);
+        if (layoutRef.current !== layout) return;
+        const saved = await saveWorkspaceLayout(layout, etag.current);
+        etag.current = saved.etag;
       })
-      .catch(() => setStorageAvailable(false));
+      .catch(async (error: unknown) => {
+        if (error instanceof Error && error.message === "workspace_layout_conflict") {
+          try {
+            const latest = await loadWorkspaceLayout();
+            etag.current = latest.etag;
+            skipNextSave.current = true;
+            layoutRef.current = latest.layout;
+            setLayout(latest.layout);
+            return;
+          } catch {
+            // Fall through to the unavailable state.
+          }
+        }
+        setStorageAvailable(false);
+      });
   }, [layout, layoutLoaded, storageAvailable]);
+
+  useEffect(() => subscribeWorkspaceLayout((remote) => {
+    etag.current = remote.etag;
+    skipNextSave.current = true;
+    layoutRef.current = remote.layout;
+    setLayout(remote.layout);
+  }), []);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
