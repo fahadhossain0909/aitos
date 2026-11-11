@@ -25,10 +25,15 @@ jobs:
         run: python -m pip install pytest black==25.12.0
       - name: Verify formatting
         run: black --check --diff aitos/security/signing_policy.py aitos/security/replay_store.py aitos/security/paper_processor.py aitos/security/risk_limits.py aitos/security/mtls.py aitos/security/signer_credentials.py aitos/security/signer_rpc_protocol.py aitos/security/signer_service.py aitos/security/risk_state.py aitos/security/signer_cli.py aitos/security/signer_rpc_client.py aitos/exchange/binance_usdm_paper_signer.py tests/security
-      - name: Validate trusted-host installer shell syntax
+      - name: Validate trusted-host installer and PKI bootstrap
         run: |
           bash -n scripts/install_user_controlled_signer_linux.sh
           bash -n scripts/bootstrap_signer_pki.sh
+          cert_dir="$(mktemp -d)"
+          trap 'rm -rf "$cert_dir"' EXIT
+          AITOS_SIGNER_CERT_DIR="$cert_dir" bash scripts/bootstrap_signer_pki.sh DNS:localhost spiffe://aitos/runtime/paper
+          AITOS_SIGNER_CERT_DIR="$cert_dir" bash scripts/bootstrap_signer_pki.sh DNS:localhost spiffe://aitos/runtime/paper
+          test "$(find "$cert_dir" -maxdepth 1 -name 'client-*.crt' | wc -l)" -eq 2
       - name: Run security intent tests
         env:
           PYTHONPATH: .
