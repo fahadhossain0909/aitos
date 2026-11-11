@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Mapping, Protocol
 
 from aitos.security.signing_policy import IntentRejected, ValidatedOrderIntent
@@ -22,6 +23,15 @@ class AccountRiskSnapshot:
     daily_loss: Decimal
     order_count_window: int
     positions: Mapping[str, Decimal]
+
+    def __post_init__(self) -> None:
+        # Copy and freeze mappings so evidence cannot be changed after capture.
+        if isinstance(self.symbol_exposure, Mapping):
+            object.__setattr__(
+                self, "symbol_exposure", MappingProxyType(dict(self.symbol_exposure))
+            )
+        if isinstance(self.positions, Mapping):
+            object.__setattr__(self, "positions", MappingProxyType(dict(self.positions)))
 
 
 @dataclass(frozen=True)
