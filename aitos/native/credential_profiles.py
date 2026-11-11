@@ -306,6 +306,8 @@ def discover_external_vault_backends() -> dict[str, ExternalVaultBackend]:
                 raise CredentialProfileError(
                     "invalid_external_provider_registration"
                 )
+            if provider_id in discovered:
+                raise CredentialProfileError("duplicate_external_provider_registration")
             factory = point.load()
             backend = factory()
             if not all(
