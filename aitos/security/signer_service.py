@@ -188,7 +188,7 @@ class SQLiteSignerRegistry:
                         serials,
                         revoked,
                         validity,
-                        True,
+                        bool(row["enabled"]),
                         min(valid_from_ms, row["valid_from_ms"]),
                         max(valid_until_ms, row["valid_until_ms"]),
                         now_ms,
@@ -261,6 +261,34 @@ class SQLiteSignerRegistry:
                     set(json.loads(row["revoked_json"])),
                     json.loads(row["serial_validity_json"] or "{}"),
                     False,
+                    row["valid_from_ms"],
+                    row["valid_until_ms"],
+                    now_ms,
+                )
+                self._db.execute("COMMIT")
+            except Exception:
+                self._rollback()
+                raise
+
+    def enable(self, identity: str, *, now_ms: int) -> None:
+        if type(now_ms) is not int or now_ms < 0:
+            raise ValueError("invalid_signer_registry_clock")
+        with self._lock:
+            try:
+                self._db.execute("BEGIN IMMEDIATE")
+                row = self._db.execute(
+                    "SELECT * FROM signer_client_grants WHERE identity=?", (identity,)
+                ).fetchone()
+                if row is None:
+                    raise ValueError("signer_identity_not_enrolled")
+                self._write(
+                    identity,
+                    row["account_alias"],
+                    set(json.loads(row["symbols_json"])),
+                    set(json.loads(row["serials_json"])),
+                    set(json.loads(row["revoked_json"])),
+                    json.loads(row["serial_validity_json"] or "{}"),
+                    True,
                     row["valid_from_ms"],
                     row["valid_until_ms"],
                     now_ms,
