@@ -50,27 +50,35 @@ class ClientGrant:
     valid_until_ms: int = 9_223_372_036_854_775_807
 
     def __post_init__(self) -> None:
-        if not isinstance(self.identity, str) or not self.identity.startswith("spiffe://"):
+        if not isinstance(self.identity, str) or not self.identity.startswith(
+            "spiffe://"
+        ):
             raise ValueError("client_grant_identity_required")
         if not isinstance(self.account_alias, str) or not self.account_alias:
             raise ValueError("client_grant_account_required")
         if (
             not isinstance(self.allowed_symbols, frozenset)
             or not self.allowed_symbols
-            or any(not isinstance(item, str) or not item for item in self.allowed_symbols)
+            or any(
+                not isinstance(item, str) or not item for item in self.allowed_symbols
+            )
         ):
             raise ValueError("client_grant_symbols_required")
         if (
             not isinstance(self.allowed_serials, frozenset)
             or not self.allowed_serials
-            or any(not isinstance(item, str) or not _SERIAL.fullmatch(item)
-                   for item in self.allowed_serials)
+            or any(
+                not isinstance(item, str) or not _SERIAL.fullmatch(item)
+                for item in self.allowed_serials
+            )
         ):
             raise ValueError("client_grant_serials_required")
         if (
             not isinstance(self.revoked_serials, frozenset)
-            or any(not isinstance(item, str) or not _SERIAL.fullmatch(item)
-                   for item in self.revoked_serials)
+            or any(
+                not isinstance(item, str) or not _SERIAL.fullmatch(item)
+                for item in self.revoked_serials
+            )
         ):
             raise ValueError("client_grant_revocations_invalid")
         if type(self.enabled) is not bool:
@@ -123,18 +131,16 @@ class ClientAuthorizationRegistry:
         The caller must obtain peer_certificate from an established TLS
         connection using build_server_context (CERT_REQUIRED + trusted CA).
         """
-        if (
-            isinstance(now_ms, bool)
-            or not isinstance(now_ms, int)
-            or now_ms < 0
-        ):
+        if isinstance(now_ms, bool) or not isinstance(now_ms, int) or now_ms < 0:
             raise SignerProtocolRejected("invalid_signer_clock")
         try:
             identity = require_client_uri_identity(
                 dict(peer_certificate), allowed_uris=frozenset(self._grants)
             )
         except MutualTLSConfigurationError as exc:
-            raise SignerProtocolRejected("client_certificate_identity_rejected") from exc
+            raise SignerProtocolRejected(
+                "client_certificate_identity_rejected"
+            ) from exc
         grant = self._grants[identity]
         serial = peer_certificate.get("serialNumber")
         if not isinstance(serial, str) or not _SERIAL.fullmatch(serial):
@@ -165,15 +171,20 @@ def parse_signer_request(
         raise SignerProtocolRejected(str(exc)) from exc
     if set(envelope) != _ALLOWED_ENVELOPE_FIELDS:
         raise SignerProtocolRejected("signer_request_fields_invalid")
-    if envelope.get("protocol_version") != 1 or type(
-        envelope.get("protocol_version")
-    ) is not int:
+    if (
+        envelope.get("protocol_version") != 1
+        or type(envelope.get("protocol_version")) is not int
+    ):
         raise SignerProtocolRejected("unsupported_signer_protocol_version")
     request_id = envelope.get("request_id")
     if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
         raise SignerProtocolRejected("invalid_signer_request_id")
     sent_at_ms = envelope.get("sent_at_ms")
-    if isinstance(sent_at_ms, bool) or not isinstance(sent_at_ms, int) or sent_at_ms < 0:
+    if (
+        isinstance(sent_at_ms, bool)
+        or not isinstance(sent_at_ms, int)
+        or sent_at_ms < 0
+    ):
         raise SignerProtocolRejected("invalid_signer_request_timestamp")
     if (
         isinstance(now_ms, bool)
