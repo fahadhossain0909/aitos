@@ -16,7 +16,7 @@ from aitos.security.replay_store import (
     ReplayStoreError,
     SQLiteReplayStore,
 )
-from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits
+from aitos.security.risk_limits import AccountEvidenceProvider, SignerRiskLimits
 from aitos.security.signing_policy import (
     OrderIntentPolicy,
     ValidatedOrderIntent,
@@ -61,6 +61,7 @@ class PaperOnlyIntentProcessor:
         replay_store: SQLiteReplayStore,
         adapter: PaperExecutionAdapter | None = None,
         risk_limits: SignerRiskLimits | None = None,
+        account_evidence_provider: AccountEvidenceProvider | None = None,
     ) -> None:
         if policy.allow_market_orders or "MARKET" in policy.allowed_order_types:
             raise ValueError("paper_skeleton_supports_limit_orders_only")
@@ -70,6 +71,9 @@ class PaperOnlyIntentProcessor:
         if risk_limits is not None and not isinstance(risk_limits, SignerRiskLimits):
             raise TypeError("signer_risk_limits_required")
         self.risk_limits = risk_limits
+        if (risk_limits is None) != (account_evidence_provider is None):
+            raise ValueError("risk_limits_and_evidence_provider_must_be_paired")
+        self.account_evidence_provider = account_evidence_provider
         if not getattr(self.adapter, "paper_only", False):
             raise ValueError("non_paper_adapter_forbidden")
 
@@ -78,7 +82,6 @@ class PaperOnlyIntentProcessor:
         payload: str | bytes | Mapping[str, Any],
         *,
         now_ms: int,
-        account_snapshot: AccountRiskSnapshot | None = None,
     ) -> PaperIntentResult:
         parsed = (
             parse_order_intent_json(payload)
@@ -93,7 +96,12 @@ class PaperOnlyIntentProcessor:
         # Independent signer-side preflight occurs before consuming an intent nonce.
         # The caller must obtain this evidence from a separately authenticated source.
         if self.risk_limits is not None:
-            self.risk_limits.authorize(intent, account_snapshot, now_ms=now_ms)
+            # Evidence is fetched inside the trusted signer boundary, never supplied
+            # as an untrusted field by the remote VPS order-intent request.
+            snapshot = self.account_evidence_provider.get_snapshot(
+                intent.account_alias, now_ms=now_ms
+            )
+            self.risk_limits.authorize(intent, snapshot, now_ms=now_ms)
         reservation = self.replay_store.reserve(intent, now_ms=now_ms)
         if not reservation.created:
             return self._duplicate_result(reservation)
