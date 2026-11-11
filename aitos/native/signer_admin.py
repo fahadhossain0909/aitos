@@ -76,15 +76,17 @@ def handle_request(request: object) -> dict:
         raise ValueError("signer_admin_action_not_allowed")
     expected_fields = {
         "status": {"action", "account_alias"},
-        "set-mode": {
-            "action",
-            "account_alias",
-            "mode",
-            "provider_id",
-            "secret_ref",
-        }
-        if request.get("mode") == "external"
-        else {"action", "account_alias", "mode"},
+        "set-mode": (
+            {
+                "action",
+                "account_alias",
+                "mode",
+                "provider_id",
+                "secret_ref",
+            }
+            if request.get("mode") == "external"
+            else {"action", "account_alias", "mode"}
+        ),
         "store-credentials": {
             "action",
             "account_alias",
@@ -100,7 +102,10 @@ def handle_request(request: object) -> dict:
         if action == "set-mode":
             mode = request.get("mode")
             if mode == "native":
-                if request.get("provider_id") is not None or request.get("secret_ref") is not None:
+                if (
+                    request.get("provider_id") is not None
+                    or request.get("secret_ref") is not None
+                ):
                     raise ValueError("native_mode_does_not_accept_external_reference")
                 profiles.set_account(account, "native")
             elif mode == "external":
@@ -108,7 +113,9 @@ def handle_request(request: object) -> dict:
                 secret_ref = request.get("secret_ref")
                 backends = discover_external_vault_backends()
                 if type(provider_id) is not str or provider_id not in backends:
-                    raise CredentialProfileError("requested_external_provider_not_installed")
+                    raise CredentialProfileError(
+                        "requested_external_provider_not_installed"
+                    )
                 profiles.set_account(
                     account,
                     "external",
