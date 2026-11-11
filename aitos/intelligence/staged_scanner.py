@@ -49,8 +49,7 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                 or uuid.uuid4().hex
             )
             object.__setattr__(candidate, "_aitos_candidate_id", candidate_id)
-            if evidence.get("available"):
-                evidence = {**evidence, "candidate_id": candidate_id}
+            evidence = {**evidence, "candidate_id": candidate_id}
             object.__setattr__(candidate, "_aitos_historical_context", evidence)
             if rows and len(rows) >= 20:
                 object.__setattr__(candidate, "_aitos_klines", tuple(rows))
