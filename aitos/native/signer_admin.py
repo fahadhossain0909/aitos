@@ -20,7 +20,8 @@ from aitos.native.credential_profiles import (
     LazyNativeCredentialStore,
     discover_external_vault_backends,
 )
-from aitos.native.credential_vault import get_credential_vault
+from aitos.native.cli_credential_vaults import ProviderVaultError
+from aitos.native.credential_vault import VaultUnavailable, get_credential_vault
 from aitos.security.signer_credentials import SignerCredentialSlots
 
 
@@ -171,7 +172,7 @@ def main() -> int:
             response = handle_request(request)
         except (UnicodeError, json.JSONDecodeError, ValueError):
             response = {"ok": False, "error": "invalid_signer_admin_request"}
-        except CredentialProfileError:
+        except (CredentialProfileError, ProviderVaultError, VaultUnavailable):
             response = {"ok": False, "error": "credential_provider_unavailable"}
         except Exception:
             response = {"ok": False, "error": "credential_operation_failed"}
