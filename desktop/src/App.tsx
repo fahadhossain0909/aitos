@@ -2017,13 +2017,14 @@ export default function App() {
                     <span className="small-cap">SIGNER CREDENTIAL CUSTODY</span>
                     <h2>Choose where exchange credentials are held</h2>
                     <p className="body-copy">This is an unapplied desktop draft. It does not write to the signer profile database or store exchange secrets.</p>
+                    <p className="body-copy">Security boundary: neither Native nor External mode protects a signer running on a provider-managed RDP/VPS. Run the signer and password-manager CLI only on a separately trusted host.</p>
                   </div>
                   <LockKeyhole size={19} />
                 </div>
                 <div className="config-field">
                   <div>
                     <strong>Credential mode</strong>
-                    <small>Native is for a trusted, user-controlled host. External is for a provider vault.</small>
+                    <small>Both modes require a trusted, user-controlled signer host. External vault mode does not protect credentials from the administrator of an RDP/VPS running the signer.</small>
                   </div>
                   <select aria-label="Credential custody mode" value={credentialMode} onChange={(event) => setCredentialMode(event.target.value as "native" | "external")}>
                     <option value="native">Native OS vault</option>
