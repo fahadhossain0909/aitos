@@ -356,3 +356,68 @@ def test_risk_gate_requires_provider_and_limits_as_a_pair(tmp_path):
             PaperOnlyIntentProcessor(
                 policy=POLICY, replay_store=store, risk_limits=limits
             )
+
+
+
+def test_paper_processor_uses_trusted_provider_for_fresh_risk_evidence(tmp_path):
+    limits = SignerRiskLimits(
+        max_gross_exposure=Decimal("1000"),
+        max_symbol_exposure=Decimal("500"),
+        max_daily_loss=Decimal("100"),
+        max_orders_per_window=10,
+    )
+    fresh = AccountRiskSnapshot(
+        account_alias="paper-primary",
+        captured_at_ms=NOW,
+        gross_exposure=Decimal("100"),
+        symbol_exposure={"BTCUSDT": Decimal("50")},
+        daily_loss=Decimal("10"),
+        order_count_window=2,
+        positions={"BTCUSDT": Decimal("0.01")},
+    )
+
+    class FreshEvidenceProvider:
+        def get_snapshot(self, account_alias, *, now_ms):
+            assert account_alias == "paper-primary"
+            assert now_ms == NOW
+            return fresh
+
+    adapter = CountingPaperAdapter()
+    with SQLiteReplayStore(tmp_path / "ledger.sqlite3") as store:
+        processor = PaperOnlyIntentProcessor(
+            policy=POLICY,
+            replay_store=store,
+            adapter=adapter,
+            risk_limits=limits,
+            account_evidence_provider=FreshEvidenceProvider(),
+        )
+        result = processor.process(intent_payload(), now_ms=NOW)
+    assert result.status == "accepted"
+    assert adapter.calls == 1
+
+
+def test_unavailable_account_evidence_never_reserves_or_executes(tmp_path):
+    limits = SignerRiskLimits(
+        max_gross_exposure=Decimal("1000"),
+        max_symbol_exposure=Decimal("500"),
+        max_daily_loss=Decimal("100"),
+        max_orders_per_window=10,
+    )
+
+    class UnavailableEvidenceProvider:
+        def get_snapshot(self, account_alias, *, now_ms):
+            raise ConnectionError("account evidence unavailable")
+
+    adapter = CountingPaperAdapter()
+    with SQLiteReplayStore(tmp_path / "ledger.sqlite3") as store:
+        processor = PaperOnlyIntentProcessor(
+            policy=POLICY,
+            replay_store=store,
+            adapter=adapter,
+            risk_limits=limits,
+            account_evidence_provider=UnavailableEvidenceProvider(),
+        )
+        with pytest.raises(ConnectionError):
+            processor.process(intent_payload(), now_ms=NOW)
+        assert store.get("intent-replay-001") is None
+    assert adapter.calls == 0
