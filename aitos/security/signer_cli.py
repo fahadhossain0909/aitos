@@ -195,20 +195,13 @@ async def _serve() -> None:
     data = _data_dir()
     account = _required("AITOS_SIGNER_ACCOUNT_ALIAS")
     symbols = _symbols()
-    host = os.environ.get(
-        "AITOS_SIGNER_BIND_HOST", "127.0.0.1"
-    )
+    host = os.environ.get("AITOS_SIGNER_BIND_HOST", "127.0.0.1")
     port = int(os.environ.get("AITOS_SIGNER_PORT", "9443"))
     try:
-        wildcard_bind = (
-            not host.strip() or ipaddress.ip_address(host).is_unspecified
-        )
+        wildcard_bind = not host.strip() or ipaddress.ip_address(host).is_unspecified
     except ValueError:
         wildcard_bind = False
-    if (
-        wildcard_bind
-        and os.environ.get("AITOS_SIGNER_ALLOW_WILDCARD_BIND") != "1"
-    ):
+    if wildcard_bind and os.environ.get("AITOS_SIGNER_ALLOW_WILDCARD_BIND") != "1":
         raise RuntimeError("wildcard_bind_requires_explicit_network_review")
 
     cert = Path(_required("AITOS_SIGNER_SERVER_CERT")).expanduser()
