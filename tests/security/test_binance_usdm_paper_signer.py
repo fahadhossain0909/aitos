@@ -111,6 +111,7 @@ class FakeTransport:
             return {
                 "orderId": 123,
                 "clientOrderId": "aitos-testnet-001",
+                "symbol": "BTCUSDT",
                 "status": "PARTIALLY_FILLED",
                 "executedQty": "0.0005",
             }
