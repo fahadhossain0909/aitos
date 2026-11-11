@@ -3,6 +3,7 @@
 These helpers establish transport identity only. They do not authorize intents,
 provide a network server, or replace signer-side policy and replay controls.
 """
+
 from __future__ import annotations
 
 import re
