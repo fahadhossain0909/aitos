@@ -150,11 +150,16 @@ def stage_sqlite_snapshot(source, destination, *, timeout_seconds=10):
                     original.backup(snapshot, pages=256, progress=progress, sleep=0.05)
                     if snapshot.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
                         raise StorageUnavailable("backup integrity check failed")
-            with open(temporary, "rb") as stream:
+            # Open read/write before fsync: Windows does not reliably flush a
+            # read-only descriptor. Keep publication atomic and no-clobber.
+            with open(temporary, "r+b") as stream:
                 os.fsync(stream.fileno())
-            # Hard-link is an atomic no-clobber publish on supported filesystems.
-            # Unsupported storage fails; it never falls back to overwriting.
-            os.link(temporary, destination)
+            if os.name == "nt":
+                # Windows rename fails if the destination already exists.
+                os.rename(temporary, destination)
+            else:
+                # POSIX hard-link is an atomic no-clobber publish.
+                os.link(temporary, destination)
             _sync_directory(destination.parent)
         except (OSError, sqlite3.Error):
             raise StorageUnavailable(
