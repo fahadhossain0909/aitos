@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "signer-local",
+  "description": "Native signer credential administration for the bundled local signer window only.",
+  "windows": ["signer"],
+  "permissions": ["core:default"]
+}

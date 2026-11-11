@@ -201,6 +201,7 @@ class Trade:
             "take_profit_levels": list(self.take_profit_levels),
             "state": self.state.value,
             "entry_time": self.entry_time,
+            "updated_at": self.updated_at,
             "exit_price": self.exit_price,
             "exit_time": self.exit_time,
             "exit_reason": self.exit_reason,

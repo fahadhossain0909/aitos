@@ -1,0 +1,30 @@
+:root{font-family:Manrope,Inter,system-ui,sans-serif;color:#e8eadf;background:#10120f;font-synthesis:none;text-rendering:optimizeLegibility}
+*{box-sizing:border-box}
+body{margin:0;min-width:320px;min-height:100vh;background:radial-gradient(ellipse at 15% 0%,#283124 0%,transparent 38%),#10120f}
+button,input,select{font:inherit}
+.signer-page{max-width:880px;margin:0 auto;padding:26px 28px 42px}
+.signer-header{display:flex;align-items:center;justify-content:space-between;padding:4px 0 28px;border-bottom:1px solid #2c3229}
+.signer-brand{display:flex;align-items:center;gap:11px}.signer-brand>div{display:grid;gap:2px}.signer-brand strong{font-size:15px;letter-spacing:.18em}.signer-brand small,.signer-eyebrow,.signer-footer,.signer-step{font-family:"DM Mono",monospace;letter-spacing:.12em;font-size:10px;color:#9aa18e}
+.signer-mark{display:grid;place-items:center;width:34px;height:34px;border:1px solid #a9c88b;border-radius:9px;color:#d6f5b5;font-weight:800}
+.signer-local-badge{font:10px "DM Mono",monospace;letter-spacing:.1em;color:#c6e7a5;border:1px solid #526542;border-radius:20px;padding:8px 11px}
+.signer-hero{padding:36px 0 24px}.signer-hero h1{font-size:clamp(30px,5vw,42px);letter-spacing:-.05em;margin:8px 0}.signer-hero p{color:#a9b09f;line-height:1.65;max-width:650px;margin:0}
+.signer-eyebrow{color:#b6ce98}.signer-warning{border:1px solid #675a32;background:#2a2618;border-radius:12px;padding:16px 18px;margin-bottom:18px}.signer-warning strong{font-size:13px;color:#f1d28a}.signer-warning p{font-size:12px;line-height:1.65;color:#d4c9a8;margin:6px 0 0}
+.signer-card{border:1px solid #30372c;background:rgba(24,28,22,.94);border-radius:14px;padding:22px;margin:14px 0;box-shadow:0 14px 40px #0002}
+.signer-card-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}.signer-card-heading h2{font-size:18px;letter-spacing:-.025em;margin:5px 0 0}.signer-step{border:1px solid #394334;border-radius:8px;padding:7px 9px}
+.signer-card label{display:block;font-size:12px;font-weight:700;color:#d7ddcf;margin:14px 0 7px}
+.signer-card input,.signer-card select{display:block;width:100%;height:43px;border:1px solid #414a3c;background:#11150f;color:#f1f3e9;border-radius:8px;padding:0 12px;outline:none}
+.signer-card input:focus,.signer-card select:focus{border-color:#b6d893;box-shadow:0 0 0 3px #b6d89322}
+.signer-mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.signer-mode{min-height:106px;text-align:left;border:1px solid #3a4234;border-radius:10px;background:#151a13;color:#e8eadf;padding:14px;cursor:pointer}.signer-mode strong,.signer-mode span{display:block}.signer-mode strong{font-size:13px;margin-bottom:8px}.signer-mode span{font-size:11px;color:#a5ad9b;line-height:1.55}.signer-mode.selected{border-color:#a6cb82;background:#202a1a;box-shadow:inset 0 0 0 1px #a6cb8240}
+.signer-fields{margin-top:14px}.signer-help{font-size:11px;line-height:1.65;color:#a1a996;margin:12px 0 0}.signer-help code{font:10px "DM Mono",monospace;color:#c8e7a9}
+.signer-actions{display:flex;justify-content:flex-end;margin-top:17px}.signer-button{min-height:40px;padding:0 16px;border-radius:8px;border:1px solid transparent;font-size:12px;font-weight:800;cursor:pointer}.signer-button.primary{background:#c8eaa7;color:#1b2415}.signer-button.secondary{background:#20271c;color:#dce9cf;border-color:#45513a}.signer-button:disabled{opacity:.45;cursor:not-allowed}
+.signer-status{display:flex;flex-wrap:wrap;gap:10px 18px;padding:12px;margin-top:14px;border-radius:8px;background:#11150f;color:#b5beaa;font-size:11px}.signer-status b{color:#e0edce}
+.signer-success,.signer-error{padding:13px 15px;border-radius:9px;font-size:12px;line-height:1.5;margin:14px 0}.signer-success{border:1px solid #4a6940;background:#1b2a18;color:#d2efbb}.signer-error{border:1px solid #795044;background:#2c1d19;color:#f1c0b2}
+.signer-footer{text-align:center;padding:26px 0 0;color:#727b6b}
+@media(max-width:620px){.signer-page{padding:18px 14px 30px}.signer-card{padding:17px}.signer-mode-grid{grid-template-columns:1fr}.signer-mode{min-height:78px}.signer-header{padding-bottom:20px}.signer-local-badge{font-size:9px}}
+
+.signer-trust-confirm{display:flex;align-items:flex-start;gap:9px;margin-top:12px;color:#f0e1bd;font-size:11px;line-height:1.5}.signer-trust-confirm input{margin:2px 0 0;accent-color:#c8eaa7}
+
+.signer-scope-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0}
+.signer-scope{min-height:38px;border:1px solid #3a4234;border-radius:8px;background:#151a13;color:#aeb7a3;font-size:11px;font-weight:700;cursor:pointer}
+.signer-scope.selected{border-color:#a6cb82;background:#202a1a;color:#e4f1d5}
+.signer-shared-warning{margin:12px 0 0;padding:12px;border:1px solid #795d32;border-radius:8px;background:#2a2417;color:#e8d29f;font-size:11px;line-height:1.6}

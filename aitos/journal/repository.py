@@ -117,11 +117,26 @@ class JournalRepository(AITOSModule):
     async def initialize(self, config: dict[str, Any]) -> None:
         if self._initialized:
             return
+        # A prior close failure must be retried before replacing its handle.
+        if self._client is not None:
+            await self.shutdown()
         self._client = await clickhouse_connect.get_async_client(**self._conn_params)
-        for ddl in ALL_DDL:
-            await self._client.command(ddl)
-        await self._ensure_excursion_columns()
-        await self._repair_legacy_epoch_trade_timestamps()
+        try:
+            for ddl in ALL_DDL:
+                await self._client.command(ddl)
+            await self._ensure_excursion_columns()
+            await self._repair_legacy_epoch_trade_timestamps()
+        except BaseException:
+            # Cancellation is also a startup failure: release acquired resources
+            # without hiding the original schema/connection failure.
+            try:
+                await self.shutdown()
+            except Exception as cleanup_error:
+                logger.error(
+                    "Repository startup cleanup failed (%s); client retained for retry",
+                    type(cleanup_error).__name__,
+                )
+            raise
         self._initialized = True
         logger.info("JournalRepository initialized (tables ensured)")
 
@@ -205,8 +220,11 @@ class JournalRepository(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds: float = 30.0) -> None:
+        # Fail closed immediately, including when close raises or is cancelled.
+        self._initialized = False
         if self._client is not None:
             await self._client.close()
+            self._client = None
         logger.info("JournalRepository shut down")
 
     async def emit_events(self):

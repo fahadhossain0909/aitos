@@ -372,12 +372,15 @@ class CapitalReservation:
         path: str | Path | None = None,
         *,
         lease_seconds: float = 300.0,
+        owner_id: str | None = None,
     ) -> None:
         if not isfinite(lease_seconds) or lease_seconds <= 0:
             raise ValueError("lease_seconds must be finite and positive")
         self._lock = RLock()
         self._reservations: dict[str, Reservation] = {}
-        self._owner_id = uuid.uuid4().hex
+        if owner_id is not None and not owner_id:
+            raise ValueError("reservation owner identity cannot be empty")
+        self._owner_id = owner_id or uuid.uuid4().hex
         self._lease_seconds = float(lease_seconds)
         self._conn: sqlite3.Connection | None = None
         if path is not None:
@@ -530,6 +533,73 @@ class CapitalReservation:
             self._conn.commit()
             return Reservation(symbol.upper(), float(row[0]), float(row[1]))
 
+    def restore_confirmed_exposure(self, reservation: Reservation) -> None:
+        """Account-matched restored exposure is retained, never re-authorized.
+
+        Caller must hold exclusive live-runtime ownership and verify the full
+        account snapshot first. Existing larger reservations remain conservative.
+        """
+        if (
+            any(
+                not isfinite(value) or value < 0
+                for value in (reservation.capital_usd, reservation.risk_budget_usd)
+            )
+            or not reservation.symbol
+        ):
+            raise ValueError("invalid confirmed exposure reservation")
+        with self._lock:
+            if self._conn is None:
+                old = self._reservations.get(reservation.symbol)
+                self._reservations[reservation.symbol] = Reservation(
+                    reservation.symbol,
+                    max(reservation.capital_usd, old.capital_usd if old else 0),
+                    max(reservation.risk_budget_usd, old.risk_budget_usd if old else 0),
+                )
+                return
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                old = self._conn.execute(
+                    "SELECT owner_id FROM capital_reservations WHERE symbol=?",
+                    (reservation.symbol.upper(),),
+                ).fetchone()
+                if old is not None and old[0] != self._owner_id:
+                    raise ValueError("restored reservation belongs to another owner")
+                self._conn.execute(
+                    "INSERT INTO capital_reservations VALUES (?,?,?,?,?) "
+                    "ON CONFLICT(symbol) DO UPDATE SET "
+                    "capital_usd=MAX(capital_usd,excluded.capital_usd), "
+                    "risk_budget_usd=MAX(risk_budget_usd,excluded.risk_budget_usd), "
+                    "expires_at=excluded.expires_at",
+                    (
+                        reservation.symbol.upper(),
+                        self._owner_id,
+                        reservation.capital_usd,
+                        reservation.risk_budget_usd,
+                        float("inf"),
+                    ),
+                )
+                self._conn.commit()
+            except BaseException:
+                self._conn.rollback()
+                raise
+
+    def pin(self, symbol: str) -> bool:
+        """Retain owned capital until explicit reconciliation/release, not TTL.
+
+        Authorization-only leases still expire. Submitted/open exposure does
+        not become spendable merely because a worker died or a timer elapsed.
+        """
+        with self._lock:
+            if self._conn is None:
+                return symbol in self._reservations
+            cursor = self._conn.execute(
+                "UPDATE capital_reservations SET expires_at=? "
+                "WHERE symbol=? AND owner_id=? AND expires_at>?",
+                (float("inf"), symbol.upper(), self._owner_id, time.time()),
+            )
+            self._conn.commit()
+            return cursor.rowcount == 1
+
     def renew(self, symbol: str) -> bool:
         """Extend an open-position reservation lease owned by this runtime."""
         with self._lock:
@@ -538,7 +608,7 @@ class CapitalReservation:
             cursor = self._conn.execute(
                 """
                 UPDATE capital_reservations
-                SET expires_at = ?
+                SET expires_at = MAX(expires_at, ?)
                 WHERE symbol = ? AND owner_id = ? AND expires_at > ?
                 """,
                 (

@@ -148,7 +148,15 @@ class CTraderOrderExecutor(OrderExecutor):
         reactor.callFromThread(dispatch)
         return await asyncio.wait_for(future, timeout=self._timeout)
 
+    @property
+    def requires_exchange_execution(self) -> bool:
+        return True
+
     async def submit_order(self, request: OrderRequest) -> OrderResult:
+        if request.reduce_only:
+            raise NotImplementedError(
+                "venue-specific position-bound reduction is not implemented"
+            )
         if request.order_type != "MARKET":
             raise ValueError(
                 "cTrader resting LIMIT/STOP orders are disabled until order "
@@ -157,9 +165,9 @@ class CTraderOrderExecutor(OrderExecutor):
         symbol_id = self._symbol_ids.get(request.symbol.upper())
         if symbol_id is None:
             raise ValueError(f"missing cTrader symbol id for {request.symbol}")
-        if not self._connected.wait(self._timeout):
+        if not await asyncio.to_thread(self._connected.wait, self._timeout):
             raise RuntimeError("cTrader connection timeout")
-        if not self._authenticated.wait(self._timeout):
+        if not await asyncio.to_thread(self._authenticated.wait, self._timeout):
             raise RuntimeError("cTrader account authentication timeout")
 
         order = ProtoOANewOrderReq()

@@ -1,0 +1,4 @@
+# Optional isolated SQL-engine verification only. Not a production dependency.
+# Engine coverage is 26.9, NOT certification of the deployment's server version.
+chdb==4.4.0
+chdb-core==26.9.0

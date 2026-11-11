@@ -88,7 +88,8 @@ def _format(bucket: dict[str, Any]) -> dict[str, Any]:
 
 
 def _start_watchdog(event_bus: Any) -> None:
-    if getattr(event_bus, "_contention_watchdog_task", None) is not None:
+    task = getattr(event_bus, "_contention_watchdog_task", None)
+    if task is not None and not task.done():
         return
     event_bus._contention_watchdog_task = asyncio.create_task(
         _watchdog(event_bus), name="aitos-event-loop-contention-watchdog"
@@ -138,6 +139,7 @@ def _install_eventbus(cls: type[Any]) -> None:
     cls._contention_telemetry_installed = True
     original_init = cls.__init__
     original_initialize = cls.initialize
+    original_shutdown = cls.shutdown
     original_health = cls.health_check
 
     @wraps(original_init)
@@ -207,7 +209,17 @@ def _install_eventbus(cls: type[Any]) -> None:
         }
         return replace(status, details=details)
 
+    @wraps(original_shutdown)
+    async def shutdown(self: Any, *args: Any, **kwargs: Any):
+        task = getattr(self, "_contention_watchdog_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self._contention_watchdog_task = None
+        return await original_shutdown(self, *args, **kwargs)
+
     cls.__init__ = init
+    cls.shutdown = shutdown
     cls.initialize = initialize
     cls.health_check = health
 

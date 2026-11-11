@@ -368,8 +368,9 @@ class EventBus(AITOSModule):
             self._group_create_busy += 1
             if reset_existing:
                 await self._set_group_to_live(stream_key, group)
-        finally:
-            self._ensured_groups.add(key)
+        # Cache only confirmed creation (or an existing group whose requested
+        # reset completed). Transient failures must remain retryable.
+        self._ensured_groups.add(key)
 
     async def _reclaim_pending(
         self, stream_key: str, group: str, consumer: str

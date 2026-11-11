@@ -178,3 +178,22 @@ These are orchestration primitives, not proof that the authenticated approval UI
 Candidate-level minimum-return, drawdown, Sharpe and champion-comparison gates run only on development events strictly before the reserved final holdout interval. Walk-forward test windows and the final locked holdout are evaluated separately and are never included in those candidate-level metrics. Event timestamps must be timezone-aware. Candidate strategies are treated as frozen proposals during validation; fitting or tuning must occur outside the validator on development data only. Regime-wise ablations and cost-sensitivity are produced by the experiment runner and remain evidence reports, not automatic model-selection decisions.
 
 Canary health requires both a cumulative sample-count threshold and a minimum number of separate healthy observation windows (default: 100 samples and 3 observations). Each observation must report cumulative samples and the same defined candidate-versus-champion metric basis; a single healthy snapshot cannot clear the canary gate.
+
+## Frozen research input contract (2026-11-07 audit)
+
+The candidate development run evaluates a deep copy of the supplied strategy, leaving
+its frozen initial state available to the independent walk-forward/holdout copies.
+Stateful strategies must encapsulate state in copyable callable objects; mutable Python
+function closures, global state and external services are not isolated by `deepcopy`.
+This does not verify how model parameters were fitted before the proposal was supplied.
+
+Each experiment cell receives a deep copy of its event slice. Baseline, ablations and
+cost scenarios may annotate their own nested fields without changing caller-owned
+history or another cell's input. This costs offline CPU/memory proportional to the slice;
+large replay optimization requires measurement and an immutable-data contract.
+
+Cost-scenario names must be unique. Experiment identity now includes `minimum_samples`,
+so a different sample acceptance policy cannot share an ID with the original plan.
+IDs produced by the earlier version are historical IDs, not values to silently rewrite.
+The hash still does not bind all evaluator code, model artifacts or upstream datasets;
+complete provenance and a canonical evaluator adapter remain separate integration work.

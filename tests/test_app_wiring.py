@@ -1,3 +1,12 @@
+"""Application composition tests.
+
+Tests calling initialize_all with the default DecisionJournalRepository use a
+real ClickHouse service and are explicitly marked integration. Fake exchange
+and Redis fixtures do not make those database writes unit tests. Full CI still
+runs them; local `-m 'not integration'` intentionally excludes service IO.
+See test_app_subscription_ownership.py for database-free route contracts.
+"""
+
 import asyncio
 from datetime import datetime, timezone
 
@@ -63,6 +72,7 @@ async def test_build_system_wires_all_core_modules(event_bus):
     assert components.correlation_updater is None
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_initialize_all_and_shutdown_all_completes_cleanly(event_bus):
     exchange = FakeScannerExchange()
@@ -85,6 +95,7 @@ async def test_initialize_all_and_shutdown_all_completes_cleanly(event_bus):
     assert exchange.closed is True
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scan_and_trade_cycle_opens_a_position_for_the_trending_symbol(event_bus):
     exchange = (
@@ -111,6 +122,7 @@ async def test_scan_and_trade_cycle_opens_a_position_for_the_trending_symbol(eve
     await shutdown_all(components)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(
     event_bus,
@@ -136,6 +148,7 @@ async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(
     await shutdown_all(components)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_price_feed_subscription_auto_updates_open_trades(event_bus):
     """The key wiring proof: TradeLifecycle isn't manually poked with
@@ -303,6 +316,7 @@ async def test_live_portfolio_tracker_queries_real_account_balance():
     assert portfolio.current_drawdown_pct == pytest.approx((1200 - 900) / 1200 * 100)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scan_and_trade_cycle_calls_refresh_equity_when_tracker_supports_it(
     event_bus,
@@ -342,6 +356,7 @@ async def test_scan_and_trade_cycle_calls_refresh_equity_when_tracker_supports_i
     await shutdown_all(components)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
     event_bus, kernel
@@ -375,6 +390,7 @@ async def test_scan_and_trade_cycle_forwards_production_flag_to_opportunities(
     await shutdown_all(components)
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 async def test_cost_adjustment_event_is_applied_to_trade_lifecycle(event_bus):
     from aitos.core.contracts import Event

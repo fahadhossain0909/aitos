@@ -308,7 +308,9 @@ async def test_set_leverage():
 
 @pytest.mark.asyncio
 async def test_place_stop_loss_order_uses_reduce_only_and_opposite_side():
-    executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
+    executor = BinanceFuturesOrderExecutor(
+        api_key="k", api_secret="s", conditional_orders_api="legacy"
+    )
     await executor.connect()
 
     captured = {}
@@ -339,7 +341,9 @@ async def test_place_stop_loss_order_uses_reduce_only_and_opposite_side():
 
 @pytest.mark.asyncio
 async def test_place_take_profit_order_for_short_uses_buy_side():
-    executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
+    executor = BinanceFuturesOrderExecutor(
+        api_key="k", api_secret="s", conditional_orders_api="legacy"
+    )
     await executor.connect()
 
     captured = {}
@@ -372,7 +376,7 @@ async def test_place_stop_loss_order_returns_failure_on_api_error():
 
     with aioresponses() as m:
         m.post(
-            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/algoOrder") + r".*"),
             status=400,
             payload={"code": -2021, "msg": "Order would immediately trigger"},
         )
@@ -387,7 +391,7 @@ async def test_place_stop_loss_order_returns_failure_on_api_error():
 
 
 @pytest.mark.asyncio
-async def test_cancel_resting_order_swallows_api_errors():
+async def test_cancel_resting_order_verifies_terminal_state_after_unknown_order():
     executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s")
     await executor.connect()
 
@@ -397,7 +401,11 @@ async def test_cancel_resting_order_swallows_api_errors():
             status=400,
             payload={"code": -2011, "msg": "Unknown order sent"},
         )
-        await executor.cancel_resting_order("BTCUSDT", "123")  # must not raise
+        m.get(
+            re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+            payload={"orderId": 123, "status": "CANCELED"},
+        )
+        await executor.cancel_resting_order("BTCUSDT", "123")
 
     await executor.close()
 
@@ -486,7 +494,9 @@ async def test_hedge_mode_open_short_sends_sell_and_position_side_short():
 async def test_hedge_mode_closing_long_sends_sell_but_keeps_position_side_long():
     """Closing a LONG in hedge mode is a SELL order, but positionSide stays
     LONG (it identifies *which* position this affects, not the order direction)."""
-    executor = BinanceFuturesOrderExecutor(api_key="k", api_secret="s", hedge_mode=True)
+    executor = BinanceFuturesOrderExecutor(
+        api_key="k", api_secret="s", conditional_orders_api="legacy", hedge_mode=True
+    )
     await executor.connect()
 
     captured = {}
@@ -515,7 +525,7 @@ async def test_one_way_mode_still_sends_reduce_only_and_no_position_side():
     """Regression check: the default (one-way) mode's request shape is
     unchanged by the hedge-mode refactor."""
     executor = BinanceFuturesOrderExecutor(
-        api_key="k", api_secret="s"
+        api_key="k", api_secret="s", conditional_orders_api="legacy"
     )  # hedge_mode defaults to False
     assert executor.hedge_mode is False
     await executor.connect()
@@ -653,6 +663,17 @@ async def test_new_order_is_accepted_without_falsely_reporting_a_full_fill():
                 "avgPrice": "0",
             },
         )
+        # Settlement requires authoritative read-back, not cancellation ACK alone.
+        for state in ("NEW", "CANCELED"):
+            mocked.get(
+                re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+                payload={
+                    "orderId": 123,
+                    "status": state,
+                    "executedQty": "0",
+                    "avgPrice": "0",
+                },
+            )
         result = await executor.submit_order(_order_request(quantity=2.0))
     assert result.success is False
     assert result.filled_quantity == 0.0
@@ -683,6 +704,17 @@ async def test_partially_filled_market_order_cancels_remainder_and_preserves_fil
                 "avgPrice": "100.1",
             },
         )
+        # Settlement requires authoritative read-back, not cancellation ACK alone.
+        for state in ("PARTIALLY_FILLED", "CANCELED"):
+            mocked.get(
+                re.compile(r"^" + re.escape(TESTNET_URL + "/fapi/v1/order") + r".*"),
+                payload={
+                    "orderId": 124,
+                    "status": state,
+                    "executedQty": "0.4",
+                    "avgPrice": "100.1",
+                },
+            )
         result = await executor.submit_order(_order_request(quantity=1.0))
     assert result.success is True
     assert result.filled_quantity == pytest.approx(0.4)

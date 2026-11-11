@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from aitos.capital.compliance import PropComplianceEngine
 from aitos.capital.models import AccountSnapshot, PropFirmProfile
+from aitos.execution.intent_store import ExecutionUncertainError
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.logging_setup import get_logger
 
@@ -46,6 +47,20 @@ class CapitalRouter:
         if account.provider != profile.provider:
             raise ValueError("profile and account providers must match")
         self._venues[venue] = (executor, profile, account)
+
+    @property
+    def requires_exchange_execution(self) -> bool:
+        return any(
+            getattr(executor, "requires_exchange_execution", False)
+            for executor, _, _ in self._venues.values()
+        )
+
+    def has_unresolved_orders(self, symbol: str | None = None) -> bool:
+        return any(
+            executor.has_unresolved_orders(symbol)
+            for executor, _, _ in self._venues.values()
+            if callable(getattr(executor, "has_unresolved_orders", None))
+        )
 
     @property
     def supports_exchange_side_stops(self) -> bool:
@@ -113,7 +128,15 @@ class CapitalRouter:
                 continue
             try:
                 return candidate.venue, await executor.submit_order(request)
+            except ExecutionUncertainError:
+                raise
             except Exception:
+                if getattr(executor, "requires_exchange_execution", False):
+                    raise ExecutionUncertainError(
+                        request.symbol,
+                        request.client_order_id or "unidentified",
+                        "live venue failed; cross-venue retry is unsafe",
+                    ) from None
                 # Try the next compliant capital venue. This makes routing
                 # resilient to a single venue outage without bypassing rules.
                 continue

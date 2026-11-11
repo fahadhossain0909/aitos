@@ -29,7 +29,15 @@ class MT5GatewayOrderExecutor(OrderExecutor):
         self._timeout = timeout
         self._session_factory = session_factory
 
+    @property
+    def requires_exchange_execution(self) -> bool:
+        return True
+
     async def submit_order(self, request: OrderRequest) -> OrderResult:
+        if request.reduce_only:
+            raise NotImplementedError(
+                "venue-specific position-bound reduction is not implemented"
+            )
         if request.order_type != "MARKET":
             raise ValueError(
                 "MT5 gateway resting orders are disabled until status polling "

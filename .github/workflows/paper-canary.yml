@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: aitos-paper-canary-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   paper-canary:

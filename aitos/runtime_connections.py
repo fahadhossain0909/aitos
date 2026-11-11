@@ -15,7 +15,16 @@ async def connect_redis_with_retry(settings, *, logger) -> Redis:
             settings.redis.url,
             max_connections=settings.redis.max_connections,
         )
-        await client.ping()
+        try:
+            await client.ping()
+        except BaseException:
+            try:
+                await client.aclose()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Redis attempt cleanup failed (%s)", type(cleanup_error).__name__
+                )
+            raise
         return client
 
     try:
@@ -43,10 +52,17 @@ async def try_connect_neo4j(settings, *, logger):
     try:
         await driver.verify_connectivity()
         return driver
-    except Exception as exc:
-        logger.warning("Neo4j unavailable: %s", exc)
-        await driver.close()
-        return None
+    except BaseException as exc:
+        try:
+            await driver.close()
+        except Exception as cleanup_error:
+            logger.warning(
+                "Neo4j startup cleanup failed (%s)", type(cleanup_error).__name__
+            )
+        if isinstance(exc, Exception):
+            logger.warning("Neo4j unavailable: %s", exc)
+            return None
+        raise
 
 
 async def connect_clickhouse_repositories(settings, *, logger):
@@ -116,6 +132,14 @@ async def connect_clickhouse_repositories(settings, *, logger):
             await market_repo.shutdown()
             logger.error("PostgreSQL paper market storage unavailable: %s", exc)
             raise SystemExit(1) from exc
+        except BaseException:
+            try:
+                await market_repo.shutdown()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Storage startup cleanup failed (%s)", type(cleanup_error).__name__
+                )
+            raise
         logger.warning(
             "PostgreSQL-only paper mode active: market events, recent OHLCV and "
             "operational journals are persisted; ClickHouse analytical SQL is disabled"
@@ -170,11 +194,28 @@ async def connect_clickhouse_repositories(settings, *, logger):
                     postgres_error,
                 )
                 raise SystemExit(1) from postgres_error
+            except BaseException:
+                try:
+                    await market_repo.shutdown()
+                except Exception as cleanup_error:
+                    logger.warning(
+                        "Storage startup cleanup failed (%s)",
+                        type(cleanup_error).__name__,
+                    )
+                raise
             market_backend = StorageBackend.POSTGRES
             logger.warning(
                 "ClickHouse unavailable; using PostgreSQL paper-runtime storage. "
                 "Arbitrary ClickHouse analytics queries remain disabled."
             )
+        except BaseException:
+            try:
+                await market_repo.shutdown()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Storage startup cleanup failed (%s)", type(cleanup_error).__name__
+                )
+            raise
 
     from aitos.journal.postgres_repository import PostgresJournalRepository
 
@@ -254,18 +295,26 @@ async def connect_clickhouse_repositories(settings, *, logger):
             fallback=journal_fallback,
             allow_fallback=journal_allow_fallback,
         )
-    except (StorageBackendError, ValueError) as exc:
-        await market_repo.shutdown()
-        if clickhouse_journal is not None:
-            await clickhouse_journal.shutdown()
-        if postgres_journal is not None:
-            await postgres_journal.shutdown()
-        logger.error(
-            "No configured journal backend can satisfy the operational "
-            "persistence contract; refusing to start: %s",
-            exc,
-        )
-        raise SystemExit(1) from exc
+    except BaseException as exc:
+        # Until both repositories are returned, this function owns all clients.
+        # A failed close must not hide cancellation or skip another resource.
+        for repository in (clickhouse_journal, postgres_journal, market_repo):
+            if repository is None:
+                continue
+            try:
+                await repository.shutdown()
+            except Exception as cleanup_error:
+                logger.warning(
+                    "Storage startup cleanup failed (%s)", type(cleanup_error).__name__
+                )
+        if isinstance(exc, (StorageBackendError, ValueError)):
+            logger.error(
+                "No configured journal backend can satisfy the operational "
+                "persistence contract; refusing to start: %s",
+                exc,
+            )
+            raise SystemExit(1) from exc
+        raise
 
     if journal_selection.backend is StorageBackend.CLICKHOUSE:
         if postgres_journal is not None:

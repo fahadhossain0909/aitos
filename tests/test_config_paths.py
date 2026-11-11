@@ -2,6 +2,7 @@ from pathlib import Path
 
 from aitos.config.paths import (
     get_model_data_dir,
+    get_data_dir,
     get_project_root,
     resolve_project_path,
 )
@@ -18,7 +19,7 @@ def test_project_root_respects_aitos_home(monkeypatch, tmp_path):
     assert get_project_root() == tmp_path.resolve()
 
 
-def test_native_model_data_defaults_inside_project(monkeypatch, tmp_path):
+def test_fresh_native_model_data_defaults_outside_installation(monkeypatch, tmp_path):
     monkeypatch.delenv("MODEL_DATA_DIR", raising=False)
     monkeypatch.setenv("AITOS_HOME", str(tmp_path))
     monkeypatch.setenv("AITOS_ENV_FILE", str(tmp_path / "missing.env"))
@@ -30,7 +31,10 @@ def test_native_model_data_defaults_inside_project(monkeypatch, tmp_path):
         return original_exists(path)
 
     monkeypatch.setattr(Path, "exists", local_exists)
-    assert get_model_data_dir() == tmp_path.resolve() / "data" / "models"
+    # A fresh installation must use persistent user storage. Existing legacy
+    # directories are tested separately; silently moving one is not permitted.
+    assert get_model_data_dir() == get_data_dir() / "models"
+    assert get_model_data_dir() != tmp_path.resolve() / "data" / "models"
 
 
 def test_relative_paths_resolve_from_project_root(monkeypatch, tmp_path):

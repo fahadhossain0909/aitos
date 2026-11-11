@@ -1,0 +1,32 @@
+name: Console quality (no deployment)
+on:
+  push:
+    branches: [arena/ed127d35-aitos]
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - '.github/workflows/console-quality.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: console-quality-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  frontend-contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: npm ci
+      - run: npm run test
+      - run: npm run build
+      - run: npm audit --audit-level=moderate

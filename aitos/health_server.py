@@ -27,12 +27,30 @@ logger = get_logger("aitos.health_server")
 
 class HealthServer:
     def __init__(
-        self, modules: Iterable[AITOSModule], host: str = "127.0.0.1", port: int = 8090
+        self,
+        modules: Iterable[AITOSModule],
+        host: str = "127.0.0.1",
+        port: int = 8090,
+        *,
+        console_token: str | None = None,
+        console_state_store=None,
+        console_runtime_mode: str = "unknown",
+        console_projection_observer=None,
+        console_account_observer=None,
+        console_protection_observer=None,
+        console_history_pages=None,
     ) -> None:
         self._modules: list[AITOSModule] = list(modules)
         self._host = host
         self._port = port
         self._rate_limiter = None
+        self._console_token = console_token
+        self._console_state_store = console_state_store
+        self._console_runtime_mode = console_runtime_mode
+        self._console_projection_observer = console_projection_observer
+        self._console_account_observer = console_account_observer
+        self._console_protection_observer = console_protection_observer
+        self._console_history_pages = console_history_pages
 
     def set_rate_limiter(self, rate_limiter) -> None:
         """Attach the exchange rate limiter for health/metrics reporting."""
@@ -81,6 +99,20 @@ class HealthServer:
         app.router.add_get(
             "/position-lifecycle/{position_id}", self._handle_position_lifecycle
         )
+        if self._console_token is not None:
+            from aitos.console_api import register_console_routes
+
+            register_console_routes(
+                app,
+                self._modules,
+                state_store=self._console_state_store,
+                runtime_mode=self._console_runtime_mode,
+                token=self._console_token,
+                projection_observer=self._console_projection_observer,
+                account_observer=self._console_account_observer,
+                protection_observer=self._console_protection_observer,
+                history_pages=self._console_history_pages,
+            )
         return app
 
     async def stop(self) -> None:
@@ -359,7 +391,7 @@ class HealthServer:
             },
         )
         # Check rate limiter status
-        rate_limiter_status = await self._get_rate_limiter_status()
+        await self._get_rate_limiter_status()
         for module in self._modules:
             module_id = getattr(module, "module_id", module.__class__.__name__)
             logger.info(
@@ -368,7 +400,6 @@ class HealthServer:
             )
             try:
                 health = await module.health_check()
-                healthy = health.status == ModuleStatus.HEALTHY
                 if health.status == ModuleStatus.UNHEALTHY:
                     overall_healthy = False
                     logger.warning(

@@ -1,0 +1,43 @@
+name: Operator gateway quality (no deployment)
+on:
+  push:
+    branches: [arena/ed127d35-aitos]
+  pull_request:
+    paths:
+      - 'aitos/console_gateway.py'
+      - 'aitos/console_api.py'
+      - 'aitos/projection_evidence.py'
+      - 'aitos/trading/revision_projector.py'
+      - 'aitos/trading/revision_journal.py'
+      - 'desktop/**'
+      - 'tests/test_console_gateway.py'
+      - 'tests/test_operator_gateway_browser.py'
+      - '.github/workflows/operator-quality.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: operator-quality-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  protected-console:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: python -m pip install -r requirements.txt
+      - run: npm ci && npm run test && npm run build
+        working-directory: desktop
+      - name: Isolated gateway contracts and built Chromium sign-in flow
+        env:
+          AITOS_RUN_OPERATOR_BROWSER: '1'
+        run: python -m pytest tests/test_console_gateway.py tests/test_operator_gateway_browser.py --timeout=90 -q

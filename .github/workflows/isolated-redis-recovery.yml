@@ -1,0 +1,44 @@
+name: Isolated Redis Recovery
+
+on:
+  pull_request:
+    branches: [main, master, develop]
+  push:
+    branches: [main, arena/ed127d35-aitos]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: isolated-redis-recovery-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  recovery:
+    name: Real Redis crash, reclaim and retry contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install test dependencies and Redis binary
+        run: |
+          python -m pip install -r requirements.txt -r requirements-backtest.txt
+          sudo apt-get update
+          sudo apt-get install -y redis-server
+          redis-server --version
+      - name: Exercise test-owned Unix socket instances
+        env:
+          AITOS_TEST_REDIS_SERVER: redis-server
+        run: |
+          python -m pytest -q tests/integration/test_isolated_redis_recovery.py --timeout=30 --junitxml=tmp/isolated-redis-results.xml
+      - name: Upload integration results
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: isolated-redis-recovery-results
+          path: tmp/isolated-redis-results.xml

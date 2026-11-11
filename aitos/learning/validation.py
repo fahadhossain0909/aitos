@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import timedelta
+from math import isfinite
 from typing import Any
 
 from aitos.backtest.engine import BacktestEngine, BacktestResult
 
+from .metric_integrity import metric_integrity_error, validate_count
 from .walk_forward import WalkForwardResult, WalkForwardValidator
 
 
@@ -26,12 +29,18 @@ class ValidationPolicy:
     min_positive_windows: int = 1
 
     def __post_init__(self) -> None:
-        if self.train_days < 1 or self.test_days < 1 or self.holdout_days < 1:
-            raise ValueError(
-                "walk-forward train/test/holdout durations must be positive"
-            )
-        if self.min_trades < 0 or self.min_positive_windows < 0:
-            raise ValueError("validation sample thresholds are invalid")
+        for name in ("train_days", "test_days", "holdout_days"):
+            validate_count(getattr(self, name), name, minimum=1)
+        for name in ("min_trades", "min_positive_windows"):
+            validate_count(getattr(self, name), name)
+        for name in ("min_total_return", "min_sharpe", "max_drawdown"):
+            value = getattr(self, name)
+            try:
+                valid = not isinstance(value, bool) and isfinite(value)
+            except (TypeError, ValueError, OverflowError):
+                valid = False
+            if not valid:
+                raise ValueError(f"{name} must be finite")
         if not 0 <= self.max_drawdown <= 1:
             raise ValueError("max_drawdown must be in [0, 1]")
 
@@ -85,7 +94,7 @@ class CandidateValidator:
             ]
             if not development_events:
                 candidate = BacktestEngine(initial_cash, fee_rate, slippage_bps).run(
-                    [], candidate_strategy, mark_price
+                    [], deepcopy(candidate_strategy), mark_price
                 )
                 walk_forward = WalkForwardValidator(
                     initial_cash=initial_cash,
@@ -114,10 +123,29 @@ class CandidateValidator:
             end = events[-1].timestamp
             development_events = events
 
+        # Do not let the development run mutate the frozen proposal that
+        # WalkForwardValidator copies for each unseen window and holdout.
         candidate = BacktestEngine(initial_cash, fee_rate, slippage_bps).run(
-            development_events, candidate_strategy, mark_price
+            development_events, deepcopy(candidate_strategy), mark_price
         )
         metrics = candidate.metrics
+        invalid = metric_integrity_error(metrics)
+        if invalid:
+            return ValidationResult(
+                False,
+                f"invalid development metrics: {invalid}",
+                candidate,
+                champion_result,
+            )
+        if champion_result is not None:
+            invalid = metric_integrity_error(champion_result.metrics)
+            if invalid:
+                return ValidationResult(
+                    False,
+                    f"invalid champion metrics: {invalid}",
+                    candidate,
+                    champion_result,
+                )
         if metrics.total_return < self.policy.min_total_return:
             return ValidationResult(
                 False,

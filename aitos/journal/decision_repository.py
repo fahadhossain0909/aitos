@@ -65,11 +65,26 @@ class DecisionJournalRepository(AITOSModule):
     async def initialize(self, config):
         if self._initialized:
             return
+        # A prior close failure must be retried before replacing its handle.
+        if self._client is not None:
+            await self.shutdown()
         self._client = await clickhouse_connect.get_async_client(**self._conn_params)
-        await self._client.command(CREATE_DECISION_JOURNAL)
-        await self._client.command(
-            "ALTER TABLE decision_journal ADD COLUMN IF NOT EXISTS evidence_contributions String DEFAULT '[]'"
-        )
+        try:
+            await self._client.command(CREATE_DECISION_JOURNAL)
+            await self._client.command(
+                "ALTER TABLE decision_journal ADD COLUMN IF NOT EXISTS evidence_contributions String DEFAULT '[]'"
+            )
+        except BaseException:
+            # Cancellation is also a startup failure: release acquired resources
+            # without hiding the original schema/connection failure.
+            try:
+                await self.shutdown()
+            except Exception as cleanup_error:
+                logger.error(
+                    "Repository startup cleanup failed (%s); client retained for retry",
+                    type(cleanup_error).__name__,
+                )
+            raise
         self._initialized = True
         logger.info("DecisionJournalRepository initialized")
 
@@ -90,8 +105,11 @@ class DecisionJournalRepository(AITOSModule):
         )
 
     async def shutdown(self, grace_period_seconds=30.0):
+        # Fail closed immediately, including when close raises or is cancelled.
+        self._initialized = False
         if self._client is not None:
             await self._client.close()
+            self._client = None
 
     async def emit_events(self):
         return

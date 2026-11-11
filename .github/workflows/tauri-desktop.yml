@@ -1,0 +1,134 @@
+name: Cross-platform embedded desktop (unsigned, no trading)
+on:
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'native/shared/**'
+      - 'aitos/native/**'
+      - 'aitos/console*.py'
+      - '.github/workflows/tauri-desktop.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: embedded-desktop-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            bundles: appimage,deb
+          - os: windows-2022
+            bundles: nsis
+          - os: macos-14
+            bundles: dmg
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux WebView and desktop libraries (not installed on any VPS)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libssl-dev librsvg2-dev libayatana-appindicator3-dev patchelf python3-tk gnome-keyring dbus-x11 xvfb
+      - name: Install narrow sidecar environment
+        run: python -m pip install -r native/shared/requirements.txt pytest
+      - name: Shared React tests and bundle
+        run: |
+          npm --prefix desktop ci
+          npm --prefix desktop test
+          npm --prefix desktop run build
+      - name: Determine real host target and freeze the read-only sidecar
+        shell: bash
+        run: |
+          target="$(rustc -vV | sed -n 's/^host: //p')"
+          test -n "$target"
+          echo "AITOS_TARGET=$target" >> "$GITHUB_ENV"
+          python native/shared/build_sidecar.py --target "$target"
+      - name: Frozen local signer admin protocol smoke (no vault)
+        shell: bash
+        run: |
+          binary="desktop/src-tauri/binaries/aitos-gateway-${AITOS_TARGET}"
+          if [[ "${RUNNER_OS}" == "Windows" ]]; then binary+=".exe"; fi
+          printf '%s\n' '{"action":"status"}' | "$binary" --credential-admin > signer-admin-smoke.json
+          python -c "import json; assert json.load(open('signer-admin-smoke.json', encoding='utf-8')) == {'ok': False, 'error': 'invalid_signer_admin_request'}"
+      - name: Real Windows Credential Manager acceptance (synthetic only)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: PYTHONPATH="$GITHUB_WORKSPACE" python native/shared/test_real_vault.py
+      - name: Backup staging and storage regression tests
+        # These two modules use only built-in pytest fixtures; skip the unrelated
+        # repository-wide conftest, which imports the full trading test stack.
+        run: python -m pytest --noconftest tests/test_backup_bundle.py tests/test_durable_files.py -q
+      - name: Frozen gateway auth and revocation smoke (synthetic, no vault)
+        shell: bash
+        run: |
+          executable="desktop/src-tauri/binaries/aitos-gateway-$AITOS_TARGET"
+          if [[ "$RUNNER_OS" == Windows ]]; then executable="$executable.exe"; fi
+          "$executable" --gateway-self-test
+      - name: Compile embedded shell and per-OS installer
+        run: npm --prefix desktop run tauri -- build --bundles ${{ matrix.bundles }}
+      - name: Linux AppImage extracted execution smoke
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          image="$(find desktop/src-tauri/target/release/bundle/appimage -name '*.AppImage' -print -quit)"
+          test -n "$image"
+          timeout 90s xvfb-run -a "$image" --appimage-extract-and-run --gateway-self-test
+      - name: Embedded Windows executable smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p=Start-Process -FilePath desktop/src-tauri/target/release/aitos-desktop.exe -ArgumentList '--gateway-self-test' -PassThru
+          if (-not $p.WaitForExit(90000)) { $p.Kill(); throw 'Embedded shell smoke deadline' }
+          if ($p.ExitCode -ne 0) { throw 'Embedded shell smoke failed' }
+      - name: macOS packaged application smoke
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app="$(find desktop/src-tauri/target/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)"
+          test -n "$app"
+          "$app/Contents/MacOS/aitos-desktop" --gateway-self-test
+      - name: Publish unsigned candidates and build provenance, never credentials
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: UNSIGNED-embedded-desktop-${{ matrix.os }}-test-only
+          retention-days: 7
+          path: |
+            desktop/src-tauri/target/release/bundle/
+            desktop/src-tauri/Cargo.lock
+  secret-service:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y gnome-keyring dbus-x11
+      - run: python -m pip install 'keyring>=25.6,<26'
+      - name: Real isolated Secret Service persistence and deletion
+        shell: bash
+        run: |
+          export PYTHONPATH="$GITHUB_WORKSPACE"
+          export HOME="$RUNNER_TEMP/aitos-secret-service-home"
+          mkdir -m 700 "$HOME"
+          dbus-run-session -- bash -euc '
+            printf "%s" "synthetic-ci-only-login" | gnome-keyring-daemon --unlock --components=secrets
+            python native/shared/test_real_vault.py
+          '

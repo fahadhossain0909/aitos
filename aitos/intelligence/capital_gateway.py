@@ -342,3 +342,7 @@ class CapitalGateway:
     def release(self, symbol: str) -> Reservation | None:
         """Release a reservation after cancellation/close."""
         return self.reservation.release(symbol)
+
+    def pin(self, symbol: str) -> bool:
+        """Submission/open exposure needs explicit release, never lease expiry."""
+        return self.reservation.pin(symbol)

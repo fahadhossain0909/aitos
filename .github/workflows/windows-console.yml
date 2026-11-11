@@ -1,0 +1,55 @@
+name: Windows console build and vault verification
+on:
+  push:
+    branches: [arena/ed127d35-aitos]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'native/windows/**'
+      - 'aitos/native/**'
+      - 'tests/test_native_console_host.py'
+      - 'aitos/console_gateway.py'
+      - 'tests/test_windows_vault.py'
+      - 'desktop/**'
+      - '.github/workflows/windows-console.yml'
+permissions:
+  contents: read
+jobs:
+  unsigned-validation:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      - run: python -m pip install -r native/windows/requirements.txt pytest pytest-asyncio pytest-timeout fakeredis python-dotenv pydantic pydantic-settings
+      - run: python -m pytest tests/test_native_console_host.py --noconftest --timeout=90 -q
+      # Native vault tests are outside the broad trading conftest dependency graph.
+      - run: python -m pytest native/windows/test_native_vault.py -q
+      - shell: pwsh
+        run: |
+          try { ./native/windows/build.ps1 2>&1 | Tee-Object -Variable output }
+          catch {
+            $detail=(($output | Select-Object -Last 25) -join "`n") + "`n" + $_.ToString()
+            $detail=$detail.Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Windows build failure::$detail"
+            throw
+          }
+      - shell: pwsh
+        run: |
+          try { ./native/windows/validate-install.ps1 }
+          catch {
+            $detail=$_.ToString().Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+            Write-Host "::error title=Installed Windows validation failure::$detail"
+            throw
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UNSIGNED-Windows-console-test-only
+          path: artifacts/windows/*

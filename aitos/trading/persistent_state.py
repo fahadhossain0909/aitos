@@ -5,15 +5,18 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import math
 import weakref
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
+from numbers import Real
 from typing import Any
 
 from aitos.app import LivePortfolioTracker
 from aitos.data.ingestion import DataIngestionService
 from aitos.eventbus.redis_bus import EventBus, Subscription
+from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.logging_setup import get_logger
 from aitos.models.trade import PartialExit, Trade, TradeLifecycleState, TradeSide
@@ -72,6 +75,88 @@ CREATE TABLE IF NOT EXISTS exchange_income_sync_cursor (
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY account
 """
+
+
+# Static, reviewable SQL statements. Filter only AFTER selecting latest
+# retained payloads; timestamp ties are not silently resolved with argMax.
+# User-controlled values remain driver-bound parameters, never SQL fragments.
+CLOSED_HISTORY_QUERY = """
+SELECT trade_id, latest_payload, payload_versions
+FROM (
+    SELECT trade_id, any(payload_json) AS latest_payload,
+           uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
+    FROM paper_closed_trade_ledger
+    WHERE (trade_id, updated_at) IN (
+        SELECT trade_id, max(updated_at)
+        FROM paper_closed_trade_ledger
+        GROUP BY trade_id
+    )
+    GROUP BY trade_id
+)
+WHERE (payload_versions != 1 OR {symbol:String} = ''
+       OR JSONExtractString(latest_payload, 'symbol') = {symbol:String})
+ORDER BY latest DESC, trade_id
+LIMIT {limit:UInt32} OFFSET {offset:UInt32}
+SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
+         max_memory_usage=134217728, read_overflow_mode='throw'
+"""
+
+CLOSED_PERFORMANCE_QUERY = """
+SELECT trade_id, latest_payload, payload_versions
+FROM (
+    SELECT trade_id, any(payload_json) AS latest_payload,
+           uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
+    FROM paper_closed_trade_ledger
+    WHERE (trade_id, updated_at) IN (
+        SELECT trade_id, max(updated_at)
+        FROM paper_closed_trade_ledger
+        GROUP BY trade_id
+    )
+    GROUP BY trade_id
+)
+ORDER BY latest DESC, trade_id
+LIMIT {limit:UInt32}
+SETTINGS max_execution_time=3, max_bytes_to_read=67108864,
+         max_memory_usage=134217728, read_overflow_mode='throw'
+"""
+
+CLOSED_RECOVERY_QUERY = """
+SELECT trade_id, latest_payload, payload_versions
+FROM (
+    SELECT trade_id, any(payload_json) AS latest_payload,
+           uniqExact(payload_json) AS payload_versions, max(updated_at) AS latest
+    FROM paper_closed_trade_ledger
+    WHERE (trade_id, updated_at) IN (
+        SELECT trade_id, max(updated_at)
+        FROM paper_closed_trade_ledger
+        GROUP BY trade_id
+    )
+    GROUP BY trade_id
+)
+ORDER BY trade_id
+"""
+
+
+def _closed_payload(row) -> dict:
+    if len(row) != 3 or row[2] != 1:
+        raise ValueError("ambiguous latest closed-ledger payload")
+    payload = json.loads(row[1])
+    if not isinstance(payload, dict) or payload.get("trade_id") != row[0]:
+        raise ValueError("closed-ledger identity mismatch")
+    if payload.get("state") != "position_closed":
+        raise ValueError("closed ledger contains a nonterminal trade")
+    pnl = payload.get("pnl")
+    if isinstance(pnl, bool) or not isinstance(pnl, Real) or not math.isfinite(pnl):
+        raise ValueError("closed ledger requires finite recorded PnL")
+    for key in ("gross_realized_pnl_usd", "fees_paid_usd", "funding_pnl_usd"):
+        value = payload.get(key)
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, Real)
+            or not math.isfinite(value)
+        ):
+            raise ValueError("invalid closed-ledger cost evidence")
+    return payload
 
 
 _INGESTIONS: weakref.WeakSet[DataIngestionService] = weakref.WeakSet()
@@ -321,8 +406,10 @@ class DurableTradingStateStore:
                         trade.trade_id,
                         trade.symbol,
                         trade.state.value,
-                        json.dumps(payload, sort_keys=True, default=str),
-                        datetime.now(timezone.utc),
+                        json.dumps(
+                            payload, sort_keys=True, default=str, allow_nan=False
+                        ),
+                        datetime.fromisoformat(trade.updated_at.replace("Z", "+00:00")),
                     ]
                 ],
                 column_names=[
@@ -366,12 +453,15 @@ class DurableTradingStateStore:
         try:
             result = await client.query(
                 """
-                SELECT trade_id, argMax(payload_json, updated_at) AS payload_json
+                SELECT trade_id, any(payload_json) AS latest_payload,
+                       uniqExact(payload_json) AS latest_payload_versions
                 FROM trade_runtime_state
-                WHERE state IN ('position_opened', 'exit_triggered')
-                  AND trade_id NOT IN (
-                      SELECT trade_id FROM paper_closed_trade_ledger
-                  )
+                WHERE (trade_id, updated_at) IN (
+                    SELECT trade_id, max(updated_at)
+                    FROM trade_runtime_state GROUP BY trade_id
+                ) AND trade_id NOT IN (
+                    SELECT trade_id FROM paper_closed_trade_ledger
+                )
                 GROUP BY trade_id
                 """
             )
@@ -381,18 +471,25 @@ class DurableTradingStateStore:
         trades: list[Trade] = []
         for row in result.result_rows:
             try:
+                if len(row) != 3 or row[2] != 1:
+                    raise ValueError("ambiguous latest runtime payload")
                 payload = json.loads(row[1])
-                trades.append(_trade_from_dict(payload))
+                if payload.get("trade_id") != row[0]:
+                    raise ValueError("runtime payload identity mismatch")
+                trade = _trade_from_dict(payload)
+                if trade.state in {
+                    TradeLifecycleState.POSITION_OPENED,
+                    TradeLifecycleState.EXIT_TRIGGERED,
+                }:
+                    trades.append(trade)
             except Exception as exc:
                 logger.error(
-                    "failed to restore trade state",
-                    extra={
-                        "aitos_extra": {
-                            "trade_id": row[0] if row else None,
-                            "error": str(exc),
-                        }
-                    },
+                    "runtime recovery blocked by invalid or ambiguous state",
+                    extra={"aitos_extra": {"trade_id": row[0] if row else None}},
                 )
+                raise RuntimeError(
+                    "runtime recovery requires unambiguous valid latest trade state"
+                ) from exc
         return trades
 
     async def save_closed_trade(self, trade: Trade) -> None:
@@ -400,41 +497,86 @@ class DurableTradingStateStore:
         if trade.state != TradeLifecycleState.POSITION_CLOSED:
             raise ValueError("only closed trades can be archived")
         client = self._client()
+        _closed_payload(
+            (trade.trade_id, json.dumps(trade.to_dict(), allow_nan=False), 1)
+        )
         await client.insert(
             "paper_closed_trade_ledger",
             [
                 [
                     trade.trade_id,
-                    json.dumps(trade.to_dict(), sort_keys=True, default=str),
+                    json.dumps(
+                        trade.to_dict(), sort_keys=True, default=str, allow_nan=False
+                    ),
                     datetime.now(timezone.utc),
                 ]
             ],
             column_names=["trade_id", "payload_json", "updated_at"],
         )
 
-    async def load_closed_trades(self) -> list[Trade]:
-        """Restore realized trade history used to rebuild paper equity and PnL."""
-        client = self._client()
-        result = await client.query(
-            """
-            SELECT trade_id, argMax(payload_json, updated_at) AS payload_json
-            FROM paper_closed_trade_ledger
-            GROUP BY trade_id
-            ORDER BY trade_id
-            """
+    async def query_closed_history(
+        self, *, limit: int, offset: int = 0, symbol: str = ""
+    ) -> list[dict]:
+        """Bounded parameterized query over the existing durable closed ledger."""
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or isinstance(offset, bool)
+            or not isinstance(offset, int)
+            or not 1 <= limit <= 100
+            or not 0 <= offset <= 100000
+        ):
+            raise ValueError("invalid bounded history query")
+        result = await self._client().query(
+            CLOSED_HISTORY_QUERY,
+            parameters={"symbol": symbol, "limit": limit, "offset": offset},
         )
-        trades: list[Trade] = []
-        for row in result.result_rows:
-            try:
-                trade = _trade_from_dict(json.loads(row[1]))
-                if trade.state == TradeLifecycleState.POSITION_CLOSED:
-                    trades.append(trade)
-            except Exception as exc:
-                logger.error(
-                    "failed to restore closed paper trade",
-                    extra={"aitos_extra": {"trade_id": row[0], "error": str(exc)}},
-                )
-        return trades
+        return [_closed_payload(row) for row in result.result_rows]
+
+    async def query_closed_snapshot(self, *, limit: int = 10000) -> dict:
+        """One bounded result for explicit console materialization, no source writes."""
+        if type(limit) is not int or not 1 <= limit <= 10000:
+            raise ValueError("invalid bounded snapshot query")
+        result = await self._client().query(
+            CLOSED_HISTORY_QUERY,
+            parameters={"symbol": "", "limit": limit + 1, "offset": 0},
+        )
+        # Validate the extra row too; never hide a known revision conflict.
+        payloads = [_closed_payload(row) for row in result.result_rows]
+        return {"rows": payloads[:limit], "truncated": len(payloads) > limit}
+
+    async def query_closed_performance(self, *, limit: int = 1000) -> dict:
+        """One bounded query, not a loop over offset pages of a changing ledger."""
+        from aitos.trading.performance import analyze_closed_trades
+
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 10000
+        ):
+            raise ValueError("invalid bounded performance query")
+        result = await self._client().query(
+            CLOSED_PERFORMANCE_QUERY,
+            parameters={"limit": limit + 1},
+        )
+        rows = result.result_rows
+        # Validate the extra row too: a known conflict must not be hidden.
+        payloads = [_closed_payload(row) for row in rows]
+        return analyze_closed_trades(
+            payloads[:limit], window_limit=limit, truncated=len(rows) > limit
+        )
+
+    async def load_closed_trades(self) -> list[Trade]:
+        """Restore complete realized evidence or fail; never silently lose PnL."""
+        result = await self._client().query(CLOSED_RECOVERY_QUERY)
+        try:
+            return [
+                _trade_from_dict(_closed_payload(row)) for row in result.result_rows
+            ]
+        except Exception as exc:
+            raise RuntimeError(
+                "closed-ledger recovery requires valid unambiguous terminal records"
+            ) from exc
 
     async def save_drawdown(self, asset: str, equity: float, peak: float) -> None:
         client = self._client()
@@ -813,12 +955,58 @@ class TradeStatePersistence:
                 group="trade-state-persistence",
             )
         )
+        self._lifecycle._execution_state_writer = self.persist_execution_state
+        self._lifecycle._execution_position_verifier = self.verify_execution_positions
         logger.info(
             "trade state persistence subscribed",
             extra={"aitos_extra": {"subscriptions": len(self._subscriptions)}},
         )
 
+    async def verify_execution_positions(self) -> None:
+        executor = self._lifecycle._order_executor
+        try:
+            if any(
+                trade.agent_consensus.get("_pending_stop_cancellations")
+                for trade in self._lifecycle.get_open_trades()
+            ):
+                raise ValueError(
+                    "unresolved protective-order cancellation requires reconciliation"
+                )
+            assert_position_snapshot_matches(
+                self._lifecycle.get_open_trades(),
+                await executor.get_position_risk(),
+                hedge_mode=executor.hedge_mode,
+            )
+        except Exception:
+            self._lifecycle._account_reconciliation_error = True
+            raise
+        self._lifecycle._account_reconciliation_error = False
+
+    async def persist_execution_state(self, trade: Trade) -> None:
+        """Critical write-through, distinct from asynchronous event publication.
+
+        Archive precedes deletion; a failure keeps the intent unacknowledged.
+        """
+        if trade.state == TradeLifecycleState.POSITION_CLOSED:
+            await self._store.save_closed_trade(trade)
+            await self._store.delete_trade(trade.trade_id)
+        else:
+            await self._store.save_trade(trade)
+
     async def shutdown(self) -> None:
+        drain = getattr(self._lifecycle, "drain_live_submissions", None)
+        if callable(drain):
+            await drain()
+        if (
+            getattr(self._lifecycle, "_execution_state_writer", None)
+            == self.persist_execution_state
+        ):
+            del self._lifecycle._execution_state_writer
+        if (
+            getattr(self._lifecycle, "_execution_position_verifier", None)
+            == self.verify_execution_positions
+        ):
+            del self._lifecycle._execution_position_verifier
         for subscription in self._subscriptions:
             subscription.cancel()
         self._subscriptions.clear()
@@ -931,6 +1119,7 @@ class IdempotentOrderExecutor(OrderExecutor):
         self._state_store = state_store
         self._completed: dict[str, OrderResult] = {}
         self._inflight: dict[str, asyncio.Future[OrderResult]] = {}
+        self._requests: dict[str, OrderRequest] = {}
         self._blocked_reason: str | None = None
         self._blocked_client_order_id: str | None = None
 
@@ -938,7 +1127,35 @@ class IdempotentOrderExecutor(OrderExecutor):
     def supports_exchange_side_stops(self) -> bool:
         return self._inner.supports_exchange_side_stops
 
+    @property
+    def requires_exchange_execution(self) -> bool:
+        return self._inner.requires_exchange_execution
+
+    def has_unresolved_orders(self, symbol: str | None = None) -> bool:
+        return any(
+            symbol is None or self._requests[key].symbol == symbol
+            for key in self._inflight
+        ) or self._inner.has_unresolved_orders(symbol)
+
+    def acknowledge_execution(self, client_order_id: str, trade_id: str) -> None:
+        self._inner.acknowledge_execution(client_order_id, trade_id)
+
     async def submit_order(self, request: OrderRequest) -> OrderResult:
+        # Reject malformed economics before registering an identity or causing
+        # any venue side effect. NaN bypasses ordinary <= 0 comparisons.
+        for name in ("quantity", "reference_price"):
+            value = getattr(request, name)
+            try:
+                valid = (
+                    not isinstance(value, bool)
+                    and isinstance(value, Real)
+                    and math.isfinite(value)
+                    and value > 0
+                )
+            except (TypeError, ValueError, OverflowError):
+                valid = False
+            if not valid:
+                raise ValueError(f"{name} must be finite and strictly positive")
         key = request.client_order_id or self._key(request)
         request = (
             request
@@ -950,19 +1167,28 @@ class IdempotentOrderExecutor(OrderExecutor):
                 f"new order submissions blocked by unresolved intent "
                 f"{self._blocked_client_order_id}: {self._blocked_reason}"
             )
+        previous = self._requests.get(key)
+        if previous is not None and previous != request:
+            raise ValueError("client order ID reused for a different request")
+        self._requests[key] = request
         if key in self._completed:
             return self._completed[key]
-        if key in self._inflight:
-            return await self._inflight[key]
-        task = asyncio.create_task(self._submit_with_recovery(key, request))
-        self._inflight[key] = task
-        try:
-            result = await task
-            if result.success or result.filled_quantity > 0:
-                self._completed[key] = result
-            return result
-        finally:
-            self._inflight.pop(key, None)
+        task = self._inflight.get(key)
+        if task is None:
+            task = asyncio.create_task(self._submit_with_recovery(key, request))
+            self._inflight[key] = task
+
+            def settle(finished: asyncio.Future[OrderResult]) -> None:
+                # Ownership belongs to the submission, not whichever caller
+                # happens to be awaiting it. Also retrieve orphaned exceptions.
+                self._inflight.pop(key, None)
+                if not finished.cancelled() and finished.exception() is None:
+                    result = finished.result()
+                    if result.success or result.filled_quantity > 0:
+                        self._completed[key] = result
+
+            task.add_done_callback(settle)
+        return await asyncio.shield(task)
 
     async def _submit_with_recovery(
         self, key: str, request: OrderRequest
@@ -972,11 +1198,81 @@ class IdempotentOrderExecutor(OrderExecutor):
 
         record = await self._state_store.load_order_record(key)
         if record is not None:
+            # A durable client ID is an immutable request identity across
+            # process restarts, not merely a lookup key. Never replay an old
+            # acknowledgement against changed economics or position intent.
+            stored_request = record.get("request")
+            if (
+                not isinstance(stored_request, Mapping)
+                or dict(stored_request) != self._request_payload(request)
+                or record.get("symbol") != request.symbol
+            ):
+                self._blocked_reason = "durable client order ID conflicts with request"
+                self._blocked_client_order_id = key
+                raise AmbiguousOrderSubmissionError(
+                    f"order {key} is bound to a different durable request; manual reconciliation required"
+                )
             state = str(record.get("state", "")).upper()
             if state in {"ACKNOWLEDGED", "REJECTED"}:
+                try:
+                    raw_result = record.get("result")
+                    if (
+                        not isinstance(raw_result, Mapping)
+                        or type(raw_result.get("success")) is not bool
+                        or not isinstance(raw_result.get("symbol"), str)
+                        or not isinstance(raw_result.get("side"), str)
+                        or any(
+                            isinstance(raw_result.get(field), bool)
+                            or not isinstance(raw_result.get(field), Real)
+                            or not math.isfinite(float(raw_result.get(field)))
+                            for field in ("filled_quantity", "fill_price")
+                        )
+                    ):
+                        raise ValueError("durable result schema is incomplete")
+                    replay = self._result_from_payload(raw_result, request)
+                    valid_quantity = (
+                        math.isfinite(replay.filled_quantity)
+                        and replay.filled_quantity >= 0
+                        and replay.filled_quantity <= request.quantity * (1 + 1e-9)
+                    )
+                    valid_price = (
+                        math.isfinite(replay.fill_price) and replay.fill_price >= 0
+                    )
+                    if (
+                        replay.symbol != request.symbol
+                        or replay.side != request.side
+                        or not valid_quantity
+                        or not valid_price
+                        or (
+                            state == "ACKNOWLEDGED"
+                            and (
+                                not replay.success
+                                or replay.filled_quantity <= 0
+                                or replay.fill_price <= 0
+                                or not replay.order_id
+                            )
+                        )
+                        or (
+                            state == "REJECTED"
+                            and (
+                                replay.success
+                                or replay.filled_quantity != 0
+                                or replay.fill_price != 0
+                            )
+                        )
+                    ):
+                        raise ValueError(
+                            "durable result does not match its terminal state"
+                        )
+                except (TypeError, ValueError, OverflowError):
+                    self._blocked_reason = "durable terminal order evidence is invalid"
+                    self._blocked_client_order_id = key
+                    raise AmbiguousOrderSubmissionError(
+                        f"order {key} has invalid durable terminal evidence; manual reconciliation required"
+                    ) from None
                 self._blocked_reason = None
                 self._blocked_client_order_id = None
-                return self._result_from_payload(record.get("result", {}), request)
+                return replay
             if state == "SUBMITTING":
                 try:
                     recovered = await self._recover_ambiguous(key, request)
@@ -1058,6 +1354,10 @@ class IdempotentOrderExecutor(OrderExecutor):
                 f"order {key} remains ambiguous: venue lookup returned no authoritative result; "
                 "automatic resubmission blocked"
             )
+        if not isinstance(status, Mapping):
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} lookup returned malformed evidence; manual reconciliation required"
+            )
         venue_state = str(status.get("status", "")).upper()
         terminal_states = {
             "FILLED",
@@ -1070,11 +1370,48 @@ class IdempotentOrderExecutor(OrderExecutor):
             raise AmbiguousOrderSubmissionError(
                 f"order {key} is still {venue_state or 'unknown'}; automatic resubmission blocked"
             )
-        filled = float(status.get("executedQty", status.get("filled_quantity", 0)) or 0)
-        price = float(status.get("avgPrice", status.get("fill_price", 0)) or 0)
-        accepted = filled > 0 and price > 0
+
+        # Recovery bypasses the normal Binance submit-response validator. Bind
+        # the lookup result back to the exact intent before it can be persisted
+        # as acknowledged exposure.
+        expected_side = (
+            ("SELL" if request.side == TradeSide.LONG else "BUY")
+            if request.reduce_only
+            else ("BUY" if request.side == TradeSide.LONG else "SELL")
+        )
+        if (
+            status.get("symbol") != request.symbol
+            or status.get("clientOrderId", status.get("client_order_id")) != key
+            or str(status.get("side", "")).upper() != expected_side
+        ):
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} lookup identity does not match the durable request"
+            )
+        try:
+            filled = float(
+                status.get("executedQty", status.get("filled_quantity", 0)) or 0
+            )
+            price = float(status.get("avgPrice", status.get("fill_price", 0)) or 0)
+        except (TypeError, ValueError, OverflowError):
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} lookup returned invalid fill economics"
+            ) from None
+        order_id = str(status.get("orderId", status.get("order_id", "")))
+        if (
+            not math.isfinite(filled)
+            or not math.isfinite(price)
+            or filled < 0
+            or filled > request.quantity * (1 + 1e-9)
+            or price < 0
+            or (filled > 0 and (price <= 0 or not order_id))
+            or (filled == 0 and price != 0)
+        ):
+            raise AmbiguousOrderSubmissionError(
+                f"order {key} lookup returned invalid or out-of-bounds fill evidence"
+            )
+        accepted = filled > 0
         result = OrderResult(
-            order_id=str(status.get("orderId", status.get("order_id", ""))),
+            order_id=order_id,
             symbol=request.symbol,
             side=request.side,
             filled_quantity=filled,
@@ -1139,9 +1476,10 @@ class IdempotentOrderExecutor(OrderExecutor):
             [
                 request.symbol,
                 request.side.value,
-                f"{request.quantity:.12g}",
-                f"{request.reference_price:.12g}",
+                float(request.quantity).hex(),
+                float(request.reference_price).hex(),
                 request.order_type,
+                str(request.reduce_only),
             ]
         )
         return "aitos-" + hashlib.sha256(raw.encode()).hexdigest()[:24]

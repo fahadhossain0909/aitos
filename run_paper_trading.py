@@ -504,8 +504,20 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
         },
     )
     state_store = DurableTradingStateStore(market_repo)
+    # Explicitly opted-in shadow mirror only: legacy recovery remains authoritative.
+    from aitos.trading.paper_shadow_runtime import (
+        configured_shadow,
+        MirroredPaperStateStore,
+    )
+
+    shadow = configured_shadow(os.environ, getattr(market_repo, "_client", None))
+    persistence_store = state_store
+    if shadow is not None:
+        cleanup.push_async_callback(shadow.stop)
+        await shadow.start()
+        persistence_store = MirroredPaperStateStore(state_store, shadow)
     trade_state_persistence = TradeStatePersistence(
-        event_bus, components.trade_lifecycle, state_store
+        event_bus, components.trade_lifecycle, persistence_store
     )
     cleanup.push_async_callback(trade_state_persistence.shutdown)
     # Ensure runtime-state tables and event subscriptions exist before recovery.
@@ -622,6 +634,10 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
         # nosec B104 - binding all interfaces is required for the Docker health check.
         host="0.0.0.0",  # nosec B104
         port=HEALTH_SERVER_PORT,
+        console_token=os.getenv("AITOS_CONSOLE_TOKEN"),
+        console_state_store=state_store,
+        console_runtime_mode="paper",
+        console_projection_observer=shadow,
     )
     cleanup.push_async_callback(health_server.stop)
     await health_server.start()
@@ -767,32 +783,40 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
             except TimeoutError:
                 pass
     finally:
-        if drift_engine is not None:
-            try:
-                await drift_engine.stop_drift_monitor()
-            except Exception:
-                logger.exception("A-Stat drift monitor shutdown failed")
-        await _cancel_task(heal_task)
-        # Let the worker finish its current ClickHouse batch before joining.
-        await _stop_learning_worker(learning_worker, learning_task)
-        await price_safety_net.stop()
-        await _shutdown_agents(agents)
-        await tracker.persist_state(components.trade_lifecycle)
-        await asyncio.to_thread(rl_scorer.save_state)
-        await asyncio.to_thread(outcome_classifier.save_state)
-        await asyncio.to_thread(
-            save_attention_model, attention_explainer, attention_path
-        )
-        await health_server.stop()
-        await experience_recorder.shutdown()
-        await market_os_persistence.shutdown()
-        await trade_state_persistence.shutdown()
-        await shutdown_all(components)
-        await market_repo.shutdown()
-        await journal_repo.shutdown()
-        if graph_driver is not None:
-            await graph_driver.close()
-        await redis_client.close()
+        try:
+            if drift_engine is not None:
+                try:
+                    await drift_engine.stop_drift_monitor()
+                except Exception:
+                    logger.exception("A-Stat drift monitor shutdown failed")
+            await _cancel_task(heal_task)
+            # Let the worker finish its current ClickHouse batch before joining.
+            await _stop_learning_worker(learning_worker, learning_task)
+            await price_safety_net.stop()
+            await _shutdown_agents(agents)
+            await tracker.persist_state(components.trade_lifecycle)
+            await asyncio.to_thread(rl_scorer.save_state)
+            await asyncio.to_thread(outcome_classifier.save_state)
+            await asyncio.to_thread(
+                save_attention_model, attention_explainer, attention_path
+            )
+            await health_server.stop()
+            await experience_recorder.shutdown()
+            await market_os_persistence.shutdown()
+            await trade_state_persistence.shutdown()
+            if shadow is not None:
+                await shadow.stop()
+            await shutdown_all(components)
+            await market_repo.shutdown()
+            await journal_repo.shutdown()
+            if graph_driver is not None:
+                await graph_driver.close()
+            await redis_client.close()
+
+        finally:
+            # Also drain the new worker if an earlier legacy teardown step fails.
+            if shadow is not None:
+                await shadow.stop()
         logger.info(
             "paper runtime shutdown complete",
             extra={"aitos_extra": {"shutdown_status": "complete"}},

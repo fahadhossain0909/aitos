@@ -19,11 +19,16 @@ from aitos.data.market_os_persistence import MarketOSPersistence
 from aitos.exchange.binance import BinanceFuturesAdapter
 from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
+from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.health_server import HealthServer
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.kernel.ai_kernel import AIKernel
 from aitos.learning.recorder import LearningExperienceRecorder
-from aitos.live_trading import confirm_live_trading, prepare_live_executor
+from aitos.live_trading import (
+    confirm_live_trading,
+    create_live_capital_gateway,
+    prepare_live_executor,
+)
 from aitos.logging_setup import configure_logging, get_logger
 from aitos.market_data.universe import resolve_live_universe
 from aitos.runtime_connections import (
@@ -32,6 +37,8 @@ from aitos.runtime_connections import (
     try_connect_neo4j,
 )
 from aitos.runtime_signals import install_signal_handlers
+from aitos.runtime_ownership import RuntimeOwnership
+from aitos.intelligence.capital_protection import Reservation
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
     IdempotentOrderExecutor,
@@ -62,6 +69,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
             "Trading entrypoint/configuration mode mismatch: run_live_trading.py requires AITOS_MODE=live"
         )
     configure_logging(settings.log_level)
+    ownership = RuntimeOwnership(get_model_data_dir() / "live_runtime.owner.lock")
+    ownership.acquire()
+    cleanup.callback(ownership.release)
     redis_client = await connect_redis_with_retry(settings, logger=logger)
     cleanup.push_async_callback(redis_client.aclose)
     from aitos.eventbus.factory import create_event_bus
@@ -134,6 +144,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     )
     event_bus_cleanup_owner["components"] = True
     cleanup.push_async_callback(shutdown_all, components)
+    components.trade_lifecycle._aitos_capital_gateway = create_live_capital_gateway(
+        raw_order_executor.execution_scope
+    )
     logger.info(
         "resolved dynamic live-trading universe",
         extra={"aitos_extra": {"symbol_count": len(symbols)}},
@@ -147,6 +160,33 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
     restored_count = await trade_state_persistence.restore()
     await trade_state_persistence.initialize()
     await initialize_all(components)
+    # First consume already-filled known protective orders, then compare the
+    # resulting local ledger against the entire account before any new entry.
+    if components.reconciliation is not None:
+        await components.reconciliation.run_once()
+    assert_position_snapshot_matches(
+        components.trade_lifecycle.get_open_trades(),
+        await raw_order_executor.get_position_risk(),
+        hedge_mode=raw_order_executor.hedge_mode,
+    )
+    gateway = components.trade_lifecycle._aitos_capital_gateway
+    restored_trades = components.trade_lifecycle.get_open_trades()
+    active_symbols = {trade.symbol for trade in restored_trades}
+    # A crash after durable close but before release may leave a flat lease.
+    # Only the matched full-account snapshot and this stable owner permit release.
+    for reservation in gateway.reservation.snapshot():
+        if reservation.symbol not in active_symbols:
+            gateway.release(reservation.symbol)
+    for trade in restored_trades:
+        if trade.leverage <= 0:
+            raise ValueError("restored exposure has invalid leverage")
+        gateway.reservation.restore_confirmed_exposure(
+            Reservation(
+                trade.symbol,
+                trade.position_size_usd / trade.leverage,
+                trade.risk_amount_usd,
+            )
+        )
     position_subscription_result = (
         await trade_state_persistence.resubscribe_restored_positions()
     )
@@ -170,6 +210,7 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         event_bus,
         state_store,
     )
+    cleanup.push_async_callback(income_reconciler.shutdown)
     market_os_persistence = MarketOSPersistence(event_bus, market_repo)
     cleanup.push_async_callback(market_os_persistence.shutdown)
     await market_os_persistence.initialize({})
@@ -195,6 +236,9 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         # nosec B104 - binding all interfaces is required for the Docker health check.
         host="0.0.0.0",  # nosec B104
         port=HEALTH_SERVER_PORT,
+        console_token=os.getenv("AITOS_CONSOLE_TOKEN"),
+        console_state_store=state_store,
+        console_runtime_mode="live",
     )
     cleanup.push_async_callback(health_server.stop)
     await health_server.start()
@@ -218,74 +262,63 @@ async def _run_live_trading(cleanup: AsyncExitStack) -> None:
         # orders while a restored position is outside verified feed coverage.
         stop_event.set()
     install_signal_handlers(stop_event)
-    # Startup completed; the runtime finally block is now the sole teardown owner.
-    cleanup.pop_all()
-    try:
-        while not stop_event.is_set():
-            try:
-                submitted = await run_scan_and_trade_cycle(
-                    components,
-                    tracker,
-                    is_production=True,
-                    approved_by=approved_by,
-                )
-                # These do blocking pickle.dump()+file-replace I/O. Run them
-                # off the event loop -- a synchronous call here previously
-                # stalled *all* concurrent async work (websocket recv,
-                # event-bus consumption) for however long the disk write
-                # took, and a stall past WS_PING_TIMEOUT_SECONDS could drop
-                # the market-data connection entirely.
-                await asyncio.to_thread(rl_scorer.save_state)
-                await asyncio.to_thread(outcome_classifier.save_state)
-                await asyncio.to_thread(
-                    save_attention_model, attention_explainer, attention_path
-                )
-                logger.info(
-                    "live scan cycle complete",
-                    extra={
-                        "aitos_extra": {
-                            "submitted": submitted,
-                            "open_trades": len(
-                                components.trade_lifecycle.get_open_trades()
-                            ),
-                            "account_equity_usd": tracker._last_known_equity_usd,
-                            "drawdown_peak_equity_usd": tracker._peak_equity_usd,
-                            "rl_samples": rl_scorer.n_samples_seen,
-                            "ml_samples": outcome_classifier.n_samples_seen,
-                            "attention_samples": attention_explainer.n_samples_seen,
-                        }
-                    },
-                )
-                if components.reconciliation is not None:
-                    await components.reconciliation.run_once()
-            except Exception as exc:
-                logger.error("scan/trade cycle failed: %s", exc)
-            try:
-                await asyncio.wait_for(
-                    stop_event.wait(),
-                    timeout=get_settings().tuning.scanner.refresh_interval_seconds,
-                )
-            except TimeoutError:
-                pass
-    finally:
-        await income_reconciler.shutdown()
-        await price_safety_net.stop()
-        await asyncio.to_thread(rl_scorer.save_state)
-        await asyncio.to_thread(outcome_classifier.save_state)
-        await asyncio.to_thread(
-            save_attention_model, attention_explainer, attention_path
-        )
-        await filter_refresher.stop()
-        await health_server.stop()
-        await experience_recorder.shutdown()
-        await market_os_persistence.shutdown()
-        if trade_state_persistence is not None:
-            await trade_state_persistence.shutdown()
-        await shutdown_all(components)
-        await order_executor.close()
-        await market_repo.shutdown()
-        await journal_repo.shutdown()
-        await redis_client.aclose()
+    # One teardown owner on both startup failure and normal exit. Draining is
+    # last registered so durable writers/executor remain available until done.
+    cleanup.push_async_callback(asyncio.to_thread, rl_scorer.save_state)
+    cleanup.push_async_callback(asyncio.to_thread, outcome_classifier.save_state)
+    cleanup.push_async_callback(
+        asyncio.to_thread, save_attention_model, attention_explainer, attention_path
+    )
+    cleanup.push_async_callback(components.trade_lifecycle.drain_live_submissions)
+    while not stop_event.is_set():
+        try:
+            if components.reconciliation is not None:
+                await components.reconciliation.run_once()
+            await trade_state_persistence.verify_execution_positions()
+            submitted = await run_scan_and_trade_cycle(
+                components,
+                tracker,
+                is_production=True,
+                approved_by=approved_by,
+            )
+            # These do blocking pickle.dump()+file-replace I/O. Run them
+            # off the event loop -- a synchronous call here previously
+            # stalled *all* concurrent async work (websocket recv,
+            # event-bus consumption) for however long the disk write
+            # took, and a stall past WS_PING_TIMEOUT_SECONDS could drop
+            # the market-data connection entirely.
+            await asyncio.to_thread(rl_scorer.save_state)
+            await asyncio.to_thread(outcome_classifier.save_state)
+            await asyncio.to_thread(
+                save_attention_model, attention_explainer, attention_path
+            )
+            logger.info(
+                "live scan cycle complete",
+                extra={
+                    "aitos_extra": {
+                        "submitted": submitted,
+                        "open_trades": len(
+                            components.trade_lifecycle.get_open_trades()
+                        ),
+                        "account_equity_usd": tracker._last_known_equity_usd,
+                        "drawdown_peak_equity_usd": tracker._peak_equity_usd,
+                        "rl_samples": rl_scorer.n_samples_seen,
+                        "ml_samples": outcome_classifier.n_samples_seen,
+                        "attention_samples": attention_explainer.n_samples_seen,
+                    }
+                },
+            )
+            if components.reconciliation is not None:
+                await components.reconciliation.run_once()
+        except Exception as exc:
+            logger.error("scan/trade cycle failed: %s", exc)
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(),
+                timeout=get_settings().tuning.scanner.refresh_interval_seconds,
+            )
+        except TimeoutError:
+            pass
 
 
 async def main() -> None:

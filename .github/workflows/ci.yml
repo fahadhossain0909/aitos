@@ -2,6 +2,7 @@ name: CI
 
 on:
   # Feature branches are validated by their PR, avoiding duplicate push + PR runs.
+  # Cross-platform desktop and storage changes must pass the same repository-wide gates.
   push:
     branches: [main]
   pull_request:
@@ -11,7 +12,7 @@ on:
 # Keep only the newest validation for each PR/branch.
 concurrency:
   group: ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 permissions:
   contents: read

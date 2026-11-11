@@ -29,11 +29,17 @@ one-way mode remains the default since it's what most accounts use.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import math
+import re
 import hmac
+import json
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import replace
+from numbers import Real
 from typing import Any
 from urllib.parse import urlencode
 
@@ -41,6 +47,7 @@ import aiohttp
 
 from aitos.exchange.symbol_filters import SymbolFilters
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
+from aitos.execution.intent_store import ExecutionIntentStore, ExecutionUncertainError
 from aitos.logging_setup import get_logger
 from aitos.models.trade import TradeSide
 
@@ -69,6 +76,8 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         session_factory: Callable[[], aiohttp.ClientSession] = aiohttp.ClientSession,
         symbol_filters: dict[str, SymbolFilters] | None = None,
         hedge_mode: bool = False,
+        intent_store: ExecutionIntentStore | None = None,
+        conditional_orders_api: str = "algo",
     ) -> None:
         if not api_key or not api_secret:
             raise ValueError(
@@ -82,6 +91,11 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         self._session: aiohttp.ClientSession | None = None
         self._symbol_filters: dict[str, SymbolFilters] = dict(symbol_filters or {})
         self._hedge_mode = hedge_mode
+        if conditional_orders_api not in {"algo", "legacy"}:
+            raise ValueError("conditional_orders_api must be algo or legacy")
+        self._conditional_orders_api = conditional_orders_api
+        self._intent_store = intent_store
+        self._pending_execution: dict[str, str] = {}
         if not testnet:
             logger.warning(
                 "BinanceFuturesOrderExecutor initialized against MAINNET — live orders will place real trades"
@@ -131,6 +145,10 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             "POST", "/fapi/v1/leverage", {"symbol": symbol, "leverage": leverage}
         )
 
+    async def get_position_risk(self) -> list[dict[str, Any]]:
+        """Read-only full-account snapshot; no symbol filter can hide exposure."""
+        return await self._signed_request("GET", "/fapi/v3/positionRisk", {})
+
     async def get_account_balance(self, asset: str = "USDT") -> float:
         """GET /fapi/v2/balance (signed) — the actual live account balance,
         for a real portfolio tracker rather than the paper-trading
@@ -141,7 +159,34 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 return float(entry.get("availableBalance", entry.get("balance", 0.0)))
         return 0.0
 
+    @property
+    def execution_scope(self) -> str:
+        if self._intent_store is None:
+            raise RuntimeError("durable execution scope is not configured")
+        return self._intent_store.scope
+
+    @property
+    def requires_exchange_execution(self) -> bool:
+        return True
+
+    def has_unresolved_orders(self, symbol: str | None = None) -> bool:
+        return any(
+            symbol is None or candidate == symbol
+            for candidate in self._pending_execution.values()
+        ) or bool(self._intent_store and self._intent_store.unresolved(symbol))
+
+    def acknowledge_execution(self, client_order_id: str, trade_id: str) -> None:
+        if self._intent_store is not None:
+            self._intent_store.mark_applied(client_order_id, trade_id)
+        self._pending_execution.pop(client_order_id, None)
+
     async def submit_order(self, request: OrderRequest) -> OrderResult:
+        for name in ("quantity", "reference_price"):
+            raw = getattr(request, name)
+            if isinstance(raw, bool) or not isinstance(raw, Real):
+                raise ValueError(f"{name} must be finite and positive")
+            if not math.isfinite(raw) or raw <= 0:
+                raise ValueError(f"{name} must be finite and positive")
         quantity, filters = self._apply_quantity_precision(
             request.symbol, request.quantity
         )
@@ -151,85 +196,198 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
             return self._min_notional_failure(
                 request.symbol, request.side, filters, request.reference_price, quantity
             )
-
-        client_order_id = request.client_order_id or f"aitos-{uuid.uuid4().hex[:20]}"
+        if quantity <= 0:
+            return OrderResult(
+                "unsubmitted",
+                request.symbol,
+                request.side,
+                0,
+                0,
+                success=False,
+                error="quantity rounds to zero",
+            )
+        client_id = request.client_order_id or f"aitos-{uuid.uuid4().hex[:20]}"
+        request = replace(request, client_order_id=client_id)
         params = {
             "symbol": request.symbol,
             "type": request.order_type,
             "quantity": quantity,
-            "newClientOrderId": client_order_id,
+            "newClientOrderId": client_id,
+            "newOrderRespType": "RESULT",
         }
         params.update(
             self._position_params(request.side, is_closing_order=request.reduce_only)
         )
-
+        if self._intent_store is not None:
+            self._intent_store.begin(request)
+        self._pending_execution[client_id] = request.symbol
         try:
-            response = await self._signed_request("POST", "/fapi/v1/order", params)
-        except BinanceAPIError as exc:
-            logger.error(
-                "order submission failed",
-                extra={"aitos_extra": {"symbol": request.symbol, "error": str(exc)}},
-            )
-            return OrderResult(
-                order_id=client_order_id,
-                symbol=request.symbol,
-                side=request.side,
-                filled_quantity=0.0,
-                fill_price=0.0,
-                success=False,
-                error=str(exc),
-            )
-
-        order_id = str(response.get("orderId", client_order_id))
-        filled_qty = float(response.get("executedQty", 0.0) or 0.0)
-        avg_price = (
-            float(response.get("avgPrice", 0.0) or 0.0) or request.reference_price
-        )
-        status = response.get("status", "UNKNOWN")
-        reconciliation_error = None
-
-        # The lifecycle contract opens a position only from confirmed fills.
-        # This adapter has no pending-limit-order monitor, so cancel any
-        # remainder rather than returning an untracked NEW order as a fill.
-        if status in ("NEW", "PARTIALLY_FILLED"):
             try:
-                response = await self.cancel_order(request.symbol, order_id)
-                status = response.get("status", status)
-                filled_qty = float(response.get("executedQty", filled_qty) or 0.0)
-                avg_price = float(response.get("avgPrice", 0.0) or 0.0) or avg_price
-            except Exception as cancel_error:
-                try:
-                    response = await self.get_order_status(request.symbol, order_id)
-                    status = response.get("status", status)
-                    filled_qty = float(response.get("executedQty", filled_qty) or 0.0)
-                    avg_price = float(response.get("avgPrice", 0.0) or 0.0) or avg_price
-                except Exception as exc:
-                    reconciliation_error = (
-                        "order state is ambiguous after cancel attempt; "
-                        f"cancel error={cancel_error}; status error={exc}; "
-                        "manual venue reconciliation required"
+                response = await self._signed_request("POST", "/fapi/v1/order", params)
+            except BinanceAPIError as exc:
+                # Only explicit known no-acceptance errors release capital. A
+                # timeout/server/duplicate error can coexist with a real fill.
+                if exc.code in {-2019, -1013, -1111, -1100, -1102, -1121, -2022}:
+                    result = OrderResult(
+                        client_id,
+                        request.symbol,
+                        request.side,
+                        0,
+                        0,
+                        success=False,
+                        error=str(exc),
                     )
+                    return self._record_execution(client_id, result)
+                response = await self.get_order_by_client_id(request.symbol, client_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                response = await self.get_order_by_client_id(request.symbol, client_id)
+            if not isinstance(response, dict):
+                raise ValueError("no authoritative order evidence")
+            if response.get("status") in {"NEW", "PARTIALLY_FILLED", "PENDING_NEW"}:
+                response = await self.get_order_by_client_id(request.symbol, client_id)
+                if isinstance(response, dict) and response.get("status") in {
+                    "NEW",
+                    "PARTIALLY_FILLED",
+                    "PENDING_NEW",
+                }:
+                    # Bounded settlement, not background/indefinite polling.
+                    # Cancellation ACK alone is not proof of zero execution.
+                    await self._signed_request(
+                        "DELETE",
+                        "/fapi/v1/order",
+                        {
+                            "symbol": request.symbol,
+                            "origClientOrderId": client_id,
+                        },
+                    )
+                    response = await self.get_order_by_client_id(
+                        request.symbol, client_id
+                    )
+            result = self._confirmed_result(request, quantity, response, params["side"])
+            return self._record_execution(client_id, result)
+        except asyncio.CancelledError:
+            # The committed SUBMITTING intent survives cancellation/restart.
+            raise
+        except Exception:
+            raise ExecutionUncertainError(
+                request.symbol,
+                client_id,
+                "authoritative terminal fill/rejection not established",
+            ) from None
 
-        if status in ("NEW", "PARTIALLY_FILLED") and reconciliation_error is None:
-            reconciliation_error = (
-                "order remains open after cancellation attempt; "
-                "manual venue reconciliation required"
+    def _record_execution(self, client_id: str, result: OrderResult) -> OrderResult:
+        if self._intent_store is not None:
+            self._intent_store.record_result(client_id, result)
+        if not result.success:
+            self._pending_execution.pop(client_id, None)
+        return result
+
+    @staticmethod
+    def _confirmed_result(
+        request: OrderRequest, quantity: float, response: Any, side: str
+    ) -> OrderResult:
+        if not isinstance(response, dict):
+            raise ValueError("missing authoritative order evidence")
+        for field, expected in (
+            ("symbol", request.symbol),
+            ("side", side),
+            ("clientOrderId", request.client_order_id),
+        ):
+            if field in response and response[field] != expected:
+                raise ValueError("order evidence identity mismatch")
+        status = response.get("status")
+        if status not in {
+            "FILLED",
+            "CANCELED",
+            "EXPIRED",
+            "EXPIRED_IN_MATCH",
+            "REJECTED",
+        }:
+            raise ValueError("order is not terminal")
+        if "executedQty" not in response or isinstance(response["executedQty"], bool):
+            raise ValueError("missing or boolean execution quantity")
+        filled = float(response["executedQty"])
+        if not math.isfinite(filled) or filled < 0 or filled > quantity * (1 + 1e-9):
+            raise ValueError("invalid executed quantity")
+        if status == "FILLED" and not math.isclose(
+            filled, quantity, rel_tol=1e-9, abs_tol=1e-12
+        ):
+            raise ValueError("FILLED evidence does not cover the submitted quantity")
+        if filled == 0:
+            if status == "FILLED":
+                raise ValueError("FILLED evidence has no execution")
+            return OrderResult(
+                str(response.get("orderId", request.client_order_id)),
+                request.symbol,
+                request.side,
+                0,
+                0,
+                success=False,
+                error=f"order was not filled (terminal status: {status})",
             )
-        success = filled_qty > 0.0
-        error = reconciliation_error or (
-            None if success else f"order was not filled (status: {status})"
-        )
+        if isinstance(response.get("avgPrice"), bool) or isinstance(
+            response.get("orderId"), bool
+        ):
+            raise ValueError("boolean execution price/identity")
+        price = float(response.get("avgPrice", 0) or 0)
+        if price == 0 and response.get("cumQuote") is not None:
+            price = float(response["cumQuote"]) / filled
+        if not math.isfinite(price) or price <= 0 or not response.get("orderId"):
+            raise ValueError("invalid executed price/order identity")
         return OrderResult(
-            order_id=order_id,
-            symbol=request.symbol,
-            side=request.side,
-            filled_quantity=filled_qty,
-            fill_price=avg_price,
-            success=success,
-            error=error,
+            str(response["orderId"]), request.symbol, request.side, filled, price
         )
 
     async def get_order_status(self, symbol: str, order_id: str) -> dict[str, Any]:
+        if order_id.startswith("algo:"):
+            algo_id = order_id.removeprefix("algo:")
+            if not algo_id.isdigit() or int(algo_id) <= 0:
+                raise ValueError("invalid algo order identity")
+            evidence = await self._signed_request(
+                "GET", "/fapi/v1/algoOrder", {"algoId": algo_id}
+            )
+            if (
+                not isinstance(evidence, dict)
+                or str(evidence.get("algoId")) != algo_id
+                or ("symbol" in evidence and evidence["symbol"] != symbol)
+            ):
+                raise ExecutionUncertainError(
+                    symbol, order_id, "algo evidence identity mismatch"
+                )
+            child_id = str(evidence.get("actualOrderId") or "")
+            if child_id and child_id != "0":
+                child = await self._signed_request(
+                    "GET",
+                    "/fapi/v1/order",
+                    {
+                        "symbol": symbol,
+                        "orderId": child_id,
+                    },
+                )
+                if (
+                    not isinstance(child, dict)
+                    or str(child.get("orderId")) != child_id
+                    or ("symbol" in child and child["symbol"] != symbol)
+                ):
+                    raise ExecutionUncertainError(
+                        symbol, order_id, "algo child identity mismatch"
+                    )
+                return {**child, "sourceAlgoId": order_id}
+            status = evidence.get("algoStatus")
+            if status not in {"NEW", "CANCELED", "EXPIRED", "REJECTED"}:
+                raise ExecutionUncertainError(
+                    symbol, order_id, "triggered algo has no confirmed child execution"
+                )
+            return {
+                "orderId": order_id,
+                "symbol": symbol,
+                "status": status,
+                "executedQty": "0",
+                "avgPrice": "0",
+                "sourceAlgoId": order_id,
+            }
         return await self._signed_request(
             "GET", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
         )
@@ -244,11 +402,19 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 {"symbol": symbol, "origClientOrderId": client_order_id},
             )
         except BinanceAPIError as exc:
-            if "-2013" in str(exc):
+            if exc.code == -2013:
                 return None
             raise
 
     async def cancel_order(self, symbol: str, order_id: str) -> dict[str, Any]:
+        if order_id.startswith("algo:"):
+            algo_id = order_id.removeprefix("algo:")
+            if not algo_id.isdigit() or int(algo_id) <= 0:
+                raise ValueError("invalid algo order identity")
+            await self._signed_request(
+                "DELETE", "/fapi/v1/algoOrder", {"algoId": algo_id}
+            )
+            return await self.get_order_status(symbol, order_id)
         return await self._signed_request(
             "DELETE", "/fapi/v1/order", {"symbol": symbol, "orderId": order_id}
         )
@@ -278,19 +444,49 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
 
     async def cancel_resting_order(self, symbol: str, order_id: str) -> None:
         try:
-            await self.cancel_order(symbol, order_id)
+            evidence = await self.cancel_order(symbol, order_id)
         except BinanceAPIError as exc:
-            # Most commonly: the order already filled or was already canceled
-            # (e.g. the opposite leg triggered first) — not an operational error.
-            logger.info("cancel_resting_order: %s", exc)
+            if exc.code not in {-2011, -2013}:
+                raise
+            evidence = await self.get_order_status(symbol, order_id)
+        if isinstance(evidence, dict) and (
+            (
+                "orderId" in evidence
+                and str(evidence["orderId"]) != str(order_id)
+                and evidence.get("sourceAlgoId") != order_id
+            )
+            or ("symbol" in evidence and evidence["symbol"] != symbol)
+        ):
+            raise ExecutionUncertainError(
+                symbol, order_id, "resting cancellation identity mismatch"
+            )
+        if not isinstance(evidence, dict) or evidence.get("status") not in {
+            "CANCELED",
+            "FILLED",
+            "EXPIRED",
+            "EXPIRED_IN_MATCH",
+            "REJECTED",
+        }:
+            raise ExecutionUncertainError(
+                symbol, order_id, "resting cancellation not confirmed"
+            )
 
     async def get_resting_order_status(self, symbol: str, order_id: str) -> str | None:
-        try:
-            status = await self.get_order_status(symbol, order_id)
-            return status.get("status")
-        except BinanceAPIError as exc:
-            logger.error("get_resting_order_status failed: %s", exc)
-            return None
+        evidence = await self.get_order_status(symbol, order_id)
+        if not isinstance(evidence, dict) or not evidence.get("status"):
+            raise ExecutionUncertainError(
+                symbol, order_id, "resting status unavailable"
+            )
+        status = str(evidence["status"])
+        if status in {"CANCELED", "EXPIRED", "EXPIRED_IN_MATCH"}:
+            quantity = float(evidence.get("executedQty", 0))
+            if not math.isfinite(quantity) or quantity < 0:
+                raise ExecutionUncertainError(
+                    symbol, order_id, "invalid resting execution quantity"
+                )
+            if quantity > 0:
+                return "PARTIALLY_FILLED_TERMINAL"
+        return status
 
     async def _place_reduce_only_stop(
         self,
@@ -316,6 +512,29 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 )
 
         client_order_id = f"aitos-{label}-{uuid.uuid4().hex[:16]}"
+        if self._intent_store is not None:
+            for pending in self._intent_store.unresolved(symbol):
+                if json.loads(pending["request_json"])["order_type"] in {
+                    "STOP_MARKET",
+                    "TAKE_PROFIT_MARKET",
+                }:
+                    raise ExecutionUncertainError(
+                        symbol,
+                        pending["client_id"],
+                        "prior protective intent requires reconciliation",
+                    )
+            self._intent_store.begin(
+                OrderRequest(
+                    symbol=symbol,
+                    side=position_side,
+                    quantity=quantity,
+                    reference_price=trigger_price,
+                    order_type=order_type,
+                    client_order_id=client_order_id,
+                    reduce_only=True,
+                )
+            )
+        self._pending_execution[client_order_id] = symbol
         params = {
             "symbol": symbol,
             "type": order_type,
@@ -325,8 +544,14 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         }
         params.update(self._position_params(position_side, is_closing_order=True))
 
+        endpoint = "/fapi/v1/order"
+        if self._conditional_orders_api == "algo":
+            endpoint = "/fapi/v1/algoOrder"
+            params["algoType"] = "CONDITIONAL"
+            params["triggerPrice"] = params.pop("stopPrice")
+            params["clientAlgoId"] = params.pop("newClientOrderId")
         try:
-            response = await self._signed_request("POST", "/fapi/v1/order", params)
+            response = await self._signed_request("POST", endpoint, params)
         except BinanceAPIError as exc:
             logger.error(
                 f"{label} order placement failed",
@@ -342,15 +567,40 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
                 error=str(exc),
             )
 
-        return OrderResult(
-            order_id=str(response.get("orderId", client_order_id)),
-            symbol=symbol,
-            side=position_side,
-            filled_quantity=0.0,  # resting order — not filled at placement time
-            fill_price=trigger_price,
-            success=response.get("status") in ("NEW", "FILLED"),
-            error=None,
-        )
+        if self._conditional_orders_api == "algo":
+            if not response.get("algoId") or response.get("algoStatus") != "NEW":
+                raise ExecutionUncertainError(
+                    symbol,
+                    client_order_id,
+                    "algo protection acceptance not established",
+                )
+            result = OrderResult(
+                order_id=f"algo:{response['algoId']}",
+                symbol=symbol,
+                side=position_side,
+                filled_quantity=0,
+                fill_price=trigger_price,
+                client_order_id=client_order_id,
+            )
+        else:
+            if not response.get("orderId") or response.get("status") != "NEW":
+                raise ExecutionUncertainError(
+                    symbol,
+                    client_order_id,
+                    "legacy protection acceptance not established",
+                )
+            result = OrderResult(
+                order_id=str(response["orderId"]),
+                symbol=symbol,
+                side=position_side,
+                filled_quantity=0,
+                fill_price=trigger_price,
+                success=True,
+                client_order_id=client_order_id,
+            )
+        if result.success and self._intent_store is not None:
+            self._intent_store.record_protection(client_order_id, result)
+        return result
 
     # -- Internals --------------------------------------------------------------
 
@@ -448,14 +698,34 @@ class BinanceFuturesOrderExecutor(OrderExecutor):
         url = f"{self._base_url}{path}?{signed_query}"
         headers = {"X-MBX-APIKEY": self._api_key}
 
-        async with self._session.request(method, url, headers=headers) as resp:
-            body = await resp.json()
-            if resp.status >= 400:
-                code = body.get("code", resp.status)
-                msg = body.get("msg", "unknown error")
-                raise BinanceAPIError(f"Binance API error {code}: {msg}")
-            return body
+        try:
+            async with self._session.request(method, url, headers=headers) as resp:
+                body = await resp.json()
+                if resp.status >= 400:
+                    code = body.get("code", resp.status)
+                    msg = body.get("msg", "unknown error")
+                    raise BinanceAPIError(f"Binance API error {code}: {msg}", code=code)
+                return body
+        except asyncio.CancelledError:
+            raise
+        except BinanceAPIError:
+            raise
+        except Exception:
+            # aiohttp exceptions can embed the signed URL. Never forward its
+            # signature/header context into lifecycle telemetry or error logs.
+            raise BinanceTransportError("private exchange transport failed") from None
+
+
+class BinanceTransportError(RuntimeError):
+    """Sanitized private-request failure; submission outcome may be unknown."""
 
 
 class BinanceAPIError(Exception):
-    """Raised for any non-2xx response from Binance's private API."""
+    """Structured venue error; absent/unknown codes are not proof of rejection."""
+
+    def __init__(self, message: str, *, code: int | None = None) -> None:
+        super().__init__(message)
+        match = re.search(r"error (-?\d+):", message)
+        self.code = (
+            int(code) if code is not None else (int(match[1]) if match else None)
+        )

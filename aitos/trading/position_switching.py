@@ -541,11 +541,28 @@ class PositionSwitchCoordinator:
                     None,
                 )
                 if open_trade is not None:
-                    await self.lifecycle.close_trade(
-                        incumbent.trade_id,
-                        float(intent.close_fill_price),
-                        f"capital_rebalance:{switch_id}",
-                    )
+                    if getattr(
+                        getattr(self.lifecycle, "_order_executor", None),
+                        "requires_exchange_execution",
+                        False,
+                    ):
+                        await self.lifecycle.finalize_confirmed_flat_close(
+                            incumbent.trade_id,
+                            CloseReceipt(
+                                True,
+                                str(intent.close_order_id),
+                                float(intent.close_fill_price),
+                                incumbent.quantity,
+                                True,
+                            ),
+                            intent.close_client_order_id,
+                        )
+                    else:
+                        await self.lifecycle.close_trade(
+                            incumbent.trade_id,
+                            float(intent.close_fill_price),
+                            f"capital_rebalance:{switch_id}",
+                        )
                 self.gateway.release(incumbent.symbol)
                 intent = self.journal.update(switch_id, state="reservation_released")
 

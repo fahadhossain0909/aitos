@@ -70,3 +70,52 @@ Static architecture does not establish that a component is active. For each boun
 - Exact Prometheus scrape and Grafana dashboard wiring.
 - Which trace/correlation identifiers cross every stage.
 - Runtime coverage of candidate/entry/exit and position-recovery telemetry.
+
+## Addendum — explicit paper projection and observation (2026-11-06)
+
+`trading/revision_projector.py` is an unwired opt-in component, not part of the
+active runner initialization graph. Inject journal/writer/sink; call `run_once`
+for one batch. `ClickHouseEvidenceSink` uses a fixed pre-created prototype table,
+scalar typed parameters and bounded reads; it creates no client/table. Local ACK
+is atomic after complete post-insert evidence verification; storage fencing is
+not venue authority. `projection_evidence.py` is a pure sanitized/freshness-checked
+public contract. Console snapshot accepts an optional observer, requiring a strong
+bearer token when attached; default remains unavailable. API imports the pure
+contract, not prototype runtime classes.
+
+Desktop Persistence & recovery consumes that optional observation and never
+substitutes financial sample data. Explicit examples/export provenance remain
+separate. No migration/start/order controls; both authority flags false. Active
+runner/health/API import guards passed. See
+`PROJECTOR_AND_PERSISTENCE_CONSOLE_2026-11-06.md`; remote integration is NOT TESTED.
+
+## Opt-in paper shadow and Windows boundary (2026-11-06)
+
+The paper entrypoint now imports a default-off shadow integration factory. When
+explicitly configured it wraps existing lifecycle writes, runs a managed projector
+and passes its sanitized observer through HealthServer. All recovery/financial
+reads stay legacy; this supersedes the earlier no-runner-import statement, NOT
+the outstanding authority-cutover gate. No DDL/new Redis consumer/venue access.
+Windows native manager uses WinCred and a local gateway, opens the browser console
+and never starts trading. Account reconciliation is an offline exact comparison,
+not provider IO. See `WINDOWS_PAPER_INTEGRATION_2026-11-06.md`.
+
+## Finishing tranche — 2026-11-06
+
+Shared `native/console_host.py` now owns gateway socket/thread lifecycle for the GUI and frozen smoke. Runner teardown has a fallback shadow drain; recovery authority remains legacy. See `PAPER_NATIVE_HARDENING_2026-11-06.md`.
+
+## Recorded account boundary — 2026-11-06
+
+Added offline `exchange/binance_account_evidence.py`; no HTTP/client/scheduler/runner wiring. Account schema 2 binds window/mode and signed margin data; schema 1 remains compatible. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.
+
+## Hosted validation handoff
+
+Published source on the required branch with branch-specific no-deployment validation only. Actual hosted Windows and disposable services verified; legacy authority and default-off/read-only boundaries unchanged. No production activation. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Sustained-write harness correction
+
+Disposable harness now exercises unique new events throughout duration; no runtime topology/authority changes. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Advanced-main source integration
+
+Main e332e2b9 is an ancestor of integrated source 58807516. PostgreSQL operational fallback and capability selection coexist with ClickHouse analytics; no silent emulation of analytical SQL. Main statistical feedback/ML pipeline wiring retained. Branch local shadow remains default-off and not financial authority. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.

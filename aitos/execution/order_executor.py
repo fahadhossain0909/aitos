@@ -48,11 +48,28 @@ class OrderResult:
     filled_at: str = field(default_factory=_utc_now_iso)
     success: bool = True
     error: str | None = None
+    client_order_id: str | None = None
 
 
 class OrderExecutor(ABC):
     @abstractmethod
     async def submit_order(self, request: OrderRequest) -> OrderResult: ...
+
+    @property
+    def requires_exchange_execution(self) -> bool:
+        """Live positions must be reduced at the venue, never by local PnL alone."""
+        return False
+
+    def has_unresolved_orders(self, symbol: str | None = None) -> bool:
+        return False
+
+    def acknowledge_execution(self, client_order_id: str, trade_id: str) -> None:
+        """Called only after durable lifecycle application, where supported."""
+
+    def acknowledge_protection(self, result: OrderResult, trade_id: str) -> None:
+        """Only acknowledge accepted protection after its ID is durably owned."""
+        if result.client_order_id:
+            self.acknowledge_execution(result.client_order_id, trade_id)
 
     async def get_order_status(self, symbol: str, order_id: str) -> dict | None:
         """Return authoritative venue order state, or None when unsupported."""
@@ -125,6 +142,15 @@ class SimulatedOrderExecutor(OrderExecutor):
             "orderId": order_id,
             "clientOrderId": request.client_order_id,
             "symbol": request.symbol,
+            "side": (
+                "SELL"
+                if request.reduce_only and request.side == TradeSide.LONG
+                else (
+                    "BUY"
+                    if request.reduce_only
+                    else "BUY" if request.side == TradeSide.LONG else "SELL"
+                )
+            ),
             "status": "FILLED",
             "executedQty": str(request.quantity),
             "avgPrice": str(result.fill_price),

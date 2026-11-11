@@ -470,28 +470,18 @@ async def restart_unhealthy_modules(modules: list[AITOSModule]) -> list[str]:
 async def initialize_all(components: SystemComponents, *, timeout: float = 5.0) -> None:
     for module in components.all_modules():
         await module.initialize({})
-    components._price_feed_subscriptions = [
-        await components.event_bus.subscribe(
-            "market.kline.*",
-            components.trade_lifecycle.handle_event,
-            group="trade-lifecycle-prices",
-        ),
-        await components.event_bus.subscribe(
-            "market.trade.*",
-            components.trade_lifecycle.handle_event,
-            group="trade-lifecycle-prices",
-        ),
-        await components.event_bus.subscribe(
-            "trade.cost_adjustment",
-            components.trade_lifecycle.handle_event,
-            group="trade-lifecycle-costs",
-        ),
-        await components.event_bus.subscribe(
-            "trade.cost_adjustment",
-            components.trade_lifecycle.handle_event,
-            group="trade-lifecycle-costs",
-        ),
-    ]
+    # Register incrementally: if a later subscription fails, the runner's
+    # managed shutdown must still own every successfully acquired handle.
+    for topic, group in (
+        ("market.kline.*", "trade-lifecycle-prices"),
+        ("market.trade.*", "trade-lifecycle-prices"),
+        ("trade.cost_adjustment", "trade-lifecycle-costs"),
+    ):
+        components._price_feed_subscriptions.append(
+            await components.event_bus.subscribe(
+                topic, components.trade_lifecycle.handle_event, group=group
+            )
+        )
     deadline = asyncio.get_running_loop().time() + timeout
     while asyncio.get_running_loop().time() < deadline:
         statuses = [await _health_status(module) for module in components.all_modules()]

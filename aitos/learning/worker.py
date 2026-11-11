@@ -73,20 +73,27 @@ class ContinualLearningWorker:
         self.client = clickhouse_connect.get_client(
             host=host, port=port, username=user, password=password, database=database
         )
-        self.scorer = DeepValueRLScorer(state_path=str(model_file))
-        self.scorer.load_state(str(model_file))
-        self._cursor_timestamp = "1970-01-01 00:00:00.000"
-        self._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
-        self._processed = 0
-        self._legacy_processed: set[str] = set()
-        self._regime_scorers: dict[str, DeepValueRLScorer] = {}
-        self._reward_calibrator = RegimeRewardCalibrator()
-        self._acquire_singleton_lock()
         try:
+            self.scorer = DeepValueRLScorer(state_path=str(model_file))
+            self.scorer.load_state(str(model_file))
+            self._cursor_timestamp = "1970-01-01 00:00:00.000"
+            self._cursor_experience_id = "00000000-0000-0000-0000-000000000000"
+            self._processed = 0
+            self._legacy_processed: set[str] = set()
+            self._regime_scorers: dict[str, DeepValueRLScorer] = {}
+            self._reward_calibrator = RegimeRewardCalibrator()
+            self._acquire_singleton_lock()
             self._load_state()
-        except Exception:
-            self.client.close()
-            self._release_singleton_lock()
+        except BaseException:
+            # All setup after client acquisition is owned here, including model
+            # loading and singleton acquisition, not only cursor restoration.
+            try:
+                self.close()
+            except Exception as cleanup_error:
+                logger.error(
+                    "Learning startup cleanup failed (%s)",
+                    type(cleanup_error).__name__,
+                )
             raise
 
     def _acquire_singleton_lock(self) -> None:
@@ -108,9 +115,6 @@ class ContinualLearningWorker:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except (OSError, BlockingIOError) as exc:
             handle.close()
-            client = getattr(self, "client", None)
-            if client is not None:
-                client.close()
             raise RuntimeError(
                 f"another continual-learning worker owns state file {self.state_path}"
             ) from exc

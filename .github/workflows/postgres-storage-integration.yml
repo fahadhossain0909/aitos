@@ -10,7 +10,7 @@ permissions:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   postgres-storage:
@@ -65,6 +65,13 @@ jobs:
           pip install -r requirements.txt
           pip install pytest pytest-asyncio
       - name: Run PostgreSQL adapter and recovery tests
-        run: pytest -q tests/storage/test_postgres_integration.py
+        run: pytest -q tests/storage/test_postgres_integration.py --junitxml=postgres-adapter.xml
       - name: Verify PostgreSQL-to-ClickHouse bidirectional reconciliation
-        run: pytest -q tests/storage/test_postgres_clickhouse_reconciliation.py
+        run: pytest -q tests/storage/test_postgres_clickhouse_reconciliation.py --junitxml=postgres-reconciliation.xml
+      - name: Preserve isolated PostgreSQL validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: isolated-postgres-reconciliation-results
+          path: postgres-*.xml
+          retention-days: 7

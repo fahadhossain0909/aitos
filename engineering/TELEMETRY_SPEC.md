@@ -88,3 +88,48 @@ Every decision should be reconstructable from logs/traces using stable decision,
 - No unbounded labels or secrets.
 - Instrumentation overhead is measured.
 - Missing instrumentation is marked NOT MEASURED, not zero.
+
+## Addendum — local projection observation, not trading readiness (2026-11-06)
+
+Optional snapshot `projection` schema 1 exposes fixed statuses, UTC observation
+time, local outbox total/pending/delivered and last checked/inserted/acknowledged
+batch. Complete ACK, safe integers and conservation required. Expiry >60s or
+future skew >5s makes evidence unavailable; failures clear counts. No account/event
+IDs, raw payloads, secrets, exceptions or arbitrary extras. Provider absent is
+unavailable, never a synthetic healthy value. Both authorization/certification
+flags remain false. No new Prometheus metrics or high-cardinality labels.
+
+Backend/TypeScript contract, real isolated API-to-built-browser flow, malformed
+clearing and mobile layout VERIFIED. Continuous monitoring, historical sink
+integrity, remote-service soak and production SLO are not established. See
+`PROJECTOR_AND_PERSISTENCE_CONSOLE_2026-11-06.md`.
+
+## Shadow worker and reconciliation evidence (2026-11-06)
+
+Optional paper worker publishes the existing sanitized expiring projection schema;
+record failure is latched unavailable, never healthy counters over a known gap.
+No new Prometheus family, sensitive account labels or raw error payloads. Offline
+account comparison outputs only status and symmetric-difference record counts;
+match is not authorization. Service workflow reports are synthetic test evidence
+only. Windows/signing/remote CI and independent review remain NOT TESTED. See
+`WINDOWS_PAPER_INTEGRATION_2026-11-06.md`.
+
+## Finishing tranche — 2026-11-06
+
+Service reports now record synthetic provenance, stage, UTC timestamp, validated source SHA and observed server version. Connected recovery checks the seeded version; offline evidence does not invent a current version. Native installed success evidence is emitted only after uninstall passes. See `PAPER_NATIVE_HARDENING_2026-11-06.md`.
+
+## Recorded account boundary — 2026-11-06
+
+Provider adapter emits sanitized comparison status/counts only. Unknown/duplicate/truncated/stale/context-mismatched evidence is unavailable. No account IDs, amounts, raw provider extras, errors or metric labels exported; flags never authorize trading. See `BINANCE_ACCOUNT_EVIDENCE_2026-11-06.md`.
+
+## Hosted validation handoff
+
+Actual remote job/step results and artifact digests now retained via GitHub links. JUnit, synthetic service journals/stage reports, unsigned Windows candidate/install evidence are available. Raw payload/log download redirects are blocked in this sandbox; no claim of independent binary inspection. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Sustained-write harness correction
+
+Corrected service reports add workload=continuous_unique_events; iterations must equal newly inserted soak rows. Historical reports remain identifiable by source SHA and lack this label. No fabricated throughput/percentiles. See `REMOTE_VALIDATION_EVIDENCE.md`.
+
+## Advanced-main source integration
+
+Main candidate/outcome/statistical feedback and successful shutdown marker retained. Latest source validation is pinned to 58807516 with eight hosted successes. No fabricated runtime health, HA or latency percentiles; 17 F-lint findings inherited from parents are explicitly recorded. Evidence/risks/rollback: `MAIN_INTEGRATION_REVIEW.md`.

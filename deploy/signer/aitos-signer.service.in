@@ -1,0 +1,25 @@
+[Unit]
+Description=AITOS user-controlled Binance Futures Testnet signer
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=@REPO_ROOT@
+Environment=PYTHONPATH=@REPO_ROOT@
+EnvironmentFile=@ENV_FILE@
+ExecStart=@PYTHON@ -m aitos.security.signer_cli serve
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+ReadWritePaths=@DATA_DIR@
+
+[Install]
+WantedBy=default.target

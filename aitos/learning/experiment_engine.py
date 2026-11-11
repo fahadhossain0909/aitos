@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Iterable, Mapping
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from math import isfinite
@@ -66,6 +67,9 @@ class ExperimentPlan:
             raise ValueError("baseline and variant names must be unique")
         if not self.cost_scenarios:
             raise ValueError("at least one execution-cost scenario is required")
+        cost_names = [cost.name for cost in self.cost_scenarios]
+        if len(set(cost_names)) != len(cost_names):
+            raise ValueError("cost scenario names must be unique")
         if (self.holdout_start is None) != (self.holdout_end is None):
             raise ValueError("holdout boundaries must be supplied together")
         if self.holdout_start is not None:
@@ -273,7 +277,7 @@ class ExperimentEngine:
                 continue
             for cost in plan.cost_scenarios:
                 for variant in variants:
-                    raw = evaluator(list(regime_events), variant, cost, regime)
+                    raw = evaluator(deepcopy(regime_events), variant, cost, regime)
                     metrics, count = self._metrics(raw)
                     raw_returns = tuple(
                         float(value) for value in raw.get("net_returns", ())
@@ -378,6 +382,7 @@ class ExperimentEngine:
         ).hexdigest()
         canonical = {
             "name": plan.name,
+            "minimum_samples": plan.minimum_samples,
             "dataset_fingerprint": dataset_fingerprint,
             "evidence_ids": sorted(plan.evidence_ids),
             "regimes": list(regimes),
