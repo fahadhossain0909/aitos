@@ -393,9 +393,7 @@ class BinanceUSDMPaperExecutionAdapter:
             try:
                 executed = Decimal(str(result.get("executedQty", "0")))
             except InvalidOperation:
-                return PaperExecutionReceipt(
-                    "unknown", "testnet_response_unrecognized"
-                )
+                return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
             if not executed.is_finite() or executed < 0:
                 return PaperExecutionReceipt(
                     "unknown", "testnet_response_unrecognized"
@@ -448,12 +446,12 @@ class BinanceUSDMPaperExecutionAdapter:
                 executed = Decimal(str(result.get("executedQty", "0")))
             except InvalidOperation:
                 return PaperExecutionReceipt(
-                "unknown", "testnet_reconciliation_unrecognized"
-            )
+                    "unknown", "testnet_reconciliation_unrecognized"
+                )
             if not executed.is_finite() or executed < 0:
                 return PaperExecutionReceipt(
-                "unknown", "testnet_reconciliation_unrecognized"
-            )
+                    "unknown", "testnet_reconciliation_unrecognized"
+                )
             if executed > 0:
                 return PaperExecutionReceipt(
                     "accepted", "testnet_order_partially_executed"
