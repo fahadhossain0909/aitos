@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import re
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -205,7 +206,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
             if not isinstance(asset, dict):
                 raise BinancePaperExchangeError("binance_balance_row_invalid")
             code = asset.get("asset")
-            if type(code) is not str or not code.isalnum() or code in seen_assets:
+            if type(code) is not str or not re.fullmatch(r"[A-Z0-9]{1,20}", code) or code in seen_assets:
                 raise BinancePaperExchangeError("binance_balance_asset_invalid")
             seen_assets.add(code)
             self._decimal(asset.get("walletBalance"), "wallet_balance")
@@ -233,7 +234,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
             if not isinstance(row, dict):
                 raise BinancePaperExchangeError("binance_position_row_invalid")
             symbol = row.get("symbol")
-            if type(symbol) is not str or not symbol.isalnum():
+            if type(symbol) is not str or not re.fullmatch(r"[A-Z0-9]{2,30}", symbol):
                 raise BinancePaperExchangeError("binance_position_symbol_invalid")
             if row.get("positionSide") != "BOTH":
                 raise BinancePaperExchangeError("binance_hedge_mode_not_supported")
@@ -253,8 +254,12 @@ class BinanceUSDMPaperAccountEvidenceProvider:
                 raise BinancePaperExchangeError("binance_open_order_symbol_invalid")
             if row.get("reduceOnly") is True or row.get("reduceOnly") == "true":
                 continue
+            if row.get("type") != "LIMIT":
+                raise BinancePaperExchangeError("binance_open_order_type_unsupported")
             quantity = self._decimal(row.get("origQty"), "open_order_quantity")
             price = self._decimal(row.get("price"), "open_order_price")
+            if quantity <= 0 or price <= 0:
+                raise BinancePaperExchangeError("binance_open_order_notional_invalid")
             notional = quantity * price
             gross += notional
             symbol_exposure[symbol] = symbol_exposure.get(symbol, Decimal("0")) + notional
@@ -340,10 +345,10 @@ class BinanceUSDMPaperExecutionAdapter:
             return PaperExecutionReceipt("unknown", "testnet_dispatch_ambiguous")
         if not isinstance(result, dict):
             return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
-        if result.get("clientOrderId") not in (
-            intent.client_order_id,
-            None,
-        ) or type(result.get("orderId")) is not int:
+        if (
+            result.get("clientOrderId") != intent.client_order_id
+            or type(result.get("orderId")) is not int
+        ):
             return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
         status = result.get("status")
         if status in {"NEW", "PARTIALLY_FILLED", "FILLED"}:
