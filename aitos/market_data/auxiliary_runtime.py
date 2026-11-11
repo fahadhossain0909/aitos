@@ -39,7 +39,7 @@ class BinanceAuxiliaryMarketDataRuntime:
         self._drain_tasks = [
             asyncio.create_task(self._drain_loop(), name="market-data-auxiliary-drain")
         ]
-        self._start("ticker", lambda: self.adapter.stream_tickers(self.symbols))
+        self._start("ticker", lambda: self.adapter.stream_all_tickers())
         self._start("funding", lambda: self.adapter.stream_funding(self.symbols))
         self._start(
             "open_interest", lambda: self.adapter.stream_open_interest(self.symbols)
@@ -113,7 +113,7 @@ class BinanceAuxiliaryMarketDataRuntime:
             self.symbols = normalized
             if self._stopped:
                 return True
-            names = {"ticker", "funding", "open_interest", "instrument"}
+            names = {"funding", "open_interest", "instrument"}
             tasks = [
                 t
                 for t in self._tasks
@@ -124,7 +124,6 @@ class BinanceAuxiliaryMarketDataRuntime:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             self._tasks = [t for t in self._tasks if t not in tasks]
-            self._start("ticker", lambda: self.adapter.stream_tickers(self.symbols))
             self._start("funding", lambda: self.adapter.stream_funding(self.symbols))
             self._start(
                 "open_interest", lambda: self.adapter.stream_open_interest(self.symbols)
