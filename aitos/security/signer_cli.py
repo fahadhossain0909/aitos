@@ -19,6 +19,7 @@ from aitos.exchange.binance_usdm_paper_signer import (
     BinanceUSDMPaperAccountEvidenceProvider,
     BinanceUSDMPaperClient,
     BinanceUSDMPaperExecutionAdapter,
+    PaperSignerRecoveryWorker,
 )
 from aitos.native.credential_vault import get_credential_vault
 from aitos.security.mtls import build_server_context
@@ -153,6 +154,10 @@ async def _serve() -> None:
     credentials = _slots()
     client = BinanceUSDMPaperClient(credentials=credentials, account_alias=account)
     exchange_evidence = BinanceUSDMPaperAccountEvidenceProvider(client=client)
+    # Startup is read-only: prove the local credential and Testnet account path
+    # before opening the RPC listener. No order is submitted here.
+    credentials.resolve(account)
+    exchange_evidence.get_snapshot(account, now_ms=client.clock_ms())
     risk_state = SQLiteSignerRiskState(
         upstream=exchange_evidence,
         database_path=data / "risk-state.sqlite3",
@@ -165,10 +170,11 @@ async def _serve() -> None:
         limit=int(os.environ.get("AITOS_SIGNER_RPC_RATE_LIMIT", str(max_orders))),
         window_ms=int(os.environ.get("AITOS_SIGNER_RPC_RATE_WINDOW_MS", "60000")),
     )
+    adapter = BinanceUSDMPaperExecutionAdapter(client=client)
     processor = PaperOnlyIntentProcessor(
         policy=policy,
         replay_store=replay,
-        adapter=BinanceUSDMPaperExecutionAdapter(client=client),
+        adapter=adapter,
         risk_limits=risk_limits,
         account_evidence_provider=risk_state,
     )
@@ -182,11 +188,30 @@ async def _serve() -> None:
         rate_limiter=limiter,
         processor=processor,
     )
+    recovery = PaperSignerRecoveryWorker(replay_store=replay, adapter=adapter)
+
+    async def recovery_loop():
+        while True:
+            await asyncio.to_thread(
+                recovery.run_once, now_ms=client.clock_ms()
+            )
+            await asyncio.sleep(15)
+
+    recovery_task = None
     try:
+        # Resolve any crash-left DISPATCHING/UNKNOWN rows before accepting new work.
+        await asyncio.to_thread(recovery.run_once, now_ms=client.clock_ms())
         await server.start(host, port)
-        print(f"AITOS paper signer listening on {host}:{port} (TLS 1.3 mTLS, Testnet only).")
+        print(
+            f"AITOS paper signer listening on {host}:{port} "
+            "(TLS 1.3 mTLS, Binance Futures Testnet only)."
+        )
+        recovery_task = asyncio.create_task(recovery_loop())
         await server.serve_forever()
     finally:
+        if recovery_task is not None:
+            recovery_task.cancel()
+            await asyncio.gather(recovery_task, return_exceptions=True)
         await server.close()
         limiter.close()
         registry.close()
