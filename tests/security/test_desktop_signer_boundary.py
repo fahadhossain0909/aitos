@@ -41,6 +41,9 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
     ui = (ROOT / "desktop" / "src" / "SignerSettings.tsx").read_text(encoding="utf-8")
     assert 'invoke<string>("signer_credential_admin"' in ui
     assert "trustedHostConfirmed" in ui
+    assert "Global default" in ui
+    assert "Per-account override" in ui
+    assert "shared by every account" in ui
     assert "provider-managed RDP/VPS" in ui
     assert "localStorage" not in ui
     assert "sessionStorage" not in ui
