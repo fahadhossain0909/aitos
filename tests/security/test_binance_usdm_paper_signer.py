@@ -10,7 +10,9 @@ from aitos.exchange.binance_usdm_paper_signer import (
     BinanceUSDMPaperAccountEvidenceProvider,
     BinanceUSDMPaperClient,
     BinanceUSDMPaperExecutionAdapter,
+    PaperSignerRecoveryWorker,
 )
+from aitos.security.replay_store import SQLiteReplayStore
 from aitos.security.signer_credentials import SignerCredentialSlots
 from aitos.security.signing_policy import OrderIntentPolicy, validate_order_intent
 
@@ -95,7 +97,14 @@ class FakeTransport:
                 {"incomeType": "COMMISSION", "income": "-1", "time": NOW, "tranId": 2},
                 {"incomeType": "FUNDING_FEE", "income": "2", "time": NOW, "tranId": 3},
             ][: self.income_count]
-        if parsed.path.endswith("/fapi/v1/order"):
+        if parsed.path.endswith("/fapi/v1/order") and method == "GET":
+            return {
+                "orderId": 123,
+                "clientOrderId": "aitos-testnet-001",
+                "status": "PARTIALLY_FILLED",
+                "executedQty": "0.0005",
+            }
+        if parsed.path.endswith("/fapi/v1/order") and method == "POST":
             if self.fail_order:
                 raise BinancePaperExchangeError("testnet_transport_unavailable")
             return {
@@ -201,3 +210,44 @@ def test_order_dispatch_timeout_is_ambiguous_not_rejected(tmp_path):
     receipt = adapter.execute(_intent())
     assert receipt.status == "unknown"
     assert receipt.outcome_code == "testnet_dispatch_ambiguous"
+
+
+
+def test_recovery_worker_reconciles_dispatching_order_without_resubmission(tmp_path):
+    transport = FakeTransport()
+    adapter = BinanceUSDMPaperExecutionAdapter(
+        client=make_client(tmp_path, transport)
+    )
+    with SQLiteReplayStore(tmp_path / "replay.sqlite3") as replay:
+        intent = _intent()
+        replay.reserve(intent, now_ms=NOW)
+        replay.mark_dispatching(intent.intent_id, now_ms=NOW + 1)
+        worker = PaperSignerRecoveryWorker(replay_store=replay, adapter=adapter)
+        result = worker.run_once(now_ms=NOW + 2)
+        assert result == {"resolved": 1, "unresolved": 0}
+        reconciled = replay.get(intent.intent_id)
+        assert reconciled.status == "accepted"
+        assert reconciled.outcome_code == "testnet_order_reconciled"
+        assert reconciled.symbol == "BTCUSDT"
+        assert not any(call[0] == "POST" for call in transport.calls)
+
+
+def test_recovery_worker_keeps_unknown_when_exchange_lookup_is_unavailable(tmp_path):
+    class LookupUnavailable(FakeTransport):
+        def request(self, method, url, *, headers, timeout):
+            if urlsplit(url).path.endswith("/fapi/v1/order") and method == "GET":
+                raise BinancePaperExchangeError("simulated_lookup_unavailable")
+            return super().request(method, url, headers=headers, timeout=timeout)
+
+    adapter = BinanceUSDMPaperExecutionAdapter(
+        client=make_client(tmp_path, LookupUnavailable())
+    )
+    with SQLiteReplayStore(tmp_path / "replay.sqlite3") as replay:
+        intent = _intent()
+        replay.reserve(intent, now_ms=NOW)
+        replay.mark_dispatching(intent.intent_id, now_ms=NOW + 1)
+        result = PaperSignerRecoveryWorker(
+            replay_store=replay, adapter=adapter
+        ).run_once(now_ms=NOW + 2)
+        assert result == {"resolved": 0, "unresolved": 1}
+        assert replay.get(intent.intent_id).status == "dispatching"
