@@ -1972,7 +1972,7 @@ export default function App() {
                 </div>
                 <div className="notice-box">
                   <ShieldCheck size={16} />
-                  <span>Switch to the local “AITOS — Trusted Signer Settings” window to choose Native OS vault or Bitwarden/1Password, configure an account policy, and store and verify a Binance Futures Testnet credential pair.</span>
+                  <span>Use the native application menu → “Open Trusted Signer Settings” to choose Native OS vault or Bitwarden/1Password, configure a global default or per-account policy, and store and verify a Binance Futures Testnet credential pair. Closing the signer window hides it; the native menu can reopen it.</span>
                 </div>
               </section>
             </>
@@ -1990,20 +1990,25 @@ export default function App() {
               AITOS OS <span className="dim"> / </span> LOCAL-FIRST{" "}
               <span className="dim"> / </span> v0.1.0
             </span>
-            <button
-              onClick={async () => {
-                if (installPrompt) {
-                  await installPrompt.prompt();
-                  setInstallPrompt(null);
-                } else
-                  notice(
-                    "Install via your browser’s app menu on a supported HTTPS/localhost origin. Native packages are not built yet.",
-                  );
-              }}
-            >
-              <ArrowDownToLine size={12} />
-              Install workspace
-            </button>
+            {(window as Window & { __TAURI__?: unknown }).__TAURI__ ? (
+              <span className="native-app-label">Native desktop application</span>
+            ) : (
+              <button
+                onClick={async () => {
+                  if (installPrompt) {
+                    await installPrompt.prompt();
+                    setInstallPrompt(null);
+                  } else {
+                    notice(
+                      "Install via your browser’s app menu on a supported HTTPS/localhost origin.",
+                    );
+                  }
+                }}
+              >
+                <ArrowDownToLine size={12} />
+                Install workspace
+              </button>
+            )}
           </footer>
         </main>
       </div>
@@ -2130,7 +2135,7 @@ export default function App() {
               {modal === "live"
                 ? "This console cannot activate live trading. Readiness requires independent evidence, approved credentials and explicit human authorization."
                 : modal === "connection"
-                  ? `${exchange} is selected for workspace context only. No account has been connected and no credential has been stored. The native credential vault and account-activation control plane are not implemented yet.`
+                  ? `${exchange} is selected for workspace context only. No account has been connected and no credential has been stored. Credential custody is configured separately in the local Trusted Signer window. Account activation and live trading remain unavailable from this console.`
                   : modal === "launch"
                     ? "Create an unapplied paper/research configuration draft. Job launch, scheduling and backtest result retrieval are not connected in this frontend release."
                     : modal === "notifications"
