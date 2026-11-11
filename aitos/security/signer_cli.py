@@ -90,9 +90,7 @@ def _slots() -> SignerCredentialSlots:
         account = _required("AITOS_SIGNER_ACCOUNT_ALIAS")
         profile = profiles.resolve(account)
         backends = (
-            discover_external_vault_backends()
-            if profile.mode == "external"
-            else {}
+            discover_external_vault_backends() if profile.mode == "external" else {}
         )
         router = CredentialProviderRouter(
             profiles=profiles,
@@ -153,9 +151,7 @@ def store_exchange_credential(_args) -> int:
     if secret != confirm:
         raise RuntimeError("exchange_secret_confirmation_mismatch")
     _slots().save(account, key_id=key_id, api_secret=secret)
-    print(
-        "Testnet credential stored using the configured signer credential provider."
-    )
+    print("Testnet credential stored using the configured signer credential provider.")
     return 0
 
 
