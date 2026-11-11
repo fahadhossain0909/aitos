@@ -670,6 +670,17 @@ The credential router appends /key-id and /api-secret to this base reference.
 The adapter rejects malformed references, mismatched item IDs, duplicate
 field labels and malformed provider responses.
 
+Configure an account after creating its dedicated item:
+
+```bash
+python -m aitos.security.signer_cli set-credential-mode --mode external --provider-id bitwarden --secret-ref <bitwarden-item-uuid> --account-alias primary
+python -m aitos.security.signer_cli set-credential-mode --mode external --provider-id onepassword --secret-ref <vault-id>/<item-id> --account-alias primary
+```
+
+The CLI command changes routing metadata only. Provision the item fields and
+run the signer's read-only credential preflight before allowing the signer to
+accept intents.
+
 ### Session, lock and timeout behavior
 
 - The signer invokes the installed bw or op executable without a shell.
