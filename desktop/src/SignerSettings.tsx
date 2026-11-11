@@ -186,7 +186,7 @@ export default function SignerSettings() {
         <div className="signer-card-heading"><div><span className="signer-eyebrow">03 / PROVISION</span><h2>Store Testnet credentials</h2></div><span className="signer-step">03</span></div>
         <form onSubmit={storeCredentials}>
           <label htmlFor="exchange-key">Binance Futures Testnet API key</label>
-          <input id="exchange-key" value={keyId} onChange={e => setKeyId(e.target.value)} autoComplete="off" spellCheck={false} maxLength={128} required/>
+          <input id="exchange-key" type="password" autoComplete="new-password" value={keyId} onChange={e => setKeyId(e.target.value)} autoComplete="off" spellCheck={false} maxLength={128} required/>
           <label htmlFor="exchange-secret">API secret</label>
           <input id="exchange-secret" type="password" value={apiSecret} onChange={e => setApiSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required/>
           <label htmlFor="exchange-secret-confirm">Confirm API secret</label>
