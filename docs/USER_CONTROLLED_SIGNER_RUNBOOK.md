@@ -50,7 +50,7 @@ device that will own the exchange credential pair.
    availability. This is a local vault read check, not an exchange connectivity
    test or permission to submit orders.
 
-The operator console is a different WebView loaded from the loopback gateway.
+The Operator Console is a different, read-only WebView loaded from the loopback gateway.
 It receives no signer IPC capability. Native credential commands are accepted
 only from the bundled local `signer.html` window. Do not expose the signer UI
 over a remote desktop, remote WebView, browser tab, or reverse proxy.
