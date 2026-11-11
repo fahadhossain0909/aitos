@@ -3346,3 +3346,5 @@ pre {
   gap: 15px;
   flex-wrap: wrap;
 }
+
+.native-app-label{display:inline-flex;align-items:center;gap:7px;color:#9eae91;font:9px var(--mono);letter-spacing:.4px}
