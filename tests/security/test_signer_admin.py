@@ -158,7 +158,7 @@ def test_stdin_protocol_returns_only_metadata_and_never_secret_material(
                     json.dumps(
                         {"action": "status", "account_alias": "stdin-account"}
                     ).encode("utf-8")
-                    + b"\\n"
+                    + b"\n"
                 )
             },
         )(),
