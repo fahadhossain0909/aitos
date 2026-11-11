@@ -512,9 +512,7 @@ class SQLiteSignerRateLimiter:
                 if count >= limit:
                     self._db.execute("ROLLBACK")
                     raise SignerProtocolRejected("signer_rate_limit_exceeded")
-                self._db.execute(
-                    insert_sql, (identity, account_alias, start)
-                )
+                self._db.execute(insert_sql, (identity, account_alias, start))
                 # Retain the active window and one previous window for audit/debug.
                 self._db.execute(
                     cleanup_sql, (start - self.window_ms,)
