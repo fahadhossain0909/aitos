@@ -585,6 +585,8 @@ class PaperSignerRPCServer:
             raise RuntimeError("signer_rpc_server_already_started")
         if type(port) is not int or not 0 <= port <= 65535:
             raise ValueError("invalid_signer_rpc_port")
+        if port == 0 and host not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError("ephemeral_signer_rpc_port_loopback_only")
         self._server = await asyncio.start_server(
             self._handle,
             host=host,
