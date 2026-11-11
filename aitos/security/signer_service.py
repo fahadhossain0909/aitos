@@ -160,18 +160,32 @@ class SQLiteSignerRegistry:
                     serials = set(json.loads(row["serials_json"]))
                     revoked = set(json.loads(row["revoked_json"]))
                     if certificate_serial.upper() in revoked:
-                        raise ValueError("revoked_certificate_serial_cannot_be_reenrolled")
+                        raise ValueError(
+                            "revoked_certificate_serial_cannot_be_reenrolled"
+                        )
                     serials.add(certificate_serial.upper())
                     self._write(
-                        identity, account_alias, symbols, serials, revoked, True,
+                        identity,
+                        account_alias,
+                        symbols,
+                        serials,
+                        revoked,
+                        True,
                         min(valid_from_ms, row["valid_from_ms"]),
-                        max(valid_until_ms, row["valid_until_ms"]), now_ms,
+                        max(valid_until_ms, row["valid_until_ms"]),
+                        now_ms,
                     )
                 else:
                     self._write(
-                        identity, account_alias, set(allowed_symbols),
-                        {certificate_serial.upper()}, set(), True,
-                        valid_from_ms, valid_until_ms, now_ms,
+                        identity,
+                        account_alias,
+                        set(allowed_symbols),
+                        {certificate_serial.upper()},
+                        set(),
+                        True,
+                        valid_from_ms,
+                        valid_until_ms,
+                        now_ms,
                     )
                 self._db.execute("COMMIT")
             except Exception:
@@ -195,10 +209,15 @@ class SQLiteSignerRegistry:
                 revoked = set(json.loads(row["revoked_json"]))
                 revoked.add(certificate_serial.upper())
                 self._write(
-                    identity, row["account_alias"], set(json.loads(row["symbols_json"])),
-                    set(json.loads(row["serials_json"])), revoked,
-                    bool(row["enabled"]), row["valid_from_ms"],
-                    row["valid_until_ms"], now_ms,
+                    identity,
+                    row["account_alias"],
+                    set(json.loads(row["symbols_json"])),
+                    set(json.loads(row["serials_json"])),
+                    revoked,
+                    bool(row["enabled"]),
+                    row["valid_from_ms"],
+                    row["valid_until_ms"],
+                    now_ms,
                 )
                 self._db.execute("COMMIT")
             except Exception:
@@ -215,10 +234,15 @@ class SQLiteSignerRegistry:
                 if row is None:
                     raise ValueError("signer_identity_not_enrolled")
                 self._write(
-                    identity, row["account_alias"], set(json.loads(row["symbols_json"])),
+                    identity,
+                    row["account_alias"],
+                    set(json.loads(row["symbols_json"])),
                     set(json.loads(row["serials_json"])),
-                    set(json.loads(row["revoked_json"])), False,
-                    row["valid_from_ms"], row["valid_until_ms"], now_ms,
+                    set(json.loads(row["revoked_json"])),
+                    False,
+                    row["valid_from_ms"],
+                    row["valid_until_ms"],
+                    now_ms,
                 )
                 self._db.execute("COMMIT")
             except Exception:
@@ -226,8 +250,16 @@ class SQLiteSignerRegistry:
                 raise
 
     def _write(
-        self, identity, account, symbols, serials, revoked, enabled,
-        valid_from, valid_until, now_ms
+        self,
+        identity,
+        account,
+        symbols,
+        serials,
+        revoked,
+        enabled,
+        valid_from,
+        valid_until,
+        now_ms,
     ):
         self._db.execute(
             """INSERT INTO signer_client_grants VALUES (?,?,?,?,?,?,?,?,?)
@@ -241,18 +273,22 @@ class SQLiteSignerRegistry:
               valid_until_ms=excluded.valid_until_ms,
               updated_at_ms=excluded.updated_at_ms""",
             (
-                identity, account, json.dumps(sorted(symbols)),
-                json.dumps(sorted(serials)), json.dumps(sorted(revoked)),
-                int(enabled), valid_from, valid_until, now_ms,
+                identity,
+                account,
+                json.dumps(sorted(symbols)),
+                json.dumps(sorted(serials)),
+                json.dumps(sorted(revoked)),
+                int(enabled),
+                valid_from,
+                valid_until,
+                now_ms,
             ),
         )
 
     def get_registry(self) -> ClientAuthorizationRegistry:
         with self._lock:
             try:
-                rows = self._db.execute(
-                    "SELECT * FROM signer_client_grants"
-                ).fetchall()
+                rows = self._db.execute("SELECT * FROM signer_client_grants").fetchall()
                 grants = {
                     row["identity"]: ClientGrant(
                         identity=row["identity"],
@@ -291,7 +327,9 @@ class SQLiteSignerRegistry:
 class SQLiteSignerRateLimiter:
     """Atomic, restart-safe fixed-window limiter scoped by identity and account."""
 
-    def __init__(self, database_path: str | os.PathLike[str], *, limit: int, window_ms: int):
+    def __init__(
+        self, database_path: str | os.PathLike[str], *, limit: int, window_ms: int
+    ):
         if type(limit) is not int or not 1 <= limit <= 100_000:
             raise ValueError("invalid_signer_rate_limit")
         if type(window_ms) is not int or not 100 <= window_ms <= 86_400_000:
@@ -307,7 +345,9 @@ class SQLiteSignerRateLimiter:
         try:
             if os.name == "posix":
                 fd = os.open(
-                    self.path, os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0), 0o600
+                    self.path,
+                    os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0),
+                    0o600,
                 )
                 os.close(fd)
             self._db = sqlite3.connect(
@@ -326,13 +366,18 @@ class SQLiteSignerRateLimiter:
             if os.name == "posix":
                 os.chmod(self.path, stat.S_IRUSR | stat.S_IWUSR)
         except (OSError, sqlite3.Error) as exc:
-            raise SignerServiceError("signer_rate_limiter_initialization_failed") from exc
+            raise SignerServiceError(
+                "signer_rate_limiter_initialization_failed"
+            ) from exc
 
     def consume(self, identity: str, account_alias: str, *, now_ms: int) -> None:
         if (
-            type(identity) is not str or not _IDENTITY.fullmatch(identity)
-            or type(account_alias) is not str or not _ALIAS.fullmatch(account_alias)
-            or type(now_ms) is not int or now_ms < 0
+            type(identity) is not str
+            or not _IDENTITY.fullmatch(identity)
+            or type(account_alias) is not str
+            or not _ALIAS.fullmatch(account_alias)
+            or type(now_ms) is not int
+            or now_ms < 0
         ):
             raise ValueError("invalid_signer_rate_key")
         start = now_ms - (now_ms % self.window_ms)
@@ -415,7 +460,11 @@ class PaperSignerRPCServer:
         if not 0.1 <= request_timeout_seconds <= 30:
             raise ValueError("invalid_signer_rpc_timeout")
         self.ssl_context = ssl_context
-        self.registry, self.rate_limiter, self.processor = registry, rate_limiter, processor
+        self.registry, self.rate_limiter, self.processor = (
+            registry,
+            rate_limiter,
+            processor,
+        )
         self.max_body_bytes = max_body_bytes
         self.request_timeout_seconds = request_timeout_seconds
         self.clock_ms = clock_ms or (lambda: __import__("time").time_ns() // 1_000_000)
@@ -427,7 +476,10 @@ class PaperSignerRPCServer:
         if type(port) is not int or not 1 <= port <= 65535:
             raise ValueError("invalid_signer_rpc_port")
         self._server = await asyncio.start_server(
-            self._handle, host=host, port=port, ssl=self.ssl_context,
+            self._handle,
+            host=host,
+            port=port,
+            ssl=self.ssl_context,
             limit=self.max_body_bytes + 1,
             backlog=64,
             ssl_handshake_timeout=5.0,
@@ -494,8 +546,15 @@ class PaperSignerRPCServer:
                     "outcome_code": result.outcome_code or "none",
                     "duplicate": result.duplicate,
                 }
-        except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError):
-            response = {"status": "rejected", "outcome_code": "request_incomplete_or_timeout"}
+        except (
+            asyncio.IncompleteReadError,
+            asyncio.LimitOverrunError,
+            asyncio.TimeoutError,
+        ):
+            response = {
+                "status": "rejected",
+                "outcome_code": "request_incomplete_or_timeout",
+            }
         except (SignerProtocolRejected, ValueError):
             response = {"status": "rejected", "outcome_code": "signer_policy_rejected"}
         except Exception:
