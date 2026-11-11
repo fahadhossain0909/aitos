@@ -732,9 +732,12 @@ acceptance tests. The desktop application now opens two separate windows:
   command additionally checks the window label, local app origin and
   `/signer.html` path before accepting a request.
 
-The local signer UI supports per-account Native/External policy selection,
-Bitwarden/1Password item references, Testnet key/secret provisioning, and a
-read-back status that never returns secret values. The UI sends a bounded JSON
+The local signer UI supports global defaults and per-account Native/External
+overrides, Bitwarden/1Password item references, Testnet key/secret provisioning,
+and a read-back status that never returns secret values. A global External
+reference is intentionally shared by accounts without an override; operators
+must use dedicated per-account overrides when exchange accounts have distinct
+credential pairs. Global Native mode still uses account-specific OS-vault slots. The UI sends a bounded JSON
 request through the Tauri command; Rust zeroizes its request buffers and passes
 the request to the frozen Python sidecar over stdin (never argv). The sidecar
 accepts an exact allowlisted action/schema, stores only profile metadata in
