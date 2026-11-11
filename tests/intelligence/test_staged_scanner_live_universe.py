@@ -9,7 +9,11 @@ class LiveUniverse:
 
 
 class NoHistory:
-    async def analyze(self, *args, **kwargs):
+    def __init__(self):
+        self.calls = []
+
+    async def analyze(self, symbol, *args, **kwargs):
+        self.calls.append(symbol)
         return None, {
             "available": False,
             "reason": "not_available",
@@ -65,3 +69,45 @@ async def test_live_universe_path_uses_tickers_then_deep_scans_top_ten_only():
     assert [s for s, _ in stages] == ["TOP_50", "TOP_25", "TOP_10", "TOP_5", "TOP_2"]
     assert stages[0][1][0] == "S0"
     assert stages[-1][1] == ["S9", "S8"]
+
+
+
+class BatchScanner(Scanner):
+    async def _lightweight_rank_symbols(self, limit=None):
+        raise AssertionError("legacy candle-based universe ranking must not run")
+
+    async def iter_candidate_batches(self):
+        candidates = [
+            SimpleNamespace(
+                symbol=f"S{i}",
+                composite_score=float(i),
+                candidate_id=f"candidate-{i}",
+                direction=SimpleNamespace(value="LONG"),
+            )
+            for i in range(4)
+        ]
+        yield candidates
+
+
+@pytest.mark.asyncio
+async def test_runtime_batch_path_uses_live_rank_and_enriches_only_promoted_top_two():
+    scanner = BatchScanner()
+    stages = []
+
+    async def changed(symbols, stage):
+        stages.append((stage, list(symbols)))
+
+    await install_staged_scan(scanner, changed)
+    selected = await scanner._lightweight_rank_symbols(limit=10)
+    batches = [batch async for batch in scanner.iter_candidate_batches()]
+
+    assert selected[:2] == ["S0", "S1"]
+    assert len(batches) == 1
+    assert scanner._aitos_historical_intelligence.calls == ["S3", "S2"]
+    by_symbol = {item.symbol: item for item in batches[0]}
+    assert by_symbol["S3"]._aitos_historical_context["available"] is False
+    assert by_symbol["S2"]._aitos_historical_context["available"] is False
+    assert (
+        by_symbol["S0"]._aitos_historical_context["reason"]
+        == "not_promoted_for_deep_history"
+    )
