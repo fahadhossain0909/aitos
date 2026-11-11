@@ -120,7 +120,7 @@ def test_rate_limit_scopes_are_isolated(tmp_path):
 def test_registry_requires_private_durable_storage(tmp_path):
     with pytest.raises(ValueError, match="durable_signer_registry_required"):
         SQLiteSignerRegistry(":memory:")
-    with pytest.raises(ValueError, match="durable_signer_rate_window"):
+    with pytest.raises(ValueError, match="invalid_signer_rate_window"):
         SQLiteSignerRateLimiter(tmp_path / "rate.sqlite3", limit=1, window_ms=1)
 
 
