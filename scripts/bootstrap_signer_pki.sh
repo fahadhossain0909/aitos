@@ -90,7 +90,7 @@ cleanup() {
 trap cleanup EXIT
 
 openssl req -new -newkey rsa:3072 -nodes -keyout "$client_key_tmp" \
-  -out "$client_csr_tmp" -subj "/CN=${client_identity}"
+  -out "$client_csr_tmp" -subj "/CN=AITOS Runtime Client"
 cat > "$client_ext_tmp" <<EOF
 basicConstraints=critical,CA:FALSE
 keyUsage=critical,digitalSignature,keyEncipherment
