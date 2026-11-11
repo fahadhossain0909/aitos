@@ -46,6 +46,12 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
 
 
 def test_signer_command_payload_is_stdin_only_and_not_forwarded_to_operator():
+    embedded = (ROOT / "aitos" / "native" / "embedded_gateway.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'sys.argv[1:] == ["--credential-admin"]' in embedded
+    assert "signer_admin_main()" in embedded
+
     rust = (TAURI / "src" / "main.rs").read_text(encoding="utf-8")
     assert '.args(["--credential-admin"])' in rust
     assert "process.write(&input)" in rust
