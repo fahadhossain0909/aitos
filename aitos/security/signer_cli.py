@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import getpass
+import ipaddress
 import os
 import sys
 from decimal import Decimal, InvalidOperation
@@ -198,8 +199,12 @@ async def _serve() -> None:
         "AITOS_SIGNER_BIND_HOST", "127.0.0.1"
     )  # nosec B104: wildcard requires explicit operator opt-in.
     port = int(os.environ.get("AITOS_SIGNER_PORT", "9443"))
+    try:
+        wildcard_bind = not host.strip() or ipaddress.ip_address(host).is_unspecified
+    except ValueError:
+        wildcard_bind = False
     if (
-        host in {"0.0.0.0", "::", ""}
+        wildcard_bind
         and os.environ.get("AITOS_SIGNER_ALLOW_WILDCARD_BIND") != "1"
     ):
         raise RuntimeError("wildcard_bind_requires_explicit_network_review")
