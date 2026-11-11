@@ -63,9 +63,8 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                     object.__setattr__(candidate, "_aitos_advanced_context", advanced)
                 except (AttributeError, TypeError, ValueError):
                     pass
-            store = getattr(scanner, "_aitos_historical_evidence_store", None)
-            if store is not None and evidence.get("available"):
-                evidence_id = await store.append(candidate_id, evidence)
+            evidence_id = await service.persist(candidate_id, evidence)
+            if evidence_id:
                 object.__setattr__(candidate, "_aitos_historical_evidence_id", evidence_id)
         except Exception as exc:
             logger.warning(
