@@ -42,11 +42,13 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                 candidate.symbol, scanner._timeframe,
                 limit=max(300, min(1000, int(scanner._kline_lookback) * 2)),
             )
+            import uuid
             candidate_id = str(
                 getattr(candidate, "candidate_id", "")
                 or getattr(candidate, "_aitos_candidate_id", "")
-                or f"{candidate.symbol}:{getattr(candidate, 'entry_price', 0)}:{getattr(candidate, 'composite_score', 0)}:{scanner._timeframe}"
+                or uuid.uuid4().hex
             )
+            object.__setattr__(candidate, "_aitos_candidate_id", candidate_id)
             if evidence.get("available"):
                 evidence = {**evidence, "candidate_id": candidate_id}
             object.__setattr__(candidate, "_aitos_historical_context", evidence)
@@ -70,6 +72,8 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                 "promoted candidate historical enrichment unavailable",
                 extra={"aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}},
             )
+
+    await asyncio.gather(*(enrich(candidate) for candidate in candidates))
 
 
 def _cheap_score(klines: list[Any]) -> float:
