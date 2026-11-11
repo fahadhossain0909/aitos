@@ -123,6 +123,7 @@ def test_first_party_provider_factories_are_registered_without_cli_execution():
 def test_provider_child_environment_excludes_exchange_credentials(monkeypatch):
     monkeypatch.setenv("BINANCE_API_SECRET", "must-not-be-inherited")
     monkeypatch.setenv("BW_SESSION", "provider-session")
+    monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "other-provider-token")
     item_id = "12345678-1234-1234-1234-123456789abc"
     item = {"id": item_id, "fields": []}
     runner = FakeRunner([(0, json.dumps(item))])
@@ -131,6 +132,7 @@ def test_provider_child_environment_excludes_exchange_credentials(monkeypatch):
     assert vault.get_secret(f"{item_id}/api-secret") is None
     child_env = runner.calls[0][1]["env"]
     assert child_env["BW_SESSION"] == "provider-session"
+    assert "OP_SERVICE_ACCOUNT_TOKEN" not in child_env
     assert "BINANCE_API_SECRET" not in child_env
 
 
@@ -171,3 +173,16 @@ def test_delete_rejects_duplicate_provider_fields(vault, reference, item):
     with pytest.raises(ProviderVaultError, match="duplicate_credential_field"):
         provider.delete_secret(reference)
     assert len(runner.calls) == 1
+
+
+def test_onepassword_child_environment_excludes_bitwarden_session(monkeypatch):
+    monkeypatch.setenv("BW_SESSION", "other-provider-session")
+    monkeypatch.setenv("OP_SERVICE_ACCOUNT_TOKEN", "onepassword-session")
+    item = {"id": "item1234", "fields": []}
+    runner = FakeRunner([(0, json.dumps(item))])
+    vault = OnePasswordCLIVault(runner=runner)
+
+    assert vault.get_secret("vault1234/item1234/api-secret") is None
+    child_env = runner.calls[0][1]["env"]
+    assert child_env["OP_SERVICE_ACCOUNT_TOKEN"] == "onepassword-session"
+    assert "BW_SESSION" not in child_env
