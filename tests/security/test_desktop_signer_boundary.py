@@ -59,6 +59,8 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
     assert "localStorage" not in ui
     assert "sessionStorage" not in ui
     assert 'type="password"' in ui
+    assert "disabled={!available || busy}" in ui
+    assert 'setAccount(e.target.value); setKeyId(""); setApiSecret(""); setConfirmSecret("");' in ui
 
 
 def test_signer_command_payload_is_stdin_only_and_not_forwarded_to_operator():
