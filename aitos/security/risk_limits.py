@@ -114,13 +114,6 @@ class SignerRiskLimits:
             or snapshot.order_count_window < 0
         ):
             raise IntentRejected("account_evidence_invalid")
-        if snapshot.gross_exposure > self.max_gross_exposure:
-            raise IntentRejected("gross_exposure_limit_exceeded")
-        if snapshot.daily_loss >= self.max_daily_loss:
-            raise IntentRejected("daily_loss_limit_reached")
-        if snapshot.order_count_window >= self.max_orders_per_window:
-            raise IntentRejected("order_rate_limit_reached")
-
         if any(
             not isinstance(position, Decimal) or not position.is_finite()
             for position in snapshot.positions.values()
@@ -147,8 +140,17 @@ class SignerRiskLimits:
                 raise IntentRejected("reduce_only_side_would_increase_exposure")
             if intent.quantity > abs(position):
                 raise IntentRejected("reduce_only_quantity_exceeds_position")
+            # Exposure, daily-loss and order-rate ceilings constrain risk growth.
+            # They must not prevent a verified reduce-only order from shrinking
+            # an existing position when the account is already over a limit.
             return
 
+        if snapshot.gross_exposure > self.max_gross_exposure:
+            raise IntentRejected("gross_exposure_limit_exceeded")
+        if snapshot.daily_loss >= self.max_daily_loss:
+            raise IntentRejected("daily_loss_limit_reached")
+        if snapshot.order_count_window >= self.max_orders_per_window:
+            raise IntentRejected("order_rate_limit_reached")
         if snapshot.gross_exposure + intent.notional > self.max_gross_exposure:
             raise IntentRejected("gross_exposure_limit_exceeded")
         if current_symbol + intent.notional > self.max_symbol_exposure:
