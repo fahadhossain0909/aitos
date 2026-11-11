@@ -111,24 +111,14 @@ class UniverseMarketContext:
 
     @staticmethod
     def score(row):
-        momentum = min(10, abs(float(row.get("change_pct_24h", 0))) * 1.5)
-        liquidity = min(
-            10, math.log10(max(1, float(row.get("quote_volume_24h", 0)))) * 0.75
-        )
-        activity = min(
-            10, math.log10(max(1, float(row.get("trade_count_24h", 0)))) * 1.5
-        )
-        spread = row.get("spread_pct")
-        spread_score = 5 if spread is None else max(0, 10 - float(spread) * 100)
-        range_score = min(10, float(row.get("range_pct_24h", 0)) * 0.75)
-        return round(
-            0.35 * momentum
-            + 0.30 * liquidity
-            + 0.15 * activity
-            + 0.10 * spread_score
-            + 0.10 * range_score,
-            6,
-        )
+        """Approximate the legacy median-quote-activity screen from 24h tickers."""
+        quote_volume = max(0.0, float(row.get("quote_volume_24h", 0.0)))
+        if quote_volume <= 0:
+            return -1.0
+        average_quote_activity = quote_volume / 1440.0
+        range_pct = max(0.0, float(row.get("range_pct_24h", 0.0)))
+        stability = 1.0 / (1.0 + range_pct)
+        return round(average_quote_activity * stability, 6)
 
     async def rank(self):
         rows = await self.snapshot()
