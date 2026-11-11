@@ -63,6 +63,7 @@ def _router(profiles: CredentialProfileStore, account: str):
 def handle_request(request: object) -> dict:
     if not isinstance(request, dict) or set(request) - {
         "action",
+        "scope",
         "account_alias",
         "mode",
         "provider_id",
@@ -74,29 +75,45 @@ def handle_request(request: object) -> dict:
     action = request.get("action")
     if action not in ACTIONS:
         raise ValueError("signer_admin_action_not_allowed")
-    expected_fields = {
-        "status": {"action", "account_alias"},
-        "set-mode": (
-            {
-                "action",
-                "account_alias",
-                "mode",
-                "provider_id",
-                "secret_ref",
-            }
-            if request.get("mode") == "external"
-            else {"action", "account_alias", "mode"}
-        ),
-        "store-credentials": {
+    scope = request.get("scope") if action == "set-mode" else None
+    if action == "set-mode" and scope not in {"global", "account"}:
+        raise ValueError("invalid_credential_policy_scope")
+    if action == "set-mode":
+        if scope == "global":
+            expected_fields = (
+                {"action", "scope", "mode", "provider_id", "secret_ref"}
+                if request.get("mode") == "external"
+                else {"action", "scope", "mode"}
+            )
+        else:
+            expected_fields = (
+                {
+                    "action",
+                    "scope",
+                    "account_alias",
+                    "mode",
+                    "provider_id",
+                    "secret_ref",
+                }
+                if request.get("mode") == "external"
+                else {"action", "scope", "account_alias", "mode"}
+            )
+    elif action == "status":
+        expected_fields = {"action", "account_alias"}
+    else:
+        expected_fields = {
             "action",
             "account_alias",
             "key_id",
             "api_secret",
-        },
-    }[action]
+        }
     if set(request) != expected_fields:
         raise ValueError("invalid_signer_admin_request")
-    account = _account(request.get("account_alias"))
+    account = (
+        _account(request.get("account_alias"))
+        if action != "set-mode" or scope == "account"
+        else None
+    )
     profiles = CredentialProfileStore(_data_dir() / "credential-profiles.sqlite3")
     try:
         if action == "set-mode":
@@ -107,7 +124,10 @@ def handle_request(request: object) -> dict:
                     or request.get("secret_ref") is not None
                 ):
                     raise ValueError("native_mode_does_not_accept_external_reference")
-                profiles.set_account(account, "native")
+                if scope == "global":
+                    profiles.set_default("native")
+                else:
+                    profiles.set_account(account, "native")
             elif mode == "external":
                 provider_id = request.get("provider_id")
                 secret_ref = request.get("secret_ref")
@@ -116,15 +136,27 @@ def handle_request(request: object) -> dict:
                     raise CredentialProfileError(
                         "requested_external_provider_not_installed"
                     )
-                profiles.set_account(
-                    account,
-                    "external",
-                    provider_id=provider_id,
-                    secret_ref=secret_ref,
-                )
+                if scope == "global":
+                    profiles.set_default(
+                        "external",
+                        provider_id=provider_id,
+                        secret_ref=secret_ref,
+                    )
+                else:
+                    profiles.set_account(
+                        account,
+                        "external",
+                        provider_id=provider_id,
+                        secret_ref=secret_ref,
+                    )
             else:
                 raise ValueError("invalid_credential_mode")
-            return {"ok": True, "action": action, "account_alias": account}
+            return {
+                "ok": True,
+                "action": action,
+                "scope": scope,
+                "account_alias": account,
+            }
 
         try:
             profile = profiles.resolve(account)
