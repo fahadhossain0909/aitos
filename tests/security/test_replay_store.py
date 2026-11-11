@@ -310,7 +310,6 @@ def test_process_termination_after_dispatching_is_not_replayed(tmp_path):
     assert adapter.calls == 1
 
 
-
 def test_paper_processor_runs_independent_risk_gate_before_reservation(tmp_path):
     limits = SignerRiskLimits(
         max_gross_exposure=Decimal("1000"),
@@ -356,7 +355,6 @@ def test_risk_gate_requires_provider_and_limits_as_a_pair(tmp_path):
             PaperOnlyIntentProcessor(
                 policy=POLICY, replay_store=store, risk_limits=limits
             )
-
 
 
 def test_paper_processor_uses_trusted_provider_for_fresh_risk_evidence(tmp_path):
