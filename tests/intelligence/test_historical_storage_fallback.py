@@ -33,8 +33,19 @@ class Repository:
 def _kline(index, opened):
     close = 100.0 + index
     return Kline(
-        "BTCUSDT", "1m", opened, opened + timedelta(minutes=1),
-        close, close + 1, close - 1, close, 10.0, 1000.0, 10, 5.0, 500.0
+        "BTCUSDT",
+        "1m",
+        opened,
+        opened + timedelta(minutes=1),
+        close,
+        close + 1,
+        close - 1,
+        close,
+        10.0,
+        1000.0,
+        10,
+        5.0,
+        500.0,
     )
 
 
@@ -51,8 +62,12 @@ async def test_clickhouse_history_is_used_before_rest():
         return []
 
     result = await fetch_historical_klines(
-        "BTCUSDT", "1m", limit=60, exchange_fetcher=rest_fetcher,
-        repository=repository, minimum_history=53,
+        "BTCUSDT",
+        "1m",
+        limit=60,
+        exchange_fetcher=rest_fetcher,
+        repository=repository,
+        minimum_history=53,
     )
     assert len(result) == 60
     assert result[0].open_time < result[-1].open_time
@@ -74,8 +89,12 @@ async def test_insufficient_clickhouse_history_uses_rest_and_merges():
         return remote[-limit:]
 
     result = await fetch_historical_klines(
-        "BTCUSDT", "1m", limit=60, exchange_fetcher=rest_fetcher,
-        repository=repository, minimum_history=53,
+        "BTCUSDT",
+        "1m",
+        limit=60,
+        exchange_fetcher=rest_fetcher,
+        repository=repository,
+        minimum_history=53,
     )
     assert calls == 1
     assert len(result) == 60
