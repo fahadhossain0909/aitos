@@ -186,13 +186,24 @@ async def install_staged_scan(
             await on_subscription_change(top50, "TOP_50")
             top25 = top50[:TOP_25]
             await on_subscription_change(top25, "TOP_25")
+            reference_klines = None
+            if anchor:
+                try:
+                    reference_klines = await scanner._exchange.fetch_klines(
+                        anchor, scanner._timeframe, limit=scanner._kline_lookback
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "live-universe reference candle unavailable",
+                        extra={"aitos_extra": {"symbol": anchor, "error": str(exc)}},
+                    )
             deep = ([anchor] if anchor in top25 else []) + [
                 symbol for symbol in top25 if symbol != anchor
             ][: TOP_10 - (1 if anchor in top25 else 0)]
             candidates = []
             for symbol in deep:
                 try:
-                    candidate = await scanner.scan_symbol(symbol, None)
+                    candidate = await scanner.scan_symbol(symbol, reference_klines)
                     if candidate is not None:
                         candidates.append(candidate)
                 except Exception as exc:
