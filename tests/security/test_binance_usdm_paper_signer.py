@@ -262,6 +262,7 @@ def test_recovery_worker_keeps_unknown_when_exchange_lookup_is_unavailable(tmp_p
         assert result == {"resolved": 0, "unresolved": 1}
         assert replay.get(intent.intent_id).status == "dispatching"
 
+
 def test_canceled_order_with_partial_fill_is_not_reported_as_rejected(tmp_path):
     adapter = BinanceUSDMPaperExecutionAdapter(
         client=make_client(
