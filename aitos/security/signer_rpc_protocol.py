@@ -73,12 +73,9 @@ class ClientGrant:
             )
         ):
             raise ValueError("client_grant_serials_required")
-        if (
-            not isinstance(self.revoked_serials, frozenset)
-            or any(
-                not isinstance(item, str) or not _SERIAL.fullmatch(item)
-                for item in self.revoked_serials
-            )
+        if not isinstance(self.revoked_serials, frozenset) or any(
+            not isinstance(item, str) or not _SERIAL.fullmatch(item)
+            for item in self.revoked_serials
         ):
             raise ValueError("client_grant_revocations_invalid")
         if type(self.enabled) is not bool:
