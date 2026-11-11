@@ -1,0 +1,188 @@
+import { useState } from "react";
+import "./signer.css";
+
+declare global {
+  interface Window {
+    __TAURI__?: {
+      core?: {
+        invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
+      };
+    };
+  }
+}
+
+type AdminResponse = {
+  ok: boolean;
+  action?: string;
+  error?: string;
+  account_alias?: string;
+  mode?: "native" | "external";
+  provider_id?: "bitwarden" | "onepassword" | null;
+  secret_ref?: string | null;
+  credential_pair_ready?: boolean;
+};
+
+async function requestSignerAdmin(payload: Record<string, unknown>) {
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (!invoke) {
+    throw new Error("Open this page from the installed AITOS Desktop application.");
+  }
+  const raw = await invoke<string>("signer_credential_admin", {
+    request: JSON.stringify(payload),
+  });
+  const result = JSON.parse(raw) as AdminResponse;
+  if (!result.ok) {
+    const messages: Record<string, string> = {
+      invalid_signer_admin_request: "The request was rejected.",
+      credential_provider_unavailable:
+        "The selected credential provider is unavailable or not authenticated.",
+      credential_operation_failed:
+        "The credential operation failed. No success was confirmed.",
+    };
+    throw new Error(messages[result.error ?? ""] ?? "Credential operation failed.");
+  }
+  return result;
+}
+
+export default function SignerSettings() {
+  const [account, setAccount] = useState("");
+  const [mode, setMode] = useState<"native" | "external">("native");
+  const [provider, setProvider] = useState<"bitwarden" | "onepassword">("bitwarden");
+  const [reference, setReference] = useState("");
+  const [keyId, setKeyId] = useState("");
+  const [apiSecret, setApiSecret] = useState("");
+  const [confirmSecret, setConfirmSecret] = useState("");
+  const [status, setStatus] = useState<AdminResponse | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const ready = Boolean(account.trim()) && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(account.trim());
+  const referenceValid =
+    provider === "bitwarden"
+      ? /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(reference.trim())
+      : /^[^/\s]{1,128}\/[^/\s]{1,128}$/.test(reference.trim());
+
+  async function run(operation: () => Promise<AdminResponse>, success: string) {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const result = await operation();
+      setStatus(result);
+      setMessage(success);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Credential operation failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function loadStatus() {
+    return run(
+      () => requestSignerAdmin({ action: "status", account_alias: account.trim() }),
+      "Signer status loaded. Secret values were not returned to this window.",
+    );
+  }
+
+  function applyMode() {
+    return run(
+      () =>
+        requestSignerAdmin({
+          action: "set-mode",
+          account_alias: account.trim(),
+          mode,
+          ...(mode === "external"
+            ? { provider_id: provider, secret_ref: reference.trim() }
+            : {}),
+        }),
+      "Credential policy saved for this account. Existing credentials were not migrated.",
+    );
+  }
+
+  function storeCredentials(event: React.FormEvent) {
+    event.preventDefault();
+    if (apiSecret !== confirmSecret) {
+      setError("The API secret confirmation does not match.");
+      return;
+    }
+    return run(
+      () =>
+        requestSignerAdmin({
+          action: "store-credentials",
+          account_alias: account.trim(),
+          key_id: keyId,
+          api_secret: apiSecret,
+        }),
+      "Credential pair stored and read back through the selected provider.",
+    ).then(() => {
+      setKeyId("");
+      setApiSecret("");
+      setConfirmSecret("");
+    });
+  }
+
+  const available = Boolean(window.__TAURI__?.core?.invoke);
+
+  return (
+    <main className="signer-page">
+      <header className="signer-header">
+        <div className="signer-brand"><span className="signer-mark">A</span><div><strong>AITOS</strong><small>TRUSTED SIGNER</small></div></div>
+        <span className="signer-local-badge">LOCAL DEVICE ONLY</span>
+      </header>
+      <section className="signer-hero">
+        <div className="signer-eyebrow">CREDENTIAL CUSTODY · ACCOUNT POLICY</div>
+        <h1>Signer settings</h1>
+        <p>Manage exchange credentials on this trusted device. This window is separate from the remote operator console.</p>
+      </section>
+      <section className="signer-warning" role="note">
+        <strong>Trust boundary</strong>
+        <p>Never run the signer or unlock Bitwarden/1Password on a provider-managed RDP/VPS. Its administrator may inspect process memory and unlocked vault sessions. Keep this signer on a separately controlled device.</p>
+      </section>
+      {!available && <div className="signer-error">Native signer commands are unavailable. Open this page from the installed desktop application.</div>}
+      <section className="signer-card">
+        <div className="signer-card-heading"><div><span className="signer-eyebrow">01 / ACCOUNT</span><h2>Choose the account</h2></div><span className="signer-step">01</span></div>
+        <label htmlFor="account-alias">Account alias</label>
+        <input id="account-alias" value={account} onChange={e => setAccount(e.target.value)} placeholder="e.g. binance-testnet-primary" autoComplete="off" spellCheck={false} maxLength={64}/>
+        <div className="signer-actions">
+          <button className="signer-button secondary" disabled={!ready || busy || !available} onClick={() => void loadStatus()}>Load current policy</button>
+        </div>
+        {status?.action === "status" && <div className="signer-status"><span>Mode: <b>{status.mode ?? "not configured"}</b></span><span>Credential pair: <b>{status.credential_pair_ready ? "available" : "not verified"}</b></span>{status.mode === "external" && <span>Provider: <b>{status.provider_id}</b></span>}</div>}
+      </section>
+      <section className="signer-card">
+        <div className="signer-card-heading"><div><span className="signer-eyebrow">02 / CUSTODY</span><h2>Choose where credentials live</h2></div><span className="signer-step">02</span></div>
+        <div className="signer-mode-grid">
+          <button type="button" className={mode === "native" ? "signer-mode selected" : "signer-mode"} onClick={() => setMode("native")} aria-pressed={mode === "native"}><strong>Native OS vault</strong><span>Windows Credential Manager · macOS Keychain · Linux Secret Service</span></button>
+          <button type="button" className={mode === "external" ? "signer-mode selected" : "signer-mode"} onClick={() => setMode("external")} aria-pressed={mode === "external"}><strong>External password manager</strong><span>Bitwarden CLI or 1Password CLI on this trusted device</span></button>
+        </div>
+        {mode === "external" && <div className="signer-fields">
+          <label htmlFor="provider">Provider</label>
+          <select id="provider" value={provider} onChange={e => setProvider(e.target.value as "bitwarden" | "onepassword")}><option value="bitwarden">Bitwarden</option><option value="onepassword">1Password</option></select>
+          <label htmlFor="secret-reference">Dedicated item reference</label>
+          <input id="secret-reference" value={reference} onChange={e => setReference(e.target.value)} placeholder={provider === "bitwarden" ? "Bitwarden item UUID" : "vault-id/item-id"} autoComplete="off" spellCheck={false}/>
+          <p className="signer-help">Create a dedicated item first. AITOS uses only its concealed fields <code>aitos_exchange_key_id</code> and <code>aitos_exchange_api_secret</code>. Unlock the provider CLI in this OS user session before storing credentials.</p>
+        </div>}
+        <div className="signer-actions">
+          <button className="signer-button primary" disabled={!ready || busy || !available || (mode === "external" && !referenceValid)} onClick={() => void applyMode()}>{busy ? "Working…" : "Save account custody policy"}</button>
+        </div>
+        <p className="signer-help">Changing this policy does not copy or delete credentials in the previous vault. Store and verify a credential pair below before restarting the signer.</p>
+      </section>
+      <section className="signer-card">
+        <div className="signer-card-heading"><div><span className="signer-eyebrow">03 / PROVISION</span><h2>Store Testnet credentials</h2></div><span className="signer-step">03</span></div>
+        <form onSubmit={storeCredentials}>
+          <label htmlFor="exchange-key">Binance Futures Testnet API key</label>
+          <input id="exchange-key" value={keyId} onChange={e => setKeyId(e.target.value)} autoComplete="off" spellCheck={false} maxLength={128} required/>
+          <label htmlFor="exchange-secret">API secret</label>
+          <input id="exchange-secret" type="password" value={apiSecret} onChange={e => setApiSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required/>
+          <label htmlFor="exchange-secret-confirm">Confirm API secret</label>
+          <input id="exchange-secret-confirm" type="password" value={confirmSecret} onChange={e => setConfirmSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required/>
+          <div className="signer-help">Secrets are sent only to the local native signer command over Tauri IPC, then passed to the credential sidecar via stdin. They are never placed in command-line arguments, browser storage, logs or the operator console. Fields clear after the operation.</div>
+          <div className="signer-actions"><button className="signer-button primary" type="submit" disabled={!ready || busy || !available || !keyId || !apiSecret || !confirmSecret}>{busy ? "Storing securely…" : "Store and verify credential pair"}</button></div>
+        </form>
+      </section>
+      {message && <div className="signer-success" role="status">{message}</div>}
+      {error && <div className="signer-error" role="alert">{error}</div>}
+      <footer className="signer-footer">AITOS · LOCAL-FIRST · PAPER / TESTNET CREDENTIAL SETUP ONLY</footer>
+    </main>
+  );
+}
