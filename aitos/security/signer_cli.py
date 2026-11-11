@@ -194,7 +194,9 @@ async def _serve() -> None:
     data = _data_dir()
     account = _required("AITOS_SIGNER_ACCOUNT_ALIAS")
     symbols = _symbols()
-    host = os.environ.get("AITOS_SIGNER_BIND_HOST", "127.0.0.1")  # nosec B104: wildcard requires explicit operator opt-in.
+    host = os.environ.get(
+        "AITOS_SIGNER_BIND_HOST", "127.0.0.1"
+    )  # nosec B104: wildcard requires explicit operator opt-in.
     port = int(os.environ.get("AITOS_SIGNER_PORT", "9443"))
     if (
         host in {"0.0.0.0", "::", ""}
