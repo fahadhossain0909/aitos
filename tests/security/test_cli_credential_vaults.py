@@ -116,3 +116,17 @@ def test_first_party_provider_factories_are_registered_without_cli_execution():
 
     providers = discover_external_vault_backends()
     assert {"bitwarden", "onepassword"}.issubset(providers)
+
+
+def test_provider_child_environment_excludes_exchange_credentials(monkeypatch):
+    monkeypatch.setenv("BINANCE_API_SECRET", "must-not-be-inherited")
+    monkeypatch.setenv("BW_SESSION", "provider-session")
+    item_id = "12345678-1234-1234-1234-123456789abc"
+    item = {"id": item_id, "fields": []}
+    runner = FakeRunner([(0, json.dumps(item))])
+    vault = BitwardenCLIVault(runner=runner)
+
+    assert vault.get_secret(f"{item_id}/api-secret") is None
+    child_env = runner.calls[0][1]["env"]
+    assert child_env["BW_SESSION"] == "provider-session"
+    assert "BINANCE_API_SECRET" not in child_env
