@@ -428,7 +428,9 @@ class PaperSignerRPCServer:
             raise ValueError("invalid_signer_rpc_port")
         self._server = await asyncio.start_server(
             self._handle, host=host, port=port, ssl=self.ssl_context,
-            limit=self.max_body_bytes + 1, ssl_handshake_timeout=5.0,
+            limit=self.max_body_bytes + 1,
+            backlog=64,
+            ssl_handshake_timeout=5.0,
             start_serving=True,
         )
 
@@ -472,17 +474,26 @@ class PaperSignerRPCServer:
             self.rate_limiter.consume(
                 request.authenticated_identity, request.account_alias, now_ms=now_ms
             )
-            result = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self.processor.process, dict(request.intent), now_ms=now_ms
-                ),
-                timeout=self.request_timeout_seconds,
-            )
-            response = {
-                "status": result.status,
-                "outcome_code": result.outcome_code or "none",
-                "duplicate": result.duplicate,
-            }
+            try:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.processor.process, dict(request.intent), now_ms=now_ms
+                    ),
+                    timeout=self.request_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                # The worker thread may still finish after the client timeout.
+                # The durable replay row prevents a retry from dispatching twice.
+                response = {
+                    "status": "unknown",
+                    "outcome_code": "paper_dispatch_timeout_ambiguous",
+                }
+            else:
+                response = {
+                    "status": result.status,
+                    "outcome_code": result.outcome_code or "none",
+                    "duplicate": result.duplicate,
+                }
         except (asyncio.IncompleteReadError, asyncio.LimitOverrunError, asyncio.TimeoutError):
             response = {"status": "rejected", "outcome_code": "request_incomplete_or_timeout"}
         except (SignerProtocolRejected, ValueError):
