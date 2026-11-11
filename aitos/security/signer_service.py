@@ -449,6 +449,13 @@ class SQLiteSignerRateLimiter:
                     PRIMARY KEY(identity, account_alias, window_start_ms)
                 )"""
             )
+            self._db.execute(
+                """CREATE TABLE IF NOT EXISTS signer_reduce_only_rate_windows (
+                    identity TEXT NOT NULL, account_alias TEXT NOT NULL,
+                    window_start_ms INTEGER NOT NULL, request_count INTEGER NOT NULL,
+                    PRIMARY KEY(identity, account_alias, window_start_ms)
+                )"""
+            )
             if os.name == "posix":
                 os.chmod(self.path, stat.S_IRUSR | stat.S_IWUSR)
         except (OSError, sqlite3.Error) as exc:
@@ -631,8 +638,12 @@ class PaperSignerRPCServer:
                 now_ms=now_ms,
                 max_body_bytes=self.max_body_bytes,
             )
+            is_reduce_only = request.intent.get("reduce_only") is True
             self.rate_limiter.consume(
-                request.authenticated_identity, request.account_alias, now_ms=now_ms
+                request.authenticated_identity,
+                request.account_alias,
+                now_ms=now_ms,
+                is_reduce_only=is_reduce_only,
             )
             intent_id = request.intent.get("intent_id")
             existing = (
@@ -640,8 +651,10 @@ class PaperSignerRPCServer:
                 if isinstance(intent_id, str)
                 else None
             )
-            if existing is None and self.processor.replay_store.list_unresolved(
-                limit=1
+            if (
+                not is_reduce_only
+                and existing is None
+                and self.processor.replay_store.list_unresolved(limit=1)
             ):
                 raise SignerProtocolRejected(
                     "unresolved_execution_requires_reconciliation"
