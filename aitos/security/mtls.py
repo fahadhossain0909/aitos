@@ -70,7 +70,11 @@ def require_client_uri_identity(
     allowed_uris: frozenset[str],
 ) -> str:
     """Map an already TLS-verified peer cert to one pinned URI SAN identity."""
-    if not isinstance(peer_certificate, dict) or not isinstance(allowed_uris, frozenset) or not allowed_uris:
+    if (
+        not isinstance(peer_certificate, dict)
+        or not isinstance(allowed_uris, frozenset)
+        or not allowed_uris
+    ):
         raise MutualTLSConfigurationError("client_identity_allowlist_required")
     if any(
         type(uri) is not str
