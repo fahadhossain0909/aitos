@@ -7,6 +7,7 @@ on:
       - 'aitos/security/**'
       - 'aitos/native/**'
       - 'tests/security/**'
+      - 'docs/CREDENTIAL_SECURITY_REMOTE_SIGNING_RFC.md'
       - '.github/workflows/security-intent-quality.yml'
 permissions:
   contents: read
