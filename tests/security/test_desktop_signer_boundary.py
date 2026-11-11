@@ -1,37 +1,50 @@
-"""Security boundary tests for the remote operator console.
-
-The operator WebView is intentionally an external loopback origin and must not
-receive native signer or credential-vault IPC privileges.
-"""
+"""Security tests for the remote operator and trusted local signer surfaces."""
 
 import json
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+TAURI = ROOT / "desktop" / "src-tauri"
 
 
-def test_operator_tauri_shell_exposes_no_native_ipc_capabilities():
-    config = json.loads(
-        (ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(
-            encoding="utf-8"
-        )
+def test_only_bundled_signer_window_receives_native_ipc_capability():
+    config = json.loads((TAURI / "tauri.conf.json").read_text(encoding="utf-8"))
+    assert config["app"]["security"]["capabilities"] == ["signer-local"]
+    capability = json.loads(
+        (TAURI / "capabilities" / "signer-local.json").read_text(encoding="utf-8")
     )
-    assert config["app"]["security"]["capabilities"] == []
+    assert capability["windows"] == ["signer"]
 
-    rust = (ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(
+    rust = (TAURI / "src" / "main.rs").read_text(encoding="utf-8")
+    assert 'window.label() != "signer"' in rust
+    assert 'url.path() == "/signer.html"' in rust
+    assert "trusted_local_signer_origin_required" in rust
+    assert 'WebviewUrl::External(url)' in rust
+    assert "invoke_handler" in rust
+
+
+def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
+    app = (ROOT / "desktop" / "src" / "App.tsx").read_text(encoding="utf-8")
+    assert "invoke(" not in app
+    assert "UNAPPLIED_CREDENTIAL_POLICY_DRAFT" in app
+
+    html = (ROOT / "desktop" / "signer.html").read_text(encoding="utf-8")
+    assert 'src="/src/signer.tsx"' in html
+    assert "default-src 'self'" in html
+
+    ui = (ROOT / "desktop" / "src" / "SignerSettings.tsx").read_text(
         encoding="utf-8"
     )
-    assert "invoke_handler" not in rust
-    assert "generate_handler!" not in rust
-    assert "WebviewUrl::External(url)" in rust
-    assert 'url.host_str() == Some("127.0.0.1")' in rust
-    assert ".on_navigation(move |next| next.origin() == allowed)" in rust
+    assert 'invoke<string>("signer_credential_admin"' in ui
+    assert "localStorage" not in ui
+    assert "sessionStorage" not in ui
+    assert "type=\"password\"" in ui
 
 
-def test_operator_credential_screen_is_only_an_unapplied_metadata_draft():
-    app = (ROOT / "desktop" / "src" / "App.tsx").read_text(encoding="utf-8")
-    assert "UNAPPLIED_CREDENTIAL_POLICY_DRAFT" in app
-    assert "Credential custody draft saved locally only." in app
-    assert "The signer policy was not changed." in app
-    assert "invoke(" not in app
+def test_signer_command_payload_is_stdin_only_and_not_forwarded_to_operator():
+    rust = (TAURI / "src" / "main.rs").read_text(encoding="utf-8")
+    assert '.args(["--credential-admin"])' in rust
+    assert "child.write(&input)" in rust
+    assert "request.len() > 8192" in rust
+    assert "signer_credential_admin" in rust
