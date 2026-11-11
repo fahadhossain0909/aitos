@@ -446,34 +446,6 @@ export default function App() {
   const [range, setRange] = useState("1M");
   const [exchange, setExchange] = useState("Binance");
   const [mode, setMode] = useState("Paper");
-  const [credentialMode, setCredentialMode] = useState<"native" | "external">(() => {
-    try {
-      return JSON.parse(localStorage.getItem("aitos-credential-policy-draft-v1") || "null")?.mode === "external" ? "external" : "native";
-    } catch {
-      return "native";
-    }
-  });
-  const [credentialProvider, setCredentialProvider] = useState<"bitwarden" | "onepassword">(() => {
-    try {
-      return JSON.parse(localStorage.getItem("aitos-credential-policy-draft-v1") || "null")?.provider === "onepassword" ? "onepassword" : "bitwarden";
-    } catch {
-      return "bitwarden";
-    }
-  });
-  const [credentialAccount, setCredentialAccount] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("aitos-credential-policy-draft-v1") || "null")?.account_alias || "";
-    } catch {
-      return "";
-    }
-  });
-  const [credentialReference, setCredentialReference] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem("aitos-credential-policy-draft-v1") || "null")?.secret_ref || "";
-    } catch {
-      return "";
-    }
-  });
   const [query, setQuery] = useState("");
   const [journalSide, setJournalSide] = useState("All directions");
   const [toast, setToast] = useState("");
@@ -705,29 +677,6 @@ export default function App() {
     notice("Journal exported. Source labels are included.");
   };
   const draftValid = checkDraft(draft);
-  function saveCredentialPolicyDraft() {
-    if (credentialMode === "external") {
-      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(credentialAccount)) {
-        return notice("Enter a valid signer account alias before saving this draft.");
-      }
-      const validReference = credentialProvider === "bitwarden"
-        ? /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(credentialReference)
-        : /^[A-Za-z0-9_-]{4,64}\/[A-Za-z0-9_-]{4,64}$/.test(credentialReference);
-      if (!validReference) return notice("Enter a valid provider item reference.");
-    }
-    try {
-      localStorage.setItem("aitos-credential-policy-draft-v1", JSON.stringify({
-        kind: "UNAPPLIED_CREDENTIAL_POLICY_DRAFT",
-        mode: credentialMode,
-        provider: credentialMode === "external" ? credentialProvider : null,
-        account_alias: credentialMode === "external" ? credentialAccount : null,
-        secret_ref: credentialMode === "external" ? credentialReference : null,
-      }));
-    } catch {
-      return notice("Device storage is unavailable. Credential policy draft was not saved.");
-    }
-    notice("Credential custody draft saved locally only. The signer policy was not changed.");
-  }
   function saveDraft() {
     if (!draftValid)
       return notice("Check the highlighted configuration bounds.");
@@ -2011,52 +1960,19 @@ export default function App() {
                   </section>
                 </div>
               </div>
-              <section className="panel padded" aria-label="Credential custody mode">
+              <section className="panel padded" aria-label="Trusted signer settings">
                 <div className="panel-heading flush">
                   <div>
                     <span className="small-cap">SIGNER CREDENTIAL CUSTODY</span>
-                    <h2>Choose where exchange credentials are held</h2>
-                    <p className="body-copy">This is an unapplied desktop draft. It does not write to the signer profile database or store exchange secrets.</p>
-                    <p className="body-copy">Security boundary: neither Native nor External mode protects a signer running on a provider-managed RDP/VPS. Run the signer and password-manager CLI only on a separately trusted host.</p>
+                    <h2>Manage credentials on your trusted device</h2>
+                    <p className="body-copy">Credential mode and Testnet API keys are configured in the separate AITOS — Trusted Signer Settings desktop window.</p>
+                    <p className="body-copy">This operator console is a remote, read-only WebView and deliberately has no native credential IPC. Do not enter exchange secrets here or run the signer on a provider-managed RDP/VPS.</p>
                   </div>
                   <LockKeyhole size={19} />
                 </div>
-                <div className="config-field">
-                  <div>
-                    <strong>Credential mode</strong>
-                    <small>Both modes require a trusted, user-controlled signer host. External vault mode does not protect credentials from the administrator of an RDP/VPS running the signer.</small>
-                  </div>
-                  <select aria-label="Credential custody mode" value={credentialMode} onChange={(event) => setCredentialMode(event.target.value as "native" | "external")}>
-                    <option value="native">Native OS vault</option>
-                    <option value="external">External password manager</option>
-                  </select>
-                </div>
-                {credentialMode === "external" && (
-                  <>
-                    <label className="config-field">
-                      <div><strong>Provider</strong><small>Provider CLI must be installed and unlocked on the signer host.</small></div>
-                      <select aria-label="External credential provider" value={credentialProvider} onChange={(event) => setCredentialProvider(event.target.value as "bitwarden" | "onepassword")}>
-                        <option value="bitwarden">Bitwarden CLI</option>
-                        <option value="onepassword">1Password CLI</option>
-                      </select>
-                    </label>
-                    <label className="config-field">
-                      <div><strong>Signer account alias</strong><small>Existing AITOS signer account alias.</small></div>
-                      <input aria-label="Signer account alias" value={credentialAccount} onChange={(event) => setCredentialAccount(event.target.value)} placeholder="primary" autoComplete="off" />
-                    </label>
-                    <label className="config-field">
-                      <div><strong>Vault item reference</strong><small>{credentialProvider === "bitwarden" ? "Bitwarden item UUID" : "1Password vault-id/item-id"}</small></div>
-                      <input aria-label="Vault item reference" value={credentialReference} onChange={(event) => setCredentialReference(event.target.value)} placeholder={credentialProvider === "bitwarden" ? "00000000-0000-0000-0000-000000000000" : "vaultid/itemid"} autoComplete="off" />
-                    </label>
-                  </>
-                )}
                 <div className="notice-box">
-                  <LockKeyhole size={16} />
-                  <span>Never enter an exchange API secret here. Create a dedicated provider item with the two AITOS credential fields, then configure and preflight it through the signer CLI. Changing this draft does not switch custody mode.</span>
-                </div>
-                <div className="config-footer">
-                  <span>Unapplied local policy draft</span>
-                  <button className="button secondary" onClick={saveCredentialPolicyDraft}>Save custody draft</button>
+                  <ShieldCheck size={16} />
+                  <span>Switch to the local “AITOS — Trusted Signer Settings” window to choose Native OS vault or Bitwarden/1Password, configure an account policy, and store and verify a Binance Futures Testnet credential pair.</span>
                 </div>
               </section>
             </>
