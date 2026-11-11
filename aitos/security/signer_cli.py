@@ -22,6 +22,12 @@ from aitos.exchange.binance_usdm_paper_signer import (
     PaperSignerRecoveryWorker,
 )
 from aitos.native.credential_vault import get_credential_vault
+from aitos.native.credential_profiles import (
+    CredentialProfileStore,
+    CredentialProfileError,
+    CredentialProviderRouter,
+    discover_external_vault_backends,
+)
 from aitos.security.mtls import build_server_context
 from aitos.security.paper_processor import PaperOnlyIntentProcessor
 from aitos.security.replay_store import SQLiteReplayStore
@@ -73,8 +79,59 @@ def _symbols() -> frozenset[str]:
     return values
 
 
+def _profiles() -> CredentialProfileStore:
+    return CredentialProfileStore(_data_dir() / "credential-profiles.sqlite3")
+
+
 def _slots() -> SignerCredentialSlots:
-    return SignerCredentialSlots(get_credential_vault())
+    profiles = _profiles()
+    try:
+        backends = discover_external_vault_backends()
+        router = CredentialProviderRouter(
+            profiles=profiles,
+            native_store=get_credential_vault(),
+            external_backends=backends,
+        )
+        return SignerCredentialSlots(router)
+    except Exception:
+        profiles.close()
+        raise
+
+
+def configure_credential_mode(args) -> int:
+    profiles = _profiles()
+    try:
+        if args.mode == "native":
+            if args.provider_id or args.secret_ref:
+                raise ValueError("native_mode_does_not_accept_external_reference")
+            if args.account_alias:
+                profiles.set_account(args.account_alias, "native")
+            else:
+                profiles.set_default("native")
+        else:
+            if not args.provider_id or not args.secret_ref:
+                raise ValueError("external_mode_requires_provider_and_secret_reference")
+            backends = discover_external_vault_backends()
+            if args.provider_id not in backends:
+                raise CredentialProfileError("requested_external_provider_not_installed")
+            if args.account_alias:
+                profiles.set_account(
+                    args.account_alias,
+                    "external",
+                    provider_id=args.provider_id,
+                    secret_ref=args.secret_ref,
+                )
+            else:
+                profiles.set_default(
+                    "external",
+                    provider_id=args.provider_id,
+                    secret_ref=args.secret_ref,
+                )
+        target = f"account {args.account_alias}" if args.account_alias else "global default"
+        print(f"Credential policy updated for {target}: {args.mode}.")
+        return 0
+    finally:
+        profiles.close()
 
 
 def store_exchange_credential(_args) -> int:
@@ -85,7 +142,7 @@ def store_exchange_credential(_args) -> int:
     if secret != confirm:
         raise RuntimeError("exchange_secret_confirmation_mismatch")
     _slots().save(account, key_id=key_id, api_secret=secret)
-    print("Testnet credential stored in the native OS credential vault.")
+    print("Testnet credential stored using the configured signer credential provider.")
     return 0
 
 
@@ -245,6 +302,16 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("store-testnet-credential").set_defaults(
         handler=store_exchange_credential
     )
+
+    credential_mode = commands.add_parser(
+        "set-credential-mode",
+        help="Set global default or per-account native/external credential policy",
+    )
+    credential_mode.add_argument("--mode", choices=("native", "external"), required=True)
+    credential_mode.add_argument("--account-alias")
+    credential_mode.add_argument("--provider-id")
+    credential_mode.add_argument("--secret-ref")
+    credential_mode.set_defaults(handler=configure_credential_mode)
 
     enroll = commands.add_parser("enroll-client")
     enroll.add_argument("--identity", required=True)
