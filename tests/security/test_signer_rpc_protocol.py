@@ -54,7 +54,6 @@ def test_certificate_revocation_and_unknown_serial_fail_closed(cert):
         {
             IDENTITY: ClientGrant(
                 identity=IDENTITY,
-                identity=IDENTITY,
                 account_alias="paper-primary",
                 allowed_symbols=frozenset({"BTCUSDT"}),
                 allowed_serials=frozenset({"A1B2"}),
@@ -70,6 +69,7 @@ def test_certificate_validity_window_is_enforced():
     registry = ClientAuthorizationRegistry(
         {
             IDENTITY: ClientGrant(
+                identity=IDENTITY,
                 account_alias="paper-primary",
                 allowed_symbols=frozenset({"BTCUSDT"}),
                 allowed_serials=frozenset({"A1B2"}),
