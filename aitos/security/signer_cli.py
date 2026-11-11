@@ -127,7 +127,9 @@ def configure_credential_mode(args) -> int:
                     provider_id=args.provider_id,
                     secret_ref=args.secret_ref,
                 )
-        target = f"account {args.account_alias}" if args.account_alias else "global default"
+        target = (
+            f"account {args.account_alias}" if args.account_alias else "global default"
+        )
         print(f"Credential policy updated for {target}: {args.mode}.")
         return 0
     finally:
@@ -142,7 +144,9 @@ def store_exchange_credential(_args) -> int:
     if secret != confirm:
         raise RuntimeError("exchange_secret_confirmation_mismatch")
     _slots().save(account, key_id=key_id, api_secret=secret)
-    print("Testnet credential stored using the configured signer credential provider.")
+    print(
+        "Testnet credential stored using the configured signer credential provider."
+    )
     return 0
 
 
@@ -307,7 +311,9 @@ def build_parser() -> argparse.ArgumentParser:
         "set-credential-mode",
         help="Set global default or per-account native/external credential policy",
     )
-    credential_mode.add_argument("--mode", choices=("native", "external"), required=True)
+    credential_mode.add_argument(
+        "--mode", choices=("native", "external"), required=True
+    )
     credential_mode.add_argument("--account-alias")
     credential_mode.add_argument("--provider-id")
     credential_mode.add_argument("--secret-ref")
