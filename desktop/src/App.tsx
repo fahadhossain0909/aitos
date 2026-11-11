@@ -446,6 +446,22 @@ export default function App() {
   const [range, setRange] = useState("1M");
   const [exchange, setExchange] = useState("Binance");
   const [mode, setMode] = useState("Paper");
+  const [credentialMode, setCredentialMode] = useState<"native" | "external">(() => {
+    try {
+      return JSON.parse(localStorage.getItem("aitos-credential-policy-draft-v1") || "null")?.mode === "external" ? "external" : "native";
+    } catch {
+      return "native";
+    }
+  });
+  const [credentialProvider, setCredentialProvider] = useState<"bitwarden" | "onepassword">(() => {
+    try {
+      return JSON.parse(localStorage.getItem("aitos-credential-policy-draft-v1") || "null")?.provider === "onepassword" ? "onepassword" : "bitwarden";
+    } catch {
+      return "bitwarden";
+    }
+  });
+  const [credentialAccount, setCredentialAccount] = useState("");
+  const [credentialReference, setCredentialReference] = useState("");
   const [query, setQuery] = useState("");
   const [journalSide, setJournalSide] = useState("All directions");
   const [toast, setToast] = useState("");
@@ -677,6 +693,29 @@ export default function App() {
     notice("Journal exported. Source labels are included.");
   };
   const draftValid = checkDraft(draft);
+  function saveCredentialPolicyDraft() {
+    if (credentialMode === "external") {
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(credentialAccount)) {
+        return notice("Enter a valid signer account alias before saving this draft.");
+      }
+      const validReference = credentialProvider === "bitwarden"
+        ? /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(credentialReference)
+        : /^[A-Za-z0-9_-]{4,64}\/[A-Za-z0-9_-]{4,64}$/.test(credentialReference);
+      if (!validReference) return notice("Enter a valid provider item reference.");
+    }
+    try {
+      localStorage.setItem("aitos-credential-policy-draft-v1", JSON.stringify({
+        kind: "UNAPPLIED_CREDENTIAL_POLICY_DRAFT",
+        mode: credentialMode,
+        provider: credentialMode === "external" ? credentialProvider : null,
+        account_alias: credentialMode === "external" ? credentialAccount : null,
+        secret_ref: credentialMode === "external" ? credentialReference : null,
+      }));
+    } catch {
+      return notice("Device storage is unavailable. Credential policy draft was not saved.");
+    }
+    notice("Credential custody draft saved locally only. The signer policy was not changed.");
+  }
   function saveDraft() {
     if (!draftValid)
       return notice("Check the highlighted configuration bounds.");
@@ -1960,6 +1999,53 @@ export default function App() {
                   </section>
                 </div>
               </div>
+              <section className="panel padded" aria-label="Credential custody mode">
+                <div className="panel-heading flush">
+                  <div>
+                    <span className="small-cap">SIGNER CREDENTIAL CUSTODY</span>
+                    <h2>Choose where exchange credentials are held</h2>
+                    <p className="body-copy">This is an unapplied desktop draft. It does not write to the signer profile database or store exchange secrets.</p>
+                  </div>
+                  <LockKeyhole size={19} />
+                </div>
+                <div className="config-field">
+                  <div>
+                    <strong>Credential mode</strong>
+                    <small>Native is for a trusted, user-controlled host. External is for a provider vault.</small>
+                  </div>
+                  <select aria-label="Credential custody mode" value={credentialMode} onChange={(event) => setCredentialMode(event.target.value as "native" | "external")}>
+                    <option value="native">Native OS vault</option>
+                    <option value="external">External password manager</option>
+                  </select>
+                </div>
+                {credentialMode === "external" && (
+                  <>
+                    <label className="config-field">
+                      <div><strong>Provider</strong><small>Provider CLI must be installed and unlocked on the signer host.</small></div>
+                      <select aria-label="External credential provider" value={credentialProvider} onChange={(event) => setCredentialProvider(event.target.value as "bitwarden" | "onepassword")}>
+                        <option value="bitwarden">Bitwarden CLI</option>
+                        <option value="onepassword">1Password CLI</option>
+                      </select>
+                    </label>
+                    <label className="config-field">
+                      <div><strong>Signer account alias</strong><small>Existing AITOS signer account alias.</small></div>
+                      <input aria-label="Signer account alias" value={credentialAccount} onChange={(event) => setCredentialAccount(event.target.value)} placeholder="primary" autoComplete="off" />
+                    </label>
+                    <label className="config-field">
+                      <div><strong>Vault item reference</strong><small>{credentialProvider === "bitwarden" ? "Bitwarden item UUID" : "1Password vault-id/item-id"}</small></div>
+                      <input aria-label="Vault item reference" value={credentialReference} onChange={(event) => setCredentialReference(event.target.value)} placeholder={credentialProvider === "bitwarden" ? "00000000-0000-0000-0000-000000000000" : "vaultid/itemid"} autoComplete="off" />
+                    </label>
+                  </>
+                )}
+                <div className="notice-box">
+                  <LockKeyhole size={16} />
+                  <span>Never enter an exchange API secret here. Create a dedicated provider item with the two AITOS credential fields, then configure and preflight it through the signer CLI. Changing this draft does not switch custody mode.</span>
+                </div>
+                <div className="config-footer">
+                  <span>Unapplied local policy draft</span>
+                  <button className="button secondary" onClick={saveCredentialPolicyDraft}>Save custody draft</button>
+                </div>
+              </section>
             </>
           )}
           <footer className="page-footer">
