@@ -135,14 +135,8 @@ def test_reduce_only_rpc_has_separate_bounded_rate_bucket(tmp_path):
     limiter.consume(IDENTITY, "paper-primary", now_ms=NOW)
     with pytest.raises(SignerProtocolRejected, match="signer_rate_limit_exceeded"):
         limiter.consume(IDENTITY, "paper-primary", now_ms=NOW + 1)
-    limiter.consume(
-        IDENTITY, "paper-primary", now_ms=NOW + 2, is_reduce_only=True
-    )
-    limiter.consume(
-        IDENTITY, "paper-primary", now_ms=NOW + 3, is_reduce_only=True
-    )
+    limiter.consume(IDENTITY, "paper-primary", now_ms=NOW + 2, is_reduce_only=True)
+    limiter.consume(IDENTITY, "paper-primary", now_ms=NOW + 3, is_reduce_only=True)
     with pytest.raises(SignerProtocolRejected, match="signer_rate_limit_exceeded"):
-        limiter.consume(
-            IDENTITY, "paper-primary", now_ms=NOW + 4, is_reduce_only=True
-        )
+        limiter.consume(IDENTITY, "paper-primary", now_ms=NOW + 4, is_reduce_only=True)
     limiter.close()
