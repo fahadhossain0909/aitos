@@ -10,7 +10,7 @@ from aitos.security.paper_processor import (
     PaperExecutionAdapter,
     PaperOnlyIntentProcessor,
 )
-from aitos.security.replay_store import (
+from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits\nfrom aitos.security.signing_policy import IntentRejected\nfrom aitos.security.replay_store import (
     ReplayConflict,
     ReplayStoreError,
     SQLiteReplayStore,
@@ -306,3 +306,29 @@ def test_process_termination_after_dispatching_is_not_replayed(tmp_path):
     assert retry.status == "dispatching"
     assert retry.duplicate is True
     assert adapter.calls == 1
+
+
+
+def test_paper_processor_runs_independent_risk_gate_before_reservation(tmp_path):
+    limits = SignerRiskLimits(
+        max_gross_exposure=Decimal("1000"),
+        max_symbol_exposure=Decimal("500"),
+        max_daily_loss=Decimal("100"),
+        max_orders_per_window=10,
+    )
+    stale = AccountRiskSnapshot(
+        account_alias="paper-primary",
+        captured_at_ms=NOW - 10_000,
+        gross_exposure=Decimal("0"),
+        symbol_exposure={},
+        daily_loss=Decimal("0"),
+        order_count_window=0,
+        positions={},
+    )
+    with SQLiteReplayStore(tmp_path / "ledger.sqlite3") as store:
+        processor = PaperOnlyIntentProcessor(
+            policy=POLICY, replay_store=store, risk_limits=limits
+        )
+        with pytest.raises(IntentRejected, match="account_evidence_stale"):
+            processor.process(intent_payload(), now_ms=NOW, account_snapshot=stale)
+        assert store.get("intent-replay-001") is None
