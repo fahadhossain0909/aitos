@@ -112,6 +112,10 @@ def main():
             asyncio.run(exercise_local_host(assets_directory()))
         elif sys.argv[1:] == ["--embedded"]:
             run_embedded()
+        elif sys.argv[1:] == ["--credential-admin"]:
+            from aitos.native.signer_admin import main as signer_admin_main
+
+            return signer_admin_main()
         else:
             return 2
     except Exception:
