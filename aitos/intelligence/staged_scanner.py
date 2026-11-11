@@ -9,7 +9,9 @@ from typing import Any
 
 from aitos.intelligence import indicators
 from aitos.intelligence.advanced_context import build_advanced_context
-from aitos.intelligence.historical_market_intelligence import OnDemandHistoricalIntelligence
+from aitos.intelligence.historical_market_intelligence import (
+    OnDemandHistoricalIntelligence,
+)
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.intelligence.staged_scanner")
@@ -39,10 +41,12 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
     async def enrich(candidate: Any) -> None:
         try:
             rows, evidence = await service.analyze(
-                candidate.symbol, scanner._timeframe,
+                candidate.symbol,
+                scanner._timeframe,
                 limit=max(300, min(1000, int(scanner._kline_lookback) * 2)),
             )
             import uuid
+
             candidate_id = str(
                 getattr(candidate, "candidate_id", "")
                 or getattr(candidate, "_aitos_candidate_id", "")
@@ -56,7 +60,8 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                 scores = getattr(candidate, "component_scores", {}) or {}
                 try:
                     advanced = build_advanced_context(
-                        rows, current_cvd_score=float(scores.get("order_flow_bias", 5.0)),
+                        rows,
+                        current_cvd_score=float(scores.get("order_flow_bias", 5.0)),
                         oi_change=None,
                     )
                     object.__setattr__(candidate, "_aitos_advanced_context", advanced)
@@ -64,15 +69,21 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
                     pass
             evidence_id = await service.persist(candidate_id, evidence)
             if evidence_id:
-                object.__setattr__(candidate, "_aitos_historical_evidence_id", evidence_id)
+                object.__setattr__(
+                    candidate, "_aitos_historical_evidence_id", evidence_id
+                )
             record = getattr(scanner, "_record_funnel", None)
             if callable(record):
                 await record(
                     symbol=candidate.symbol,
-                    side=getattr(getattr(candidate, "direction", None), "value", "UNKNOWN"),
+                    side=getattr(
+                        getattr(candidate, "direction", None), "value", "UNKNOWN"
+                    ),
                     stage="historical_intelligence",
                     accepted=bool(evidence.get("available")),
-                    reason=str(evidence.get("reason") or "historical_evidence_available"),
+                    reason=str(
+                        evidence.get("reason") or "historical_evidence_available"
+                    ),
                     details={
                         "candidate_id": candidate_id,
                         "historical_evidence_id": evidence_id,
@@ -171,13 +182,13 @@ async def install_staged_scan(
             scores = dict(ranked)
             top50 = [symbol for symbol, _ in ranked[:TOP_50]]
             if anchor in scores and anchor not in top50:
-                top50 = [anchor, *top50[:TOP_50 - 1]]
+                top50 = [anchor, *top50[: TOP_50 - 1]]
             await on_subscription_change(top50, "TOP_50")
             top25 = top50[:TOP_25]
             await on_subscription_change(top25, "TOP_25")
             deep = ([anchor] if anchor in top25 else []) + [
                 symbol for symbol in top25 if symbol != anchor
-            ][:TOP_10 - (1 if anchor in top25 else 0)]
+            ][: TOP_10 - (1 if anchor in top25 else 0)]
             candidates = []
             for symbol in deep:
                 try:
@@ -185,9 +196,16 @@ async def install_staged_scan(
                     if candidate is not None:
                         candidates.append(candidate)
                 except Exception as exc:
-                    logger.error("live-context candidate analysis failed", extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}})
+                    logger.error(
+                        "live-context candidate analysis failed",
+                        extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                    )
             candidates.sort(key=lambda item: float(item.composite_score), reverse=True)
-            top10, top5, top2 = candidates[:TOP_10], candidates[:TOP_5], candidates[:TOP_2]
+            top10, top5, top2 = (
+                candidates[:TOP_10],
+                candidates[:TOP_5],
+                candidates[:TOP_2],
+            )
             await on_subscription_change([c.symbol for c in top10], "TOP_10")
             await on_subscription_change([c.symbol for c in top5], "TOP_5")
             await on_subscription_change([c.symbol for c in top2], "TOP_2")
@@ -319,7 +337,10 @@ async def install_staged_scan(
                 limit = max(1, min(TOP_50, int(requested))) if requested else TOP_50
                 selected = [symbol for symbol, _score in ranked[:limit]]
                 anchor = getattr(scanner, "_reference_symbol", None) or "BTCUSDT"
-                if anchor in {symbol for symbol, _score in ranked} and anchor not in selected:
+                if (
+                    anchor in {symbol for symbol, _score in ranked}
+                    and anchor not in selected
+                ):
                     selected = [anchor, *selected[: limit - 1]]
             else:
                 selected = await original_lightweight_rank(*args, **kwargs)
@@ -339,7 +360,11 @@ async def install_staged_scan(
                 batches.append(current)
                 candidates.extend(current)
             if candidates:
-                ranked = sorted(candidates, key=lambda item: float(item.composite_score), reverse=True)
+                ranked = sorted(
+                    candidates,
+                    key=lambda item: float(item.composite_score),
+                    reverse=True,
+                )
                 top5 = [item.symbol for item in ranked[:TOP_5]]
                 top2 = ranked[:TOP_2]
                 await on_subscription_change(top5, "TOP_5")
