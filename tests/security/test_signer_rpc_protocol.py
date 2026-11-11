@@ -85,7 +85,9 @@ def test_certificate_validity_window_is_enforced():
             )
         }
     )
-    with pytest.raises(SignerProtocolRejected, match="client_certificate_not_authorized"):
+    with pytest.raises(
+        SignerProtocolRejected, match="client_certificate_not_authorized"
+    ):
         registry.authorize(CERT, now_ms=200)
 
 
