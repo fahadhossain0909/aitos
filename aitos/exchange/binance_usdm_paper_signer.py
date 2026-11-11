@@ -13,10 +13,11 @@ import hmac
 import json
 import re
 import time
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from types import MappingProxyType
-from typing import Callable, Mapping, Protocol
+from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -250,7 +251,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
 
         positions: dict[str, Decimal] = {}
         symbol_exposure: dict[str, Decimal] = {}
-        gross = Decimal("0")
+        gross = Decimal(0)
         for row in account["positions"]:
             if not isinstance(row, dict):
                 raise BinancePaperExchangeError("binance_position_row_invalid")
@@ -268,7 +269,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
             positions[symbol] = quantity
             gross += notional
             symbol_exposure[symbol] = (
-                symbol_exposure.get(symbol, Decimal("0")) + notional
+                symbol_exposure.get(symbol, Decimal(0)) + notional
             )
 
         for row in open_orders:
@@ -288,10 +289,10 @@ class BinanceUSDMPaperAccountEvidenceProvider:
             notional = quantity * price
             gross += notional
             symbol_exposure[symbol] = (
-                symbol_exposure.get(symbol, Decimal("0")) + notional
+                symbol_exposure.get(symbol, Decimal(0)) + notional
             )
 
-        net_income = Decimal("0")
+        net_income = Decimal(0)
         seen_receipts = set()
         for row in income:
             if not isinstance(row, dict):
@@ -315,7 +316,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
             seen_receipts.add(identity)
             if kind in _INCOME_TYPES:
                 net_income += self._decimal(row.get("income"), "income_amount")
-        daily_loss = max(Decimal("0"), -net_income)
+        daily_loss = max(Decimal(0), -net_income)
 
         request_finished_ms = self.client.clock_ms()
         if (

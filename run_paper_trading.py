@@ -506,8 +506,8 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     state_store = DurableTradingStateStore(market_repo)
     # Explicitly opted-in shadow mirror only: legacy recovery remains authoritative.
     from aitos.trading.paper_shadow_runtime import (
-        configured_shadow,
         MirroredPaperStateStore,
+        configured_shadow,
     )
 
     shadow = configured_shadow(os.environ, getattr(market_repo, "_client", None))

@@ -2,7 +2,9 @@
 
 import sys
 import uuid
+
 import pytest
+
 from aitos.native.windows_vault import WindowsVault
 
 

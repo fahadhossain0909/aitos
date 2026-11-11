@@ -31,10 +31,10 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import math
-import re
 import hmac
 import json
+import math
+import re
 import time
 import uuid
 from collections.abc import Callable
@@ -46,8 +46,8 @@ from urllib.parse import urlencode
 import aiohttp
 
 from aitos.exchange.symbol_filters import SymbolFilters
-from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.execution.intent_store import ExecutionIntentStore, ExecutionUncertainError
+from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.logging_setup import get_logger
 from aitos.models.trade import TradeSide
 

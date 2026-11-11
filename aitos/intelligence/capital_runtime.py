@@ -21,8 +21,8 @@ from aitos.intelligence.capital_controls import ProbabilityCalibrator
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_protection import CapitalReservation, Reservation
 from aitos.intelligence.opportunity_outcomes import DirectionalFunnelStore
-from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 from aitos.logging_setup import get_logger
+from aitos.models.trade import Opportunity, Trade, TradeLifecycleState
 
 logger = get_logger("aitos.intelligence.capital_runtime")
 

@@ -11,8 +11,8 @@ from typing import Any
 import aiohttp
 
 from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
-from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 from aitos.execution.intent_store import ExecutionUncertainError
+from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
 
 
 class AlfaxOrderExecutor(BinanceFuturesOrderExecutor):

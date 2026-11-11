@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
+
 from aitos.console_api import register_console_routes
 from aitos.console_gateway import GatewayConfig, create_gateway
 
@@ -99,6 +100,7 @@ async def test_built_operator_browser_authentication(tmp_path, monkeypatch):
     )
     await observer.observe()
     from datetime import datetime, timezone
+
     from aitos.execution.operator_protection import ExportedProtectionObserver
 
     async def capture_protection():

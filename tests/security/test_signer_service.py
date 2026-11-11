@@ -6,7 +6,6 @@ from aitos.security.signer_service import (
     SQLiteSignerRegistry,
 )
 
-
 IDENTITY = "spiffe://aitos/signer/client-01"
 NOW = 1_800_000_000_000
 

@@ -21,6 +21,7 @@ from aitos.exchange.cost_adjustments import BinanceIncomeReconciliationService
 from aitos.exchange.symbol_filter_refresher import SymbolFilterRefresher
 from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.health_server import HealthServer
+from aitos.intelligence.capital_protection import Reservation
 from aitos.intelligence.deep_rl_policy import DeepValueRLScorer
 from aitos.kernel.ai_kernel import AIKernel
 from aitos.learning.recorder import LearningExperienceRecorder
@@ -36,9 +37,8 @@ from aitos.runtime_connections import (
     connect_redis_with_retry,
     try_connect_neo4j,
 )
-from aitos.runtime_signals import install_signal_handlers
 from aitos.runtime_ownership import RuntimeOwnership
-from aitos.intelligence.capital_protection import Reservation
+from aitos.runtime_signals import install_signal_handlers
 from aitos.trading.persistent_state import (
     DurableTradingStateStore,
     IdempotentOrderExecutor,

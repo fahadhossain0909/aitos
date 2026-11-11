@@ -18,8 +18,8 @@ from aiohttp import web
 
 from aitos.config.tuning import load_tuning_settings
 from aitos.console_readiness import assess_readiness
-from aitos.projection_evidence import public_projection, unavailable
 from aitos.forensics.data_flow_registry import get_data_flow_registry
+from aitos.projection_evidence import public_projection, unavailable
 
 TRADE_FIELDS = (
     "trade_id",
@@ -89,7 +89,7 @@ def register_console_routes(
     def authorize(request):
         if token and not hmac.compare_digest(
             request.headers.get("Authorization", "").encode("utf-8"),
-            f"Bearer {token}".encode("utf-8"),
+            f"Bearer {token}".encode(),
         ):
             raise web.HTTPUnauthorized(text="Console authorization required")
 

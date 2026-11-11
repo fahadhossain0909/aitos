@@ -2,10 +2,12 @@
 
 import json
 from dataclasses import replace
+
 import pytest
+
 from aitos.trading.revision_journal import (
-    JournalIntegrityError,
     PROJECTION_DDL,
+    JournalIntegrityError,
     Revision,
     RevisionJournal,
     Scope,
@@ -84,7 +86,7 @@ def test_conflicting_projection_retained_and_blocks_ack(projection):
 
 def test_financial_amendment_projection_preserves_original_close(projection, tmp_path):
     from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
-    from aitos.trading.financial_amendment import CostAmendment, AMENDMENT_KEY
+    from aitos.trading.financial_amendment import AMENDMENT_KEY, CostAmendment
     from aitos.trading.paper_revision import PaperRevisionStore, decode_trade
 
     engine, _, scope, _, _ = projection

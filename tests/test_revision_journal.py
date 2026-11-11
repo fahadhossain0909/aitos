@@ -5,10 +5,11 @@ import sqlite3
 from dataclasses import replace
 
 import pytest
+
 from aitos.trading.revision_journal import (
+    MAX_INTEGER,
     AppendResult,
     JournalIntegrityError,
-    MAX_INTEGER,
     RevisionConflict,
     RevisionJournal,
     Scope,

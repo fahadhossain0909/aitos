@@ -13,11 +13,11 @@ import json
 import os
 import re
 import sqlite3
-import stat
 import ssl
+import stat
 import threading
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from aitos.security.paper_processor import PaperOnlyIntentProcessor
 from aitos.security.signer_rpc_protocol import (

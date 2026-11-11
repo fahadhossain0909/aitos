@@ -10,10 +10,11 @@ from pathlib import Path
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+
 from aitos.console_api import register_console_routes
 from aitos.projection_evidence import public_projection, unavailable
-from aitos.trading.revision_journal import RevisionJournal, Scope, JournalIntegrityError
-from aitos.trading.revision_projector import RevisionProjector, ProjectorBusy
+from aitos.trading.revision_journal import JournalIntegrityError, RevisionJournal, Scope
+from aitos.trading.revision_projector import ProjectorBusy, RevisionProjector
 
 
 class Sink:

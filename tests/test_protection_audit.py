@@ -2,11 +2,13 @@
 
 import copy
 import json
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from aitos.execution.protection_audit import audit_protection_inventory
+
 from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.execution.order_executor import OrderRequest
+from aitos.execution.protection_audit import audit_protection_inventory
 from aitos.execution.recovery import read_protection_audit
 from aitos.models.trade import TradeSide
 

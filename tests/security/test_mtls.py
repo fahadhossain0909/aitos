@@ -7,7 +7,6 @@ from aitos.security.mtls import (
     require_client_uri_identity,
 )
 
-
 IDENTITY = "spiffe://aitos/signer/client-01"
 
 

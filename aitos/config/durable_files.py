@@ -9,11 +9,11 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-from pathlib import Path
 import shutil
 import sqlite3
 import tempfile
 import time
+from pathlib import Path
 
 from aitos.config.paths import get_cache_dir, get_project_root
 
@@ -145,11 +145,10 @@ def stage_sqlite_snapshot(source, destination, *, timeout_seconds=10):
             uri = source.resolve().as_uri() + "?mode=ro"
             with contextlib.closing(
                 sqlite3.connect(uri, uri=True, timeout=3)
-            ) as original:
-                with contextlib.closing(sqlite3.connect(temporary)) as snapshot:
-                    original.backup(snapshot, pages=256, progress=progress, sleep=0.05)
-                    if snapshot.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
-                        raise StorageUnavailable("backup integrity check failed")
+            ) as original, contextlib.closing(sqlite3.connect(temporary)) as snapshot:
+                original.backup(snapshot, pages=256, progress=progress, sleep=0.05)
+                if snapshot.execute("PRAGMA quick_check").fetchall() != [("ok",)]:
+                    raise StorageUnavailable("backup integrity check failed")
             # Open read/write before fsync: Windows does not reliably flush a
             # read-only descriptor. Keep publication atomic and no-clobber.
             with open(temporary, "r+b") as stream:

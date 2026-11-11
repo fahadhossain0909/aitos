@@ -1,16 +1,16 @@
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-import json
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from aitos.trading import history_pages as module
 from aitos.console_api import register_console_routes
+from aitos.trading import history_pages as module
 from aitos.trading.persistent_state import (
-    DurableTradingStateStore,
     CLOSED_HISTORY_QUERY,
+    DurableTradingStateStore,
 )
 
 

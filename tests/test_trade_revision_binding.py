@@ -1,8 +1,5 @@
 """Typed paper revision binding. All journal files are temporary and synthetic."""
 
-from aitos.models.trade import Trade, TradeSide, TradeLifecycleState
-
-
 import copy
 from dataclasses import replace
 from types import SimpleNamespace
@@ -10,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from aitos.core.contracts import Event
+from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.paper_revision import (
     PaperRevisionStore,
     assess_legacy_rows,
@@ -279,10 +277,10 @@ async def test_existing_persistence_event_round_trip_keeps_distinct_update_times
 async def test_real_simulated_lifecycle_close_after_typed_restart(
     tmp_path, event_bus, risk_engine
 ):
+    from aitos.execution.order_executor import SimulatedOrderExecutor
     from aitos.models.trade import Opportunity
     from aitos.risk.models import PortfolioState
     from aitos.trading.lifecycle import TradeLifecycle
-    from aitos.execution.order_executor import SimulatedOrderExecutor
 
     store = make_store(tmp_path)
     lifecycle = TradeLifecycle(

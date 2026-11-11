@@ -228,6 +228,7 @@ async def test_ctrader_connection_wait_does_not_block_event_loop():
 
 async def test_private_transport_error_does_not_expose_signed_url():
     from types import SimpleNamespace
+
     from aitos.execution.binance_executor import BinanceTransportError
 
     class Fault:

@@ -1,13 +1,13 @@
+import sqlite3
 from datetime import datetime, timezone
 from types import SimpleNamespace
-import sqlite3
 
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from aitos.trading import account_timeline as module
 from aitos.console_api import register_console_routes
+from aitos.trading import account_timeline as module
 
 
 def observation(value="10"):

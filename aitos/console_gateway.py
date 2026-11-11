@@ -420,50 +420,49 @@ def create_gateway(
         if config.upstream_token:
             headers["Authorization"] = f"Bearer {config.upstream_token}"
         try:
-            async with upstream_slots:
-                async with upstream.get(
-                    url, headers=headers, allow_redirects=False
-                ) as result:
-                    if result.status != 200:
-                        status = (
-                            result.status if result.status in {400, 429, 503} else 502
-                        )
-                        return web.json_response(
-                            {"error": "Runtime evidence unavailable"}, status=status
-                        )
-                    if (
-                        result.content_type != "application/json"
-                        or result.headers.get("Content-Encoding", "identity")
-                        != "identity"
-                        or result.content_length is not None
-                        and result.content_length > 2 * 1024 * 1024
-                    ):
-                        raise ValueError()
-                    body = bytearray()
-                    async for chunk in result.content.iter_chunked(65536):
-                        body.extend(chunk)
-                        if len(body) > 2 * 1024 * 1024:
-                            raise ValueError()
-
-                    def unique_object(pairs):
-                        result = {}
-                        for key, value in pairs:
-                            if key in result:
-                                raise ValueError("duplicate upstream JSON field")
-                            result[key] = value
-                        return result
-
-                    def reject_constant(value):
-                        raise ValueError("nonfinite upstream JSON")
-
-                    payload = json.loads(
-                        body,
-                        object_pairs_hook=unique_object,
-                        parse_constant=reject_constant,
+            async with upstream_slots, upstream.get(
+                url, headers=headers, allow_redirects=False
+            ) as result:
+                if result.status != 200:
+                    status = (
+                        result.status if result.status in {400, 429, 503} else 502
                     )
-                    if not isinstance(payload, dict):
+                    return web.json_response(
+                        {"error": "Runtime evidence unavailable"}, status=status
+                    )
+                if (
+                    result.content_type != "application/json"
+                    or result.headers.get("Content-Encoding", "identity")
+                    != "identity"
+                    or result.content_length is not None
+                    and result.content_length > 2 * 1024 * 1024
+                ):
+                    raise ValueError()
+                body = bytearray()
+                async for chunk in result.content.iter_chunked(65536):
+                    body.extend(chunk)
+                    if len(body) > 2 * 1024 * 1024:
                         raise ValueError()
-                    return web.json_response(payload)
+
+                def unique_object(pairs):
+                    result = {}
+                    for key, value in pairs:
+                        if key in result:
+                            raise ValueError("duplicate upstream JSON field")
+                        result[key] = value
+                    return result
+
+                def reject_constant(value):
+                    raise ValueError("nonfinite upstream JSON")
+
+                payload = json.loads(
+                    body,
+                    object_pairs_hook=unique_object,
+                    parse_constant=reject_constant,
+                )
+                if not isinstance(payload, dict):
+                    raise ValueError()
+                return web.json_response(payload)
         except Exception:
             logger.warning("operator runtime evidence request failed")
             return web.json_response(

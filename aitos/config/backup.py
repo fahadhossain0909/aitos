@@ -6,11 +6,11 @@ credential backup, automatic migration, deletion or runtime configuration edits.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
-from pathlib import Path
 import sqlite3
-import contextlib
+from pathlib import Path
 
 from aitos.config.durable_files import (
     StorageUnavailable,

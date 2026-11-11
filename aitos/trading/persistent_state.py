@@ -16,8 +16,8 @@ from typing import Any
 from aitos.app import LivePortfolioTracker
 from aitos.data.ingestion import DataIngestionService
 from aitos.eventbus.redis_bus import EventBus, Subscription
-from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.execution.order_executor import OrderExecutor, OrderRequest, OrderResult
+from aitos.execution.position_integrity import assert_position_snapshot_matches
 from aitos.logging_setup import get_logger
 from aitos.models.trade import PartialExit, Trade, TradeLifecycleState, TradeSide
 

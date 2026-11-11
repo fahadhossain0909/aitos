@@ -22,14 +22,14 @@ from aitos.exchange.binance_usdm_paper_signer import (
     BinanceUSDMPaperExecutionAdapter,
     PaperSignerRecoveryWorker,
 )
-from aitos.native.credential_vault import get_credential_vault
 from aitos.native.credential_profiles import (
-    CredentialProfileStore,
     CredentialProfileError,
+    CredentialProfileStore,
     CredentialProviderRouter,
     LazyNativeCredentialStore,
     discover_external_vault_backends,
 )
+from aitos.native.credential_vault import get_credential_vault
 from aitos.security.mtls import build_server_context
 from aitos.security.paper_processor import PaperOnlyIntentProcessor
 from aitos.security.replay_store import SQLiteReplayStore

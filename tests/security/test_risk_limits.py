@@ -9,12 +9,11 @@ from aitos.security.signing_policy import (
     validate_order_intent,
 )
 
-
 NOW = 1_800_000_000_000
 POLICY = OrderIntentPolicy(
     account_alias="paper-primary",
     allowed_symbols=frozenset({"BTCUSDT"}),
-    max_order_notional=Decimal("1000"),
+    max_order_notional=Decimal(1000),
 )
 
 
@@ -42,9 +41,9 @@ def snapshot(**overrides):
     values = {
         "account_alias": "paper-primary",
         "captured_at_ms": NOW,
-        "gross_exposure": Decimal("100"),
-        "symbol_exposure": {"BTCUSDT": Decimal("50")},
-        "daily_loss": Decimal("10"),
+        "gross_exposure": Decimal(100),
+        "symbol_exposure": {"BTCUSDT": Decimal(50)},
+        "daily_loss": Decimal(10),
         "order_count_window": 2,
         "positions": {"BTCUSDT": Decimal("0.01")},
     }
@@ -53,9 +52,9 @@ def snapshot(**overrides):
 
 
 LIMITS = SignerRiskLimits(
-    max_gross_exposure=Decimal("1000"),
-    max_symbol_exposure=Decimal("500"),
-    max_daily_loss=Decimal("100"),
+    max_gross_exposure=Decimal(1000),
+    max_symbol_exposure=Decimal(500),
+    max_daily_loss=Decimal(100),
     max_orders_per_window=10,
 )
 
@@ -70,11 +69,11 @@ def test_fresh_account_evidence_passes_independent_risk_gate():
         (None, "account_evidence_required"),
         (snapshot(account_alias="other"), "account_evidence_mismatch"),
         (snapshot(captured_at_ms=NOW - 6000), "account_evidence_stale"),
-        (snapshot(daily_loss=Decimal("100")), "daily_loss_limit_reached"),
+        (snapshot(daily_loss=Decimal(100)), "daily_loss_limit_reached"),
         (snapshot(order_count_window=10), "order_rate_limit_reached"),
-        (snapshot(gross_exposure=Decimal("970")), "gross_exposure_limit_exceeded"),
+        (snapshot(gross_exposure=Decimal(970)), "gross_exposure_limit_exceeded"),
         (
-            snapshot(symbol_exposure={"BTCUSDT": Decimal("490")}),
+            snapshot(symbol_exposure={"BTCUSDT": Decimal(490)}),
             "symbol_exposure_limit_exceeded",
         ),
         (snapshot(gross_exposure=float("nan")), "account_evidence_invalid"),
@@ -129,14 +128,14 @@ def test_reduce_only_wrong_side_is_rejected():
 
 def test_account_snapshot_copies_and_freezes_exposure_mappings():
     positions = {"BTCUSDT": Decimal("0.01")}
-    exposure = {"BTCUSDT": Decimal("50")}
+    exposure = {"BTCUSDT": Decimal(50)}
     evidence = snapshot(positions=positions, symbol_exposure=exposure)
-    positions["BTCUSDT"] = Decimal("99")
+    positions["BTCUSDT"] = Decimal(99)
     exposure.clear()
     assert evidence.positions["BTCUSDT"] == Decimal("0.01")
-    assert evidence.symbol_exposure["BTCUSDT"] == Decimal("50")
+    assert evidence.symbol_exposure["BTCUSDT"] == Decimal(50)
     with pytest.raises(TypeError):
-        evidence.positions["BTCUSDT"] = Decimal("1")
+        evidence.positions["BTCUSDT"] = Decimal(1)
 
 
 def test_reduce_only_remains_available_when_growth_limits_are_exceeded():
@@ -149,8 +148,8 @@ def test_reduce_only_remains_available_when_growth_limits_are_exceeded():
         reduce_only=True,
     )
     over_limit = snapshot(
-        gross_exposure=Decimal("1500"),
-        daily_loss=Decimal("150"),
+        gross_exposure=Decimal(1500),
+        daily_loss=Decimal(150),
         order_count_window=25,
     )
     LIMITS.authorize(reduce, over_limit, now_ms=NOW)

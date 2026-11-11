@@ -1,6 +1,7 @@
 """Actual loopback TCP and threading, synthetic credentials, no Windows claim."""
 
 import pytest
+
 from aitos.native.console_host import LocalConsoleHost, exercise_local_host
 
 

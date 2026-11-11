@@ -6,8 +6,9 @@ missing pages/rows. Schema 2 binds position mode and inclusive receipt window.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
 import re
+from datetime import datetime, timedelta, timezone
+
 from aitos.trading.account_reconciliation import (
     AccountSnapshot,
     amount,
@@ -207,6 +208,7 @@ def main(argv=None):
     import argparse
     import json
     from pathlib import Path
+
     from aitos.trading.account_reconciliation import read_snapshot_file
 
     parser = argparse.ArgumentParser(description=__doc__)

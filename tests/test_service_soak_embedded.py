@@ -3,7 +3,9 @@
 import json
 import sys
 from types import SimpleNamespace
+
 import pytest
+
 from engineering.tools.paper_service_soak import run
 
 pytestmark = pytest.mark.integration
@@ -23,7 +25,7 @@ async def test_service_harness_seed_recover_and_soak_against_embedded_sql(
     class Client:
         async def command(self, sql, parameters=None):
             if sql.startswith("CREATE DATABASE"):
-                return None  # server-admin transport is NOT verified here
+                return  # server-admin transport is NOT verified here
             engine.query(sql)
 
         async def query(self, sql, parameters=None):

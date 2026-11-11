@@ -3,9 +3,11 @@
 import json
 from dataclasses import replace
 from types import SimpleNamespace
+
 import pytest
+
 from aitos.trading.revision_journal import PROJECTION_DDL, RevisionJournal, Scope
-from aitos.trading.revision_projector import RevisionProjector, ClickHouseEvidenceSink
+from aitos.trading.revision_projector import ClickHouseEvidenceSink, RevisionProjector
 
 pytestmark = pytest.mark.integration
 

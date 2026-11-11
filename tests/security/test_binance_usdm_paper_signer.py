@@ -16,7 +16,6 @@ from aitos.security.replay_store import SQLiteReplayStore
 from aitos.security.signer_credentials import SignerCredentialSlots
 from aitos.security.signing_policy import OrderIntentPolicy, validate_order_intent
 
-
 NOW = 1_800_000_000_000
 
 
@@ -148,7 +147,7 @@ def test_account_evidence_uses_signed_testnet_account_and_position_data(tmp_path
     assert snapshot.gross_exposure == Decimal("160.000")
     assert snapshot.symbol_exposure["BTCUSDT"] == Decimal("160.000")
     assert snapshot.positions["BTCUSDT"] == Decimal("0.01")
-    assert snapshot.daily_loss == Decimal("9")
+    assert snapshot.daily_loss == Decimal(9)
     assert snapshot.order_count_window == 1
     assert all(
         urlsplit(call[1]).netloc == "testnet.binancefuture.com"
@@ -181,7 +180,7 @@ def _intent():
     policy = OrderIntentPolicy(
         account_alias="paper-primary",
         allowed_symbols=frozenset({"BTCUSDT"}),
-        max_order_notional=Decimal("1000"),
+        max_order_notional=Decimal(1000),
     )
     return validate_order_intent(
         {

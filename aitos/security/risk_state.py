@@ -165,7 +165,7 @@ class SQLiteSignerRiskState:
                     WHERE account_alias=? AND occurred_at_ms>=? AND occurred_at_ms<=?""",
                     (account_alias, midnight, now_ms),
                 ).fetchall()
-                local_net = sum((Decimal(row[0]) for row in pnl_rows), Decimal("0"))
+                local_net = sum((Decimal(row[0]) for row in pnl_rows), Decimal(0))
                 self._db.execute(
                     "DELETE FROM signer_order_windows WHERE window_start_ms < ?",
                     (window_start - self.window_ms,),
@@ -178,7 +178,7 @@ class SQLiteSignerRiskState:
                     self._db.execute("ROLLBACK")
                 raise RuntimeError("signer_risk_state_unavailable") from exc
 
-        local_daily_loss = max(Decimal("0"), -local_net)
+        local_daily_loss = max(Decimal(0), -local_net)
         return replace(
             snapshot,
             daily_loss=snapshot.daily_loss + local_daily_loss,

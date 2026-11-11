@@ -12,6 +12,7 @@ import threading
 from pathlib import Path
 
 from aiohttp import web
+
 from aitos.console_gateway import GatewayConfig, create_gateway
 
 
@@ -130,6 +131,7 @@ class LocalConsoleHost:
 async def exercise_local_host(dist):
     """Synthetic actual TCP/auth smoke for installed binaries; no real credentials."""
     import secrets
+
     from aiohttp import ClientSession, ClientTimeout, CookieJar
 
     token, password = secrets.token_urlsafe(32), secrets.token_urlsafe(32)

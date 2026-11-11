@@ -12,7 +12,7 @@ import pytest
 from aitos.core.contracts import ModuleStatus
 from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
 from aitos.execution.intent_store import ExecutionIntentStore, ExecutionUncertainError
-from aitos.models.trade import Opportunity, TradeSide, TradeLifecycleState
+from aitos.models.trade import Opportunity, TradeLifecycleState, TradeSide
 from aitos.risk.models import PortfolioState
 from aitos.trading.lifecycle import TradeLifecycle
 from aitos.trading.persistent_state import IdempotentOrderExecutor

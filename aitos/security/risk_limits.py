@@ -7,10 +7,11 @@ is a hard rejection. It does not submit orders or claim venue reconciliation.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal
 from types import MappingProxyType
-from typing import Mapping, Protocol
+from typing import Protocol
 
 from aitos.security.signing_policy import IntentRejected, ValidatedOrderIntent
 
@@ -119,7 +120,7 @@ class SignerRiskLimits:
             for position in snapshot.positions.values()
         ):
             raise IntentRejected("account_evidence_invalid")
-        current_symbol = snapshot.symbol_exposure.get(intent.symbol, Decimal("0"))
+        current_symbol = snapshot.symbol_exposure.get(intent.symbol, Decimal(0))
         if (
             not isinstance(current_symbol, Decimal)
             or not current_symbol.is_finite()

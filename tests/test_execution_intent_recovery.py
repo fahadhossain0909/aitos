@@ -209,6 +209,7 @@ def test_offline_inventory_never_equates_empty_history_with_verified_account(tmp
 
 def test_read_only_inventory_does_not_create_missing_database(tmp_path):
     import sqlite3
+
     from aitos.execution.recovery import read_recovery_inventory
 
     path = tmp_path / "missing.sqlite3"

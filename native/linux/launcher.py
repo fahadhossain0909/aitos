@@ -5,13 +5,13 @@ from __future__ import annotations
 import asyncio
 import secrets
 import sys
+import tkinter as tk
 import webbrowser
 from pathlib import Path
-import tkinter as tk
 from tkinter import messagebox, simpledialog
 
-from aitos.console_gateway import is_valid_operator_password
 from aitos.console_capabilities import RuntimeEndpoint
+from aitos.console_gateway import is_valid_operator_password
 from aitos.native.console_host import LocalConsoleHost, exercise_local_host
 from aitos.native.credential_vault import get_credential_vault
 

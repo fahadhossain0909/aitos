@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 import pytest
 
 from aitos.execution.intent_store import ExecutionUncertainError
-from aitos.execution.order_executor import SimulatedOrderExecutor, OrderResult
-from aitos.models.trade import Trade, TradeSide, TradeLifecycleState
+from aitos.execution.order_executor import OrderResult, SimulatedOrderExecutor
+from aitos.models.trade import Trade, TradeLifecycleState, TradeSide
 from aitos.trading.lifecycle import TradeLifecycle
 
 

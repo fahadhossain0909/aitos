@@ -4,19 +4,19 @@ Never starts a trading runner. Credentials stay in Windows Credential Manager.
 
 import asyncio
 import sys
+import tkinter as tk
 import webbrowser
 from pathlib import Path
-import tkinter as tk
-from tkinter import simpledialog, messagebox
+from tkinter import messagebox, simpledialog
 
+from aitos.console_capabilities import RuntimeEndpoint
 from aitos.console_gateway import (
     GatewayConfig,
     create_gateway,
     is_valid_operator_password,
 )
-from aitos.native.credential_vault import get_credential_vault
-from aitos.console_capabilities import RuntimeEndpoint
 from aitos.native.console_host import LocalConsoleHost, exercise_local_host
+from aitos.native.credential_vault import get_credential_vault
 
 
 def main():
@@ -134,8 +134,8 @@ def main():
 
 def self_test():
     """Frozen-bundle smoke: native API, assets, gateway imports; no server launch."""
-    import uuid
     import secrets
+    import uuid
 
     vault = get_credential_vault()
     if vault.get("tests/self-test-" + uuid.uuid4().hex) is not None:

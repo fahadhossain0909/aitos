@@ -1,12 +1,14 @@
 """Offline read-only console contracts; no external services or orders."""
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-import json
+
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
-from aitos.console_api import register_console_routes, finite_json
+
+from aitos.console_api import finite_json, register_console_routes
 from aitos.trading.persistent_state import DurableTradingStateStore
 
 TOKEN = "test-only-console-token-" + "x" * 32

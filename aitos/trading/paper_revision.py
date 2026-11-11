@@ -14,6 +14,7 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 
 from aitos.models.trade import PartialExit, Trade, TradeLifecycleState, TradeSide
+from aitos.trading.financial_amendment import AMENDMENT_KEY, decode_metadata
 from aitos.trading.revision_journal import (
     JournalIntegrityError,
     Revision,
@@ -23,8 +24,6 @@ from aitos.trading.revision_journal import (
     canonical,
     identifier,
 )
-
-from aitos.trading.financial_amendment import AMENDMENT_KEY, decode_metadata
 
 FIELDS = {field.name for field in fields(Trade)}
 STATES = {"position_opened", "exit_triggered", "position_closed"}

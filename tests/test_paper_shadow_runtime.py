@@ -4,14 +4,16 @@ import asyncio
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+
 import pytest
+
+from aitos.trading.paper_revision import PaperRevisionStore, encode_trade
 from aitos.trading.paper_shadow_runtime import (
-    PaperShadowRuntime,
     MirroredPaperStateStore,
+    PaperShadowRuntime,
     configured_shadow,
 )
-from aitos.trading.paper_revision import PaperRevisionStore, encode_trade
-from aitos.trading.revision_journal import RevisionJournal, Scope, RevisionConflict
+from aitos.trading.revision_journal import RevisionConflict, RevisionJournal, Scope
 from tests.test_trade_revision_binding import sample_trade
 
 
@@ -46,8 +48,8 @@ def setup(tmp_path):
 
 
 async def test_real_lifecycle_event_to_shadow_and_projector(setup):
-    from aitos.trading.persistent_state import TradeStatePersistence
     from aitos.core.contracts import Event
+    from aitos.trading.persistent_state import TradeStatePersistence
 
     legacy = SimpleNamespace(save_trade=AsyncMock(), initialize=AsyncMock())
     lifecycle = SimpleNamespace()
@@ -181,8 +183,9 @@ def test_explicit_config_generation_prevents_restart_stealing(tmp_path):
 
 
 async def test_health_server_forwards_observer_and_requires_auth(setup):
-    from aitos.health_server import HealthServer
     from aiohttp.test_utils import TestClient, TestServer
+
+    from aitos.health_server import HealthServer
 
     await setup.record(sample_trade())
     await setup.projector.run_once()
@@ -241,9 +244,9 @@ async def test_cancelled_record_and_shutdown_drain_sqlite_thread(setup):
 
 
 async def test_actual_close_callback_retains_terminal_journal_record(setup):
+    from aitos.core.contracts import Event
     from aitos.models.trade import TradeLifecycleState
     from aitos.trading.persistent_state import TradeStatePersistence
-    from aitos.core.contracts import Event
 
     trade = sample_trade()
     assert await setup.record(trade)

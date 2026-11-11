@@ -1,10 +1,11 @@
 """Execute actual runner teardown AST without constructing a trading system."""
 
 import ast
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-import asyncio
 from unittest.mock import AsyncMock, Mock
+
 import pytest
 
 

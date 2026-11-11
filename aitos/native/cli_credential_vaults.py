@@ -12,8 +12,8 @@ import json
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 
 class ProviderVaultError(RuntimeError):

@@ -1,8 +1,8 @@
-from concurrent.futures import ThreadPoolExecutor
-from decimal import Decimal
 import os
 import sqlite3
 import stat
+from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 
 import pytest
 
@@ -10,21 +10,23 @@ from aitos.security.paper_processor import (
     PaperExecutionAdapter,
     PaperOnlyIntentProcessor,
 )
-from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits
-from aitos.security.signing_policy import IntentRejected
 from aitos.security.replay_store import (
     ReplayConflict,
     ReplayStoreError,
     SQLiteReplayStore,
 )
-from aitos.security.signing_policy import OrderIntentPolicy, validate_order_intent
-
+from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits
+from aitos.security.signing_policy import (
+    IntentRejected,
+    OrderIntentPolicy,
+    validate_order_intent,
+)
 
 NOW = 1_800_000_000_000
 POLICY = OrderIntentPolicy(
     account_alias="paper-primary",
     allowed_symbols=frozenset({"BTCUSDT"}),
-    max_order_notional=Decimal("1000"),
+    max_order_notional=Decimal(1000),
 )
 
 
@@ -235,7 +237,7 @@ def test_paper_processor_rejects_market_policy_and_non_paper_adapter(tmp_path):
     market_policy = OrderIntentPolicy(
         account_alias="paper-primary",
         allowed_symbols=frozenset({"BTCUSDT"}),
-        max_order_notional=Decimal("1000"),
+        max_order_notional=Decimal(1000),
         allowed_order_types=frozenset({"MARKET"}),
         allow_market_orders=True,
     )
@@ -312,17 +314,17 @@ def test_process_termination_after_dispatching_is_not_replayed(tmp_path):
 
 def test_paper_processor_runs_independent_risk_gate_before_reservation(tmp_path):
     limits = SignerRiskLimits(
-        max_gross_exposure=Decimal("1000"),
-        max_symbol_exposure=Decimal("500"),
-        max_daily_loss=Decimal("100"),
+        max_gross_exposure=Decimal(1000),
+        max_symbol_exposure=Decimal(500),
+        max_daily_loss=Decimal(100),
         max_orders_per_window=10,
     )
     stale = AccountRiskSnapshot(
         account_alias="paper-primary",
         captured_at_ms=NOW - 10_000,
-        gross_exposure=Decimal("0"),
+        gross_exposure=Decimal(0),
         symbol_exposure={},
-        daily_loss=Decimal("0"),
+        daily_loss=Decimal(0),
         order_count_window=0,
         positions={},
     )
@@ -346,9 +348,9 @@ def test_paper_processor_runs_independent_risk_gate_before_reservation(tmp_path)
 
 def test_risk_gate_requires_provider_and_limits_as_a_pair(tmp_path):
     limits = SignerRiskLimits(
-        max_gross_exposure=Decimal("1000"),
-        max_symbol_exposure=Decimal("500"),
-        max_daily_loss=Decimal("100"),
+        max_gross_exposure=Decimal(1000),
+        max_symbol_exposure=Decimal(500),
+        max_daily_loss=Decimal(100),
         max_orders_per_window=10,
     )
     with SQLiteReplayStore(tmp_path / "ledger.sqlite3") as store:
@@ -360,17 +362,17 @@ def test_risk_gate_requires_provider_and_limits_as_a_pair(tmp_path):
 
 def test_paper_processor_uses_trusted_provider_for_fresh_risk_evidence(tmp_path):
     limits = SignerRiskLimits(
-        max_gross_exposure=Decimal("1000"),
-        max_symbol_exposure=Decimal("500"),
-        max_daily_loss=Decimal("100"),
+        max_gross_exposure=Decimal(1000),
+        max_symbol_exposure=Decimal(500),
+        max_daily_loss=Decimal(100),
         max_orders_per_window=10,
     )
     fresh = AccountRiskSnapshot(
         account_alias="paper-primary",
         captured_at_ms=NOW,
-        gross_exposure=Decimal("100"),
-        symbol_exposure={"BTCUSDT": Decimal("50")},
-        daily_loss=Decimal("10"),
+        gross_exposure=Decimal(100),
+        symbol_exposure={"BTCUSDT": Decimal(50)},
+        daily_loss=Decimal(10),
         order_count_window=2,
         positions={"BTCUSDT": Decimal("0.01")},
     )
@@ -397,9 +399,9 @@ def test_paper_processor_uses_trusted_provider_for_fresh_risk_evidence(tmp_path)
 
 def test_unavailable_account_evidence_never_reserves_or_executes(tmp_path):
     limits = SignerRiskLimits(
-        max_gross_exposure=Decimal("1000"),
-        max_symbol_exposure=Decimal("500"),
-        max_daily_loss=Decimal("100"),
+        max_gross_exposure=Decimal(1000),
+        max_symbol_exposure=Decimal(500),
+        max_daily_loss=Decimal(100),
         max_orders_per_window=10,
     )
 

@@ -6,11 +6,13 @@ Install the test-only chdb extra separately. This is not a server/transport test
 
 import json
 from types import SimpleNamespace
+
 import pytest
+
 from aitos.trading.persistent_state import (
-    DurableTradingStateStore,
-    CREATE_RUNTIME_STATE,
     CREATE_PAPER_CLOSED_TRADE_LEDGER,
+    CREATE_RUNTIME_STATE,
+    DurableTradingStateStore,
 )
 
 pytestmark = pytest.mark.integration

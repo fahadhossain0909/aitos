@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from aitos.config.paths import (
-    get_model_data_dir,
     get_data_dir,
+    get_model_data_dir,
     get_project_root,
     resolve_project_path,
 )

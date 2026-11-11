@@ -1,10 +1,10 @@
 """Freeze only the read-only gateway for the selected native target."""
 
 import argparse
-from pathlib import Path
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main():

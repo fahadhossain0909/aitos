@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
 
-from aitos.console_gateway import normalize_origin, _loopback
+from aitos.console_gateway import _loopback, normalize_origin
 
 API_VERSION = "1.0"
 

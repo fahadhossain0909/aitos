@@ -9,10 +9,10 @@ No trading process is started by this sidecar.
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import signal
 import sys
 import threading
+from pathlib import Path
 
 from aitos.console_capabilities import RuntimeEndpoint
 from aitos.console_gateway import is_valid_operator_password

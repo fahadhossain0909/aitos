@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 
+from aitos.native.cli_credential_vaults import ProviderVaultError
 from aitos.native.credential_profiles import (
     CredentialProfileError,
     CredentialProfileStore,
@@ -20,10 +21,8 @@ from aitos.native.credential_profiles import (
     LazyNativeCredentialStore,
     discover_external_vault_backends,
 )
-from aitos.native.cli_credential_vaults import ProviderVaultError
 from aitos.native.credential_vault import VaultUnavailable, get_credential_vault
 from aitos.security.signer_credentials import SignerCredentialSlots
-
 
 MAX_REQUEST_BYTES = 8192
 ACTIONS = frozenset({"status", "set-mode", "store-credentials"})

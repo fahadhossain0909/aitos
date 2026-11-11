@@ -3,7 +3,9 @@
 import copy
 from datetime import datetime, timezone
 from decimal import localcontext
+
 import pytest
+
 from aitos.exchange.binance_account_evidence import (
     adapt_recorded_account,
     reconcile_recorded_account,

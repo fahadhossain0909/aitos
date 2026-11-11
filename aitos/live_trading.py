@@ -13,12 +13,12 @@ from contextlib import ExitStack
 
 from aitos.config.paths import get_model_data_dir
 from aitos.exchange.binance import BinanceFuturesAdapter
-from aitos.execution.intent_store import ExecutionIntentStore
 from aitos.execution.binance_executor import BinanceFuturesOrderExecutor
-from aitos.logging_setup import get_logger
+from aitos.execution.intent_store import ExecutionIntentStore
+from aitos.intelligence.capital_controls import ProbabilityCalibrator
 from aitos.intelligence.capital_gateway import CapitalGateway
 from aitos.intelligence.capital_protection import CapitalReservation
-from aitos.intelligence.capital_controls import ProbabilityCalibrator
+from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.live_trading")
 

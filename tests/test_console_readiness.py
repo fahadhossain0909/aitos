@@ -1,5 +1,7 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 import pytest
+
 from aitos.console_readiness import assess_readiness
 
 NOW = datetime(2026, 11, 7, 12, tzinfo=timezone.utc)

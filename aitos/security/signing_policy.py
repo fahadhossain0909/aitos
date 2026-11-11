@@ -10,9 +10,10 @@ import base64
 import binascii
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, DecimalException, InvalidOperation, localcontext
-from typing import Any, FrozenSet, Mapping
+from typing import Any
 
 
 class IntentRejected(ValueError):
@@ -147,10 +148,10 @@ class OrderIntentPolicy:
     """
 
     account_alias: str
-    allowed_symbols: FrozenSet[str]
+    allowed_symbols: frozenset[str]
     max_order_notional: Decimal
-    allowed_sides: FrozenSet[str] = frozenset({"BUY", "SELL"})
-    allowed_order_types: FrozenSet[str] = frozenset({"LIMIT"})
+    allowed_sides: frozenset[str] = frozenset({"BUY", "SELL"})
+    allowed_order_types: frozenset[str] = frozenset({"LIMIT"})
     allow_market_orders: bool = False
     allow_reduce_only: bool = True
     max_intent_ttl_ms: int = 30_000

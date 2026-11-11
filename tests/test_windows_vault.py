@@ -1,6 +1,8 @@
 import sys
+
 import pytest
-from aitos.native.windows_vault import WindowsVault, VaultUnavailable
+
+from aitos.native.windows_vault import VaultUnavailable, WindowsVault
 
 
 class API:

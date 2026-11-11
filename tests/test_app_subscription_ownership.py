@@ -13,7 +13,7 @@ def components(bus):
         event_bus=bus,
         trade_lifecycle=SimpleNamespace(handle_event=AsyncMock()),
         _price_feed_subscriptions=[],
-        all_modules=lambda: [],
+        all_modules=list,
     )
 
 

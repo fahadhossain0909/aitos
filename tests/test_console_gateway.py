@@ -1,7 +1,7 @@
 """Loopback-only gateway security contracts; dummy credentials, no exchange/account."""
 
-import hashlib
 import asyncio
+import hashlib
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -10,8 +10,8 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from aitos.console_gateway import (
-    GatewayConfig,
     GATEWAY_STATE,
+    GatewayConfig,
     create_gateway,
     normalize_origin,
 )

@@ -10,14 +10,13 @@ from aitos.security.mtls import build_client_context, build_server_context
 from aitos.security.paper_processor import PaperOnlyIntentProcessor
 from aitos.security.replay_store import SQLiteReplayStore
 from aitos.security.risk_limits import AccountRiskSnapshot, SignerRiskLimits
-from aitos.security.signing_policy import OrderIntentPolicy
 from aitos.security.signer_rpc_client import SignerRPCClient
 from aitos.security.signer_service import (
     PaperSignerRPCServer,
     SQLiteSignerRateLimiter,
     SQLiteSignerRegistry,
 )
-
+from aitos.security.signing_policy import OrderIntentPolicy
 
 NOW = 1_800_000_000_000
 IDENTITY = "spiffe://aitos/signer/client-01"
@@ -120,14 +119,14 @@ def test_real_tls13_mtls_socket_accepts_only_enrolled_paper_intents(tmp_path):
     policy = OrderIntentPolicy(
         account_alias="paper-primary",
         allowed_symbols=frozenset({"BTCUSDT"}),
-        max_order_notional=Decimal("1000"),
+        max_order_notional=Decimal(1000),
     )
     snapshot = AccountRiskSnapshot(
         account_alias="paper-primary",
         captured_at_ms=NOW,
-        gross_exposure=Decimal("0"),
+        gross_exposure=Decimal(0),
         symbol_exposure={},
-        daily_loss=Decimal("0"),
+        daily_loss=Decimal(0),
         order_count_window=0,
         positions={},
     )
@@ -156,9 +155,9 @@ def test_real_tls13_mtls_socket_accepts_only_enrolled_paper_intents(tmp_path):
             policy=policy,
             replay_store=replay,
             risk_limits=SignerRiskLimits(
-                max_gross_exposure=Decimal("1000"),
-                max_symbol_exposure=Decimal("500"),
-                max_daily_loss=Decimal("100"),
+                max_gross_exposure=Decimal(1000),
+                max_symbol_exposure=Decimal(500),
+                max_daily_loss=Decimal(100),
                 max_orders_per_window=10,
             ),
             account_evidence_provider=Evidence(),

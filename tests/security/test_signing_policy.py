@@ -9,13 +9,12 @@ from aitos.security.signing_policy import (
     validate_order_intent,
 )
 
-
 NOW = 1_800_000_000_000
 NONCE = "AAECAwQFBgcICQoLDA0ODw"
 POLICY = OrderIntentPolicy(
     account_alias="paper-primary",
     allowed_symbols=frozenset({"BTCUSDT", "ETHUSDT"}),
-    max_order_notional=Decimal("1000"),
+    max_order_notional=Decimal(1000),
 )
 
 
@@ -107,7 +106,7 @@ def test_market_order_requires_explicit_policy_and_signer_price():
     market_policy = OrderIntentPolicy(
         account_alias="paper-primary",
         allowed_symbols=frozenset({"BTCUSDT"}),
-        max_order_notional=Decimal("1000"),
+        max_order_notional=Decimal(1000),
         allowed_order_types=frozenset({"MARKET"}),
         allow_market_orders=True,
     )
@@ -120,7 +119,7 @@ def test_market_order_requires_explicit_policy_and_signer_price():
         payload,
         policy=market_policy,
         now_ms=NOW,
-        trusted_market_price=Decimal("65000"),
+        trusted_market_price=Decimal(65000),
     )
     assert result.notional == Decimal("65.000")
 
@@ -129,7 +128,7 @@ def test_market_order_rejects_caller_supplied_price():
     market_policy = OrderIntentPolicy(
         account_alias="paper-primary",
         allowed_symbols=frozenset({"BTCUSDT"}),
-        max_order_notional=Decimal("1000"),
+        max_order_notional=Decimal(1000),
         allowed_order_types=frozenset({"MARKET"}),
         allow_market_orders=True,
     )
@@ -138,7 +137,7 @@ def test_market_order_rejects_caller_supplied_price():
             intent(order_type="MARKET"),
             policy=market_policy,
             now_ms=NOW,
-            trusted_market_price=Decimal("65000"),
+            trusted_market_price=Decimal(65000),
         )
 
 
@@ -146,7 +145,7 @@ def test_reduce_only_policy_can_be_disabled():
     policy = OrderIntentPolicy(
         account_alias="paper-primary",
         allowed_symbols=frozenset({"BTCUSDT"}),
-        max_order_notional=Decimal("1000"),
+        max_order_notional=Decimal(1000),
         allow_reduce_only=False,
     )
     with pytest.raises(IntentRejected, match="reduce_only_not_allowed"):
@@ -158,13 +157,13 @@ def test_policy_rejects_unsafe_configuration():
         OrderIntentPolicy(
             account_alias="paper-primary",
             allowed_symbols=frozenset(),
-            max_order_notional=Decimal("1000"),
+            max_order_notional=Decimal(1000),
         )
     with pytest.raises(ValueError):
         OrderIntentPolicy(
             account_alias="paper-primary",
             allowed_symbols=frozenset({"BTCUSDT"}),
-            max_order_notional=Decimal("1000"),
+            max_order_notional=Decimal(1000),
             allowed_order_types=frozenset({"MARKET"}),
         )
 
@@ -192,12 +191,12 @@ def test_policy_requires_strict_boolean_flags_and_valid_account_alias():
         OrderIntentPolicy(
             account_alias="paper-primary",
             allowed_symbols=frozenset({"BTCUSDT"}),
-            max_order_notional=Decimal("1000"),
+            max_order_notional=Decimal(1000),
             allow_market_orders="yes",
         )
     with pytest.raises(ValueError, match="account_alias_required"):
         OrderIntentPolicy(
             account_alias="bad alias",
             allowed_symbols=frozenset({"BTCUSDT"}),
-            max_order_notional=Decimal("1000"),
+            max_order_notional=Decimal(1000),
         )

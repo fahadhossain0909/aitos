@@ -2,8 +2,9 @@
 
 import json
 from pathlib import Path
-from aitos.trading.performance import analyze_closed_trades
+
 from aitos.learning.evaluation_plan import EvaluationPlanRequest, build_evaluation_plan
+from aitos.trading.performance import analyze_closed_trades
 
 ROOT = Path(__file__).resolve().parents[1]
 

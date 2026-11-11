@@ -8,9 +8,9 @@ not a consistent cross-endpoint snapshot, historical timeline or recovery proof.
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone
 from decimal import Decimal, localcontext
-import re
 
 from aitos.trading.account_reconciliation import amount
 

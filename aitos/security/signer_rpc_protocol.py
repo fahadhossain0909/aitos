@@ -9,9 +9,9 @@ paper/signer processor after all authentication and policy checks pass.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Mapping
 
 from aitos.security.mtls import (
     MutualTLSConfigurationError,

@@ -5,18 +5,19 @@ venue requests. Requires explicit dedicated-service acknowledgement. Not HA proo
 """
 
 from __future__ import annotations
+
 import argparse
 import asyncio
 import json
 import os
+import re
 import time
 import uuid
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 
-from aitos.trading.revision_journal import RevisionJournal, Scope, PROJECTION_DDL
-from aitos.trading.revision_projector import RevisionProjector, ClickHouseEvidenceSink
+from aitos.trading.revision_journal import PROJECTION_DDL, RevisionJournal, Scope
+from aitos.trading.revision_projector import ClickHouseEvidenceSink, RevisionProjector
 
 
 def guard(environment):

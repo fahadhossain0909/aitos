@@ -4,7 +4,9 @@ import copy
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
 import pytest
+
 from aitos.trading.performance import analyze_closed_trades
 from aitos.trading.persistent_state import DurableTradingStateStore
 

@@ -4,9 +4,8 @@ from types import SimpleNamespace
 import pytest
 
 from aitos.security.risk_limits import AccountRiskSnapshot
-from aitos.security.signing_policy import IntentRejected
 from aitos.security.risk_state import SQLiteSignerRiskState
-
+from aitos.security.signing_policy import IntentRejected
 
 NOW = 1_800_000_000_000
 
@@ -16,9 +15,9 @@ class Evidence:
         return AccountRiskSnapshot(
             account_alias=account_alias,
             captured_at_ms=now_ms,
-            gross_exposure=Decimal("100"),
-            symbol_exposure={"BTCUSDT": Decimal("50")},
-            daily_loss=Decimal("5"),
+            gross_exposure=Decimal(100),
+            symbol_exposure={"BTCUSDT": Decimal(50)},
+            daily_loss=Decimal(5),
             order_count_window=0,
             positions={"BTCUSDT": Decimal("0.01")},
         )
@@ -86,9 +85,8 @@ def test_evidence_provider_mismatch_fails_closed(tmp_path):
         upstream=WrongAccount(),
         database_path=tmp_path / "risk.sqlite3",
         max_orders_per_window=10,
-    ) as state:
-        with pytest.raises(IntentRejected, match="account_evidence_mismatch"):
-            state.get_snapshot("paper-primary", now_ms=NOW)
+    ) as state, pytest.raises(IntentRejected, match="account_evidence_mismatch"):
+        state.get_snapshot("paper-primary", now_ms=NOW)
 
 
 def test_reduce_only_snapshot_does_not_consume_growth_order_budget(tmp_path):

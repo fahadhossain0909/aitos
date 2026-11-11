@@ -17,7 +17,7 @@ from aitos.trading.paper_revision import (
     encode_trade,
     timestamp,
 )
-from aitos.trading.revision_journal import canonical, RevisionConflict
+from aitos.trading.revision_journal import RevisionConflict, canonical
 from aitos.trading.revision_projector import RevisionProjector
 
 
@@ -178,6 +178,7 @@ def configured_shadow(environment, client):
     if enabled != "1":
         raise ValueError("shadow flag must be 0 or 1")
     from pathlib import Path
+
     from aitos.trading.revision_journal import RevisionJournal, Scope
     from aitos.trading.revision_projector import ClickHouseEvidenceSink
 

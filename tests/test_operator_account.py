@@ -3,8 +3,8 @@ from copy import deepcopy
 import pytest
 
 from aitos.exchange.operator_account import (
-    BinanceOperatorAccount,
     AccountObservationUnavailable,
+    BinanceOperatorAccount,
 )
 
 

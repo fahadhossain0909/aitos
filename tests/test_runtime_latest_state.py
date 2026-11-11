@@ -3,9 +3,11 @@
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+
 import pytest
-from aitos.trading.persistent_state import DurableTradingStateStore
+
 from aitos.models.trade import TradeLifecycleState
+from aitos.trading.persistent_state import DurableTradingStateStore
 
 
 def store(rows):
