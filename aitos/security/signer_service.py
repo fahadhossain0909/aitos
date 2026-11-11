@@ -483,34 +483,41 @@ class SQLiteSignerRateLimiter:
         ):
             raise ValueError("invalid_signer_rate_key")
         start = now_ms - (now_ms % self.window_ms)
-        table = (
-            "signer_reduce_only_rate_windows"
-            if is_reduce_only
-            else "signer_rate_windows"
-        )
+        if is_reduce_only:
+            select_sql = """SELECT request_count FROM signer_reduce_only_rate_windows
+                WHERE identity=? AND account_alias=? AND window_start_ms=?"""
+            insert_sql = """INSERT INTO signer_reduce_only_rate_windows
+                VALUES (?,?,?,1)
+                ON CONFLICT(identity,account_alias,window_start_ms)
+                DO UPDATE SET request_count=request_count+1"""
+            cleanup_sql = """DELETE FROM signer_reduce_only_rate_windows
+                WHERE window_start_ms < ?"""
+        else:
+            select_sql = """SELECT request_count FROM signer_rate_windows
+                WHERE identity=? AND account_alias=? AND window_start_ms=?"""
+            insert_sql = """INSERT INTO signer_rate_windows
+                VALUES (?,?,?,1)
+                ON CONFLICT(identity,account_alias,window_start_ms)
+                DO UPDATE SET request_count=request_count+1"""
+            cleanup_sql = """DELETE FROM signer_rate_windows
+                WHERE window_start_ms < ?"""
         limit = self.reduce_only_limit if is_reduce_only else self.limit
         with self._lock:
             try:
                 self._db.execute("BEGIN IMMEDIATE")
                 row = self._db.execute(
-                    f"""SELECT request_count FROM {table}
-                    WHERE identity=? AND account_alias=? AND window_start_ms=?""",
-                    (identity, account_alias, start),
+                    select_sql, (identity, account_alias, start)
                 ).fetchone()
                 count = row[0] if row else 0
                 if count >= limit:
                     self._db.execute("ROLLBACK")
                     raise SignerProtocolRejected("signer_rate_limit_exceeded")
                 self._db.execute(
-                    f"""INSERT INTO {table} VALUES (?,?,?,1)
-                    ON CONFLICT(identity,account_alias,window_start_ms)
-                    DO UPDATE SET request_count=request_count+1""",
-                    (identity, account_alias, start),
+                    insert_sql, (identity, account_alias, start)
                 )
                 # Retain the active window and one previous window for audit/debug.
                 self._db.execute(
-                    f"DELETE FROM {table} WHERE window_start_ms < ?",
-                    (start - self.window_ms,),
+                    cleanup_sql, (start - self.window_ms,)
                 )
                 self._db.execute("COMMIT")
             except SignerProtocolRejected:
