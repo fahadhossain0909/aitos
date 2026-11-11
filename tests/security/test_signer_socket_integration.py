@@ -35,9 +35,19 @@ def _openssl(*args):
 def _certificates(directory: Path):
     ca_key, ca_cert = directory / "ca.key", directory / "ca.crt"
     _openssl(
-        "req", "-x509", "-newkey", "rsa:2048", "-nodes",
-        "-keyout", ca_key, "-out", ca_cert, "-subj", "/CN=AITOS-Test-CA",
-        "-days", "2",
+        "req",
+        "-x509",
+        "-newkey",
+        "rsa:2048",
+        "-nodes",
+        "-keyout",
+        ca_key,
+        "-out",
+        ca_cert,
+        "-subj",
+        "/CN=AITOS-Test-CA",
+        "-days",
+        "2",
     )
     for role, serial, san, usage in (
         ("server", "0xAABB", "DNS:localhost", "serverAuth"),
@@ -49,8 +59,17 @@ def _certificates(directory: Path):
             directory / f"{role}.crt",
         )
         _openssl(
-            "req", "-new", "-newkey", "rsa:2048", "-nodes",
-            "-keyout", key, "-out", csr, "-subj", f"/CN=aitos-{role}",
+            "req",
+            "-new",
+            "-newkey",
+            "rsa:2048",
+            "-nodes",
+            "-keyout",
+            key,
+            "-out",
+            csr,
+            "-subj",
+            f"/CN=aitos-{role}",
         )
         ext = directory / f"{role}.ext"
         ext.write_text(
@@ -58,11 +77,30 @@ def _certificates(directory: Path):
             encoding="utf-8",
         )
         _openssl(
-            "x509", "-req", "-in", csr, "-CA", ca_cert, "-CAkey", ca_key,
-            "-set_serial", serial, "-out", cert, "-days", "2",
-            "-extfile", ext,
+            "x509",
+            "-req",
+            "-in",
+            csr,
+            "-CA",
+            ca_cert,
+            "-CAkey",
+            ca_key,
+            "-set_serial",
+            serial,
+            "-out",
+            cert,
+            "-days",
+            "2",
+            "-extfile",
+            ext,
         )
-    return ca_cert, directory / "server.crt", directory / "server.key", directory / "client.crt", directory / "client.key"
+    return (
+        ca_cert,
+        directory / "server.crt",
+        directory / "server.key",
+        directory / "client.crt",
+        directory / "client.key",
+    )
 
 
 @pytest.mark.skipif(shutil.which("openssl") is None, reason="OpenSSL CLI required")
