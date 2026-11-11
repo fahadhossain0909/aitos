@@ -42,11 +42,15 @@ It receives no signer IPC capability. Native credential commands are accepted
 only from the bundled local `signer.html` window. Do not expose the signer UI
 over a remote desktop, remote WebView, browser tab, or reverse proxy.
 
-For Bitwarden/1Password, authenticate/unlock the provider CLI before launching
-AITOS Desktop, from the same OS user session. The desktop sidecar inherits the
-provider CLI session environment but AITOS does not save that token. A locked,
-expired or unavailable provider fails closed; it never falls back to the
-native vault automatically.
+For Bitwarden/1Password, authenticate/unlock the provider CLI and make
+its session variables available to the **same parent process environment that
+launches AITOS Desktop** (for example, start the desktop executable from the
+shell in which the CLI session was established). Unlocking a separate shell
+does not automatically update an already-running desktop process. The signer
+sidecar inherits the desktop process environment, then passes only the
+provider-specific session variables to the selected provider child process.
+AITOS does not persist that token. A locked, expired or unavailable provider
+fails closed; it never falls back to the native vault automatically.
 
 ## Credential custody selection
 
