@@ -22,7 +22,7 @@ class ProviderVaultError(RuntimeError):
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
 
-def _provider_environment() -> dict[str, str]:
+def _provider_environment(session_env: tuple[str, ...]) -> dict[str, str]:
     """Pass only OS runtime and provider-session variables to the CLI child."""
     allowed = {
         "PATH",
@@ -44,10 +44,9 @@ def _provider_environment() -> dict[str, str]:
         key: value for key, value in os.environ.items() if key in allowed
     }
     for key, value in os.environ.items():
-        if (
-            key == "BW_SESSION"
-            or key == "OP_SERVICE_ACCOUNT_TOKEN"
-            or key.startswith("OP_SESSION_")
+        if any(
+            key == allowed_key or key.startswith(allowed_key)
+            for allowed_key in session_env
         ):
             environment[key] = value
     return environment
@@ -58,6 +57,7 @@ class _CLI:
     executable: str
     timeout_seconds: float = 8.0
     runner: Runner = subprocess.run
+    session_env: tuple[str, ...] = ()
 
     def run(self, args: list[str], *, stdin: str | None = None) -> str:
         if not args or any(type(part) is not str or not part for part in args):
@@ -70,7 +70,7 @@ class _CLI:
                 text=True,
                 timeout=self.timeout_seconds,
                 check=False,
-                env=_provider_environment(),
+                env=_provider_environment(self.session_env),
             )
         except subprocess.TimeoutExpired:
             raise ProviderVaultError("provider_command_timeout") from None
@@ -95,7 +95,9 @@ class BitwardenCLIVault:
         timeout_seconds: float = 8.0,
         runner: Runner = subprocess.run,
     ) -> None:
-        self._cli = _CLI(executable, timeout_seconds, runner)
+        self._cli = _CLI(
+            executable, timeout_seconds, runner, ("BW_SESSION",)
+        )
 
     @staticmethod
     def _item(reference: str) -> str:
@@ -214,7 +216,12 @@ class OnePasswordCLIVault:
         timeout_seconds: float = 8.0,
         runner: Runner = subprocess.run,
     ) -> None:
-        self._cli = _CLI(executable, timeout_seconds, runner)
+        self._cli = _CLI(
+            executable,
+            timeout_seconds,
+            runner,
+            ("OP_SERVICE_ACCOUNT_TOKEN", "OP_SESSION_"),
+        )
 
     @staticmethod
     def _reference(reference: str) -> tuple[str, str, str]:
