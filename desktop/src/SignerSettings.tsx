@@ -53,6 +53,7 @@ export default function SignerSettings() {
   const [apiSecret, setApiSecret] = useState("");
   const [confirmSecret, setConfirmSecret] = useState("");
   const [status, setStatus] = useState<AdminResponse | null>(null);
+  const [policySaved, setPolicySaved] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
@@ -80,22 +81,35 @@ export default function SignerSettings() {
 
   function loadStatus() {
     return run(
-      () => requestSignerAdmin({ action: "status", account_alias: account.trim() }),
+      async () => {
+        const result = await requestSignerAdmin({
+          action: "status",
+          account_alias: account.trim(),
+        });
+        setPolicySaved(Boolean(result.configured));
+        if (result.configured && result.mode) setMode(result.mode);
+        if (result.provider_id) setProvider(result.provider_id);
+        if (result.secret_ref) setReference(result.secret_ref);
+        return result;
+      },
       "Signer status loaded. Secret values were not returned to this window.",
     );
   }
 
   function applyMode() {
     return run(
-      () =>
-        requestSignerAdmin({
+      async () => {
+        const result = await requestSignerAdmin({
           action: "set-mode",
           account_alias: account.trim(),
           mode,
           ...(mode === "external"
             ? { provider_id: provider, secret_ref: reference.trim() }
             : {}),
-        }),
+        });
+        setPolicySaved(true);
+        return result;
+      },
       "Credential policy saved for this account. Existing credentials were not migrated.",
     );
   }
@@ -143,7 +157,7 @@ export default function SignerSettings() {
       <section className="signer-card">
         <div className="signer-card-heading"><div><span className="signer-eyebrow">01 / ACCOUNT</span><h2>Choose the account</h2></div><span className="signer-step">01</span></div>
         <label htmlFor="account-alias">Account alias</label>
-        <input id="account-alias" value={account} onChange={e => setAccount(e.target.value)} placeholder="e.g. binance-testnet-primary" autoComplete="off" spellCheck={false} maxLength={64}/>
+        <input id="account-alias" value={account} onChange={e => { setAccount(e.target.value); setPolicySaved(false); setStatus(null); }} placeholder="e.g. binance-testnet-primary" autoComplete="off" spellCheck={false} maxLength={64}/>
         <div className="signer-actions">
           <button className="signer-button secondary" disabled={!ready || busy || !available} onClick={() => void loadStatus()}>Load current policy</button>
         </div>
@@ -152,14 +166,14 @@ export default function SignerSettings() {
       <section className="signer-card">
         <div className="signer-card-heading"><div><span className="signer-eyebrow">02 / CUSTODY</span><h2>Choose where credentials live</h2></div><span className="signer-step">02</span></div>
         <div className="signer-mode-grid">
-          <button type="button" className={mode === "native" ? "signer-mode selected" : "signer-mode"} onClick={() => setMode("native")} aria-pressed={mode === "native"}><strong>Native OS vault</strong><span>Windows Credential Manager · macOS Keychain · Linux Secret Service</span></button>
-          <button type="button" className={mode === "external" ? "signer-mode selected" : "signer-mode"} onClick={() => setMode("external")} aria-pressed={mode === "external"}><strong>External password manager</strong><span>Bitwarden CLI or 1Password CLI on this trusted device</span></button>
+          <button type="button" className={mode === "native" ? "signer-mode selected" : "signer-mode"} onClick={() => { setMode("native"); setPolicySaved(false); }} aria-pressed={mode === "native"}><strong>Native OS vault</strong><span>Windows Credential Manager · macOS Keychain · Linux Secret Service</span></button>
+          <button type="button" className={mode === "external" ? "signer-mode selected" : "signer-mode"} onClick={() => { setMode("external"); setPolicySaved(false); }} aria-pressed={mode === "external"}><strong>External password manager</strong><span>Bitwarden CLI or 1Password CLI on this trusted device</span></button>
         </div>
         {mode === "external" && <div className="signer-fields">
           <label htmlFor="provider">Provider</label>
-          <select id="provider" value={provider} onChange={e => setProvider(e.target.value as "bitwarden" | "onepassword")}><option value="bitwarden">Bitwarden</option><option value="onepassword">1Password</option></select>
+          <select id="provider" value={provider} onChange={e => { setProvider(e.target.value as "bitwarden" | "onepassword"); setPolicySaved(false); }}><option value="bitwarden">Bitwarden</option><option value="onepassword">1Password</option></select>
           <label htmlFor="secret-reference">Dedicated item reference</label>
-          <input id="secret-reference" value={reference} onChange={e => setReference(e.target.value)} placeholder={provider === "bitwarden" ? "Bitwarden item UUID" : "vault-id/item-id"} autoComplete="off" spellCheck={false}/>
+          <input id="secret-reference" value={reference} onChange={e => { setReference(e.target.value); setPolicySaved(false); }} placeholder={provider === "bitwarden" ? "Bitwarden item UUID" : "vault-id/item-id"} autoComplete="off" spellCheck={false}/>
           <p className="signer-help">Create a dedicated item first. AITOS uses only its concealed fields <code>aitos_exchange_key_id</code> and <code>aitos_exchange_api_secret</code>. Unlock the provider CLI in this OS user session before storing credentials.</p>
         </div>}
         <div className="signer-actions">
@@ -177,7 +191,7 @@ export default function SignerSettings() {
           <label htmlFor="exchange-secret-confirm">Confirm API secret</label>
           <input id="exchange-secret-confirm" type="password" value={confirmSecret} onChange={e => setConfirmSecret(e.target.value)} autoComplete="new-password" maxLength={2560} required/>
           <div className="signer-help">Secrets are sent only to the local native signer command over Tauri IPC, then passed to the credential sidecar via stdin. They are never placed in command-line arguments, browser storage, logs or the operator console. Fields clear after the operation.</div>
-          <div className="signer-actions"><button className="signer-button primary" type="submit" disabled={!ready || busy || !available || !keyId || !apiSecret || !confirmSecret}>{busy ? "Storing securely…" : "Store and verify credential pair"}</button></div>
+          <div className="signer-actions"><button className="signer-button primary" type="submit" disabled={!ready || !policySaved || busy || !available || !keyId || !apiSecret || !confirmSecret}>{busy ? "Storing securely…" : "Store and verify credential pair"}</button></div>
         </form>
       </section>
       {message && <div className="signer-success" role="status">{message}</div>}
