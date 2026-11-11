@@ -12,6 +12,7 @@ VALIDATION_WORKFLOWS = (
     ".github/workflows/ledger-quality.yml",
     ".github/workflows/linux-console.yml",
     ".github/workflows/operator-quality.yml",
+    ".github/workflows/paper-canary.yml",
     ".github/workflows/persistence-quality.yml",
     ".github/workflows/postgres-storage-integration.yml",
     ".github/workflows/security-intent-quality.yml",
