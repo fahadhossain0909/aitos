@@ -101,7 +101,6 @@ def test_external_mode_routes_pair_to_only_selected_provider(tmp_path, monkeypat
     }
 
 
-
 def test_global_native_policy_is_used_by_accounts_without_overrides(
     tmp_path, monkeypatch
 ):
