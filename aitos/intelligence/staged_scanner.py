@@ -184,7 +184,10 @@ async def install_staged_scan(
         universe = getattr(scanner, "_aitos_universe_market_context", None)
         if universe is not None:
             # Production path: full-universe live tickers, no historical candle fan-out.
-            ranked = await universe.rank()
+            allowed_symbols = set(scanner._symbols)
+            ranked = [
+                item for item in await universe.rank() if item[0] in allowed_symbols
+            ]
             if not ranked:
                 logger.warning("no fresh all-market ticker context; skipping scan")
                 scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
@@ -355,7 +358,10 @@ async def install_staged_scan(
         async def _rank_and_subscribe(*args: Any, **kwargs: Any) -> list[str]:
             universe = getattr(scanner, "_aitos_universe_market_context", None)
             if universe is not None:
-                ranked = await universe.rank()
+                allowed_symbols = set(scanner._symbols)
+                ranked = [
+                    item for item in await universe.rank() if item[0] in allowed_symbols
+                ]
                 requested = kwargs.get("limit", args[0] if args else None)
                 limit = max(1, min(TOP_50, int(requested))) if requested else TOP_50
                 selected = [symbol for symbol, _score in ranked[:limit]]
