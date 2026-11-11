@@ -6,6 +6,7 @@ is persisted in this database.
 """
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 from importlib.metadata import entry_points
@@ -43,8 +44,13 @@ class CredentialProfileStore:
     def __init__(self, database_path: str | Path):
         self.path = Path(database_path)
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.path.parent.is_symlink():
-            raise CredentialProfileError("credential_profile_directory_must_not_be_symlink")
+        if self.path.parent.is_symlink() or self.path.is_symlink():
+            raise CredentialProfileError("credential_profile_path_must_not_be_symlink")
+        if os.name == "posix":
+            try:
+                self.path.parent.chmod(0o700)
+            except OSError:
+                raise CredentialProfileError("credential_profile_directory_permissions_unavailable") from None
         self._db = sqlite3.connect(self.path, isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
         self._db.execute("PRAGMA synchronous=FULL")
@@ -64,7 +70,7 @@ class CredentialProfileStore:
                 secret_ref TEXT
             )"""
         )
-        if self.path.exists():
+        if os.name == "posix":
             try:
                 self.path.chmod(0o600)
             except OSError:
