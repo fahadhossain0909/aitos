@@ -10,3 +10,4 @@ tauri-build = { version = "=2.7.4", features = [] }
 [dependencies]
 tauri = { version = "=2.12.5", features = [] }
 tauri-plugin-shell = "=2.6.0"
+tokio = { version = "1", features = ["time"] }
