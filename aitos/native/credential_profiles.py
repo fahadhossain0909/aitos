@@ -167,6 +167,31 @@ class CredentialProfileStore:
         self._db.close()
 
 
+class LazyNativeCredentialStore:
+    """Initialize the OS vault only if a selected profile actually uses it."""
+
+    def __init__(self, factory):
+        self._factory = factory
+        self._store: CredentialStore | None = None
+
+    def _get_store(self) -> CredentialStore:
+        if self._store is None:
+            try:
+                self._store = self._factory()
+            except Exception:
+                raise VaultUnavailable("native credential provider unavailable") from None
+        return self._store
+
+    def put(self, slot: str, secret: str) -> None:
+        self._get_store().put(slot, secret)
+
+    def get(self, slot: str) -> str | None:
+        return self._get_store().get(slot)
+
+    def delete(self, slot: str) -> bool:
+        return self._get_store().delete(slot)
+
+
 class CredentialProviderRouter:
     """Routes signer slots by account policy; never silently falls back."""
 
