@@ -494,7 +494,7 @@ The current branch contains a deliberately non-live reference implementation:
 - `aitos/security/replay_store.py`: SQLite WAL/FULL durable idempotency ledger. Ambiguous DISPATCHING rows are never automatically resubmitted. Capacity exhaustion fails closed; POSIX parent/database permissions are checked.
 - `aitos/security/paper_processor.py`: in-process paper adapter only; it has no HTTP listener, credential access, signature generation or exchange connectivity.
 - `aitos/security/risk_limits.py`: independent risk preflight requires fresh, account-matched evidence and enforces gross exposure, symbol exposure, daily-loss and order-rate ceilings. Reduce-only requires a matching position and cannot flip exposure. This is a pure gate; the evidence source is not yet a production exchange reconciler.
-- `aitos/security/mtls.py`: TLS 1.3 mutual-authentication context builders and exact URI-SAN client identity pinning. This is transport configuration only, not a deployed remote signer service.
+- `aitos/security/signer_credentials.py`: account-scoped credential slots backed by the injected OS vault; instantiate only inside the trusted signer boundary. Partial writes are rolled back where possible.\n- `aitos/security/mtls.py`: TLS 1.3 mutual-authentication context builders and exact URI-SAN client identity pinning. This is transport configuration only, not a deployed remote signer service.
 - `aitos/native/credential_vault.py` and `aitos/native/windows_vault.py`: existing OS-vault adapters (Linux Secret Service, macOS Keychain backend, Windows Credential Manager). These are local credential-store primitives, not proof against an administrator of the same host.
 
 ### 12.1 Required production gaps
