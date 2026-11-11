@@ -223,6 +223,14 @@ async def _serve() -> None:
         risk_state.close()
 
 
+def enable_client(args) -> int:
+    data = _data_dir()
+    with SQLiteSignerRegistry(data / "client-registry.sqlite3") as registry:
+        registry.enable(args.identity, now_ms=args.now_ms)
+    print("Signer client identity explicitly enabled.")
+    return 0
+
+
 def serve(_args) -> int:
     asyncio.run(_serve())
     return 0
@@ -259,6 +267,11 @@ def build_parser() -> argparse.ArgumentParser:
     disable.add_argument("--identity", required=True)
     disable.add_argument("--now-ms", required=True, type=int)
     disable.set_defaults(handler=disable_client)
+
+    enable = commands.add_parser("enable-client")
+    enable.add_argument("--identity", required=True)
+    enable.add_argument("--now-ms", required=True, type=int)
+    enable.set_defaults(handler=enable_client)
 
     commands.add_parser("serve").set_defaults(handler=serve)
     return parser
