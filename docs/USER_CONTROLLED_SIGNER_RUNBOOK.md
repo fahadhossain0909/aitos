@@ -21,8 +21,11 @@ Review ~/.config/aitos-signer/signer.env. Keep AITOS_SIGNER_BIND_HOST=127.0.0.1 
 ## Desktop signer settings
 
 The Tauri desktop application opens a separate **AITOS — Trusted Signer Settings**
-window alongside the read-only Operator Console. Use this local signer window
-only on the trusted device that will own the exchange credential pair.
+window alongside the read-only Operator Console. The UI requires an explicit
+trusted-host acknowledgement before enabling credential operations. This is
+an operator safety confirmation, not technical proof of host ownership. Use
+this local signer window only on the trusted device that will own the exchange
+credential pair.
 
 1. Enter the exact account alias configured as
    `AITOS_SIGNER_ACCOUNT_ALIAS` for the signer service (for example,
