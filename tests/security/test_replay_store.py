@@ -326,6 +326,7 @@ def test_paper_processor_runs_independent_risk_gate_before_reservation(tmp_path)
         order_count_window=0,
         positions={},
     )
+
     class StaleEvidenceProvider:
         def get_snapshot(self, account_alias, *, now_ms):
             assert account_alias == "paper-primary"
