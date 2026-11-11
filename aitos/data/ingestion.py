@@ -312,10 +312,17 @@ class DataIngestionService(_LegacyDataIngestionService):
                 self._scanner._aitos_historical_repository = self._repository
             client = getattr(self._repository, "_client", None)
             if client is not None:
-                self._historical_evidence_store = HistoricalEvidenceStore(client)
-                await self._historical_evidence_store.ensure_schema()
-                if self._scanner is not None:
-                    self._scanner._aitos_historical_evidence_store = self._historical_evidence_store
+                evidence_store = HistoricalEvidenceStore(client)
+                try:
+                    await evidence_store.ensure_schema()
+                except Exception:
+                    logger.exception(
+                        "historical evidence store initialization failed"
+                    )
+                else:
+                    self._historical_evidence_store = evidence_store
+                    if self._scanner is not None:
+                        self._scanner._aitos_historical_evidence_store = evidence_store
             if self._canonical_persistence is not None:
                 await self._canonical_persistence.initialize()
             await self._canonical_runtime.start()
