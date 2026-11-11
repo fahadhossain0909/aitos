@@ -1966,7 +1966,7 @@ export default function App() {
                     <span className="small-cap">SIGNER CREDENTIAL CUSTODY</span>
                     <h2>Manage credentials on your trusted device</h2>
                     <p className="body-copy">Credential mode and Testnet API keys are configured in the separate AITOS — Trusted Signer Settings desktop window.</p>
-                    <p className="body-copy">This operator console is a remote, read-only WebView and deliberately has no native credential IPC. Do not enter exchange secrets here or run the signer on a provider-managed RDP/VPS.</p>
+                    <p className="body-copy">This operator console is a separate loopback, read-only WebView and deliberately has no native credential IPC. Do not enter exchange secrets here or run the signer on a provider-managed RDP/VPS.</p>
                   </div>
                   <LockKeyhole size={19} />
                 </div>
