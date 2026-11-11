@@ -40,6 +40,7 @@ class IntentReservation:
     intent_id: str
     account_alias: str
     client_order_id: str
+    symbol: str
     fingerprint: str
     status: IntentStatus
     outcome_code: str | None
@@ -159,11 +160,23 @@ class SQLiteReplayStore:
                 outcome_code TEXT,
                 created_at_ms INTEGER NOT NULL,
                 updated_at_ms INTEGER NOT NULL,
+                symbol TEXT NOT NULL DEFAULT '',
                 UNIQUE(account_alias, nonce_sha256),
                 UNIQUE(account_alias, client_order_id)
             )
             """
         )
+        columns = {
+            row["name"]
+            for row in self._connection.execute(
+                "PRAGMA table_info(signer_intent_ledger)"
+            ).fetchall()
+        }
+        if "symbol" not in columns:
+            self._connection.execute(
+                "ALTER TABLE signer_intent_ledger ADD COLUMN "
+                "symbol TEXT NOT NULL DEFAULT ''"
+            )
         self._connection.execute(
             """
             CREATE INDEX IF NOT EXISTS signer_intent_status_idx
@@ -222,8 +235,8 @@ class SQLiteReplayStore:
                     INSERT INTO signer_intent_ledger (
                         intent_id, account_alias, nonce_sha256, client_order_id,
                         fingerprint_sha256, status, outcome_code,
-                        created_at_ms, updated_at_ms
-                    ) VALUES (?, ?, ?, ?, ?, 'reserved', NULL, ?, ?)
+                        created_at_ms, updated_at_ms, symbol
+                    ) VALUES (?, ?, ?, ?, ?, 'reserved', NULL, ?, ?, ?)
                     """,
                     (
                         intent.intent_id,
@@ -233,6 +246,7 @@ class SQLiteReplayStore:
                         fingerprint,
                         now_ms,
                         now_ms,
+                        intent.symbol,
                     ),
                 )
                 row = self._connection.execute(
@@ -276,6 +290,54 @@ class SQLiteReplayStore:
             now_ms=now_ms,
             outcome_code=outcome_code,
         )
+
+    def list_unresolved(self, *, limit: int = 1000) -> list[IntentReservation]:
+        if type(limit) is not int or not 1 <= limit <= 10_000:
+            raise ValueError("invalid_unresolved_query_limit")
+        with self._lock:
+            try:
+                rows = self._connection.execute(
+                    """SELECT * FROM signer_intent_ledger
+                    WHERE status IN ('dispatching','unknown')
+                    ORDER BY created_at_ms ASC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+            except sqlite3.Error as exc:
+                raise ReplayStoreError("replay_unresolved_query_failed") from exc
+        return [self._reservation(row, created=False) for row in rows]
+
+    def resolve_reconciled(
+        self,
+        intent_id: str,
+        *,
+        status: Literal["accepted", "rejected"],
+        outcome_code: str,
+        now_ms: int,
+    ) -> None:
+        if status not in {"accepted", "rejected"}:
+            raise ValueError("invalid_reconciliation_status")
+        if not isinstance(outcome_code, str) or not _SAFE_CODE.fullmatch(outcome_code):
+            raise ValueError("invalid_outcome_code")
+        if type(now_ms) is not int or now_ms < 0:
+            raise ValueError("invalid_reconciliation_clock")
+        with self._lock:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                cursor = self._connection.execute(
+                    """UPDATE signer_intent_ledger
+                    SET status=?, outcome_code=?, updated_at_ms=?
+                    WHERE intent_id=? AND status IN ('dispatching','unknown')""",
+                    (status, outcome_code, now_ms, intent_id),
+                )
+                if cursor.rowcount != 1:
+                    raise ReplayStoreError("intent_not_unresolved_or_missing")
+                self._connection.execute("COMMIT")
+            except ReplayStoreError:
+                self._rollback()
+                raise
+            except sqlite3.Error as exc:
+                self._rollback()
+                raise ReplayStoreError("replay_reconciliation_failed") from exc
 
     def get(self, intent_id: str) -> IntentReservation | None:
         with self._lock:
@@ -333,6 +395,7 @@ class SQLiteReplayStore:
             intent_id=row["intent_id"],
             account_alias=row["account_alias"],
             client_order_id=row["client_order_id"],
+            symbol=row["symbol"],
             fingerprint=row["fingerprint_sha256"],
             status=row["status"],
             outcome_code=row["outcome_code"],
