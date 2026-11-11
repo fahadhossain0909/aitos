@@ -149,14 +149,6 @@ class SQLiteSignerRegistry:
             or now_ms < 0
         ):
             raise ValueError("invalid_signer_certificate_validity")
-        grant = ClientGrant(
-            identity=identity,
-            account_alias=account_alias,
-            allowed_symbols=frozenset(allowed_symbols),
-            allowed_serials=frozenset({certificate_serial.upper()}),
-            valid_from_ms=valid_from_ms,
-            valid_until_ms=valid_until_ms,
-        )
         with self._lock:
             try:
                 self._db.execute("BEGIN IMMEDIATE")
