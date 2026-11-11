@@ -652,8 +652,7 @@ class PaperSignerRPCServer:
                 else None
             )
             if (
-                not is_reduce_only
-                and existing is None
+                existing is None
                 and self.processor.replay_store.list_unresolved(limit=1)
             ):
                 raise SignerProtocolRejected(
