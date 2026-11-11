@@ -57,7 +57,7 @@ jobs:
         run: |
           binary="desktop/src-tauri/binaries/aitos-gateway-${AITOS_TARGET}"
           if [[ "${RUNNER_OS}" == "Windows" ]]; then binary+=".exe"; fi
-          printf '{}\\n' | "$binary" --credential-admin > signer-admin-smoke.json
+          printf '%s\n' '{}' | "$binary" --credential-admin > signer-admin-smoke.json
           python -c "import json; assert json.load(open('signer-admin-smoke.json', encoding='utf-8')) == {'ok': False, 'error': 'invalid_signer_admin_request'}"
       - name: Determine real host target and freeze the read-only sidecar
         shell: bash
