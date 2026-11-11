@@ -120,7 +120,9 @@ def configure_credential_mode(args) -> int:
                 raise ValueError("external_mode_requires_provider_and_secret_reference")
             backends = discover_external_vault_backends()
             if args.provider_id not in backends:
-                raise CredentialProfileError("requested_external_provider_not_installed")
+                raise CredentialProfileError(
+                    "requested_external_provider_not_installed"
+                )
             if args.account_alias:
                 profiles.set_account(
                     args.account_alias,
@@ -170,7 +172,8 @@ def enroll_client(args) -> int:
             now_ms=args.now_ms,
         )
     print(
-        "Client certificate enrolled. No private key or exchange credential was imported."
+        "Client certificate enrolled. No private key or exchange credential "
+        "was imported."
     )
     return 0
 
