@@ -98,9 +98,15 @@ class PaperOnlyIntentProcessor:
         if self.risk_limits is not None:
             # Evidence is fetched inside the trusted signer boundary, never supplied
             # as an untrusted field by the remote VPS order-intent request.
-            snapshot = self.account_evidence_provider.get_snapshot(
-                intent.account_alias, now_ms=now_ms
+            intent_snapshot = getattr(
+                self.account_evidence_provider, "get_snapshot_for_intent", None
             )
+            if callable(intent_snapshot):
+                snapshot = intent_snapshot(intent, now_ms=now_ms)
+            else:
+                snapshot = self.account_evidence_provider.get_snapshot(
+                    intent.account_alias, now_ms=now_ms
+                )
             self.risk_limits.authorize(intent, snapshot, now_ms=now_ms)
         reservation = self.replay_store.reserve(intent, now_ms=now_ms)
         if not reservation.created:
