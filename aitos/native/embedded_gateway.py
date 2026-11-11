@@ -1,8 +1,9 @@
-"""Private Tauri sidecar: one read-only gateway, no trading process or shell.
+"""Private Tauri sidecar: read-only operator gateway plus local signer admin.
 
-Secrets are collected by native dialogs/OS vault, never argv/env/stdout/webview
-IPC. Only the loopback origin is emitted for the Rust shell to embed. Legacy
-browser-based packages remain available until embedded acceptance is completed.
+The operator gateway emits only a loopback origin. Signer credential requests
+arrive only from the capability-scoped local signer window and travel to this
+sidecar over stdin; they are never placed in argv, environment or stdout.
+No trading process is started by this sidecar.
 """
 
 from __future__ import annotations
