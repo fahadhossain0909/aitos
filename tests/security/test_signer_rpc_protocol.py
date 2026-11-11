@@ -193,3 +193,13 @@ def test_tls_peer_authentication_helper_binds_certificate_to_request():
     )
     assert parsed.authenticated_identity == IDENTITY
     assert parsed.account_alias == "paper-primary"
+
+
+def test_negative_signer_clock_is_rejected():
+    with pytest.raises(SignerProtocolRejected, match="signer_request_clock_skew"):
+        parse_signer_request(
+            request(),
+            authenticated_identity=IDENTITY,
+            grant=GRANT,
+            now_ms=-1,
+        )
