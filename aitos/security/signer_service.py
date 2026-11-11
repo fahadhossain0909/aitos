@@ -574,6 +574,16 @@ class PaperSignerRPCServer:
             self.rate_limiter.consume(
                 request.authenticated_identity, request.account_alias, now_ms=now_ms
             )
+            intent_id = request.intent.get("intent_id")
+            existing = (
+                self.processor.replay_store.get(intent_id)
+                if isinstance(intent_id, str)
+                else None
+            )
+            if existing is None and self.processor.replay_store.list_unresolved(limit=1):
+                raise SignerProtocolRejected(
+                    "unresolved_execution_requires_reconciliation"
+                )
             try:
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
