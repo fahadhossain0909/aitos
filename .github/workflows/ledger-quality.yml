@@ -15,7 +15,7 @@ permissions:
   contents: read
 concurrency:
   group: ledger-quality-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   embedded-clickhouse:
     runs-on: ubuntu-latest
