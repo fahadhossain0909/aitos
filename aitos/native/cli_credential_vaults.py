@@ -69,7 +69,7 @@ class BitwardenCLIVault:
     @staticmethod
     def _item(reference: str) -> str:
         if type(reference) is not str or not re.fullmatch(
-            (r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-" r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"),
+            (\n                r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"\n                r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"\n            ),
             reference,
         ):
             raise ProviderVaultError("bitwarden_item_reference_invalid")
@@ -118,7 +118,7 @@ class BitwardenCLIVault:
         item_id = self._item(reference.rsplit("/", 1)[0])
         label = self._field(reference)
         item = self._get_item(item_id)
-        matches = [f for f in item["fields"] if isinstance(f, dict) and f.get("name") == label]
+        matches = [\n            f\n            for f in item["fields"]\n            if isinstance(f, dict) and f.get("name") == label\n        ]
         if len(matches) > 1:
             raise ProviderVaultError("bitwarden_duplicate_credential_field")
         if matches:
@@ -147,7 +147,7 @@ class BitwardenCLIVault:
         ]
         if len(item["fields"]) == len(old):
             return False
-        encoded = self._cli.run(["encode"], stdin=json.dumps(item, separators=(",", ":")))
+        encoded = self._cli.run(\n            ["encode"], stdin=json.dumps(item, separators=(",", ":"))\n        )
         if not encoded.strip():
             raise ProviderVaultError("bitwarden_encode_failed")
         self._cli.run(["edit", "item", item_id], stdin=encoded.strip())
@@ -230,7 +230,7 @@ class OnePasswordCLIVault:
         vault_id, item_id, part = self._reference(reference)
         item = self._get_item(vault_id, item_id)
         label = self._label(part)
-        matches = [f for f in item["fields"] if isinstance(f, dict) and f.get("label") == label]
+        matches = [\n            f\n            for f in item["fields"]\n            if isinstance(f, dict) and f.get("label") == label\n        ]
         if len(matches) > 1:
             raise ProviderVaultError("onepassword_duplicate_credential_field")
         if matches:
@@ -257,7 +257,7 @@ class OnePasswordCLIVault:
         ]
         if len(item["fields"]) == len(old):
             return False
-        self._cli.run(["item", "edit", item_id, "--vault", vault_id], stdin=json.dumps(item))
+        self._cli.run(\n            ["item", "edit", item_id, "--vault", vault_id], stdin=json.dumps(item)\n        )
         return True
 
 
