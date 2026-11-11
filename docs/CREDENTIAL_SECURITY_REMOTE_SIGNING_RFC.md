@@ -547,3 +547,6 @@ The protocol hands the intent to the existing strict intent validator and durabl
 Certificate lifecycle limitation: this code supports a static, in-memory authorization snapshot and serial revocation policy. It does not issue certificates, persist registry updates, watch a revocation feed/CRL/OCSP, rotate private keys, or expose an operator enrollment workflow. A process restart reloads policy from trusted deployment configuration, which is not yet implemented here.
 
 No live signing, exchange dispatch, account API adapter, production listener, deployment or credential migration is included.
+
+
+The request parser is paired with `authenticate_signer_request`, which obtains the identity/grant from the supplied TLS peer certificate and then parses the bounded request. A future socket handler must pass only the peer certificate returned by the accepted TLS socket. Forwarded certificate headers, JSON identity claims and caller-selected account grants are not trusted identity sources. This remains a callable protocol helper, not a running listener.
