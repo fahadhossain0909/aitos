@@ -122,3 +122,27 @@ def test_registry_requires_private_durable_storage(tmp_path):
         SQLiteSignerRegistry(":memory:")
     with pytest.raises(ValueError, match="durable_signer_rate_window"):
         SQLiteSignerRateLimiter(tmp_path / "rate.sqlite3", limit=1, window_ms=1)
+
+
+
+def test_reduce_only_rpc_has_separate_bounded_rate_bucket(tmp_path):
+    limiter = SQLiteSignerRateLimiter(
+        tmp_path / "rate.sqlite3",
+        limit=1,
+        window_ms=1000,
+        reduce_only_limit=2,
+    )
+    limiter.consume(IDENTITY, "paper-primary", now_ms=NOW)
+    with pytest.raises(SignerProtocolRejected, match="signer_rate_limit_exceeded"):
+        limiter.consume(IDENTITY, "paper-primary", now_ms=NOW + 1)
+    limiter.consume(
+        IDENTITY, "paper-primary", now_ms=NOW + 2, is_reduce_only=True
+    )
+    limiter.consume(
+        IDENTITY, "paper-primary", now_ms=NOW + 3, is_reduce_only=True
+    )
+    with pytest.raises(SignerProtocolRejected, match="signer_rate_limit_exceeded"):
+        limiter.consume(
+            IDENTITY, "paper-primary", now_ms=NOW + 4, is_reduce_only=True
+        )
+    limiter.close()
