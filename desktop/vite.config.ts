@@ -1,6 +1,9 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+
+const desktopRoot = dirname(fileURLToPath(import.meta.url));
 export default defineConfig(() => {
   if (process.env.AITOS_CONSOLE_TOKEN) {
     throw new Error(
@@ -12,8 +15,8 @@ export default defineConfig(() => {
     build: {
       rollupOptions: {
         input: {
-          operator: resolve("index.html"),
-          signer: resolve("signer.html"),
+          operator: resolve(desktopRoot, "index.html"),
+          signer: resolve(desktopRoot, "signer.html"),
         },
       },
     },
