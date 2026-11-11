@@ -17,8 +17,9 @@ from aitos.security.signing_policy import IntentRejected
 
 
 class _EvidenceProvider(Protocol):
-    def get_snapshot(self, account_alias: str, *, now_ms: int) -> AccountRiskSnapshot:
-        ...
+    def get_snapshot(
+        self, account_alias: str, *, now_ms: int
+    ) -> AccountRiskSnapshot: ...
 
 
 class SQLiteSignerRiskState:
@@ -40,7 +41,10 @@ class SQLiteSignerRiskState:
     ) -> None:
         if not callable(getattr(upstream, "get_snapshot", None)):
             raise TypeError("trusted_account_evidence_provider_required")
-        if type(max_orders_per_window) is not int or not 1 <= max_orders_per_window <= 100_000:
+        if (
+            type(max_orders_per_window) is not int
+            or not 1 <= max_orders_per_window <= 100_000
+        ):
             raise ValueError("invalid_signer_order_rate_limit")
         if type(window_ms) is not int or not 100 <= window_ms <= 86_400_000:
             raise ValueError("invalid_signer_risk_window")
@@ -143,9 +147,7 @@ class SQLiteSignerRiskState:
                     WHERE account_alias=? AND occurred_at_ms>=? AND occurred_at_ms<=?""",
                     (account_alias, midnight, now_ms),
                 ).fetchall()
-                local_net = sum(
-                    (Decimal(row[0]) for row in pnl_rows), Decimal("0")
-                )
+                local_net = sum((Decimal(row[0]) for row in pnl_rows), Decimal("0"))
                 self._db.execute(
                     "DELETE FROM signer_order_windows WHERE window_start_ms < ?",
                     (window_start - self.window_ms,),
