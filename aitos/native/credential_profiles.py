@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from importlib.metadata import entry_points
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -177,3 +178,33 @@ class CredentialProviderRouter:
     def delete(self, slot: str) -> bool:
         backend, reference = self._route(slot)
         return backend.delete(reference) if backend is self._native else backend.delete_secret(reference)
+
+
+
+def discover_external_vault_backends() -> dict[str, ExternalVaultBackend]:
+    """Load explicitly installed signer-host adapters via Python entry points.
+
+    Entry-point group: aitos.credential_vaults. Each entry point name is the
+    provider ID and must load a zero-argument factory returning a backend.
+    """
+    discovered: dict[str, ExternalVaultBackend] = {}
+    try:
+        points = entry_points(group="aitos.credential_vaults")
+        for point in points:
+            provider_id = point.name
+            if not re.fullmatch(r"[a-z][a-z0-9_-]{1,31}", provider_id):
+                raise CredentialProfileError("invalid_external_provider_registration")
+            factory = point.load()
+            backend = factory()
+            if not all(
+                callable(getattr(backend, method, None))
+                for method in ("get_secret", "put_secret", "delete_secret")
+            ):
+                raise CredentialProfileError("external_provider_contract_invalid")
+            discovered[provider_id] = backend
+    except CredentialProfileError:
+        raise
+    except Exception:
+        # Do not leak plugin import errors, auth tokens, or provider diagnostics.
+        raise CredentialProfileError("external_provider_initialization_failed") from None
+    return discovered
