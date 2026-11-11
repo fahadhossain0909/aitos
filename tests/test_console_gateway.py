@@ -167,9 +167,7 @@ async def test_workspace_layout_is_authenticated_and_survives_gateway_restart(
     assert h.config.workspace_file.is_file()
 
     restarted = create_gateway(h.config, password=PASSWORD)
-    client = TestClient(
-        TestServer(restarted), headers={"Host": "127.0.0.1:8780"}
-    )
+    client = TestClient(TestServer(restarted), headers={"Host": "127.0.0.1:8780"})
     await client.start_server()
     try:
         await client.post(

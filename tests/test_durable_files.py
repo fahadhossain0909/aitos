@@ -66,9 +66,7 @@ def test_online_sqlite_snapshot_and_fresh_restore_candidate(tmp_path):
     assert not list(tmp_path.glob(".aitos-snapshot-*"))
 
 
-def test_windows_snapshot_does_not_replace_racing_destination(
-    tmp_path, monkeypatch
-):
+def test_windows_snapshot_does_not_replace_racing_destination(tmp_path, monkeypatch):
     source = tmp_path / "source-race.sqlite"
     destination = tmp_path / "racing-destination.sqlite"
     with sqlite3.connect(source) as db:
