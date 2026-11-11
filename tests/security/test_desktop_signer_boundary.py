@@ -33,6 +33,8 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
     html = (ROOT / "desktop" / "signer.html").read_text(encoding="utf-8")
     assert 'src="/src/signer.tsx"' in html
     assert "default-src 'self'" in html
+    vite = (ROOT / "desktop" / "vite.config.ts").read_text(encoding="utf-8")
+    assert 'signer: resolve(desktopRoot, "signer.html")' in vite
 
     ui = (ROOT / "desktop" / "src" / "SignerSettings.tsx").read_text(
         encoding="utf-8"
