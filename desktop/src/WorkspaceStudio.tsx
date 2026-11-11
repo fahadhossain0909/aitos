@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { loadWorkspaceLayout, saveWorkspaceLayout } from "./workspaceStore";
 import {
   activateWorkspace,
   DEFAULT_LAYOUT,
@@ -12,36 +13,42 @@ import {
   type PanelId,
 } from "./workspaceModel";
 
-const STORAGE_KEY = "aitos.workspace-layout.v1";
-
-function readLayout(): WorkspaceLayout {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? parseWorkspaceLayout(JSON.parse(stored)) : parseWorkspaceLayout(DEFAULT_LAYOUT);
-  } catch {
-    return parseWorkspaceLayout(DEFAULT_LAYOUT);
-  }
-}
-
 export function WorkspaceStudio({
   onOpenPanel,
 }: {
   onOpenPanel: (panel: PanelId) => void;
 }) {
-  const [layout, setLayout] = useState<WorkspaceLayout>(() => readLayout());
+  const [layout, setLayout] = useState<WorkspaceLayout>(() => parseWorkspaceLayout(DEFAULT_LAYOUT));
+  const [layoutLoaded, setLayoutLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [storageAvailable, setStorageAvailable] = useState(true);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(layout));
-      setStorageAvailable(true);
-    } catch {
-      setStorageAvailable(false);
-    }
-  }, [layout]);
+    let active = true;
+    loadWorkspaceLayout()
+      .then((saved) => {
+        if (active) {
+          setLayout(saved);
+          setStorageAvailable(true);
+        }
+      })
+      .catch(() => {
+        if (active) setStorageAvailable(false);
+      })
+      .finally(() => {
+        if (active) setLayoutLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!layoutLoaded || !storageAvailable) return;
+    saveWorkspaceLayout(layout).catch(() => setStorageAvailable(false));
+  }, [layout, layoutLoaded, storageAvailable]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -83,6 +90,14 @@ export function WorkspaceStudio({
     setQuery("");
   };
 
+  if (!layoutLoaded) {
+    return (
+      <section className="workspace-studio" aria-label="Workspace Studio" aria-busy="true">
+        <div className="workspace-empty">Loading saved workspace layout…</div>
+      </section>
+    );
+  }
+
   return (
     <section className="workspace-studio" aria-label="Workspace Studio">
       <div className="workspace-studio-toolbar">
@@ -115,7 +130,7 @@ export function WorkspaceStudio({
         <div className="workspace-editor">
           <div className="workspace-editor-heading">
             <div><span className="small-cap">ACTIVE ENVIRONMENT</span><h3>{active.label}</h3><p>{active.description}</p></div>
-            <span className="workspace-local-badge">{storageAvailable ? "SAVED ON DEVICE" : "LOCAL SETTINGS UNAVAILABLE"}</span>
+            <span className="workspace-local-badge">{storageAvailable ? "SAVED LOCALLY" : "LOCAL SETTINGS UNAVAILABLE"}</span>
           </div>
           <div className="workspace-panel-heading">
             <strong>Docked panels</strong><span>{activePanels.length} active · {PANELS.length} available</span>
@@ -146,7 +161,7 @@ export function WorkspaceStudio({
           </div>
           <div className="workspace-studio-footnote">
             <span>LAYOUT STATE</span>
-            <span>Version 1 · Local device profile · No runtime or trading settings changed</span>
+            <span>Version 1 · OS configuration storage · No runtime or trading settings changed</span>
           </div>
         </div>
       </div>

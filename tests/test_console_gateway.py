@@ -137,6 +137,75 @@ async def login(h, password=PASSWORD, **kwargs):
     )
 
 
+async def test_workspace_layout_is_authenticated_and_survives_gateway_restart(
+    harness,
+):
+    h = harness
+    assert (await h.client.get("/operator/v1/workspace-layout")).status == 401
+    await login(h)
+
+    initial = await h.client.get("/operator/v1/workspace-layout")
+    assert initial.status == 200
+    assert initial.headers["Cache-Control"] == "no-store"
+    assert await initial.json() == DEFAULT_WORKSPACE_LAYOUT
+
+    updated = {
+        **DEFAULT_WORKSPACE_LAYOUT,
+        "activeWorkspace": "risk",
+        "panels": {
+            **DEFAULT_WORKSPACE_LAYOUT["panels"],
+            "risk": ["audit", "exposure"],
+        },
+    }
+    saved = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=updated,
+        headers={"Origin": ORIGIN},
+    )
+    assert saved.status == 200
+    assert await saved.json() == updated
+    assert h.config.workspace_file.is_file()
+
+    restarted = create_gateway(h.config, password=PASSWORD)
+    client = TestClient(
+        TestServer(restarted), headers={"Host": "127.0.0.1:8780"}
+    )
+    await client.start_server()
+    try:
+        await client.post(
+            "/operator/v1/login",
+            json={"password": PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        restored = await client.get("/operator/v1/workspace-layout")
+        assert restored.status == 200
+        assert await restored.json() == updated
+    finally:
+        await client.close()
+
+
+async def test_workspace_layout_rejects_unknown_panels_without_overwriting(harness):
+    h = harness
+    await login(h)
+    initial = await h.client.get("/operator/v1/workspace-layout")
+    original = await initial.json()
+    invalid = {
+        **original,
+        "panels": {
+            **original["panels"],
+            "trading": ["charts", "shell.exec"],
+        },
+    }
+    response = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=invalid,
+        headers={"Origin": ORIGIN},
+    )
+    assert response.status == 400
+    restored = await h.client.get("/operator/v1/workspace-layout")
+    assert await restored.json() == original
+
+
 async def test_sign_in_cookie_and_server_side_bearer_boundary(harness):
     h = harness
     assert (await h.client.get("/console/v1/snapshot")).status == 401
