@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from aitos.security.paper_processor import PaperExecutionReceipt
+from aitos.security.replay_store import IntentReservation, SQLiteReplayStore
 from aitos.security.risk_limits import AccountRiskSnapshot
 from aitos.security.signer_credentials import SignerCredentialSlots
 from aitos.security.signing_policy import ValidatedOrderIntent
@@ -381,3 +382,82 @@ class BinanceUSDMPaperExecutionAdapter:
         if status in {"REJECTED", "EXPIRED", "CANCELED"}:
             return PaperExecutionReceipt("rejected", "testnet_order_rejected")
         return PaperExecutionReceipt("unknown", "testnet_response_unrecognized")
+
+
+    def reconcile(self, reservation: IntentReservation) -> PaperExecutionReceipt:
+        """Read exchange order state by durable client ID; never resubmit an order."""
+        if (
+            not isinstance(reservation, IntentReservation)
+            or not reservation.symbol
+            or not reservation.client_order_id
+        ):
+            return PaperExecutionReceipt("unknown", "testnet_reconciliation_scope_missing")
+        try:
+            timestamp = self.client.server_time_ms()
+            result = self.client.signed_request(
+                "GET",
+                "/fapi/v1/order",
+                {
+                    "symbol": reservation.symbol,
+                    "origClientOrderId": reservation.client_order_id,
+                },
+                timestamp_ms=timestamp,
+            )
+        except BinancePaperExchangeError:
+            return PaperExecutionReceipt("unknown", "testnet_reconciliation_unavailable")
+        if (
+            not isinstance(result, dict)
+            or result.get("clientOrderId") != reservation.client_order_id
+            or type(result.get("orderId")) is not int
+        ):
+            return PaperExecutionReceipt("unknown", "testnet_reconciliation_unrecognized")
+        status = result.get("status")
+        if status in {"NEW", "PARTIALLY_FILLED", "FILLED"}:
+            return PaperExecutionReceipt("accepted", "testnet_order_reconciled")
+        if status in {"REJECTED", "EXPIRED", "CANCELED"}:
+            try:
+                executed = Decimal(str(result.get("executedQty", "0")))
+            except InvalidOperation:
+                return PaperExecutionReceipt("unknown", "testnet_reconciliation_unrecognized")
+            if not executed.is_finite() or executed < 0:
+                return PaperExecutionReceipt("unknown", "testnet_reconciliation_unrecognized")
+            if executed > 0:
+                return PaperExecutionReceipt("accepted", "testnet_order_partially_executed")
+            return PaperExecutionReceipt("rejected", "testnet_order_not_executed")
+        return PaperExecutionReceipt("unknown", "testnet_reconciliation_unrecognized")
+
+
+class PaperSignerRecoveryWorker:
+    """Reconcile durable ambiguous intents against Testnet without retrying them."""
+
+    def __init__(
+        self,
+        *,
+        replay_store: SQLiteReplayStore,
+        adapter: BinanceUSDMPaperExecutionAdapter,
+    ) -> None:
+        if not isinstance(replay_store, SQLiteReplayStore):
+            raise TypeError("durable_replay_store_required")
+        if not isinstance(adapter, BinanceUSDMPaperExecutionAdapter):
+            raise TypeError("binance_testnet_reconciliation_adapter_required")
+        self.replay_store = replay_store
+        self.adapter = adapter
+
+    def run_once(self, *, now_ms: int, limit: int = 1000) -> dict[str, int]:
+        if type(now_ms) is not int or now_ms < 0:
+            raise ValueError("invalid_recovery_clock")
+        resolved = 0
+        unresolved = 0
+        for reservation in self.replay_store.list_unresolved(limit=limit):
+            receipt = self.adapter.reconcile(reservation)
+            if receipt.status in {"accepted", "rejected"}:
+                self.replay_store.resolve_reconciled(
+                    reservation.intent_id,
+                    status=receipt.status,
+                    outcome_code=receipt.outcome_code,
+                    now_ms=now_ms,
+                )
+                resolved += 1
+            else:
+                unresolved += 1
+        return {"resolved": resolved, "unresolved": unresolved}
