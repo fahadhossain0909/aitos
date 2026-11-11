@@ -7,7 +7,10 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
+};
 use zeroize::{Zeroize, Zeroizing};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
@@ -128,6 +131,29 @@ fn main() {
         .invoke_handler(tauri::generate_handler![signer_credential_admin])
         .setup(move |app| {
             let handle = app.handle().clone();
+
+            // The native application menu is the only way to reopen the trusted
+            // signer window. The remote operator WebView receives no IPC grant.
+            let open_signer = MenuItem::with_id(
+                app,
+                "open_signer_settings",
+                "Open Trusted Signer Settings",
+                true,
+                None::<&str>,
+            )?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            let quit = PredefinedMenuItem::quit(app, None)?;
+            let menu = Menu::with_items(app, &[&open_signer, &separator, &quit])?;
+            app.set_menu(menu)?;
+            app.on_menu_event(|app, event| {
+                if event.id() == "open_signer_settings" {
+                    if let Some(window) = app.get_webview_window("signer") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            });
+
             let signer = WebviewWindowBuilder::new(
                 &handle,
                 "signer",
@@ -204,9 +230,16 @@ fn main() {
             Ok(())
         })
         .on_window_event(move |window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                on_close.store(true, Ordering::SeqCst);
-                window.app_handle().exit(0);
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "signer" {
+                    // Keep the desktop session and gateway alive. The native
+                    // application menu can restore this local-only window.
+                    api.prevent_close();
+                    let _ = window.hide();
+                } else {
+                    on_close.store(true, Ordering::SeqCst);
+                    window.app_handle().exit(0);
+                }
             }
         })
         .build(tauri::generate_context!())
