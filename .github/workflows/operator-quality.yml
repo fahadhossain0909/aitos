@@ -18,7 +18,7 @@ permissions:
   contents: read
 concurrency:
   group: operator-quality-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   protected-console:
     runs-on: ubuntu-latest
