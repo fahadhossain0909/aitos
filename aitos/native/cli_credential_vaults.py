@@ -178,6 +178,13 @@ class BitwardenCLIVault:
         label = self._field(reference)
         item = self._get_item(item_id)
         old = item["fields"]
+        matches = [
+            f
+            for f in old
+            if isinstance(f, dict) and f.get("name") == label
+        ]
+        if len(matches) > 1:
+            raise ProviderVaultError("bitwarden_duplicate_credential_field")
         item["fields"] = [
             f
             for f in old
@@ -294,6 +301,13 @@ class OnePasswordCLIVault:
         item = self._get_item(vault_id, item_id)
         label = self._label(part)
         old = item["fields"]
+        matches = [
+            f
+            for f in old
+            if isinstance(f, dict) and f.get("label") == label
+        ]
+        if len(matches) > 1:
+            raise ProviderVaultError("onepassword_duplicate_credential_field")
         item["fields"] = [
             f
             for f in old
