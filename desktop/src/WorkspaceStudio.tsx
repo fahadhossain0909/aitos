@@ -9,7 +9,6 @@ import {
   WORKSPACES,
   type WorkspaceId,
   type WorkspaceLayout,
-  type PanelId,
 } from "./workspaceModel";
 
 const STORAGE_KEY = "aitos.workspace-layout.v1";
@@ -48,8 +47,13 @@ export function WorkspaceStudio() {
         setPaletteOpen(false);
       }
     };
+    const openPalette = () => setPaletteOpen(true);
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("aitos:open-command-palette", openPalette);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("aitos:open-command-palette", openPalette);
+    };
   }, []);
 
   useEffect(() => {

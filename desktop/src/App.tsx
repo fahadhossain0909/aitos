@@ -611,8 +611,11 @@ export default function App() {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setPage("history");
-        setTimeout(() => searchRef.current?.focus(), 30);
+        setPage("workspaces");
+        window.setTimeout(
+          () => window.dispatchEvent(new Event("aitos:open-command-palette")),
+          40,
+        );
       }
       if (e.key === "Escape") {
         setModal(null);
