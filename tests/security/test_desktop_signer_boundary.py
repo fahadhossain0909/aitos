@@ -20,7 +20,7 @@ def test_only_bundled_signer_window_receives_native_ipc_capability():
     assert 'window.label() != "signer"' in rust
     assert 'url.path() == "/signer.html"' in rust
     assert "trusted_local_signer_origin_required" in rust
-    assert 'WebviewUrl::External(url)' in rust
+    assert "WebviewUrl::External(url)" in rust
     assert "invoke_handler" in rust
 
 
@@ -36,15 +36,13 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
     vite = (ROOT / "desktop" / "vite.config.ts").read_text(encoding="utf-8")
     assert 'signer: resolve(desktopRoot, "signer.html")' in vite
 
-    ui = (ROOT / "desktop" / "src" / "SignerSettings.tsx").read_text(
-        encoding="utf-8"
-    )
+    ui = (ROOT / "desktop" / "src" / "SignerSettings.tsx").read_text(encoding="utf-8")
     assert 'invoke<string>("signer_credential_admin"' in ui
     assert "trustedHostConfirmed" in ui
     assert "provider-managed RDP/VPS" in ui
     assert "localStorage" not in ui
     assert "sessionStorage" not in ui
-    assert "type=\"password\"" in ui
+    assert 'type="password"' in ui
 
 
 def test_signer_command_payload_is_stdin_only_and_not_forwarded_to_operator():
