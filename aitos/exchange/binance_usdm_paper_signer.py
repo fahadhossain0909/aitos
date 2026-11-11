@@ -50,7 +50,9 @@ class UrllibJsonTransport:
     ) -> object:
         request = Request(url, headers=dict(headers), method=method)
         try:
-            with urlopen(request, timeout=timeout) as response:  # nosec B310: URL host is fixed to the HTTPS Testnet origin.
+            with urlopen(
+                request, timeout=timeout
+            ) as response:  # nosec B310: URL host is fixed to the HTTPS Testnet origin.
                 raw = response.read(_MAX_RESPONSE_BYTES + 1)
         except HTTPError as exc:
             # Never surface the response body: exchange errors can echo request data.
