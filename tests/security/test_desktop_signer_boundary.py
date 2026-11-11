@@ -40,6 +40,8 @@ def test_operator_console_has_no_credential_ipc_and_local_signer_is_bundled():
         encoding="utf-8"
     )
     assert 'invoke<string>("signer_credential_admin"' in ui
+    assert "trustedHostConfirmed" in ui
+    assert "provider-managed RDP/VPS" in ui
     assert "localStorage" not in ui
     assert "sessionStorage" not in ui
     assert "type=\"password\"" in ui
