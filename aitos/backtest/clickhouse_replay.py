@@ -343,6 +343,14 @@ class ClickHouseAblationRun:
     depth_flow: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class ClickHouseAMDReplayRun:
+    dataset: ClickHouseReplayDataset
+    observations: tuple[Any, ...]
+    timeframe: str
+    horizon_bars: int
+
+
 class ClickHouseHistoricalAblationRunner:
     """Connect real ClickHouse observations to canonical replay and holdout."""
 
@@ -454,4 +462,41 @@ class ClickHouseHistoricalAblationRunner:
             dataset=dataset,
             report=report,
             depth_flow=depth_flow,
+        )
+
+
+    async def run_amd_phase_replay(
+        self,
+        symbol: str,
+        start: datetime,
+        end: datetime,
+        *,
+        timeframe: str,
+        horizon_bars: int = 20,
+        limit: int | None = None,
+    ) -> ClickHouseAMDReplayRun:
+        """Load and replay point-in-time AMD observations from ClickHouse."""
+        import asyncio
+
+        from aitos.intelligence.amd_research import (
+            replay_amd_historical_observations,
+        )
+
+        dataset = await self.loader.load(symbol, start, end, limit=limit)
+        observations = await asyncio.to_thread(
+            replay_amd_historical_observations,
+            dataset,
+            timeframe=timeframe,
+            horizon_bars=horizon_bars,
+        )
+        if not observations:
+            raise ValueError(
+                "AMD historical replay produced no observations; check candle "
+                "coverage, timeframe and the 20-closed-candle warm-up"
+            )
+        return ClickHouseAMDReplayRun(
+            dataset=dataset,
+            observations=observations,
+            timeframe=timeframe.lower(),
+            horizon_bars=horizon_bars,
         )
