@@ -11,11 +11,11 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
-use zeroize::{Zeroize, Zeroizing};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 struct Gateway(Mutex<Option<CommandChild>>);
 
@@ -43,11 +43,7 @@ fn is_local_operator_url(url: &tauri::Url) -> bool {
         && url.password().is_none()
 }
 
-fn open_operator_window(
-    app: &AppHandle,
-    url: tauri::Url,
-    label: &str,
-) -> Result<(), String> {
+fn open_operator_window(app: &AppHandle, url: tauri::Url, label: &str) -> Result<(), String> {
     if !is_local_operator_url(&url) {
         return Err("trusted_local_operator_origin_required".into());
     }
@@ -191,42 +187,34 @@ fn main() {
             )?;
             let menu = Menu::with_items(app, &[&app_menu])?;
             app.set_menu(menu)?;
-            app.on_menu_event(|app, event| {
-                match event.id().as_ref() {
-                    "open_signer_settings" => {
-                        if let Some(window) = app.get_webview_window("signer") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+            app.on_menu_event(|app, event| match event.id().as_ref() {
+                "open_signer_settings" => {
+                    if let Some(window) = app.get_webview_window("signer") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
                     }
-                    "new_operator_window" => {
-                        let source = app
-                            .get_webview_window("operator")
-                            .or_else(|| {
-                                app.webview_windows()
-                                    .into_iter()
-                                    .find(|(label, _)| label.starts_with("operator-"))
-                                    .map(|(_, window)| window)
-                            });
-                        if let Some(source) = source {
-                            if let Ok(url) = source.url() {
-                                let sequence =
-                                    OPERATOR_WINDOW_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-                                let label = format!("operator-{sequence}");
-                                let _ = open_operator_window(app, url, &label);
-                            }
-                        }
-                    }
-                    _ => {}
                 }
+                "new_operator_window" => {
+                    let source = app.get_webview_window("operator").or_else(|| {
+                        app.webview_windows()
+                            .into_iter()
+                            .find(|(label, _)| label.starts_with("operator-"))
+                            .map(|(_, window)| window)
+                    });
+                    if let Some(source) = source {
+                        if let Ok(url) = source.url() {
+                            let sequence = OPERATOR_WINDOW_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+                            let label = format!("operator-{sequence}");
+                            let _ = open_operator_window(app, url, &label);
+                        }
+                    }
+                }
+                _ => {}
             });
 
-            let signer = WebviewWindowBuilder::new(
-                &handle,
-                "signer",
-                WebviewUrl::App("signer.html".into()),
-            )
-            .title("AITOS — Trusted Signer Settings")
+            let signer =
+                WebviewWindowBuilder::new(&handle, "signer", WebviewUrl::App("signer.html".into()))
+                    .title("AITOS — Trusted Signer Settings")
             .inner_size(920.0, 900.0)
             .min_inner_size(360.0, 620.0)
             .on_navigation(is_local_signer_url)
@@ -249,8 +237,7 @@ fn main() {
                     match event {
                         CommandEvent::Stdout(bytes) if !smoke && !opened => {
                             let line = String::from_utf8_lossy(&bytes);
-                            if let Some(origin) =
-                                line.trim().strip_prefix("AITOS_GATEWAY_ORIGIN=")
+                            if let Some(origin) = line.trim().strip_prefix("AITOS_GATEWAY_ORIGIN=")
                             {
                                 let parsed = origin.parse::<tauri::Url>();
                                 match parsed {
@@ -293,9 +280,7 @@ fn main() {
                     // application menu can restore this local-only window.
                     api.prevent_close();
                     let _ = window.hide();
-                } else if window.label() == "operator"
-                    || window.label().starts_with("operator-")
-                {
+                } else if window.label() == "operator" || window.label().starts_with("operator-") {
                     let remaining = OPERATOR_WINDOW_COUNT.fetch_sub(1, Ordering::SeqCst) - 1;
                     if remaining == 0 {
                         on_close.store(true, Ordering::SeqCst);
@@ -319,7 +304,6 @@ fn main() {
     });
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,7 +323,10 @@ mod tests {
             "http://127.0.0.1:8780.evil.example/",
         ] {
             let url = rejected.parse().unwrap();
-            assert!(!is_local_operator_url(&url), "unexpectedly accepted {rejected}");
+            assert!(
+                !is_local_operator_url(&url),
+                "unexpectedly accepted {rejected}"
+            );
         }
     }
 }
