@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 import json
@@ -120,6 +121,21 @@ def _stable_id(*parts: Any) -> str:
 def _closed_candles(raw: Sequence[Any]) -> list[Candle]:
     rows = [Candle.from_value(item) for item in raw]
     return [row for row in rows if row.is_closed]
+
+
+def _is_prior_checkpoint(state: AMDState | None, as_of: str) -> bool:
+    if state is None or not state.as_of or not as_of:
+        return False
+    try:
+        previous_time = datetime.fromisoformat(state.as_of.replace("Z", "+00:00"))
+        current_time = datetime.fromisoformat(as_of.replace("Z", "+00:00"))
+        if previous_time.tzinfo is None:
+            previous_time = previous_time.replace(tzinfo=timezone.utc)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=timezone.utc)
+        return previous_time < current_time
+    except ValueError:
+        return state.as_of < as_of and state.as_of != as_of
 
 
 def _atr(rows: Sequence[Candle]) -> float:
@@ -278,6 +294,7 @@ def analyze_amd(
         raise ValueError("AMD requires at least one completed candle")
     latest = rows[-1]
     as_of = latest.timestamp or ""
+    prior_state = previous_state if _is_prior_checkpoint(previous_state, as_of) else None
     accumulation = _accumulation_features(
         symbol, timeframe, rows, liquidity, order_flow, cfg
     )
@@ -325,11 +342,11 @@ def analyze_amd(
 
     if (
         not direction
-        and previous_state is not None
-        and previous_state.phase
+        and prior_state is not None
+        and prior_state.phase
         in {AMDPhase.DISTRIBUTION_CONFIRMED, AMDPhase.TREND_CONTINUATION}
     ):
-        direction = previous_state.direction
+        direction = prior_state.direction
 
     normalized_structure = str(structure_bias or "").strip().lower()
     if normalized_structure not in {"bullish", "bearish"}:
@@ -429,7 +446,7 @@ def analyze_amd(
         in {AMDPhase.DISTRIBUTION_CONFIRMED, AMDPhase.TREND_CONTINUATION}
     ):
         phase = AMDPhase.TREND_CONTINUATION
-    if previous_state is not None and phase is AMDPhase.ACCUMULATION_CONFIRMED:
+    if prior_state is not None and phase is AMDPhase.ACCUMULATION_CONFIRMED:
         if previous_state.direction == "LONG":
             phase = AMDPhase.REACCUMULATION
             direction = "LONG"
