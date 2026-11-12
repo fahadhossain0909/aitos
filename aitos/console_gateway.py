@@ -306,7 +306,11 @@ def validate_workspace_layout(value):
     if not (legacy or current):
         raise ValueError("workspace_layout_shape_invalid")
     version = value["version"]
-    if type(version) is not int or (legacy and version != 1) or (current and version != 2):
+    if (
+        type(version) is not int
+        or (legacy and version != 1)
+        or (current and version != 2)
+    ):
         raise ValueError("workspace_layout_version_invalid")
     if (
         not isinstance(value["activeWorkspace"], str)
@@ -328,7 +332,9 @@ def validate_workspace_layout(value):
             raise ValueError("workspace_panel_duplicate")
         panels[workspace_id] = list(items)
 
-    raw_geometry = value.get("panelGeometry", {workspace_id: {} for workspace_id in WORKSPACE_IDS})
+    raw_geometry = value.get(
+        "panelGeometry", {workspace_id: {} for workspace_id in WORKSPACE_IDS}
+    )
     if not isinstance(raw_geometry, dict) or set(raw_geometry) != WORKSPACE_IDS:
         raise ValueError("workspace_geometry_invalid")
     geometry = {}
@@ -339,7 +345,10 @@ def validate_workspace_layout(value):
             raise ValueError("workspace_geometry_panel_invalid")
         normalized = {}
         for panel_id, dimensions in entries.items():
-            if not isinstance(dimensions, dict) or set(dimensions) != {"width", "height"}:
+            if (
+                not isinstance(dimensions, dict)
+                or set(dimensions) != {"width", "height"}
+            ):
                 raise ValueError("workspace_geometry_shape_invalid")
             width, height = dimensions["width"], dimensions["height"]
             if type(width) is not int or width not in {1, 2}:
