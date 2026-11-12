@@ -84,9 +84,7 @@ async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> No
 
     async def enrich(candidate: Any) -> None:
         try:
-            analyze_multi_timeframe = getattr(
-                service, "analyze_multi_timeframe", None
-            )
+            analyze_multi_timeframe = getattr(service, "analyze_multi_timeframe", None)
             analyze = analyze_multi_timeframe or service.analyze
             rows, evidence = await analyze(
                 candidate.symbol,

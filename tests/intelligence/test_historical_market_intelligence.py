@@ -145,9 +145,7 @@ async def test_multi_timeframe_analysis_includes_primary_and_configured_interval
         return [k(i) for i in range(limit)]
 
     service = OnDemandHistoricalIntelligence(fetcher)
-    rows, evidence = await service.analyze_multi_timeframe(
-        "BTCUSDT", "1m", limit=80
-    )
+    rows, evidence = await service.analyze_multi_timeframe("BTCUSDT", "1m", limit=80)
 
     assert rows and evidence["multi_timeframe"] is True
     assert evidence["timeframe"] == "1m"

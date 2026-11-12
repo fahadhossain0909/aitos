@@ -52,7 +52,9 @@ class HistoricalIntelligenceConfig:
             raise ValueError("invalid HMIE resource limits")
         if not self.analysis_timeframes:
             raise ValueError("HMIE analysis_timeframes cannot be empty")
-        normalized = tuple(_normalize_timeframe(value) for value in self.analysis_timeframes)
+        normalized = tuple(
+            _normalize_timeframe(value) for value in self.analysis_timeframes
+        )
         if len(set(normalized)) != len(normalized):
             raise ValueError("HMIE analysis_timeframes must be unique")
 
@@ -437,7 +439,10 @@ class OnDemandHistoricalIntelligence:
         timeframes = tuple(
             dict.fromkeys(
                 (primary,)
-                + tuple(_normalize_timeframe(value) for value in self.config.analysis_timeframes)
+                + tuple(
+                    _normalize_timeframe(value)
+                    for value in self.config.analysis_timeframes
+                )
             )
         )
         results = await asyncio.gather(
@@ -455,7 +460,9 @@ class OnDemandHistoricalIntelligence:
         evidence = {
             **primary_context,
             "available": bool(available_timeframes),
-            "reason": None if available_timeframes else "historical_evidence_unavailable",
+            "reason": (
+                None if available_timeframes else "historical_evidence_unavailable"
+            ),
             "symbol": symbol.upper(),
             "timeframe": primary,
             "captured_at": (
