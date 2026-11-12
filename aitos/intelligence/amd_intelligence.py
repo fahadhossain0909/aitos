@@ -7,6 +7,7 @@ calibrated probabilities.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from enum import Enum
 from hashlib import sha256
@@ -506,4 +507,100 @@ def analyze_amd(
         liquidity_event_id=latest_sweep.event_id if latest_sweep else None,
         target_liquidity_ids=targets,
         evidence=tuple(dict.fromkeys(evidence)),
+    )
+
+
+@dataclass(frozen=True)
+class AMDTimeframeStack:
+    symbol: str
+    direction: str
+    bullish_score: float
+    bearish_score: float
+    available_timeframes: tuple[str, ...]
+    missing_timeframes: tuple[str, ...]
+    stack_complete: bool
+    evidence_coverage: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+_AMD_TIMEFRAME_WEIGHTS = {
+    "1d": 2.0,
+    "4h": 1.8,
+    "1h": 1.0,
+    "15m": 0.8,
+    "5m": 0.6,
+    "1m": 0.4,
+}
+
+
+def analyze_amd_timeframe_stack(
+    states: Mapping[str, AMDState],
+    *,
+    required_timeframes: Sequence[str] = ("1d", "4h", "1h", "15m", "5m", "1m"),
+    neutral_margin: float = 0.10,
+) -> AMDTimeframeStack:
+    """Aggregate only supplied AMD states; missing frames remain explicitly missing.
+
+    The role weights follow AITOS MTF hierarchy. A single available timeframe
+    is not promoted to a complete stack and cannot silently stand in for HTF.
+    """
+    normalized = {str(key).lower(): value for key, value in states.items()}
+    symbols = {value.symbol.upper() for value in normalized.values()}
+    if len(symbols) > 1:
+        raise ValueError("AMD timeframe stack cannot mix symbols")
+    symbol = next(iter(symbols), "")
+    available = tuple(
+        sorted(
+            key
+            for key, value in normalized.items()
+            if value.timeframe.lower() == key
+        )
+    )
+    required = tuple(str(item).lower() for item in required_timeframes)
+    missing = tuple(item for item in required if item not in normalized)
+    bullish = 0.0
+    bearish = 0.0
+    total_weight = 0.0
+    for timeframe, state in normalized.items():
+        weight = _AMD_TIMEFRAME_WEIGHTS.get(timeframe, 0.25)
+        total_weight += weight
+        active = state.phase in {
+            AMDPhase.MANIPULATION_CANDIDATE,
+            AMDPhase.MANIPULATION_CONFIRMED,
+            AMDPhase.DISTRIBUTION_CANDIDATE,
+            AMDPhase.DISTRIBUTION_CONFIRMED,
+        }
+        if not active:
+            continue
+        contribution = weight * max(0.0, min(1.0, state.confidence))
+        if state.direction == "LONG":
+            bullish += contribution
+        elif state.direction == "SHORT":
+            bearish += contribution
+    if total_weight:
+        bullish /= total_weight
+        bearish /= total_weight
+    if bullish - bearish > neutral_margin:
+        direction = "LONG"
+    elif bearish - bullish > neutral_margin:
+        direction = "SHORT"
+    else:
+        direction = "NEUTRAL"
+    coverage = (
+        sum(_AMD_TIMEFRAME_WEIGHTS.get(item, 0.25) for item in available)
+        / sum(_AMD_TIMEFRAME_WEIGHTS.get(item, 0.25) for item in required)
+        if required
+        else 1.0
+    )
+    return AMDTimeframeStack(
+        symbol=symbol,
+        direction=direction,
+        bullish_score=round(bullish, 4),
+        bearish_score=round(bearish, 4),
+        available_timeframes=available,
+        missing_timeframes=missing,
+        stack_complete=not missing,
+        evidence_coverage=round(min(1.0, coverage), 4),
     )
