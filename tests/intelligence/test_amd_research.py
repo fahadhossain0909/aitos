@@ -347,3 +347,23 @@ def test_live_event_flow_fails_closed_when_depth_history_was_reset_inside_window
     )
     assert not result.evidence.fresh
     assert "depth_history_gap_in_window" in result.diagnostics
+
+
+def test_execution_replay_reports_partial_exit_as_incomplete_and_matches_fills():
+    entry = [BookSnapshot(100, 100.0, 100.2, 2.0, 1.0)]
+    exit_books = [BookSnapshot(1000, 101.0, 101.2, 0.4, 2.0)]
+    result = replay_amd_execution(
+        entry,
+        exit_books,
+        direction="LONG",
+        quantity=1.0,
+        entry_submitted_at_ms=100,
+        exit_submitted_at_ms=1000,
+        latency_ms=0,
+        taker_fee_bps=4.0,
+    )
+    assert not result.complete
+    assert result.entry.filled_quantity == pytest.approx(1.0)
+    assert result.exit.filled_quantity == pytest.approx(0.4)
+    assert result.gross_pnl == pytest.approx(0.32)
+    assert result.net_pnl is not None
