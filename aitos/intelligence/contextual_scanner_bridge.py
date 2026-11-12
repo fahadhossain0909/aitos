@@ -87,7 +87,10 @@ def _live_liquidity_flow_evidence(store: Any, symbol: str):
 
 
 async def _persist_liquidity_evidence(
-    scanner: Any, candidate: Any, analysis: Any
+    scanner: Any,
+    candidate: Any,
+    analysis: Any,
+    amd_state: dict[str, Any] | None = None,
 ) -> str | None:
     """Persist a deterministic, candidate-linked liquidity evidence snapshot."""
     service = getattr(scanner, "_aitos_historical_intelligence", None)
@@ -110,12 +113,14 @@ async def _persist_liquidity_evidence(
         getattr(latest, "timeframe", getattr(scanner, "_timeframe", "unknown"))
     )
     evidence = {
-        "schema_version": 1,
+        "schema_version": 2 if amd_state is not None else 1,
         "symbol": str(candidate.symbol).upper(),
         "timeframe": timeframe,
         "captured_at": str(captured_at),
         "liquidity_intelligence": analysis.to_dict(),
     }
+    if amd_state is not None:
+        evidence["amd_intelligence"] = amd_state
     try:
         return await persist(str(candidate_id), evidence)
     except Exception:
@@ -221,8 +226,33 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                     flow=flow_evidence,
                 )
                 liquidity_payload = liquidity_analysis.to_dict()
+                from aitos.intelligence.amd_intelligence import analyze_amd
+
+                amd_state = analyze_amd(
+                    candidate.symbol,
+                    str(getattr(candidate_klines[-1], "timeframe", "unknown")),
+                    candidate_klines,
+                    liquidity=liquidity_analysis,
+                    flow=flow_evidence,
+                )
+                amd_payload = amd_state.to_dict()
+                amd_payload["decision_impact"] = False
+                liquidity_payload["amd_intelligence"] = amd_payload
+                object.__setattr__(candidate, "_aitos_amd_state", amd_payload)
+                object.__setattr__(
+                    candidate,
+                    "_aitos_amd_summary",
+                    {
+                        "phase": amd_state.phase.value,
+                        "direction": amd_state.direction,
+                        "state_id": amd_state.state_id,
+                        "confidence": amd_state.confidence,
+                        "evidence_coverage": amd_state.evidence_coverage,
+                        "decision_impact": False,
+                    },
+                )
                 liquidity_evidence_id = await _persist_liquidity_evidence(
-                    self, candidate, liquidity_analysis
+                    self, candidate, liquidity_analysis, amd_payload
                 )
                 liquidity_summary = {
                     "schema_version": 1,
@@ -276,6 +306,10 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                             ),
                             "decision_impact": False,
                             "liquidity_evidence_id": liquidity_evidence_id,
+                            "amd_phase": amd_state.phase.value,
+                            "amd_direction": amd_state.direction,
+                            "amd_state_id": amd_state.state_id,
+                            "amd_decision_impact": False,
                         },
                     )
             except (AttributeError, TypeError, ValueError):
@@ -303,6 +337,12 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
             "positioning": positioning,
             "graph_context": graph_context,
             "liquidity_intelligence": liquidity_payload,
+            "amd_intelligence": (
+                liquidity_payload.get("amd_intelligence")
+                if isinstance(liquidity_payload, dict)
+                else None
+            ),
+            "amd_intelligence_mode": "shadow",
             "liquidity_intelligence_mode": "shadow",
         }
         return await kernel.request_decision(
