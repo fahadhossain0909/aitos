@@ -108,3 +108,29 @@ def test_context_is_evidence_only_and_excludes_current_window_from_matches():
         < current
         for i in context["analogue_indices"]
     )
+
+
+@pytest.mark.asyncio
+async def test_monthly_and_minute_timeframes_do_not_collide():
+    requested = []
+
+    async def fetcher(symbol, timeframe, limit):
+        requested.append(timeframe)
+        return [k(i) for i in range(limit)]
+
+    service = OnDemandHistoricalIntelligence(fetcher)
+    minute = await service.get_klines("BTCUSDT", "1m", limit=80)
+    monthly = await service.get_klines("BTCUSDT", "1M", limit=80)
+
+    assert minute and monthly
+    assert requested == ["1m", "1M"]
+    assert len(service._cache) == 2
+
+
+def test_unknown_historical_timeframe_is_rejected():
+    from aitos.intelligence.historical_market_intelligence import (
+        _normalize_timeframe,
+    )
+
+    with pytest.raises(ValueError, match="unsupported historical timeframe"):
+        _normalize_timeframe("2M")
