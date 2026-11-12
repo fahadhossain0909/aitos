@@ -347,6 +347,7 @@ class ClickHouseAblationRun:
 class ClickHouseAMDReplayRun:
     dataset: ClickHouseReplayDataset
     observations: tuple[Any, ...]
+    cohorts: tuple[dict[str, Any], ...]
     timeframe: str
     horizon_bars: int
 
@@ -479,6 +480,7 @@ class ClickHouseHistoricalAblationRunner:
 
         from aitos.intelligence.amd_research import (
             replay_amd_historical_observations,
+            summarize_amd_forward_cohorts,
         )
 
         dataset = await self.loader.load(symbol, start, end, limit=limit)
@@ -496,6 +498,7 @@ class ClickHouseHistoricalAblationRunner:
         return ClickHouseAMDReplayRun(
             dataset=dataset,
             observations=observations,
+            cohorts=summarize_amd_forward_cohorts(observations),
             timeframe=timeframe.lower(),
             horizon_bars=horizon_bars,
         )
