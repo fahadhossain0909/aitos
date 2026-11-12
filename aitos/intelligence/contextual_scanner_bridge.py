@@ -252,9 +252,7 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                         "depth_sequence_gap_marker",
                         "depth_history_gap_in_window",
                     }
-                    if sequence_gap_diagnostics.intersection(
-                        event_flow.diagnostics
-                    ):
+                    if sequence_gap_diagnostics.intersection(event_flow.diagnostics):
                         flow_evidence = OrderFlowEvidence()
                         flow_evidence_source = "blocked_depth_sequence_gap"
                     elif event_flow.evidence.fresh:
