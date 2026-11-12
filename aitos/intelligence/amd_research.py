@@ -60,11 +60,15 @@ def _best_level(levels: Sequence[tuple[float, float]]) -> tuple[float, float] | 
     price, size = levels[0]
     price, size = float(price), float(size)
     if not isfinite(price) or not isfinite(size) or price <= 0 or size < 0:
-        raise ValueError("depth levels must contain finite positive prices and non-negative size")
+        raise ValueError(
+            "depth levels must contain finite positive prices and non-negative size"
+        )
     return price, size
 
 
-def _book_ofi(previous: AMDDepthSnapshot, current: AMDDepthSnapshot) -> tuple[float, float, float]:
+def _book_ofi(
+    previous: AMDDepthSnapshot, current: AMDDepthSnapshot
+) -> tuple[float, float, float]:
     prev_bid = _best_level(previous.bids)
     curr_bid = _best_level(current.bids)
     prev_ask = _best_level(previous.asks)
@@ -202,7 +206,11 @@ def build_event_aligned_order_flow(
         bid_replenishment=min(10.0, bid_add),
         ask_replenishment=min(10.0, ask_add),
         aggressive_buy_ratio=(
-            sum(item.price * item.quantity for item in classified if item.aggressor_side.upper() == "BUY")
+            sum(
+                item.price * item.quantity
+                for item in classified
+                if item.aggressor_side.upper() == "BUY"
+            )
             / total_notional
             if total_notional > 0 else 0.5
         ),
@@ -374,7 +382,11 @@ def summarize_amd_cohorts(
             "resolved_outcomes": len(values),
             "unresolved_outcomes": counts[key] - len(values),
             "mean_net_return_pct": sum(values) / len(values) if values else None,
-            "win_rate": sum(value > 0 for value in values) / len(values) if values else None,
+            "win_rate": (
+                sum(value > 0 for value in values) / len(values)
+                if values
+                else None
+            ),
             "profit_factor": (
                 sum(value for value in values if value > 0)
                 / abs(sum(value for value in values if value < 0))
@@ -458,29 +470,57 @@ def replay_amd_execution(
             False,
         )
     )
-    matched = min(entry.filled_quantity, exit_result.filled_quantity)
-    gross = None
-    if matched > 0 and entry.average_fill_price and exit_result.average_fill_price:
-        gross = (
-            (exit_result.average_fill_price - entry.average_fill_price) * matched
-            if side == "LONG"
-            else (entry.average_fill_price - exit_result.average_fill_price) * matched
+    entry_remaining = [fill.quantity for fill in entry.fills]
+    exit_remaining = [fill.quantity for fill in exit_result.fills]
+    entry_index = 0
+    exit_index = 0
+    matched = 0.0
+    gross = 0.0
+    entry_notional = 0.0
+    while entry_index < len(entry.fills) and exit_index < len(exit_result.fills):
+        entry_fill = entry.fills[entry_index]
+        exit_fill = exit_result.fills[exit_index]
+        quantity_match = min(
+            entry_remaining[entry_index], exit_remaining[exit_index]
         )
-    cost = entry.total_cost + exit_result.total_cost
-    complete = entry.complete and exit_result.complete and matched >= quantity - 1e-12
-    net = gross - cost if gross is not None else None
-    entry_notional = (
-        entry.average_fill_price * matched
-        if entry.average_fill_price is not None else 0.0
+        matched += quantity_match
+        entry_notional += quantity_match * entry_fill.fill_price
+        gross += (
+            (exit_fill.fill_price - entry_fill.fill_price) * quantity_match
+            if side == "LONG"
+            else (entry_fill.fill_price - exit_fill.fill_price) * quantity_match
+        )
+        entry_remaining[entry_index] -= quantity_match
+        exit_remaining[exit_index] -= quantity_match
+        if entry_remaining[entry_index] <= 1e-12:
+            entry_index += 1
+        if exit_remaining[exit_index] <= 1e-12:
+            exit_index += 1
+    gross_value = gross if matched > 0 else None
+    allocated_entry_cost = (
+        entry.total_cost * matched / entry.filled_quantity
+        if entry.filled_quantity > 0
+        else 0.0
     )
+    cost = allocated_entry_cost + exit_result.total_cost
+    complete = (
+        entry.complete
+        and exit_result.complete
+        and matched >= quantity - 1e-12
+    )
+    net = gross_value - cost if gross_value is not None else None
     return AMDExecutionReplay(
         direction=side,
         quantity=quantity,
         entry=entry,
         exit=exit_result,
-        gross_pnl=gross,
+        gross_pnl=gross_value,
         total_cost=cost,
         net_pnl=net,
-        net_return_pct=(net / entry_notional * 100.0 if net is not None and entry_notional > 0 else None),
+        net_return_pct=(
+            net / entry_notional * 100.0
+            if net is not None and entry_notional > 0
+            else None
+        ),
         complete=complete,
     )
