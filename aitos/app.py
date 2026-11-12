@@ -293,6 +293,8 @@ async def build_system(
         live_trade_handler=scanner.accept_live_trade,
         live_orderbook_handler=scanner.accept_live_order_book,
     )
+    # Share the bounded structural-liquidity snapshot with the position context.
+    scanner._aitos_liquidity_state_store = data_ingestion.live_state
     if position_manager is not None:
         from aitos.trading.market_context import LiveStateContextProvider
 

@@ -110,6 +110,13 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                     ),
                 )
                 liquidity_payload = liquidity_analysis.to_dict()
+                state_store = getattr(self, "_aitos_liquidity_state_store", None)
+                update_levels = getattr(state_store, "update_liquidity_levels", None)
+                if callable(update_levels):
+                    try:
+                        update_levels(candidate.symbol, list(liquidity_analysis.levels))
+                    except (AttributeError, TypeError, ValueError):
+                        pass
                 record = getattr(self, "_record_funnel", None)
                 if callable(record):
                     await record(
