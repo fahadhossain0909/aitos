@@ -253,9 +253,14 @@ def evaluate_amd_forward_outcome(
     if horizon_bars < 1:
         raise ValueError("horizon_bars must be positive")
     selected = tuple(future_candles[:horizon_bars])
-    highs = [float(getattr(row, "high", row.get("high"))) for row in selected]
-    lows = [float(getattr(row, "low", row.get("low"))) for row in selected]
-    closes = [float(getattr(row, "close", row.get("close"))) for row in selected]
+    def field_value(row: Any, name: str) -> float:
+        if isinstance(row, Mapping):
+            return float(row[name])
+        return float(getattr(row, name))
+
+    highs = [field_value(row, "high") for row in selected]
+    lows = [field_value(row, "low") for row in selected]
+    closes = [field_value(row, "close") for row in selected]
     if any(not isfinite(value) for value in highs + lows + closes):
         raise ValueError("future candle prices must be finite")
     if any(low <= 0 or high < low for high, low in zip(highs, lows)):
@@ -425,14 +430,33 @@ def replay_amd_execution(
         holding_hours=holding_hours,
     )
     exit_quantity = entry.filled_quantity
-    exit_result = replay_historical_order(
-        exit_books,
-        side=exit_side,
-        quantity=exit_quantity if exit_quantity > 0 else quantity,
-        submitted_at_ms=exit_submitted_at_ms,
-        latency_ms=latency_ms,
-        taker_fee_bps=taker_fee_bps,
-        slippage_bps=slippage_bps,
+    exit_result = (
+        replay_historical_order(
+            exit_books,
+            side=exit_side,
+            quantity=exit_quantity,
+            submitted_at_ms=exit_submitted_at_ms,
+            latency_ms=latency_ms,
+            taker_fee_bps=taker_fee_bps,
+            slippage_bps=slippage_bps,
+        )
+        if exit_quantity > 0
+        else ExecutionReplayResult(
+            exit_side,
+            0.0,
+            0.0,
+            0.0,
+            None,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            (),
+            latency_ms,
+            False,
+        )
     )
     matched = min(entry.filled_quantity, exit_result.filled_quantity)
     gross = None
