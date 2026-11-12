@@ -10,6 +10,7 @@ from aitos.intelligence.amd_research import (
     evaluate_amd_forward_outcome,
     purged_walk_forward_folds,
     replay_amd_execution,
+    replay_amd_historical_observations,
     summarize_amd_cohorts,
 )
 from aitos.statistics.replay import BookSnapshot
@@ -391,3 +392,91 @@ def test_forward_outcome_rejects_candle_at_or_before_amd_event_time():
             entry_time_ms=1000,
             horizon_bars=1,
         )
+
+
+def test_historical_amd_replay_uses_closed_candles_and_archived_event_time():
+    from datetime import datetime, timedelta, timezone
+
+    from aitos.models.market import OrderBookSnapshot, TradeSide, TradeTick
+
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    candles = []
+    events = []
+    update_id = 100
+    for index in range(25):
+        open_time = base + timedelta(minutes=5 * index)
+        close_time = open_time + timedelta(minutes=5)
+        candles.append(
+            {
+                "timeframe": "5m",
+                "open_time": open_time,
+                "close_time": close_time,
+                "open": 100.0,
+                "high": 101.0,
+                "low": 99.0,
+                "close": 100.0,
+                "volume": 10.0,
+            }
+        )
+        for trade_index in range(10):
+            trade_time = close_time - timedelta(seconds=10 - trade_index)
+            events.append(
+                TradeTick(
+                    symbol="BTCUSDT",
+                    trade_id=index * 10 + trade_index,
+                    price=100.0,
+                    quantity=1.0,
+                    side=TradeSide.BUY,
+                    is_buyer_maker=False,
+                    timestamp=trade_time,
+                )
+            )
+        for depth_index in range(2):
+            event_time = close_time - timedelta(seconds=2 - depth_index)
+            events.append(
+                OrderBookSnapshot(
+                    symbol="BTCUSDT",
+                    bids=((100.0, 5.0),),
+                    asks=((100.2, 5.0),),
+                    last_update_id=update_id,
+                    timestamp=event_time,
+                    depth_event={
+                        "event_time_ms": int(event_time.timestamp() * 1000),
+                        "first_update_id": update_id,
+                        "final_update_id": update_id,
+                        "previous_update_id": update_id - 1,
+                        "ofi_raw": 1.0,
+                        "ofi_scale": 2.0,
+                        "bid_replenishment_qty": 0.5,
+                        "ask_replenishment_qty": 0.0,
+                        "reductions": [],
+                    },
+                )
+            )
+            update_id += 1
+    dataset = SimpleNamespace(
+        symbol="BTCUSDT",
+        candles=tuple(candles),
+        events=tuple(sorted(events, key=lambda item: item.timestamp)),
+        provenance={"raw_depth_event_replay_available": True},
+    )
+    observations = replay_amd_historical_observations(
+        dataset,
+        timeframe="5m",
+        horizon_bars=2,
+    )
+    assert len(observations) == 6
+    assert observations[0].flow_source == "sequenced_trade_and_depth_events"
+    assert observations[-1].state.as_of == close_time.isoformat()
+    assert all(item.decision_time_ms <= int(close_time.timestamp() * 1000) for item in observations)
+
+
+def test_historical_amd_replay_rejects_snapshot_only_datasets():
+    dataset = SimpleNamespace(
+        symbol="BTCUSDT",
+        candles=(),
+        events=(),
+        provenance={"raw_depth_event_replay_available": False},
+    )
+    with pytest.raises(ValueError, match="raw sequenced depth"):
+        replay_amd_historical_observations(dataset, timeframe="5m")
