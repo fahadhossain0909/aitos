@@ -178,7 +178,6 @@ def test_runner_target_extension_vetoes_when_path_has_no_runway():
     assert "insufficient_path_runway" in decision.vetoes
 
 
-
 def test_mapped_liquidity_pools_become_path_destinations():
     from aitos.intelligence.liquidity_intelligence import (
         LiquidityLevel,
