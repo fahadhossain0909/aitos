@@ -4,6 +4,8 @@ import pytest
 
 from aitos.intelligence.amd_research import (
     AMDDepthSnapshot,
+    AMDForwardOutcome,
+    AMDHistoricalObservation,
     AMDTradePrint,
     build_event_aligned_order_flow,
     build_live_event_order_flow,
