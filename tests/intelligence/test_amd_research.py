@@ -306,3 +306,44 @@ def test_live_event_flow_rejects_depth_sequence_gaps():
     assert not result.evidence.fresh
     assert "depth_sequence_gap" in result.diagnostics
     assert result.evidence.confidence == 0.0
+
+
+def test_live_event_flow_fails_closed_when_depth_history_was_reset_inside_window():
+    from datetime import datetime, timezone
+
+    trades = [
+        SimpleNamespace(
+            timestamp=datetime.fromtimestamp(index / 10, tz=timezone.utc),
+            trade_id=index,
+            price=100.0,
+            quantity=1.0,
+            side="BUY",
+        )
+        for index in range(10)
+    ]
+    events = [
+        {
+            "event_time_ms": 900,
+            "final_update_id": 10,
+            "previous_update_id": 9,
+            "ofi_raw": 1.0,
+            "ofi_scale": 2.0,
+        },
+        {
+            "event_time_ms": 950,
+            "final_update_id": 11,
+            "previous_update_id": 10,
+            "ofi_raw": 1.0,
+            "ofi_scale": 2.0,
+        },
+    ]
+    result = build_live_event_order_flow(
+        trades,
+        events,
+        as_of_ms=1000,
+        min_trade_events=10,
+        min_depth_events=2,
+        history_gap_at_ms=925,
+    )
+    assert not result.evidence.fresh
+    assert "depth_history_gap_in_window" in result.diagnostics
