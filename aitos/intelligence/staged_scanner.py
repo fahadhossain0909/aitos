@@ -452,6 +452,7 @@ async def install_staged_scan(
                 top2 = ranked[:TOP_2]
                 await on_subscription_change(top5, "TOP_5")
                 await on_subscription_change([item.symbol for item in top2], "TOP_2")
+
                 def candidate_key(item: Any) -> str:
                     return str(
                         getattr(item, "candidate_id", None)
