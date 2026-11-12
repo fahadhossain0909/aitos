@@ -236,6 +236,9 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                                 * 1000.0,
                             )
                         ),
+                        history_gap_at_ms=getattr(
+                            live_state, "depth_history_gap_at_ms", None
+                        ),
                     )
                     event_flow_diagnostics = {
                         "trade_count": event_flow.trade_count,
