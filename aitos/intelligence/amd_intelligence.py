@@ -58,8 +58,13 @@ class AMDConfig:
     def __post_init__(self) -> None:
         if self.window < self.min_window or self.min_window < 8:
             raise ValueError("AMD window must be >= min_window >= 8")
-        if self.range_atr_max <= 0 or self.compression_ratio_max <= 0:
-            raise ValueError("range and compression limits must be positive")
+        positive_limits = (
+            self.range_atr_max,
+            self.compression_ratio_max,
+            self.volume_expansion_ratio,
+        )
+        if any(not isfinite(float(value)) or value <= 0 for value in positive_limits):
+            raise ValueError("range, compression and volume limits must be finite and positive")
         for name in (
             "min_accumulation_score",
             "confirmed_accumulation_score",
@@ -67,10 +72,10 @@ class AMDConfig:
             "min_flow_confidence",
         ):
             value = float(getattr(self, name))
-            if not 0.0 <= value <= 1.0:
-                raise ValueError(name + " must be in [0, 1]")
-        if self.volume_expansion_ratio <= 0 or self.min_liquidity_pools < 1:
-            raise ValueError("volume and liquidity-pool limits must be positive")
+            if not isfinite(value) or not 0.0 <= value <= 1.0:
+                raise ValueError(name + " must be finite and in [0, 1]")
+        if self.min_liquidity_pools < 1:
+            raise ValueError("minimum liquidity-pool count must be positive")
 
 
 @dataclass(frozen=True)
