@@ -228,9 +228,7 @@ def build_live_event_order_flow(
         ask_replenishment=min(10.0, ask_replenishment),
         aggressive_buy_ratio=(
             sum(
-                price * quantity
-                for _, side, price, quantity in trades
-                if side == "BUY"
+                price * quantity for _, side, price, quantity in trades if side == "BUY"
             )
             / total_notional
             if total_notional > 0
@@ -296,13 +294,15 @@ def build_event_aligned_order_flow(
         unique[key] = trade
 
     classified = [
-        item for item in unique.values()
+        item
+        for item in unique.values()
         if str(item.aggressor_side or "").upper() in {"BUY", "SELL"}
     ]
     classified.sort(key=lambda item: (item.timestamp_ms, str(item.trade_id)))
     signed_notional = sum(
         (1.0 if item.aggressor_side.upper() == "BUY" else -1.0)
-        * item.price * item.quantity
+        * item.price
+        * item.quantity
         for item in classified
     )
     total_notional = sum(item.price * item.quantity for item in classified)
@@ -310,14 +310,16 @@ def build_event_aligned_order_flow(
     cvd_score = max(0.0, min(10.0, 5.0 + 5.0 * cvd_ratio))
 
     books = [
-        item for item in depth_snapshots
+        item
+        for item in depth_snapshots
         if start <= _validate_timestamp(item.timestamp_ms) <= as_of
     ]
     books.sort(key=lambda item: item.timestamp_ms)
     if any(a.timestamp_ms == b.timestamp_ms for a, b in zip(books, books[1:])):
         diagnostics.append("duplicate_depth_timestamps")
         books = [
-            item for index, item in enumerate(books)
+            item
+            for index, item in enumerate(books)
             if index == 0 or item.timestamp_ms != books[index - 1].timestamp_ms
         ]
 
@@ -373,7 +375,8 @@ def build_event_aligned_order_flow(
                 if item.aggressor_side.upper() == "BUY"
             )
             / total_notional
-            if total_notional > 0 else 0.5
+            if total_notional > 0
+            else 0.5
         ),
     )
     return EventFlowResult(
@@ -459,20 +462,23 @@ def evaluate_amd_forward_outcome(
         raise ValueError("invalid future candle range")
     sign = 1.0 if direction == "LONG" else -1.0
     favorable = max(
-        (sign * (high - entry_price) / entry_price * 100.0 for high in highs)
-        if direction == "LONG"
-        else (sign * (low - entry_price) / entry_price * 100.0 for low in lows),
+        (
+            (sign * (high - entry_price) / entry_price * 100.0 for high in highs)
+            if direction == "LONG"
+            else (sign * (low - entry_price) / entry_price * 100.0 for low in lows)
+        ),
         default=None,
     )
     adverse = min(
-        (sign * (low - entry_price) / entry_price * 100.0 for low in lows)
-        if direction == "LONG"
-        else (sign * (high - entry_price) / entry_price * 100.0 for high in highs),
+        (
+            (sign * (low - entry_price) / entry_price * 100.0 for low in lows)
+            if direction == "LONG"
+            else (sign * (high - entry_price) / entry_price * 100.0 for high in highs)
+        ),
         default=None,
     )
     close_return = (
-        sign * (closes[-1] - entry_price) / entry_price * 100.0
-        if closes else None
+        sign * (closes[-1] - entry_price) / entry_price * 100.0 if closes else None
     )
     return AMDForwardOutcome(
         symbol=str(state.symbol).upper(),
@@ -556,28 +562,28 @@ def summarize_amd_cohorts(
     output = []
     for key in sorted(counts):
         values = cohorts[key]
-        output.append({
-            "variant": key[0],
-            "symbol": key[1],
-            "regime": key[2],
-            "phase": key[3],
-            "direction": key[4],
-            "observations": counts[key],
-            "resolved_outcomes": len(values),
-            "unresolved_outcomes": counts[key] - len(values),
-            "mean_net_return_pct": sum(values) / len(values) if values else None,
-            "win_rate": (
-                sum(value > 0 for value in values) / len(values)
-                if values
-                else None
-            ),
-            "profit_factor": (
-                sum(value for value in values if value > 0)
-                / abs(sum(value for value in values if value < 0))
-                if any(value < 0 for value in values)
-                else None
-            ),
-        })
+        output.append(
+            {
+                "variant": key[0],
+                "symbol": key[1],
+                "regime": key[2],
+                "phase": key[3],
+                "direction": key[4],
+                "observations": counts[key],
+                "resolved_outcomes": len(values),
+                "unresolved_outcomes": counts[key] - len(values),
+                "mean_net_return_pct": sum(values) / len(values) if values else None,
+                "win_rate": (
+                    sum(value > 0 for value in values) / len(values) if values else None
+                ),
+                "profit_factor": (
+                    sum(value for value in values if value > 0)
+                    / abs(sum(value for value in values if value < 0))
+                    if any(value < 0 for value in values)
+                    else None
+                ),
+            }
+        )
     return tuple(output)
 
 
@@ -664,9 +670,7 @@ def replay_amd_execution(
     while entry_index < len(entry.fills) and exit_index < len(exit_result.fills):
         entry_fill = entry.fills[entry_index]
         exit_fill = exit_result.fills[exit_index]
-        quantity_match = min(
-            entry_remaining[entry_index], exit_remaining[exit_index]
-        )
+        quantity_match = min(entry_remaining[entry_index], exit_remaining[exit_index])
         matched += quantity_match
         entry_notional += quantity_match * entry_fill.fill_price
         gross += (
@@ -687,11 +691,7 @@ def replay_amd_execution(
         else 0.0
     )
     cost = allocated_entry_cost + exit_result.total_cost
-    complete = (
-        entry.complete
-        and exit_result.complete
-        and matched >= quantity - 1e-12
-    )
+    complete = entry.complete and exit_result.complete and matched >= quantity - 1e-12
     net = gross_value - cost if gross_value is not None else None
     return AMDExecutionReplay(
         direction=side,
@@ -749,7 +749,8 @@ def replay_amd_historical_observations(
     normalized_timeframe = str(timeframe).lower()
     candle_rows = sorted(
         (
-            row for row in dataset.candles
+            row
+            for row in dataset.candles
             if str(row.get("timeframe", "")).lower() == normalized_timeframe
         ),
         key=lambda row: row["close_time"],
@@ -766,7 +767,8 @@ def replay_amd_historical_observations(
             raise ValueError("historical candle close times must be timezone-aware")
         decision_ms = int(decision_time.timestamp() * 1000)
         history_rows = [
-            row for row in candle_rows[: index + 1]
+            row
+            for row in candle_rows[: index + 1]
             if row["close_time"] <= decision_time
         ]
         candles = tuple(Candle.from_value(row) for row in history_rows)
@@ -774,7 +776,8 @@ def replay_amd_historical_observations(
             continue
         window_start = decision_ms - event_window_ms
         recent_trades = [
-            event for event in events
+            event
+            for event in events
             if isinstance(event, TradeTick)
             and window_start <= int(event.timestamp.timestamp() * 1000) <= decision_ms
         ]
