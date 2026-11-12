@@ -277,7 +277,7 @@ WORKSPACE_PANELS = frozenset(
     }
 )
 DEFAULT_WORKSPACE_LAYOUT = {
-    "version": 1,
+    "version": 2,
     "activeWorkspace": "trading",
     "panels": {
         "trading": ["watchlist", "charts", "orderflow", "execution", "copilot"],
@@ -287,18 +287,26 @@ DEFAULT_WORKSPACE_LAYOUT = {
         "data": ["datasets", "dataquality", "watchlist"],
         "risk": ["exposure", "audit", "execution"],
     },
+    "panelGeometry": {
+        "trading": {},
+        "ai": {},
+        "quant": {},
+        "developer": {},
+        "data": {},
+        "risk": {},
+    },
 }
 
 
 def validate_workspace_layout(value):
-    """Validate a bounded, non-executable desktop preference document."""
-    if not isinstance(value, dict) or set(value) != {
-        "version",
-        "activeWorkspace",
-        "panels",
-    }:
+    """Validate bounded workspace visibility and dock geometry preferences."""
+    required = {"version", "activeWorkspace", "panels"}
+    legacy = isinstance(value, dict) and set(value) == required
+    current = isinstance(value, dict) and set(value) == required | {"panelGeometry"}
+    if not (legacy or current):
         raise ValueError("workspace_layout_shape_invalid")
-    if type(value["version"]) is not int or value["version"] != 1:
+    version = value["version"]
+    if type(version) is not int or (legacy and version != 1) or (current and version != 2):
         raise ValueError("workspace_layout_version_invalid")
     if (
         not isinstance(value["activeWorkspace"], str)
@@ -319,10 +327,32 @@ def validate_workspace_layout(value):
         if len(items) != len(set(items)):
             raise ValueError("workspace_panel_duplicate")
         panels[workspace_id] = list(items)
+
+    raw_geometry = value.get("panelGeometry", {workspace_id: {} for workspace_id in WORKSPACE_IDS})
+    if not isinstance(raw_geometry, dict) or set(raw_geometry) != WORKSPACE_IDS:
+        raise ValueError("workspace_geometry_invalid")
+    geometry = {}
+    for workspace_id, entries in raw_geometry.items():
+        if not isinstance(entries, dict) or len(entries) > 24:
+            raise ValueError("workspace_geometry_invalid")
+        if not set(entries).issubset(set(panels[workspace_id])):
+            raise ValueError("workspace_geometry_panel_invalid")
+        normalized = {}
+        for panel_id, dimensions in entries.items():
+            if not isinstance(dimensions, dict) or set(dimensions) != {"width", "height"}:
+                raise ValueError("workspace_geometry_shape_invalid")
+            width, height = dimensions["width"], dimensions["height"]
+            if type(width) is not int or width not in {1, 2}:
+                raise ValueError("workspace_geometry_width_invalid")
+            if type(height) is not int or height not in {1, 2}:
+                raise ValueError("workspace_geometry_height_invalid")
+            normalized[panel_id] = {"width": width, "height": height}
+        geometry[workspace_id] = normalized
     return {
-        "version": 1,
+        "version": 2,
         "activeWorkspace": value["activeWorkspace"],
         "panels": panels,
+        "panelGeometry": geometry,
     }
 
 
