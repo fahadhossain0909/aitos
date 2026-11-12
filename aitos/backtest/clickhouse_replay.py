@@ -464,7 +464,6 @@ class ClickHouseHistoricalAblationRunner:
             depth_flow=depth_flow,
         )
 
-
     async def run_amd_phase_replay(
         self,
         symbol: str,
