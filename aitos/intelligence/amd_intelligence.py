@@ -13,6 +13,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
+from math import isfinite
 import json
 from statistics import mean
 from typing import Any, Sequence
@@ -252,15 +253,20 @@ def _accumulation_features(
         )
 
     if flow.fresh and flow.confidence >= config.min_flow_confidence:
-        replenishment = min(
-            1.0, (flow.bid_replenishment + flow.ask_replenishment) / 10.0
-        )
-        components.append((replenishment, 0.15))
-        evidence.append(
-            "fresh_two_sided_liquidity_replenishment"
-            if replenishment > 0
-            else "fresh_flow_without_replenishment"
-        )
+        bid_replenishment = float(flow.bid_replenishment)
+        ask_replenishment = float(flow.ask_replenishment)
+        if isfinite(bid_replenishment) and isfinite(ask_replenishment):
+            replenishment = min(
+                1.0, max(0.0, min(bid_replenishment, ask_replenishment)) / 5.0
+            )
+            components.append((replenishment, 0.15))
+            evidence.append(
+                "fresh_two_sided_liquidity_replenishment"
+                if bid_replenishment > 0 and ask_replenishment > 0
+                else "fresh_one_sided_or_no_replenishment"
+            )
+        else:
+            evidence.append("invalid_replenishment_metrics")
     else:
         evidence.append("fresh_order_flow_unavailable")
 
