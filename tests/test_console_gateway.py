@@ -222,6 +222,45 @@ async def test_workspace_layout_compare_and_swap_between_windows(harness):
     assert await aba_conflict.json() == DEFAULT_WORKSPACE_LAYOUT
 
 
+async def test_workspace_layout_rejects_invalid_dock_geometry(harness):
+    h = harness
+    await login(h)
+    initial = await h.client.get("/operator/v1/workspace-layout")
+    invalid = {
+        **DEFAULT_WORKSPACE_LAYOUT,
+        "panelGeometry": {
+            **DEFAULT_WORKSPACE_LAYOUT["panelGeometry"],
+            "trading": {"charts": {"width": 3, "height": 1}},
+        },
+    }
+    response = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=invalid,
+        headers={"Origin": ORIGIN, "If-Match": initial.headers["ETag"]},
+    )
+    assert response.status == 400
+    restored = await h.client.get("/operator/v1/workspace-layout")
+    assert await restored.json() == DEFAULT_WORKSPACE_LAYOUT
+
+
+async def test_legacy_workspace_file_migrates_to_geometry_schema(harness):
+    h = harness
+    h.config.workspace_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy = {
+        "version": 1,
+        "activeWorkspace": "quant",
+        "panels": DEFAULT_WORKSPACE_LAYOUT["panels"],
+    }
+    h.config.workspace_file.write_text(json.dumps(legacy), encoding="utf-8")
+    await login(h)
+    response = await h.client.get("/operator/v1/workspace-layout")
+    assert response.status == 200
+    restored = await response.json()
+    assert restored["version"] == 2
+    assert restored["activeWorkspace"] == "quant"
+    assert restored["panelGeometry"] == DEFAULT_WORKSPACE_LAYOUT["panelGeometry"]
+
+
 async def test_workspace_layout_requires_revision_for_mutation(harness):
     await login(harness)
     response = await h.client.put(
