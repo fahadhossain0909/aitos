@@ -64,7 +64,9 @@ class AMDConfig:
             self.volume_expansion_ratio,
         )
         if any(not isfinite(float(value)) or value <= 0 for value in positive_limits):
-            raise ValueError("range, compression and volume limits must be finite and positive")
+            raise ValueError(
+                "range, compression and volume limits must be finite and positive"
+            )
         for name in (
             "min_accumulation_score",
             "confirmed_accumulation_score",
