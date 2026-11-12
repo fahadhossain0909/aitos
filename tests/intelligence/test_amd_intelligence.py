@@ -435,3 +435,43 @@ def test_previous_direction_turns_confirmed_balance_into_reaccumulation():
     )
     assert state.phase is AMDPhase.REACCUMULATION
     assert state.direction == "LONG"
+
+
+def test_future_checkpoint_is_ignored_for_historical_replay():
+    future = AMDState(
+        symbol="BTCUSDT",
+        timeframe="5m",
+        phase=AMDPhase.DISTRIBUTION_CONFIRMED,
+        direction="LONG",
+        state_id="future-state",
+        as_of="2026-11-13T00:00:00Z",
+        accumulation_score=0.0,
+        manipulation_score=0.8,
+        distribution_score=1.0,
+        confidence=1.0,
+        evidence_coverage=1.0,
+        range_high=102.0,
+        range_low=98.0,
+        liquidity_event_id="future-sweep",
+        target_liquidity_ids=(),
+        evidence=("future",),
+    )
+    level = LiquidityLevel(
+        "range-pool",
+        "BTCUSDT",
+        LiquiditySide.BUY_SIDE,
+        100.1,
+        LiquiditySource.EQUAL_HIGHS,
+        "5m",
+        70.0,
+        2,
+    )
+    state = analyze_amd(
+        "BTCUSDT",
+        "5m",
+        _range_candles(),
+        liquidity=_liquidity(levels=(level,)),
+        previous_state=future,
+    )
+    assert state.phase is AMDPhase.ACCUMULATION_CONFIRMED
+    assert state.direction == ""
