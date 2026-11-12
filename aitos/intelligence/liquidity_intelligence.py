@@ -565,7 +565,7 @@ def detect_liquidity_sweeps(
                 continue
             events.append(
                 SweepEvent(
-                    event_id=f"{level.level_id}:{idx}",
+                    event_id=_stable_id(level.level_id, candle.timestamp or idx),
                     level=level,
                     direction=direction,
                     sweep_price=candle.low if direction == "down" else candle.high,

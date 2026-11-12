@@ -283,3 +283,31 @@ def test_buy_side_rejection_with_bearish_flow_creates_short_candidate():
         ),
     )
     assert result.action is LiquidityAction.REVERSAL_SHORT
+
+
+
+def test_sweep_event_id_is_stable_when_replay_window_moves():
+    level = LiquidityLevel(
+        "stable-pool",
+        "BTCUSDT",
+        LiquiditySide.SELL_SIDE,
+        100,
+        LiquiditySource.EQUAL_LOWS,
+        "5m",
+        80,
+        2,
+    )
+    prefix = Candle(101, 102, 100.5, 101, 10, timestamp="prefix")
+    rows = candles(
+        [
+            (101, 102, 100.5, 101, 10),
+            (101, 101.5, 99.5, 100.5, 12),
+            (100.5, 101, 98.8, 100.4, 30),
+            (100.4, 102, 100.1, 101.5, 20),
+        ]
+    )
+    rows[2] = Candle(100.5, 101, 98.8, 100.4, 30, timestamp="sweep-bar")
+    config = LiquidityConfig(sweep_min_penetration_atr=0.01)
+    first = detect_liquidity_sweeps([level], rows, config=config)
+    second = detect_liquidity_sweeps([level], [prefix, *rows], config=config)
+    assert first[-1].event_id == second[-1].event_id
