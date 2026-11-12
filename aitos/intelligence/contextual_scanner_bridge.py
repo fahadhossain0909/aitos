@@ -234,7 +234,11 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                 )
 
                 candidate_timeframe = str(
-                    getattr(candidate_klines[-1], "timeframe", "unknown")
+                    getattr(
+                        candidate_klines[-1],
+                        "timeframe",
+                        getattr(self, "_timeframe", "unknown"),
+                    )
                 ).lower()
                 timeframe_candles = dict(
                     getattr(candidate, "_aitos_mtf_candles", {}) or {}
