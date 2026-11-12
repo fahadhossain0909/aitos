@@ -613,9 +613,7 @@ def analyze_amd_timeframe_stack(
         raise ValueError("AMD timeframe stack cannot mix symbols")
     symbol = next(iter(symbols), "")
     available = tuple(sorted(normalized))
-    required = tuple(
-        dict.fromkeys(str(item).lower() for item in required_timeframes)
-    )
+    required = tuple(dict.fromkeys(str(item).lower() for item in required_timeframes))
     missing = tuple(item for item in required if item not in normalized)
     bullish = 0.0
     bearish = 0.0
@@ -682,9 +680,7 @@ def _amd_checkpoint_key(symbol: str, timeframe: str) -> str:
     normalized_symbol = "".join(
         char for char in symbol.upper() if char.isalnum() or char in "-_"
     )
-    normalized_timeframe = "".join(
-        char for char in timeframe.lower() if char.isalnum()
-    )
+    normalized_timeframe = "".join(char for char in timeframe.lower() if char.isalnum())
     if not normalized_symbol or not normalized_timeframe:
         raise ValueError("AMD checkpoint requires symbol and timeframe")
     return "aitos:amd:checkpoint:v1:" + normalized_symbol + ":" + normalized_timeframe
