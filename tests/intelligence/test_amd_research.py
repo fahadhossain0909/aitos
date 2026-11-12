@@ -1,0 +1,218 @@
+from types import SimpleNamespace
+
+import pytest
+
+from aitos.intelligence.amd_research import (
+    AMDDepthSnapshot,
+    AMDTradePrint,
+    build_event_aligned_order_flow,
+    evaluate_amd_forward_outcome,
+    purged_walk_forward_folds,
+    replay_amd_execution,
+    summarize_amd_cohorts,
+)
+from aitos.statistics.replay import BookSnapshot
+
+
+def _depth(timestamp, bid_size=5.0, ask_size=5.0):
+    return AMDDepthSnapshot(
+        timestamp_ms=timestamp,
+        bids=((100.0, bid_size),),
+        asks=((100.2, ask_size),),
+    )
+
+
+def test_event_flow_uses_explicit_aggressor_side_and_deduplicates_trades():
+    trades = [
+        AMDTradePrint(i * 100, str(i), 100.0, 1.0, "BUY" if i < 9 else "SELL")
+        for i in range(10)
+    ]
+    trades.append(trades[0])
+    trades.append(AMDTradePrint(950, "unknown", 100.0, 1.0, None))
+    result = build_event_aligned_order_flow(
+        trades,
+        [_depth(100), _depth(300, 7.0, 4.0), _depth(500, 8.0, 3.0)],
+        symbol="BTCUSDT",
+        as_of_ms=1000,
+        min_trade_events=10,
+        min_depth_updates=2,
+    )
+    assert result.evidence.fresh
+    assert result.trade_count == 10
+    assert result.duplicate_trade_count == 1
+    assert result.unclassified_trade_count == 1
+    assert result.evidence.cvd_score > 5.0
+    assert result.evidence.bid_replenishment > 0
+    assert "unclassified_aggressor_side_excluded" in result.diagnostics
+
+
+def test_event_flow_fails_closed_for_stale_or_insufficient_inputs():
+    result = build_event_aligned_order_flow(
+        [AMDTradePrint(100, str(i), 100.0, 1.0, "BUY") for i in range(3)],
+        [_depth(100), _depth(200)],
+        symbol="BTCUSDT",
+        as_of_ms=10_000,
+        max_staleness_ms=500,
+        min_trade_events=10,
+        min_depth_updates=2,
+    )
+    assert not result.evidence.fresh
+    assert result.evidence.confidence == 0.0
+    assert "insufficient_classified_trade_events" in result.diagnostics
+    assert "event_flow_stale" in result.diagnostics
+
+
+def test_event_flow_rejects_invalid_depth_and_out_of_order_trade_ids_are_safe():
+    with pytest.raises(ValueError):
+        build_event_aligned_order_flow(
+            [],
+            [AMDDepthSnapshot(1, ((100.0, -1.0),), ((101.0, 1.0),))],
+            symbol="BTCUSDT",
+            as_of_ms=2,
+        )
+
+
+def test_forward_outcome_reports_mfe_mae_and_incomplete_horizon():
+    state = SimpleNamespace(
+        symbol="BTCUSDT",
+        timeframe="5m",
+        state_id="amd-1",
+        direction="LONG",
+    )
+    result = evaluate_amd_forward_outcome(
+        state,
+        [
+            SimpleNamespace(high=102.0, low=99.0, close=101.0),
+            {"high": 103.0, "low": 100.0, "close": 102.0},
+        ],
+        entry_price=100.0,
+        entry_time_ms=1000,
+        horizon_bars=3,
+    )
+    assert result.forward_return_pct == pytest.approx(2.0)
+    assert result.mfe_pct == pytest.approx(3.0)
+    assert result.mae_pct == pytest.approx(-1.0)
+    assert result.observed_bars == 2
+    assert not result.outcome_complete
+
+
+def test_forward_outcome_short_excursions_are_directionally_signed():
+    state = SimpleNamespace(
+        symbol="BTCUSDT",
+        timeframe="1m",
+        state_id="amd-short",
+        direction="SHORT",
+    )
+    result = evaluate_amd_forward_outcome(
+        state,
+        [SimpleNamespace(high=102.0, low=97.0, close=98.0)],
+        entry_price=100.0,
+        entry_time_ms=1000,
+        horizon_bars=1,
+    )
+    assert result.forward_return_pct == pytest.approx(2.0)
+    assert result.mfe_pct == pytest.approx(3.0)
+    assert result.mae_pct == pytest.approx(-2.0)
+
+
+def test_walk_forward_folds_are_chronological_and_purged():
+    folds = purged_walk_forward_folds(
+        list(range(30)),
+        min_train_size=10,
+        test_size=5,
+        step_size=5,
+        embargo_bars=2,
+    )
+    assert folds
+    for fold in folds:
+        assert max(fold.train_indices) < min(fold.test_indices)
+        assert min(fold.test_indices) - max(fold.train_indices) - 1 >= 2
+        assert fold.train_end_ms < fold.test_start_ms
+
+
+def test_walk_forward_rejects_unsorted_timestamps():
+    with pytest.raises(ValueError):
+        purged_walk_forward_folds([1, 3, 2], min_train_size=2, test_size=1)
+
+
+def test_cohort_summary_keeps_unresolved_outcomes_separate():
+    rows = [
+        {
+            "variant": "amd",
+            "symbol": "BTCUSDT",
+            "regime": "trend",
+            "phase": "distribution",
+            "direction": "LONG",
+            "net_return_pct": 2.0,
+        },
+        {
+            "variant": "amd",
+            "symbol": "BTCUSDT",
+            "regime": "trend",
+            "phase": "distribution",
+            "direction": "LONG",
+            "net_return_pct": -1.0,
+        },
+        {
+            "variant": "amd",
+            "symbol": "BTCUSDT",
+            "regime": "trend",
+            "phase": "distribution",
+            "direction": "LONG",
+            "net_return_pct": None,
+        },
+    ]
+    summary = summarize_amd_cohorts(rows)[0]
+    assert summary["observations"] == 3
+    assert summary["resolved_outcomes"] == 2
+    assert summary["unresolved_outcomes"] == 1
+    assert summary["win_rate"] == pytest.approx(0.5)
+    assert summary["profit_factor"] == pytest.approx(2.0)
+
+
+def test_execution_replay_accounts_for_both_legs_and_all_costs():
+    entry = [
+        BookSnapshot(100, 100.0, 100.2, 2.0, 2.0),
+        BookSnapshot(200, 100.0, 100.2, 2.0, 2.0),
+    ]
+    exit_books = [
+        BookSnapshot(1000, 100.8, 101.0, 2.0, 2.0),
+        BookSnapshot(1100, 100.8, 101.0, 2.0, 2.0),
+    ]
+    result = replay_amd_execution(
+        entry,
+        exit_books,
+        direction="LONG",
+        quantity=1.0,
+        entry_submitted_at_ms=100,
+        exit_submitted_at_ms=1000,
+        latency_ms=0,
+        taker_fee_bps=4.0,
+        slippage_bps=2.0,
+        funding_bps=1.0,
+        holding_hours=8.0,
+    )
+    assert result.complete
+    assert result.entry.complete and result.exit.complete
+    assert result.entry.fees > 0 and result.exit.fees > 0
+    assert result.entry.funding_cost > 0
+    assert result.total_cost > result.entry.total_cost
+    assert result.net_pnl is not None
+    assert result.net_return_pct is not None
+
+
+def test_execution_replay_does_not_fabricate_exit_when_entry_unfilled():
+    result = replay_amd_execution(
+        [],
+        [BookSnapshot(1000, 100.8, 101.0, 2.0, 2.0)],
+        direction="LONG",
+        quantity=1.0,
+        entry_submitted_at_ms=100,
+        exit_submitted_at_ms=1000,
+        latency_ms=0,
+        taker_fee_bps=4.0,
+    )
+    assert not result.complete
+    assert result.entry.filled_quantity == 0.0
+    assert result.exit.filled_quantity == 0.0
+    assert result.net_pnl is None
