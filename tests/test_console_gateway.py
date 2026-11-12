@@ -192,7 +192,8 @@ async def test_workspace_layout_compare_and_swap_between_windows(harness):
     stale_etag = second.headers["ETag"]
     updated = {**DEFAULT_WORKSPACE_LAYOUT, "activeWorkspace": "risk"}
     saved = await h.client.put(
-        "/operator/v1/workspace-layout", json=updated,
+        "/operator/v1/workspace-layout",
+        json=updated,
         headers={"Origin": ORIGIN, "If-Match": first.headers["ETag"]},
     )
     assert saved.status == 200 and saved.headers["ETag"] != stale_etag
@@ -224,7 +225,8 @@ async def test_workspace_layout_compare_and_swap_between_windows(harness):
 async def test_workspace_layout_requires_revision_for_mutation(harness):
     await login(harness)
     response = await h.client.put(
-        "/operator/v1/workspace-layout", json=DEFAULT_WORKSPACE_LAYOUT,
+        "/operator/v1/workspace-layout",
+        json=DEFAULT_WORKSPACE_LAYOUT,
         headers={"Origin": ORIGIN},
     )
     assert response.status == 428
