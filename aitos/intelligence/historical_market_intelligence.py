@@ -99,7 +99,8 @@ async def fetch_historical_klines(
     """Read durable ClickHouse history first, then merge a bounded REST fallback."""
     from datetime import datetime, timedelta, timezone
 
-    seconds = _TIMEFRAME_SECONDS.get(timeframe, 60)
+    timeframe = _normalize_timeframe(timeframe)
+    seconds = _TIMEFRAME_SECONDS[timeframe]
     stored: dict[datetime, Kline] = {}
     if repository is not None:
         try:
