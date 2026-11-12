@@ -11,6 +11,7 @@ from aitos.intelligence import indicators
 from aitos.intelligence.advanced_context import build_advanced_context
 from aitos.intelligence.historical_market_intelligence import (
     OnDemandHistoricalIntelligence,
+    fetch_historical_klines,
 )
 from aitos.logging_setup import get_logger
 
@@ -451,16 +452,24 @@ async def install_staged_scan(
                 top2 = ranked[:TOP_2]
                 await on_subscription_change(top5, "TOP_5")
                 await on_subscription_change([item.symbol for item in top2], "TOP_2")
-                promoted = {item.candidate_id for item in top2}
+                def candidate_key(item: Any) -> str:
+                    return str(
+                        getattr(item, "candidate_id", None)
+                        or getattr(item, "_aitos_candidate_id", None)
+                        or getattr(item, "symbol", "unknown")
+                    )
+
+                promoted = {candidate_key(item) for item in top2}
                 for item in candidates:
-                    if item.candidate_id not in promoted:
+                    candidate_id = candidate_key(item)
+                    if candidate_id not in promoted:
                         object.__setattr__(
                             item,
                             "_aitos_historical_context",
                             {
                                 "available": False,
                                 "reason": "not_promoted_for_deep_history",
-                                "candidate_id": item.candidate_id,
+                                "candidate_id": candidate_id,
                                 "evidence_only": True,
                             },
                         )
