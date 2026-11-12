@@ -38,7 +38,9 @@ def _range_candles():
     rows = []
     for index in range(30):
         if index < 20:
-            high, low, volume = 101.0 + (index % 2) * 0.2, 99.0 - (index % 2) * 0.2, 20.0
+            high = 101.0 + (index % 2) * 0.2
+            low = 99.0 - (index % 2) * 0.2
+            volume = 20.0
         else:
             high, low, volume = 100.2, 99.8, 10.0
         rows.append(
