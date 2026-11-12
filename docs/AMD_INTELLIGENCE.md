@@ -78,14 +78,14 @@ analyze_amd_timeframe_stack aggregates supplied AMDState objects using AITOS rol
 
 Missing timeframes are listed explicitly and reduce evidence coverage. The function never fabricates a neutral state for an unavailable frame and rejects mixed-symbol inputs.
 
-The scanner now passes the six closed-candle snapshots already returned by MultiTimeframeAnalyzer and HigherTimeframeCandleCache into AMD. The bridge computes per-frame liquidity/AMD context and aggregates the resulting states without making additional exchange requests. Only the candidate timeframe receives the current freshness-gated live flow snapshot; higher frames do not borrow lower-timeframe flow and therefore cannot receive a flow-confirmed reversal label without their own event-aligned feed. If the existing HTF analysis is disabled or incomplete, missing frames remain visible and the AMD stack is marked incomplete.
+The scanner now passes the six closed-candle snapshots already returned by MultiTimeframeAnalyzer and HigherTimeframeCandleCache into AMD. The bridge computes per-frame liquidity/AMD context and aggregates the resulting states without making additional exchange requests. For the candidate timeframe it first attempts event-time CVD from deduplicated TradeTick records with explicit aggressor side and full-depth OFI from the existing sequence-validated LocalOrderBook depth-event history. A depth update-chain break fails the event-flow freshness gate. When event-flow evidence is insufficient, the existing freshness-gated live snapshot proxy may be retained but its source is explicitly identified in the AMD payload. Higher frames do not borrow lower-timeframe flow and therefore cannot receive a flow-confirmed reversal label without their own event-aligned feed. If the existing HTF analysis is disabled or incomplete, missing frames remain visible and the AMD stack is marked incomplete.
 
 ## Scanner and evidence integration
 
 The contextual scanner bridge:
 
 - Runs AMD only when candidate historical candles are present.
-- Reuses the same freshness-gated flow snapshot used by Liquidity Intelligence.
+- Prefers sequenced live trade/depth-event CVD/OFI and records flow source, freshness, event counts and sequence diagnostics; falls back only to the explicitly labelled legacy live proxy when event history is insufficient.
 - Attaches amd_intelligence to the AI Kernel context as evidence-only data.
 - Adds phase, direction, stable state ID and decision_impact=false to the candidate funnel telemetry.
 - Stores AMD output beside Liquidity Intelligence in the candidate-linked historical evidence payload.
@@ -103,7 +103,7 @@ These defaults are starting points for replay experiments, not universal market 
 
 1. Unit tests: closed-candle-only processing, deterministic IDs, accumulation candidate, both sweep directions, stale/missing flow, directional expansion, MTF missing-frame reporting and mixed-symbol rejection.
 2. Replay labels: point-in-time liquidity pools, sweep timestamp, reclaim/acceptance, structure shift, CVD/OFI freshness, volume expansion and forward path.
-3. Execution-aware replay: fees, funding, spread, slippage, latency, partial fills and adverse selection.
+3. Execution-aware replay: fees, funding, spread, slippage, latency, partial fills and adverse selection. The reusable APIs and their limits are specified in [AMD Research Validation](AMD_RESEARCH_VALIDATION.md).
 4. Ablations: baseline; liquidity only; AMD accumulation only; manipulation only; distribution only; full AMD; full AMD plus CVD/OFI/HTF.
 5. Metrics: phase precision/recall, false-sweep rate, calibration error, time-to-delivery, MAE/MFE, stop-out attribution, net expectancy, PF, drawdown, Sharpe/Sortino, trade count and missed opportunity rate.
 6. Chronological walk-forward and symbol/regime OOS validation, with separate LONG and SHORT reporting.
@@ -113,9 +113,9 @@ These defaults are starting points for replay experiments, not universal market 
 ## Known limitations and next gates
 
 - Fresh live flow evidence is currently attached only to the candidate timeframe. Higher-timeframe states use completed-candle and structural-liquidity evidence; they do not borrow lower-timeframe CVD/OFI.
-- The current live order-flow adapter uses freshness-gated bounded buy-ratio and top-of-book depth proxies. It is not a fully event-aligned trade CVD plus depth-event OFI reconstruction.
+- Event-aligned candidate-timeframe flow now consumes the scanner's deduplicated aggressor-side TradeTick stream and sequence-validated LocalOrderBook full-depth depth-event history. The legacy snapshot proxy remains a clearly labelled fallback only when event history is insufficient. This is still bounded in-memory history, not a durable historical event archive.
 - Durable checkpoint restore depends on the existing historical-intelligence Redis client being configured and healthy. Without it, AMD falls back to deterministic candle-window reconstruction and marks checkpoint persistence unavailable.
-- The append-only candidate evidence path is not yet a complete trade-close outcome join. Fees/funding/slippage-aware replay and long-horizon phase outcome attribution remain required.
+- Candidate funnel decisions already link AMD phase/state IDs to the DecisionOutcomeLedger and the existing candidate label reconciliation. Dedicated phase-horizon outcome entities and historical exchange replay ingestion remain separate research tasks. Fees/funding/slippage-aware execution replay helpers are implemented, but venue-specific historical data and calibrated cost assumptions are still required.
 - No threshold is production-calibrated and no profitability claim is made.
 
 These limitations must remain visible in release notes and rollout gates.
