@@ -226,16 +226,57 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                     flow=flow_evidence,
                 )
                 liquidity_payload = liquidity_analysis.to_dict()
-                from aitos.intelligence.amd_intelligence import analyze_amd
-
-                amd_state = analyze_amd(
-                    candidate.symbol,
-                    str(getattr(candidate_klines[-1], "timeframe", "unknown")),
-                    candidate_klines,
-                    liquidity=liquidity_analysis,
-                    flow=flow_evidence,
+                from aitos.intelligence.amd_intelligence import (
+                    analyze_amd,
+                    analyze_amd_timeframe_stack,
                 )
+
+                candidate_timeframe = str(
+                    getattr(candidate_klines[-1], "timeframe", "unknown")
+                ).lower()
+                timeframe_candles = dict(
+                    getattr(self, "_aitos_unused_mtf_candles", {}) or {}
+                )
+                timeframe_candles.update(
+                    {
+                        str(key).lower(): tuple(value)
+                        for key, value in (
+                            getattr(candidate, "_aitos_mtf_candles", {}) or {}
+                        ).items()
+                    }
+                )
+                timeframe_candles[candidate_timeframe] = tuple(candidate_klines)
+                amd_states = {}
+                for timeframe, frame_candles in timeframe_candles.items():
+                    if not frame_candles:
+                        continue
+                    if timeframe == candidate_timeframe:
+                        frame_liquidity = liquidity_analysis
+                        frame_flow = flow_evidence
+                    else:
+                        from aitos.intelligence.liquidity_intelligence import (
+                            OrderFlowEvidence,
+                            analyze_liquidity,
+                        )
+
+                        frame_flow = OrderFlowEvidence()
+                        frame_liquidity = analyze_liquidity(
+                            candidate.symbol,
+                            timeframe,
+                            frame_candles,
+                            flow=frame_flow,
+                        )
+                    amd_states[timeframe] = analyze_amd(
+                        candidate.symbol,
+                        timeframe,
+                        frame_candles,
+                        liquidity=frame_liquidity,
+                        flow=frame_flow,
+                    )
+                amd_state = amd_states[candidate_timeframe]
+                amd_stack = analyze_amd_timeframe_stack(amd_states)
                 amd_payload = amd_state.to_dict()
+                amd_payload["timeframe_stack"] = amd_stack.to_dict()
                 amd_payload["decision_impact"] = False
                 liquidity_payload["amd_intelligence"] = amd_payload
                 object.__setattr__(candidate, "_aitos_amd_state", amd_payload)
