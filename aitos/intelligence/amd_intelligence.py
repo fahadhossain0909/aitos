@@ -692,7 +692,9 @@ async def save_amd_checkpoint(
     """
     if redis_client is None or not state.as_of or ttl_seconds < 1:
         return False
-    payload = json.dumps(state.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    payload = json.dumps(
+        state.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
+    )
     try:
         result = await redis_client.eval(
             _AMD_CHECKPOINT_CAS_LUA,
