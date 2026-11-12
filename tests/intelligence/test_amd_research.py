@@ -537,3 +537,43 @@ def test_forward_cohort_summary_does_not_call_gross_markout_net_pnl():
     assert summary["mean_forward_return_pct"] == pytest.approx(1.0)
     assert summary["outcome_type"] == "counterfactual_gross_candle_markout"
     assert "net_return_pct" not in summary
+
+
+def test_live_event_flow_requires_nonzero_depth_ofi_activity():
+    from datetime import datetime, timezone
+
+    trades = [
+        SimpleNamespace(
+            timestamp=datetime.fromtimestamp(index / 10, tz=timezone.utc),
+            trade_id=index,
+            price=100.0,
+            quantity=1.0,
+            side="BUY",
+        )
+        for index in range(10)
+    ]
+    events = [
+        {
+            "event_time_ms": 900,
+            "final_update_id": 10,
+            "previous_update_id": 9,
+            "ofi_raw": 0.0,
+            "ofi_scale": 10.0,
+        },
+        {
+            "event_time_ms": 950,
+            "final_update_id": 11,
+            "previous_update_id": 10,
+            "ofi_raw": 0.0,
+            "ofi_scale": 10.0,
+        },
+    ]
+    result = build_live_event_order_flow(
+        trades,
+        events,
+        as_of_ms=1000,
+        min_trade_events=10,
+        min_depth_events=2,
+    )
+    assert not result.evidence.fresh
+    assert "depth_ofi_unavailable" in result.diagnostics
