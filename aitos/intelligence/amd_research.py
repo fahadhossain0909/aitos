@@ -315,6 +315,9 @@ def build_event_aligned_order_flow(
         if start <= _validate_timestamp(item.timestamp_ms) <= as_of
     ]
     books.sort(key=lambda item: item.timestamp_ms)
+    for book in books:
+        _best_level(book.bids)
+        _best_level(book.asks)
     if any(a.timestamp_ms == b.timestamp_ms for a, b in zip(books, books[1:])):
         diagnostics.append("duplicate_depth_timestamps")
         books = [
