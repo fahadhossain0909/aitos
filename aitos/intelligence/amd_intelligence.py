@@ -118,6 +118,21 @@ def _stable_id(*parts: Any) -> str:
     return sha256(raw).hexdigest()[:24]
 
 
+def _normalize_as_of(value: Any) -> str:
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return value
+    else:
+        return str(value or "")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat()
+
+
 def _closed_candles(raw: Sequence[Any]) -> list[Candle]:
     rows = [Candle.from_value(item) for item in raw]
     return [row for row in rows if row.is_closed]
@@ -293,7 +308,7 @@ def analyze_amd(
     if not rows:
         raise ValueError("AMD requires at least one completed candle")
     latest = rows[-1]
-    as_of = latest.timestamp or ""
+    as_of = _normalize_as_of(latest.timestamp)
     prior_state = (
         previous_state
         if (
