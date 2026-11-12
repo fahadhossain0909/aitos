@@ -5,6 +5,7 @@ completed candles and explicit reference levels. It never claims to observe
 hidden stop orders or infer participant intent. All scores are research
 features until calibrated on point-in-time, out-of-sample data.
 """
+
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
@@ -75,11 +76,17 @@ class Candle:
             timestamp=str(get("close_time", get("timestamp", "")) or ""),
             is_closed=bool(get("is_closed", True)),
         )
-        if not all(isfinite(x) for x in (candle.open, candle.high, candle.low, candle.close, candle.volume)):
+        if not all(
+            isfinite(x)
+            for x in (candle.open, candle.high, candle.low, candle.close, candle.volume)
+        ):
             raise ValueError("candle values must be finite")
         if candle.low <= 0 or candle.high < candle.low:
             raise ValueError("candle price range is invalid")
-        if not candle.low <= candle.open <= candle.high or not candle.low <= candle.close <= candle.high:
+        if (
+            not candle.low <= candle.open <= candle.high
+            or not candle.low <= candle.close <= candle.high
+        ):
             raise ValueError("candle open/close must be inside high/low")
         if candle.volume < 0:
             raise ValueError("candle volume cannot be negative")
@@ -102,7 +109,9 @@ class LiquidityLevel:
 
     def __post_init__(self) -> None:
         if not self.symbol or not isfinite(self.price) or self.price <= 0:
-            raise ValueError("liquidity level requires symbol and positive finite price")
+            raise ValueError(
+                "liquidity level requires symbol and positive finite price"
+            )
         if not 0.0 <= self.strength <= 100.0:
             raise ValueError("strength must be in [0, 100]")
         if self.touch_count < 1:
@@ -269,17 +278,19 @@ def _atr(candles: Sequence[Candle], period: int = 14) -> float:
     ranges = []
     previous_close = candles[0].close
     for candle in candles[-period:]:
-        ranges.append(max(
-            candle.high - candle.low,
-            abs(candle.high - previous_close),
-            abs(candle.low - previous_close),
-        ))
+        ranges.append(
+            max(
+                candle.high - candle.low,
+                abs(candle.high - previous_close),
+                abs(candle.low - previous_close),
+            )
+        )
         previous_close = candle.close
     return mean(ranges) if ranges else 0.0
 
 
 def _volume_zscore(candles: Sequence[Candle], index: int, window: int = 20) -> float:
-    history = [c.volume for c in candles[max(0, index - window):index]]
+    history = [c.volume for c in candles[max(0, index - window) : index]]
     if len(history) < 5:
         return 0.0
     deviation = pstdev(history)
@@ -314,21 +325,32 @@ def map_liquidity_levels(
     lows: list[tuple[int, float]] = []
     for idx in range(cfg.pivot_left, len(candles) - cfg.pivot_right):
         item = candles[idx]
-        left = candles[idx - cfg.pivot_left:idx]
-        right = candles[idx + 1:idx + cfg.pivot_right + 1]
-        if all(item.high > x.high for x in left) and all(item.high >= x.high for x in right):
+        left = candles[idx - cfg.pivot_left : idx]
+        right = candles[idx + 1 : idx + cfg.pivot_right + 1]
+        if all(item.high > x.high for x in left) and all(
+            item.high >= x.high for x in right
+        ):
             highs.append((idx, item.high))
-        if all(item.low < x.low for x in left) and all(item.low <= x.low for x in right):
+        if all(item.low < x.low for x in left) and all(
+            item.low <= x.low for x in right
+        ):
             lows.append((idx, item.low))
 
     levels: list[LiquidityLevel] = []
 
-    def add_cluster(points: list[tuple[int, float]], side: LiquiditySide, source: LiquiditySource) -> None:
+    def add_cluster(
+        points: list[tuple[int, float]], side: LiquiditySide, source: LiquiditySource
+    ) -> None:
         unused = set(range(len(points)))
         while unused:
             first = min(unused)
             base = points[first][1]
-            cluster = [i for i in sorted(unused) if abs(points[i][1] - base) / base * 10000 <= cfg.equal_level_tolerance_bps]
+            cluster = [
+                i
+                for i in sorted(unused)
+                if abs(points[i][1] - base) / base * 10000
+                <= cfg.equal_level_tolerance_bps
+            ]
             for i in cluster:
                 unused.discard(i)
             if len(cluster) < cfg.min_equal_touches:
@@ -336,30 +358,75 @@ def map_liquidity_levels(
             prices = [points[i][1] for i in cluster]
             price = mean(prices)
             touch_count = len(cluster)
-            strength = min(100.0, 25.0 + touch_count * 12.0 + min(20.0, max(prices) - min(prices)) / price * 10000)
+            strength = min(
+                100.0,
+                25.0
+                + touch_count * 12.0
+                + min(20.0, max(prices) - min(prices)) / price * 10000,
+            )
             timestamps = [candles[points[i][0]].timestamp for i in cluster]
-            levels.append(LiquidityLevel(
-                level_id=uuid.uuid4().hex,
-                symbol=symbol.upper(),
-                side=side,
-                price=price,
-                source=source,
-                timeframe=timeframe,
-                strength=round(strength, 2),
-                touch_count=touch_count,
-                first_seen=min(timestamps) if timestamps else "",
-                last_seen=max(timestamps) if timestamps else "",
-                evidence=(f"{touch_count} confirmed pivots within {cfg.equal_level_tolerance_bps:g} bps",),
-            ))
+            levels.append(
+                LiquidityLevel(
+                    level_id=uuid.uuid4().hex,
+                    symbol=symbol.upper(),
+                    side=side,
+                    price=price,
+                    source=source,
+                    timeframe=timeframe,
+                    strength=round(strength, 2),
+                    touch_count=touch_count,
+                    first_seen=min(timestamps) if timestamps else "",
+                    last_seen=max(timestamps) if timestamps else "",
+                    evidence=(
+                        f"{touch_count} confirmed pivots within {cfg.equal_level_tolerance_bps:g} bps",
+                    ),
+                )
+            )
 
     add_cluster(highs, LiquiditySide.BUY_SIDE, LiquiditySource.EQUAL_HIGHS)
     add_cluster(lows, LiquiditySide.SELL_SIDE, LiquiditySource.EQUAL_LOWS)
     for idx, price in highs:
-        if not any(abs(level.price - price) / price * 10000 <= cfg.equal_level_tolerance_bps for level in levels if level.side is LiquiditySide.BUY_SIDE):
-            levels.append(LiquidityLevel(uuid.uuid4().hex, symbol.upper(), LiquiditySide.BUY_SIDE, price, LiquiditySource.SWING_HIGH, timeframe, 35.0, 1, candles[idx].timestamp, candles[idx].timestamp, ("confirmed swing high",)))
+        if not any(
+            abs(level.price - price) / price * 10000 <= cfg.equal_level_tolerance_bps
+            for level in levels
+            if level.side is LiquiditySide.BUY_SIDE
+        ):
+            levels.append(
+                LiquidityLevel(
+                    uuid.uuid4().hex,
+                    symbol.upper(),
+                    LiquiditySide.BUY_SIDE,
+                    price,
+                    LiquiditySource.SWING_HIGH,
+                    timeframe,
+                    35.0,
+                    1,
+                    candles[idx].timestamp,
+                    candles[idx].timestamp,
+                    ("confirmed swing high",),
+                )
+            )
     for idx, price in lows:
-        if not any(abs(level.price - price) / price * 10000 <= cfg.equal_level_tolerance_bps for level in levels if level.side is LiquiditySide.SELL_SIDE):
-            levels.append(LiquidityLevel(uuid.uuid4().hex, symbol.upper(), LiquiditySide.SELL_SIDE, price, LiquiditySource.SWING_LOW, timeframe, 35.0, 1, candles[idx].timestamp, candles[idx].timestamp, ("confirmed swing low",)))
+        if not any(
+            abs(level.price - price) / price * 10000 <= cfg.equal_level_tolerance_bps
+            for level in levels
+            if level.side is LiquiditySide.SELL_SIDE
+        ):
+            levels.append(
+                LiquidityLevel(
+                    uuid.uuid4().hex,
+                    symbol.upper(),
+                    LiquiditySide.SELL_SIDE,
+                    price,
+                    LiquiditySource.SWING_LOW,
+                    timeframe,
+                    35.0,
+                    1,
+                    candles[idx].timestamp,
+                    candles[idx].timestamp,
+                    ("confirmed swing low",),
+                )
+            )
 
     for raw in reference_levels:
         try:
@@ -368,19 +435,23 @@ def map_liquidity_levels(
             price = float(raw["price"])
             if not isfinite(price) or price <= 0:
                 continue
-            levels.append(LiquidityLevel(
-                level_id=str(raw.get("level_id") or uuid.uuid4().hex),
-                symbol=symbol.upper(),
-                side=side,
-                price=price,
-                source=source,
-                timeframe=str(raw.get("timeframe") or timeframe),
-                strength=max(0.0, min(100.0, float(raw.get("strength", 60.0)))),
-                touch_count=max(1, int(raw.get("touch_count", 1))),
-                first_seen=str(raw.get("first_seen", "")),
-                last_seen=str(raw.get("last_seen", "")),
-                evidence=tuple(raw.get("evidence", ("point-in-time reference level",))),
-            ))
+            levels.append(
+                LiquidityLevel(
+                    level_id=str(raw.get("level_id") or uuid.uuid4().hex),
+                    symbol=symbol.upper(),
+                    side=side,
+                    price=price,
+                    source=source,
+                    timeframe=str(raw.get("timeframe") or timeframe),
+                    strength=max(0.0, min(100.0, float(raw.get("strength", 60.0)))),
+                    touch_count=max(1, int(raw.get("touch_count", 1))),
+                    first_seen=str(raw.get("first_seen", "")),
+                    last_seen=str(raw.get("last_seen", "")),
+                    evidence=tuple(
+                        raw.get("evidence", ("point-in-time reference level",))
+                    ),
+                )
+            )
         except (KeyError, TypeError, ValueError):
             continue
 
@@ -395,7 +466,7 @@ def map_liquidity_levels(
         )
         if not duplicate:
             deduped.append(level)
-    return tuple(deduped[:cfg.max_levels])
+    return tuple(deduped[: cfg.max_levels])
 
 
 def detect_liquidity_sweeps(
@@ -405,10 +476,14 @@ def detect_liquidity_sweeps(
     config: LiquidityConfig | None = None,
 ) -> tuple[SweepEvent, ...]:
     cfg = config or LiquidityConfig()
-    candles = [Candle.from_value(item) for item in raw_candles if Candle.from_value(item).is_closed]
+    candles = [
+        Candle.from_value(item)
+        for item in raw_candles
+        if Candle.from_value(item).is_closed
+    ]
     events: list[SweepEvent] = []
     for idx, candle in enumerate(candles):
-        atr = _atr(candles[:idx + 1])
+        atr = _atr(candles[: idx + 1])
         if atr <= 0:
             continue
         for level in levels:
@@ -416,28 +491,53 @@ def detect_liquidity_sweeps(
                 penetration = level.price - candle.low
                 reclaimed = candle.close > level.price
                 direction = "down"
-                wick = max(0.0, min(1.0, (min(candle.open, candle.close) - candle.low) / max(candle.high - candle.low, 1e-12)))
+                wick = max(
+                    0.0,
+                    min(
+                        1.0,
+                        (min(candle.open, candle.close) - candle.low)
+                        / max(candle.high - candle.low, 1e-12),
+                    ),
+                )
             else:
                 penetration = candle.high - level.price
                 reclaimed = candle.close < level.price
                 direction = "up"
-                wick = max(0.0, min(1.0, (candle.high - max(candle.open, candle.close)) / max(candle.high - candle.low, 1e-12)))
+                wick = max(
+                    0.0,
+                    min(
+                        1.0,
+                        (candle.high - max(candle.open, candle.close))
+                        / max(candle.high - candle.low, 1e-12),
+                    ),
+                )
             depth_atr = penetration / atr
-            if penetration <= 0 or depth_atr < cfg.sweep_min_penetration_atr or depth_atr > cfg.sweep_max_penetration_atr:
+            if (
+                penetration <= 0
+                or depth_atr < cfg.sweep_min_penetration_atr
+                or depth_atr > cfg.sweep_max_penetration_atr
+            ):
                 continue
-            events.append(SweepEvent(
-                event_id=f"{level.level_id}:{idx}",
-                level=level,
-                direction=direction,
-                sweep_price=candle.low if direction == "down" else candle.high,
-                penetration=penetration,
-                candle_index=idx,
-                candle_timestamp=candle.timestamp,
-                wick_ratio=wick,
-                volume_zscore=_volume_zscore(candles, idx),
-                state=SweepState.SWEPT if not reclaimed else SweepState.REJECTION_PENDING,
-                evidence=("level penetrated", "completed candle only") + (("same-candle reclaim",) if reclaimed else ()),
-            ))
+            events.append(
+                SweepEvent(
+                    event_id=f"{level.level_id}:{idx}",
+                    level=level,
+                    direction=direction,
+                    sweep_price=candle.low if direction == "down" else candle.high,
+                    penetration=penetration,
+                    candle_index=idx,
+                    candle_timestamp=candle.timestamp,
+                    wick_ratio=wick,
+                    volume_zscore=_volume_zscore(candles, idx),
+                    state=(
+                        SweepState.SWEPT
+                        if not reclaimed
+                        else SweepState.REJECTION_PENDING
+                    ),
+                    evidence=("level penetrated", "completed candle only")
+                    + (("same-candle reclaim",) if reclaimed else ()),
+                )
+            )
     return tuple(events)
 
 
@@ -449,36 +549,101 @@ def classify_sweep(
     config: LiquidityConfig | None = None,
 ) -> SweepClassification:
     cfg = config or LiquidityConfig()
-    candles = [Candle.from_value(item) for item in raw_candles if Candle.from_value(item).is_closed]
-    future = candles[event.candle_index + 1:event.candle_index + 1 + max(cfg.reclaim_bars, cfg.acceptance_bars)]
+    candles = [
+        Candle.from_value(item)
+        for item in raw_candles
+        if Candle.from_value(item).is_closed
+    ]
+    future = candles[
+        event.candle_index
+        + 1 : event.candle_index
+        + 1
+        + max(cfg.reclaim_bars, cfg.acceptance_bars)
+    ]
     flow = flow or OrderFlowEvidence()
     evidence = list(event.evidence)
     if not future:
-        return SweepClassification(SweepState.INDECISION, LiquidityAction.WAIT, 0.0, ("awaiting post-sweep completed bars",), 0)
+        return SweepClassification(
+            SweepState.INDECISION,
+            LiquidityAction.WAIT,
+            0.0,
+            ("awaiting post-sweep completed bars",),
+            0,
+        )
 
     level = event.level.price
     if event.direction == "down":
-        reclaimed = any(c.close > level for c in future[:cfg.reclaim_bars])
-        accepted = len(future) >= cfg.acceptance_bars and all(c.close < level for c in future[:cfg.acceptance_bars])
-        flow_confirms = flow.fresh and flow.confidence >= 0.5 and (flow.cvd_score >= 6.0 or flow.ofi_score >= 6.0 or flow.bid_replenishment > 0)
+        reclaimed = any(c.close > level for c in future[: cfg.reclaim_bars])
+        accepted = len(future) >= cfg.acceptance_bars and all(
+            c.close < level for c in future[: cfg.acceptance_bars]
+        )
+        flow_confirms = (
+            flow.fresh
+            and flow.confidence >= cfg.minimum_confirmation_confidence
+            and (
+                flow.cvd_score >= 6.0
+                or flow.ofi_score >= 6.0
+                or flow.bid_replenishment > 0
+            )
+        )
         if reclaimed and flow_confirms:
-            evidence.extend(("sell-side liquidity reclaimed", "bullish order-flow confirmation"))
-            return SweepClassification(SweepState.REJECTED, LiquidityAction.REVERSAL_LONG, min(1.0, 0.55 + flow.confidence * 0.35 + event.wick_ratio * 0.1), tuple(evidence), len(future))
+            evidence.extend(
+                ("sell-side liquidity reclaimed", "bullish order-flow confirmation")
+            )
+            return SweepClassification(
+                SweepState.REJECTED,
+                LiquidityAction.REVERSAL_LONG,
+                min(1.0, 0.55 + flow.confidence * 0.35 + event.wick_ratio * 0.1),
+                tuple(evidence),
+                len(future),
+            )
         if accepted:
             evidence.append("price accepted below sell-side liquidity")
-            return SweepClassification(SweepState.ACCEPTED, LiquidityAction.CONTINUATION_SHORT, 0.65, tuple(evidence), len(future))
+            return SweepClassification(
+                SweepState.ACCEPTED,
+                LiquidityAction.CONTINUATION_SHORT,
+                0.65,
+                tuple(evidence),
+                len(future),
+            )
     else:
-        reclaimed = any(c.close < level for c in future[:cfg.reclaim_bars])
-        accepted = len(future) >= cfg.acceptance_bars and all(c.close > level for c in future[:cfg.acceptance_bars])
-        flow_confirms = flow.fresh and flow.confidence >= 0.5 and (flow.cvd_score <= 4.0 or flow.ofi_score <= 4.0 or flow.ask_replenishment > 0)
+        reclaimed = any(c.close < level for c in future[: cfg.reclaim_bars])
+        accepted = len(future) >= cfg.acceptance_bars and all(
+            c.close > level for c in future[: cfg.acceptance_bars]
+        )
+        flow_confirms = (
+            flow.fresh
+            and flow.confidence >= 0.5
+            and (
+                flow.cvd_score <= 4.0
+                or flow.ofi_score <= 4.0
+                or flow.ask_replenishment > 0
+            )
+        )
         if reclaimed and flow_confirms:
-            evidence.extend(("buy-side liquidity reclaimed", "bearish order-flow confirmation"))
-            return SweepClassification(SweepState.REJECTED, LiquidityAction.REVERSAL_SHORT, min(1.0, 0.55 + flow.confidence * 0.35 + event.wick_ratio * 0.1), tuple(evidence), len(future))
+            evidence.extend(
+                ("buy-side liquidity reclaimed", "bearish order-flow confirmation")
+            )
+            return SweepClassification(
+                SweepState.REJECTED,
+                LiquidityAction.REVERSAL_SHORT,
+                min(1.0, 0.55 + flow.confidence * 0.35 + event.wick_ratio * 0.1),
+                tuple(evidence),
+                len(future),
+            )
         if accepted:
             evidence.append("price accepted above buy-side liquidity")
-            return SweepClassification(SweepState.ACCEPTED, LiquidityAction.CONTINUATION_LONG, 0.65, tuple(evidence), len(future))
+            return SweepClassification(
+                SweepState.ACCEPTED,
+                LiquidityAction.CONTINUATION_LONG,
+                0.65,
+                tuple(evidence),
+                len(future),
+            )
     evidence.append("post-sweep evidence is mixed or incomplete")
-    return SweepClassification(SweepState.INDECISION, LiquidityAction.WAIT, 0.25, tuple(evidence), len(future))
+    return SweepClassification(
+        SweepState.INDECISION, LiquidityAction.WAIT, 0.25, tuple(evidence), len(future)
+    )
 
 
 def score_liquidity_risk(
@@ -497,26 +662,61 @@ def score_liquidity_risk(
         raise ValueError("price must be positive and finite")
     if direction.upper() not in {"LONG", "SHORT"}:
         raise ValueError("direction must be LONG or SHORT")
-    relevant = [x for x in levels if (direction.upper() == "LONG" and x.side is LiquiditySide.SELL_SIDE and x.price < price) or (direction.upper() == "SHORT" and x.side is LiquiditySide.BUY_SIDE and x.price > price)]
+    relevant = [
+        x
+        for x in levels
+        if (
+            direction.upper() == "LONG"
+            and x.side is LiquiditySide.SELL_SIDE
+            and x.price < price
+        )
+        or (
+            direction.upper() == "SHORT"
+            and x.side is LiquiditySide.BUY_SIDE
+            and x.price > price
+        )
+    ]
     nearest = min(relevant, key=lambda x: abs(price - x.price)) if relevant else None
-    distance = abs(price - nearest.price) / atr if nearest is not None and atr > 0 else None
-    proximity = 0.0 if distance is None else max(0.0, 1.0 - distance / max(cfg.risk_nearby_atr, 1e-9)) * 35.0
+    distance = (
+        abs(price - nearest.price) / atr if nearest is not None and atr > 0 else None
+    )
+    proximity = (
+        0.0
+        if distance is None
+        else max(0.0, 1.0 - distance / max(cfg.risk_nearby_atr, 1e-9)) * 35.0
+    )
     strength = (nearest.strength / 100.0 * 25.0) if nearest else 0.0
     adverse_flow = 0.0
     reasons: list[str] = []
     if nearest:
         reasons.append("nearby_" + nearest.source.value)
     if flow.fresh and flow.confidence >= 0.5:
-        adverse_flow = (max(0.0, 5.0 - flow.cvd_score) + max(0.0, 5.0 - flow.ofi_score)) * 2.0 if direction.upper() == "LONG" else (max(0.0, flow.cvd_score - 5.0) + max(0.0, flow.ofi_score - 5.0)) * 2.0
+        adverse_flow = (
+            (max(0.0, 5.0 - flow.cvd_score) + max(0.0, 5.0 - flow.ofi_score)) * 2.0
+            if direction.upper() == "LONG"
+            else (max(0.0, flow.cvd_score - 5.0) + max(0.0, flow.ofi_score - 5.0)) * 2.0
+        )
         adverse_flow = min(25.0, adverse_flow)
         if adverse_flow >= 8.0:
             reasons.append("fresh_adverse_order_flow")
     vol_score = max(0.0, min(15.0, float(volatility_expansion) * 5.0))
     if vol_score >= 5:
         reasons.append("volatility_expansion")
-    score = round(max(0.0, min(100.0, proximity + strength + adverse_flow + vol_score)), 2)
-    action = LiquidityAction.BLOCK_ENTRY if score >= cfg.risk_block_threshold else (LiquidityAction.WAIT if score >= cfg.risk_block_threshold * 0.65 else LiquidityAction.SHADOW)
-    return LiquidityRisk(score, distance, nearest.level_id if nearest else None, tuple(reasons), action)
+    score = round(
+        max(0.0, min(100.0, proximity + strength + adverse_flow + vol_score)), 2
+    )
+    action = (
+        LiquidityAction.BLOCK_ENTRY
+        if score >= cfg.risk_block_threshold
+        else (
+            LiquidityAction.WAIT
+            if score >= cfg.risk_block_threshold * 0.65
+            else LiquidityAction.SHADOW
+        )
+    )
+    return LiquidityRisk(
+        score, distance, nearest.level_id if nearest else None, tuple(reasons), action
+    )
 
 
 def plan_liquidity_aware_stop(
@@ -537,23 +737,60 @@ def plan_liquidity_aware_stop(
         raise ValueError("LONG invalidation must be below entry")
     if normalized == "SHORT" and invalidation_price <= entry_price:
         raise ValueError("SHORT invalidation must be above entry")
-    buffer = max(entry_price * cfg.min_stop_buffer_bps / 10000.0, max(0.0, atr) * cfg.stop_buffer_atr)
-    stop = invalidation_price - buffer if normalized == "LONG" else invalidation_price + buffer
+    buffer = max(
+        entry_price * cfg.min_stop_buffer_bps / 10000.0,
+        max(0.0, atr) * cfg.stop_buffer_atr,
+    )
+    stop = (
+        invalidation_price - buffer
+        if normalized == "LONG"
+        else invalidation_price + buffer
+    )
     distance = abs(entry_price - stop)
     distance_pct = distance / entry_price
     allowed = distance_pct <= cfg.max_stop_distance_pct
-    return StopPlan(normalized, entry_price, invalidation_price, stop, distance, distance_pct, buffer, allowed, "thesis_invalidation_with_liquidity_buffer" if allowed else "stop_exceeds_max_distance_reduce_size_or_reject")
+    return StopPlan(
+        normalized,
+        entry_price,
+        invalidation_price,
+        stop,
+        distance,
+        distance_pct,
+        buffer,
+        allowed,
+        (
+            "thesis_invalidation_with_liquidity_buffer"
+            if allowed
+            else "stop_exceeds_max_distance_reduce_size_or_reject"
+        ),
+    )
 
 
 def position_quantity_for_risk(
-    *, equity: float, risk_fraction: float, stop_distance: float, contract_multiplier: float = 1.0,
+    *,
+    equity: float,
+    risk_fraction: float,
+    stop_distance: float,
+    contract_multiplier: float = 1.0,
     estimated_cost_per_unit: float = 0.0,
 ) -> float:
     """Risk-budget sizing; costs are reserved before quantity is calculated."""
-    values = (equity, risk_fraction, stop_distance, contract_multiplier, estimated_cost_per_unit)
+    values = (
+        equity,
+        risk_fraction,
+        stop_distance,
+        contract_multiplier,
+        estimated_cost_per_unit,
+    )
     if not all(isfinite(float(x)) for x in values):
         raise ValueError("sizing inputs must be finite")
-    if equity <= 0 or not 0 < risk_fraction <= 1 or stop_distance <= 0 or contract_multiplier <= 0 or estimated_cost_per_unit < 0:
+    if (
+        equity <= 0
+        or not 0 < risk_fraction <= 1
+        or stop_distance <= 0
+        or contract_multiplier <= 0
+        or estimated_cost_per_unit < 0
+    ):
         raise ValueError("invalid sizing inputs")
     budget = equity * risk_fraction
     per_unit_risk = stop_distance * contract_multiplier + estimated_cost_per_unit
@@ -571,13 +808,36 @@ def analyze_liquidity(
     config: LiquidityConfig | None = None,
 ) -> LiquidityAnalysis:
     cfg = config or LiquidityConfig()
-    candles = [Candle.from_value(item) for item in raw_candles if Candle.from_value(item).is_closed]
-    levels = map_liquidity_levels(symbol, timeframe, candles, config=cfg, reference_levels=reference_levels)
+    candles = [
+        Candle.from_value(item)
+        for item in raw_candles
+        if Candle.from_value(item).is_closed
+    ]
+    levels = map_liquidity_levels(
+        symbol, timeframe, candles, config=cfg, reference_levels=reference_levels
+    )
     sweeps = detect_liquidity_sweeps(levels, candles, config=cfg)
-    classification = classify_sweep(sweeps[-1], candles, flow=flow, config=cfg) if sweeps else None
+    classification = (
+        classify_sweep(sweeps[-1], candles, flow=flow, config=cfg) if sweeps else None
+    )
     atr = _atr(candles)
-    risk = score_liquidity_risk(candles[-1].close, levels, atr=atr, direction=direction, flow=flow, config=cfg) if candles else LiquidityRisk(0.0, None, None, ("insufficient_candles",), LiquidityAction.WAIT)
-    return LiquidityAnalysis(symbol.upper(), timeframe, levels, sweeps, classification, risk)
+    risk = (
+        score_liquidity_risk(
+            candles[-1].close,
+            levels,
+            atr=atr,
+            direction=direction,
+            flow=flow,
+            config=cfg,
+        )
+        if candles
+        else LiquidityRisk(
+            0.0, None, None, ("insufficient_candles",), LiquidityAction.WAIT
+        )
+    )
+    return LiquidityAnalysis(
+        symbol.upper(), timeframe, levels, sweeps, classification, risk
+    )
 
 
 @dataclass(frozen=True)
@@ -599,7 +859,17 @@ class LiquidityOutcome:
 
 
 def attribute_liquidity_outcome(outcome: LiquidityOutcome) -> dict[str, Any]:
-    if not all(isfinite(float(x)) for x in (outcome.realized_pnl, outcome.mae, outcome.mfe, outcome.fees, outcome.funding, outcome.slippage)):
+    if not all(
+        isfinite(float(x))
+        for x in (
+            outcome.realized_pnl,
+            outcome.mae,
+            outcome.mfe,
+            outcome.fees,
+            outcome.funding,
+            outcome.slippage,
+        )
+    ):
         raise ValueError("outcome metrics must be finite")
     return {
         "event_id": outcome.event_id,

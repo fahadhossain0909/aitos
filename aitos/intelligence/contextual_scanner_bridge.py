@@ -96,7 +96,15 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                     direction=candidate.direction.value,
                     flow=OrderFlowEvidence(
                         cvd_score=max(0.0, min(10.0, flow_score)),
-                        ofi_score=max(0.0, min(10.0, float(context_scores.get("order_book_flow_imbalance", 5.0)))),
+                        ofi_score=max(
+                            0.0,
+                            min(
+                                10.0,
+                                float(
+                                    context_scores.get("order_book_flow_imbalance", 5.0)
+                                ),
+                            ),
+                        ),
                         fresh=False,
                         confidence=0.0,
                     ),
