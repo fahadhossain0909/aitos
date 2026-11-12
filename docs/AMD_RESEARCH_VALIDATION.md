@@ -1,0 +1,61 @@
+# AMD Research Validation and Execution Replay
+
+## Status and decision boundary
+
+The AMD classifier remains shadow-only. This document defines the reusable research and execution-measurement layer; it does not assert a profitable edge or authorize strategy activation. Unit tests validate contracts on synthetic data, not market performance.
+
+## Event-time order-flow evidence
+
+`build_event_aligned_order_flow` accepts:
+- Trade prints with exchange event timestamps, unique trade IDs, price, quantity and an explicit aggressor side.
+- Timestamped post-update L1 book states with best bid/ask prices and displayed quantities.
+
+It deduplicates trade IDs, rejects future/out-of-window events, excludes unknown aggressor sides, computes signed-notional CVD and best-quote OFI, and fails freshness closed when event counts or staleness limits are not met. The output's bid/ask refill fields are displayed-size increases at unchanged best prices only. They do not prove hidden liquidity, cancellation/replenishment intent, queue position or absorption.
+
+The current canonical `TradeEvent` contract does not guarantee an aggressor-side field, and the scanner cache does not expose a complete, sequence-validated history of every depth delta to the AMD bridge. Therefore this event-time builder is available for validated adapter/replay inputs but is not silently wired to the existing approximate live CVD/depth proxies. A venue adapter must map Binance buyer-maker semantics into aggressor side, preserve event time and trade identity, apply depth snapshot/delta sequence continuity, and publish post-update book states before live AMD can consume it. Until then the existing scanner flow remains explicitly freshness-gated and shadow-only.
+
+## Point-in-time outcome labels
+
+`evaluate_amd_forward_outcome` computes directional close return, MFE and MAE for a fixed forward candle horizon. It marks incomplete horizons explicitly and does not guess intrabar ordering when both stop and target could have traded within the same candle. These are counterfactual candle markouts, not exchange fills or net trade returns.
+
+## Execution-aware replay
+
+`replay_amd_execution` composes the existing timestamped L1 execution replay for entry and exit:
+- Submission-to-market latency.
+- Spread and adverse slippage.
+- Taker fees on executed quantity.
+- Partial fills constrained by displayed top-of-book size.
+- Funding over the stated holding interval.
+
+Entry and exit fills are matched FIFO so partial exit PnL is calculated only on matched quantities. Entry costs are allocated pro-rata to matched inventory; unmatched inventory makes the result incomplete. The existing L1 replay is not a full L2 market-impact, passive queue, stop-gap or liquidation model. For those scenarios use the existing `depth_replay.py` L2 tools and venue-calibrated impact assumptions. Do not treat zero impact coefficients as evidence that impact is zero.
+
+## Walk-forward and cohort reporting
+
+`purged_walk_forward_folds` creates expanding chronological train/test folds with an explicit embargo. The caller must choose embargo length at least as large as the maximum label horizon and ensure the source rows are already deduplicated, sorted and point-in-time. The helper rejects non-chronological event timestamps.
+
+`summarize_amd_cohorts` reports observations, resolved/unresolved outcomes, mean net return, win rate and profit factor by experiment variant, symbol, regime, AMD phase and LONG/SHORT direction. It never imputes missing outcomes. Supply `net_return_pct` only after fees, funding, spread, slippage and execution outcomes have been reconciled.
+
+## Required ablation matrix
+
+Run identical chronological splits and execution assumptions for:
+1. `baseline`: existing AITOS behavior with AMD excluded from decision inputs.
+2. `liquidity_only`: existing Liquidity Intelligence shadow evidence.
+3. `amd_accumulation`: accumulation phase features only.
+4. `amd_manipulation`: manipulation/sweep phase features only.
+5. `amd_distribution`: distribution/delivery phase features only.
+6. `amd_full`: all AMD phases.
+7. `amd_full_event_flow`: AMD with validated event-time CVD and L1/L2 OFI.
+
+Report all cohorts separately for LONG and SHORT, symbol, timeframe, volatility/liquidity regime and venue. Include sample count, unresolved fraction, phase precision/recall against independently defined labels, false-sweep rate, expectancy, profit factor, maximum drawdown, Sharpe/Sortino, MAE/MFE, time-to-delivery, stop-out attribution, turnover and cost sensitivity. Include confidence intervals and multiple-testing correction; do not tune thresholds on the final holdout.
+
+## Acceptance gates before any decision influence
+
+- A complete point-in-time historical dataset with exchange event time, ingestion time, unique trade IDs, aggressor side, sequenced depth deltas/snapshots, candles, funding and instrument filters.
+- No look-ahead, survivorship or symbol-selection leakage; chronological purged walk-forward and a final untouched holdout.
+- Calibrated phase labels and separate LONG/SHORT results across symbols and regimes.
+- Execution-aware L1/L2 replay with conservative fees, funding, spread, slippage, latency, partial fills, stop gaps and exchange constraints.
+- Baseline and ablation results with adequate sample sizes, uncertainty intervals and no unexplained material regression.
+- Independent review and explicit champion/challenger approval.
+- Shadow and paper canary evidence before any live decision influence.
+
+No historical exchange dataset or production venue-calibrated cost model is fabricated by this code change. If those data are not present in the research environment, the corresponding validation gate remains open.
