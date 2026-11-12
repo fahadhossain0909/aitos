@@ -708,3 +708,130 @@ def replay_amd_execution(
         ),
         complete=complete,
     )
+
+
+@dataclass(frozen=True)
+class AMDHistoricalObservation:
+    state: Any
+    outcome: AMDForwardOutcome | None
+    decision_time_ms: int
+    flow_diagnostics: tuple[str, ...]
+    flow_source: str
+
+
+def replay_amd_historical_observations(
+    dataset: Any,
+    *,
+    timeframe: str,
+    horizon_bars: int = 20,
+    event_window_ms: int = 60_000,
+    max_flow_staleness_ms: int = 5_000,
+) -> tuple[AMDHistoricalObservation, ...]:
+    """Replay AMD at closed-candle boundaries using archived sequenced events.
+
+    Requires the ClickHouse loader's raw-depth replay provenance. Snapshot-only
+    datasets are rejected because they cannot reproduce event-time OFI.
+    """
+    from aitos.intelligence.amd_intelligence import AMDState, analyze_amd
+    from aitos.intelligence.liquidity_intelligence import (
+        Candle,
+        OrderFlowEvidence,
+        analyze_liquidity,
+    )
+    from aitos.models.market import OrderBookSnapshot, TradeTick
+
+    provenance = dict(getattr(dataset, "provenance", {}) or {})
+    if not provenance.get("raw_depth_event_replay_available"):
+        raise ValueError(
+            "AMD historical replay requires raw sequenced depth events and "
+            "a pre-window order-book bootstrap"
+        )
+    normalized_timeframe = str(timeframe).lower()
+    candle_rows = sorted(
+        (
+            row for row in dataset.candles
+            if str(row.get("timeframe", "")).lower() == normalized_timeframe
+        ),
+        key=lambda row: row["close_time"],
+    )
+    if not candle_rows:
+        raise ValueError("historical dataset has no candles for requested timeframe")
+    events = tuple(sorted(dataset.events, key=lambda item: item.timestamp))
+    previous_state: AMDState | None = None
+    observations: list[AMDHistoricalObservation] = []
+
+    for index, decision_candle in enumerate(candle_rows):
+        decision_time = decision_candle["close_time"]
+        if decision_time.tzinfo is None:
+            raise ValueError("historical candle close times must be timezone-aware")
+        decision_ms = int(decision_time.timestamp() * 1000)
+        history_rows = [
+            row for row in candle_rows[: index + 1]
+            if row["close_time"] <= decision_time
+        ]
+        candles = tuple(Candle.from_value(row) for row in history_rows)
+        if len(candles) < 20:
+            continue
+        window_start = decision_ms - event_window_ms
+        recent_trades = [
+            event for event in events
+            if isinstance(event, TradeTick)
+            and window_start <= int(event.timestamp.timestamp() * 1000) <= decision_ms
+        ]
+        recent_depth = [
+            event.depth_event
+            for event in events
+            if isinstance(event, OrderBookSnapshot)
+            and event.depth_event is not None
+            and window_start <= int(event.timestamp.timestamp() * 1000) <= decision_ms
+        ]
+        flow_result = build_live_event_order_flow(
+            recent_trades,
+            recent_depth,
+            as_of_ms=decision_ms,
+            window_ms=event_window_ms,
+            max_staleness_ms=max_flow_staleness_ms,
+        )
+        flow = flow_result.evidence
+        liquidity = analyze_liquidity(
+            str(dataset.symbol).upper(),
+            normalized_timeframe,
+            candles,
+            flow=flow if flow.fresh else OrderFlowEvidence(),
+        )
+        state = analyze_amd(
+            str(dataset.symbol).upper(),
+            normalized_timeframe,
+            candles,
+            liquidity=liquidity,
+            flow=flow,
+            previous_state=previous_state,
+        )
+        previous_state = state
+        future_rows = [
+            row for row in candle_rows[index + 1 :]
+            if row["open_time"] >= decision_time
+        ][:horizon_bars]
+        outcome = None
+        if state.direction in {"LONG", "SHORT"}:
+            outcome = evaluate_amd_forward_outcome(
+                state,
+                future_rows,
+                entry_price=candles[-1].close,
+                entry_time_ms=decision_ms,
+                horizon_bars=horizon_bars,
+            )
+        observations.append(
+            AMDHistoricalObservation(
+                state=state,
+                outcome=outcome,
+                decision_time_ms=decision_ms,
+                flow_diagnostics=flow_result.diagnostics,
+                flow_source=(
+                    "sequenced_trade_and_depth_events"
+                    if flow.fresh
+                    else "unavailable_or_stale_event_flow"
+                ),
+            )
+        )
+    return tuple(observations)
