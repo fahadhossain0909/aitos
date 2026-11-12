@@ -165,6 +165,7 @@ def build_live_event_order_flow(
         diagnostics.append("depth_sequence_gap_marker")
     ofi_raw = 0.0
     ofi_scale = 0.0
+    ofi_activity = 0.0
     bid_replenishment = 0.0
     ask_replenishment = 0.0
     for index, (_, event) in enumerate(events):
@@ -178,6 +179,7 @@ def build_live_event_order_flow(
             raise ValueError("depth-event scale and replenishment must be non-negative")
         ofi_raw += raw
         ofi_scale += scale
+        ofi_activity += abs(raw)
         bid_replenishment += bid_add
         ask_replenishment += ask_add
         if index:
@@ -200,6 +202,7 @@ def build_live_event_order_flow(
     fresh = bool(
         len(trades) >= min_trade_events
         and len(events) >= min_depth_events
+        and ofi_activity > 0
         and sequence_valid
         and latest is not None
         and as_of - latest <= max_staleness_ms
@@ -219,6 +222,8 @@ def build_live_event_order_flow(
         diagnostics.append("insufficient_classified_trade_events")
     if len(events) < min_depth_events:
         diagnostics.append("insufficient_sequenced_depth_events")
+    if ofi_activity <= 0:
+        diagnostics.append("depth_ofi_unavailable")
     if latest is None or as_of - latest > max_staleness_ms:
         diagnostics.append("event_flow_stale")
     evidence = OrderFlowEvidence(
@@ -353,6 +358,7 @@ def build_event_aligned_order_flow(
         and latest is not None
         and as_of - latest <= max_staleness_ms
         and len(classified) >= min_trade_events
+        and ofi_scale > 0
     )
     trade_coverage = min(1.0, len(classified) / float(min_trade_events))
     depth_coverage = min(1.0, updates / float(min_depth_updates))
@@ -363,6 +369,8 @@ def build_event_aligned_order_flow(
         diagnostics.append("insufficient_classified_trade_events")
     if updates < min_depth_updates:
         diagnostics.append("insufficient_depth_updates")
+    if ofi_scale <= 0:
+        diagnostics.append("depth_ofi_unavailable")
     if latest is None or as_of - latest > max_staleness_ms:
         diagnostics.append("event_flow_stale")
 
