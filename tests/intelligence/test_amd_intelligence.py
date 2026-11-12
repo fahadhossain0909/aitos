@@ -475,3 +475,30 @@ def test_future_checkpoint_is_ignored_for_historical_replay():
     )
     assert state.phase is AMDPhase.ACCUMULATION_CONFIRMED
     assert state.direction == ""
+
+
+def test_one_sided_replenishment_is_not_labelled_two_sided_absorption():
+    level = LiquidityLevel(
+        "range-pool",
+        "BTCUSDT",
+        LiquiditySide.BUY_SIDE,
+        100.1,
+        LiquiditySource.EQUAL_HIGHS,
+        "5m",
+        70.0,
+        2,
+    )
+    state = analyze_amd(
+        "BTCUSDT",
+        "5m",
+        _range_candles(),
+        liquidity=_liquidity(levels=(level,)),
+        flow=OrderFlowEvidence(
+            fresh=True,
+            confidence=0.9,
+            bid_replenishment=5.0,
+            ask_replenishment=0.0,
+        ),
+    )
+    assert "fresh_one_sided_or_no_replenishment" in state.evidence
+    assert "fresh_two_sided_liquidity_replenishment" not in state.evidence
