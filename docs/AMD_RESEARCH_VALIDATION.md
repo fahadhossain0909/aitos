@@ -39,7 +39,7 @@ Entry and exit fills are matched FIFO so partial exit PnL is calculated only on 
 
 `summarize_amd_cohorts` reports observations, resolved/unresolved outcomes, mean net return, win rate and profit factor by experiment variant, symbol, regime, AMD phase and LONG/SHORT direction. It never imputes missing outcomes. Supply `net_return_pct` only after fees, funding, spread, slippage and execution outcomes have been reconciled.
 
-`replay_amd_historical_observations` returns phase/state observations plus strictly later counterfactual candle labels; `summarize_amd_forward_cohorts` reports those gross forward markouts separately and never labels them net PnL. `ClickHouseHistoricalAblationRunner.run_amd_phase_replay` is the async ClickHouse entry point for loading and running this point-in-time phase replay.
+`replay_amd_historical_observations` returns phase/state observations plus strictly later counterfactual candle labels; `summarize_amd_forward_cohorts` reports those gross forward markouts separately and never labels them net PnL. `ClickHouseHistoricalAblationRunner.run_amd_phase_replay` is the async ClickHouse entry point for loading and running this point-in-time phase replay; its result includes both per-bar observations and the gross forward-cohort report.
 
 ## Required ablation matrix
 
