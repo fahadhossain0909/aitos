@@ -77,6 +77,60 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
         )
         context_scores["graph_historical_support"] = graph_context["score"]
         availability["graph_historical_support"] = graph_context["available"]
+        # Evidence-only Liquidity Intelligence. This enriches the Kernel context
+        # and attribution trail but deliberately does not alter ranking or gates.
+        liquidity_payload = None
+        candidate_klines = getattr(candidate, "_aitos_klines", ())
+        if candidate_klines:
+            try:
+                from aitos.intelligence.liquidity_intelligence import (
+                    OrderFlowEvidence,
+                    analyze_liquidity,
+                )
+
+                flow_score = float(context_scores.get("order_flow_bias", 5.0))
+                liquidity_analysis = analyze_liquidity(
+                    candidate.symbol,
+                    str(getattr(candidate_klines[-1], "timeframe", "unknown")),
+                    candidate_klines,
+                    direction=candidate.direction.value,
+                    flow=OrderFlowEvidence(
+                        cvd_score=max(0.0, min(10.0, flow_score)),
+                        ofi_score=max(0.0, min(10.0, float(context_scores.get("order_book_flow_imbalance", 5.0)))),
+                        fresh=False,
+                        confidence=0.0,
+                    ),
+                )
+                liquidity_payload = liquidity_analysis.to_dict()
+                record = getattr(self, "_record_funnel", None)
+                if callable(record):
+                    await record(
+                        symbol=candidate.symbol,
+                        side=candidate.direction.value,
+                        stage="liquidity_intelligence_shadow",
+                        accepted=True,
+                        reason="evidence_only_no_decision_impact",
+                        details={
+                            "candidate_id": getattr(candidate, "candidate_id", None),
+                            "liquidity_level_count": len(liquidity_analysis.levels),
+                            "sweep_count": len(liquidity_analysis.sweeps),
+                            "risk_score": liquidity_analysis.risk.score,
+                            "risk_action": liquidity_analysis.risk.action.value,
+                            "latest_sweep_state": (
+                                liquidity_analysis.latest_classification.state.value
+                                if liquidity_analysis.latest_classification
+                                else None
+                            ),
+                            "decision_impact": False,
+                        },
+                    )
+            except (AttributeError, TypeError, ValueError):
+                liquidity_payload = {
+                    "available": False,
+                    "reason": "liquidity_analysis_invalid_or_unavailable",
+                    "decision_impact": False,
+                }
+
         context = {
             "direction": candidate.direction.value,
             "component_scores": context_scores,
@@ -94,6 +148,8 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
             ),
             "positioning": positioning,
             "graph_context": graph_context,
+            "liquidity_intelligence": liquidity_payload,
+            "liquidity_intelligence_mode": "shadow",
         }
         return await kernel.request_decision(
             DecisionContext(symbol=candidate.symbol, context=context)
