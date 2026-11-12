@@ -152,3 +152,10 @@ async def test_multi_timeframe_analysis_includes_primary_and_configured_interval
     assert set(evidence["timeframe_evidence"]) == {"1m", "5m", "15m", "1h", "4h"}
     assert set(requested) == {"1m", "5m", "15m", "1h", "4h"}
     assert len(requested) == 5
+
+
+def test_multi_timeframe_configuration_rejects_duplicate_normalized_intervals():
+    import pytest
+
+    with pytest.raises(ValueError, match="must be unique"):
+        HistoricalIntelligenceConfig(analysis_timeframes=("5m", "5M"))
