@@ -7,10 +7,11 @@ create trading signals, infer hidden queue position, or promote AMD into gates.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from math import isfinite
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 from aitos.intelligence.liquidity_intelligence import OrderFlowEvidence
 from aitos.statistics.replay import (

@@ -8,15 +8,15 @@ calibrated probabilities.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 from math import isfinite
-import json
 from statistics import mean
-from typing import Any, Sequence
+from typing import Any
 
 from aitos.intelligence.liquidity_intelligence import (
     Candle,
