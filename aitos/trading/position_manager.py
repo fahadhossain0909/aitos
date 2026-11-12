@@ -269,6 +269,7 @@ class PositionManager:
             market_state=market_state,
             volume_profile=volume_profile,
             liquidity_events=market_kwargs.get("liquidity_events", ()),
+            liquidity_levels=market_kwargs.get("liquidity_levels", ()),
             prior_highs=market_kwargs.get("prior_highs", ()),
             prior_lows=market_kwargs.get("prior_lows", ()),
             swing_highs=market_kwargs.get("swing_highs", ()),

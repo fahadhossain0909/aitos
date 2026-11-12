@@ -18,6 +18,7 @@ from typing import Any, Protocol
 
 from aitos.core.contracts import Event
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
+from aitos.intelligence.liquidity_intelligence import LiquidityLevel
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
 from aitos.logging_setup import get_logger
 
@@ -29,6 +30,7 @@ _BRIDGE_DELIVERIES = 0
 class MarketContext:
     order_flow: OrderFlowFeatures | None = None
     liquidity_events: tuple[LiquidityEvent, ...] = ()
+    liquidity_levels: tuple[LiquidityLevel, ...] = ()
     prior_highs: tuple[float, ...] = ()
     prior_lows: tuple[float, ...] = ()
     swing_highs: tuple[float, ...] = ()
@@ -45,6 +47,7 @@ class MarketContext:
             "order_flow": self.order_flow,
             "volume_profile": self.volume_profile,
             "liquidity_events": self.liquidity_events,
+            "liquidity_levels": self.liquidity_levels,
             "prior_highs": self.prior_highs,
             "prior_lows": self.prior_lows,
             "swing_highs": self.swing_highs,
@@ -73,6 +76,7 @@ class LiveStateContextProvider:
         return MarketContext(
             order_flow=snap.order_flow,
             liquidity_events=snap.liquidity_events,
+            liquidity_levels=tuple(getattr(snap, "liquidity_levels", ()) or ()),
             source="live_state",
         )
 
@@ -84,6 +88,7 @@ class CompositeContextProvider:
     def get_context(self, symbol: str) -> MarketContext:
         of = None
         events: list[LiquidityEvent] = []
+        levels: list[LiquidityLevel] = []
         prior_h: list[float] = []
         prior_l: list[float] = []
         swing_h: list[float] = []
@@ -105,6 +110,8 @@ class CompositeContextProvider:
                 of = ctx.order_flow
             if ctx.liquidity_events:
                 events.extend(ctx.liquidity_events)
+            if ctx.liquidity_levels:
+                levels.extend(ctx.liquidity_levels)
             if ctx.prior_highs:
                 prior_h.extend(ctx.prior_highs)
             if ctx.prior_lows:
@@ -126,6 +133,7 @@ class CompositeContextProvider:
         return MarketContext(
             order_flow=of,
             liquidity_events=tuple(events),
+            liquidity_levels=tuple(levels),
             prior_highs=tuple(prior_h),
             prior_lows=tuple(prior_l),
             swing_highs=tuple(swing_h),
