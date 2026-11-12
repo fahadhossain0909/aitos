@@ -294,7 +294,11 @@ def analyze_amd(
         raise ValueError("AMD requires at least one completed candle")
     latest = rows[-1]
     as_of = latest.timestamp or ""
-    prior_state = previous_state if _is_prior_checkpoint(previous_state, as_of) else None
+    prior_state = (
+        previous_state
+        if _is_prior_checkpoint(previous_state, as_of)
+        else None
+    )
     accumulation = _accumulation_features(
         symbol, timeframe, rows, liquidity, order_flow, cfg
     )
@@ -439,10 +443,10 @@ def analyze_amd(
         phase = AMDPhase.NEUTRAL
 
     if (
-        previous_state is not None
+        prior_state is not None
         and phase is AMDPhase.DISTRIBUTION_CONFIRMED
-        and previous_state.direction == direction
-        and previous_state.phase
+        and prior_state.direction == direction
+        and prior_state.phase
         in {AMDPhase.DISTRIBUTION_CONFIRMED, AMDPhase.TREND_CONTINUATION}
     ):
         phase = AMDPhase.TREND_CONTINUATION
