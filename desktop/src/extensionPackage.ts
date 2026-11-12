@@ -40,13 +40,15 @@ function decodeBase64(value: string): Uint8Array | null {
 }
 
 function safePackagePath(path: string): boolean {
+  const segments = path.split("/");
+  const filename = segments.at(-1) ?? "";
   return path.length > 0 &&
     path.length <= 240 &&
     !path.startsWith("/") &&
     !path.includes("\\\\") &&
     !path.includes("\\0") &&
-    path.split("/").every((part) => part !== "" && part !== "." && part !== "..") &&
-    /^(?:[A-Za-z0-9._-]+\\/)*[A-Za-z0-9._-]+\\.(?:js|mjs|css|json|svg|png|woff2?)$/.test(path);
+    segments.every((part) => /^[A-Za-z0-9._-]+$/.test(part) && part !== "." && part !== "..") &&
+    /\\.(?:js|mjs|css|json|svg|png|woff2?)$/.test(filename);
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
@@ -87,6 +89,7 @@ export async function verifySignedExtensionPackage(
   for (const path of paths) {
     const encoded = rawFiles[path];
     if (!safePackagePath(path) || typeof encoded !== "string") return { ok: false, error: "package_path_or_encoding_invalid" };
+    if (encoded.length > Math.ceil(maxFileBytes * 4 / 3) + 4) return { ok: false, error: "package_file_size_invalid" };
     const bytes = decodeBase64(encoded);
     if (!bytes || bytes.byteLength > maxFileBytes) return { ok: false, error: "package_file_size_invalid" };
     packageBytes += bytes.byteLength;
