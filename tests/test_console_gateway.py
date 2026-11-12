@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -262,7 +263,8 @@ async def test_legacy_workspace_file_migrates_to_geometry_schema(harness):
 
 
 async def test_workspace_layout_requires_revision_for_mutation(harness):
-    await login(harness)
+    h = harness
+    await login(h)
     response = await h.client.put(
         "/operator/v1/workspace-layout",
         json=DEFAULT_WORKSPACE_LAYOUT,
