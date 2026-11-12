@@ -367,3 +367,27 @@ def test_execution_replay_reports_partial_exit_as_incomplete_and_matches_fills()
     assert result.exit.filled_quantity == pytest.approx(0.4)
     assert result.gross_pnl == pytest.approx(0.32)
     assert result.net_pnl is not None
+
+
+def test_forward_outcome_rejects_candle_at_or_before_amd_event_time():
+    state = SimpleNamespace(
+        symbol="BTCUSDT",
+        timeframe="5m",
+        state_id="amd-lookahead",
+        direction="LONG",
+    )
+    with pytest.raises(ValueError, match="must occur after"):
+        evaluate_amd_forward_outcome(
+            state,
+            [
+                {
+                    "timestamp_ms": 1000,
+                    "high": 102.0,
+                    "low": 99.0,
+                    "close": 101.0,
+                }
+            ],
+            entry_price=100.0,
+            entry_time_ms=1000,
+            horizon_bars=1,
+        )
