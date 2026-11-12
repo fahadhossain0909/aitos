@@ -8,12 +8,13 @@ features until calibrated on point-in-time, out-of-sample data.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import asdict, dataclass
 from enum import Enum
-from math import isfinite
 from hashlib import sha256
+from math import isfinite
 from statistics import mean, pstdev
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 
 def _stable_id(*parts: Any) -> str:
@@ -66,7 +67,7 @@ class Candle:
     is_closed: bool = True
 
     @classmethod
-    def from_value(cls, value: Any) -> "Candle":
+    def from_value(cls, value: Any) -> Candle:
         def get(name: str, default: Any = None) -> Any:
             if isinstance(value, Mapping):
                 return value.get(name, default)

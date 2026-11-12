@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from aitos.core.contracts import Event
-from aitos.intelligence.liquidity_tracker import LiquidityEvent
 from aitos.intelligence.liquidity_intelligence import LiquidityLevel
+from aitos.intelligence.liquidity_tracker import LiquidityEvent
 from aitos.intelligence.order_flow_engine import OrderFlowFeatures
 from aitos.logging_setup import get_logger
 

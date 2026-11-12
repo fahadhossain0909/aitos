@@ -7,7 +7,6 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 
 from aitos.intelligence.liquidity_intelligence import LiquidityLevel
-
 from aitos.intelligence.liquidity_tracker import LiquidityEvent, LiquidityTracker
 from aitos.intelligence.order_flow_engine import OrderFlowEngine, OrderFlowFeatures
 from aitos.models.market import OrderBookSnapshot, TradeTick

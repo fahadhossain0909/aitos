@@ -7,8 +7,6 @@ from aitos.intelligence.liquidity_intelligence import (
     LiquiditySide,
     LiquiditySource,
     OrderFlowEvidence,
-    SweepEvent,
-    SweepState,
     attribute_liquidity_outcome,
     classify_sweep,
     detect_liquidity_sweeps,
