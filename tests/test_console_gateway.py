@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from aitos.console_gateway import (
+    DEFAULT_WORKSPACE_LAYOUT,
     GATEWAY_STATE,
     GatewayConfig,
     create_gateway,
@@ -40,7 +42,7 @@ def test_operator_password_validation_uses_utf8_byte_contract(password, valid):
 
 
 @pytest.fixture
-async def harness(tmp_path):
+async def harness(tmp_path, monkeypatch):
     root = tmp_path / "dist"
     root.mkdir()
     (root / "index.html").write_text("<html>operator console</html>")
@@ -93,8 +95,21 @@ async def harness(tmp_path):
     app.router.add_route("*", "/{path:.*}", backend)
     upstream = TestServer(app)
     await upstream.start_server()
+
+    def prepare_test_directory(path, **_):
+        path.mkdir(parents=True, mode=0o700, exist_ok=True)
+        return path
+
+    monkeypatch.setattr(
+        "aitos.console_gateway.prepare_durable_directory", prepare_test_directory
+    )
     config = GatewayConfig(
-        ORIGIN, str(upstream.make_url("")).rstrip("/"), root, TOKEN, session_seconds=120
+        ORIGIN,
+        str(upstream.make_url("")).rstrip("/"),
+        root,
+        TOKEN,
+        session_seconds=120,
+        workspace_file=tmp_path / "config" / "workspace-layout.json",
     )
     clock = SimpleNamespace(now=1000.0)
     gateway = create_gateway(config, password=PASSWORD, clock=lambda: clock.now)
@@ -121,6 +136,164 @@ async def login(h, password=PASSWORD, **kwargs):
         headers={"Origin": ORIGIN},
         **kwargs,
     )
+
+
+async def test_workspace_layout_is_authenticated_and_survives_gateway_restart(
+    harness,
+):
+    h = harness
+    assert (await h.client.get("/operator/v1/workspace-layout")).status == 401
+    await login(h)
+
+    initial = await h.client.get("/operator/v1/workspace-layout")
+    assert initial.status == 200
+    assert initial.headers["Cache-Control"] == "no-store"
+    initial_etag = initial.headers["ETag"]
+    assert len(initial_etag) == 66
+    assert await initial.json() == DEFAULT_WORKSPACE_LAYOUT
+
+    updated = {
+        **DEFAULT_WORKSPACE_LAYOUT,
+        "activeWorkspace": "risk",
+        "panels": {
+            **DEFAULT_WORKSPACE_LAYOUT["panels"],
+            "risk": ["audit", "exposure"],
+        },
+    }
+    saved = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=updated,
+        headers={"Origin": ORIGIN, "If-Match": initial_etag},
+    )
+    assert saved.status == 200
+    assert await saved.json() == updated
+    assert h.config.workspace_file.is_file()
+
+    restarted = create_gateway(h.config, password=PASSWORD)
+    client = TestClient(TestServer(restarted), headers={"Host": "127.0.0.1:8780"})
+    await client.start_server()
+    try:
+        await client.post(
+            "/operator/v1/login",
+            json={"password": PASSWORD},
+            headers={"Origin": ORIGIN},
+        )
+        restored = await client.get("/operator/v1/workspace-layout")
+        assert restored.status == 200
+        assert await restored.json() == updated
+    finally:
+        await client.close()
+
+
+async def test_workspace_layout_compare_and_swap_between_windows(harness):
+    h = harness
+    await login(h)
+    first = await h.client.get("/operator/v1/workspace-layout")
+    second = await h.client.get("/operator/v1/workspace-layout")
+    stale_etag = second.headers["ETag"]
+    updated = {**DEFAULT_WORKSPACE_LAYOUT, "activeWorkspace": "risk"}
+    saved = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=updated,
+        headers={"Origin": ORIGIN, "If-Match": first.headers["ETag"]},
+    )
+    assert saved.status == 200 and saved.headers["ETag"] != stale_etag
+    stale = {**DEFAULT_WORKSPACE_LAYOUT, "activeWorkspace": "developer"}
+    conflict = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=stale,
+        headers={"Origin": ORIGIN, "If-Match": stale_etag},
+    )
+    assert conflict.status == 409
+    assert conflict.headers["ETag"] == saved.headers["ETag"]
+    assert await conflict.json() == updated
+
+    restored = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=DEFAULT_WORKSPACE_LAYOUT,
+        headers={"Origin": ORIGIN, "If-Match": saved.headers["ETag"]},
+    )
+    assert restored.status == 200
+    aba_conflict = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=stale,
+        headers={"Origin": ORIGIN, "If-Match": stale_etag},
+    )
+    assert aba_conflict.status == 409
+    assert await aba_conflict.json() == DEFAULT_WORKSPACE_LAYOUT
+
+
+async def test_workspace_layout_rejects_invalid_dock_geometry(harness):
+    h = harness
+    await login(h)
+    initial = await h.client.get("/operator/v1/workspace-layout")
+    invalid = {
+        **DEFAULT_WORKSPACE_LAYOUT,
+        "panelGeometry": {
+            **DEFAULT_WORKSPACE_LAYOUT["panelGeometry"],
+            "trading": {"charts": {"width": 3, "height": 1}},
+        },
+    }
+    response = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=invalid,
+        headers={"Origin": ORIGIN, "If-Match": initial.headers["ETag"]},
+    )
+    assert response.status == 400
+    restored = await h.client.get("/operator/v1/workspace-layout")
+    assert await restored.json() == DEFAULT_WORKSPACE_LAYOUT
+
+
+async def test_legacy_workspace_file_migrates_to_geometry_schema(harness):
+    h = harness
+    h.config.workspace_file.parent.mkdir(parents=True, exist_ok=True)
+    legacy = {
+        "version": 1,
+        "activeWorkspace": "quant",
+        "panels": DEFAULT_WORKSPACE_LAYOUT["panels"],
+    }
+    h.config.workspace_file.write_text(json.dumps(legacy), encoding="utf-8")
+    await login(h)
+    response = await h.client.get("/operator/v1/workspace-layout")
+    assert response.status == 200
+    restored = await response.json()
+    assert restored["version"] == 2
+    assert restored["activeWorkspace"] == "quant"
+    assert restored["panelGeometry"] == DEFAULT_WORKSPACE_LAYOUT["panelGeometry"]
+
+
+async def test_workspace_layout_requires_revision_for_mutation(harness):
+    h = harness
+    await login(h)
+    response = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=DEFAULT_WORKSPACE_LAYOUT,
+        headers={"Origin": ORIGIN},
+    )
+    assert response.status == 428
+
+
+async def test_workspace_layout_rejects_unknown_panels_without_overwriting(harness):
+    h = harness
+    await login(h)
+    initial = await h.client.get("/operator/v1/workspace-layout")
+    original = await initial.json()
+    etag = initial.headers["ETag"]
+    invalid = {
+        **original,
+        "panels": {
+            **original["panels"],
+            "trading": ["charts", "shell.exec"],
+        },
+    }
+    response = await h.client.put(
+        "/operator/v1/workspace-layout",
+        json=invalid,
+        headers={"Origin": ORIGIN, "If-Match": etag},
+    )
+    assert response.status == 400
+    restored = await h.client.get("/operator/v1/workspace-layout")
+    assert await restored.json() == original
 
 
 async def test_sign_in_cookie_and_server_side_bearer_boundary(harness):

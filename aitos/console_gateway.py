@@ -25,6 +25,13 @@ from urllib.parse import urlsplit, urlunsplit
 from aiohttp import ClientSession, ClientTimeout, DummyCookieJar, TCPConnector, web
 from yarl import URL
 
+from aitos.config.durable_files import (
+    StorageUnavailable,
+    atomic_write_json,
+    exclusive_file_lock,
+    prepare_durable_directory,
+)
+from aitos.config.paths import get_config_dir
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.console_gateway")
@@ -144,6 +151,7 @@ class GatewayConfig:
     upstream_token: str | None = field(default=None, repr=False)
     session_seconds: int = 900
     max_sessions: int = 4
+    workspace_file: Path | None = None
 
     def __post_init__(self):
         for key in ("public_origin", "upstream_origin"):
@@ -177,6 +185,12 @@ class GatewayConfig:
         if not root.is_dir() or not (root / "index.html").is_file():
             raise ValueError("build the desktop bundle before starting the gateway")
         object.__setattr__(self, "dist_dir", root)
+        workspace_file = self.workspace_file
+        if workspace_file is None:
+            workspace_file = get_config_dir() / "desktop" / "workspace-layout.json"
+        object.__setattr__(
+            self, "workspace_file", Path(workspace_file).expanduser().resolve()
+        )
 
 
 class OperatorSessions:
@@ -241,6 +255,137 @@ class OperatorSessions:
         async with self.hash_lock:
             derived = await asyncio.to_thread(self._derive, password)
             return hmac.compare_digest(derived, self.digest)
+
+
+WORKSPACE_IDS = frozenset({"trading", "ai", "quant", "developer", "data", "risk"})
+WORKSPACE_PANELS = frozenset(
+    {
+        "watchlist",
+        "charts",
+        "orderflow",
+        "execution",
+        "copilot",
+        "conversations",
+        "experiments",
+        "regimes",
+        "strategy",
+        "terminal",
+        "datasets",
+        "dataquality",
+        "exposure",
+        "audit",
+    }
+)
+DEFAULT_WORKSPACE_LAYOUT = {
+    "version": 2,
+    "activeWorkspace": "trading",
+    "panels": {
+        "trading": ["watchlist", "charts", "orderflow", "execution", "copilot"],
+        "ai": ["copilot", "conversations", "datasets"],
+        "quant": ["experiments", "regimes", "datasets", "copilot"],
+        "developer": ["strategy", "terminal", "audit"],
+        "data": ["datasets", "dataquality", "watchlist"],
+        "risk": ["exposure", "audit", "execution"],
+    },
+    "panelGeometry": {
+        "trading": {},
+        "ai": {},
+        "quant": {},
+        "developer": {},
+        "data": {},
+        "risk": {},
+    },
+}
+
+
+def validate_workspace_layout(value):
+    """Validate bounded workspace visibility and dock geometry preferences."""
+    required = {"version", "activeWorkspace", "panels"}
+    legacy = isinstance(value, dict) and set(value) == required
+    current = isinstance(value, dict) and set(value) == required | {"panelGeometry"}
+    if not (legacy or current):
+        raise ValueError("workspace_layout_shape_invalid")
+    version = value["version"]
+    if (
+        type(version) is not int
+        or (legacy and version != 1)
+        or (current and version != 2)
+    ):
+        raise ValueError("workspace_layout_version_invalid")
+    if (
+        not isinstance(value["activeWorkspace"], str)
+        or value["activeWorkspace"] not in WORKSPACE_IDS
+    ):
+        raise ValueError("workspace_active_id_invalid")
+    raw_panels = value["panels"]
+    if not isinstance(raw_panels, dict) or set(raw_panels) != WORKSPACE_IDS:
+        raise ValueError("workspace_panels_invalid")
+    panels = {}
+    for workspace_id, items in raw_panels.items():
+        if not isinstance(items, list) or len(items) > 24:
+            raise ValueError("workspace_panel_count_invalid")
+        if any(
+            not isinstance(item, str) or item not in WORKSPACE_PANELS for item in items
+        ):
+            raise ValueError("workspace_panel_id_invalid")
+        if len(items) != len(set(items)):
+            raise ValueError("workspace_panel_duplicate")
+        panels[workspace_id] = list(items)
+
+    raw_geometry = value.get(
+        "panelGeometry", {workspace_id: {} for workspace_id in WORKSPACE_IDS}
+    )
+    if not isinstance(raw_geometry, dict) or set(raw_geometry) != WORKSPACE_IDS:
+        raise ValueError("workspace_geometry_invalid")
+    geometry = {}
+    for workspace_id, entries in raw_geometry.items():
+        if not isinstance(entries, dict) or len(entries) > 24:
+            raise ValueError("workspace_geometry_invalid")
+        if not set(entries).issubset(set(panels[workspace_id])):
+            raise ValueError("workspace_geometry_panel_invalid")
+        normalized = {}
+        for panel_id, dimensions in entries.items():
+            if not isinstance(dimensions, dict) or set(dimensions) != {
+                "width",
+                "height",
+            }:
+                raise ValueError("workspace_geometry_shape_invalid")
+            width, height = dimensions["width"], dimensions["height"]
+            if type(width) is not int or width not in {1, 2}:
+                raise ValueError("workspace_geometry_width_invalid")
+            if type(height) is not int or height not in {1, 2}:
+                raise ValueError("workspace_geometry_height_invalid")
+            normalized[panel_id] = {"width": width, "height": height}
+        geometry[workspace_id] = normalized
+    return {
+        "version": 2,
+        "activeWorkspace": value["activeWorkspace"],
+        "panels": panels,
+        "panelGeometry": geometry,
+    }
+
+
+def workspace_layout_etag(layout, revision):
+    canonical = json.dumps(
+        {"layout": layout, "revision": revision},
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return '"' + hashlib.sha256(canonical.encode("utf-8")).hexdigest() + '"'
+
+
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate_json_field")
+        result[key] = value
+    return result
+
+
+def _reject_json_constant(value):
+    raise ValueError(f"nonfinite JSON constant: {value}")
 
 
 GATEWAY_STATE = web.AppKey("operator_sessions", OperatorSessions)
@@ -333,6 +478,110 @@ def create_gateway(
             samesite="Strict",
         )
         return response
+
+    def require_operator_session(request):
+        if not state.remaining(request.cookies.get(cookie_name)):
+            raise web.HTTPUnauthorized(text="Operator session required")
+
+    def workspace_layout_path():
+        return config.workspace_file
+
+    def read_workspace_document():
+        path = workspace_layout_path()
+        prepare_durable_directory(path.parent, reserve_bytes=1024 * 1024)
+        if path.is_symlink():
+            raise StorageUnavailable("workspace layout symlink forbidden")
+        if not path.exists():
+            return DEFAULT_WORKSPACE_LAYOUT, 0
+        if path.stat().st_size > 4096:
+            raise StorageUnavailable("workspace layout exceeds size limit")
+        raw = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_json_object,
+            parse_constant=_reject_json_constant,
+        )
+        # Read legacy v1 layout files once; subsequent saves atomically store
+        # the layout and monotonic revision together to prevent ABA conflicts.
+        if isinstance(raw, dict) and set(raw) == {"layout", "revision"}:
+            revision = raw["revision"]
+            if type(revision) is not int or not 1 <= revision < 2**63:
+                raise StorageUnavailable("workspace revision invalid")
+            return validate_workspace_layout(raw["layout"]), revision
+        return validate_workspace_layout(raw), 0
+
+    async def get_workspace_layout(request):
+        require_operator_session(request)
+        try:
+            layout, revision = await asyncio.to_thread(read_workspace_document)
+        except (OSError, ValueError, StorageUnavailable):
+            return web.json_response(
+                {"error": "Workspace preferences unavailable"},
+                status=503,
+                headers={"Cache-Control": "no-store"},
+            )
+        return web.json_response(
+            layout,
+            headers={
+                "Cache-Control": "no-store",
+                "ETag": workspace_layout_etag(layout, revision),
+            },
+        )
+
+    async def put_workspace_layout(request):
+        require_operator_session(request)
+        if request.content_type != "application/json":
+            raise web.HTTPUnsupportedMediaType()
+        expected_etag = request.headers.get("If-Match", "")
+        if not re.fullmatch(r'"[0-9a-f]{64}"', expected_etag):
+            raise web.HTTPPreconditionRequired(text="Workspace revision required")
+        try:
+            raw = await request.read()
+            if len(raw) > 4096:
+                raise ValueError("workspace layout exceeds size limit")
+            value = json.loads(
+                raw,
+                object_pairs_hook=_unique_json_object,
+                parse_constant=_reject_json_constant,
+            )
+            layout = validate_workspace_layout(value)
+        except (ValueError, UnicodeError):
+            raise web.HTTPBadRequest(text="Invalid workspace preferences") from None
+
+        def persist():
+            path = workspace_layout_path()
+            prepare_durable_directory(path.parent, reserve_bytes=1024 * 1024)
+            if path.is_symlink():
+                raise StorageUnavailable("workspace layout symlink forbidden")
+            # Compare-and-swap is serialized across all local desktop windows.
+            with exclusive_file_lock(path.with_name(path.name + ".revision.lock")):
+                current, revision = read_workspace_document()
+                current_etag = workspace_layout_etag(current, revision)
+                if not hmac.compare_digest(expected_etag, current_etag):
+                    return current, current_etag, False
+                if revision >= 2**63 - 1:
+                    raise StorageUnavailable("workspace revision exhausted")
+                next_revision = revision + 1
+                atomic_write_json(path, {"layout": layout, "revision": next_revision})
+                return layout, workspace_layout_etag(layout, next_revision), True
+
+        try:
+            saved_layout, saved_etag, did_save = await asyncio.to_thread(persist)
+        except (OSError, ValueError, StorageUnavailable):
+            return web.json_response(
+                {"error": "Workspace preferences could not be saved"},
+                status=503,
+                headers={"Cache-Control": "no-store"},
+            )
+        if not did_save:
+            return web.json_response(
+                saved_layout,
+                status=409,
+                headers={"Cache-Control": "no-store", "ETag": saved_etag},
+            )
+        return web.json_response(
+            saved_layout,
+            headers={"Cache-Control": "no-store", "ETag": saved_etag},
+        )
 
     async def session_status(request):
         remaining = state.remaining(request.cookies.get(cookie_name))
@@ -498,6 +747,8 @@ def create_gateway(
         return web.FileResponse(candidate)
 
     app.router.add_get("/operator/v1/session", session_status)
+    app.router.add_get("/operator/v1/workspace-layout", get_workspace_layout)
+    app.router.add_put("/operator/v1/workspace-layout", put_workspace_layout)
     app.router.add_post("/operator/v1/login", login)
     app.router.add_post("/operator/v1/logout", logout)
     app.router.add_route("*", "/console/{path:.*}", proxy)

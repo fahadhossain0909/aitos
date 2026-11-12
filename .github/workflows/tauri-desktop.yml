@@ -80,6 +80,10 @@ jobs:
           executable="desktop/src-tauri/binaries/aitos-gateway-$AITOS_TARGET"
           if [[ "$RUNNER_OS" == Windows ]]; then executable="$executable.exe"; fi
           "$executable" --gateway-self-test
+      - name: Rust shell unit tests and formatting
+        run: |
+          cargo fmt --manifest-path desktop/src-tauri/Cargo.toml -- --check
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml
       - name: Compile embedded shell and per-OS installer
         run: npm --prefix desktop run tauri -- build --bundles ${{ matrix.bundles }}
       - name: Linux AppImage extracted execution smoke

@@ -2,7 +2,7 @@
 
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc, Mutex,
     },
     time::Duration,
@@ -11,13 +11,16 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     AppHandle, Manager, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
-use zeroize::{Zeroize, Zeroizing};
 use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent},
     ShellExt,
 };
+use zeroize::{Zeroize, Zeroizing};
 
 struct Gateway(Mutex<Option<CommandChild>>);
+
+static OPERATOR_WINDOW_COUNT: AtomicUsize = AtomicUsize::new(0);
+static OPERATOR_WINDOW_SEQUENCE: AtomicUsize = AtomicUsize::new(2);
 
 struct AdminChild(Option<CommandChild>);
 
@@ -27,6 +30,32 @@ impl Drop for AdminChild {
             let _ = child.kill();
         }
     }
+}
+
+fn is_local_operator_url(url: &tauri::Url) -> bool {
+    url.scheme() == "http"
+        && url.host_str() == Some("127.0.0.1")
+        && url.port().is_some_and(|port| port > 0)
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && url.username().is_empty()
+        && url.password().is_none()
+}
+
+fn open_operator_window(app: &AppHandle, url: tauri::Url, label: &str) -> Result<(), String> {
+    if !is_local_operator_url(&url) {
+        return Err("trusted_local_operator_origin_required".into());
+    }
+    let allowed = url.origin();
+    WebviewWindowBuilder::new(app, label, WebviewUrl::External(url))
+        .title("AITOS — Read-only Operator Console")
+        .inner_size(1440.0, 900.0)
+        .on_navigation(move |next| next.origin() == allowed)
+        .build()
+        .map_err(|_| "operator_window_creation_failed".to_owned())?;
+    OPERATOR_WINDOW_COUNT.fetch_add(1, Ordering::SeqCst);
+    Ok(())
 }
 
 fn is_local_signer_url(url: &tauri::Url) -> bool {
@@ -141,35 +170,55 @@ fn main() {
                 true,
                 Some("CmdOrCtrl+Shift+S"),
             )?;
+            let new_operator = MenuItem::with_id(
+                app,
+                "new_operator_window",
+                "New Operator Window",
+                true,
+                Some("CmdOrCtrl+Shift+N"),
+            )?;
             let separator = PredefinedMenuItem::separator(app)?;
             let quit = PredefinedMenuItem::quit(app, None)?;
             let app_menu = Submenu::with_items(
                 app,
                 "AITOS",
                 true,
-                &[&open_signer, &separator, &quit],
+                &[&new_operator, &open_signer, &separator, &quit],
             )?;
             let menu = Menu::with_items(app, &[&app_menu])?;
             app.set_menu(menu)?;
-            app.on_menu_event(|app, event| {
-                if event.id() == "open_signer_settings" {
+            app.on_menu_event(|app, event| match event.id().as_ref() {
+                "open_signer_settings" => {
                     if let Some(window) = app.get_webview_window("signer") {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
                 }
+                "new_operator_window" => {
+                    let source = app.get_webview_window("operator").or_else(|| {
+                        app.webview_windows()
+                            .into_iter()
+                            .find(|(label, _)| label.starts_with("operator-"))
+                            .map(|(_, window)| window)
+                    });
+                    if let Some(source) = source {
+                        if let Ok(url) = source.url() {
+                            let sequence = OPERATOR_WINDOW_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+                            let label = format!("operator-{sequence}");
+                            let _ = open_operator_window(app, url, &label);
+                        }
+                    }
+                }
+                _ => {}
             });
 
-            let signer = WebviewWindowBuilder::new(
-                &handle,
-                "signer",
-                WebviewUrl::App("signer.html".into()),
-            )
-            .title("AITOS — Trusted Signer Settings")
-            .inner_size(920.0, 900.0)
-            .min_inner_size(360.0, 620.0)
-            .on_navigation(is_local_signer_url)
-            .build()?;
+            let signer =
+                WebviewWindowBuilder::new(&handle, "signer", WebviewUrl::App("signer.html".into()))
+                    .title("AITOS — Trusted Signer Settings")
+                    .inner_size(920.0, 900.0)
+                    .min_inner_size(360.0, 620.0)
+                    .on_navigation(is_local_signer_url)
+                    .build()?;
             let _ = signer;
 
             let (mut events, child) = app
@@ -188,8 +237,7 @@ fn main() {
                     match event {
                         CommandEvent::Stdout(bytes) if !smoke && !opened => {
                             let line = String::from_utf8_lossy(&bytes);
-                            if let Some(origin) =
-                                line.trim().strip_prefix("AITOS_GATEWAY_ORIGIN=")
+                            if let Some(origin) = line.trim().strip_prefix("AITOS_GATEWAY_ORIGIN=")
                             {
                                 let parsed = origin.parse::<tauri::Url>();
                                 match parsed {
@@ -203,17 +251,7 @@ fn main() {
                                             && url.query().is_none()
                                             && url.fragment().is_none() =>
                                     {
-                                        let allowed = url.origin();
-                                        let window = WebviewWindowBuilder::new(
-                                            &handle,
-                                            "operator",
-                                            WebviewUrl::External(url),
-                                        )
-                                        .title("AITOS — Read-only Operator Console")
-                                        .inner_size(1440.0, 900.0)
-                                        .on_navigation(move |next| next.origin() == allowed)
-                                        .build();
-                                        if window.is_err() {
+                                        if open_operator_window(&handle, url, "operator").is_err() {
                                             handle.exit(2);
                                         }
                                         opened = true;
@@ -242,6 +280,12 @@ fn main() {
                     // application menu can restore this local-only window.
                     api.prevent_close();
                     let _ = window.hide();
+                } else if window.label() == "operator" || window.label().starts_with("operator-") {
+                    let remaining = OPERATOR_WINDOW_COUNT.fetch_sub(1, Ordering::SeqCst) - 1;
+                    if remaining == 0 {
+                        on_close.store(true, Ordering::SeqCst);
+                        window.app_handle().exit(0);
+                    }
                 } else {
                     on_close.store(true, Ordering::SeqCst);
                     window.app_handle().exit(0);
@@ -258,4 +302,31 @@ fn main() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn operator_window_accepts_only_the_embedded_loopback_gateway_origin() {
+        let allowed = "http://127.0.0.1:8780/".parse().unwrap();
+        assert!(is_local_operator_url(&allowed));
+        for rejected in [
+            "https://127.0.0.1:8780/",
+            "http://localhost:8780/",
+            "http://127.0.0.1/",
+            "http://127.0.0.1:8780/console",
+            "http://127.0.0.1:8780/?token=secret",
+            "http://127.0.0.1:8780/#fragment",
+            "http://user@127.0.0.1:8780/",
+            "http://127.0.0.1:8780.evil.example/",
+        ] {
+            let url = rejected.parse().unwrap();
+            assert!(
+                !is_local_operator_url(&url),
+                "unexpectedly accepted {rejected}"
+            );
+        }
+    }
 }

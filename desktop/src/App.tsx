@@ -1,3 +1,5 @@
+import { WorkspaceStudio } from "./WorkspaceStudio";
+import type { PanelId } from "./workspaceModel";
 import { parseHistoryCut } from "./historyCursorClient";
 import ProtectionPanel from "./ProtectionPanel";
 import AccountPanel from "./AccountPanel";
@@ -71,7 +73,8 @@ type Page =
   | "settings"
   | "readiness"
   | "performance"
-  | "persistence";
+  | "persistence"
+  | "workspaces";
 type Modal = "launch" | "live" | "connection" | "notifications" | "help" | null;
 const navigation: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
@@ -84,6 +87,7 @@ const navigation: { id: Page; label: string; icon: LucideIcon }[] = [
   { id: "settings", label: "Configuration", icon: SlidersHorizontal },
   { id: "readiness", label: "Quality & readiness", icon: ShieldCheck },
   { id: "persistence", label: "Persistence & recovery", icon: Database },
+  { id: "workspaces", label: "Workspace Studio", icon: Layers3 },
 ];
 function Icon({
   as: Component,
@@ -608,8 +612,11 @@ export default function App() {
     const key = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
-        setPage("history");
-        setTimeout(() => searchRef.current?.focus(), 30);
+        setPage("workspaces");
+        window.setTimeout(
+          () => window.dispatchEvent(new Event("aitos:open-command-palette")),
+          40,
+        );
       }
       if (e.key === "Escape") {
         setModal(null);
@@ -658,6 +665,25 @@ export default function App() {
     setPage(id);
     setSidebar(false);
     setQuery("");
+  };
+  const openWorkspacePanel = (panel: PanelId) => {
+    const destinations: Record<PanelId, Page> = {
+      watchlist: "overview",
+      charts: "overview",
+      orderflow: "telemetry",
+      execution: "positions",
+      copilot: "research",
+      conversations: "research",
+      experiments: "research",
+      regimes: "research",
+      strategy: "settings",
+      terminal: "telemetry",
+      datasets: "persistence",
+      dataquality: "readiness",
+      exposure: "positions",
+      audit: "history",
+    };
+    navigate(destinations[panel]);
   };
   const notice = (s: string) => setToast(s);
   const exportJournal = () => {
@@ -880,6 +906,8 @@ export default function App() {
                       "Evidence-led decisions. Explicit unknowns. A safer next step.",
                     persistence:
                       "Committed state. Verified delivery. Explicit recovery boundaries.",
+                    workspaces:
+                      "Arrange your trading, research and engineering environment.",
                   }[page]
                 }
               </p>
@@ -965,6 +993,7 @@ export default function App() {
           {page === "persistence" && (
             <PersistencePanel snapshot={apiError ? null : snapshot} />
           )}
+          {page === "workspaces" && <WorkspaceStudio onOpenPanel={openWorkspacePanel} /> }
           {page === "readiness" && (
             <ReadinessPanel snapshot={apiError ? null : snapshot} />
           )}

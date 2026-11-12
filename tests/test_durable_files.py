@@ -66,6 +66,46 @@ def test_online_sqlite_snapshot_and_fresh_restore_candidate(tmp_path):
     assert not list(tmp_path.glob(".aitos-snapshot-*"))
 
 
+def test_windows_snapshot_does_not_replace_racing_destination(tmp_path, monkeypatch):
+    source = tmp_path / "source-race.sqlite"
+    destination = tmp_path / "racing-destination.sqlite"
+    with sqlite3.connect(source) as db:
+        db.execute("CREATE TABLE evidence(value TEXT)")
+        db.execute("INSERT INTO evidence VALUES ('source')")
+        db.commit()
+
+    def destination_appears_during_publish(_source, _destination):
+        destination.write_bytes(b"owned-by-another-writer")
+        raise FileExistsError("destination appeared during no-clobber publish")
+
+    monkeypatch.setattr(files, "_is_windows", lambda: True)
+    monkeypatch.setattr(files.os, "rename", destination_appears_during_publish)
+    with pytest.raises(files.StorageUnavailable):
+        files.stage_sqlite_snapshot(source, destination)
+
+    assert destination.read_bytes() == b"owned-by-another-writer"
+    assert not list(tmp_path.glob(".aitos-snapshot-*"))
+
+
+def test_windows_snapshot_successful_rename_cleans_missing_temporary_file(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "windows-source.sqlite"
+    destination = tmp_path / "windows-snapshot.sqlite"
+    with sqlite3.connect(source) as db:
+        db.execute("CREATE TABLE evidence(value TEXT)")
+        db.execute("INSERT INTO evidence VALUES ('windows-rename')")
+
+    monkeypatch.setattr(files, "_is_windows", lambda: True)
+    files.stage_sqlite_snapshot(source, destination)
+
+    with sqlite3.connect(destination) as db:
+        assert db.execute("SELECT value FROM evidence").fetchall() == [
+            ("windows-rename",)
+        ]
+    assert not list(tmp_path.glob(".aitos-snapshot-*"))
+
+
 def test_cache_temporary_and_installation_paths_forbidden(tmp_path, monkeypatch):
     monkeypatch.setattr(files, "get_cache_dir", lambda: tmp_path / "cache")
     monkeypatch.setattr(files, "get_project_root", lambda: tmp_path / "install")
