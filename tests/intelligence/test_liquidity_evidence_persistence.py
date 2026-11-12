@@ -37,9 +37,7 @@ async def test_liquidity_evidence_persists_with_candidate_and_candle_identity():
         symbol="btcusdt",
         _aitos_klines=(SimpleNamespace(close_time=close_time, timeframe="15m"),),
     )
-    evidence_id = await _persist_liquidity_evidence(
-        scanner, candidate, _Analysis()
-    )
+    evidence_id = await _persist_liquidity_evidence(scanner, candidate, _Analysis())
     assert evidence_id == "evidence-id-1"
     candidate_id, evidence = service.rows[0]
     assert candidate_id == "candidate-1"
