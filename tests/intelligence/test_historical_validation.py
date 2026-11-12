@@ -72,3 +72,60 @@ def test_walk_forward_is_explicitly_oos_and_does_not_auto_promote():
     if report["available"]:
         assert report["sample_count"] > 0
         assert 0 <= report["brier_score"] <= 2
+
+
+def test_walk_forward_rejects_non_finite_threshold_and_non_positive_step():
+    rows = []
+    for i in range(80):
+        t = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=i)
+        rows.append(
+            Kline(
+                "BTCUSDT",
+                "1m",
+                t,
+                t + timedelta(minutes=1),
+                100 + i,
+                101 + i,
+                99 + i,
+                100 + i,
+                10,
+                1000,
+                5,
+                5,
+                500,
+            )
+        )
+    import pytest
+
+    with pytest.raises(ValueError, match="invalid walk-forward"):
+        evaluate_historical_analogues_walk_forward(rows, flat_band=float("nan"))
+    with pytest.raises(ValueError, match="invalid walk-forward"):
+        evaluate_historical_analogues_walk_forward(rows, step=0)
+
+
+def test_walk_forward_rejects_non_chronological_candles():
+    import pytest
+
+    rows = []
+    for i in range(80):
+        t = datetime(2026, 1, 1, tzinfo=timezone.utc) + timedelta(minutes=i)
+        rows.append(
+            Kline(
+                "BTCUSDT",
+                "1m",
+                t,
+                t + timedelta(minutes=1),
+                100 + i,
+                101 + i,
+                99 + i,
+                100 + i,
+                10,
+                1000,
+                5,
+                5,
+                500,
+            )
+        )
+    rows[40] = rows[39]
+    with pytest.raises(ValueError, match="strictly chronological"):
+        evaluate_historical_analogues_walk_forward(rows)
