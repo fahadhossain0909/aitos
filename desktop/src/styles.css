@@ -3371,11 +3371,21 @@ pre {
 .workspace-panel-heading { border-top:0; }
 .workspace-panel-heading strong,.workspace-library-heading strong { color:var(--text); font:11px var(--sans); letter-spacing:0; }
 .workspace-panel-heading span,.workspace-library-heading span { font:9px var(--mono); color:var(--muted); letter-spacing:0; }
-.workspace-panel-row { display:flex; align-items:center; gap:12px; padding:11px 15px; border-bottom:1px solid var(--line); }
-.workspace-panel-grip { color:var(--muted); }
-.workspace-panel-name { flex:1; min-width:0; }
+.workspace-panel-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:14px; }
+.workspace-panel-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; min-width:0; min-height:104px; padding:12px; border:1px solid var(--line); border-radius:6px; background:var(--surface); }
+.workspace-panel-row.panel-wide { grid-column:span 2; }
+.workspace-panel-row.panel-tall { min-height:180px; align-content:flex-start; }
+.workspace-panel-row[draggable="true"] { cursor:grab; }
+.workspace-panel-row[draggable="true"]:active { cursor:grabbing; }
+.workspace-panel-grip { color:var(--muted); cursor:grab; }
+.workspace-panel-name { flex:1 1 110px; min-width:0; }
+.workspace-panel-actions { display:flex; align-items:center; flex-wrap:wrap; gap:4px; margin-left:auto; }
 .workspace-panel-row .icon-button { width:27px; height:27px; border:1px solid var(--line); background:transparent; color:var(--text); }
 .workspace-panel-row .icon-button:disabled { opacity:.25; cursor:not-allowed; }
+@media (max-width: 720px) {
+  .workspace-panel-grid { grid-template-columns:minmax(0,1fr); }
+  .workspace-panel-row.panel-wide { grid-column:auto; }
+}
 .workspace-library { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; padding:14px; }
 .workspace-library-item { display:grid; grid-template-columns:20px 1fr; gap:2px 8px; text-align:left; padding:11px; border:1px solid var(--line); background:transparent; color:var(--text); cursor:pointer; }
 .workspace-library-item:hover { border-color:var(--accent); background:var(--surface); }
