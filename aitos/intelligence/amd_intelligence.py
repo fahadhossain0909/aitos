@@ -402,7 +402,11 @@ def analyze_amd(
         and expansion_matches
     ):
         phase = AMDPhase.DISTRIBUTION_CONFIRMED
-    elif direction and any(distribution_parts):
+    elif manipulation_confirmed and not structure_matches:
+        phase = AMDPhase.MANIPULATION_CONFIRMED
+    elif direction and (
+        structure_matches or (flow_matches and expansion_matches)
+    ):
         phase = AMDPhase.DISTRIBUTION_CANDIDATE
     elif manipulation_confirmed:
         phase = AMDPhase.MANIPULATION_CONFIRMED
