@@ -86,6 +86,42 @@ def _live_liquidity_flow_evidence(store: Any, symbol: str):
     )
 
 
+async def _persist_liquidity_evidence(
+    scanner: Any, candidate: Any, analysis: Any
+) -> str | None:
+    """Persist a deterministic, candidate-linked liquidity evidence snapshot."""
+    service = getattr(scanner, "_aitos_historical_intelligence", None)
+    persist = getattr(service, "persist", None)
+    candidate_id = getattr(candidate, "_aitos_candidate_id", None)
+    if not callable(persist) or not candidate_id:
+        return None
+    rows = getattr(candidate, "_aitos_klines", ())
+    if not rows:
+        return None
+    latest = rows[-1]
+    captured_at = getattr(latest, "close_time", None) or getattr(
+        latest, "timestamp", None
+    )
+    if hasattr(captured_at, "isoformat"):
+        captured_at = captured_at.isoformat()
+    if not captured_at:
+        return None
+    timeframe = str(
+        getattr(latest, "timeframe", getattr(scanner, "_timeframe", "unknown"))
+    )
+    evidence = {
+        "schema_version": 1,
+        "symbol": str(candidate.symbol).upper(),
+        "timeframe": timeframe,
+        "captured_at": str(captured_at),
+        "liquidity_intelligence": analysis.to_dict(),
+    }
+    try:
+        return await persist(str(candidate_id), evidence)
+    except Exception:
+        return None
+
+
 def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
     """Install contextual enrichment on OpportunityScanner exactly once."""
     if getattr(scanner_cls, _PATCHED, False):
@@ -185,6 +221,34 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                     flow=flow_evidence,
                 )
                 liquidity_payload = liquidity_analysis.to_dict()
+                liquidity_evidence_id = await _persist_liquidity_evidence(
+                    self, candidate, liquidity_analysis
+                )
+                liquidity_summary = {
+                    "schema_version": 1,
+                    "mode": "shadow",
+                    "evidence_id": liquidity_evidence_id,
+                    "level_ids": [
+                        level.level_id for level in liquidity_analysis.levels
+                    ],
+                    "sweep_event_ids": [
+                        event.event_id for event in liquidity_analysis.sweeps[-20:]
+                    ],
+                    "latest_classification": (
+                        liquidity_analysis.latest_classification.state.value
+                        if liquidity_analysis.latest_classification
+                        else None
+                    ),
+                    "risk_score": liquidity_analysis.risk.score,
+                    "risk_action": liquidity_analysis.risk.action.value,
+                    "decision_impact": False,
+                }
+                object.__setattr__(
+                    candidate, "_aitos_liquidity_summary", liquidity_summary
+                )
+                object.__setattr__(
+                    candidate, "_aitos_liquidity_evidence_id", liquidity_evidence_id
+                )
                 update_levels = getattr(state_store, "update_liquidity_levels", None)
                 if callable(update_levels):
                     try:
@@ -211,6 +275,7 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                                 else None
                             ),
                             "decision_impact": False,
+                            "liquidity_evidence_id": liquidity_evidence_id,
                         },
                     )
             except (AttributeError, TypeError, ValueError):

@@ -838,6 +838,12 @@ async def run_scan_and_trade_cycle(
                         "candidate_weights": dict(components.scanner._weights),
                         "candidate_threshold": components.scanner._min_score_threshold,
                         "candidate_rationale": list(candidate.rationale or []),
+                        "liquidity_intelligence": getattr(
+                            candidate, "_aitos_liquidity_summary", None
+                        ),
+                        "liquidity_evidence_id": getattr(
+                            candidate, "_aitos_liquidity_evidence_id", None
+                        ),
                     },
                     source_module="aitos.app",
                 )
