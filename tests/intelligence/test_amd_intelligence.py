@@ -88,7 +88,7 @@ def test_accumulation_candidate_uses_completed_candles_and_internal_liquidity():
     }
     assert state.range_high == 101.2
     assert state.range_low == 98.8
-    assert state.as_of.endswith("29:00Z")
+    assert state.as_of == "2026-11-12T00:29:00+00:00"
     assert "liquidity_pools_inside_range" in state.evidence
 
 
