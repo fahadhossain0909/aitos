@@ -215,10 +215,10 @@ fn main() {
             let signer =
                 WebviewWindowBuilder::new(&handle, "signer", WebviewUrl::App("signer.html".into()))
                     .title("AITOS — Trusted Signer Settings")
-            .inner_size(920.0, 900.0)
-            .min_inner_size(360.0, 620.0)
-            .on_navigation(is_local_signer_url)
-            .build()?;
+                    .inner_size(920.0, 900.0)
+                    .min_inner_size(360.0, 620.0)
+                    .on_navigation(is_local_signer_url)
+                    .build()?;
             let _ = signer;
 
             let (mut events, child) = app
