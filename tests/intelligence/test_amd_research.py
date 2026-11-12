@@ -471,7 +471,10 @@ def test_historical_amd_replay_uses_closed_candles_and_archived_event_time():
     assert len(observations) == 6
     assert observations[0].flow_source == "sequenced_trade_and_depth_events"
     assert observations[-1].state.as_of == close_time.isoformat()
-    assert all(item.decision_time_ms <= int(close_time.timestamp() * 1000) for item in observations)
+    assert all(
+        item.decision_time_ms <= int(close_time.timestamp() * 1000)
+        for item in observations
+    )
 
 
 def test_historical_amd_replay_rejects_snapshot_only_datasets():
