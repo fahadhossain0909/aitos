@@ -235,15 +235,7 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                     getattr(candidate_klines[-1], "timeframe", "unknown")
                 ).lower()
                 timeframe_candles = dict(
-                    getattr(self, "_aitos_unused_mtf_candles", {}) or {}
-                )
-                timeframe_candles.update(
-                    {
-                        str(key).lower(): tuple(value)
-                        for key, value in (
-                            getattr(candidate, "_aitos_mtf_candles", {}) or {}
-                        ).items()
-                    }
+                    getattr(candidate, "_aitos_mtf_candles", {}) or {}
                 )
                 timeframe_candles[candidate_timeframe] = tuple(candidate_klines)
                 amd_states = {}
@@ -254,11 +246,6 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                         frame_liquidity = liquidity_analysis
                         frame_flow = flow_evidence
                     else:
-                        from aitos.intelligence.liquidity_intelligence import (
-                            OrderFlowEvidence,
-                            analyze_liquidity,
-                        )
-
                         frame_flow = OrderFlowEvidence()
                         frame_liquidity = analyze_liquidity(
                             candidate.symbol,
