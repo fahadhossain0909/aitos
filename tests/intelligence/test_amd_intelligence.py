@@ -228,6 +228,10 @@ def test_amd_config_rejects_invalid_window_and_scores():
         AMDConfig(window=10, min_window=20)
     with pytest.raises(ValueError):
         AMDConfig(min_distribution_score=1.5)
+    with pytest.raises(ValueError):
+        AMDConfig(range_atr_max=float("nan"))
+    with pytest.raises(ValueError):
+        AMDConfig(volume_expansion_ratio=float("inf"))
 
 
 def test_timeframe_stack_exposes_missing_frames_instead_of_fabricating_consensus():
