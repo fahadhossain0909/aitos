@@ -61,7 +61,7 @@ AMDPhase includes neutral, candidate and confirmed accumulation/manipulation/dis
 
 AMDState is immutable and has a deterministic state_id based on symbol, timeframe, completed-candle timestamp, phase and latest liquidity event. It carries range bounds, direction, event identity, target liquidity IDs, component scores, evidence and coverage.
 
-analyze_amd is deterministic for identical point-in-time inputs. It accepts an optional previous_state checkpoint so a durable caller can distinguish reaccumulation/redistribution from a first accumulation. The scanner integration currently reconstructs the current state from the bounded closed-candle window and writes it into the same append-only candidate evidence record as Liquidity Intelligence. It does not yet restore a durable per-symbol/per-timeframe checkpoint after process restart; that is a separate persistence integration gate, not claimed as complete.
+analyze_amd is deterministic for identical point-in-time inputs. It accepts an optional previous_state checkpoint so a durable caller can distinguish reaccumulation/redistribution from a first accumulation. The scanner restores and atomically updates per-symbol/per-timeframe checkpoints in the same Redis client already used by historical intelligence when that client is configured. Checkpoints have a 30-day TTL and reject older candle timestamps, preventing delayed replay from overwriting newer state. When Redis is unavailable, the classifier remains deterministic and reconstructs from closed-candle evidence; it reports checkpoint persistence as unavailable rather than claiming durability. The current state is also written into the candidate-linked append-only evidence record.
 
 ## Multi-timeframe aggregation
 
@@ -114,7 +114,7 @@ These defaults are starting points for replay experiments, not universal market 
 
 - Fresh live flow evidence is currently attached only to the candidate timeframe. Higher-timeframe states use completed-candle and structural-liquidity evidence; they do not borrow lower-timeframe CVD/OFI.
 - The current live order-flow adapter uses freshness-gated bounded buy-ratio and top-of-book depth proxies. It is not a fully event-aligned trade CVD plus depth-event OFI reconstruction.
-- The current state is replay-reconstructible from candle/evidence windows, but durable checkpoint restore across restarts is not yet implemented.
+- Durable checkpoint restore depends on the existing historical-intelligence Redis client being configured and healthy. Without it, AMD falls back to deterministic candle-window reconstruction and marks checkpoint persistence unavailable.
 - The append-only candidate evidence path is not yet a complete trade-close outcome join. Fees/funding/slippage-aware replay and long-horizon phase outcome attribution remain required.
 - No threshold is production-calibrated and no profitability claim is made.
 
