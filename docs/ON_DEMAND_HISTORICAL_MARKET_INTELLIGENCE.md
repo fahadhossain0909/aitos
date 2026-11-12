@@ -59,3 +59,8 @@ to 60 Binance request-weight units per rolling minute. Tune it to the exchange
 IP's complete workload, not HMIE alone. Cache TTL and freshness thresholds
 must be load-tested against the Render hybrid topology. No production rollout
 or live-trading certification is implied.
+
+The walk-forward evaluator rejects non-finite thresholds, non-positive steps,
+non-positive closes and duplicate/out-of-order candle timestamps before
+producing any OOS metrics. An unavailable or under-sampled report remains
+explicitly unavailable and cannot be used as promotion evidence.
