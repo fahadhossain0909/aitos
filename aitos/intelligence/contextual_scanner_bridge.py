@@ -340,7 +340,9 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                             "amd_state_id": amd_state.state_id,
                             "amd_timeframe_direction": amd_stack.direction,
                             "amd_timeframe_stack_complete": amd_stack.stack_complete,
-                            "amd_missing_timeframes": list(amd_stack.missing_timeframes),
+                            "amd_missing_timeframes": list(
+                                amd_stack.missing_timeframes
+                            ),
                             "amd_decision_impact": False,
                         },
                     )
