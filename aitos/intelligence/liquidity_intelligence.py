@@ -528,11 +528,19 @@ def detect_liquidity_sweeps(
     ]
     events: list[SweepEvent] = []
     for idx, candle in enumerate(candles):
+        # A pool can generate a new event only after price was last accepted
+        # back on its original side. This prevents every candle beyond a
+        # broken level from being counted as a fresh sweep.
+        if idx == 0:
+            continue
+        previous_close = candles[idx - 1].close
         atr = _atr(candles[: idx + 1])
         if atr <= 0:
             continue
         for level in levels:
             if level.side is LiquiditySide.SELL_SIDE:
+                if previous_close < level.price:
+                    continue
                 penetration = level.price - candle.low
                 reclaimed = candle.close > level.price
                 direction = "down"
@@ -545,6 +553,8 @@ def detect_liquidity_sweeps(
                     ),
                 )
             else:
+                if previous_close > level.price:
+                    continue
                 penetration = candle.high - level.price
                 reclaimed = candle.close < level.price
                 direction = "up"
