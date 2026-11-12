@@ -31,6 +31,7 @@ class HistoricalIntelligenceConfig:
     analogue_window: int = 20
     analogue_horizon: int = 12
     analogue_top_k: int = 8
+    analysis_timeframes: tuple[str, ...] = ("5m", "15m", "1h", "4h")
 
     def __post_init__(self):
         if (
@@ -49,6 +50,11 @@ class HistoricalIntelligenceConfig:
             or self.max_candles_per_request > 1500
         ):
             raise ValueError("invalid HMIE resource limits")
+        if not self.analysis_timeframes:
+            raise ValueError("HMIE analysis_timeframes cannot be empty")
+        normalized = tuple(_normalize_timeframe(value) for value in self.analysis_timeframes)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("HMIE analysis_timeframes must be unique")
 
 
 def kline_request_weight(limit: int) -> int:
@@ -411,6 +417,7 @@ class OnDemandHistoricalIntelligence:
         }
 
     async def analyze(self, symbol: str, timeframe: str, *, limit: int = 500):
+        timeframe = _normalize_timeframe(timeframe)
         rows = await self.get_klines(symbol, timeframe, limit=limit)
         if rows is None:
             return None, {
@@ -421,6 +428,47 @@ class OnDemandHistoricalIntelligence:
                 "evidence_only": True,
             }
         return rows, self.build_context(symbol, timeframe, rows)
+
+    async def analyze_multi_timeframe(
+        self, symbol: str, primary_timeframe: str, *, limit: int = 500
+    ) -> tuple[list[Kline] | None, dict[str, Any]]:
+        """Collect independent, point-in-time historical evidence across timeframes."""
+        primary = _normalize_timeframe(primary_timeframe)
+        timeframes = tuple(
+            dict.fromkeys(
+                (primary,)
+                + tuple(_normalize_timeframe(value) for value in self.config.analysis_timeframes)
+            )
+        )
+        results = await asyncio.gather(
+            *(self.analyze(symbol, timeframe, limit=limit) for timeframe in timeframes)
+        )
+        by_timeframe = {
+            timeframe: context for timeframe, (_, context) in zip(timeframes, results)
+        }
+        primary_rows, primary_context = results[0]
+        available_timeframes = [
+            timeframe
+            for timeframe, item in by_timeframe.items()
+            if item.get("available")
+        ]
+        evidence = {
+            **primary_context,
+            "available": bool(available_timeframes),
+            "reason": None if available_timeframes else "historical_evidence_unavailable",
+            "symbol": symbol.upper(),
+            "timeframe": primary,
+            "captured_at": (
+                primary_rows[-1].close_time.isoformat()
+                if primary_rows
+                else datetime.now(timezone.utc).isoformat()
+            ),
+            "timeframe_evidence": by_timeframe,
+            "available_timeframes": available_timeframes,
+            "evidence_only": True,
+            "multi_timeframe": True,
+        }
+        return primary_rows, evidence
 
     async def persist(self, candidate_id: str, evidence: dict[str, Any]) -> str | None:
         if self.evidence_store is None:
