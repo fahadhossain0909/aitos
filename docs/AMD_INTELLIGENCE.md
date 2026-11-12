@@ -78,7 +78,7 @@ analyze_amd_timeframe_stack aggregates supplied AMDState objects using AITOS rol
 
 Missing timeframes are listed explicitly and reduce evidence coverage. The function never fabricates a neutral state for an unavailable frame and rejects mixed-symbol inputs.
 
-The current scanner hook attaches the AMD state for the candidate's available candle timeframe. Wiring the full six-timeframe AMD stack to the existing HigherTimeframeCandleCache requires passing its per-frame closed-candle/evidence snapshots into this function; it must not duplicate HTF REST requests or introduce a second cache.
+The scanner now passes the six closed-candle snapshots already returned by MultiTimeframeAnalyzer and HigherTimeframeCandleCache into AMD. The bridge computes per-frame liquidity/AMD context and aggregates the resulting states without making additional exchange requests. Only the candidate timeframe receives the current freshness-gated live flow snapshot; higher frames do not borrow lower-timeframe flow and therefore cannot receive a flow-confirmed reversal label without their own event-aligned feed. If the existing HTF analysis is disabled or incomplete, missing frames remain visible and the AMD stack is marked incomplete.
 
 ## Scanner and evidence integration
 
@@ -112,7 +112,7 @@ These defaults are starting points for replay experiments, not universal market 
 
 ## Known limitations and next gates
 
-- The current scanner path supplies the candidate timeframe; full six-frame AMD orchestration is not yet wired.
+- Fresh live flow evidence is currently attached only to the candidate timeframe. Higher-timeframe states use completed-candle and structural-liquidity evidence; they do not borrow lower-timeframe CVD/OFI.
 - The current live order-flow adapter uses freshness-gated bounded buy-ratio and top-of-book depth proxies. It is not a fully event-aligned trade CVD plus depth-event OFI reconstruction.
 - The current state is replay-reconstructible from candle/evidence windows, but durable checkpoint restore across restarts is not yet implemented.
 - The append-only candidate evidence path is not yet a complete trade-close outcome join. Fees/funding/slippage-aware replay and long-horizon phase outcome attribution remain required.
