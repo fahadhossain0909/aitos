@@ -190,11 +190,22 @@ class LiquidityAnalysis:
         return {
             "symbol": self.symbol,
             "timeframe": self.timeframe,
-            "levels": [asdict(item) for item in self.levels],
+            "levels": [
+                {
+                    **asdict(item),
+                    "side": item.side.value,
+                    "source": item.source.value,
+                }
+                for item in self.levels
+            ],
             "sweeps": [
                 {
                     **asdict(item),
-                    "level": asdict(item.level),
+                    "level": {
+                        **asdict(item.level),
+                        "side": item.level.side.value,
+                        "source": item.level.source.value,
+                    },
                     "state": item.state.value,
                 }
                 for item in self.sweeps
@@ -292,7 +303,11 @@ def map_liquidity_levels(
     be supplied by a point-in-time caller with their source and timestamp.
     """
     cfg = config or LiquidityConfig()
-    candles = [Candle.from_value(item) for item in raw_candles if Candle.from_value(item).is_closed]
+    candles = []
+    for raw in raw_candles:
+        candle = Candle.from_value(raw)
+        if candle.is_closed:
+            candles.append(candle)
     if len(candles) < cfg.pivot_left + cfg.pivot_right + 1:
         return ()
     highs: list[tuple[int, float]] = []
@@ -370,13 +385,17 @@ def map_liquidity_levels(
             continue
 
     # Stable deduplication by side and price; strongest evidence wins.
-    deduped: dict[tuple[str, int], LiquidityLevel] = {}
-    for level in levels:
-        key = (level.side.value, round(level.price / max(level.price * cfg.equal_level_tolerance_bps / 10000, 1e-12)))
-        previous = deduped.get(key)
-        if previous is None or level.strength > previous.strength:
-            deduped[key] = level
-    return tuple(sorted(deduped.values(), key=lambda x: (-x.strength, x.price))[:cfg.max_levels])
+    deduped: list[LiquidityLevel] = []
+    for level in sorted(levels, key=lambda item: (-item.strength, item.price)):
+        duplicate = any(
+            existing.side is level.side
+            and abs(existing.price - level.price) / level.price * 10000
+            <= cfg.equal_level_tolerance_bps
+            for existing in deduped
+        )
+        if not duplicate:
+            deduped.append(level)
+    return tuple(deduped[:cfg.max_levels])
 
 
 def detect_liquidity_sweeps(
@@ -476,6 +495,8 @@ def score_liquidity_risk(
     flow = flow or OrderFlowEvidence()
     if not isfinite(price) or price <= 0:
         raise ValueError("price must be positive and finite")
+    if direction.upper() not in {"LONG", "SHORT"}:
+        raise ValueError("direction must be LONG or SHORT")
     relevant = [x for x in levels if (direction.upper() == "LONG" and x.side is LiquiditySide.SELL_SIDE and x.price < price) or (direction.upper() == "SHORT" and x.side is LiquiditySide.BUY_SIDE and x.price > price)]
     nearest = min(relevant, key=lambda x: abs(price - x.price)) if relevant else None
     distance = abs(price - nearest.price) / atr if nearest is not None and atr > 0 else None

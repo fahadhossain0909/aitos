@@ -25,14 +25,14 @@ def candles(rows):
 
 def test_equal_highs_and_lows_are_mapped_from_confirmed_pivots():
     rows = candles([
-        (100, 101, 99, 100, 10),
+        (100, 102, 99, 100, 10),
         (100, 105, 99, 103, 10),
-        (103, 104, 98, 100, 10),
-        (100, 104.99, 99, 102, 10),
-        (102, 103, 97, 99, 10),
-        (99, 103, 98, 101, 10),
+        (103, 103, 98, 100, 10),
+        (100, 104, 99, 102, 10),
+        (102, 104.99, 98.5, 99, 10),
+        (99, 103, 99, 101, 10),
         (101, 102, 98.01, 100, 10),
-        (100, 101, 98, 99, 10),
+        (100, 101, 98.5, 99, 10),
     ])
     levels = map_liquidity_levels("BTCUSDT", "5m", rows)
     assert any(x.side is LiquiditySide.BUY_SIDE and x.source is LiquiditySource.EQUAL_HIGHS for x in levels)
