@@ -296,7 +296,12 @@ def analyze_amd(
     as_of = latest.timestamp or ""
     prior_state = (
         previous_state
-        if _is_prior_checkpoint(previous_state, as_of)
+        if (
+            previous_state is not None
+            and previous_state.symbol.upper() == symbol.upper()
+            and previous_state.timeframe.lower() == timeframe.lower()
+            and _is_prior_checkpoint(previous_state, as_of)
+        )
         else None
     )
     accumulation = _accumulation_features(
