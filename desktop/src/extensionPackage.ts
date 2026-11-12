@@ -1,4 +1,9 @@
-import { validateExtensionManifest, type ExtensionManifest } from "./extensionManifest";
+import {
+  registerExtension,
+  validateExtensionManifest,
+  type ExtensionManifest,
+  type RegisteredExtension,
+} from "./extensionManifest";
 
 export interface SignedExtensionPackage {
   manifest: unknown;
@@ -138,4 +143,31 @@ export async function extensionSignaturePayload(
     digests[path] = await sha256(bytes);
   }
   return encoder.encode(canonical({ apiVersion: 1, manifest: validated.manifest, files: digests, signerKeyId }));
+}
+
+export async function registerSignedExtension(
+  registry: ReadonlyMap<string, RegisteredExtension>,
+  input: unknown,
+  policy: ExtensionTrustPolicy,
+): Promise<{
+  registry: Map<string, RegisteredExtension>;
+  verification: ExtensionVerification;
+  registration: { ok: boolean; errors?: string[] };
+}> {
+  const verification = await verifySignedExtensionPackage(input, policy);
+  if (!verification.ok) {
+    return {
+      registry: new Map(registry),
+      verification,
+      registration: { ok: false, errors: [verification.error] },
+    };
+  }
+  const registered = registerExtension(registry, verification.manifest);
+  return {
+    registry: registered.registry,
+    verification,
+    registration: registered.result.ok
+      ? { ok: true }
+      : { ok: false, errors: registered.result.errors },
+  };
 }
