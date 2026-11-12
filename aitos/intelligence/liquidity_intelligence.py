@@ -279,7 +279,10 @@ class LiquidityConfig:
             raise ValueError("minimum confirmation confidence must be in [0, 1]")
         if self.equal_level_tolerance_bps <= 0:
             raise ValueError("equal-level tolerance must be positive")
-        if self.sweep_min_penetration_atr < 0 or self.sweep_max_penetration_atr <= self.sweep_min_penetration_atr:
+        if (
+            self.sweep_min_penetration_atr < 0
+            or self.sweep_max_penetration_atr <= self.sweep_min_penetration_atr
+        ):
             raise ValueError("invalid sweep penetration range")
 
 
@@ -378,7 +381,14 @@ def map_liquidity_levels(
             timestamps = [candles[points[i][0]].timestamp for i in cluster]
             levels.append(
                 LiquidityLevel(
-                    level_id=_stable_id(symbol.upper(), timeframe, side.value, source.value, round(price, 10), tuple(timestamps)),
+                    level_id=_stable_id(
+                        symbol.upper(),
+                        timeframe,
+                        side.value,
+                        source.value,
+                        round(price, 10),
+                        tuple(timestamps),
+                    ),
                     symbol=symbol.upper(),
                     side=side,
                     price=price,
@@ -404,7 +414,14 @@ def map_liquidity_levels(
         ):
             levels.append(
                 LiquidityLevel(
-                    _stable_id(symbol.upper(), timeframe, 'buy_side', 'swing_high', round(price, 10), candles[idx].timestamp),
+                    _stable_id(
+                        symbol.upper(),
+                        timeframe,
+                        "buy_side",
+                        "swing_high",
+                        round(price, 10),
+                        candles[idx].timestamp,
+                    ),
                     symbol.upper(),
                     LiquiditySide.BUY_SIDE,
                     price,
@@ -425,7 +442,14 @@ def map_liquidity_levels(
         ):
             levels.append(
                 LiquidityLevel(
-                    _stable_id(symbol.upper(), timeframe, 'sell_side', 'swing_low', round(price, 10), candles[idx].timestamp),
+                    _stable_id(
+                        symbol.upper(),
+                        timeframe,
+                        "sell_side",
+                        "swing_low",
+                        round(price, 10),
+                        candles[idx].timestamp,
+                    ),
                     symbol.upper(),
                     LiquiditySide.SELL_SIDE,
                     price,
