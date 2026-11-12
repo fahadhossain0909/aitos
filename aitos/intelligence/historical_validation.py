@@ -49,10 +49,19 @@ def evaluate_historical_analogues_walk_forward(
         or horizon < 1
         or top_k < 1
         or min_analogue_count < 1
+        or not math.isfinite(flat_band)
         or flat_band < 0
+        or (step is not None and step < 1)
     ):
         raise ValueError("invalid walk-forward validation parameters")
-    stride = max(1, step or horizon)
+    previous_time = None
+    for row in klines:
+        if not math.isfinite(float(row.close)) or float(row.close) <= 0:
+            raise ValueError("walk-forward closes must be finite and positive")
+        if previous_time is not None and row.open_time <= previous_time:
+            raise ValueError("walk-forward candles must be strictly chronological")
+        previous_time = row.open_time
+    stride = step if step is not None else horizon
     first = max(window * 2 + horizon, window + min_analogue_count)
     probabilities = []
     labels = []
