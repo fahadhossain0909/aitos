@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from enum import Enum
 from hashlib import sha256
+import json
 from statistics import mean
 from typing import Any, Sequence
 
@@ -599,3 +600,108 @@ def analyze_amd_timeframe_stack(
         stack_complete=not missing,
         evidence_coverage=round(min(1.0, coverage), 4),
     )
+
+
+_AMD_CHECKPOINT_TTL_SECONDS = 30 * 24 * 60 * 60
+_AMD_CHECKPOINT_CAS_LUA = """
+local current = redis.call('GET', KEYS[1])
+if current then
+    local ok, decoded = pcall(cjson.decode, current)
+    if ok and decoded.as_of and decoded.as_of > ARGV[1] then
+        return 0
+    end
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+return 1
+"""
+
+
+def _amd_checkpoint_key(symbol: str, timeframe: str) -> str:
+    normalized_symbol = "".join(
+        char for char in symbol.upper() if char.isalnum() or char in "-_"
+    )
+    normalized_timeframe = "".join(
+        char for char in timeframe.lower() if char.isalnum()
+    )
+    if not normalized_symbol or not normalized_timeframe:
+        raise ValueError("AMD checkpoint requires symbol and timeframe")
+    return "aitos:amd:checkpoint:v1:" + normalized_symbol + ":" + normalized_timeframe
+
+
+async def load_amd_checkpoint(
+    redis_client: Any, symbol: str, timeframe: str
+) -> AMDState | None:
+    """Load a validated immutable AMD checkpoint; unavailable Redis is non-fatal."""
+    if redis_client is None:
+        return None
+    try:
+        raw = await redis_client.get(_amd_checkpoint_key(symbol, timeframe))
+        if not raw:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        value = json.loads(raw)
+        if (
+            str(value.get("symbol", "")).upper() != symbol.upper()
+            or str(value.get("timeframe", "")).lower() != timeframe.lower()
+        ):
+            return None
+        return AMDState(
+            symbol=str(value["symbol"]),
+            timeframe=str(value["timeframe"]),
+            phase=AMDPhase(value["phase"]),
+            direction=str(value.get("direction", "")),
+            state_id=str(value["state_id"]),
+            as_of=str(value["as_of"]),
+            accumulation_score=float(value["accumulation_score"]),
+            manipulation_score=float(value["manipulation_score"]),
+            distribution_score=float(value["distribution_score"]),
+            confidence=float(value["confidence"]),
+            evidence_coverage=float(value["evidence_coverage"]),
+            range_high=(
+                float(value["range_high"])
+                if value.get("range_high") is not None
+                else None
+            ),
+            range_low=(
+                float(value["range_low"])
+                if value.get("range_low") is not None
+                else None
+            ),
+            liquidity_event_id=value.get("liquidity_event_id"),
+            target_liquidity_ids=tuple(value.get("target_liquidity_ids", ())),
+            evidence=tuple(value.get("evidence", ())),
+            invalidation_reason=value.get("invalidation_reason"),
+        )
+    except (AttributeError, KeyError, TypeError, UnicodeDecodeError, ValueError):
+        return None
+    except Exception:
+        return None
+
+
+async def save_amd_checkpoint(
+    redis_client: Any,
+    state: AMDState,
+    *,
+    ttl_seconds: int = _AMD_CHECKPOINT_TTL_SECONDS,
+) -> bool:
+    """Atomically save a newer per-symbol/timeframe checkpoint in Redis.
+
+    Older candle timestamps cannot overwrite newer checkpoints. The checkpoint
+    is operational state only and is never an order or strategy instruction.
+    """
+    if redis_client is None or not state.as_of or ttl_seconds < 1:
+        return False
+    payload = json.dumps(state.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+    try:
+        result = await redis_client.eval(
+            _AMD_CHECKPOINT_CAS_LUA,
+            1,
+            _amd_checkpoint_key(state.symbol, state.timeframe),
+            state.as_of,
+            payload,
+            int(ttl_seconds),
+        )
+        return bool(result)
+    except Exception:
+        return False
