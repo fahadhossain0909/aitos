@@ -228,11 +228,7 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                         max_staleness_ms=int(
                             max(
                                 500.0,
-                                float(
-                                    getattr(
-                                        self, "_live_state_stale_seconds", 5.0
-                                    )
-                                )
+                                float(getattr(self, "_live_state_stale_seconds", 5.0))
                                 * 1000.0,
                             )
                         ),
