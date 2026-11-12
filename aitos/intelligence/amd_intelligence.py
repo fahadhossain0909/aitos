@@ -485,6 +485,7 @@ def analyze_amd(
                 in {
                     AMDPhase.DISTRIBUTION_CANDIDATE,
                     AMDPhase.DISTRIBUTION_CONFIRMED,
+                    AMDPhase.TREND_CONTINUATION,
                 }
                 else 0.0
             ),
