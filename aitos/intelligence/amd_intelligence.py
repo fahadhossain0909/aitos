@@ -542,16 +542,18 @@ def analyze_amd_timeframe_stack(
     is not promoted to a complete stack and cannot silently stand in for HTF.
     """
     normalized = {str(key).lower(): value for key, value in states.items()}
+    if any(value.timeframe.lower() != key for key, value in normalized.items()):
+        raise ValueError("AMD state timeframe must match its stack key")
+    if not 0.0 <= neutral_margin <= 1.0:
+        raise ValueError("neutral margin must be in [0, 1]")
     symbols = {value.symbol.upper() for value in normalized.values()}
     if len(symbols) > 1:
         raise ValueError("AMD timeframe stack cannot mix symbols")
     symbol = next(iter(symbols), "")
-    available = tuple(
-        sorted(
-            key for key, value in normalized.items() if value.timeframe.lower() == key
-        )
+    available = tuple(sorted(normalized))
+    required = tuple(
+        dict.fromkeys(str(item).lower() for item in required_timeframes)
     )
-    required = tuple(str(item).lower() for item in required_timeframes)
     missing = tuple(item for item in required if item not in normalized)
     bullish = 0.0
     bearish = 0.0
