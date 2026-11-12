@@ -7,6 +7,7 @@ create trading signals, infer hidden queue position, or promote AMD into gates.
 from __future__ import annotations
 
 from collections import defaultdict
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from math import isfinite
 from typing import Any, Iterable, Mapping, Sequence
@@ -421,6 +422,29 @@ def evaluate_amd_forward_outcome(
     if horizon_bars < 1:
         raise ValueError("horizon_bars must be positive")
     selected = tuple(future_candles[:horizon_bars])
+
+    for row in selected:
+        raw_timestamp = (
+            row.get("timestamp_ms", row.get("timestamp", row.get("close_time")))
+            if isinstance(row, Mapping)
+            else getattr(
+                row,
+                "timestamp_ms",
+                getattr(row, "timestamp", getattr(row, "close_time", None)),
+            )
+        )
+        if raw_timestamp is None:
+            continue
+        if isinstance(raw_timestamp, str):
+            parsed = datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            candle_time_ms = int(parsed.timestamp() * 1000)
+        else:
+            candle_time_ms = _event_time_ms(raw_timestamp)
+        if candle_time_ms <= _validate_timestamp(entry_time_ms):
+            raise ValueError("future outcome candle must occur after the AMD event")
+
     def field_value(row: Any, name: str) -> float:
         if isinstance(row, Mapping):
             return float(row[name])
