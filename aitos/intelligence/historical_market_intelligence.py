@@ -1,11 +1,18 @@
 """On-demand historical evidence with bounded cache and shared Redis budget."""
 
 from __future__ import annotations
-import asyncio, hashlib, json, time, uuid
-from datetime import datetime, timezone
+
+import asyncio
+import hashlib
+import json
+import time
+import uuid
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from datetime import datetime, timezone
+from typing import Any
+
 from aitos.intelligence.historical_analogue import search_historical_analogues
 from aitos.models.market import Kline
 

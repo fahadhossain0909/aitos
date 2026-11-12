@@ -1,8 +1,11 @@
 """Leakage-aware walk-forward evaluation for historical analogue evidence."""
 
 from __future__ import annotations
+
 import math
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
+
 from aitos.intelligence.historical_analogue import search_historical_analogues
 from aitos.models.market import Kline
 

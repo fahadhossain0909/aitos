@@ -1,9 +1,13 @@
 """Compact all-market ticker context; no historical candles are retained."""
 
 from __future__ import annotations
-import json, math, time
+
+import json
+import math
+import time
 from collections import OrderedDict
 from typing import Any
+
 from aitos.market_data.bus import MarketDataBus
 from aitos.market_data.contracts import MarketEvent, MarketEventType
 

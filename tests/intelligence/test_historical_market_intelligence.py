@@ -1,6 +1,8 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
+
 import pytest
+
 from aitos.intelligence.historical_market_intelligence import (
     HistoricalIntelligenceConfig,
     OnDemandHistoricalIntelligence,

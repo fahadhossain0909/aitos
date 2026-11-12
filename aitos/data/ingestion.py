@@ -7,6 +7,8 @@ import os
 from typing import Any
 
 from aitos.config.settings import get_settings
+from aitos.intelligence.historical_market_intelligence import HistoricalEvidenceStore
+from aitos.intelligence.universe_market_context import UniverseMarketContext
 from aitos.logging_setup import get_logger
 from aitos.market_data.auxiliary_runtime import BinanceAuxiliaryMarketDataRuntime
 from aitos.market_data.binance_adapter import BinanceCanonicalMarketDataAdapter
@@ -17,8 +19,6 @@ from aitos.market_data.deep_orderbook_collector import DeepOrderBookCollector
 from aitos.market_data.gateway import MarketDataGateway
 from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSink
 from aitos.market_data.runtime import CanonicalMarketDataRuntime
-from aitos.intelligence.universe_market_context import UniverseMarketContext
-from aitos.intelligence.historical_market_intelligence import HistoricalEvidenceStore
 
 from .ingestion_legacy import DataIngestionService as _LegacyDataIngestionService
 from .ingestion_legacy import (
@@ -307,8 +307,12 @@ class DataIngestionService(_LegacyDataIngestionService):
             await self._universe_market_context.start(MarketDataBus(self._event_bus))
             self._universe_context_started = True
             if self._scanner is not None:
-                self._scanner._aitos_universe_market_context = self._universe_market_context
-                self._scanner._aitos_historical_redis = getattr(self._event_bus, "_redis", None)
+                self._scanner._aitos_universe_market_context = (
+                    self._universe_market_context
+                )
+                self._scanner._aitos_historical_redis = getattr(
+                    self._event_bus, "_redis", None
+                )
                 self._scanner._aitos_historical_repository = self._repository
             client = getattr(self._repository, "_client", None)
             if client is not None:
@@ -316,9 +320,7 @@ class DataIngestionService(_LegacyDataIngestionService):
                 try:
                     await evidence_store.ensure_schema()
                 except Exception:
-                    logger.exception(
-                        "historical evidence store initialization failed"
-                    )
+                    logger.exception("historical evidence store initialization failed")
                 else:
                     self._historical_evidence_store = evidence_store
                     if self._scanner is not None:
@@ -367,7 +369,9 @@ class DataIngestionService(_LegacyDataIngestionService):
         if self._auxiliary_runtime is not None:
             status.details["auxiliary_market_data"] = self._auxiliary_runtime.snapshot()
         if self._universe_market_context is not None:
-            status.details["universe_market_context"] = self._universe_market_context.health_snapshot()
+            status.details["universe_market_context"] = (
+                self._universe_market_context.health_snapshot()
+            )
         if self._scanner is not None:
             hmie = getattr(self._scanner, "_aitos_historical_intelligence", None)
             if hmie is not None:

@@ -6,7 +6,6 @@ from typing import Any
 
 from aitos.intelligence.advanced_context import (
     AdvancedMarketContext,
-    build_advanced_context,
 )
 from aitos.intelligence.contextual_layers import PositioningContext
 from aitos.intelligence.graph_context import retrieve_graph_context

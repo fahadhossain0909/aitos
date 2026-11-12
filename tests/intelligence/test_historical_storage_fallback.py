@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
+
+import pytest
+
 from aitos.intelligence.historical_market_intelligence import fetch_historical_klines
 from aitos.models.market import Kline
-import pytest
 
 
 def _row(index, opened):

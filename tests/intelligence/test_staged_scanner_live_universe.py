@@ -1,5 +1,7 @@
 from types import SimpleNamespace
+
 import pytest
+
 from aitos.intelligence.staged_scanner import install_staged_scan
 
 

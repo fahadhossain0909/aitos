@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+
 from aitos.intelligence.historical_analogue import search_historical_analogues
 from aitos.models.market import Kline
 
