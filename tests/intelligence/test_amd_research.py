@@ -67,7 +67,7 @@ def test_event_flow_fails_closed_for_stale_or_insufficient_inputs():
     assert "event_flow_stale" in result.diagnostics
 
 
-def test_event_flow_rejects_invalid_depth_and_out_of_order_trade_ids_are_safe():
+def test_event_flow_rejects_invalid_depth_snapshot():
     with pytest.raises(ValueError):
         build_event_aligned_order_flow(
             [],
