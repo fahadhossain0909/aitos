@@ -110,6 +110,8 @@ def build_live_event_order_flow(
     as_of = _validate_timestamp(as_of_ms)
     if window_ms <= 0 or max_staleness_ms < 0:
         raise ValueError("window_ms must be positive and staleness non-negative")
+    if min_trade_events < 1 or min_depth_events < 1:
+        raise ValueError("minimum trade and depth event counts must be positive")
     start = max(0, as_of - int(window_ms))
     diagnostics: list[str] = []
     trades_by_id: dict[str, Any] = {}
