@@ -522,9 +522,7 @@ def create_gateway(
                 if revision >= 2**63 - 1:
                     raise StorageUnavailable("workspace revision exhausted")
                 next_revision = revision + 1
-                atomic_write_json(
-                    path, {"layout": layout, "revision": next_revision}
-                )
+                atomic_write_json(path, {"layout": layout, "revision": next_revision})
                 return layout, workspace_layout_etag(layout, next_revision), True
 
         try:
