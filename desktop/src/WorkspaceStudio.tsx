@@ -229,7 +229,7 @@ export function WorkspaceStudio({
           </div>
           <div className="workspace-studio-footnote">
             <span>LAYOUT STATE</span>
-            <span>Version 1 · OS configuration storage · No runtime or trading settings changed</span>
+            <span>Layout v2 · OS configuration storage · No runtime or trading settings changed</span>
           </div>
         </div>
       </div>
