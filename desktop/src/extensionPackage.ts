@@ -45,10 +45,10 @@ function safePackagePath(path: string): boolean {
   return path.length > 0 &&
     path.length <= 240 &&
     !path.startsWith("/") &&
-    !path.includes("\\\\") &&
-    !path.includes("\\0") &&
+    !path.includes("\\") &&
+    !path.includes("\0") &&
     segments.every((part) => /^[A-Za-z0-9._-]+$/.test(part) && part !== "." && part !== "..") &&
-    /\\.(?:js|mjs|css|json|svg|png|woff2?)$/.test(filename);
+    /\.(?:js|mjs|css|json|svg|png|woff2?)$/.test(filename);
 }
 
 async function sha256(bytes: Uint8Array): Promise<string> {
