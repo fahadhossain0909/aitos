@@ -1,5 +1,8 @@
 """Regression tests for the evidence-based AMD classifier."""
 
+import json
+from dataclasses import replace
+
 import pytest
 
 from aitos.intelligence.amd_intelligence import (
@@ -8,6 +11,8 @@ from aitos.intelligence.amd_intelligence import (
     AMDState,
     analyze_amd,
     analyze_amd_timeframe_stack,
+    load_amd_checkpoint,
+    save_amd_checkpoint,
 )
 from aitos.intelligence.liquidity_intelligence import (
     Candle,
@@ -355,3 +360,38 @@ def test_bearish_distribution_confirmation_is_symmetric():
     )
     assert state.phase is AMDPhase.DISTRIBUTION_CONFIRMED
     assert state.direction == "SHORT"
+
+
+class _CheckpointRedis:
+    def __init__(self):
+        self.values = {}
+
+    async def get(self, key):
+        return self.values.get(key)
+
+    async def eval(self, script, key_count, key, as_of, payload, ttl):
+        current = self.values.get(key)
+        if current and json.loads(current)["as_of"] > as_of:
+            return 0
+        self.values[key] = payload
+        return 1
+
+
+@pytest.mark.asyncio
+async def test_amd_checkpoint_round_trip_and_stale_write_rejection():
+    redis = _CheckpointRedis()
+    state = analyze_amd("BTCUSDT", "5m", _range_candles())
+    assert await save_amd_checkpoint(redis, state)
+    restored = await load_amd_checkpoint(redis, "BTCUSDT", "5m")
+    assert restored == state
+
+    older = replace(state, as_of="2026-11-11T00:00:00+00:00")
+    assert not await save_amd_checkpoint(redis, older)
+    assert await load_amd_checkpoint(redis, "BTCUSDT", "5m") == state
+
+
+@pytest.mark.asyncio
+async def test_amd_checkpoint_is_optional_without_redis():
+    state = analyze_amd("BTCUSDT", "5m", _range_candles())
+    assert await load_amd_checkpoint(None, "BTCUSDT", "5m") is None
+    assert not await save_amd_checkpoint(None, state)
