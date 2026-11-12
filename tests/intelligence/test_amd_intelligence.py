@@ -395,3 +395,43 @@ async def test_amd_checkpoint_is_optional_without_redis():
     state = analyze_amd("BTCUSDT", "5m", _range_candles())
     assert await load_amd_checkpoint(None, "BTCUSDT", "5m") is None
     assert not await save_amd_checkpoint(None, state)
+
+
+def test_previous_direction_turns_confirmed_balance_into_reaccumulation():
+    previous = AMDState(
+        symbol="BTCUSDT",
+        timeframe="5m",
+        phase=AMDPhase.DISTRIBUTION_CONFIRMED,
+        direction="LONG",
+        state_id="prior-trend",
+        as_of="2026-11-11T23:55:00Z",
+        accumulation_score=0.0,
+        manipulation_score=0.8,
+        distribution_score=1.0,
+        confidence=1.0,
+        evidence_coverage=1.0,
+        range_high=102.0,
+        range_low=98.0,
+        liquidity_event_id="prior-sweep",
+        target_liquidity_ids=(),
+        evidence=("prior_delivery",),
+    )
+    level = LiquidityLevel(
+        "range-pool",
+        "BTCUSDT",
+        LiquiditySide.BUY_SIDE,
+        100.1,
+        LiquiditySource.EQUAL_HIGHS,
+        "5m",
+        70.0,
+        2,
+    )
+    state = analyze_amd(
+        "BTCUSDT",
+        "5m",
+        _range_candles(),
+        liquidity=_liquidity(levels=(level,)),
+        previous_state=previous,
+    )
+    assert state.phase is AMDPhase.REACCUMULATION
+    assert state.direction == "LONG"
