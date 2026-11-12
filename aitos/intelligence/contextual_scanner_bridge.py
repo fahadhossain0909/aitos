@@ -229,6 +229,8 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                 from aitos.intelligence.amd_intelligence import (
                     analyze_amd,
                     analyze_amd_timeframe_stack,
+                    load_amd_checkpoint,
+                    save_amd_checkpoint,
                 )
 
                 candidate_timeframe = str(
@@ -238,7 +240,13 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                     getattr(candidate, "_aitos_mtf_candles", {}) or {}
                 )
                 timeframe_candles[candidate_timeframe] = tuple(candidate_klines)
+                checkpoint_redis = getattr(
+                    getattr(self, "_aitos_historical_intelligence", None),
+                    "redis",
+                    None,
+                )
                 amd_states = {}
+                checkpoint_results = {}
                 for timeframe, frame_candles in timeframe_candles.items():
                     if not frame_candles:
                         continue
@@ -253,17 +261,30 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                             frame_candles,
                             flow=frame_flow,
                         )
-                    amd_states[timeframe] = analyze_amd(
+                    previous_state = await load_amd_checkpoint(
+                        checkpoint_redis, candidate.symbol, timeframe
+                    )
+                    frame_state = analyze_amd(
                         candidate.symbol,
                         timeframe,
                         frame_candles,
                         liquidity=frame_liquidity,
                         flow=frame_flow,
+                        previous_state=previous_state,
+                    )
+                    amd_states[timeframe] = frame_state
+                    checkpoint_results[timeframe] = await save_amd_checkpoint(
+                        checkpoint_redis, frame_state
                     )
                 amd_state = amd_states[candidate_timeframe]
                 amd_stack = analyze_amd_timeframe_stack(amd_states)
                 amd_payload = amd_state.to_dict()
                 amd_payload["timeframe_stack"] = amd_stack.to_dict()
+                amd_payload["checkpoint_persisted"] = checkpoint_results.get(
+                    candidate_timeframe, False
+                )
+                amd_payload["checkpoint_store_available"] = checkpoint_redis is not None
+                amd_payload["timeframe_checkpoint_persistence"] = checkpoint_results
                 amd_payload["decision_impact"] = False
                 liquidity_payload["amd_intelligence"] = amd_payload
                 object.__setattr__(candidate, "_aitos_amd_state", amd_payload)
