@@ -134,3 +134,23 @@ def test_unknown_historical_timeframe_is_rejected():
 
     with pytest.raises(ValueError, match="unsupported historical timeframe"):
         _normalize_timeframe("2M")
+
+
+@pytest.mark.asyncio
+async def test_multi_timeframe_analysis_includes_primary_and_configured_intervals():
+    requested = []
+
+    async def fetcher(symbol, timeframe, limit):
+        requested.append(timeframe)
+        return [k(i) for i in range(limit)]
+
+    service = OnDemandHistoricalIntelligence(fetcher)
+    rows, evidence = await service.analyze_multi_timeframe(
+        "BTCUSDT", "1m", limit=80
+    )
+
+    assert rows and evidence["multi_timeframe"] is True
+    assert evidence["timeframe"] == "1m"
+    assert set(evidence["timeframe_evidence"]) == {"1m", "5m", "15m", "1h", "4h"}
+    assert set(requested) == {"1m", "5m", "15m", "1h", "4h"}
+    assert len(requested) == 5
