@@ -59,6 +59,15 @@ CREATE TABLE IF NOT EXISTS aitos.live_analytics_events (
 PARTITION BY toYYYYMM(event_time)
 ORDER BY (category, symbol, event_time, event_id);
 
+CREATE TABLE IF NOT EXISTS aitos.historical_decision_evidence (
+    evidence_id String, candidate_id String, symbol LowCardinality(String),
+    timeframe LowCardinality(String), captured_at DateTime64(3, 'UTC'),
+    evidence_json String, schema_version UInt16,
+    ingested_at DateTime64(3, 'UTC') DEFAULT now64(3)
+) ENGINE = ReplacingMergeTree(ingested_at)
+PARTITION BY toYYYYMM(captured_at)
+ORDER BY (candidate_id, evidence_id);
+
 CREATE TABLE IF NOT EXISTS aitos.learning_experiences (
     experience_id UUID, timestamp DateTime64(3, 'UTC'), source LowCardinality(String),
     symbol LowCardinality(String), decision LowCardinality(String), outcome Nullable(String),

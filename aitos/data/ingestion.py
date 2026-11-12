@@ -17,6 +17,8 @@ from aitos.market_data.deep_orderbook_collector import DeepOrderBookCollector
 from aitos.market_data.gateway import MarketDataGateway
 from aitos.market_data.persistence_sink import CanonicalMarketDataPersistenceSink
 from aitos.market_data.runtime import CanonicalMarketDataRuntime
+from aitos.intelligence.universe_market_context import UniverseMarketContext
+from aitos.intelligence.historical_market_intelligence import HistoricalEvidenceStore
 
 from .ingestion_legacy import DataIngestionService as _LegacyDataIngestionService
 from .ingestion_legacy import (
@@ -104,6 +106,10 @@ class DataIngestionService(_LegacyDataIngestionService):
             "AITOS_ENABLE_DEEP_HISTORY", False
         )
         self._ranking_hook_installed = False
+        self._scanner = scanner
+        self._universe_market_context: UniverseMarketContext | None = None
+        self._universe_context_started = False
+        self._historical_evidence_store: HistoricalEvidenceStore | None = None
         self._staged_scanner_install_task: asyncio.Task | None = None
         self._live_trade_symbols: list[str] = []
         self._live_kline_symbols: list[str] = []
@@ -200,6 +206,8 @@ class DataIngestionService(_LegacyDataIngestionService):
         from aitos.intelligence.staged_scanner import install_staged_scan
 
         ingestion = self
+        scanner._aitos_universe_market_context = self._universe_market_context
+        scanner._aitos_historical_redis = getattr(self._event_bus, "_redis", None)
 
         async def on_stage(symbols: list[str], stage: str) -> None:
             if stage == "TOP_50":
@@ -292,6 +300,29 @@ class DataIngestionService(_LegacyDataIngestionService):
         else:
             await super().initialize(config)
         if self._canonical_runtime is not None:
+            if self._universe_market_context is None:
+                self._universe_market_context = UniverseMarketContext(
+                    getattr(self._event_bus, "_redis", None)
+                )
+            await self._universe_market_context.start(MarketDataBus(self._event_bus))
+            self._universe_context_started = True
+            if self._scanner is not None:
+                self._scanner._aitos_universe_market_context = self._universe_market_context
+                self._scanner._aitos_historical_redis = getattr(self._event_bus, "_redis", None)
+                self._scanner._aitos_historical_repository = self._repository
+            client = getattr(self._repository, "_client", None)
+            if client is not None:
+                evidence_store = HistoricalEvidenceStore(client)
+                try:
+                    await evidence_store.ensure_schema()
+                except Exception:
+                    logger.exception(
+                        "historical evidence store initialization failed"
+                    )
+                else:
+                    self._historical_evidence_store = evidence_store
+                    if self._scanner is not None:
+                        self._scanner._aitos_historical_evidence_store = evidence_store
             if self._canonical_persistence is not None:
                 await self._canonical_persistence.initialize()
             await self._canonical_runtime.start()
@@ -335,6 +366,12 @@ class DataIngestionService(_LegacyDataIngestionService):
             )
         if self._auxiliary_runtime is not None:
             status.details["auxiliary_market_data"] = self._auxiliary_runtime.snapshot()
+        if self._universe_market_context is not None:
+            status.details["universe_market_context"] = self._universe_market_context.health_snapshot()
+        if self._scanner is not None:
+            hmie = getattr(self._scanner, "_aitos_historical_intelligence", None)
+            if hmie is not None:
+                status.details["historical_intelligence"] = dict(hmie.metrics)
         status.details["deep_history_enabled"] = self._deep_history_enabled
         if self._deep_runtime is not None:
             status.details["deep_market_data"] = self._deep_runtime.gateway.snapshot()
@@ -353,6 +390,9 @@ class DataIngestionService(_LegacyDataIngestionService):
                 self._staged_scanner_install_task, return_exceptions=True
             )
             self._staged_scanner_install_task = None
+        if self._universe_market_context is not None and self._universe_context_started:
+            await self._universe_market_context.stop()
+            self._universe_context_started = False
         if self._deep_collector is not None:
             await self._deep_collector.stop()
         if self._canonical_persistence is not None:

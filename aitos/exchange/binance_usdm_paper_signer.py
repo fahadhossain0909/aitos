@@ -268,9 +268,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
                 raise BinancePaperExchangeError("binance_duplicate_position_symbol")
             positions[symbol] = quantity
             gross += notional
-            symbol_exposure[symbol] = (
-                symbol_exposure.get(symbol, Decimal(0)) + notional
-            )
+            symbol_exposure[symbol] = symbol_exposure.get(symbol, Decimal(0)) + notional
 
         for row in open_orders:
             if not isinstance(row, dict):
@@ -288,9 +286,7 @@ class BinanceUSDMPaperAccountEvidenceProvider:
                 raise BinancePaperExchangeError("binance_open_order_notional_invalid")
             notional = quantity * price
             gross += notional
-            symbol_exposure[symbol] = (
-                symbol_exposure.get(symbol, Decimal(0)) + notional
-            )
+            symbol_exposure[symbol] = symbol_exposure.get(symbol, Decimal(0)) + notional
 
         net_income = Decimal(0)
         seen_receipts = set()

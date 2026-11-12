@@ -44,6 +44,39 @@ async def _wait_for(predicate, timeout=3.0, interval=0.05):
     return False
 
 
+async def _seed_live_universe(components):
+    """Provide fresh ticker context required by the fail-closed live scanner."""
+    from aitos.market_data.contracts import MarketEvent, MarketEventType, MarketSource
+
+    universe = components.data_ingestion._universe_market_context
+    now = datetime.now(timezone.utc)
+    for symbol in components.scanner._symbols:
+        quote_volume = 1e9 if symbol == "BTCUSDT" else 1e8
+        await universe.on_ticker(
+            MarketEvent(
+                event_type=MarketEventType.TICKER,
+                exchange="binance",
+                venue="binance",
+                market="usd_m_futures",
+                market_type="futures",
+                symbol=symbol,
+                instrument_id=symbol,
+                event_time=now,
+                source=MarketSource.WEBSOCKET,
+                payload={
+                    "c": "100",
+                    "P": "2",
+                    "q": str(quote_volume),
+                    "n": "1000",
+                    "h": "105",
+                    "l": "95",
+                    "b": "99.9",
+                    "a": "100.1",
+                },
+            )
+        )
+
+
 @pytest.mark.asyncio
 async def test_build_system_wires_all_core_modules(event_bus):
     exchange = FakeScannerExchange()
@@ -110,6 +143,7 @@ async def test_scan_and_trade_cycle_opens_a_position_for_the_trending_symbol(eve
         min_score_threshold=0.0,
     )
     await initialize_all(components)
+    await _seed_live_universe(components)
     tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
 
     submitted = await run_scan_and_trade_cycle(components, tracker)
@@ -137,6 +171,7 @@ async def test_scan_and_trade_cycle_does_not_duplicate_an_already_open_symbol(
         min_score_threshold=0.0,
     )
     await initialize_all(components)
+    await _seed_live_universe(components)
     tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
 
     await run_scan_and_trade_cycle(components, tracker)
@@ -166,6 +201,7 @@ async def test_price_feed_subscription_auto_updates_open_trades(event_bus):
         min_score_threshold=0.0,
     )
     await initialize_all(components)
+    await _seed_live_universe(components)
     tracker = PaperPortfolioTracker(starting_equity_usd=10_000.0)
 
     await run_scan_and_trade_cycle(components, tracker)

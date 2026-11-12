@@ -424,16 +424,13 @@ def create_gateway(
                 url, headers=headers, allow_redirects=False
             ) as result:
                 if result.status != 200:
-                    status = (
-                        result.status if result.status in {400, 429, 503} else 502
-                    )
+                    status = result.status if result.status in {400, 429, 503} else 502
                     return web.json_response(
                         {"error": "Runtime evidence unavailable"}, status=status
                     )
                 if (
                     result.content_type != "application/json"
-                    or result.headers.get("Content-Encoding", "identity")
-                    != "identity"
+                    or result.headers.get("Content-Encoding", "identity") != "identity"
                     or result.content_length is not None
                     and result.content_length > 2 * 1024 * 1024
                 ):

@@ -54,6 +54,28 @@ def _event(
 class BinanceAuxiliaryMarketDataAdapter(BinanceCanonicalMarketDataAdapter):
     """Real producers for ticker/funding/liquidation and REST-polled OI/instruments."""
 
+    async def stream_all_tickers(self) -> AsyncIterator[MarketEvent]:
+        """Consume Binance's single all-market ticker stream."""
+        async for data, _name in self.exchange._raw_stream(
+            ["!ticker@arr"], emit_reconnect=True
+        ):
+            items = data if isinstance(data, list) else [data]
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                # Binance merges UM+CM instruments on this stream; keep
+                # the USD-M runtime scoped to UM contracts.
+                try:
+                    if int(item.get("st", 1)) != 1:
+                        continue
+                except (TypeError, ValueError):
+                    continue
+                symbol = str(item.get("s", "")).upper()
+                if symbol:
+                    yield _event(
+                        MarketEventType.TICKER, symbol, dict(item), _dt(item.get("E"))
+                    )
+
     async def stream_tickers(self, symbols: list[str]) -> AsyncIterator[MarketEvent]:
         bounded = (await self._valid_symbols(symbols))[:TOP_SYMBOL_LIMIT]
         if not bounded:

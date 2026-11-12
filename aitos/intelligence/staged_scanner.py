@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aitos.intelligence import indicators
+from aitos.intelligence.advanced_context import build_advanced_context
+from aitos.intelligence.historical_market_intelligence import (
+    OnDemandHistoricalIntelligence,
+    fetch_historical_klines,
+)
 from aitos.logging_setup import get_logger
 
 logger = get_logger("aitos.intelligence.staged_scanner")
@@ -20,6 +25,152 @@ TOP_2 = 2
 CHEAP_KLINE_CONCURRENCY = 6
 
 SubscriptionCallback = Callable[[list[str], str], Awaitable[None]]
+
+
+async def _rank_live_universe(scanner: Any, universe: Any) -> list[tuple[str, float]]:
+    """Rank configured symbols and preserve the scanner's cooldown policy."""
+    allowed = set(scanner._symbols)
+    anchor = getattr(scanner, "_reference_symbol", None) or "BTCUSDT"
+    fingerprints = getattr(scanner, "_lightweight_fingerprints", None)
+    if fingerprints is None:
+        fingerprints = {}
+        scanner._lightweight_fingerprints = fingerprints
+    rotation = getattr(scanner, "_candidate_rotation", None)
+    snapshots = await universe.snapshot()
+    ranked: list[tuple[str, float]] = []
+    for symbol, row in snapshots.items():
+        if symbol not in allowed:
+            continue
+        score = float(universe.score(row))
+        if score < 0:
+            continue
+        fingerprints[symbol] = (
+            f"{round(float(row.get('last_price', 0.0)), 10)}:"
+            f"{round(float(row.get('change_pct_24h', 0.0)), 5)}:"
+            f"{round(float(row.get('quote_volume_24h', 0.0)), 2)}"
+        )
+        if (
+            rotation is not None
+            and symbol != anchor
+            and rotation.should_skip(symbol, fingerprints[symbol])
+        ):
+            continue
+        ranked.append((symbol, score))
+    return sorted(ranked, key=lambda item: (-item[1], item[0]))
+
+
+async def _enrich_promoted_candidates(scanner: Any, candidates: list[Any]) -> None:
+    if not candidates:
+        return
+    service = getattr(scanner, "_aitos_historical_intelligence", None)
+    if service is None:
+
+        async def historical_fetcher(symbol: str, timeframe: str, *, limit: int):
+            return await fetch_historical_klines(
+                symbol,
+                timeframe,
+                limit=limit,
+                exchange_fetcher=scanner._exchange.fetch_klines,
+                repository=getattr(scanner, "_aitos_historical_repository", None),
+                minimum_history=(2 * 20 + 12 + 1),
+            )
+
+        service = OnDemandHistoricalIntelligence(
+            historical_fetcher,
+            redis_client=getattr(scanner, "_aitos_historical_redis", None),
+            evidence_store=getattr(scanner, "_aitos_historical_evidence_store", None),
+        )
+        scanner._aitos_historical_intelligence = service
+
+    async def enrich(candidate: Any) -> None:
+        try:
+            analyze_multi_timeframe = getattr(service, "analyze_multi_timeframe", None)
+            analyze = analyze_multi_timeframe or service.analyze
+            rows, evidence = await analyze(
+                candidate.symbol,
+                scanner._timeframe,
+                limit=max(300, min(1000, int(scanner._kline_lookback) * 2)),
+            )
+            import uuid
+
+            candidate_id = str(
+                getattr(candidate, "candidate_id", "")
+                or getattr(candidate, "_aitos_candidate_id", "")
+                or uuid.uuid4().hex
+            )
+            object.__setattr__(candidate, "_aitos_candidate_id", candidate_id)
+            evidence = {**evidence, "candidate_id": candidate_id}
+            object.__setattr__(candidate, "_aitos_historical_context", evidence)
+            if rows and len(rows) >= 20:
+                object.__setattr__(candidate, "_aitos_klines", tuple(rows))
+                scores = getattr(candidate, "component_scores", {}) or {}
+                try:
+                    advanced = build_advanced_context(
+                        rows,
+                        current_cvd_score=float(scores.get("order_flow_bias", 5.0)),
+                        oi_change=None,
+                    )
+                    object.__setattr__(candidate, "_aitos_advanced_context", advanced)
+                except (AttributeError, TypeError, ValueError):
+                    pass
+            evidence_id = None
+            try:
+                evidence_id = await service.persist(candidate_id, evidence)
+            except Exception as exc:
+                logger.warning(
+                    "historical evidence snapshot persistence failed",
+                    extra={
+                        "aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}
+                    },
+                )
+            if evidence_id:
+                object.__setattr__(
+                    candidate, "_aitos_historical_evidence_id", evidence_id
+                )
+            record = getattr(scanner, "_record_funnel", None)
+            if callable(record):
+                try:
+                    await record(
+                        symbol=candidate.symbol,
+                        side=getattr(
+                            getattr(candidate, "direction", None), "value", "UNKNOWN"
+                        ),
+                        stage="historical_intelligence",
+                        accepted=True,
+                        reason=(
+                            "historical_evidence_available"
+                            if evidence.get("available")
+                            else str(
+                                evidence.get("reason")
+                                or "historical_evidence_unavailable"
+                            )
+                        ),
+                        details={
+                            "candidate_id": candidate_id,
+                            "historical_evidence_id": evidence_id,
+                            "historical_available": bool(evidence.get("available")),
+                            "sample_count": int(evidence.get("sample_count", 0)),
+                            "analogue_count": int(evidence.get("analogue_count", 0)),
+                            "evidence_only": True,
+                        },
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "historical evidence decision attribution failed",
+                        extra={
+                            "aitos_extra": {
+                                "symbol": candidate.symbol,
+                                "error": str(exc),
+                            }
+                        },
+                    )
+        except Exception as exc:
+            logger.warning(
+                "promoted candidate historical enrichment unavailable",
+                extra={"aitos_extra": {"symbol": candidate.symbol, "error": str(exc)}},
+            )
+
+    await asyncio.gather(*(enrich(candidate) for candidate in candidates))
 
 
 def _cheap_score(klines: list[Any]) -> float:
@@ -90,6 +241,62 @@ async def install_staged_scan(
             return symbol, []
 
     async def _staged_scan_all() -> list[Any]:
+        universe = getattr(scanner, "_aitos_universe_market_context", None)
+        if universe is not None:
+            # Production path: full-universe live tickers, no historical candle fan-out.
+            ranked = await _rank_live_universe(scanner, universe)
+            if not ranked:
+                logger.warning("no fresh all-market ticker context; skipping scan")
+                scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
+                scanner._last_candidate_count = 0
+                return []
+            anchor = scanner._reference_symbol or "BTCUSDT"
+            scores = dict(ranked)
+            top50 = [symbol for symbol, _ in ranked[:TOP_50]]
+            if anchor in scores and anchor not in top50:
+                top50 = [anchor, *top50[: TOP_50 - 1]]
+            await on_subscription_change(top50, "TOP_50")
+            top25 = top50[:TOP_25]
+            await on_subscription_change(top25, "TOP_25")
+            reference_klines = None
+            if anchor:
+                try:
+                    reference_klines = await scanner._exchange.fetch_klines(
+                        anchor, scanner._timeframe, limit=scanner._kline_lookback
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "live-universe reference candle unavailable",
+                        extra={"aitos_extra": {"symbol": anchor, "error": str(exc)}},
+                    )
+            deep = ([anchor] if anchor in top25 else []) + [
+                symbol for symbol in top25 if symbol != anchor
+            ][: TOP_10 - (1 if anchor in top25 else 0)]
+            candidates = []
+            for symbol in deep:
+                try:
+                    candidate = await scanner.scan_symbol(symbol, reference_klines)
+                    if candidate is not None:
+                        candidates.append(candidate)
+                except Exception as exc:
+                    logger.error(
+                        "live-context candidate analysis failed",
+                        extra={"aitos_extra": {"symbol": symbol, "error": str(exc)}},
+                    )
+            candidates.sort(key=lambda item: float(item.composite_score), reverse=True)
+            top10, top5, top2 = (
+                candidates[:TOP_10],
+                candidates[:TOP_5],
+                candidates[:TOP_2],
+            )
+            await on_subscription_change([c.symbol for c in top10], "TOP_10")
+            await on_subscription_change([c.symbol for c in top5], "TOP_5")
+            await on_subscription_change([c.symbol for c in top2], "TOP_2")
+            await _enrich_promoted_candidates(scanner, top2)
+            scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
+            scanner._last_candidate_count = len(top2)
+            return top2
+
         symbols = list(dict.fromkeys(scanner._symbols))
         anchor = scanner._reference_symbol or "BTCUSDT"
         reference_klines = None
@@ -174,6 +381,7 @@ async def install_staged_scan(
         await on_subscription_change([c.symbol for c in top5], "TOP_5")
         top2 = top5[:TOP_2]
         await on_subscription_change([c.symbol for c in top2], "TOP_2")
+        await _enrich_promoted_candidates(scanner, top2)
 
         scanner._last_scan_at = datetime.now(timezone.utc).isoformat()
         scanner._last_candidate_count = len(top2)
@@ -205,7 +413,22 @@ async def install_staged_scan(
     if callable(original_lightweight_rank):
 
         async def _rank_and_subscribe(*args: Any, **kwargs: Any) -> list[str]:
-            selected = await original_lightweight_rank(*args, **kwargs)
+            universe = getattr(scanner, "_aitos_universe_market_context", None)
+            if universe is not None:
+                ranked = await _rank_live_universe(scanner, universe)
+                requested = kwargs.get("limit", args[0] if args else None)
+                if requested is None:
+                    requested = scanner._tuning.analysis.expensive_analysis_limit
+                limit = max(1, min(TOP_50, int(requested)))
+                selected = [symbol for symbol, _score in ranked[:limit]]
+                anchor = getattr(scanner, "_reference_symbol", None) or "BTCUSDT"
+                if (
+                    anchor in {symbol for symbol, _score in ranked}
+                    and anchor not in selected
+                ):
+                    selected = [anchor, *selected[: limit - 1]]
+            else:
+                selected = await original_lightweight_rank(*args, **kwargs)
             await on_subscription_change(list(selected), "TOP_50")
             return selected
 
@@ -215,21 +438,47 @@ async def install_staged_scan(
     if callable(original_iter_candidate_batches):
 
         async def _iter_candidate_batches_with_subscriptions(*args: Any, **kwargs: Any):
+            batches: list[list[Any]] = []
             candidates: list[Any] = []
             async for batch in original_iter_candidate_batches(*args, **kwargs):
-                candidates.extend(batch)
-                yield batch
-
+                current = list(batch)
+                batches.append(current)
+                candidates.extend(current)
             if candidates:
                 ranked = sorted(
                     candidates,
-                    key=lambda candidate: float(candidate.composite_score),
+                    key=lambda item: float(item.composite_score),
                     reverse=True,
                 )
-                top5 = [candidate.symbol for candidate in ranked[:TOP_5]]
-                top2 = top5[:TOP_2]
+                top5 = [item.symbol for item in ranked[:TOP_5]]
+                top2 = ranked[:TOP_2]
                 await on_subscription_change(top5, "TOP_5")
-                await on_subscription_change(top2, "TOP_2")
+                await on_subscription_change([item.symbol for item in top2], "TOP_2")
+
+                def candidate_key(item: Any) -> str:
+                    return str(
+                        getattr(item, "candidate_id", None)
+                        or getattr(item, "_aitos_candidate_id", None)
+                        or getattr(item, "symbol", "unknown")
+                    )
+
+                promoted = {candidate_key(item) for item in top2}
+                for item in candidates:
+                    candidate_id = candidate_key(item)
+                    if candidate_id not in promoted:
+                        object.__setattr__(
+                            item,
+                            "_aitos_historical_context",
+                            {
+                                "available": False,
+                                "reason": "not_promoted_for_deep_history",
+                                "candidate_id": candidate_id,
+                                "evidence_only": True,
+                            },
+                        )
+                await _enrich_promoted_candidates(scanner, top2)
+            for batch in batches:
+                yield batch
 
         scanner.iter_candidate_batches = _iter_candidate_batches_with_subscriptions
     scanner.scan_all = _staged_scan_all

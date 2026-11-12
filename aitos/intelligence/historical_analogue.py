@@ -83,14 +83,16 @@ def _path(klines: Sequence[Kline]) -> list[float]:
 
 
 def _return_distribution(
-    klines: Sequence[Kline], starts: Sequence[int], horizon: int
+    klines: Sequence[Kline], starts: Sequence[int], window: int, horizon: int
 ) -> AnalogueOutcome | None:
+    """Measure the move after each matched pattern, not inside the pattern."""
     returns: list[float] = []
     for start in starts:
-        end = start + horizon
+        base_index = start + window - 1
+        end = base_index + horizon
         if end >= len(klines):
             continue
-        base = klines[start].close
+        base = klines[base_index].close
         if base:
             returns.append((klines[end].close - base) / base)
     if not returns:
@@ -152,7 +154,7 @@ def search_historical_analogues(
     candidates.sort(reverse=True)
     selected = candidates[:top_k]
     starts = [x[1] for x in selected]
-    outcome = _return_distribution(klines, starts, forward_horizon)
+    outcome = _return_distribution(klines, starts, window, forward_horizon)
     return tuple(
         HistoricalAnalogue(
             start_index=start,
