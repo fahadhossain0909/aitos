@@ -96,7 +96,7 @@ describe("signed extension package verification", () => {
         "../payload.js": files["dist/index.mjs"],
       },
     }, { trustedEd25519Keys: { [signerKeyId]: publicKey } });
-    expect(traversal).toEqual({ ok: false, error: "package_file_count_or_entrypoint_invalid" });
+    expect(traversal).toEqual({ ok: false, error: "package_path_or_encoding_invalid" });
     const malformed = await verifySignedExtensionPackage({
       ...pkg,
       files: { "dist/index.mjs": "not base64!" },
