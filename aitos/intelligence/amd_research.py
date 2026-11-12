@@ -88,6 +88,157 @@ def _book_ofi(
     return bid_delta + ask_delta, bid_add, ask_add
 
 
+def _event_time_ms(value: Any) -> int:
+    if hasattr(value, "timestamp"):
+        return _validate_timestamp(round(value.timestamp() * 1000))
+    return _validate_timestamp(value)
+
+
+def build_live_event_order_flow(
+    trade_ticks: Iterable[Any],
+    depth_events: Iterable[Mapping[str, Any]],
+    *,
+    as_of_ms: int,
+    window_ms: int = 60_000,
+    max_staleness_ms: int = 5_000,
+    min_trade_events: int = 10,
+    min_depth_events: int = 2,
+) -> EventFlowResult:
+    """Consume AITOS TradeTick and sequenced LocalOrderBook depth-event records."""
+    as_of = _validate_timestamp(as_of_ms)
+    if window_ms <= 0 or max_staleness_ms < 0:
+        raise ValueError("window_ms must be positive and staleness non-negative")
+    start = max(0, as_of - int(window_ms))
+    diagnostics: list[str] = []
+    trades_by_id: dict[str, Any] = {}
+    duplicates = 0
+    unclassified = 0
+    for trade in trade_ticks:
+        timestamp = _event_time_ms(getattr(trade, "timestamp", None))
+        if timestamp < start or timestamp > as_of:
+            continue
+        trade_id = str(getattr(trade, "trade_id", ""))
+        if not trade_id:
+            unclassified += 1
+            continue
+        if trade_id in trades_by_id:
+            duplicates += 1
+            continue
+        side = getattr(trade, "side", None)
+        side = str(getattr(side, "value", side) or "").upper()
+        if side not in {"BUY", "SELL"}:
+            unclassified += 1
+            continue
+        price = float(getattr(trade, "price", 0.0))
+        quantity = float(getattr(trade, "quantity", 0.0))
+        if not isfinite(price) or not isfinite(quantity) or price <= 0 or quantity <= 0:
+            raise ValueError("live trade values must be finite and positive")
+        trades_by_id[trade_id] = (timestamp, side, price, quantity)
+
+    trades = sorted(trades_by_id.values(), key=lambda item: item[0])
+    total_notional = sum(price * quantity for _, _, price, quantity in trades)
+    signed_notional = sum(
+        (1.0 if side == "BUY" else -1.0) * price * quantity
+        for _, side, price, quantity in trades
+    )
+    cvd_ratio = signed_notional / total_notional if total_notional else 0.0
+    cvd_score = max(0.0, min(10.0, 5.0 + 5.0 * cvd_ratio))
+
+    events = []
+    for event in depth_events:
+        timestamp = _validate_timestamp(int(event.get("event_time_ms", 0)))
+        if start <= timestamp <= as_of:
+            events.append((timestamp, event))
+    events.sort(key=lambda item: item[0])
+    sequence_valid = True
+    ofi_raw = 0.0
+    ofi_scale = 0.0
+    bid_replenishment = 0.0
+    ask_replenishment = 0.0
+    for index, (_, event) in enumerate(events):
+        raw = float(event.get("ofi_raw", 0.0))
+        scale = float(event.get("ofi_scale", 0.0))
+        bid_add = float(event.get("bid_replenishment_qty", 0.0))
+        ask_add = float(event.get("ask_replenishment_qty", 0.0))
+        if any(not isfinite(value) for value in (raw, scale, bid_add, ask_add)):
+            raise ValueError("depth-event metrics must be finite")
+        if scale < 0 or bid_add < 0 or ask_add < 0:
+            raise ValueError("depth-event scale and replenishment must be non-negative")
+        ofi_raw += raw
+        ofi_scale += scale
+        bid_replenishment += bid_add
+        ask_replenishment += ask_add
+        if index:
+            previous = events[index - 1][1]
+            previous_final = previous.get("final_update_id")
+            current_previous = event.get("previous_update_id")
+            if (
+                previous_final is not None
+                and current_previous is not None
+                and int(current_previous) != int(previous_final)
+            ):
+                sequence_valid = False
+    if not sequence_valid:
+        diagnostics.append("depth_sequence_gap")
+    ofi_ratio = ofi_raw / ofi_scale if ofi_scale > 0 else 0.0
+    ofi_score = max(0.0, min(10.0, 5.0 + 50.0 * ofi_ratio))
+    latest_times = [item[0] for item in trades]
+    latest_times.extend(timestamp for timestamp, _ in events)
+    latest = max(latest_times) if latest_times else None
+    fresh = bool(
+        len(trades) >= min_trade_events
+        and len(events) >= min_depth_events
+        and sequence_valid
+        and latest is not None
+        and as_of - latest <= max_staleness_ms
+    )
+    confidence = (
+        min(
+            1.0,
+            len(trades) / float(min_trade_events),
+            len(events) / float(min_depth_events),
+        )
+        if fresh
+        else 0.0
+    )
+    if unclassified:
+        diagnostics.append("unclassified_trade_side_excluded")
+    if len(trades) < min_trade_events:
+        diagnostics.append("insufficient_classified_trade_events")
+    if len(events) < min_depth_events:
+        diagnostics.append("insufficient_sequenced_depth_events")
+    if latest is None or as_of - latest > max_staleness_ms:
+        diagnostics.append("event_flow_stale")
+    evidence = OrderFlowEvidence(
+        cvd_score=cvd_score,
+        ofi_score=ofi_score,
+        fresh=fresh,
+        confidence=confidence,
+        bid_replenishment=min(10.0, bid_replenishment),
+        ask_replenishment=min(10.0, ask_replenishment),
+        aggressive_buy_ratio=(
+            sum(
+                price * quantity
+                for _, side, price, quantity in trades
+                if side == "BUY"
+            )
+            / total_notional
+            if total_notional > 0
+            else 0.5
+        ),
+    )
+    return EventFlowResult(
+        evidence=evidence,
+        trade_count=len(trades),
+        depth_update_count=len(events),
+        duplicate_trade_count=duplicates,
+        unclassified_trade_count=unclassified,
+        latest_event_ms=latest,
+        event_window_start_ms=start,
+        diagnostics=tuple(diagnostics),
+    )
+
+
 def build_event_aligned_order_flow(
     trades: Iterable[AMDTradePrint],
     depth_snapshots: Iterable[AMDDepthSnapshot],
