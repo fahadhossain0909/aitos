@@ -6,6 +6,8 @@ import {
   movePanel,
   PANELS,
   parseWorkspaceLayout,
+  reorderPanel,
+  resizePanel,
   togglePanel,
   WORKSPACES,
   type WorkspaceId,
@@ -29,6 +31,7 @@ export function WorkspaceStudio({
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
   const searchRef = useRef<HTMLInputElement>(null);
+  const draggedPanel = useRef<PanelId | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -144,7 +147,7 @@ export function WorkspaceStudio({
         <div>
           <span className="small-cap">PERSONAL WORKSPACE CONTROL</span>
           <h2>One application. Six focused environments.</h2>
-          <p>Choose a workspace, arrange its panels and persist the layout in your OS configuration folder.</p>
+          <p>Choose a workspace, resize and reorder its panels, and persist the layout in your OS configuration folder.</p>
         </div>
         <button className="button secondary" onClick={() => setPaletteOpen(true)} aria-keyshortcuts="Control+K Meta+K">
           <span>⌘</span> Command palette <kbd>Ctrl K</kbd>
@@ -173,21 +176,46 @@ export function WorkspaceStudio({
             <span className="workspace-local-badge">{storageAvailable ? "SAVED LOCALLY" : "LOCAL SETTINGS UNAVAILABLE"}</span>
           </div>
           <div className="workspace-panel-heading">
-            <strong>Docked panels</strong><span>{activePanels.length} active · {PANELS.length} available</span>
+            <strong>Resizable docked panels</strong><span>{activePanels.length} active · drag to reorder</span>
           </div>
-          <div className="workspace-panel-list">
+          <div className="workspace-panel-grid" aria-label="Resizable docked panels">
             {activePanels.length ? activePanels.map((panelId, index) => {
               const panel = PANELS.find((item) => item.id === panelId)!;
+              const geometry = layout.panelGeometry[layout.activeWorkspace][panelId] ?? { width: 1, height: 1 };
               return (
-                <div className="workspace-panel-row" key={panelId}>
+                <article
+                  className={`workspace-panel-row ${geometry.width === 2 ? "panel-wide" : ""} ${geometry.height === 2 ? "panel-tall" : ""}`}
+                  key={panelId}
+                  draggable
+                  onDragStart={(event) => {
+                    draggedPanel.current = panelId;
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", panelId);
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const source = draggedPanel.current;
+                    if (source) update(reorderPanel(layout, layout.activeWorkspace, source, panelId));
+                    draggedPanel.current = null;
+                  }}
+                  onDragEnd={() => { draggedPanel.current = null; }}
+                >
                   <span className="workspace-panel-grip" aria-hidden="true">⠿</span>
                   <span className="workspace-panel-order">{String(index + 1).padStart(2, "0")}</span>
-                  <span className="workspace-panel-name"><strong>{panel.label}</strong><small>{panel.group}</small></span>
-                  <button className="icon-button" onClick={() => onOpenPanel(panelId)} aria-label={`Open ${panel.label}`} title="Open panel">↗</button>
-                  <button className="icon-button" onClick={() => update(movePanel(layout, layout.activeWorkspace, panelId, -1))} disabled={index === 0} aria-label={`Move ${panel.label} up`}>↑</button>
-                  <button className="icon-button" onClick={() => update(movePanel(layout, layout.activeWorkspace, panelId, 1))} disabled={index === activePanels.length - 1} aria-label={`Move ${panel.label} down`}>↓</button>
-                  <button className="icon-button" onClick={() => update(togglePanel(layout, layout.activeWorkspace, panelId))} aria-label={`Remove ${panel.label}`}>×</button>
-                </div>
+                  <span className="workspace-panel-name">
+                    <strong>{panel.label}</strong>
+                    <small>{panel.group} · {geometry.width === 2 ? "Wide" : "Standard"} · {geometry.height === 2 ? "Tall" : "Compact"}</small>
+                  </span>
+                  <div className="workspace-panel-actions">
+                    <button className="icon-button" onClick={() => onOpenPanel(panelId)} aria-label={`Open ${panel.label}`} title="Open existing operator page">↗</button>
+                    <button className="icon-button" onClick={() => update(resizePanel(layout, layout.activeWorkspace, panelId, "width", geometry.width === 2 ? 1 : 2))} aria-label={geometry.width === 2 ? `Narrow ${panel.label}` : `Widen ${panel.label}`} title={geometry.width === 2 ? "Narrow panel" : "Widen panel"}>↔</button>
+                    <button className="icon-button" onClick={() => update(resizePanel(layout, layout.activeWorkspace, panelId, "height", geometry.height === 2 ? 1 : 2))} aria-label={geometry.height === 2 ? `Shorten ${panel.label}` : `Expand ${panel.label}`} title={geometry.height === 2 ? "Shorten panel" : "Expand panel"}>↕</button>
+                    <button className="icon-button" onClick={() => update(movePanel(layout, layout.activeWorkspace, panelId, -1))} disabled={index === 0} aria-label={`Move ${panel.label} up`}>↑</button>
+                    <button className="icon-button" onClick={() => update(movePanel(layout, layout.activeWorkspace, panelId, 1))} disabled={index === activePanels.length - 1} aria-label={`Move ${panel.label} down`}>↓</button>
+                    <button className="icon-button" onClick={() => update(togglePanel(layout, layout.activeWorkspace, panelId))} aria-label={`Undock ${panel.label}`}>×</button>
+                  </div>
+                </article>
               );
             }) : <div className="workspace-empty">No panels are docked. Add a panel from the library.</div>}
           </div>
