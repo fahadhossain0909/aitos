@@ -53,7 +53,9 @@ async def test_all_market_tickers_are_compacted_and_ranked_without_candles():
         )
         await service.on_ticker(event)
     ranked = await service.rank()
-    assert ranked[0][0] == "ETHUSDT"
+    # Quote-activity priority is intentional: BTC has 10x ETH's quote volume.
+    assert ranked[0][0] == "BTCUSDT"
+    assert ranked[1][0] == "ETHUSDT"
     assert len(await service.snapshot()) == 3
     assert service.health_snapshot()["memory_symbols"] == 3
 
