@@ -76,6 +76,17 @@ _TIMEFRAME_SECONDS = {
 }
 
 
+def _normalize_timeframe(timeframe: str) -> str:
+    """Preserve Binance's case-sensitive 1M interval (monthly vs 1-minute)."""
+    value = str(timeframe).strip()
+    if value == "1M":
+        return value
+    normalized = value.lower()
+    if normalized not in _TIMEFRAME_SECONDS:
+        raise ValueError(f"unsupported historical timeframe: {timeframe!r}")
+    return normalized
+
+
 async def fetch_historical_klines(
     symbol: str,
     timeframe: str,
@@ -318,7 +329,7 @@ class OnDemandHistoricalIntelligence:
         limit = min(int(limit), self.config.max_candles_per_request)
         if limit < 1:
             return None
-        key = (symbol.upper(), timeframe.lower(), limit)
+        key = (symbol.upper(), _normalize_timeframe(timeframe), limit)
         now = time.monotonic()
         async with self._lock:
             item = self._cache.get(key)
