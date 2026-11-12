@@ -835,3 +835,55 @@ def replay_amd_historical_observations(
             )
         )
     return tuple(observations)
+
+
+def summarize_amd_forward_cohorts(
+    observations: Iterable[AMDHistoricalObservation],
+) -> tuple[dict[str, Any], ...]:
+    """Summarize directional phase markouts without mislabelling them net PnL."""
+    groups: dict[tuple[str, str, str, str], list[AMDForwardOutcome]] = defaultdict(list)
+    for observation in observations:
+        outcome = observation.outcome
+        if outcome is None:
+            continue
+        key = (
+            outcome.symbol,
+            outcome.timeframe,
+            observation.state.phase.value,
+            outcome.direction,
+        )
+        groups[key].append(outcome)
+    reports = []
+    for key in sorted(groups):
+        outcomes = groups[key]
+        complete = [item for item in outcomes if item.outcome_complete]
+        returns = [
+            item.forward_return_pct
+            for item in complete
+            if item.forward_return_pct is not None
+        ]
+        mfe = [item.mfe_pct for item in outcomes if item.mfe_pct is not None]
+        mae = [item.mae_pct for item in outcomes if item.mae_pct is not None]
+        reports.append(
+            {
+                "symbol": key[0],
+                "timeframe": key[1],
+                "phase": key[2],
+                "direction": key[3],
+                "observations": len(outcomes),
+                "complete_horizons": len(complete),
+                "incomplete_horizons": len(outcomes) - len(complete),
+                "mean_forward_return_pct": (
+                    sum(returns) / len(returns) if returns else None
+                ),
+                "positive_forward_return_rate": (
+                    sum(value > 0 for value in returns) / len(returns)
+                    if returns
+                    else None
+                ),
+                "mean_mfe_pct": sum(mfe) / len(mfe) if mfe else None,
+                "mean_mae_pct": sum(mae) / len(mae) if mae else None,
+                "outcome_type": "counterfactual_gross_candle_markout",
+            }
+        )
+    return tuple(reports)
