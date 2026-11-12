@@ -87,7 +87,10 @@ def _live_liquidity_flow_evidence(store: Any, symbol: str):
 
 
 async def _persist_liquidity_evidence(
-    scanner: Any, candidate: Any, analysis: Any
+    scanner: Any,
+    candidate: Any,
+    analysis: Any,
+    amd_state: dict[str, Any] | None = None,
 ) -> str | None:
     """Persist a deterministic, candidate-linked liquidity evidence snapshot."""
     service = getattr(scanner, "_aitos_historical_intelligence", None)
@@ -110,12 +113,14 @@ async def _persist_liquidity_evidence(
         getattr(latest, "timeframe", getattr(scanner, "_timeframe", "unknown"))
     )
     evidence = {
-        "schema_version": 1,
+        "schema_version": 2 if amd_state is not None else 1,
         "symbol": str(candidate.symbol).upper(),
         "timeframe": timeframe,
         "captured_at": str(captured_at),
         "liquidity_intelligence": analysis.to_dict(),
     }
+    if amd_state is not None:
+        evidence["amd_intelligence"] = amd_state
     try:
         return await persist(str(candidate_id), evidence)
     except Exception:
@@ -199,6 +204,60 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                 flow_evidence = _live_liquidity_flow_evidence(
                     state_store, candidate.symbol
                 )
+                flow_evidence_source = (
+                    "legacy_live_snapshot_proxy"
+                    if flow_evidence.fresh
+                    else "unavailable"
+                )
+                event_flow_diagnostics = {}
+                live_cache = getattr(self, "_live_cache", None)
+                live_state = (
+                    live_cache.snapshot(candidate.symbol)
+                    if live_cache is not None
+                    else None
+                )
+                if live_state is not None:
+                    from aitos.intelligence.amd_research import (
+                        build_live_event_order_flow,
+                    )
+
+                    event_flow = build_live_event_order_flow(
+                        tuple(getattr(live_state, "trades", ()) or ()),
+                        tuple(getattr(live_state, "depth_event_history", ()) or ()),
+                        as_of_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+                        max_staleness_ms=int(
+                            max(
+                                500.0,
+                                float(getattr(self, "_live_state_stale_seconds", 5.0))
+                                * 1000.0,
+                            )
+                        ),
+                        history_gap_at_ms=getattr(
+                            live_state, "depth_history_gap_at_ms", None
+                        ),
+                    )
+                    event_flow_diagnostics = {
+                        "trade_count": event_flow.trade_count,
+                        "depth_update_count": event_flow.depth_update_count,
+                        "duplicate_trade_count": event_flow.duplicate_trade_count,
+                        "unclassified_trade_count": (
+                            event_flow.unclassified_trade_count
+                        ),
+                        "latest_event_ms": event_flow.latest_event_ms,
+                        "diagnostics": list(event_flow.diagnostics),
+                        "fresh": event_flow.evidence.fresh,
+                    }
+                    sequence_gap_diagnostics = {
+                        "depth_sequence_gap",
+                        "depth_sequence_gap_marker",
+                        "depth_history_gap_in_window",
+                    }
+                    if sequence_gap_diagnostics.intersection(event_flow.diagnostics):
+                        flow_evidence = OrderFlowEvidence()
+                        flow_evidence_source = "blocked_depth_sequence_gap"
+                    elif event_flow.evidence.fresh:
+                        flow_evidence = event_flow.evidence
+                        flow_evidence_source = "sequenced_trade_and_depth_events"
                 if not flow_evidence.fresh:
                     flow_score = float(context_scores.get("order_flow_bias", 5.0))
                     flow_evidence = OrderFlowEvidence(
@@ -221,8 +280,89 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                     flow=flow_evidence,
                 )
                 liquidity_payload = liquidity_analysis.to_dict()
+                from aitos.intelligence.amd_intelligence import (
+                    analyze_amd,
+                    analyze_amd_timeframe_stack,
+                    load_amd_checkpoint,
+                    save_amd_checkpoint,
+                )
+
+                candidate_timeframe = str(
+                    getattr(
+                        candidate_klines[-1],
+                        "timeframe",
+                        getattr(self, "_timeframe", "unknown"),
+                    )
+                ).lower()
+                timeframe_candles = dict(
+                    getattr(candidate, "_aitos_mtf_candles", {}) or {}
+                )
+                timeframe_candles[candidate_timeframe] = tuple(candidate_klines)
+                checkpoint_redis = getattr(
+                    getattr(self, "_aitos_historical_intelligence", None),
+                    "redis",
+                    None,
+                )
+                amd_states = {}
+                checkpoint_results = {}
+                for timeframe, frame_candles in timeframe_candles.items():
+                    if not frame_candles:
+                        continue
+                    if timeframe == candidate_timeframe:
+                        frame_liquidity = liquidity_analysis
+                        frame_flow = flow_evidence
+                    else:
+                        frame_flow = OrderFlowEvidence()
+                        frame_liquidity = analyze_liquidity(
+                            candidate.symbol,
+                            timeframe,
+                            frame_candles,
+                            flow=frame_flow,
+                        )
+                    previous_state = await load_amd_checkpoint(
+                        checkpoint_redis, candidate.symbol, timeframe
+                    )
+                    frame_state = analyze_amd(
+                        candidate.symbol,
+                        timeframe,
+                        frame_candles,
+                        liquidity=frame_liquidity,
+                        flow=frame_flow,
+                        previous_state=previous_state,
+                    )
+                    amd_states[timeframe] = frame_state
+                    checkpoint_results[timeframe] = await save_amd_checkpoint(
+                        checkpoint_redis, frame_state
+                    )
+                amd_state = amd_states[candidate_timeframe]
+                amd_stack = analyze_amd_timeframe_stack(amd_states)
+                amd_payload = amd_state.to_dict()
+                amd_payload["timeframe_stack"] = amd_stack.to_dict()
+                amd_payload["order_flow_source"] = flow_evidence_source
+                amd_payload["event_flow_diagnostics"] = event_flow_diagnostics
+                amd_payload["checkpoint_persisted"] = checkpoint_results.get(
+                    candidate_timeframe, False
+                )
+                amd_payload["checkpoint_store_available"] = checkpoint_redis is not None
+                amd_payload["timeframe_checkpoint_persistence"] = checkpoint_results
+                amd_payload["decision_impact"] = False
+                liquidity_payload["amd_intelligence"] = amd_payload
+                object.__setattr__(candidate, "_aitos_amd_state", amd_payload)
+                object.__setattr__(
+                    candidate,
+                    "_aitos_amd_summary",
+                    {
+                        "phase": amd_state.phase.value,
+                        "direction": amd_state.direction,
+                        "state_id": amd_state.state_id,
+                        "confidence": amd_state.confidence,
+                        "evidence_coverage": amd_state.evidence_coverage,
+                        "timeframe_stack": amd_stack.to_dict(),
+                        "decision_impact": False,
+                    },
+                )
                 liquidity_evidence_id = await _persist_liquidity_evidence(
-                    self, candidate, liquidity_analysis
+                    self, candidate, liquidity_analysis, amd_payload
                 )
                 liquidity_summary = {
                     "schema_version": 1,
@@ -276,6 +416,19 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                             ),
                             "decision_impact": False,
                             "liquidity_evidence_id": liquidity_evidence_id,
+                            "amd_phase": amd_state.phase.value,
+                            "amd_direction": amd_state.direction,
+                            "amd_state_id": amd_state.state_id,
+                            "amd_timeframe_direction": amd_stack.direction,
+                            "amd_timeframe_stack_complete": amd_stack.stack_complete,
+                            "amd_missing_timeframes": list(
+                                amd_stack.missing_timeframes
+                            ),
+                            "amd_decision_impact": False,
+                            "amd_order_flow_source": flow_evidence_source,
+                            "amd_event_flow_fresh": bool(
+                                event_flow_diagnostics.get("fresh", False)
+                            ),
                         },
                     )
             except (AttributeError, TypeError, ValueError):
@@ -303,6 +456,12 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
             "positioning": positioning,
             "graph_context": graph_context,
             "liquidity_intelligence": liquidity_payload,
+            "amd_intelligence": (
+                liquidity_payload.get("amd_intelligence")
+                if isinstance(liquidity_payload, dict)
+                else None
+            ),
+            "amd_intelligence_mode": "shadow",
             "liquidity_intelligence_mode": "shadow",
         }
         return await kernel.request_decision(

@@ -58,3 +58,30 @@ async def test_liquidity_evidence_skips_when_candidate_identity_is_missing():
         _aitos_klines=(SimpleNamespace(close_time=datetime.now(timezone.utc)),),
     )
     assert await _persist_liquidity_evidence(scanner, candidate, _Analysis()) is None
+
+
+@pytest.mark.asyncio
+async def test_amd_snapshot_is_persisted_with_versioned_evidence():
+    close_time = datetime(2026, 11, 12, 6, 15, tzinfo=timezone.utc)
+    service = _EvidenceService()
+    scanner = SimpleNamespace(
+        _aitos_historical_intelligence=service,
+        _timeframe="5m",
+    )
+    candidate = SimpleNamespace(
+        _aitos_candidate_id="candidate-amd",
+        symbol="BTCUSDT",
+        _aitos_klines=(SimpleNamespace(close_time=close_time, timeframe="5m"),),
+    )
+    amd = {
+        "phase": "distribution_candidate",
+        "state_id": "amd-state-1",
+        "decision_impact": False,
+    }
+    evidence_id = await _persist_liquidity_evidence(
+        scanner, candidate, _Analysis(), amd
+    )
+    assert evidence_id == "evidence-id-1"
+    _, evidence = service.rows[0]
+    assert evidence["schema_version"] == 2
+    assert evidence["amd_intelligence"] == amd

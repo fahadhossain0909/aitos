@@ -394,6 +394,17 @@ class DataIngestionService(_LegacyDataIngestionService):
                 self._staged_scanner_install_task, return_exceptions=True
             )
             self._staged_scanner_install_task = None
+        # Stop producers before waiting for their downstream subscribers and
+        # persistence consumers.  Otherwise a continuously-fed subscription
+        # can keep shutdown busy while the market-data runtimes are still
+        # publishing, leaving their worker tasks alive for the whole grace
+        # period.
+        if self._auxiliary_runtime is not None:
+            await self._auxiliary_runtime.stop()
+        if self._deep_runtime is not None:
+            await self._deep_runtime.stop()
+        if self._canonical_runtime is not None:
+            await self._canonical_runtime.stop()
         if self._universe_market_context is not None and self._universe_context_started:
             await self._universe_market_context.stop()
             self._universe_context_started = False
@@ -401,12 +412,6 @@ class DataIngestionService(_LegacyDataIngestionService):
             await self._deep_collector.stop()
         if self._canonical_persistence is not None:
             await self._canonical_persistence.shutdown()
-        if self._auxiliary_runtime is not None:
-            await self._auxiliary_runtime.stop()
-        if self._deep_runtime is not None:
-            await self._deep_runtime.stop()
-        if self._canonical_runtime is not None:
-            await self._canonical_runtime.stop()
         await super().shutdown(grace_period_seconds)
 
 

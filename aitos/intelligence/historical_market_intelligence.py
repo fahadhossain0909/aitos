@@ -200,7 +200,7 @@ class HistoricalEvidenceStore:
                     evidence["timeframe"],
                     evidence["captured_at"],
                     body,
-                    1,
+                    int(evidence.get("schema_version", 1)),
                 ]
             ],
             column_names=[

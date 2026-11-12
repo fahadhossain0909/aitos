@@ -1012,6 +1012,7 @@ class OpportunityScanner(AITOSModule):
         self._last_oi[symbol] = oi_current
         htf_alignment_score = 5.0
         htf_available = False
+        amd_mtf_candles: dict[str, tuple[Any, ...]] = {}
         htf_diagnostics: dict[str, Any] = {
             "trend": "disabled",
             "reason": "htf_filter_disabled",
@@ -1037,6 +1038,11 @@ class OpportunityScanner(AITOSModule):
                     countertrend_min_score=self._tuning.scanner.htf_countertrend_min_ltf_score,
                     alignment_balance_threshold=self._tuning.scanner.htf_alignment_balance_threshold,
                 )
+                amd_mtf_candles = {
+                    snapshot.timeframe: tuple(snapshot.candles)
+                    for snapshot in mtf_result.snapshots
+                    if snapshot.context.available and snapshot.candles
+                }
                 htf_diagnostics = dict(mtf_result.diagnostics)
                 htf_available = bool(mtf_result.diagnostics["available_timeframes"])
                 await self._record_funnel(
@@ -1707,6 +1713,8 @@ class OpportunityScanner(AITOSModule):
             trace_id=_ACTIVE_SCAN_TRACE_ID.get() or None,
             statistical_forecast=statistical_forecast,
         )
+        if amd_mtf_candles:
+            object.__setattr__(candidate, "_aitos_mtf_candles", amd_mtf_candles)
         event_features = self._financial_ml.event_features(symbol)
         from aitos.statistics.financial_volatility import (
             financial_volatility_features,

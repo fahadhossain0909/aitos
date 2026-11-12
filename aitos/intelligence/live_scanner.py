@@ -37,6 +37,7 @@ class LiveSymbolCache:
     order_book: OrderBookSnapshot | None = None
     liquidity_events: deque = field(default_factory=lambda: deque(maxlen=200))
     depth_event_history: deque = field(default_factory=lambda: deque(maxlen=200))
+    depth_history_gap_at_ms: int | None = None
     trade_depth_matcher: TradeDepthMatcher = field(default_factory=TradeDepthMatcher)
     stale_trade_rejections: int = 0
     stale_book_rejections: int = 0
@@ -276,18 +277,24 @@ class LiveScannerCache:
             except Exception:
                 pass
             return
-        if state.order_book is not None and (
-            book.depth_event is None
-            or int(book.depth_event.get("previous_update_id", -1))
-            != state.order_book.last_update_id
-        ):
+        depth_sequence_gap = bool(
+            state.order_book is not None
+            and (
+                book.depth_event is None
+                or int(book.depth_event.get("previous_update_id", -1))
+                != state.order_book.last_update_id
+            )
+        )
+        if depth_sequence_gap:
             state.depth_event_history.clear()
             state.trade_depth_matcher.reset()
+            state.depth_history_gap_at_ms = int(book.timestamp.timestamp() * 1000)
         state.order_book = book
         if book.depth_event:
-            depth_event = state.trade_depth_matcher.add_depth_event(
-                dict(book.depth_event)
-            )
+            event_payload = dict(book.depth_event)
+            if depth_sequence_gap:
+                event_payload["sequence_gap"] = True
+            depth_event = state.trade_depth_matcher.add_depth_event(event_payload)
             state.depth_event_history.append(depth_event)
         state.last_book_at = received_at
         state.last_book_source_at = book.timestamp
@@ -378,18 +385,24 @@ class LiveScannerCache:
         ):
             state.duplicate_book_rejections += 1
             return
-        if state.order_book is not None and (
-            book.depth_event is None
-            or int(book.depth_event.get("previous_update_id", -1))
-            != state.order_book.last_update_id
-        ):
+        depth_sequence_gap = bool(
+            state.order_book is not None
+            and (
+                book.depth_event is None
+                or int(book.depth_event.get("previous_update_id", -1))
+                != state.order_book.last_update_id
+            )
+        )
+        if depth_sequence_gap:
             state.depth_event_history.clear()
             state.trade_depth_matcher.reset()
+            state.depth_history_gap_at_ms = int(book.timestamp.timestamp() * 1000)
         state.order_book = book
         if book.depth_event:
-            depth_event = state.trade_depth_matcher.add_depth_event(
-                dict(book.depth_event)
-            )
+            event_payload = dict(book.depth_event)
+            if depth_sequence_gap:
+                event_payload["sequence_gap"] = True
+            depth_event = state.trade_depth_matcher.add_depth_event(event_payload)
             state.depth_event_history.append(depth_event)
         state.last_book_at = received_at
         state.last_book_source_at = event.event_time
