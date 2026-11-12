@@ -5,6 +5,7 @@ AITOS candle/liquidity/order-flow contracts and never claims to observe hidden
 stop orders or participant intent. Scores are heuristic research features, not
 calibrated probabilities.
 """
+
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -200,9 +201,7 @@ def _accumulation_features(
         )
 
     if pools:
-        pool_score = min(
-            1.0, len(pools) / max(1, config.min_liquidity_pools * 2)
-        )
+        pool_score = min(1.0, len(pools) / max(1, config.min_liquidity_pools * 2))
         components.append((pool_score, 0.20))
         evidence.append("liquidity_pools_inside_range")
     else:
@@ -284,9 +283,7 @@ def analyze_amd(
     acc_score = accumulation.score if accumulation else 0.0
     acc_coverage = accumulation.coverage if accumulation else 0.0
     acc_evidence = list(
-        accumulation.evidence
-        if accumulation
-        else ("insufficient_closed_candles",)
+        accumulation.evidence if accumulation else ("insufficient_closed_candles",)
     )
     sweeps = liquidity.sweeps if liquidity else ()
     classification = liquidity.latest_classification if liquidity else None
@@ -300,20 +297,13 @@ def analyze_amd(
         if classification is not None:
             if classification.state is SweepState.REJECTED:
                 manipulation_score += 0.45
-                manipulation_evidence.append(
-                    "post_sweep_reclaim_classified_rejected"
-                )
+                manipulation_evidence.append("post_sweep_reclaim_classified_rejected")
             elif classification.state is SweepState.ACCEPTED:
                 manipulation_score += 0.35
                 manipulation_evidence.append("post_sweep_price_acceptance")
             else:
-                manipulation_evidence.append(
-                    "post_sweep_confirmation_pending"
-                )
-        if (
-            order_flow.fresh
-            and order_flow.confidence >= cfg.min_flow_confidence
-        ):
+                manipulation_evidence.append("post_sweep_confirmation_pending")
+        if order_flow.fresh and order_flow.confidence >= cfg.min_flow_confidence:
             manipulation_score += 0.25
             manipulation_evidence.append("fresh_order_flow_snapshot")
     manipulation_score = min(1.0, manipulation_score)
@@ -369,8 +359,7 @@ def analyze_amd(
         )
     )
     expansion_matches = bool(
-        volume_expansion is not None
-        and volume_expansion >= cfg.volume_expansion_ratio
+        volume_expansion is not None and volume_expansion >= cfg.volume_expansion_ratio
     )
     distribution_parts = [structure_matches, flow_matches, expansion_matches]
     distribution_score = sum(1.0 for item in distribution_parts if item) / 3.0
@@ -404,9 +393,7 @@ def analyze_amd(
         phase = AMDPhase.DISTRIBUTION_CONFIRMED
     elif manipulation_confirmed and not structure_matches:
         phase = AMDPhase.MANIPULATION_CONFIRMED
-    elif direction and (
-        structure_matches or (flow_matches and expansion_matches)
-    ):
+    elif direction and (structure_matches or (flow_matches and expansion_matches)):
         phase = AMDPhase.DISTRIBUTION_CANDIDATE
     elif manipulation_confirmed:
         phase = AMDPhase.MANIPULATION_CONFIRMED
@@ -434,9 +421,7 @@ def analyze_amd(
     if normalized_structure:
         evidence.append("structure_bias_" + normalized_structure)
     event_id = latest_sweep.event_id if latest_sweep else "no-sweep"
-    state_id = _stable_id(
-        symbol.upper(), timeframe, as_of, phase.value, event_id
-    )
+    state_id = _stable_id(symbol.upper(), timeframe, as_of, phase.value, event_id)
     coverage_values = [acc_coverage]
     if latest_sweep is not None:
         coverage_values.append(1.0 if classification is not None else 0.5)
@@ -454,29 +439,35 @@ def analyze_amd(
     coverage = round(sum(coverage_values) / len(coverage_values), 4)
     confidence = round(
         max(
-            acc_score
-            if phase
-            in {
-                AMDPhase.ACCUMULATION_CANDIDATE,
-                AMDPhase.ACCUMULATION_CONFIRMED,
-                AMDPhase.REACCUMULATION,
-                AMDPhase.REDISTRIBUTION,
-            }
-            else 0.0,
-            manipulation_score
-            if phase
-            in {
-                AMDPhase.MANIPULATION_CANDIDATE,
-                AMDPhase.MANIPULATION_CONFIRMED,
-            }
-            else 0.0,
-            distribution_score
-            if phase
-            in {
-                AMDPhase.DISTRIBUTION_CANDIDATE,
-                AMDPhase.DISTRIBUTION_CONFIRMED,
-            }
-            else 0.0,
+            (
+                acc_score
+                if phase
+                in {
+                    AMDPhase.ACCUMULATION_CANDIDATE,
+                    AMDPhase.ACCUMULATION_CONFIRMED,
+                    AMDPhase.REACCUMULATION,
+                    AMDPhase.REDISTRIBUTION,
+                }
+                else 0.0
+            ),
+            (
+                manipulation_score
+                if phase
+                in {
+                    AMDPhase.MANIPULATION_CANDIDATE,
+                    AMDPhase.MANIPULATION_CONFIRMED,
+                }
+                else 0.0
+            ),
+            (
+                distribution_score
+                if phase
+                in {
+                    AMDPhase.DISTRIBUTION_CANDIDATE,
+                    AMDPhase.DISTRIBUTION_CONFIRMED,
+                }
+                else 0.0
+            ),
         ),
         4,
     )
@@ -557,9 +548,7 @@ def analyze_amd_timeframe_stack(
     symbol = next(iter(symbols), "")
     available = tuple(
         sorted(
-            key
-            for key, value in normalized.items()
-            if value.timeframe.lower() == key
+            key for key, value in normalized.items() if value.timeframe.lower() == key
         )
     )
     required = tuple(str(item).lower() for item in required_timeframes)
