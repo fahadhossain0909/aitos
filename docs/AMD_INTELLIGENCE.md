@@ -57,7 +57,7 @@ When any evidence family is missing, the engine emits at most a candidate. The c
 
 ## State and deterministic replay
 
-AMDPhase includes neutral, candidate and confirmed accumulation/manipulation/distribution states, plus reaccumulation and redistribution labels.
+AMDPhase includes neutral, candidate and confirmed accumulation/manipulation/distribution states, trend continuation, reaccumulation and redistribution labels. Directional context is carried forward only through a supplied prior checkpoint; it is not inferred from an unrelated symbol or timeframe.
 
 AMDState is immutable and has a deterministic state_id based on symbol, timeframe, completed-candle timestamp, phase and latest liquidity event. It carries range bounds, direction, event identity, target liquidity IDs, component scores, evidence and coverage.
 
