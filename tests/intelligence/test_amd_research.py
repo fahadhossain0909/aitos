@@ -6,6 +6,7 @@ from aitos.intelligence.amd_research import (
     AMDDepthSnapshot,
     AMDTradePrint,
     build_event_aligned_order_flow,
+    build_live_event_order_flow,
     evaluate_amd_forward_outcome,
     purged_walk_forward_folds,
     replay_amd_execution,
@@ -216,3 +217,92 @@ def test_execution_replay_does_not_fabricate_exit_when_entry_unfilled():
     assert result.entry.filled_quantity == 0.0
     assert result.exit.filled_quantity == 0.0
     assert result.net_pnl is None
+
+
+def test_live_event_flow_uses_aitos_trade_ticks_and_sequenced_depth_events():
+    from datetime import datetime, timezone
+
+    trades = [
+        SimpleNamespace(
+            timestamp=datetime.fromtimestamp(index / 10, tz=timezone.utc),
+            trade_id=index,
+            price=100.0,
+            quantity=1.0,
+            side="BUY" if index < 9 else "SELL",
+        )
+        for index in range(10)
+    ]
+    events = [
+        {
+            "event_time_ms": 900,
+            "first_update_id": 10,
+            "final_update_id": 10,
+            "previous_update_id": 9,
+            "ofi_raw": 2.0,
+            "ofi_scale": 4.0,
+            "bid_replenishment_qty": 1.0,
+            "ask_replenishment_qty": 0.0,
+        },
+        {
+            "event_time_ms": 950,
+            "first_update_id": 11,
+            "final_update_id": 11,
+            "previous_update_id": 10,
+            "ofi_raw": 1.0,
+            "ofi_scale": 2.0,
+            "bid_replenishment_qty": 0.5,
+            "ask_replenishment_qty": 0.0,
+        },
+    ]
+    result = build_live_event_order_flow(
+        trades,
+        events,
+        as_of_ms=1000,
+        min_trade_events=10,
+        min_depth_events=2,
+    )
+    assert result.evidence.fresh
+    assert result.evidence.cvd_score > 5.0
+    assert result.evidence.ofi_score > 5.0
+    assert result.evidence.bid_replenishment == pytest.approx(1.5)
+
+
+def test_live_event_flow_rejects_depth_sequence_gaps():
+    from datetime import datetime, timezone
+
+    trades = [
+        SimpleNamespace(
+            timestamp=datetime.fromtimestamp(index / 10, tz=timezone.utc),
+            trade_id=index,
+            price=100.0,
+            quantity=1.0,
+            side="BUY",
+        )
+        for index in range(10)
+    ]
+    events = [
+        {
+            "event_time_ms": 900,
+            "final_update_id": 10,
+            "previous_update_id": 9,
+            "ofi_raw": 1.0,
+            "ofi_scale": 2.0,
+        },
+        {
+            "event_time_ms": 950,
+            "final_update_id": 12,
+            "previous_update_id": 11,
+            "ofi_raw": 1.0,
+            "ofi_scale": 2.0,
+        },
+    ]
+    result = build_live_event_order_flow(
+        trades,
+        events,
+        as_of_ms=1000,
+        min_trade_events=10,
+        min_depth_events=2,
+    )
+    assert not result.evidence.fresh
+    assert "depth_sequence_gap" in result.diagnostics
+    assert result.evidence.confidence == 0.0
