@@ -30,7 +30,6 @@ _BRIDGE_DELIVERIES = 0
 class MarketContext:
     order_flow: OrderFlowFeatures | None = None
     liquidity_events: tuple[LiquidityEvent, ...] = ()
-    liquidity_levels: tuple[LiquidityLevel, ...] = ()
     prior_highs: tuple[float, ...] = ()
     prior_lows: tuple[float, ...] = ()
     swing_highs: tuple[float, ...] = ()
@@ -41,6 +40,7 @@ class MarketContext:
     volume_profile: Any = None
     extra_features: dict[str, float] = field(default_factory=dict)
     source: str = "none"
+    liquidity_levels: tuple[LiquidityLevel, ...] = ()
 
     def as_kwargs(self) -> dict[str, Any]:
         return {
