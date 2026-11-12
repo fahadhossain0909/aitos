@@ -12,6 +12,7 @@ from aitos.intelligence.amd_research import (
     replay_amd_execution,
     replay_amd_historical_observations,
     summarize_amd_cohorts,
+    summarize_amd_forward_cohorts,
 )
 from aitos.statistics.replay import BookSnapshot
 
@@ -480,3 +481,54 @@ def test_historical_amd_replay_rejects_snapshot_only_datasets():
     )
     with pytest.raises(ValueError, match="raw sequenced depth"):
         replay_amd_historical_observations(dataset, timeframe="5m")
+
+
+def test_forward_cohort_summary_does_not_call_gross_markout_net_pnl():
+    state = SimpleNamespace(phase=SimpleNamespace(value="distribution_confirmed"))
+    outcomes = [
+        AMDForwardOutcome(
+            symbol="BTCUSDT",
+            timeframe="5m",
+            state_id="amd-1",
+            direction="LONG",
+            entry_time_ms=1000,
+            entry_price=100.0,
+            horizon_bars=2,
+            observed_bars=2,
+            forward_return_pct=1.0,
+            mfe_pct=2.0,
+            mae_pct=-0.5,
+            outcome_complete=True,
+        ),
+        AMDForwardOutcome(
+            symbol="BTCUSDT",
+            timeframe="5m",
+            state_id="amd-2",
+            direction="LONG",
+            entry_time_ms=2000,
+            entry_price=100.0,
+            horizon_bars=2,
+            observed_bars=1,
+            forward_return_pct=-0.5,
+            mfe_pct=1.0,
+            mae_pct=-1.0,
+            outcome_complete=False,
+        ),
+    ]
+    observations = [
+        AMDHistoricalObservation(
+            state=state,
+            outcome=outcome,
+            decision_time_ms=outcome.entry_time_ms,
+            flow_diagnostics=(),
+            flow_source="sequenced_trade_and_depth_events",
+        )
+        for outcome in outcomes
+    ]
+    summary = summarize_amd_forward_cohorts(observations)[0]
+    assert summary["observations"] == 2
+    assert summary["complete_horizons"] == 1
+    assert summary["incomplete_horizons"] == 1
+    assert summary["mean_forward_return_pct"] == pytest.approx(1.0)
+    assert summary["outcome_type"] == "counterfactual_gross_candle_markout"
+    assert "net_return_pct" not in summary
