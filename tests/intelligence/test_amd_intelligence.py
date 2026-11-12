@@ -257,3 +257,64 @@ def test_timeframe_stack_rejects_mixed_symbols():
     )
     with pytest.raises(ValueError):
         analyze_amd_timeframe_stack({"5m": first, "1h": second})
+
+
+def test_bearish_distribution_confirmation_is_symmetric():
+    level = LiquidityLevel(
+        "buy-pool",
+        "BTCUSDT",
+        LiquiditySide.BUY_SIDE,
+        101.0,
+        LiquiditySource.EQUAL_HIGHS,
+        "5m",
+        80.0,
+        2,
+    )
+    rows = []
+    for index in range(20):
+        close = 100.0 - max(0, index - 14) * 0.25
+        volume = 10.0 if index < 15 else 30.0
+        rows.append(
+            Candle(
+                open=close + 0.05,
+                high=close + 0.15,
+                low=close - 0.15,
+                close=close,
+                volume=volume,
+                timestamp=f"bear-bar-{index}",
+            )
+        )
+    sweep = SweepEvent(
+        "buy-sweep",
+        level,
+        "up",
+        101.5,
+        0.5,
+        14,
+        "bear-bar-14",
+        0.7,
+        2.0,
+        state=SweepState.REJECTED,
+    )
+    classification = SweepClassification(
+        SweepState.REJECTED,
+        LiquidityAction.REVERSAL_SHORT,
+        0.9,
+        ("rejection", "fresh flow"),
+        5,
+    )
+    state = analyze_amd(
+        "BTCUSDT",
+        "5m",
+        rows,
+        liquidity=_liquidity((level,), (sweep,), classification),
+        flow=OrderFlowEvidence(
+            cvd_score=2.0,
+            ofi_score=3.0,
+            fresh=True,
+            confidence=0.9,
+        ),
+        structure_bias="bearish",
+    )
+    assert state.phase is AMDPhase.DISTRIBUTION_CONFIRMED
+    assert state.direction == "SHORT"
