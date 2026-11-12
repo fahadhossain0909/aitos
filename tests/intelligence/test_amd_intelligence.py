@@ -4,7 +4,9 @@ import pytest
 from aitos.intelligence.amd_intelligence import (
     AMDConfig,
     AMDPhase,
+    AMDState,
     analyze_amd,
+    analyze_amd_timeframe_stack,
 )
 from aitos.intelligence.liquidity_intelligence import (
     Candle,
@@ -212,3 +214,46 @@ def test_amd_config_rejects_invalid_window_and_scores():
         AMDConfig(window=10, min_window=20)
     with pytest.raises(ValueError):
         AMDConfig(min_distribution_score=1.5)
+
+
+def test_timeframe_stack_exposes_missing_frames_instead_of_fabricating_consensus():
+    state = AMDState(
+        symbol="BTCUSDT",
+        timeframe="5m",
+        phase=AMDPhase.DISTRIBUTION_CONFIRMED,
+        direction="LONG",
+        state_id="state-5m",
+        as_of="bar-1",
+        accumulation_score=0.0,
+        manipulation_score=0.8,
+        distribution_score=1.0,
+        confidence=0.9,
+        evidence_coverage=1.0,
+        range_high=101.0,
+        range_low=99.0,
+        liquidity_event_id="sweep-1",
+        target_liquidity_ids=(),
+        evidence=("fresh_flow",),
+    )
+    stack = analyze_amd_timeframe_stack(
+        {"5m": state},
+        required_timeframes=("1h", "15m", "5m"),
+    )
+    assert stack.direction == "LONG"
+    assert stack.available_timeframes == ("5m",)
+    assert stack.missing_timeframes == ("1h", "15m")
+    assert not stack.stack_complete
+    assert stack.evidence_coverage < 1.0
+
+
+def test_timeframe_stack_rejects_mixed_symbols():
+    first = AMDState(
+        "BTCUSDT", "5m", AMDPhase.NEUTRAL, "", "a", "t",
+        0.0, 0.0, 0.0, 0.0, 0.0, None, None, None, (), (),
+    )
+    second = AMDState(
+        "ETHUSDT", "1h", AMDPhase.NEUTRAL, "", "b", "t",
+        0.0, 0.0, 0.0, 0.0, 0.0, None, None, None, (), (),
+    )
+    with pytest.raises(ValueError):
+        analyze_amd_timeframe_stack({"5m": first, "1h": second})
