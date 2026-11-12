@@ -345,10 +345,10 @@ def validate_workspace_layout(value):
             raise ValueError("workspace_geometry_panel_invalid")
         normalized = {}
         for panel_id, dimensions in entries.items():
-            if (
-                not isinstance(dimensions, dict)
-                or set(dimensions) != {"width", "height"}
-            ):
+            if not isinstance(dimensions, dict) or set(dimensions) != {
+                "width",
+                "height",
+            }:
                 raise ValueError("workspace_geometry_shape_invalid")
             width, height = dimensions["width"], dimensions["height"]
             if type(width) is not int or width not in {1, 2}:
