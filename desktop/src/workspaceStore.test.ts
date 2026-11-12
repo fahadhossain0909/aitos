@@ -23,8 +23,13 @@ describe("OS-backed workspace preferences client", () => {
       json: async () => DEFAULT_LAYOUT,
     });
     const channel = { postMessage: vi.fn(), close: vi.fn() };
+    class MockBroadcastChannel {
+      postMessage = channel.postMessage;
+      close = channel.close;
+      constructor(_name: string) {}
+    }
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubGlobal("BroadcastChannel", vi.fn(() => channel));
+    vi.stubGlobal("BroadcastChannel", MockBroadcastChannel);
     await expect(saveWorkspaceLayout(DEFAULT_LAYOUT, ETAG)).resolves.toEqual({ layout: DEFAULT_LAYOUT, etag: ETAG });
     expect(fetchMock).toHaveBeenCalledWith("/operator/v1/workspace-layout",
       expect.objectContaining({ method: "PUT",
