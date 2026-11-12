@@ -86,6 +86,7 @@ def test_windows_snapshot_does_not_replace_racing_destination(tmp_path, monkeypa
     assert destination.read_bytes() == b"owned-by-another-writer"
     assert not list(tmp_path.glob(".aitos-snapshot-*"))
 
+
 def test_windows_snapshot_successful_rename_cleans_missing_temporary_file(
     tmp_path, monkeypatch
 ):
