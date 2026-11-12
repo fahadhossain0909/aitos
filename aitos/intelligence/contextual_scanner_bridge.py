@@ -204,6 +204,53 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                 flow_evidence = _live_liquidity_flow_evidence(
                     state_store, candidate.symbol
                 )
+                flow_evidence_source = (
+                    "legacy_live_snapshot_proxy"
+                    if flow_evidence.fresh
+                    else "unavailable"
+                )
+                event_flow_diagnostics = {}
+                live_cache = getattr(self, "_live_cache", None)
+                live_state = (
+                    live_cache.snapshot(candidate.symbol)
+                    if live_cache is not None
+                    else None
+                )
+                if live_state is not None:
+                    from aitos.intelligence.amd_research import (
+                        build_live_event_order_flow,
+                    )
+
+                    event_flow = build_live_event_order_flow(
+                        tuple(getattr(live_state, "trades", ()) or ()),
+                        tuple(getattr(live_state, "depth_event_history", ()) or ()),
+                        as_of_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+                        max_staleness_ms=int(
+                            max(
+                                500.0,
+                                float(
+                                    getattr(
+                                        self, "_live_state_stale_seconds", 5.0
+                                    )
+                                )
+                                * 1000.0,
+                            )
+                        ),
+                    )
+                    event_flow_diagnostics = {
+                        "trade_count": event_flow.trade_count,
+                        "depth_update_count": event_flow.depth_update_count,
+                        "duplicate_trade_count": event_flow.duplicate_trade_count,
+                        "unclassified_trade_count": (
+                            event_flow.unclassified_trade_count
+                        ),
+                        "latest_event_ms": event_flow.latest_event_ms,
+                        "diagnostics": list(event_flow.diagnostics),
+                        "fresh": event_flow.evidence.fresh,
+                    }
+                    if event_flow.evidence.fresh:
+                        flow_evidence = event_flow.evidence
+                        flow_evidence_source = "sequenced_trade_and_depth_events"
                 if not flow_evidence.fresh:
                     flow_score = float(context_scores.get("order_flow_bias", 5.0))
                     flow_evidence = OrderFlowEvidence(
@@ -284,6 +331,8 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                 amd_stack = analyze_amd_timeframe_stack(amd_states)
                 amd_payload = amd_state.to_dict()
                 amd_payload["timeframe_stack"] = amd_stack.to_dict()
+                amd_payload["order_flow_source"] = flow_evidence_source
+                amd_payload["event_flow_diagnostics"] = event_flow_diagnostics
                 amd_payload["checkpoint_persisted"] = checkpoint_results.get(
                     candidate_timeframe, False
                 )
@@ -369,6 +418,10 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                                 amd_stack.missing_timeframes
                             ),
                             "amd_decision_impact": False,
+                            "amd_order_flow_source": flow_evidence_source,
+                            "amd_event_flow_fresh": bool(
+                                event_flow_diagnostics.get("fresh", False)
+                            ),
                         },
                     )
             except (AttributeError, TypeError, ValueError):
