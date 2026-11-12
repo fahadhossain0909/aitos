@@ -451,10 +451,10 @@ def analyze_amd(
     ):
         phase = AMDPhase.TREND_CONTINUATION
     if prior_state is not None and phase is AMDPhase.ACCUMULATION_CONFIRMED:
-        if previous_state.direction == "LONG":
+        if prior_state.direction == "LONG":
             phase = AMDPhase.REACCUMULATION
             direction = "LONG"
-        elif previous_state.direction == "SHORT":
+        elif prior_state.direction == "SHORT":
             phase = AMDPhase.REDISTRIBUTION
             direction = "SHORT"
 
