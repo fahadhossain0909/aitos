@@ -17,7 +17,12 @@ execution and risk still require their existing live feeds.
 ## Historical retrieval
 
 Only the globally promoted Top-2 candidates are eligible for deep historical
-retrieval. Retrieval is bounded by:
+retrieval. Each promoted candidate receives independent evidence for its active
+scanner interval plus the configured 5m, 15m, 1h and 4h intervals (duplicate
+intervals are collapsed). The active interval remains the primary context;
+other intervals are retained as separate evidence and are never blended into
+a synthetic directional score. Binance's case-sensitive 1M monthly interval
+is kept distinct from 1m minute candles. Retrieval is bounded by:
 - process-local TTL/LRU limits on entry count and total candles;
 - Redis shared cache and short-lived distributed request lock;
 - atomic Redis sliding-window weighted request budget;
