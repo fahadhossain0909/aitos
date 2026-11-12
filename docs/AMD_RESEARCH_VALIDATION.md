@@ -20,6 +20,8 @@ The existing Binance parser already maps `isBuyerMaker` to `TradeTick.side`, and
 
 `evaluate_amd_forward_outcome` computes directional close return, MFE and MAE for a fixed forward candle horizon. It marks incomplete horizons explicitly and does not guess intrabar ordering when both stop and target could have traded within the same candle. These are counterfactual candle markouts, not exchange fills or net trade returns.
 
+`replay_amd_historical_observations` consumes the existing ClickHouse replay dataset contract, requires raw sequenced depth-event replay plus a pre-window book bootstrap, rebuilds each AMD state at a completed-candle boundary, and attaches only later candles as counterfactual labels. It rejects snapshot-only datasets and never uses candles that close after the decision timestamp. This is the historical data path to use when a configured ClickHouse repository is available.
+
 ## Execution-aware replay
 
 `replay_amd_execution` composes the existing timestamped L1 execution replay for entry and exit:
