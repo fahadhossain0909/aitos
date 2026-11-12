@@ -80,3 +80,59 @@ def test_buffer_applied():
     assert stop.buffer_applied > 0
     # Stop should be below the raw swing low because of buffer
     assert stop.stop_price < 78600.0
+
+
+def test_long_uses_mapped_sell_side_liquidity_pool():
+    from aitos.intelligence.liquidity_intelligence import (
+        LiquidityLevel,
+        LiquiditySide,
+        LiquiditySource,
+    )
+
+    pool = LiquidityLevel(
+        level_id="mapped-low",
+        symbol="BTCUSDT",
+        side=LiquiditySide.SELL_SIDE,
+        price=78600.0,
+        source=LiquiditySource.EQUAL_LOWS,
+        timeframe="15m",
+        strength=85.0,
+        touch_count=3,
+    )
+    stop = StructuralRiskEngine().compute(
+        symbol="BTCUSDT",
+        side="LONG",
+        entry_price=79000.0,
+        liquidity_levels=[pool],
+        atr=200.0,
+    )
+    assert stop.invalidation_type == "liquidity"
+    assert stop.stop_price < pool.price
+
+
+def test_short_uses_mapped_buy_side_liquidity_pool():
+    from aitos.intelligence.liquidity_intelligence import (
+        LiquidityLevel,
+        LiquiditySide,
+        LiquiditySource,
+    )
+
+    pool = LiquidityLevel(
+        level_id="mapped-high",
+        symbol="BTCUSDT",
+        side=LiquiditySide.BUY_SIDE,
+        price=79400.0,
+        source=LiquiditySource.EQUAL_HIGHS,
+        timeframe="15m",
+        strength=85.0,
+        touch_count=3,
+    )
+    stop = StructuralRiskEngine().compute(
+        symbol="BTCUSDT",
+        side="SHORT",
+        entry_price=79000.0,
+        liquidity_levels=[pool],
+        atr=200.0,
+    )
+    assert stop.invalidation_type == "liquidity"
+    assert stop.stop_price > pool.price

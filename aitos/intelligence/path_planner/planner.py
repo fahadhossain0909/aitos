@@ -20,6 +20,7 @@ from typing import Any
 
 from aitos.intelligence.amt.volume_profile import VolumeProfile
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
+from aitos.intelligence.liquidity_intelligence import LiquidityLevel
 from aitos.intelligence.market_state.models import (
     AuctionState,
     MarketState,
@@ -59,6 +60,7 @@ class MarketPathPlanner:
         market_state: MarketState,
         volume_profile: VolumeProfile | None = None,
         liquidity_events: Sequence[LiquidityEvent] = (),
+        liquidity_levels: Sequence[LiquidityLevel] = (),
         prior_highs: Sequence[float] = (),
         prior_lows: Sequence[float] = (),
         swing_highs: Sequence[float] = (),
@@ -86,6 +88,7 @@ class MarketPathPlanner:
 
         # ---- Liquidity events / walls ---------------------------------------
         candidates.extend(self._from_liquidity_events(liquidity_events, price))
+        candidates.extend(self._from_liquidity_levels(liquidity_levels, price))
 
         # ---- Prior extremes & swings ----------------------------------------
         for p in prior_highs:
@@ -387,6 +390,31 @@ class MarketPathPlanner:
                     base_prob=base,
                     confidence=0.55,
                     notes=f"{ev.kind}/{ev.side} score={ev.score}",
+                )
+            )
+        return out
+
+    def _from_liquidity_levels(
+        self, levels: Sequence[LiquidityLevel], price: float
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for level in levels:
+            if level.price <= 0 or level.price == price:
+                continue
+            base = 0.40 + min(0.35, level.strength / 100.0 * 0.35)
+            confidence = min(0.90, 0.55 + level.strength / 250.0)
+            out.append(
+                self._candidate(
+                    level.price,
+                    price,
+                    "liquidity_pool",
+                    level.side.value,
+                    base_prob=base,
+                    confidence=confidence,
+                    notes=(
+                        f"{level.source.value}/{level.timeframe} "
+                        f"strength={level.strength:.1f} touches={level.touch_count}"
+                    ),
                 )
             )
         return out

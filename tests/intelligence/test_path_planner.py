@@ -176,3 +176,40 @@ def test_runner_target_extension_vetoes_when_path_has_no_runway():
     assert decision.approved is False
     assert decision.target_price == 103.0
     assert "insufficient_path_runway" in decision.vetoes
+
+
+def test_mapped_liquidity_pools_become_path_destinations():
+    from aitos.intelligence.liquidity_intelligence import (
+        LiquidityLevel,
+        LiquiditySide,
+        LiquiditySource,
+    )
+
+    sell_pool = LiquidityLevel(
+        level_id="sell-pool",
+        symbol="BTCUSDT",
+        side=LiquiditySide.SELL_SIDE,
+        price=78000.0,
+        source=LiquiditySource.EQUAL_LOWS,
+        timeframe="1h",
+        strength=90.0,
+        touch_count=3,
+    )
+    buy_pool = LiquidityLevel(
+        level_id="buy-pool",
+        symbol="BTCUSDT",
+        side=LiquiditySide.BUY_SIDE,
+        price=80000.0,
+        source=LiquiditySource.EQUAL_HIGHS,
+        timeframe="4h",
+        strength=85.0,
+        touch_count=2,
+    )
+    plan = MarketPathPlanner().plan(
+        market_state=_state(),
+        liquidity_levels=[sell_pool, buy_pool],
+    )
+    assert any(item.price == 80000.0 for item in plan.upside)
+    assert any(item.price == 78000.0 for item in plan.downside)
+    assert any(item.liquidity_type == "buy_side" for item in plan.upside)
+    assert any(item.liquidity_type == "sell_side" for item in plan.downside)
