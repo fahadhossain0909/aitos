@@ -112,3 +112,57 @@ def test_invalid_prices_fail_closed():
     import pytest
     with pytest.raises(ValueError):
         plan_liquidity_aware_stop(side="LONG", entry_price=100, invalidation_price=101, atr=1)
+
+
+
+def test_liquidity_level_ids_are_stable_across_replays():
+    rows = candles(
+        [
+            (100, 102, 99, 100, 10),
+            (100, 104.95, 99, 103, 10),
+            (103, 103, 98, 100, 10),
+            (100, 104, 99, 102, 10),
+            (102, 105.0, 98.5, 99, 10),
+            (99, 103, 99, 101, 10),
+            (101, 102, 98.01, 100, 10),
+            (100, 101, 98.5, 99, 10),
+        ]
+    )
+    first = map_liquidity_levels("BTCUSDT", "5m", rows)
+    second = map_liquidity_levels("BTCUSDT", "5m", rows)
+    assert [level.level_id for level in first] == [level.level_id for level in second]
+
+
+def test_buy_side_rejection_with_bearish_flow_creates_short_candidate():
+    level = LiquidityLevel(
+        "pool-short",
+        "BTCUSDT",
+        LiquiditySide.BUY_SIDE,
+        100,
+        LiquiditySource.EQUAL_HIGHS,
+        "5m",
+        80,
+        2,
+    )
+    rows = candles(
+        [
+            (99, 100.5, 98.5, 99, 10),
+            (99, 101.2, 98.8, 100.8, 20),
+            (100.8, 101, 99.8, 99.5, 15),
+            (99.5, 100, 98.5, 98.8, 18),
+        ]
+    )
+    event = detect_liquidity_sweeps(
+        [level], rows, config=LiquidityConfig(sweep_min_penetration_atr=0.01)
+    )[-1]
+    result = classify_sweep(
+        event,
+        rows,
+        flow=OrderFlowEvidence(
+            cvd_score=3,
+            ofi_score=3,
+            fresh=True,
+            confidence=0.9,
+        ),
+    )
+    assert result.action is LiquidityAction.REVERSAL_SHORT

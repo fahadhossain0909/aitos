@@ -11,9 +11,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from math import isfinite
+from hashlib import sha256
 from statistics import mean, pstdev
 from typing import Any, Iterable, Mapping, Sequence
-import uuid
+
+
+def _stable_id(*parts: Any) -> str:
+    payload = "|".join(str(part) for part in parts).encode("utf-8")
+    return sha256(payload).hexdigest()[:24]
 
 
 class LiquiditySide(str, Enum):
@@ -270,6 +275,12 @@ class LiquidityConfig:
             raise ValueError("risk threshold must be in (0, 100]")
         if not 0 < self.max_stop_distance_pct < 1:
             raise ValueError("max stop distance must be in (0, 1)")
+        if not 0 <= self.minimum_confirmation_confidence <= 1:
+            raise ValueError("minimum confirmation confidence must be in [0, 1]")
+        if self.equal_level_tolerance_bps <= 0:
+            raise ValueError("equal-level tolerance must be positive")
+        if self.sweep_min_penetration_atr < 0 or self.sweep_max_penetration_atr <= self.sweep_min_penetration_atr:
+            raise ValueError("invalid sweep penetration range")
 
 
 def _atr(candles: Sequence[Candle], period: int = 14) -> float:
@@ -367,7 +378,7 @@ def map_liquidity_levels(
             timestamps = [candles[points[i][0]].timestamp for i in cluster]
             levels.append(
                 LiquidityLevel(
-                    level_id=uuid.uuid4().hex,
+                    level_id=_stable_id(symbol.upper(), timeframe, side.value, source.value, round(price, 10), tuple(timestamps)),
                     symbol=symbol.upper(),
                     side=side,
                     price=price,
@@ -393,7 +404,7 @@ def map_liquidity_levels(
         ):
             levels.append(
                 LiquidityLevel(
-                    uuid.uuid4().hex,
+                    _stable_id(symbol.upper(), timeframe, 'buy_side', 'swing_high', round(price, 10), candles[idx].timestamp),
                     symbol.upper(),
                     LiquiditySide.BUY_SIDE,
                     price,
@@ -414,7 +425,7 @@ def map_liquidity_levels(
         ):
             levels.append(
                 LiquidityLevel(
-                    uuid.uuid4().hex,
+                    _stable_id(symbol.upper(), timeframe, 'sell_side', 'swing_low', round(price, 10), candles[idx].timestamp),
                     symbol.upper(),
                     LiquiditySide.SELL_SIDE,
                     price,
@@ -437,7 +448,17 @@ def map_liquidity_levels(
                 continue
             levels.append(
                 LiquidityLevel(
-                    level_id=str(raw.get("level_id") or uuid.uuid4().hex),
+                    level_id=str(
+                        raw.get("level_id")
+                        or _stable_id(
+                            symbol.upper(),
+                            timeframe,
+                            side.value,
+                            source.value,
+                            round(price, 10),
+                            raw.get("first_seen", ""),
+                        )
+                    ),
                     symbol=symbol.upper(),
                     side=side,
                     price=price,
