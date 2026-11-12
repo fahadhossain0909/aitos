@@ -154,10 +154,7 @@ class StructuralRiskEngine:
                         (ev.price, "liquidity", 0.55, TYPE_RANK["liquidity"])
                     )
             for level in liquidity_levels:
-                if (
-                    level.side is LiquiditySide.BUY_SIDE
-                    and level.price > entry_price
-                ):
+                if level.side is LiquiditySide.BUY_SIDE and level.price > entry_price:
                     confidence = min(0.85, 0.55 + level.strength / 300.0)
                     candidates.append(
                         (

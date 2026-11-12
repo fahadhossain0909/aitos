@@ -285,7 +285,6 @@ def test_buy_side_rejection_with_bearish_flow_creates_short_candidate():
     assert result.action is LiquidityAction.REVERSAL_SHORT
 
 
-
 def test_sweep_event_id_is_stable_when_replay_window_moves():
     level = LiquidityLevel(
         "stable-pool",

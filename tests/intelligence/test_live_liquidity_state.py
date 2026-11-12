@@ -50,8 +50,6 @@ def test_live_state_expires_stale_structural_liquidity_levels():
 
 def test_live_state_empty_update_clears_previous_levels():
     store = LiveMarketStateStore()
-    store.update_liquidity_levels(
-        "BTCUSDT", [_pool("pool", "BTCUSDT", 99000.0, 80.0)]
-    )
+    store.update_liquidity_levels("BTCUSDT", [_pool("pool", "BTCUSDT", 99000.0, 80.0)])
     store.update_liquidity_levels("BTCUSDT", [])
     assert store.snapshot_model("BTCUSDT").liquidity_levels == ()

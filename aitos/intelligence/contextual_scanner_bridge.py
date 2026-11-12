@@ -16,7 +16,6 @@ _ORIGINAL_SCAN = "_aitos_original_scan_symbol"
 _ORIGINAL_DECIDE = "_aitos_original_decide_with_kernel"
 
 
-
 def _live_liquidity_flow_evidence(store: Any, symbol: str):
     """Build freshness-gated flow evidence from the shared live-state store."""
     from aitos.intelligence.liquidity_intelligence import OrderFlowEvidence

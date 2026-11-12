@@ -82,7 +82,6 @@ def test_buffer_applied():
     assert stop.stop_price < 78600.0
 
 
-
 def test_long_uses_mapped_sell_side_liquidity_pool():
     from aitos.intelligence.liquidity_intelligence import (
         LiquidityLevel,

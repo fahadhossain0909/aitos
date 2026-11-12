@@ -22,9 +22,8 @@ def test_market_context_forwards_and_merges_liquidity_levels():
         type(
             "Provider",
             (),
-            {"get_context": lambda self, symbol: MarketContext(
-                liquidity_levels=(pool,), source="liquidity-test"
-            )},
+            {
+                "get_context": lambda self, symbol: MarketContext(
         )()
     )
     context = provider.get_context("BTCUSDT")
