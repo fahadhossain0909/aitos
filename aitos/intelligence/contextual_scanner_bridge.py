@@ -276,6 +276,7 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                         "state_id": amd_state.state_id,
                         "confidence": amd_state.confidence,
                         "evidence_coverage": amd_state.evidence_coverage,
+                        "timeframe_stack": amd_stack.to_dict(),
                         "decision_impact": False,
                     },
                 )
@@ -337,6 +338,9 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                             "amd_phase": amd_state.phase.value,
                             "amd_direction": amd_state.direction,
                             "amd_state_id": amd_state.state_id,
+                            "amd_timeframe_direction": amd_stack.direction,
+                            "amd_timeframe_stack_complete": amd_stack.stack_complete,
+                            "amd_missing_timeframes": list(amd_stack.missing_timeframes),
                             "amd_decision_impact": False,
                         },
                     )
