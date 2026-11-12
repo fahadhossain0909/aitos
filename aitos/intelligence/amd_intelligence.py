@@ -393,7 +393,13 @@ def analyze_amd(
         and order_flow.confidence >= cfg.min_flow_confidence
     )
 
-    if distribution_score >= cfg.min_distribution_score and direction:
+    if (
+        distribution_score >= cfg.min_distribution_score
+        and direction
+        and structure_matches
+        and flow_matches
+        and expansion_matches
+    ):
         phase = AMDPhase.DISTRIBUTION_CONFIRMED
     elif direction and any(distribution_parts):
         phase = AMDPhase.DISTRIBUTION_CANDIDATE
