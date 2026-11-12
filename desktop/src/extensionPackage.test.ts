@@ -1,7 +1,11 @@
 import { Buffer } from "node:buffer";
 import { webcrypto } from "node:crypto";
 import { beforeAll, describe, expect, it } from "vitest";
-import { extensionSignaturePayload, verifySignedExtensionPackage } from "./extensionPackage";
+import {
+  extensionSignaturePayload,
+  registerSignedExtension,
+  verifySignedExtensionPackage,
+} from "./extensionPackage";
 
 const manifest = {
   apiVersion: 1,
@@ -87,7 +91,10 @@ describe("signed extension package verification", () => {
     const pkg = await signedPackage() as Record<string, any>;
     const traversal = await verifySignedExtensionPackage({
       ...pkg,
-      files: { "../payload.js": files["dist/index.mjs"] },
+      files: {
+        "dist/index.mjs": files["dist/index.mjs"],
+        "../payload.js": files["dist/index.mjs"],
+      },
     }, { trustedEd25519Keys: { [signerKeyId]: publicKey } });
     expect(traversal).toEqual({ ok: false, error: "package_file_count_or_entrypoint_invalid" });
     const malformed = await verifySignedExtensionPackage({
@@ -104,6 +111,23 @@ describe("signed extension package verification", () => {
       maxFileBytes: 8,
     });
     expect(oversized).toEqual({ ok: false, error: "package_file_size_invalid" });
+  });
+
+  it("only registers a signed package after publisher verification", async () => {
+    const validPackage = await signedPackage();
+    const rejected = await registerSignedExtension(new Map(), validPackage, {
+      trustedEd25519Keys: {},
+    });
+    expect(rejected.registration.ok).toBe(false);
+    expect(rejected.registry.size).toBe(0);
+    const accepted = await registerSignedExtension(new Map(), validPackage, {
+      trustedEd25519Keys: { [signerKeyId]: publicKey },
+    });
+    expect(accepted.registration.ok).toBe(true);
+    expect(accepted.registry.get(manifest.id)).toMatchObject({
+      approved: false,
+      enabled: false,
+    });
   });
 
   it("rejects malformed envelope fields and invalid public keys", async () => {
