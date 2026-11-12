@@ -76,8 +76,11 @@ export async function verifySignedExtensionPackage(
     return { ok: false, error: "signer_key_id_invalid" };
   }
   if (typeof value.signature !== "string") return { ok: false, error: "signature_invalid" };
+  if (!Object.hasOwn(policy.trustedEd25519Keys, value.signerKeyId)) {
+    return { ok: false, error: "publisher_not_trusted" };
+  }
   const publicKeyText = policy.trustedEd25519Keys[value.signerKeyId];
-  if (!publicKeyText) return { ok: false, error: "publisher_not_trusted" };
+  if (typeof publicKeyText !== "string") return { ok: false, error: "publisher_not_trusted" };
   if (!value.files || typeof value.files !== "object" || Array.isArray(value.files)) {
     return { ok: false, error: "package_files_invalid" };
   }
@@ -86,8 +89,16 @@ export async function verifySignedExtensionPackage(
   if (!paths.length || paths.length > MAX_FILES || !paths.includes(validated.manifest.entrypoint)) {
     return { ok: false, error: "package_file_count_or_entrypoint_invalid" };
   }
-  const maxPackageBytes = policy.maxPackageBytes ?? MAX_PACKAGE_BYTES;
-  const maxFileBytes = policy.maxFileBytes ?? MAX_FILE_BYTES;
+  const requestedPackageLimit = policy.maxPackageBytes ?? MAX_PACKAGE_BYTES;
+  const requestedFileLimit = policy.maxFileBytes ?? MAX_FILE_BYTES;
+  if (
+    !Number.isSafeInteger(requestedPackageLimit) ||
+    requestedPackageLimit < 1 ||
+    !Number.isSafeInteger(requestedFileLimit) ||
+    requestedFileLimit < 1
+  ) return { ok: false, error: "package_policy_invalid" };
+  const maxPackageBytes = Math.min(requestedPackageLimit, MAX_PACKAGE_BYTES);
+  const maxFileBytes = Math.min(requestedFileLimit, MAX_FILE_BYTES);
   const files = new Map<string, Uint8Array>();
   let packageBytes = 0;
   const digests: Record<string, string> = {};
