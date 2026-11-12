@@ -18,6 +18,7 @@ from typing import Any
 
 from aitos.intelligence.amt.volume_profile import VolumeProfile
 from aitos.intelligence.liquidity_tracker import LiquidityEvent
+from aitos.intelligence.liquidity_intelligence import LiquidityLevel, LiquiditySide
 from aitos.intelligence.market_state.models import MarketState
 from aitos.intelligence.structural_risk.hierarchy import (
     DEFAULT_HIERARCHY_SLACK_PCT,
@@ -65,6 +66,7 @@ class StructuralRiskEngine:
         swing_highs: Sequence[float] = (),
         structure_break_level: float | None = None,
         liquidity_events: Sequence[LiquidityEvent] = (),
+        liquidity_levels: Sequence[LiquidityLevel] = (),
         atr: float | None = None,
         timestamp: datetime | None = None,
     ) -> StructuralStop:
@@ -116,6 +118,20 @@ class StructuralRiskEngine:
                     candidates.append(
                         (ev.price, "liquidity", 0.55, TYPE_RANK["liquidity"])
                     )
+            for level in liquidity_levels:
+                if (
+                    level.side is LiquiditySide.SELL_SIDE
+                    and 0 < level.price < entry_price
+                ):
+                    confidence = min(0.85, 0.55 + level.strength / 300.0)
+                    candidates.append(
+                        (
+                            level.price,
+                            "liquidity",
+                            confidence,
+                            TYPE_RANK["liquidity"],
+                        )
+                    )
         else:
             for p in swing_highs:
                 if not (p > entry_price):
@@ -136,6 +152,20 @@ class StructuralRiskEngine:
                 if getattr(ev, "side", None) == "ask" and ev.price > entry_price:
                     candidates.append(
                         (ev.price, "liquidity", 0.55, TYPE_RANK["liquidity"])
+                    )
+            for level in liquidity_levels:
+                if (
+                    level.side is LiquiditySide.BUY_SIDE
+                    and level.price > entry_price
+                ):
+                    confidence = min(0.85, 0.55 + level.strength / 300.0)
+                    candidates.append(
+                        (
+                            level.price,
+                            "liquidity",
+                            confidence,
+                            TYPE_RANK["liquidity"],
+                        )
                     )
 
         valid = [
