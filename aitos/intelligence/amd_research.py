@@ -812,8 +812,7 @@ def replay_amd_historical_observations(
         )
         previous_state = state
         future_rows = [
-            row for row in candle_rows[index + 1 :]
-            if row["open_time"] >= decision_time
+            row for row in candle_rows[index + 1 :] if row["open_time"] >= decision_time
         ][:horizon_bars]
         outcome = None
         if state.direction in {"LONG", "SHORT"}:
