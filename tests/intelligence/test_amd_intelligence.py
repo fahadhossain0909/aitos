@@ -1,4 +1,5 @@
 """Regression tests for the evidence-based AMD classifier."""
+
 import pytest
 
 from aitos.intelligence.amd_intelligence import (
@@ -68,9 +69,7 @@ def test_accumulation_candidate_uses_completed_candles_and_internal_liquidity():
         2,
     )
     rows = _range_candles()
-    rows.append(
-        Candle(100, 120, 80, 110, 1000, timestamp="forming", is_closed=False)
-    )
+    rows.append(Candle(100, 120, 80, 110, 1000, timestamp="forming", is_closed=False))
     state = analyze_amd(
         "BTCUSDT",
         "5m",
@@ -173,7 +172,15 @@ def test_stale_flow_cannot_confirm_distribution():
         for index in range(20)
     ]
     sweep = SweepEvent(
-        "sweep-2", level, "down", 98.5, 0.5, 14, "bar-14", 0.7, 2.0,
+        "sweep-2",
+        level,
+        "down",
+        98.5,
+        0.5,
+        14,
+        "bar-14",
+        0.7,
+        2.0,
         state=SweepState.REJECTED,
     )
     classification = SweepClassification(
@@ -250,12 +257,40 @@ def test_timeframe_stack_exposes_missing_frames_instead_of_fabricating_consensus
 
 def test_timeframe_stack_rejects_mixed_symbols():
     first = AMDState(
-        "BTCUSDT", "5m", AMDPhase.NEUTRAL, "", "a", "t",
-        0.0, 0.0, 0.0, 0.0, 0.0, None, None, None, (), (),
+        "BTCUSDT",
+        "5m",
+        AMDPhase.NEUTRAL,
+        "",
+        "a",
+        "t",
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        None,
+        None,
+        None,
+        (),
+        (),
     )
     second = AMDState(
-        "ETHUSDT", "1h", AMDPhase.NEUTRAL, "", "b", "t",
-        0.0, 0.0, 0.0, 0.0, 0.0, None, None, None, (), (),
+        "ETHUSDT",
+        "1h",
+        AMDPhase.NEUTRAL,
+        "",
+        "b",
+        "t",
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        None,
+        None,
+        None,
+        (),
+        (),
     )
     with pytest.raises(ValueError):
         analyze_amd_timeframe_stack({"5m": first, "1h": second})
