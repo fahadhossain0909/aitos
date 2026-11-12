@@ -247,7 +247,17 @@ def install_contextual_scanner_bridge(scanner_cls: type[Any]) -> None:
                         "diagnostics": list(event_flow.diagnostics),
                         "fresh": event_flow.evidence.fresh,
                     }
-                    if event_flow.evidence.fresh:
+                    sequence_gap_diagnostics = {
+                        "depth_sequence_gap",
+                        "depth_sequence_gap_marker",
+                        "depth_history_gap_in_window",
+                    }
+                    if sequence_gap_diagnostics.intersection(
+                        event_flow.diagnostics
+                    ):
+                        flow_evidence = OrderFlowEvidence()
+                        flow_evidence_source = "blocked_depth_sequence_gap"
+                    elif event_flow.evidence.fresh:
                         flow_evidence = event_flow.evidence
                         flow_evidence_source = "sequenced_trade_and_depth_events"
                 if not flow_evidence.fresh:
