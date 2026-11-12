@@ -103,6 +103,7 @@ def build_live_event_order_flow(
     max_staleness_ms: int = 5_000,
     min_trade_events: int = 10,
     min_depth_events: int = 2,
+    history_gap_at_ms: int | None = None,
 ) -> EventFlowResult:
     """Consume AITOS TradeTick and sequenced LocalOrderBook depth-event records."""
     as_of = _validate_timestamp(as_of_ms)
@@ -151,6 +152,14 @@ def build_live_event_order_flow(
             events.append((timestamp, event))
     events.sort(key=lambda item: item[0])
     sequence_valid = True
+    if history_gap_at_ms is not None:
+        gap_timestamp = _validate_timestamp(history_gap_at_ms)
+        if gap_timestamp >= start:
+            sequence_valid = False
+            diagnostics.append("depth_history_gap_in_window")
+    if any(bool(event.get("sequence_gap", False)) for _, event in events):
+        sequence_valid = False
+        diagnostics.append("depth_sequence_gap_marker")
     ofi_raw = 0.0
     ofi_scale = 0.0
     bid_replenishment = 0.0
