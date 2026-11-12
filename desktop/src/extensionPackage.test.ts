@@ -130,6 +130,24 @@ describe("signed extension package verification", () => {
     });
   });
 
+  it("rejects prototype-inherited publisher keys and invalid limits", async () => {
+    const pkg = await signedPackage() as Record<string, unknown>;
+    const inherited = await verifySignedExtensionPackage(pkg, {
+      trustedEd25519Keys: Object.create({ [signerKeyId]: publicKey }) as Record<string, string>,
+    });
+    expect(inherited).toEqual({ ok: false, error: "publisher_not_trusted" });
+    const invalidLimit = await verifySignedExtensionPackage(pkg, {
+      trustedEd25519Keys: { [signerKeyId]: publicKey },
+      maxFileBytes: -1,
+    });
+    expect(invalidLimit).toEqual({ ok: false, error: "package_policy_invalid" });
+    const raisedLimit = await verifySignedExtensionPackage(pkg, {
+      trustedEd25519Keys: { [signerKeyId]: publicKey },
+      maxFileBytes: Number.MAX_SAFE_INTEGER,
+    });
+    expect(raisedLimit.ok).toBe(true);
+  });
+
   it("rejects malformed envelope fields and invalid public keys", async () => {
     const pkg = await signedPackage() as Record<string, any>;
     expect(await verifySignedExtensionPackage({ ...pkg, extra: true }, {
