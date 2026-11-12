@@ -34,6 +34,7 @@ class AMDPhase(str, Enum):
     MANIPULATION_CONFIRMED = "manipulation_confirmed"
     DISTRIBUTION_CANDIDATE = "distribution_candidate"
     DISTRIBUTION_CONFIRMED = "distribution_confirmed"
+    TREND_CONTINUATION = "trend_continuation"
     REACCUMULATION = "reaccumulation"
     REDISTRIBUTION = "redistribution"
     INVALIDATED = "invalidated"
@@ -322,6 +323,14 @@ def analyze_amd(
         }:
             direction = "SHORT"
 
+    if (
+        not direction
+        and previous_state is not None
+        and previous_state.phase
+        in {AMDPhase.DISTRIBUTION_CONFIRMED, AMDPhase.TREND_CONTINUATION}
+    ):
+        direction = previous_state.direction
+
     normalized_structure = str(structure_bias or "").strip().lower()
     if normalized_structure not in {"bullish", "bearish"}:
         normalized_structure = ""
@@ -412,11 +421,21 @@ def analyze_amd(
     else:
         phase = AMDPhase.NEUTRAL
 
+    if (
+        previous_state is not None
+        and phase is AMDPhase.DISTRIBUTION_CONFIRMED
+        and previous_state.direction == direction
+        and previous_state.phase
+        in {AMDPhase.DISTRIBUTION_CONFIRMED, AMDPhase.TREND_CONTINUATION}
+    ):
+        phase = AMDPhase.TREND_CONTINUATION
     if previous_state is not None and phase is AMDPhase.ACCUMULATION_CONFIRMED:
         if previous_state.direction == "LONG":
             phase = AMDPhase.REACCUMULATION
+            direction = "LONG"
         elif previous_state.direction == "SHORT":
             phase = AMDPhase.REDISTRIBUTION
+            direction = "SHORT"
 
     evidence = acc_evidence + manipulation_evidence + distribution_evidence
     if normalized_structure:
@@ -567,6 +586,7 @@ def analyze_amd_timeframe_stack(
             AMDPhase.MANIPULATION_CONFIRMED,
             AMDPhase.DISTRIBUTION_CANDIDATE,
             AMDPhase.DISTRIBUTION_CONFIRMED,
+            AMDPhase.TREND_CONTINUATION,
         }
         if not active:
             continue
