@@ -23,8 +23,7 @@ class IntelligenceSourceAdapter(Protocol):
 class EventSink(Protocol):
     """Transport-neutral publisher; production wiring uses the existing Redis bus."""
 
-    async def publish(self, topic: str, payload: Mapping[str, object]) -> None:
-        ...
+    async def publish(self, topic: str, payload: Mapping[str, object]) -> None: ...
 
 
 async def ingest_page(
