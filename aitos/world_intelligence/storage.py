@@ -168,7 +168,7 @@ class ClickHouseIntelligenceStore:
 
         lower_bound = cutoff - timedelta(hours=lookback_hours)
         result = await self.client.query(
-            f"SELECT payload_json FROM {self.events_table} FINAL "
+            f"SELECT payload_json FROM {self.events_table} FINAL "  # nosec B608 - validated fixed table identifier
             "WHERE published_at <= toDateTime64({as_of:String}, 3, 'UTC') "
             "AND first_seen_at <= toDateTime64({as_of:String}, 3, 'UTC') "
             "AND first_seen_at >= toDateTime64({lower_bound:String}, 3, 'UTC') "
