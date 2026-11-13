@@ -7,6 +7,7 @@ from aitos.world_intelligence.contracts import (
 )
 from aitos.world_intelligence.governor import IntelligenceRiskGovernor, RiskAssessment
 from aitos.world_intelligence.impact import estimate_asset_impact
+from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
 
 __all__ = [
     "AssetImpact",
@@ -15,4 +16,5 @@ __all__ = [
     "IntelligenceRiskGovernor",
     "RiskAssessment",
     "estimate_asset_impact",
+    "ClickHouseIntelligenceStore",
 ]
