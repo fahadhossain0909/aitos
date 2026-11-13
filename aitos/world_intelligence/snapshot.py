@@ -55,10 +55,7 @@ def build_asset_intelligence_snapshot(
         raise ValueError("as_of must be timezone-aware")
     if not asset or not asset.strip():
         raise ValueError("asset is required")
-    if (
-        not isfinite(float(attention_half_life_hours))
-        or attention_half_life_hours <= 0
-    ):
+    if not isfinite(float(attention_half_life_hours)) or attention_half_life_hours <= 0:
         raise ValueError("attention half-life must be positive and finite")
     selected_horizons = dict(horizons or {"1h": 1.0, "4h": 4.0, "24h": 24.0})
     if not selected_horizons or any(
