@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from math import fsum
+from math import fsum, isfinite
 from typing import Mapping, Sequence
 
 from aitos.world_intelligence.contracts import AssetImpact, IntelligenceEvent
@@ -56,7 +56,11 @@ def build_asset_intelligence_snapshot(
         raise ValueError("asset is required")
     selected_horizons = dict(horizons or {"1h": 1.0, "4h": 4.0, "24h": 24.0})
     if not selected_horizons or any(
-        not name.strip() or hours <= 0 for name, hours in selected_horizons.items()
+        not isinstance(name, str)
+        or not name.strip()
+        or not isfinite(float(hours))
+        or hours <= 0
+        for name, hours in selected_horizons.items()
     ):
         raise ValueError("horizons must contain positive named durations")
 
@@ -139,8 +143,16 @@ def build_asset_intelligence_snapshot(
     attention = max(0.0, min(1.0, attention))
 
     risk_engine = governor or IntelligenceRiskGovernor()
+    fresh_verified_events = [
+        event
+        for event in verified_events
+        if 0.0
+        <= (cutoff - event.first_seen_at).total_seconds()
+        <= risk_engine.max_age_seconds
+    ]
+    risk_candidates = fresh_verified_events or verified_events or ordered_events
     risk_event = max(
-        verified_events or ordered_events,
+        risk_candidates,
         key=lambda event: (event.severity, event.first_seen_at),
         default=None,
     )
