@@ -50,10 +50,12 @@ def event(event_id, entities, first_seen):
 
 @pytest.mark.asyncio
 async def test_asset_snapshot_provider_filters_by_base_asset_and_keeps_beta_neutral():
-    store = Store([
-        event("btc", ("BTC",), NOW - timedelta(minutes=1)),
-        event("eth", ("ETH",), NOW - timedelta(minutes=1)),
-    ])
+    store = Store(
+        [
+            event("btc", ("BTC",), NOW - timedelta(minutes=1)),
+            event("eth", ("ETH",), NOW - timedelta(minutes=1)),
+        ]
+    )
     provider = ClickHouseAssetSnapshotProvider(store)
     snapshot = await provider.snapshot_for_asset("BTCUSDT", as_of=NOW)
     assert snapshot.asset == "BTCUSDT"
@@ -72,7 +74,8 @@ async def test_snapshot_provider_rejects_naive_as_of():
 
 def test_snapshot_serialization_declares_shadow_only_policy():
     snapshot = __import__(
-        "aitos.world_intelligence.snapshot", fromlist=["build_asset_intelligence_snapshot"]
+        "aitos.world_intelligence.snapshot",
+        fromlist=["build_asset_intelligence_snapshot"],
     ).build_asset_intelligence_snapshot([], asset="BTCUSDT", as_of=NOW)
     payload = snapshot_to_dict(snapshot)
     assert payload["policy"] == "shadow_only_no_execution_or_sizing_authority"
