@@ -88,3 +88,12 @@ def test_evaluation_rejects_naive_as_of_and_invalid_probability():
             event_id="bad", asset="BTC", horizon="1h", event_time=BASE,
             outcome_available_at=BASE, predicted_probability_up=1.5, forward_return=0.0,
         )
+
+
+def test_ablation_rejects_mismatched_realized_outcomes():
+    baseline = [prediction(0)]
+    enriched = [prediction(0, result=0.5)]
+    with pytest.raises(ValueError, match="identical outcomes"):
+        compare_ablation(
+            baseline, enriched, as_of=BASE + timedelta(days=1)
+        )
