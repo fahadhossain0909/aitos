@@ -188,14 +188,14 @@ async def test_none_cursor_uses_empty_string_checkpoint_sentinel():
 
 @pytest.mark.asyncio
 async def test_load_recent_events_rehydrates_validated_point_in_time_payload():
-    import json
-
     client = FakeAsyncClickHouse()
     store = ClickHouseIntelligenceStore(client)
     event = make_event()
-    client.query = async_query = lambda query, parameters=None: FakeResult(
-        [(event.to_json(),)]
-    )
+
+    async def query(_query, parameters=None):
+        return FakeResult([(event.to_json(),)])
+
+    client.query = query
     loaded = await store.load_recent_events(as_of=NOW, lookback_hours=24)
     assert loaded[0].event_id == event.event_id
     assert loaded[0].source.source_id == event.source.source_id
