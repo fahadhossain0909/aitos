@@ -31,6 +31,9 @@ class AssetIntelligenceSnapshot:
     event_count: int
     verified_event_count: int
     unverified_event_count: int
+    event_ids: tuple[str, ...]
+    narrative_ids: tuple[str, ...]
+    source_ids: tuple[str, ...]
     attention_score: float
     horizon_impacts: tuple[HorizonImpact, ...]
     risk_assessment: RiskAssessment
@@ -188,6 +191,11 @@ def build_asset_intelligence_snapshot(
         event_count=len(ordered_events),
         verified_event_count=len(verified_events),
         unverified_event_count=unverified_count,
+        event_ids=tuple(event.event_id for event in ordered_events),
+        narrative_ids=tuple(
+            sorted({item for event in ordered_events for item in event.narrative_ids})
+        ),
+        source_ids=tuple(sorted({event.source.source_id for event in ordered_events})),
         attention_score=attention,
         horizon_impacts=tuple(horizon_results),
         risk_assessment=assessment,
