@@ -66,7 +66,7 @@ class IntelligenceIngestionWorker:
                     enriched = enrich_event_batch(
                         events,
                         publisher_groups=self.publisher_groups,
-                        entity_registry=self.entity_registry,
+                        registry=self.entity_registry,
                     )
                     events = list(enriched.events)
                     for quality in enriched.source_quality:
