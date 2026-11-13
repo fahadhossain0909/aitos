@@ -166,6 +166,7 @@ async def build_system(
     top_n: int | None = None,
     enable_exit_intelligence: bool = False,
     position_switching_factory: PositionSwitchingFactory | None = None,
+    world_intelligence_provider: Any | None = None,
 ) -> SystemComponents:
     settings = get_settings()
     tuning = settings.tuning
@@ -242,6 +243,7 @@ async def build_system(
         min_score_threshold=min_score_threshold,
         top_n=top_n,
         tuning=tuning,
+        world_intelligence_provider=world_intelligence_provider,
     )
     rl_feedback = RLFeedbackLoop(event_bus=event_bus, scorer=rl_scorer)
     outcome_classifier = outcome_classifier or TradeOutcomeClassifier()

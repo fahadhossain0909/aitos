@@ -1,0 +1,35 @@
+"""Bridge normalized intelligence messages onto the existing AITOS EventBus."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Protocol
+
+from aitos.core.contracts import Event
+
+
+class EventBusProtocol(Protocol):
+    async def publish(self, event: Event, priority=None) -> None: ...
+
+
+class EventBusSink:
+    def __init__(
+        self, event_bus: EventBusProtocol, *, source_module: str = "world-intelligence"
+    ):
+        self.event_bus = event_bus
+        self.source_module = source_module
+
+    async def publish(self, topic: str, payload: Mapping[str, object]) -> None:
+        event_id = str(payload.get("event_id") or "")
+        event_fields = {"event_id": event_id} if event_id else {}
+        event = Event(
+            topic=topic,
+            payload=dict(payload),
+            source_module=self.source_module,
+            schema_version=str(payload.get("schema_version", "1")),
+            **event_fields,
+        )
+        await self.event_bus.publish(event)
+
+
+__all__ = ["EventBusSink"]
