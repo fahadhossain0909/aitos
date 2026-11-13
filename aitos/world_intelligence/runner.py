@@ -3,6 +3,7 @@
 Run with `python -m aitos.world_intelligence.runner`. Secrets are read from
 environment variables; no credentials are committed or written to event data.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,7 +42,9 @@ def build_source_adapters(
         kind = str(config.get("type", "")).strip().lower()
         user_agent = str(
             config.get("user_agent")
-            or env.get("AITOS_CONTACT_USER_AGENT", "AITOS-WIATS/1.0 operator-configured")
+            or env.get(
+                "AITOS_CONTACT_USER_AGENT", "AITOS-WIATS/1.0 operator-configured"
+            )
         )
         common = {
             "source_id": str(config.get("source_id", "")).strip(),
@@ -112,7 +115,9 @@ def build_source_adapters(
                     query_params=config.get("query_params", {}),
                     headers=headers,
                     cursor_param=config.get("cursor_param"),
-                    source_kind=str(config.get("source_kind", "licensed_news_or_social")),
+                    source_kind=str(
+                        config.get("source_kind", "licensed_news_or_social")
+                    ),
                     reliability=float(config.get("reliability", 0.4)),
                     max_records=int(config.get("max_records", 100)),
                     max_response_bytes=int(config.get("max_response_bytes", 2_000_000)),
@@ -124,7 +129,9 @@ def build_source_adapters(
             key_env = str(config.get("api_key_env", "FRED_API_KEY"))
             api_key = env.get(key_env, "")
             if not api_key:
-                raise ValueError(f"FRED API key environment variable {key_env!r} is missing")
+                raise ValueError(
+                    f"FRED API key environment variable {key_env!r} is missing"
+                )
             adapters.append(
                 FREDSeriesAdapter(
                     series_id=str(config["series_id"]),
@@ -165,7 +172,9 @@ async def _run() -> None:
         raise ValueError("AITOS_WORLD_INTELLIGENCE_SOURCES must be a JSON array")
     publisher_groups = _load_json_env("AITOS_WORLD_INTELLIGENCE_PUBLISHER_GROUPS", {})
     if not isinstance(publisher_groups, dict):
-        raise ValueError("AITOS_WORLD_INTELLIGENCE_PUBLISHER_GROUPS must be a JSON object")
+        raise ValueError(
+            "AITOS_WORLD_INTELLIGENCE_PUBLISHER_GROUPS must be a JSON object"
+        )
     adapters = build_source_adapters(source_configs)
 
     clickhouse = await clickhouse_connect.get_async_client(
@@ -181,7 +190,11 @@ async def _run() -> None:
         decode_responses=False,
     )
     event_bus = create_event_bus(
-        {"backend": "redis", "runtime_mode": "production", "module_id": "wiats-ingestion"},
+        {
+            "backend": "redis",
+            "runtime_mode": "production",
+            "module_id": "wiats-ingestion",
+        },
         redis_client=redis_client,
     )
     worker = IntelligenceIngestionWorker(
