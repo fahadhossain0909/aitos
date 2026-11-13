@@ -11,14 +11,25 @@ NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 def make_event(source_id, title, uri):
     source = SourceEvidence(
-        source_id=source_id, source_kind="news", uri=uri,
-        published_at=NOW - timedelta(minutes=2), first_seen_at=NOW - timedelta(minutes=1),
+        source_id=source_id,
+        source_kind="news",
+        uri=uri,
+        published_at=NOW - timedelta(minutes=2),
+        first_seen_at=NOW - timedelta(minutes=1),
         reliability=0.9,
     )
     return IntelligenceEvent(
-        event_id=source_id, event_type="corporate_action", title=title,
-        entities=(), published_at=source.published_at, first_seen_at=source.first_seen_at,
-        source=source, sentiment=0.2, severity=0.4, novelty=0.5, confidence=0.5,
+        event_id=source_id,
+        event_type="corporate_action",
+        title=title,
+        entities=(),
+        published_at=source.published_at,
+        first_seen_at=source.first_seen_at,
+        source=source,
+        sentiment=0.2,
+        severity=0.4,
+        novelty=0.5,
+        confidence=0.5,
     )
 
 
@@ -41,8 +52,14 @@ def test_alias_registry_rejects_conflicting_aliases():
 
 def test_narratives_cluster_shared_entity_and_lexical_overlap_only():
     events = [
-        make_event("one", "Nvidia announces new AI chip production", "https://a.example/1"),
-        make_event("two", "Nvidia announces AI chip production expansion", "https://b.example/2"),
+        make_event(
+            "one", "Nvidia announces new AI chip production", "https://a.example/1"
+        ),
+        make_event(
+            "two",
+            "Nvidia announces AI chip production expansion",
+            "https://b.example/2",
+        ),
         make_event("three", "Bitcoin ETF approval news", "https://c.example/3"),
     ]
     enriched = [
@@ -50,6 +67,7 @@ def test_narratives_cluster_shared_entity_and_lexical_overlap_only():
         for event in events
     ]
     from dataclasses import replace
+
     enriched[0] = replace(enriched[0], entities=("NVDA",))
     enriched[1] = replace(enriched[1], entities=("NVDA",))
     enriched[2] = replace(enriched[2], entities=("BTC",))
@@ -74,15 +92,25 @@ def test_primary_source_does_not_promote_every_event_in_a_cluster():
     from dataclasses import replace
 
     primary = replace(
-        make_event("sec", "Nvidia announces AI chip production expansion", "https://sec.example/1"),
+        make_event(
+            "sec",
+            "Nvidia announces AI chip production expansion",
+            "https://sec.example/1",
+        ),
         source=replace(
-            make_event("sec", "Nvidia announces AI chip production expansion", "https://sec.example/1").source,
+            make_event(
+                "sec",
+                "Nvidia announces AI chip production expansion",
+                "https://sec.example/1",
+            ).source,
             is_primary=True,
             reliability=0.99,
         ),
     )
     syndicated = make_event(
-        "wire", "Nvidia announces AI chip production expansion", "https://wire.example/1"
+        "wire",
+        "Nvidia announces AI chip production expansion",
+        "https://wire.example/1",
     )
     result = enrich_event_batch(
         [primary, syndicated],
