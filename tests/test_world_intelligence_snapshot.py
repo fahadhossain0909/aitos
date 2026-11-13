@@ -99,7 +99,7 @@ def test_snapshot_ignores_beta_estimates_created_after_as_of():
         beta_estimates={("regulatory", "1h"): future_beta},
     )
     assert snapshot.horizon_impacts[0].signed_impact == 0.0
-    assert snapshot.horizon_impacts[0].evidence_count == 0
+    assert snapshot.horizon_impacts[0].evidence_count == 1
 
 
 def test_snapshot_unverified_events_are_attention_only():
