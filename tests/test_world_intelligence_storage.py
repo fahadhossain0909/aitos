@@ -125,3 +125,53 @@ async def test_page_rejects_cross_source_event():
 def test_database_name_is_validated_before_sql_interpolation():
     with pytest.raises(ValueError):
         ClickHouseIntelligenceStore(FakeAsyncClickHouse(), "aitos; DROP TABLE x")
+
+
+@pytest.mark.asyncio
+async def test_publish_failure_does_not_advance_durable_cursor():
+    from aitos.world_intelligence.adapters import ingest_page_durably
+
+    class Adapter:
+        source_id = "gdelt"
+
+        async def poll(self, *, cursor=None):
+            return [make_event()], "page-2"
+
+    class FailingSink:
+        async def publish(self, topic, payload):
+            raise RuntimeError("redis unavailable")
+
+    client = FakeAsyncClickHouse()
+    store = ClickHouseIntelligenceStore(client)
+    with pytest.raises(RuntimeError, match="redis unavailable"):
+        await ingest_page_durably(Adapter(), FailingSink(), store)
+    assert len(client.inserts) == 1
+    assert client.inserts[0][0].endswith("world_intelligence_events")
+    assert client.cursor is None
+
+
+@pytest.mark.asyncio
+async def test_durable_ingestion_checkpoints_after_publish():
+    from aitos.world_intelligence.adapters import ingest_page_durably
+
+    class Adapter:
+        source_id = "gdelt"
+
+        async def poll(self, *, cursor=None):
+            return [make_event()], "page-2"
+
+    class RecordingSink:
+        def __init__(self):
+            self.published = []
+
+        async def publish(self, topic, payload):
+            self.published.append((topic, payload))
+
+    client = FakeAsyncClickHouse()
+    sink = RecordingSink()
+    store = ClickHouseIntelligenceStore(client)
+    result = await ingest_page_durably(Adapter(), sink, store)
+    assert result == "page-2"
+    assert len(sink.published) == 1
+    assert client.inserts[-1][0].endswith("world_intelligence_cursors")
+    assert await store.load_cursor("gdelt") == "page-2"
