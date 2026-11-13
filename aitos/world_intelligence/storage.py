@@ -151,6 +151,45 @@ class ClickHouseIntelligenceStore:
             column_names=["source_id", "cursor", "updated_at"],
         )
 
+    async def load_recent_events(
+        self,
+        *,
+        as_of: datetime,
+        lookback_hours: float = 72.0,
+        limit: int = 5000,
+    ) -> list[IntelligenceEvent]:
+        """Load bounded, point-in-time evidence for shadow snapshot generation."""
+        if as_of.tzinfo is None:
+            raise ValueError("as_of must be timezone-aware")
+        if not 0 < lookback_hours <= 24 * 90 or not 1 <= limit <= 20_000:
+            raise ValueError("invalid event query lookback or limit")
+        cutoff = as_of.astimezone(timezone.utc)
+        from datetime import timedelta
+
+        lower_bound = cutoff - timedelta(hours=lookback_hours)
+        result = await self.client.query(
+            f"SELECT payload_json FROM {self.events_table} FINAL "
+            "WHERE published_at <= toDateTime64({as_of:String}, 3, 'UTC') "
+            "AND first_seen_at <= toDateTime64({as_of:String}, 3, 'UTC') "
+            "AND first_seen_at >= toDateTime64({lower_bound:String}, 3, 'UTC') "
+            "ORDER BY first_seen_at DESC LIMIT {limit:UInt32}",
+            parameters={
+                "as_of": cutoff.isoformat(),
+                "lower_bound": lower_bound.isoformat(),
+                "limit": limit,
+            },
+        )
+        events: list[IntelligenceEvent] = []
+        for row in result.result_rows:
+            try:
+                payload = json.loads(row[0])
+                event = IntelligenceEvent.from_dict(payload)
+            except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+                continue
+            if event.published_at <= cutoff and event.first_seen_at <= cutoff:
+                events.append(event)
+        return events
+
     async def persist_page(
         self,
         source_id: str,
