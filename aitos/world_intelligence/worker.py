@@ -69,6 +69,13 @@ class IntelligenceIngestionWorker:
                         entity_registry=self.entity_registry,
                     )
                     events = list(enriched.events)
+                    for quality in enriched.source_quality:
+                        if quality.suspected_automation:
+                            logger.warning(
+                                "source quality requires review: %s %s",
+                                quality.source_id,
+                                ",".join(quality.reasons),
+                            )
                     await self.store.append_events(adapter.source_id, events)
                     for event in events:
                         await self.sink.publish(
