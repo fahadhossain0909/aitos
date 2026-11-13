@@ -23,6 +23,7 @@ estimate_asset_impact applies signed sentiment, severity, novelty, model confide
 
 ## Implemented durable ingestion slice
 
+- A point-in-time event-study beta estimator filters by asset/event/horizon and requires the forward outcome to have become observable before the as-of timestamp. It defaults to zero below the minimum sample count, shrinks estimates toward zero, and bounds output.
 - A source-verification gate uses operator-maintained publisher groups, freshness, reliability and explicit primary-source metadata. Multiple feeds from the same publisher count once; disputed/retracted observations fail closed. This is provenance verification, not independent factual adjudication.
 - An explainable English financial-headline lexicon emits bounded sentiment, coarse event type/severity, matched terms, and a deliberately capped heuristic confidence (0.55). It is annotation-only, does not verify claims, and is not a multilingual trained NLP model.
 - A bounded RSS/Atom adapter supports conditional ETag/Last-Modified requests, HTTPS host allowlists (including redirects), response-size limits, and DTD/entity rejection. It emits neutral, unverified observations; it does not infer sentiment or facts.
@@ -38,7 +39,7 @@ estimate_asset_impact applies signed sentiment, severity, novelty, model confide
 2. Add raw-response retention, source-specific durable cursors, and stronger operational idempotency/recovery around the normalized ClickHouse event store.
 3. Publish normalized events through the existing Redis Streams EventBus and its established ACK/retry/DLQ semantics.
 4. Add source verification, entity resolution, semantic clustering, multilingual financial NLP, bot/spam detection, and narrative tracking.
-5. Estimate asset-specific impact with historical point-in-time event studies and calibrated uncertainty.
+5. Expand the point-in-time event-study baseline with event-specific calibration, robust uncertainty, multiple horizons, and chronological OOS validation before any model use.
 6. Attach compact, timestamped intelligence snapshots to candidate/decision evidence and the existing DecisionOutcomeLedger.
 7. Run shadow-only replay, leakage checks, ablation, and chronological walk-forward tests before advisory paper policy.
 8. Require explicit review and champion/challenger governance before any decision influence.
