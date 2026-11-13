@@ -6,7 +6,7 @@ import logging
 from dataclasses import dataclass
 from typing import Sequence
 
-from aitos.world_intelligence.adapters import EventSink, IntelligenceSourceAdapter, ingest_page_durably
+from aitos.world_intelligence.adapters import EventSink, IntelligenceSourceAdapter
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
 
 logger = logging.getLogger(__name__)
@@ -50,10 +50,22 @@ class IntelligenceIngestionWorker:
             for adapter in self.adapters:
                 try:
                     cursor = await self.store.load_cursor(adapter.source_id)
-                    next_cursor = await ingest_page_durably(
-                        adapter, self.sink, self.store, cursor=cursor
+                    events, next_cursor = await adapter.poll(cursor=cursor)
+                    await self.store.append_events(adapter.source_id, events)
+                    for event in events:
+                        await self.sink.publish(
+                            "intelligence.events.normalized",
+                            {
+                                "schema_version": event.schema_version,
+                                "event_id": event.event_id,
+                                "deduplication_key": event.deduplication_key,
+                                "payload": event.to_dict(),
+                            },
+                        )
+                    await self.store.save_cursor(adapter.source_id, next_cursor)
+                    results.append(
+                        SourceRunResult(adapter.source_id, len(events), next_cursor)
                     )
-                    results.append(SourceRunResult(adapter.source_id, -1, next_cursor))
                 except Exception as exc:
                     logger.exception("World-intelligence source poll failed: %s", adapter.source_id)
                     results.append(SourceRunResult(adapter.source_id, 0, None, type(exc).__name__))
