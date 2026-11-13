@@ -12,7 +12,7 @@ AS_OF = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 def observation(index, *, event_time=None, outcome_time=None, signal=None, result=None):
     event_time = event_time or AS_OF - timedelta(days=2)
     outcome_time = outcome_time or AS_OF - timedelta(days=1)
-    signal = signal if signal is not None else (index - 15) / 15
+    signal = signal if signal is not None else (index - 20) / 20
     result = result if result is not None else signal * 0.02
     return EventStudyObservation(
         asset="BTCUSDT",
