@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Protocol
 
 from aitos.core.contracts import Event
-from aitos.eventbus.contracts import EventBusProtocol
+
+
+class EventBusProtocol(Protocol):
+    async def publish(self, event: Event, priority=None) -> None: ...
 
 
 class EventBusSink:
