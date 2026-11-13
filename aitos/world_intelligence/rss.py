@@ -101,6 +101,8 @@ class RSSFeedAdapter:
         feed_url: str,
         allowed_hosts: set[str] | frozenset[str],
         reliability: float = 0.5,
+        source_kind: str = "news_feed",
+        is_primary: bool = False,
         max_items: int = 100,
         max_response_bytes: int = 1_000_000,
         timeout_seconds: float = 10.0,
@@ -119,10 +121,14 @@ class RSSFeedAdapter:
             raise ValueError("max_response_bytes must be between 1024 and 4000000")
         if not 0.0 <= float(reliability) <= 1.0:
             raise ValueError("reliability must be between 0 and 1")
+        if not source_kind or not source_kind.strip():
+            raise ValueError("source_kind is required")
         if not 0.1 <= float(timeout_seconds) <= 30.0:
             raise ValueError("timeout_seconds must be between 0.1 and 30")
         self.feed_url = feed_url
         self.reliability = float(reliability)
+        self.source_kind = source_kind.strip()
+        self.is_primary = bool(is_primary)
         self.max_items = max_items
         self.max_response_bytes = max_response_bytes
         self.timeout_seconds = float(timeout_seconds)
@@ -185,20 +191,25 @@ class RSSFeedAdapter:
         body, response_headers = await asyncio.to_thread(
             fetch, self.feed_url, request_headers
         )
-        next_cursor = json.dumps(
-            {
-                key: value
-                for key, value in {
-                    "etag": response_headers.get("etag", ""),
-                    "last_modified": response_headers.get("last_modified", ""),
-                }.items()
-                if value
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        next_cache = {
+            key: value
+            for key, value in {
+                "etag": response_headers.get("etag", ""),
+                "last_modified": response_headers.get("last_modified", ""),
+            }.items()
+            if value
+        }
         if body is None:
-            return [], next_cursor or cursor
+            return [], (
+                json.dumps(next_cache, sort_keys=True, separators=(",", ":"))
+                if next_cache
+                else cursor
+            )
+        next_cursor = (
+            json.dumps(next_cache, sort_keys=True, separators=(",", ":"))
+            if next_cache
+            else None
+        )
         if re.search(rb"<!\s*(DOCTYPE|ENTITY)", body, re.IGNORECASE):
             raise ValueError("DTD and entity declarations are not accepted in feeds")
         root = ET.fromstring(body)
@@ -231,12 +242,12 @@ class RSSFeedAdapter:
             ).hexdigest()
             source = SourceEvidence(
                 source_id=self.source_id,
-                source_kind="news_feed",
+                source_kind=self.source_kind,
                 uri=story_uri,
                 published_at=published,
                 first_seen_at=max(now, published),
                 reliability=self.reliability,
-                is_primary=False,
+                is_primary=self.is_primary,
                 original_story_id=origin_id,
             )
             analysis = analyze_financial_headline(title)
