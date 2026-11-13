@@ -68,3 +68,28 @@ def test_enrichment_resolves_entities_and_marks_only_configured_primary_publishe
     assert result.events[0].entities == ("NVDA",)
     assert result.events[0].verification == "single_source"
     assert result.verification["sec"].verified is False
+
+
+def test_primary_source_does_not_promote_every_event_in_a_cluster():
+    from dataclasses import replace
+
+    primary = replace(
+        make_event("sec", "Nvidia announces AI chip production expansion", "https://sec.example/1"),
+        source=replace(
+            make_event("sec", "Nvidia announces AI chip production expansion", "https://sec.example/1").source,
+            is_primary=True,
+            reliability=0.99,
+        ),
+    )
+    syndicated = make_event(
+        "wire", "Nvidia announces AI chip production expansion", "https://wire.example/1"
+    )
+    result = enrich_event_batch(
+        [primary, syndicated],
+        publisher_groups={"sec": "sec.gov", "wire": "wire-service"},
+        as_of=NOW,
+        registry=EntityAliasRegistry({"NVDA": ["nvidia"]}),
+    )
+    by_source = {event.source.source_id: event for event in result.events}
+    assert by_source["sec"].verification == "primary_source"
+    assert by_source["wire"].verification == "unverified"
