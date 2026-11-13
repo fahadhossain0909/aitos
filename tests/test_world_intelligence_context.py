@@ -56,8 +56,6 @@ async def test_asset_snapshot_provider_filters_by_base_asset_and_keeps_beta_neut
             event("eth", ("ETH",), NOW - timedelta(minutes=1)),
         ]
     )
-        ]
-    )
     provider = ClickHouseAssetSnapshotProvider(store)
     snapshot = await provider.snapshot_for_asset("BTCUSDT", as_of=NOW)
     assert snapshot.asset == "BTCUSDT"
@@ -65,7 +63,6 @@ async def test_asset_snapshot_provider_filters_by_base_asset_and_keeps_beta_neut
     assert snapshot.verified_event_count == 1
     assert all(item.signed_impact == 0.0 for item in snapshot.horizon_impacts)
     assert store.request["as_of"] == NOW
-
 
 @pytest.mark.asyncio
 async def test_snapshot_provider_rejects_naive_as_of():
