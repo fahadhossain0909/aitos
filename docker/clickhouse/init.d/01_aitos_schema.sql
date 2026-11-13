@@ -88,7 +88,7 @@ ORDER BY (source_id, deduplication_key);
 
 CREATE TABLE IF NOT EXISTS aitos.world_intelligence_cursors (
     source_id LowCardinality(String),
-    cursor Nullable(String),
+    cursor String,
     updated_at DateTime64(6, 'UTC')
 ) ENGINE = ReplacingMergeTree(updated_at)
 ORDER BY source_id;
