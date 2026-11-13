@@ -84,3 +84,18 @@ async def test_licensed_json_adapter_rejects_non_allowlisted_and_full_pages():
     )
     with pytest.raises(ValueError, match="refusing cursor advance"):
         await adapter.poll()
+
+
+def test_licensed_json_adapter_rejects_secrets_in_query_parameters():
+    with pytest.raises(ValueError, match="headers"):
+        LicensedJSONFeedAdapter(
+            source_id="unsafe",
+            endpoint="https://api.social.example/search?api_key=secret",
+            allowed_hosts={"api.social.example"},
+            records_path="data.items",
+            field_map={
+                "title": "headline",
+                "published_at": "created",
+                "uri": "permalink",
+            },
+        )
