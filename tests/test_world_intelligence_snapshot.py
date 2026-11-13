@@ -113,9 +113,7 @@ def test_snapshot_unverified_events_are_attention_only():
 
 def test_snapshot_emits_advisory_critical_event_review():
     event = make_event(severity=0.95)
-    snapshot = build_asset_intelligence_snapshot(
-        [event], asset="BTCUSDT", as_of=AS_OF
-    )
+    snapshot = build_asset_intelligence_snapshot([event], asset="BTCUSDT", as_of=AS_OF)
     assert snapshot.risk_assessment.recommend_new_entry_block
     assert snapshot.risk_assessment.exposure_multiplier == 0.5
 
