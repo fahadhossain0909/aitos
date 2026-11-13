@@ -175,3 +175,12 @@ async def test_durable_ingestion_checkpoints_after_publish():
     assert len(sink.published) == 1
     assert client.inserts[-1][0].endswith("world_intelligence_cursors")
     assert await store.load_cursor("gdelt") == "page-2"
+
+
+@pytest.mark.asyncio
+async def test_none_cursor_uses_empty_string_checkpoint_sentinel():
+    client = FakeAsyncClickHouse()
+    store = ClickHouseIntelligenceStore(client)
+    await store.save_cursor("gdelt", None)
+    assert client.inserts[-1][1][0][1] == ""
+    assert await store.load_cursor("gdelt") is None
