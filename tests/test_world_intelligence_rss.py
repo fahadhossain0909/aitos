@@ -158,3 +158,20 @@ async def test_rss_adapter_attaches_heuristic_features_but_keeps_event_unverifie
     assert event.sentiment < 0
     assert event.verification == "unverified"
     assert event.metadata["sentiment_status"] == "heuristic_unverified"
+
+
+@pytest.mark.asyncio
+async def test_rss_adapter_can_mark_operator_approved_primary_feed():
+    adapter = RSSFeedAdapter(
+        source_id="sec-filings",
+        feed_url="https://www.sec.gov/rss",
+        allowed_hosts={"www.sec.gov"},
+        reliability=0.99,
+        source_kind="official_filing",
+        is_primary=True,
+        fetcher=lambda url, headers: (RSS, {}),
+    )
+    events, _ = await adapter.poll()
+    assert events[0].source.is_primary
+    assert events[0].source.source_kind == "official_filing"
+    assert events[0].source.reliability == 0.99
