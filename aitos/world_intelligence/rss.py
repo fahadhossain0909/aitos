@@ -120,7 +120,9 @@ class RSSFeedAdapter:
             url,
             headers={
                 "User-Agent": "AITOS-World-Intelligence/1.0",
-                "Accept": "application/atom+xml, application/rss+xml, application/xml, text/xml",
+                "Accept": (
+                    "application/atom+xml, application/rss+xml, application/xml, text/xml"
+                ),
                 **dict(headers),
             },
         )
@@ -196,7 +198,11 @@ class RSSFeedAdapter:
             for item in root.iter()
             if _local_name(item.tag) in {"item", "entry"}
         ]
-        for item in entries[: self.max_items]:
+        if len(entries) > self.max_items:
+            raise ValueError(
+                "feed item count exceeds max_items; increase the configured limit"
+            )
+        for item in entries:
             title = _child_text(item, {"title"})
             link = _child_text(item, {"link"})
             guid = _child_text(item, {"guid", "id"})
