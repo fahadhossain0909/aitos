@@ -64,6 +64,7 @@ async def test_asset_snapshot_provider_filters_by_base_asset_and_keeps_beta_neut
     assert snapshot.asset == "BTCUSDT"
     assert snapshot.event_count == 1
     assert snapshot.verified_event_count == 1
+    assert snapshot.event_ids == ("btc",)
     assert all(item.signed_impact == 0.0 for item in snapshot.horizon_impacts)
     assert store.request["as_of"] == NOW
 
@@ -80,6 +81,8 @@ def test_snapshot_serialization_declares_shadow_only_policy():
     payload = snapshot_to_dict(snapshot)
     assert payload["policy"] == "shadow_only_no_execution_or_sizing_authority"
     assert payload["schema_version"] == 1
+    assert "event_ids" in payload
+    assert "narrative_ids" in payload
 
 
 @pytest.mark.asyncio
