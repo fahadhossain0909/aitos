@@ -93,7 +93,7 @@ def verify_observations(
         )
 
     groups = {
-        publisher_groups[event.source.source_id]
+        publisher_groups[event.source.source_id].strip().casefold()
         for event in accepted.values()
     }
     if len(groups) >= min_independent_sources:
