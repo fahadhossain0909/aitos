@@ -45,3 +45,15 @@ def test_financial_nlp_rejects_empty_or_oversized_text():
         analyze_financial_headline(" ")
     with pytest.raises(ValueError):
         analyze_financial_headline("x" * 20_001)
+
+
+def test_multilingual_headlines_receive_bounded_domain_annotations():
+    bengali = analyze_financial_headline("এক্সচেঞ্জে হ্যাক ও তথ্য ফাঁস")
+    chinese = analyze_financial_headline("央行宣布加息 通货膨胀上升")
+    japanese = analyze_financial_headline("企業の破産と債務不履行")
+    assert bengali.event_type == "security"
+    assert bengali.sentiment < 0
+    assert chinese.event_type == "macro"
+    assert chinese.sentiment < 0
+    assert japanese.event_type == "security" or japanese.event_type == "general_news"
+    assert all(0.0 <= item.confidence <= 0.55 for item in (bengali, chinese, japanese))
