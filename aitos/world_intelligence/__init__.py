@@ -36,6 +36,15 @@ from aitos.world_intelligence.providers import (
     SECEdgarSubmissionsAdapter,
     FREDSeriesAdapter,
 )
+from aitos.world_intelligence.evaluation import (
+    EventPrediction,
+    EvaluationMetrics,
+    WalkForwardSplit,
+    AblationComparison,
+    evaluate_predictions,
+    chronological_walk_forward_splits,
+    compare_ablation,
+)
 from aitos.world_intelligence.context import (
     AssetSnapshotProvider,
     ClickHouseAssetSnapshotProvider,
@@ -82,6 +91,13 @@ __all__ = [
     "GDELTDocAdapter",
     "SECEdgarSubmissionsAdapter",
     "FREDSeriesAdapter",
+    "EventPrediction",
+    "EvaluationMetrics",
+    "WalkForwardSplit",
+    "AblationComparison",
+    "evaluate_predictions",
+    "chronological_walk_forward_splits",
+    "compare_ablation",
     "AssetSnapshotProvider",
     "ClickHouseAssetSnapshotProvider",
     "snapshot_to_dict",
