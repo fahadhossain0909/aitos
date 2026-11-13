@@ -37,8 +37,9 @@ def estimate_asset_impact(
     verification_factor = {
         "multi_source_confirmed": 1.0,
         "primary_source": 1.0,
-        "single_source": 0.65,
+        "single_source": 0.0,
         "unverified": 0.0,
+        "single_source": 0.0,
         "disputed": 0.0,
         "retracted": 0.0,
     }.get(event.verification, 0.0)
