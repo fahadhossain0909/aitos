@@ -36,6 +36,11 @@ from aitos.world_intelligence.providers import (
     SECEdgarSubmissionsAdapter,
     FREDSeriesAdapter,
 )
+from aitos.world_intelligence.context import (
+    AssetSnapshotProvider,
+    ClickHouseAssetSnapshotProvider,
+    snapshot_to_dict,
+)
 from aitos.world_intelligence.eventbus_adapter import EventBusSink
 from aitos.world_intelligence.worker import (
     SourceRunResult,
@@ -77,6 +82,9 @@ __all__ = [
     "GDELTDocAdapter",
     "SECEdgarSubmissionsAdapter",
     "FREDSeriesAdapter",
+    "AssetSnapshotProvider",
+    "ClickHouseAssetSnapshotProvider",
+    "snapshot_to_dict",
     "EventBusSink",
     "SourceRunResult",
     "IntelligenceIngestionWorker",
