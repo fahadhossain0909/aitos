@@ -24,9 +24,11 @@ PAYLOAD = {
 @pytest.mark.asyncio
 async def test_licensed_json_adapter_normalizes_social_records_and_redacts_urls():
     seen = []
+
     def fetch(url, headers):
         seen.append((url, headers))
         return json.dumps(PAYLOAD).encode()
+
     adapter = LicensedJSONFeedAdapter(
         source_id="licensed-social",
         endpoint="https://api.social.example/v1/search",
@@ -64,7 +66,11 @@ async def test_licensed_json_adapter_rejects_non_allowlisted_and_full_pages():
             endpoint="http://api.social.example/feed",
             allowed_hosts={"api.social.example"},
             records_path="data.items",
-            field_map={"title": "headline", "published_at": "created", "uri": "permalink"},
+            field_map={
+                "title": "headline",
+                "published_at": "created",
+                "uri": "permalink",
+            },
         )
     adapter = LicensedJSONFeedAdapter(
         source_id="licensed",
