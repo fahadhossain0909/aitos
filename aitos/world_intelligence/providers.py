@@ -113,9 +113,7 @@ class _JSONSource:
     async def _get_json(self, url: str) -> Mapping[str, Any]:
         _validate_url(url, self.host)
         async with self._rate_lock:
-            delay = self.min_interval_seconds - (
-                time.monotonic() - self._last_request
-            )
+            delay = self.min_interval_seconds - (time.monotonic() - self._last_request)
             if delay > 0:
                 await asyncio.sleep(delay)
             fetch = self.fetcher or self._fetch
@@ -178,9 +176,8 @@ class GDELTDocAdapter(_JSONSource):
             "startdatetime": start.strftime("%Y%m%d%H%M%S"),
             "enddatetime": now.strftime("%Y%m%d%H%M%S"),
         }
-        url = (
-            "https://api.gdeltproject.org/api/v2/doc/doc?"
-            + urllib.parse.urlencode(params)
+        url = "https://api.gdeltproject.org/api/v2/doc/doc?" + urllib.parse.urlencode(
+            params
         )
         payload = await self._get_json(url)
         articles = payload.get("articles", [])
@@ -196,9 +193,9 @@ class GDELTDocAdapter(_JSONSource):
             uri = article.get("url")
             raw_time = str(article.get("seendate", ""))
             try:
-                published = datetime.strptime(
-                    raw_time, "%Y%m%dT%H%M%SZ"
-                ).replace(tzinfo=timezone.utc)
+                published = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ").replace(
+                    tzinfo=timezone.utc
+                )
             except ValueError:
                 continue
             if (
@@ -317,12 +314,7 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
                 continue
             form = str(forms[index])[:32]
             document = str(documents[index])
-            if (
-                not document
-                or "/" in document
-                or "\\" in document
-                or ".." in document
-            ):
+            if not document or "/" in document or "\\" in document or ".." in document:
                 continue
             accession_path = accession.replace("-", "")
             uri = (
@@ -426,9 +418,7 @@ class FREDSeriesAdapter(_JSONSource):
             not isinstance(observations, list)
             or len(observations) > self.max_observations
         ):
-            raise ValueError(
-                "FRED observations are invalid or exceed configured limit"
-            )
+            raise ValueError("FRED observations are invalid or exceed configured limit")
         now = datetime.now(timezone.utc)
         events: list[IntelligenceEvent] = []
         next_cursor = cursor
