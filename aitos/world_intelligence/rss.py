@@ -13,7 +13,7 @@ import json
 import re
 import urllib.error
 import urllib.request
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
