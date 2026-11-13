@@ -1,5 +1,6 @@
 """Single-active-instance, graceful, bounded intelligence ingestion worker."""
 
+
 from __future__ import annotations
 
 import asyncio
