@@ -49,6 +49,18 @@ def _validate_feed_url(url: str, allowed_hosts: frozenset[str]) -> str:
     return host
 
 
+def _safe_story_uri(uri: str, fallback: str) -> str:
+    parsed = urlsplit(uri)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        parsed = urlsplit(fallback)
+    return parsed._replace(query="", fragment="").geturl()
+
+
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].lower()
 
@@ -208,7 +220,10 @@ class RSSFeedAdapter:
             )
             if not title or published is None or published > now:
                 continue
-            story_uri = urljoin(self.feed_url, link) if link else self.feed_url
+            story_uri = _safe_story_uri(
+                urljoin(self.feed_url, link) if link else self.feed_url,
+                self.feed_url,
+            )
             origin_id = guid or story_uri
             event_id = hashlib.sha256(
                 f"{self.source_id}|{origin_id}".encode("utf-8")
@@ -239,7 +254,7 @@ class RSSFeedAdapter:
                     verification="unverified",
                     impact_horizon="unknown",
                     metadata={
-                        "feed_url": self.feed_url,
+                        "feed_url": _safe_story_uri(self.feed_url, self.feed_url),
                         "story_uri": story_uri,
                         "response_sha256": response_hash,
                         "sentiment_status": "not_analyzed",
