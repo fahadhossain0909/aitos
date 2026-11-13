@@ -111,9 +111,7 @@ class IntelligenceEvent:
     def deduplication_key(self) -> str:
         """Stable source-story identity; not a semantic event-clustering key."""
         origin = self.source.original_story_id or self.source.uri or self.title
-        raw = "|".join(
-            (self.source.source_id, self.event_type, origin.strip().lower())
-        )
+        raw = "|".join((self.source.source_id, self.event_type, origin.strip().lower()))
         return sha256(raw.encode("utf-8")).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
