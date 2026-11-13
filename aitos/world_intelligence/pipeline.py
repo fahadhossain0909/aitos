@@ -1,4 +1,5 @@
 """Bounded event enrichment pipeline; provenance checks are not fact verification."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -33,15 +34,17 @@ def enrich_event_batch(
     registry: EntityAliasRegistry = DEFAULT_ENTITY_REGISTRY,
     max_event_age_hours: float = 72.0,
 ) -> EnrichmentResult:
-    timestamp = (as_of or datetime.now(timezone.utc))
+    timestamp = as_of or datetime.now(timezone.utc)
     if timestamp.tzinfo is None:
         raise ValueError("as_of must be timezone-aware")
     if max_event_age_hours <= 0:
         raise ValueError("max_event_age_hours must be positive")
     cutoff = timestamp.astimezone(timezone.utc)
     eligible = [
-        event for event in events
-        if event.published_at <= cutoff and event.first_seen_at <= cutoff
+        event
+        for event in events
+        if event.published_at <= cutoff
+        and event.first_seen_at <= cutoff
         and (cutoff - event.first_seen_at).total_seconds() <= max_event_age_hours * 3600
     ]
     enriched = [
@@ -56,7 +59,8 @@ def enrich_event_batch(
     narratives = cluster_narratives(enriched, as_of=cutoff)
     narrative_for_event = {
         event_id: narrative.narrative_id
-        for narrative in narratives for event_id in narrative.event_ids
+        for narrative in narratives
+        for event_id in narrative.event_ids
     }
     groups: dict[str, list[IntelligenceEvent]] = {}
     for event in enriched:
