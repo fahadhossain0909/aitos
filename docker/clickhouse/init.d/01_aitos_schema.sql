@@ -68,6 +68,31 @@ CREATE TABLE IF NOT EXISTS aitos.historical_decision_evidence (
 PARTITION BY toYYYYMM(captured_at)
 ORDER BY (candidate_id, evidence_id);
 
+-- World Intelligence: append-only event evidence and per-source checkpoints.
+-- Cursor is advanced only after the event page is persisted; ingestion is
+-- at-least-once and requires one active writer per source.
+CREATE TABLE IF NOT EXISTS aitos.world_intelligence_events (
+    source_id LowCardinality(String),
+    deduplication_key String,
+    event_id String,
+    published_at DateTime64(3, 'UTC'),
+    first_seen_at DateTime64(3, 'UTC'),
+    ingested_at DateTime64(6, 'UTC'),
+    event_type LowCardinality(String),
+    verification LowCardinality(String),
+    entities_json String,
+    payload_json String
+) ENGINE = ReplacingMergeTree(ingested_at)
+PARTITION BY toYYYYMM(published_at)
+ORDER BY (source_id, deduplication_key);
+
+CREATE TABLE IF NOT EXISTS aitos.world_intelligence_cursors (
+    source_id LowCardinality(String),
+    cursor Nullable(String),
+    updated_at DateTime64(6, 'UTC')
+) ENGINE = ReplacingMergeTree(updated_at)
+ORDER BY source_id;
+
 CREATE TABLE IF NOT EXISTS aitos.learning_experiences (
     experience_id UUID, timestamp DateTime64(3, 'UTC'), source LowCardinality(String),
     symbol LowCardinality(String), decision LowCardinality(String), outcome Nullable(String),
