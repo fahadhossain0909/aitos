@@ -68,7 +68,7 @@ def test_future_events_are_excluded_even_if_outcome_timestamp_is_old():
             observation(
                 i,
                 event_time=AS_OF + timedelta(minutes=1),
-                outcome_time=AS_OF,
+                outcome_time=AS_OF + timedelta(hours=2),
             )
             for i in range(40)
         ],
