@@ -1,4 +1,5 @@
 """Read-only, point-in-time world-intelligence context for scanner shadow use."""
+
 from __future__ import annotations
 
 from dataclasses import asdict
@@ -77,7 +78,8 @@ class ClickHouseAssetSnapshotProvider:
             limit=self.max_events,
         )
         matched = [
-            event for event in events
+            event
+            for event in events
             if normalized in event.entities or base in event.entities
         ]
         return build_asset_intelligence_snapshot(
