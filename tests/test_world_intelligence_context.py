@@ -17,9 +17,11 @@ class Store:
     def __init__(self, events):
         self.events = events
         self.request = None
+        self.query_count = 0
 
     async def load_recent_events(self, **kwargs):
         self.request = kwargs
+        self.query_count += 1
         return self.events
 
 
@@ -78,3 +80,17 @@ def test_snapshot_serialization_declares_shadow_only_policy():
     payload = snapshot_to_dict(snapshot)
     assert payload["policy"] == "shadow_only_no_execution_or_sizing_authority"
     assert payload["schema_version"] == 1
+
+
+@pytest.mark.asyncio
+async def test_snapshot_provider_reuses_recent_event_read_across_symbols():
+    store = Store(
+        [
+            event("btc", ("BTC",), NOW - timedelta(minutes=1)),
+            event("eth", ("ETH",), NOW - timedelta(minutes=1)),
+        ]
+    )
+    provider = ClickHouseAssetSnapshotProvider(store, cache_ttl_seconds=5)
+    await provider.snapshot_for_asset("BTCUSDT", as_of=NOW)
+    await provider.snapshot_for_asset("ETHUSDT", as_of=NOW)
+    assert store.query_count == 1
