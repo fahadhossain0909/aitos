@@ -7,6 +7,7 @@ from aitos.world_intelligence.context import (
     snapshot_to_dict,
 )
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
+from aitos.world_intelligence.snapshot import build_asset_intelligence_snapshot
 
 
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
@@ -64,6 +65,7 @@ async def test_asset_snapshot_provider_filters_by_base_asset_and_keeps_beta_neut
     assert all(item.signed_impact == 0.0 for item in snapshot.horizon_impacts)
     assert store.request["as_of"] == NOW
 
+
 @pytest.mark.asyncio
 async def test_snapshot_provider_rejects_naive_as_of():
     provider = ClickHouseAssetSnapshotProvider(Store([]))
@@ -71,12 +73,8 @@ async def test_snapshot_provider_rejects_naive_as_of():
         await provider.snapshot_for_asset("BTCUSDT", as_of=datetime(2026, 11, 13))
 
 
-        "aitos.world_intelligence.snapshot",
-        fromlist=["build_asset_intelligence_snapshot"],
-    snapshot = __import__(
-        "aitos.world_intelligence.snapshot",
-        fromlist=["build_asset_intelligence_snapshot"],
-    ).build_asset_intelligence_snapshot([], asset="BTCUSDT", as_of=NOW)
+def test_snapshot_serialization_declares_shadow_only_policy():
+    snapshot = build_asset_intelligence_snapshot([], asset="BTCUSDT", as_of=NOW)
     payload = snapshot_to_dict(snapshot)
     assert payload["policy"] == "shadow_only_no_execution_or_sizing_authority"
     assert payload["schema_version"] == 1
