@@ -118,3 +118,22 @@ async def test_rss_adapter_refuses_to_checkpoint_truncated_feed():
     )
     with pytest.raises(ValueError, match="exceeds max_items"):
         await adapter.poll()
+
+
+@pytest.mark.asyncio
+async def test_rss_adapter_redacts_query_parameters_from_stored_uris():
+    body = b"""<rss><channel><item>
+    <title>Public headline</title>
+    <link>https://news.example.test/story/1?access_token=secret</link>
+    <pubDate>Fri, 13 Nov 2026 11:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+    adapter = RSSFeedAdapter(
+        source_id="news",
+        feed_url="https://news.example.test/rss?api_key=secret",
+        allowed_hosts={"news.example.test"},
+        fetcher=lambda url, headers: (body, {}),
+    )
+    events, _ = await adapter.poll()
+    assert len(events) == 1
+    assert "secret" not in events[0].source.uri
+    assert "secret" not in events[0].metadata["feed_url"]
