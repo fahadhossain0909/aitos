@@ -20,13 +20,15 @@ class EventBusSink:
 
     async def publish(self, topic: str, payload: Mapping[str, object]) -> None:
         event_id = str(payload.get("event_id") or "")
-        await self.event_bus.publish(Event(
+        event_fields = {"event_id": event_id} if event_id else {}
+        event = Event(
             topic=topic,
             payload=dict(payload),
-            **({"event_id": event_id} if event_id else {}),.
             source_module=self.source_module,
             schema_version=str(payload.get("schema_version", "1")),
-        ))
+            **event_fields,
+        )
+        await self.event_bus.publish(event)
 
 
 __all__ = ["EventBusSink"]
