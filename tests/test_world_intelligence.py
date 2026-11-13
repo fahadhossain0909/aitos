@@ -142,3 +142,18 @@ def test_single_source_event_has_no_directional_impact():
     )
     assert impact.signed_impact == 0.0
     assert impact.confidence == 0.0
+
+
+def test_future_event_cannot_be_scored_at_an_earlier_as_of_time():
+    event = make_event(
+        published_at=NOW + timedelta(minutes=1),
+        first_seen_at=NOW + timedelta(minutes=1),
+    )
+    with pytest.raises(ValueError, match="not observable"):
+        estimate_asset_impact(
+            event,
+            asset="BTCUSDT",
+            horizon_hours=1,
+            beta=1.0,
+            now=NOW,
+        )
