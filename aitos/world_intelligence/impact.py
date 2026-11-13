@@ -28,7 +28,11 @@ def estimate_asset_impact(
     timestamp = now or datetime.now(timezone.utc)
     if timestamp.tzinfo is None:
         raise ValueError("now must be timezone-aware")
-    age_hours = max(0.0, (timestamp.astimezone(timezone.utc) - event.published_at).total_seconds() / 3600.0)
+    age_hours = max(
+        0.0,
+        (timestamp.astimezone(timezone.utc) - event.published_at).total_seconds()
+        / 3600.0,
+    )
     decay = exp(-0.6931471805599453 * age_hours / half_life_hours)
     verification_factor = {
         "multi_source_confirmed": 1.0,
@@ -41,7 +45,9 @@ def estimate_asset_impact(
     signed = event.sentiment * event.severity * event.novelty * event.confidence
     signed *= event.source.reliability * verification_factor * float(beta) * decay
     signed = max(-1.0, min(1.0, signed))
-    confidence = event.confidence * event.source.reliability * verification_factor * decay
+    confidence = (
+        event.confidence * event.source.reliability * verification_factor * decay
+    )
     return AssetImpact(
         event_id=event.event_id,
         asset=asset.upper(),
