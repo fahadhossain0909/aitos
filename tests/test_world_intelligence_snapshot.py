@@ -118,3 +118,38 @@ def test_snapshot_emits_advisory_critical_event_review():
     )
     assert snapshot.risk_assessment.recommend_new_entry_block
     assert snapshot.risk_assessment.exposure_multiplier == 0.5
+
+
+def test_snapshot_attention_decays_with_event_age():
+    fresh = make_event()
+    old_time = AS_OF - timedelta(hours=12)
+    old_source = SourceEvidence(
+        source_id="official",
+        source_kind="official",
+        uri="https://example.test/old-event",
+        published_at=old_time - timedelta(minutes=1),
+        first_seen_at=old_time,
+        reliability=1.0,
+        is_primary=True,
+    )
+    old_event = IntelligenceEvent(
+        event_id="old",
+        event_type="regulatory",
+        title="Old official event",
+        entities=("BTC",),
+        published_at=old_time - timedelta(minutes=1),
+        first_seen_at=old_time,
+        source=old_source,
+        sentiment=-0.8,
+        severity=0.9,
+        novelty=0.8,
+        confidence=0.95,
+        verification="primary_source",
+    )
+    fresh_snapshot = build_asset_intelligence_snapshot(
+        [fresh], asset="BTCUSDT", as_of=AS_OF
+    )
+    old_snapshot = build_asset_intelligence_snapshot(
+        [old_event], asset="BTCUSDT", as_of=AS_OF
+    )
+    assert old_snapshot.attention_score < fresh_snapshot.attention_score
