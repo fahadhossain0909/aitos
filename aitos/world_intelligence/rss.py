@@ -20,6 +20,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit
 
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
+from aitos.world_intelligence.financial_nlp import analyze_financial_headline
 
 
 FetchResult = tuple[bytes | None, Mapping[str, str]]
@@ -238,26 +239,29 @@ class RSSFeedAdapter:
                 is_primary=False,
                 original_story_id=origin_id,
             )
+            analysis = analyze_financial_headline(title)
             events.append(
                 IntelligenceEvent(
                     event_id=event_id,
-                    event_type="news",
+                    event_type=analysis.event_type,
                     title=title[:500],
                     entities=(),
                     published_at=published,
                     first_seen_at=max(now, published),
                     source=source,
-                    sentiment=0.0,
-                    severity=0.1,
+                    sentiment=analysis.sentiment,
+                    severity=analysis.severity,
                     novelty=0.5,
-                    confidence=0.1,
+                    confidence=analysis.confidence,
                     verification="unverified",
-                    impact_horizon="unknown",
+                    impact_horizon=analysis.impact_horizon,
                     metadata={
                         "feed_url": _safe_story_uri(self.feed_url, self.feed_url),
                         "story_uri": story_uri,
                         "response_sha256": response_hash,
-                        "sentiment_status": "not_analyzed",
+                        "sentiment_status": "heuristic_unverified",
+                        "nlp_analyzer_version": analysis.analyzer_version,
+                        "nlp_matched_terms": list(analysis.matched_terms),
                     },
                 )
             )
