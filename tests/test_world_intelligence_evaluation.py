@@ -59,8 +59,10 @@ def test_walk_forward_splits_purge_labels_that_overlap_test_start():
     )
     assert splits
     for split in splits:
-        assert all(item.outcome_available_at <= split.test_start - timedelta(minutes=30)
-                   for item in split.train)
+        assert all(
+            item.outcome_available_at <= split.test_start - timedelta(minutes=30)
+            for item in split.train
+        )
         assert max(item.event_time for item in split.train) < split.test_start
 
 
@@ -71,9 +73,7 @@ def test_ablation_uses_only_matched_events_and_reports_incremental_net_return():
         prediction(1, probability=0.8, result=0.01),
         prediction(99, probability=0.9, result=0.5),
     ]
-    result = compare_ablation(
-        baseline, enriched, as_of=BASE + timedelta(days=1)
-    )
+    result = compare_ablation(baseline, enriched, as_of=BASE + timedelta(days=1))
     assert result.matched_sample_count == 2
     assert result.baseline.sample_count == 2
     assert result.with_intelligence.sample_count == 2
@@ -85,8 +85,13 @@ def test_evaluation_rejects_naive_as_of_and_invalid_probability():
         evaluate_predictions([], as_of=datetime(2026, 1, 1))
     with pytest.raises(ValueError, match="predicted_probability_up"):
         EventPrediction(
-            event_id="bad", asset="BTC", horizon="1h", event_time=BASE,
-            outcome_available_at=BASE, predicted_probability_up=1.5, forward_return=0.0,
+            event_id="bad",
+            asset="BTC",
+            horizon="1h",
+            event_time=BASE,
+            outcome_available_at=BASE,
+            predicted_probability_up=1.5,
+            forward_return=0.0,
         )
 
 
@@ -94,6 +99,4 @@ def test_ablation_rejects_mismatched_realized_outcomes():
     baseline = [prediction(0)]
     enriched = [prediction(0, result=0.5)]
     with pytest.raises(ValueError, match="identical outcomes"):
-        compare_ablation(
-            baseline, enriched, as_of=BASE + timedelta(days=1)
-        )
+        compare_ablation(baseline, enriched, as_of=BASE + timedelta(days=1))
