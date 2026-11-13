@@ -155,8 +155,7 @@ class RSSFeedAdapter:
             try:
                 decoded = json.loads(cursor)
                 if not isinstance(decoded, dict) or any(
-                    key not in {"etag", "last_modified"}
-                    or not isinstance(value, str)
+                    key not in {"etag", "last_modified"} or not isinstance(value, str)
                     for key, value in decoded.items()
                 ):
                     raise ValueError
@@ -187,16 +186,14 @@ class RSSFeedAdapter:
         )
         if body is None:
             return [], next_cursor or cursor
-        if re.search(br"<!\s*(DOCTYPE|ENTITY)", body, re.IGNORECASE):
+        if re.search(rb"<!\s*(DOCTYPE|ENTITY)", body, re.IGNORECASE):
             raise ValueError("DTD and entity declarations are not accepted in feeds")
         root = ET.fromstring(body)
         now = datetime.now(timezone.utc)
         response_hash = hashlib.sha256(body).hexdigest()
         events: list[IntelligenceEvent] = []
         entries = [
-            item
-            for item in root.iter()
-            if _local_name(item.tag) in {"item", "entry"}
+            item for item in root.iter() if _local_name(item.tag) in {"item", "entry"}
         ]
         if len(entries) > self.max_items:
             raise ValueError(
