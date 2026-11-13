@@ -1,4 +1,5 @@
 """Bridge normalized intelligence messages onto the existing AITOS EventBus."""
+
 from __future__ import annotations
 
 from collections.abc import Mapping
