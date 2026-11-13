@@ -375,7 +375,9 @@ class OpportunityScanner(AITOSModule):
         if not 0.005 <= world_intelligence_timeout_seconds <= 1.0:
             raise ValueError("world intelligence timeout must be between 5ms and 1s")
         self._world_intelligence_provider = world_intelligence_provider
-        self._world_intelligence_timeout_seconds = float(world_intelligence_timeout_seconds)
+        self._world_intelligence_timeout_seconds = float(
+            world_intelligence_timeout_seconds
+        )
         self._event_bus = event_bus
         self._exchange = exchange
         self._tuning = tuning or load_tuning_settings()
@@ -1990,7 +1992,11 @@ class OpportunityScanner(AITOSModule):
                         "regime": candidate.regime,
                         "candidate_id": candidate.candidate_id,
                         **(
-                            {"world_intelligence_shadow": dict(candidate.world_intelligence_shadow)}
+                            {
+                                "world_intelligence_shadow": dict(
+                                    candidate.world_intelligence_shadow
+                                )
+                            }
                             if candidate.world_intelligence_shadow
                             else {}
                         ),
@@ -2405,7 +2411,11 @@ class OpportunityScanner(AITOSModule):
                     "features": dict(candidate.financial_ml_features),
                 },
                 **(
-                    {"world_intelligence_shadow": dict(candidate.world_intelligence_shadow)}
+                    {
+                        "world_intelligence_shadow": dict(
+                            candidate.world_intelligence_shadow
+                        )
+                    }
                     if candidate.world_intelligence_shadow
                     else {}
                 ),
