@@ -10,6 +10,11 @@ from aitos.world_intelligence.impact import estimate_asset_impact
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
 from aitos.world_intelligence.rss import RSSFeedAdapter
 from aitos.world_intelligence.adapters import ingest_page, ingest_page_durably
+from aitos.world_intelligence.snapshot import (
+    HorizonImpact,
+    AssetIntelligenceSnapshot,
+    build_asset_intelligence_snapshot,
+)
 from aitos.world_intelligence.event_study import (
     EventStudyObservation,
     EventBetaEstimate,
@@ -42,4 +47,7 @@ __all__ = [
     "EventStudyObservation",
     "EventBetaEstimate",
     "estimate_event_beta",
+    "HorizonImpact",
+    "AssetIntelligenceSnapshot",
+    "build_asset_intelligence_snapshot",
 ]
