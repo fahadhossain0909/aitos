@@ -31,7 +31,7 @@ async def test_rss_adapter_emits_unverified_neutral_observations():
     assert len(events) == 1
     assert events[0].verification == "unverified"
     assert events[0].sentiment == 0.0
-    assert events[0].metadata["sentiment_status"] == "not_analyzed"
+    assert events[0].metadata["sentiment_status"] == "heuristic_unverified"
     assert events[0].source.original_story_id == "story-1"
     assert json.loads(cursor)["etag"] == '"v1"'
     assert calls[0][1] == {}
