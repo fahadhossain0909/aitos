@@ -148,7 +148,8 @@ def chronological_walk_forward_splits(
         end = test[-1].event_time.astimezone(timezone.utc)
         train = tuple(
             item for item in ordered[:test_start_index]
-            if item.outcome_available_at.astimezone(timezone.utc) <= start - embargo
+            if item.event_time.astimezone(timezone.utc) < start
+            and item.outcome_available_at.astimezone(timezone.utc) <= start - embargo
         )
         if len(train) >= min_train_samples:
             splits.append(WalkForwardSplit(tuple(train), tuple(test), start, end))
@@ -168,6 +169,24 @@ def compare_ablation(
     common = sorted(set(baseline_map) & set(enriched_map))
     base_items = [baseline_map[key] for key in common]
     enriched_items = [enriched_map[key] for key in common]
+    for base_item, enriched_item in zip(base_items, enriched_items):
+        fixed_fields = (
+            "asset",
+            "horizon",
+            "event_time",
+            "outcome_available_at",
+            "forward_return",
+            "transaction_cost_bps",
+            "funding_cost_bps",
+            "latency_slippage_bps",
+        )
+        if any(
+            getattr(base_item, field) != getattr(enriched_item, field)
+            for field in fixed_fields
+        ):
+            raise ValueError(
+                "ablation rows must share identical outcomes and execution costs"
+            )
     base_metrics = evaluate_predictions(base_items, as_of=as_of)
     enriched_metrics = evaluate_predictions(enriched_items, as_of=as_of)
     delta = None
