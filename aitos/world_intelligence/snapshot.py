@@ -130,10 +130,7 @@ def build_asset_intelligence_snapshot(
 
     attention = (
         fsum(
-            event.severity
-            * event.novelty
-            * event.confidence
-            * event.source.reliability
+            event.severity * event.novelty * event.confidence * event.source.reliability
             for event in ordered_events
         )
         / len(ordered_events)
