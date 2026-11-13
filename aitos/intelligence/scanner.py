@@ -299,6 +299,7 @@ class ScanCandidate:
     meta_probability: float | None = None
     meta_accepted: bool | None = None
     meta_reason: str | None = None
+    world_intelligence_shadow: dict[str, Any] = field(default_factory=dict)
 
 
 def _volatility_fitness(
@@ -368,7 +369,13 @@ class OpportunityScanner(AITOSModule):
         amt_value_area_pct: float = 0.70,
         amt_ib_minutes: int = 60,
         tuning: TuningSettings | None = None,
+        world_intelligence_provider: Any | None = None,
+        world_intelligence_timeout_seconds: float = 0.05,
     ) -> None:
+        if not 0.005 <= world_intelligence_timeout_seconds <= 1.0:
+            raise ValueError("world intelligence timeout must be between 5ms and 1s")
+        self._world_intelligence_provider = world_intelligence_provider
+        self._world_intelligence_timeout_seconds = float(world_intelligence_timeout_seconds)
         self._event_bus = event_bus
         self._exchange = exchange
         self._tuning = tuning or load_tuning_settings()
@@ -1698,6 +1705,26 @@ class OpportunityScanner(AITOSModule):
                         a_stat_result.probability_confidence
                     ),
                 }
+        world_intelligence_shadow = {}
+        if self._world_intelligence_provider is not None:
+            try:
+                from aitos.world_intelligence.context import snapshot_to_dict
+
+                snapshot = await asyncio.wait_for(
+                    self._world_intelligence_provider.snapshot_for_asset(
+                        symbol,
+                        as_of=datetime.fromisoformat(scanned_at),
+                    ),
+                    timeout=self._world_intelligence_timeout_seconds,
+                )
+                if snapshot is not None:
+                    world_intelligence_shadow = snapshot_to_dict(snapshot)
+            except Exception as exc:
+                logger.warning(
+                    "world-intelligence shadow context unavailable: %s",
+                    type(exc).__name__,
+                    extra={"aitos_extra": {"symbol": symbol}},
+                )
         candidate = ScanCandidate(
             symbol=symbol,
             direction=direction,
@@ -1712,6 +1739,7 @@ class OpportunityScanner(AITOSModule):
             htf_adx=float(htf_diagnostics.get("adx", 0.0)),
             trace_id=_ACTIVE_SCAN_TRACE_ID.get() or None,
             statistical_forecast=statistical_forecast,
+            world_intelligence_shadow=world_intelligence_shadow,
         )
         if amd_mtf_candles:
             object.__setattr__(candidate, "_aitos_mtf_candles", amd_mtf_candles)
@@ -1961,6 +1989,11 @@ class OpportunityScanner(AITOSModule):
                         "composite_score": candidate.composite_score,
                         "regime": candidate.regime,
                         "candidate_id": candidate.candidate_id,
+                        **(
+                            {"world_intelligence_shadow": dict(candidate.world_intelligence_shadow)}
+                            if candidate.world_intelligence_shadow
+                            else {}
+                        ),
                     },
                     candidate_id=candidate.candidate_id,
                 )
@@ -2371,6 +2404,11 @@ class OpportunityScanner(AITOSModule):
                     "mode": self._financial_ml.mode,
                     "features": dict(candidate.financial_ml_features),
                 },
+                **(
+                    {"world_intelligence_shadow": dict(candidate.world_intelligence_shadow)}
+                    if candidate.world_intelligence_shadow
+                    else {}
+                ),
                 **(
                     {"statistical_forecast": dict(candidate.statistical_forecast)}
                     if candidate.statistical_forecast is not None
