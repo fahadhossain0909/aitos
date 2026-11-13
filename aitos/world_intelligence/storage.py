@@ -96,21 +96,12 @@ class ClickHouseIntelligenceStore:
             return None
         return result.result_rows[0][0]
 
-    async def persist_page(
-        self,
-        source_id: str,
-        events: list[IntelligenceEvent],
-        next_cursor: str | None,
+    async def append_events(
+        self, source_id: str, events: list[IntelligenceEvent]
     ) -> int:
-        """Persist all events before advancing the cursor.
-
-        On any event insert failure, the cursor is not advanced. Cursor-write
-        failure is propagated; replay is safe and expected.
-        """
+        """Append a normalized page without moving its source checkpoint."""
         if not source_id or not source_id.strip():
             raise ValueError("source_id is required")
-        if next_cursor is not None and not isinstance(next_cursor, str):
-            raise ValueError("cursor must be a string or None")
         for event in events:
             if event.source.source_id != source_id:
                 raise ValueError("event source_id does not match page source")
@@ -148,10 +139,32 @@ class ClickHouseIntelligenceStore:
                     "payload_json",
                 ],
             )
+        return len(rows)
 
+    async def save_cursor(self, source_id: str, cursor: str | None) -> None:
+        """Advance a source cursor after all downstream page work succeeds."""
+        if not source_id or not source_id.strip():
+            raise ValueError("source_id is required")
+        if cursor is not None and not isinstance(cursor, str):
+            raise ValueError("cursor must be a string or None")
         await self.client.insert(
             self.cursors_table,
-            [(source_id, next_cursor, now)],
+            [(source_id, cursor, datetime.now(timezone.utc))],
             column_names=["source_id", "cursor", "updated_at"],
         )
-        return len(rows)
+
+    async def persist_page(
+        self,
+        source_id: str,
+        events: list[IntelligenceEvent],
+        next_cursor: str | None,
+    ) -> int:
+        """Persist a page before advancing its checkpoint.
+
+        This convenience method provides at-least-once persistence. Callers
+        that also publish to Redis should use append_events(), publish, then
+        save_cursor() so a failed publish cannot lose the page.
+        """
+        count = await self.append_events(source_id, events)
+        await self.save_cursor(source_id, next_cursor)
+        return count
