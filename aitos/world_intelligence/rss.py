@@ -17,10 +17,8 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from typing import Any
 from urllib.parse import urljoin, urlsplit
 
-from aitos.world_intelligence.adapters import IntelligenceSourceAdapter
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 
 
@@ -117,9 +115,9 @@ class RSSFeedAdapter:
         self.timeout_seconds = float(timeout_seconds)
         self.fetcher = fetcher
 
-    def _fetch(self, headers: Mapping[str, str]) -> FetchResult:
+    def _fetch(self, url: str, headers: Mapping[str, str]) -> FetchResult:
         request = urllib.request.Request(
-            self.feed_url,
+            url,
             headers={
                 "User-Agent": "AITOS-World-Intelligence/1.0",
                 "Accept": "application/atom+xml, application/rss+xml, application/xml, text/xml",
@@ -170,7 +168,9 @@ class RSSFeedAdapter:
             request_headers["If-Modified-Since"] = cache["last_modified"]
 
         fetch = self.fetcher or self._fetch
-        body, response_headers = await asyncio.to_thread(fetch, request_headers)
+        body, response_headers = await asyncio.to_thread(
+            fetch, self.feed_url, request_headers
+        )
         next_cursor = json.dumps(
             {
                 key: value
