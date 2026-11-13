@@ -10,6 +10,11 @@ from aitos.world_intelligence.impact import estimate_asset_impact
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
 from aitos.world_intelligence.rss import RSSFeedAdapter
 from aitos.world_intelligence.adapters import ingest_page, ingest_page_durably
+from aitos.world_intelligence.event_study import (
+    EventStudyObservation,
+    EventBetaEstimate,
+    estimate_event_beta,
+)
 from aitos.world_intelligence.verification import (
     VerificationResult,
     verify_observations,
@@ -34,4 +39,7 @@ __all__ = [
     "analyze_financial_headline",
     "VerificationResult",
     "verify_observations",
+    "EventStudyObservation",
+    "EventBetaEstimate",
+    "estimate_event_beta",
 ]
