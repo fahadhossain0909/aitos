@@ -1994,7 +1994,7 @@ class OpportunityScanner(AITOSModule):
                         **(
                             {
                                 "world_intelligence_shadow": dict(
-                                    candidate.world_intelligence_shadow
+                                    getattr(candidate, "world_intelligence_shadow", {})
                                 )
                             }
                             if candidate.world_intelligence_shadow
