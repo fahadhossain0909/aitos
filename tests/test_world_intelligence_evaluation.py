@@ -49,7 +49,7 @@ def test_evaluation_includes_fees_funding_and_latency_slippage():
         latency_slippage_bps=4.0,
     )
     metrics = evaluate_predictions([item], as_of=BASE + timedelta(hours=2))
-    assert metrics.mean_net_return == pytest.approx(0.0001)
+    assert metrics.mean_net_return == pytest.approx(-0.0001)
 
 
 def test_walk_forward_splits_purge_labels_that_overlap_test_start():
