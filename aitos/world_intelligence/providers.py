@@ -5,6 +5,7 @@ responses, an operator-configured User-Agent/API key and opaque replay cursor.
 Provider terms and rate limits remain the operator's responsibility.
 """
 
+
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +37,12 @@ class _RedirectGuard(urllib.request.HTTPRedirectHandler):
 
 
 def _validate_url(url: str, host: str) -> None:
-    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != host
+        or parsed.username
+        or parsed.password
+    ):
     if (
         parsed.scheme != "https"
         or parsed.hostname != host
@@ -85,7 +91,12 @@ class _JSONSource:
         self.max_response_bytes = max_response_bytes
         self.min_interval_seconds = min_interval_seconds
         self.fetcher = fetcher
-        self._last_request = 0.0
+            url,
+            headers={
+                "User-Agent": self.user_agent,
+                "Accept": "application/json",
+                **dict(headers),
+            },
         self._rate_lock = asyncio.Lock()
 
     def _fetch(self, url: str, headers: Mapping[str, str]) -> JSONFetchResult:
@@ -123,17 +134,6 @@ class _JSONSource:
         try:
             payload = json.loads(body)
         except (TypeError, ValueError, UnicodeDecodeError) as exc:
-            raise ValueError("provider returned invalid JSON") from exc
-        if not isinstance(payload, dict):
-            raise ValueError("provider JSON root must be an object")
-        return payload
-
-
-class GDELTDocAdapter(_JSONSource):
-    """GDELT DOC 2.0 article search; all articles remain unverified."""
-
-    host = "api.gdeltproject.org"
-
     def __init__(
         self,
         *,
@@ -143,11 +143,47 @@ class GDELTDocAdapter(_JSONSource):
         max_records: int = 100,
         **kwargs,
     ):
-        super().__init__(source_id=source_id, **kwargs)
+        if not isinstance(payload, dict):
         if (
             not query.strip()
             or not 1 <= lookback_minutes <= 1440
             or not 1 <= max_records <= 250
+        ):
+        return payload
+
+
+class GDELTDocAdapter(_JSONSource):
+    """GDELT DOC 2.0 article search; all articles remain unverified."""
+    async def poll(
+        self, *, cursor: str | None = None
+    ) -> tuple[list[IntelligenceEvent], str | None]:
+    host = "api.gdeltproject.org"
+        prior = (
+            _parse_utc(cursor)
+            if cursor
+            else now - timedelta(minutes=self.lookback_minutes)
+        )
+    def __init__(
+        self,
+        *,
+        query: str,
+            "query": self.query,
+            "mode": "ArtList",
+            "format": "json",
+            "maxrecords": str(self.max_records),
+            "sort": "HybridRel",
+        max_records: int = 100,
+        **kwargs,
+    ):
+        url = "https://api.gdeltproject.org/api/v2/doc/doc?" + urllib.parse.urlencode(
+            params
+        )
+        if (
+            not query.strip()
+            or not 1 <= lookback_minutes <= 1440
+            raise ValueError(
+                "GDELT article list is invalid or exceeds configured limit"
+            )
         ):
             raise ValueError("invalid GDELT query/window/record limit")
         self.query = query.strip()
@@ -156,10 +192,16 @@ class GDELTDocAdapter(_JSONSource):
 
     async def poll(
         self, *, cursor: str | None = None
-    ) -> tuple[list[IntelligenceEvent], str | None]:
+                published = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ").replace(
+                    tzinfo=timezone.utc
+                )
         now = datetime.now(timezone.utc)
         prior = (
-            _parse_utc(cursor)
+            if (
+                not isinstance(title, str)
+                or not title.strip()
+                or not isinstance(uri, str)
+            ):
             if cursor
             else now - timedelta(minutes=self.lookback_minutes)
         )
@@ -173,48 +215,6 @@ class GDELTDocAdapter(_JSONSource):
             "maxrecords": str(self.max_records),
             "sort": "HybridRel",
             "startdatetime": start.strftime("%Y%m%d%H%M%S"),
-            "enddatetime": now.strftime("%Y%m%d%H%M%S"),
-        }
-        url = "https://api.gdeltproject.org/api/v2/doc/doc?" + urllib.parse.urlencode(
-            params
-        )
-        payload = await self._get_json(url)
-        articles = payload.get("articles", [])
-        if not isinstance(articles, list) or len(articles) > self.max_records:
-            raise ValueError(
-                "GDELT article list is invalid or exceeds configured limit"
-            )
-        events: list[IntelligenceEvent] = []
-        for article in articles:
-            if not isinstance(article, dict):
-                continue
-            title, uri = article.get("title"), article.get("url")
-            raw_time = str(article.get("seendate", ""))
-            published = None
-            try:
-                published = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ").replace(
-                    tzinfo=timezone.utc
-                )
-            except ValueError:
-                continue
-            if (
-                not isinstance(title, str)
-                or not title.strip()
-                or not isinstance(uri, str)
-            ):
-                continue
-            parsed = urllib.parse.urlsplit(uri)
-            if (
-                parsed.scheme not in {"http", "https"}
-                or not parsed.hostname
-                or parsed.username is not None
-                or parsed.password is not None
-            ):
-                continue
-            safe_uri = parsed._replace(query="", fragment="").geturl()
-            digest = hashlib.sha256(safe_uri.encode()).hexdigest()
-            analysis = analyze_financial_headline(title[:20_000])
-            source = SourceEvidence(
                 source_id=self.source_id,
                 source_kind="gdelt_article_index",
                 uri=safe_uri,
@@ -246,14 +246,14 @@ class GDELTDocAdapter(_JSONSource):
                     },
                 )
             )
-        return events, now.isoformat()
-
-
-class SECEdgarSubmissionsAdapter(_JSONSource):
-    """Official SEC submissions feed for one CIK; filing metadata is primary evidence."""
-
-    host = "data.sec.gov"
-
+            if not isinstance(article, dict):
+                continue
+            title, uri = article.get("title"), article.get("url")
+            raw_time = str(article.get("seendate", ""))
+            published = None
+            try:
+                published = datetime.strptime(raw_time, "%Y%m%dT%H%M%SZ").replace(
+                    tzinfo=timezone.utc
     def __init__(
         self,
         *,
@@ -261,6 +261,115 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
         contact_user_agent: str,
         source_id: str | None = None,
         max_filings: int = 100,
+        **kwargs,
+    ):
+            except ValueError:
+                continue
+            if (
+                not isinstance(title, str)
+                or not title.strip()
+                or not isinstance(uri, str)
+            ):
+                continue
+            parsed = urllib.parse.urlsplit(uri)
+        super().__init__(
+            source_id=source_id or f"sec-cik-{self.cik}",
+            user_agent=contact_user_agent,
+            **kwargs,
+        )
+
+    async def poll(
+        self, *, cursor: str | None = None
+    ) -> tuple[list[IntelligenceEvent], str | None]:
+        payload = await self._get_json(
+            f"https://data.sec.gov/submissions/CIK{self.cik}.json"
+        )
+                or parsed.password is not None
+            ):
+                continue
+            safe_uri = parsed._replace(query="", fragment="").geturl()
+            digest = hashlib.sha256(safe_uri.encode()).hexdigest()
+            analysis = analyze_financial_headline(title[:20_000])
+        if not all(
+            isinstance(values, list) for values in (accessions, forms, dates, documents)
+        ):
+            raise ValueError(
+                "SEC submissions response has invalid recent filing arrays"
+            )
+                source_kind="gdelt_article_index",
+                uri=safe_uri,
+                published_at=published,
+                first_seen_at=max(now, published),
+                reliability=0.35,
+                is_primary=False,
+                original_story_id=digest,
+            )
+            events.append(
+                IntelligenceEvent(
+                    event_id=digest,
+                    event_type=analysis.event_type,
+                    title=title[:500],
+                    entities=(),
+                    published_at=published,
+                    first_seen_at=max(now, published),
+                    source=source,
+                    sentiment=analysis.sentiment,
+                    severity=analysis.severity,
+                    novelty=0.5,
+                    confidence=analysis.confidence,
+                    verification="unverified",
+                    impact_horizon=analysis.impact_horizon,
+                    metadata={
+                        "provider": "gdelt_doc",
+                        "source_domain": str(article.get("domain", ""))[:200],
+                        "sentiment_status": "heuristic_unverified",
+                source_id=self.source_id,
+                source_kind="sec_official_filing",
+                uri=uri,
+                published_at=published,
+                first_seen_at=now,
+                reliability=0.99,
+                is_primary=True,
+                original_story_id=accession,
+            )
+            events.append(
+                IntelligenceEvent(
+                    event_id=event_id,
+                    event_type="sec_filing",
+                    title=title,
+                    entities=(f"CIK:{self.cik}",),
+                    published_at=published,
+                    first_seen_at=now,
+                    source=source,
+                    sentiment=0.0,
+                    severity=0.2,
+                    novelty=0.3,
+                    confidence=0.5,
+                    verification="primary_source",
+                    impact_horizon="multi_day",
+                    metadata={
+                        "provider": "sec_edgar",
+                        "form": form,
+                        "company": company,
+                    },
+                )
+            )
+    def __init__(
+        self,
+        *,
+        cik: str,
+        contact_user_agent: str,
+        source_id: str | None = None,
+        max_filings: int = 100,
+        **kwargs,
+    def __init__(
+        self,
+        *,
+        series_id: str,
+        api_key: str,
+        start_date: str,
+        source_id: str | None = None,
+        max_observations: int = 1000,
         **kwargs,
     ):
         if not contact_user_agent.strip() or "@" not in contact_user_agent:
@@ -275,23 +384,36 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
         super().__init__(
             source_id=source_id or f"sec-cik-{self.cik}",
             user_agent=contact_user_agent,
-            **kwargs,
+        super().__init__(
+            source_id=source_id or f"fred-{self.series_id.lower()}", **kwargs
         )
 
+    async def poll(
+        self, *, cursor: str | None = None
+    ) -> tuple[list[IntelligenceEvent], str | None]:
     async def poll(
         self, *, cursor: str | None = None
     ) -> tuple[list[IntelligenceEvent], str | None]:
         payload = await self._get_json(
             f"https://data.sec.gov/submissions/CIK{self.cik}.json"
         )
-        company = str(payload.get("name", "SEC registrant"))[:200]
-        recent = payload.get("filings", {}).get("recent", {})
-        accessions = recent.get("accessionNumber", [])
+            "series_id": self.series_id,
+            "api_key": self._api_key,
+            "file_type": "json",
+            "observation_start": cursor or self.start_date,
+            "sort_order": "asc",
+            "limit": str(self.max_observations),
         forms = recent.get("form", [])
-        dates = recent.get("filingDate", [])
+        url = (
+            "https://api.stlouisfed.org/fred/series/observations?"
+            + urllib.parse.urlencode(params)
+        )
         documents = recent.get("primaryDocument", [])
         if not all(
-            isinstance(values, list) for values in (accessions, forms, dates, documents)
+        if (
+            not isinstance(observations, list)
+            or len(observations) > self.max_observations
+        ):
         ):
             raise ValueError(
                 "SEC submissions response has invalid recent filing arrays"
@@ -314,22 +436,42 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
             published = datetime.combine(filed, datetime.min.time(), timezone.utc)
             if published > now:
                 continue
-            form = str(forms[index])[:32]
+            digest = hashlib.sha256(
+                f"{self.series_id}|{observation_date}|{value}".encode()
+            ).hexdigest()
             document = str(documents[index])
-            if not document or "/" in document or "\\" in document or ".." in document:
-                continue
-            accession_path = accession.replace("-", "")
-            uri = f"https://www.sec.gov/Archives/edgar/data/{int(self.cik)}/{accession_path}/{urllib.parse.quote(document)}"
-            event_id = hashlib.sha256(f"{self.cik}|{accession}".encode()).hexdigest()
-            title = f"{company} filed SEC form {form}"
-            source = SourceEvidence(
                 source_id=self.source_id,
-                source_kind="sec_official_filing",
-                uri=uri,
+                source_kind="fred_official_macro_data",
+                continue
                 published_at=published,
                 first_seen_at=now,
                 reliability=0.99,
                 is_primary=True,
+                original_story_id=f"{self.series_id}:{observation_date}",
+            )
+            events.append(
+                IntelligenceEvent(
+                    event_id=digest,
+                    event_type="macro_data",
+                    title=f"FRED {self.series_id} observation for {observation_date}",
+                    entities=(self.series_id,),
+                    published_at=published,
+                    first_seen_at=now,
+                    source=source,
+                    sentiment=0.0,
+                    severity=0.1,
+                    novelty=0.2,
+                    confidence=0.5,
+                    verification="primary_source",
+                    impact_horizon="multi_day",
+                    metadata={
+                        "provider": "fred",
+                        "series_id": self.series_id,
+                        "observation_date": observation_date,
+                        "value": value,
+                    },
+                )
+            )
                 original_story_id=accession,
             )
             events.append(
