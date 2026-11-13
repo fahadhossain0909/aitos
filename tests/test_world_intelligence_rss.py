@@ -99,3 +99,22 @@ def test_rss_adapter_rejects_invalid_cursor():
         import asyncio
 
         asyncio.run(adapter.poll(cursor='{"unexpected": "value"}'))
+
+
+@pytest.mark.asyncio
+async def test_rss_adapter_refuses_to_checkpoint_truncated_feed():
+    oversized = (
+        b"<rss><channel>"
+        b"<item><title>A</title><pubDate>Fri, 13 Nov 2026 11:00:00 GMT</pubDate></item>"
+        b"<item><title>B</title><pubDate>Fri, 13 Nov 2026 10:00:00 GMT</pubDate></item>"
+        b"</channel></rss>"
+    )
+    adapter = RSSFeedAdapter(
+        source_id="news",
+        feed_url="https://news.example.test/rss",
+        allowed_hosts={"news.example.test"},
+        max_items=1,
+        fetcher=lambda url, headers: (oversized, {"etag": '"v2"'}),
+    )
+    with pytest.raises(ValueError, match="exceeds max_items"):
+        await adapter.poll()
