@@ -103,9 +103,7 @@ def _is_negated(text: str, start: int) -> bool:
 
 
 def _has_unnegated_match(text: str, phrase: str) -> bool:
-    return any(
-        not _is_negated(text, match.start()) for match in _matches(text, phrase)
-    )
+    return any(not _is_negated(text, match.start()) for match in _matches(text, phrase))
 
 
 def analyze_financial_headline(text: str) -> FinancialNLPResult:
