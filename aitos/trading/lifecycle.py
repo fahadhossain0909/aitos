@@ -2142,6 +2142,9 @@ class TradeLifecycle(AITOSModule):
                 "risk_amount_usd": trade.risk_amount_usd,
                 "strategy_id": trade.strategy_id,
                 "candidate_id": trade.agent_consensus.get("candidate_id"),
+                "world_intelligence_shadow": trade.agent_consensus.get(
+                    "world_intelligence_shadow"
+                ),
                 "statistical_risk_assessment": trade.agent_consensus.get(
                     "statistical_risk_assessment"
                 ),
