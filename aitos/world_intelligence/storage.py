@@ -76,7 +76,7 @@ class ClickHouseIntelligenceStore:
             CREATE TABLE IF NOT EXISTS {self.cursors_table}
             (
                 source_id LowCardinality(String),
-                cursor Nullable(String),
+                cursor String,
                 updated_at DateTime64(6, 'UTC')
             )
             ENGINE = ReplacingMergeTree(updated_at)
@@ -94,7 +94,7 @@ class ClickHouseIntelligenceStore:
         )
         if not result.result_rows:
             return None
-        return result.result_rows[0][0]
+        return result.result_rows[0][0] or None
 
     async def append_events(
         self, source_id: str, events: list[IntelligenceEvent]
@@ -149,7 +149,7 @@ class ClickHouseIntelligenceStore:
             raise ValueError("cursor must be a string or None")
         await self.client.insert(
             self.cursors_table,
-            [(source_id, cursor, datetime.now(timezone.utc))],
+            [(source_id, cursor or "", datetime.now(timezone.utc))],
             column_names=["source_id", "cursor", "updated_at"],
         )
 
