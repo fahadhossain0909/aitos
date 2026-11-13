@@ -6,9 +6,15 @@ from datetime import datetime, timezone
 from typing import Mapping
 
 from aitos.world_intelligence.contracts import IntelligenceEvent
-from aitos.world_intelligence.entity_resolution import DEFAULT_ENTITY_REGISTRY, EntityAliasRegistry
+from aitos.world_intelligence.entity_resolution import (
+    DEFAULT_ENTITY_REGISTRY,
+    EntityAliasRegistry,
+)
 from aitos.world_intelligence.narratives import NarrativeCluster, cluster_narratives
-from aitos.world_intelligence.verification import VerificationResult, verify_observations
+from aitos.world_intelligence.verification import (
+    VerificationResult,
+    verify_observations,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +45,12 @@ def enrich_event_batch(
         and (cutoff - event.first_seen_at).total_seconds() <= max_event_age_hours * 3600
     ]
     enriched = [
-        replace(event, entities=tuple(sorted(set(event.entities) | set(registry.resolve(event.title)))))
+        replace(
+            event,
+            entities=tuple(
+                sorted(set(event.entities) | set(registry.resolve(event.title)))
+            ),
+        )
         for event in eligible
     ]
     narratives = cluster_narratives(enriched, as_of=cutoff)
@@ -49,14 +60,18 @@ def enrich_event_batch(
     }
     groups: dict[str, list[IntelligenceEvent]] = {}
     for event in enriched:
-        groups.setdefault(narrative_for_event.get(event.event_id, event.event_id), []).append(event)
+        group_key = narrative_for_event.get(event.event_id, event.event_id)
+        groups.setdefault(group_key, []).append(event)
 
     results: dict[str, VerificationResult] = {}
     output: list[IntelligenceEvent] = []
     for key, group in groups.items():
-        result = verify_observations(group, publisher_groups=publisher_groups, now=cutoff)
+        result = verify_observations(
+            group, publisher_groups=publisher_groups, now=cutoff
+        )
         results[key] = result
-        narrative_id = key if key in {item.narrative_id for item in narratives} else None
+        narrative_ids = {item.narrative_id for item in narratives}
+        narrative_id = key if key in narrative_ids else None
         for event in group:
             status = event.verification
             if status not in {"disputed", "retracted"}:
@@ -69,11 +84,18 @@ def enrich_event_batch(
                     )
                 else:
                     status = result.status
-            output.append(replace(
-                event,
-                verification=status,
-                narrative_ids=tuple(sorted(set(event.narrative_ids) | ({narrative_id} if narrative_id else set()))),
-            ))
+            output.append(
+                replace(
+                    event,
+                    verification=status,
+                    narrative_ids=tuple(
+                        sorted(
+                            set(event.narrative_ids)
+                            | ({narrative_id} if narrative_id else set())
+                        )
+                    ),
+                )
+            )
     output.sort(key=lambda item: (item.first_seen_at, item.event_id))
     return EnrichmentResult(tuple(output), narratives, results, cutoff)
 
