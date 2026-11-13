@@ -130,3 +130,15 @@ def test_governor_critical_verified_event_recommends_conservative_review():
     )
     assert result.recommend_new_entry_block
     assert result.exposure_multiplier == 0.5
+
+
+def test_single_source_event_has_no_directional_impact():
+    impact = estimate_asset_impact(
+        make_event(verification="single_source"),
+        asset="BTCUSDT",
+        horizon_hours=1,
+        beta=1.0,
+        now=NOW,
+    )
+    assert impact.signed_impact == 0.0
+    assert impact.confidence == 0.0
