@@ -104,9 +104,7 @@ def test_snapshot_ignores_beta_estimates_created_after_as_of():
 
 def test_snapshot_unverified_events_are_attention_only():
     event = make_event(verification="unverified")
-    snapshot = build_asset_intelligence_snapshot(
-        [event], asset="BTCUSDT", as_of=AS_OF
-    )
+    snapshot = build_asset_intelligence_snapshot([event], asset="BTCUSDT", as_of=AS_OF)
     assert snapshot.event_count == 1
     assert snapshot.verified_event_count == 0
     assert snapshot.horizon_impacts[0].signed_impact == 0.0
