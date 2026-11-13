@@ -37,12 +37,7 @@ class _RedirectGuard(urllib.request.HTTPRedirectHandler):
 
 
 def _validate_url(url: str, host: str) -> None:
-    if (
-        parsed.scheme != "https"
-        or parsed.hostname != host
-        or parsed.username
-        or parsed.password
-    ):
+    parsed = urllib.parse.urlsplit(url)
     if (
         parsed.scheme != "https"
         or parsed.hostname != host
