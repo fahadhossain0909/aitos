@@ -86,7 +86,9 @@ class LicensedJSONFeedAdapter:
             for key, _ in urllib.parse.parse_qsl(urllib.parse.urlsplit(endpoint).query)
         }
         if endpoint_keys & sensitive_keys:
-            raise ValueError("licensed API secrets must be supplied in headers, not URLs")
+            raise ValueError(
+                "licensed API secrets must be supplied in headers, not URLs"
+            )
         if not source_id.strip() or not records_path.strip():
             raise ValueError("source_id and records_path are required")
         required = {"title", "published_at", "uri"}
@@ -104,7 +106,9 @@ class LicensedJSONFeedAdapter:
         self.field_map = dict(field_map)
         self.query_params = dict(query_params or {})
         if {key.casefold() for key in self.query_params} & sensitive_keys:
-            raise ValueError("licensed API secrets must be supplied in headers, not query parameters")
+            raise ValueError(
+                "licensed API secrets must be supplied in headers, not query parameters"
+            )
         self.headers = dict(headers or {})
         self.cursor_param = cursor_param
         self.source_kind = source_kind
