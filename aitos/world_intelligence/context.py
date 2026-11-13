@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -54,15 +56,21 @@ class ClickHouseAssetSnapshotProvider:
         lookback_hours: float = 72.0,
         max_events: int = 5000,
         beta_estimates: dict[tuple[str, str], EventBetaEstimate] | None = None,
+        cache_ttl_seconds: float = 5.0,
     ):
         if not 0 < lookback_hours <= 24 * 90:
             raise ValueError("lookback_hours must be between 0 and 2160")
         if not 1 <= max_events <= 20_000:
             raise ValueError("max_events must be between 1 and 20000")
+        if not 0.1 <= cache_ttl_seconds <= 60.0:
+            raise ValueError("cache_ttl_seconds must be between 0.1 and 60")
         self.store = store
         self.lookback_hours = float(lookback_hours)
         self.max_events = max_events
         self.beta_estimates = dict(beta_estimates or {})
+        self.cache_ttl_seconds = float(cache_ttl_seconds)
+        self._cache_lock = asyncio.Lock()
+        self._event_cache = None
 
     async def snapshot_for_asset(
         self, symbol: str, *, as_of: datetime
@@ -72,11 +80,21 @@ class ClickHouseAssetSnapshotProvider:
         cutoff = as_of.astimezone(timezone.utc)
         normalized = symbol.strip().upper()
         base = _base_asset(normalized)
-        events = await self.store.load_recent_events(
-            as_of=cutoff,
-            lookback_hours=self.lookback_hours,
-            limit=self.max_events,
-        )
+        async with self._cache_lock:
+            cached = self._event_cache
+            if cached is not None and time.monotonic() - cached[0] <= self.cache_ttl_seconds:
+                events = cached[2]
+            else:
+                events = await self.store.load_recent_events(
+                    as_of=cutoff,
+                    lookback_hours=self.lookback_hours,
+                    limit=self.max_events,
+                )
+                self._event_cache = (time.monotonic(), cutoff, events)
+        events = [
+            event for event in events
+            if event.published_at <= cutoff and event.first_seen_at <= cutoff
+        ]
         matched = [
             event
             for event in events
