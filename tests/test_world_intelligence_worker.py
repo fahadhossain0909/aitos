@@ -11,6 +11,10 @@ class Store:
         self.schema_calls += 1
     async def load_cursor(self, source_id):
         return self.cursor
+    async def append_events(self, source_id, events):
+        return len(events)
+    async def save_cursor(self, source_id, cursor):
+        self.cursor = cursor
 
 
 class Adapter:
