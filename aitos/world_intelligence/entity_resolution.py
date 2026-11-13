@@ -3,6 +3,7 @@
 No fuzzy model is used: aliases are matched on token boundaries and longest
 matches win. Ambiguous aliases should not be registered.
 """
+
 from __future__ import annotations
 
 import re
@@ -17,7 +18,9 @@ class ResolvedEntity:
 
 
 class EntityAliasRegistry:
-    def __init__(self, aliases: Mapping[str, tuple[str, ...] | list[str]] | None = None):
+    def __init__(
+        self, aliases: Mapping[str, tuple[str, ...] | list[str]] | None = None
+    ):
         self._aliases: dict[str, str] = {}
         for canonical, values in (aliases or {}).items():
             self.register(canonical, values)
@@ -35,7 +38,9 @@ class EntityAliasRegistry:
                 raise ValueError(f"alias {alias!r} is already assigned to {existing}")
             self._aliases[normalized] = canonical
 
-    def resolve_text(self, text: str, *, max_entities: int = 32) -> tuple[ResolvedEntity, ...]:
+    def resolve_text(
+        self, text: str, *, max_entities: int = 32
+    ) -> tuple[ResolvedEntity, ...]:
         if not isinstance(text, str):
             raise TypeError("text must be a string")
         if not 1 <= max_entities <= 256:
@@ -51,7 +56,9 @@ class EntityAliasRegistry:
         occupied: list[tuple[int, int]] = []
         seen: set[str] = set()
         for start, end, alias, canonical in matches:
-            if canonical in seen or any(start < right and end > left for left, right in occupied):
+            if canonical in seen or any(
+                start < right and end > left for left, right in occupied
+            ):
                 continue
             accepted.append(ResolvedEntity(canonical, alias))
             seen.add(canonical)
@@ -61,24 +68,29 @@ class EntityAliasRegistry:
         return tuple(accepted)
 
     def resolve(self, text: str, *, max_entities: int = 32) -> tuple[str, ...]:
-        return tuple(item.canonical_id for item in self.resolve_text(text, max_entities=max_entities))
+        return tuple(
+            item.canonical_id
+            for item in self.resolve_text(text, max_entities=max_entities)
+        )
 
 
-DEFAULT_ENTITY_REGISTRY = EntityAliasRegistry({
-    "BTC": ("bitcoin", "btc", "xbt"),
-    "ETH": ("ethereum", "ether", "eth"),
-    "BNB": ("binance coin", "bnb"),
-    "SOL": ("solana", "sol"),
-    "XRP": ("ripple", "xrp"),
-    "DOGE": ("dogecoin", "doge"),
-    "NVDA": ("nvidia", "nvda"),
-    "AAPL": ("apple inc", "aapl"),
-    "MSFT": ("microsoft", "msft"),
-    "GOOGL": ("alphabet", "google", "googl"),
-    "FED": ("federal reserve", "fomc"),
-    "SEC": ("u.s. securities and exchange commission", "sec"),
-    "ECB": ("european central bank", "ecb"),
-})
+DEFAULT_ENTITY_REGISTRY = EntityAliasRegistry(
+    {
+        "BTC": ("bitcoin", "btc", "xbt"),
+        "ETH": ("ethereum", "ether", "eth"),
+        "BNB": ("binance coin", "bnb"),
+        "SOL": ("solana", "sol"),
+        "XRP": ("ripple", "xrp"),
+        "DOGE": ("dogecoin", "doge"),
+        "NVDA": ("nvidia", "nvda"),
+        "AAPL": ("apple inc", "aapl"),
+        "MSFT": ("microsoft", "msft"),
+        "GOOGL": ("alphabet", "google", "googl"),
+        "FED": ("federal reserve", "fomc"),
+        "SEC": ("u.s. securities and exchange commission", "sec"),
+        "ECB": ("european central bank", "ecb"),
+    }
+)
 
 
 __all__ = ["ResolvedEntity", "EntityAliasRegistry", "DEFAULT_ENTITY_REGISTRY"]
