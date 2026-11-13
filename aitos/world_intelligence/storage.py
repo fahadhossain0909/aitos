@@ -34,9 +34,7 @@ class AsyncClickHouseClient(Protocol):
 class ClickHouseIntelligenceStore:
     """Persist normalized intelligence events and durable adapter cursors."""
 
-    def __init__(
-        self, client: AsyncClickHouseClient, database: str = "aitos"
-    ) -> None:
+    def __init__(self, client: AsyncClickHouseClient, database: str = "aitos") -> None:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", database):
             raise ValueError("database must be a simple ClickHouse identifier")
         self.client = client
