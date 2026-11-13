@@ -13,7 +13,9 @@ class IntelligenceSourceAdapter(Protocol):
 
     source_id: str
 
-    async def poll(self, *, cursor: str | None = None) -> tuple[list[IntelligenceEvent], str | None]:
+    async def poll(
+        self, *, cursor: str | None = None
+    ) -> tuple[list[IntelligenceEvent], str | None]:
         """Return one bounded page and an opaque continuation cursor."""
         ...
 
