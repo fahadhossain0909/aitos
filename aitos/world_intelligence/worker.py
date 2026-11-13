@@ -8,6 +8,8 @@ from typing import Sequence
 
 from aitos.world_intelligence.adapters import EventSink, IntelligenceSourceAdapter
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
+from aitos.world_intelligence.entity_resolution import DEFAULT_ENTITY_REGISTRY, EntityAliasRegistry
+from aitos.world_intelligence.pipeline import enrich_event_batch
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +30,8 @@ class IntelligenceIngestionWorker:
         sink: EventSink,
         *,
         poll_interval_seconds: float = 30.0,
+        publisher_groups: dict[str, str] | None = None,
+        entity_registry: EntityAliasRegistry = DEFAULT_ENTITY_REGISTRY,
     ):
         if not adapters or poll_interval_seconds < 1.0:
             raise ValueError("at least one adapter and a poll interval >= 1s are required")
@@ -38,6 +42,8 @@ class IntelligenceIngestionWorker:
         self.store = store
         self.sink = sink
         self.poll_interval_seconds = float(poll_interval_seconds)
+        self.publisher_groups = dict(publisher_groups or {})
+        self.entity_registry = entity_registry
         self._stop = asyncio.Event()
         self._running = False
 
@@ -51,6 +57,12 @@ class IntelligenceIngestionWorker:
                 try:
                     cursor = await self.store.load_cursor(adapter.source_id)
                     events, next_cursor = await adapter.poll(cursor=cursor)
+                    enriched = enrich_event_batch(
+                        events,
+                        publisher_groups=self.publisher_groups,
+                        entity_registry=self.entity_registry,
+                    )
+                    events = list(enriched.events)
                     await self.store.append_events(adapter.source_id, events)
                     for event in events:
                         await self.sink.publish(
