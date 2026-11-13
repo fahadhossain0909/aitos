@@ -88,7 +88,7 @@ def build_source_adapters(
                     cik=str(config["cik"]),
                     contact_user_agent=contact,
                     source_id=common["source_id"] or None,
-                    max_filings=int(config.get("max_filings", 100)),
+                    max_filings=int(config.get("max_filings", 1000)),
                     timeout_seconds=common["timeout_seconds"],
                     min_interval_seconds=common["min_interval_seconds"],
                 )
