@@ -247,16 +247,21 @@ _NEGATIONS = {
 
 
 def _matches(text: str, phrase: str) -> list[re.Match]:
-    pattern = re.compile(
-        r"(?<!\w)" + re.escape(phrase).replace(r"\ ", r"\s+") + r"(?!\w)",
-        re.IGNORECASE,
-    )
+    escaped = re.escape(phrase).replace(r"\ ", r"\s+")
+    if phrase.isascii():
+        pattern = re.compile(r"(?<!\w)" + escaped + r"(?!\w)", re.IGNORECASE)
+    else:
+        # CJK headlines often omit spaces; token boundaries would suppress matches.
+        pattern = re.compile(escaped, re.IGNORECASE)
     return list(pattern.finditer(text))
 
 
 def _is_negated(text: str, start: int) -> bool:
-    preceding = re.findall(r"\w+", text[max(0, start - 48) : start].casefold())
-    return any(token in _NEGATIONS for token in preceding[-3:])
+    prefix = text[max(0, start - 48) : start].casefold()
+    preceding = re.findall(r"\w+", prefix)
+    return any(token in _NEGATIONS for token in preceding[-3:]) or any(
+        token in prefix[-16:] for token in ("没有", "否认", "未", "不", "ない", "否定")
+    )
 
 
 def _has_unnegated_match(text: str, phrase: str) -> bool:
