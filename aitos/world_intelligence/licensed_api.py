@@ -4,6 +4,7 @@ This deliberately has no vendor-specific scraping or auth assumptions. The
 operator supplies an HTTPS allowlist, response field map and secret headers
 from environment variables after reviewing the provider's licence and limits.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -168,7 +169,9 @@ class LicensedJSONFeedAdapter:
         if not isinstance(records, list) or len(records) > self.max_records:
             raise ValueError("licensed API record list exceeds configured limit")
         if len(records) == self.max_records:
-            raise ValueError("licensed API page reached max_records; refusing cursor advance")
+            raise ValueError(
+                "licensed API page reached max_records; refusing cursor advance"
+            )
 
         events: list[IntelligenceEvent] = []
         for record in records:
