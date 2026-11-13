@@ -162,7 +162,12 @@ class GDELTDocAdapter(_JSONSource):
             if not isinstance(title, str) or not title.strip() or not isinstance(uri, str):
                 continue
             parsed = urllib.parse.urlsplit(uri)
-            if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            if (
+                parsed.scheme not in {"http", "https"}
+                or not parsed.hostname
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
                 continue
             safe_uri = parsed._replace(query="", fragment="").geturl()
             digest = hashlib.sha256(safe_uri.encode()).hexdigest()
@@ -211,7 +216,10 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
         documents = recent.get("primaryDocument", [])
         if not all(isinstance(values, list) for values in (accessions, forms, dates, documents)):
             raise ValueError("SEC submissions response has invalid recent filing arrays")
-        count = min(len(accessions), len(forms), len(dates), len(documents), self.max_filings)
+        lengths = {len(accessions), len(forms), len(dates), len(documents)}
+        if len(lengths) != 1:
+            raise ValueError("SEC recent filing arrays have inconsistent lengths")
+        count = min(len(accessions), self.max_filings)
         now = datetime.now(timezone.utc)
         next_cursor = str(accessions[0]) if count else cursor
         events: list[IntelligenceEvent] = []
@@ -294,12 +302,16 @@ class FREDSeriesAdapter(_JSONSource):
             observation_date = str(observation.get("date", ""))
             try:
                 day = date.fromisoformat(observation_date)
-                value = float(observation.get("value"))
             except (ValueError, TypeError):
                 continue
             if cursor and observation_date <= cursor:
                 continue
             if day > now.date():
+                continue
+            next_cursor = observation_date
+            try:
+                value = float(observation.get("value"))
+            except (ValueError, TypeError):
                 continue
             published = datetime.combine(day, datetime.min.time(), timezone.utc)
             digest = hashlib.sha256(f"{self.series_id}|{observation_date}|{value}".encode()).hexdigest()
@@ -318,7 +330,6 @@ class FREDSeriesAdapter(_JSONSource):
                 metadata={"provider": "fred", "series_id": self.series_id,
                           "observation_date": observation_date, "value": value},
             ))
-            next_cursor = observation_date
         return events, next_cursor or cursor
 
 
