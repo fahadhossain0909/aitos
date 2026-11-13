@@ -113,8 +113,8 @@ def analyze_financial_headline(text: str) -> FinancialNLPResult:
     weighted_signals: list[tuple[str, float]] = []
     for phrase, weight in _SENTIMENT_TERMS.items():
         for match in _matches(normalized, phrase):
-            effective = -weight if _is_negated(normalized, match.start()) else weight
-            weighted_signals.append((phrase, effective))
+            if not _is_negated(normalized, match.start()):
+                weighted_signals.append((phrase, weight))
 
     total_weight = sum(weight for _, weight in weighted_signals)
     magnitude = sum(abs(weight) for _, weight in weighted_signals)
@@ -123,12 +123,14 @@ def analyze_financial_headline(text: str) -> FinancialNLPResult:
 
     event_type = "general_news"
     for candidate, phrases in _EVENT_PATTERNS:
-        if any(_matches(normalized, phrase) for phrase in phrases):
+        if any(_has_unnegated_match(normalized, phrase) for phrase in phrases):
             event_type = candidate
             break
 
     matched = tuple(sorted({phrase for phrase, _ in weighted_signals}))
-    high_severity = any(_matches(normalized, phrase) for phrase in _HIGH_SEVERITY)
+    high_severity = any(
+        _has_unnegated_match(normalized, phrase) for phrase in _HIGH_SEVERITY
+    )
     if high_severity:
         severity = 0.9
     elif event_type in {"security", "regulatory", "geopolitical"}:
