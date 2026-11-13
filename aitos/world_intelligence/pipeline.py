@@ -60,7 +60,15 @@ def enrich_event_batch(
         for event in group:
             status = event.verification
             if status not in {"disputed", "retracted"}:
-                status = result.status
+                if result.status == "primary_source":
+                    status = (
+                        "primary_source"
+                        if event.source.source_id in result.accepted_source_ids
+                        and event.source.is_primary
+                        else "unverified"
+                    )
+                else:
+                    status = result.status
             output.append(replace(
                 event,
                 verification=status,
