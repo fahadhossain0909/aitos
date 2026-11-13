@@ -3,6 +3,7 @@
 These deterministic heuristics identify suspicious ingestion patterns; they do
 not label an author as a bot, establish factual truth, or auto-change trust.
 """
+
 from __future__ import annotations
 
 import re
@@ -34,7 +35,9 @@ class SourceOutcome:
 
     def __post_init__(self) -> None:
         if not self.source_id.strip() or self.label_available_at.tzinfo is None:
-            raise ValueError("source identity and timezone-aware label time are required")
+            raise ValueError(
+                "source identity and timezone-aware label time are required"
+            )
 
 
 @dataclass(frozen=True, slots=True)
