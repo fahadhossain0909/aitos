@@ -149,6 +149,32 @@ services:
     mem_limit: "${LEARNING_MEM_LIMIT:-512m}"
     restart: unless-stopped
 
+  aitos-world-intelligence:
+    image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
+    container_name: aitos-world-intelligence
+    user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
+    command: ["python3", "-m", "aitos.world_intelligence.runner"]
+    env_file: [.env]
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: "${REDIS_PASSWORD:?REDIS_PASSWORD is required}"
+      CLICKHOUSE_HOST: clickhouse
+      CLICKHOUSE_PORT: "8123"
+      CLICKHOUSE_DATABASE: aitos
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-}"
+      CLICKHOUSE_SECURE: "false"
+      AITOS_WORLD_INTELLIGENCE_POLL_SECONDS: "${AITOS_WORLD_INTELLIGENCE_POLL_SECONDS:-30}"
+    depends_on:
+      redis: {condition: service_healthy}
+      clickhouse-init: {condition: service_completed_successfully}
+    cpus: "${WORLD_INTELLIGENCE_CPUS:-0.10}"
+    mem_limit: "${WORLD_INTELLIGENCE_MEM_LIMIT:-384m}"
+    logging: {driver: json-file, options: {max-size: "20m", max-file: "3"}}
+    restart: unless-stopped
+    profiles: [world-intelligence]
+
   aitos-backtest:
     image: "${AITOS_IMAGE:-ghcr.io/fahadhossain0909/aitos}:${AITOS_IMAGE_TAG:-latest}"
     user: "${AITOS_UID:-1000}:${AITOS_GID:-1000}"
