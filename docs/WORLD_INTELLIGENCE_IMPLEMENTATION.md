@@ -23,6 +23,7 @@ estimate_asset_impact applies signed sentiment, severity, novelty, model confide
 
 ## Implemented durable ingestion slice
 
+- An explainable English financial-headline lexicon emits bounded sentiment, coarse event type/severity, matched terms, and a deliberately capped heuristic confidence (0.55). It is annotation-only, does not verify claims, and is not a multilingual trained NLP model.
 - A bounded RSS/Atom adapter supports conditional ETag/Last-Modified requests, HTTPS host allowlists (including redirects), response-size limits, and DTD/entity rejection. It emits neutral, unverified observations; it does not infer sentiment or facts.
 - ClickHouse event evidence is stored append-only in `world_intelligence_events`, keyed by source plus deterministic source-story identity.
 - Per-source opaque adapter cursors are stored in `world_intelligence_cursors`.
