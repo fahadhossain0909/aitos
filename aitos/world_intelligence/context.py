@@ -82,7 +82,10 @@ class ClickHouseAssetSnapshotProvider:
         base = _base_asset(normalized)
         async with self._cache_lock:
             cached = self._event_cache
-            if cached is not None and time.monotonic() - cached[0] <= self.cache_ttl_seconds:
+            if (
+                cached is not None
+                and time.monotonic() - cached[0] <= self.cache_ttl_seconds
+            ):
                 events = cached[2]
             else:
                 events = await self.store.load_recent_events(
@@ -92,7 +95,8 @@ class ClickHouseAssetSnapshotProvider:
                 )
                 self._event_cache = (time.monotonic(), cutoff, events)
         events = [
-            event for event in events
+            event
+            for event in events
             if event.published_at <= cutoff and event.first_seen_at <= cutoff
         ]
         matched = [
