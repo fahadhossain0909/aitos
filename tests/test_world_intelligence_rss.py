@@ -137,3 +137,24 @@ async def test_rss_adapter_redacts_query_parameters_from_stored_uris():
     assert len(events) == 1
     assert "secret" not in events[0].source.uri
     assert "secret" not in events[0].metadata["feed_url"]
+
+
+@pytest.mark.asyncio
+async def test_rss_adapter_attaches_heuristic_features_but_keeps_event_unverified():
+    body = b"""<rss><channel><item>
+    <title>Exchange reports hack and stolen funds</title>
+    <link>https://news.example.test/security/1</link>
+    <pubDate>Fri, 13 Nov 2026 11:00:00 GMT</pubDate>
+    </item></channel></rss>"""
+    adapter = RSSFeedAdapter(
+        source_id="news",
+        feed_url="https://news.example.test/rss",
+        allowed_hosts={"news.example.test"},
+        fetcher=lambda url, headers: (body, {}),
+    )
+    events, _ = await adapter.poll()
+    event = events[0]
+    assert event.event_type == "security"
+    assert event.sentiment < 0
+    assert event.verification == "unverified"
+    assert event.metadata["sentiment_status"] == "heuristic_unverified"
