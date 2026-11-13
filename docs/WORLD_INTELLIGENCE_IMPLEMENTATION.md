@@ -21,10 +21,18 @@ SourceEvidence captures source provenance, source reliability, primary-source st
 
 estimate_asset_impact applies signed sentiment, severity, novelty, model confidence, source reliability, verification status, a supplied point-in-time asset beta, and exponential half-life decay. The default beta is zero. Production betas must be estimated from point-in-time event studies and validated out of sample before use.
 
+## Implemented durable ingestion slice
+
+- ClickHouse event evidence is stored append-only in `world_intelligence_events`, keyed by source plus deterministic source-story identity.
+- Per-source opaque adapter cursors are stored in `world_intelligence_cursors`.
+- Durable ingestion order is **append ClickHouse evidence → publish normalized Redis event → save cursor**. A failed insert or publish leaves the cursor unchanged, so the source page is replayed rather than lost.
+- This is at-least-once delivery, not a distributed transaction. A single active poller per source is required; consumers must use the deterministic deduplication key. ReplacingMergeTree deduplication is eventual, so exact reads should use `FINAL` or an aggregation strategy.
+- The store deliberately does not create a Redis consumer group or alter existing EventBus ACK/retry/DLQ policy. The runtime worker and production ClickHouse integration still need wiring and service-level verification.
+
 ## Integration plan
 
 1. Add source adapters for official SEC, Federal Reserve/FRED, GDELT, exchange announcements, and licensed news/social APIs.
-2. Persist raw observations and normalized events with provenance in ClickHouse; store operational cursors and idempotency state durably.
+2. Add raw-response retention, source-specific durable cursors, and stronger operational idempotency/recovery around the normalized ClickHouse event store.
 3. Publish normalized events through the existing Redis Streams EventBus and its established ACK/retry/DLQ semantics.
 4. Add source verification, entity resolution, semantic clustering, multilingual financial NLP, bot/spam detection, and narrative tracking.
 5. Estimate asset-specific impact with historical point-in-time event studies and calibrated uncertainty.
