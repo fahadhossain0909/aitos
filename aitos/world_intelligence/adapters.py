@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Protocol
 
 from aitos.world_intelligence.contracts import IntelligenceEvent
+from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
 
 
 class IntelligenceSourceAdapter(Protocol):
@@ -44,4 +45,28 @@ async def ingest_page(
                 "payload": event.to_dict(),
             },
         )
+    return next_cursor
+
+
+async def ingest_page_durably(
+    adapter: IntelligenceSourceAdapter,
+    sink: EventSink,
+    store: ClickHouseIntelligenceStore,
+    *,
+    cursor: str | None = None,
+) -> str | None:
+    """Persist, publish, then checkpoint: failures cause safe at-least-once replay."""
+    events, next_cursor = await adapter.poll(cursor=cursor)
+    await store.append_events(adapter.source_id, events)
+    for event in events:
+        await sink.publish(
+            "intelligence.events.normalized",
+            {
+                "schema_version": event.schema_version,
+                "event_id": event.event_id,
+                "deduplication_key": event.deduplication_key,
+                "payload": event.to_dict(),
+            },
+        )
+    await store.save_cursor(adapter.source_id, next_cursor)
     return next_cursor
