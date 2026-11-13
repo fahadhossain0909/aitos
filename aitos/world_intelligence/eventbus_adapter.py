@@ -12,7 +12,9 @@ class EventBusProtocol(Protocol):
 
 
 class EventBusSink:
-    def __init__(self, event_bus: EventBusProtocol, *, source_module: str = "world-intelligence"):
+    def __init__(
+        self, event_bus: EventBusProtocol, *, source_module: str = "world-intelligence"
+    ):
         self.event_bus = event_bus
         self.source_module = source_module
 
@@ -21,7 +23,7 @@ class EventBusSink:
         await self.event_bus.publish(Event(
             topic=topic,
             payload=dict(payload),
-            event_id=event_id or None,  # Event contract generates an ID when omitted.
+            **({"event_id": event_id} if event_id else {}),.
             source_module=self.source_module,
             schema_version=str(payload.get("schema_version", "1")),
         ))
