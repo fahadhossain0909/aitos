@@ -58,7 +58,8 @@ class EventPrediction:
             + self.funding_cost_bps
             + self.latency_slippage_bps
         ) / 10_000.0
-        return self.forward_return - costs
+        direction = 1.0 if self.predicted_probability_up >= 0.5 else -1.0
+        return direction * self.forward_return - costs
 
 
 @dataclass(frozen=True, slots=True)
