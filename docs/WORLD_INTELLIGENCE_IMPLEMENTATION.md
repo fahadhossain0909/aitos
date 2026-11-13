@@ -23,6 +23,7 @@ estimate_asset_impact applies signed sentiment, severity, novelty, model confide
 
 ## Implemented durable ingestion slice
 
+- A point-in-time asset snapshot aggregates verified event evidence, beta estimates, attention, horizon-specific impact features and advisory risk assessment. It filters both event observations and beta estimates by the snapshot as-of timestamp.
 - A point-in-time event-study beta estimator filters by asset/event/horizon and requires the forward outcome to have become observable before the as-of timestamp. It defaults to zero below the minimum sample count, shrinks estimates toward zero, and bounds output.
 - A source-verification gate uses operator-maintained publisher groups, freshness, reliability and explicit primary-source metadata. Multiple feeds from the same publisher count once; disputed/retracted observations fail closed. This is provenance verification, not independent factual adjudication.
 - An explainable English financial-headline lexicon emits bounded sentiment, coarse event type/severity, matched terms, and a deliberately capped heuristic confidence (0.55). It is annotation-only, does not verify claims, and is not a multilingual trained NLP model.
