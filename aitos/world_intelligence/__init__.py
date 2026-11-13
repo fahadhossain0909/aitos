@@ -31,6 +31,7 @@ from aitos.world_intelligence.entity_resolution import (
 )
 from aitos.world_intelligence.narratives import NarrativeCluster, cluster_narratives
 from aitos.world_intelligence.pipeline import EnrichmentResult, enrich_event_batch
+from aitos.world_intelligence.licensed_api import LicensedJSONFeedAdapter
 from aitos.world_intelligence.providers import (
     GDELTDocAdapter,
     SECEdgarSubmissionsAdapter,
@@ -95,6 +96,7 @@ __all__ = [
     "cluster_narratives",
     "EnrichmentResult",
     "enrich_event_batch",
+    "LicensedJSONFeedAdapter",
     "GDELTDocAdapter",
     "SECEdgarSubmissionsAdapter",
     "FREDSeriesAdapter",
