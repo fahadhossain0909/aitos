@@ -56,6 +56,8 @@ async def test_asset_snapshot_provider_filters_by_base_asset_and_keeps_beta_neut
             event("eth", ("ETH",), NOW - timedelta(minutes=1)),
         ]
     )
+        ]
+    )
     provider = ClickHouseAssetSnapshotProvider(store)
     snapshot = await provider.snapshot_for_asset("BTCUSDT", as_of=NOW)
     assert snapshot.asset == "BTCUSDT"
@@ -72,7 +74,8 @@ async def test_snapshot_provider_rejects_naive_as_of():
         await provider.snapshot_for_asset("BTCUSDT", as_of=datetime(2026, 11, 13))
 
 
-def test_snapshot_serialization_declares_shadow_only_policy():
+        "aitos.world_intelligence.snapshot",
+        fromlist=["build_asset_intelligence_snapshot"],
     snapshot = __import__(
         "aitos.world_intelligence.snapshot",
         fromlist=["build_asset_intelligence_snapshot"],
