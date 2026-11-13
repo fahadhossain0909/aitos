@@ -144,8 +144,12 @@ class IntelligenceEvent:
             source_id=str(source_payload["source_id"]),
             source_kind=str(source_payload["source_kind"]),
             uri=str(source_payload["uri"]),
-            published_at=parse_timestamp(source_payload["published_at"], "source.published_at"),
-            first_seen_at=parse_timestamp(source_payload["first_seen_at"], "source.first_seen_at"),
+            published_at=parse_timestamp(
+                source_payload["published_at"], "source.published_at"
+            ),
+            first_seen_at=parse_timestamp(
+                source_payload["first_seen_at"], "source.first_seen_at"
+            ),
             reliability=source_payload["reliability"],
             is_primary=bool(source_payload.get("is_primary", False)),
             original_story_id=source_payload.get("original_story_id"),
