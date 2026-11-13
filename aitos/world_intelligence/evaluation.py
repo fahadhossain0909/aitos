@@ -3,6 +3,7 @@
 Metrics are descriptive diagnostics only. This module does not train, promote,
 or activate a model and makes no profitability claim.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -26,7 +27,11 @@ class EventPrediction:
     regime: str = "unknown"
 
     def __post_init__(self) -> None:
-        if not self.event_id.strip() or not self.asset.strip() or not self.horizon.strip():
+        if (
+            not self.event_id.strip()
+            or not self.asset.strip()
+            or not self.horizon.strip()
+        ):
             raise ValueError("event_id, asset and horizon are required")
         for name in ("event_time", "outcome_available_at"):
             value = getattr(self, name)
@@ -91,7 +96,8 @@ def evaluate_predictions(
         raise ValueError("as_of must be timezone-aware")
     cutoff = as_of.astimezone(timezone.utc)
     eligible = [
-        item for item in predictions
+        item
+        for item in predictions
         if item.event_time.astimezone(timezone.utc) <= cutoff
         and item.outcome_available_at.astimezone(timezone.utc) <= cutoff
     ]
@@ -147,7 +153,8 @@ def chronological_walk_forward_splits(
         start = test[0].event_time.astimezone(timezone.utc)
         end = test[-1].event_time.astimezone(timezone.utc)
         train = tuple(
-            item for item in ordered[:test_start_index]
+            item
+            for item in ordered[:test_start_index]
             if item.event_time.astimezone(timezone.utc) < start
             and item.outcome_available_at.astimezone(timezone.utc) <= start - embargo
         )
