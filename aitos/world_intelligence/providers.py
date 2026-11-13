@@ -183,9 +183,7 @@ class GDELTDocAdapter(_JSONSource):
         payload = await self._get_json(url)
         articles = payload.get("articles", [])
         if not isinstance(articles, list) or len(articles) >= self.max_records:
-            raise ValueError(
-                "GDELT page reached max_records; refusing cursor advance"
-            )
+            raise ValueError("GDELT page reached max_records; refusing cursor advance")
         events: list[IntelligenceEvent] = []
         for article in articles:
             if not isinstance(article, dict):
