@@ -294,7 +294,9 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
         documents = recent.get("primaryDocument", [])
         arrays = (accessions, forms, dates, documents)
         if not all(isinstance(values, list) for values in arrays):
-            raise ValueError("SEC submissions response has invalid recent filing arrays")
+            raise ValueError(
+                "SEC submissions response has invalid recent filing arrays"
+            )
         if len({len(values) for values in arrays}) != 1:
             raise ValueError("SEC recent filing arrays have inconsistent lengths")
         count = min(len(accessions), self.max_filings)
