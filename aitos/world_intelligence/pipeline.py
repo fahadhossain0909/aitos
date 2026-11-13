@@ -107,9 +107,7 @@ def enrich_event_batch(
                 )
             )
     output.sort(key=lambda item: (item.first_seen_at, item.event_id))
-    return EnrichmentResult(
-        tuple(output), narratives, results, source_quality, cutoff
-    )
+    return EnrichmentResult(tuple(output), narratives, results, source_quality, cutoff)
 
 
 __all__ = ["EnrichmentResult", "enrich_event_batch"]
