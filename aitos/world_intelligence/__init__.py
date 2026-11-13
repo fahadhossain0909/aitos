@@ -8,6 +8,8 @@ from aitos.world_intelligence.contracts import (
 from aitos.world_intelligence.governor import IntelligenceRiskGovernor, RiskAssessment
 from aitos.world_intelligence.impact import estimate_asset_impact
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
+from aitos.world_intelligence.rss import RSSFeedAdapter
+from aitos.world_intelligence.adapters import ingest_page, ingest_page_durably
 
 __all__ = [
     "AssetImpact",
@@ -17,4 +19,7 @@ __all__ = [
     "RiskAssessment",
     "estimate_asset_impact",
     "ClickHouseIntelligenceStore",
+    "RSSFeedAdapter",
+    "ingest_page",
+    "ingest_page_durably",
 ]
