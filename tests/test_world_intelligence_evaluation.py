@@ -67,10 +67,14 @@ def test_walk_forward_splits_purge_labels_that_overlap_test_start():
 
 
 def test_ablation_uses_only_matched_events_and_reports_incremental_net_return():
-    baseline = [prediction(0), prediction(1), prediction(2)]
+    baseline = [
+        prediction(0, probability=0.3),
+        prediction(1, probability=0.3),
+        prediction(2),
+    ]
     enriched = [
-        prediction(0, probability=0.8, result=0.02),
-        prediction(1, probability=0.8, result=0.01),
+        prediction(0, probability=0.8),
+        prediction(1, probability=0.8),
         prediction(99, probability=0.9, result=0.5),
     ]
     result = compare_ablation(baseline, enriched, as_of=BASE + timedelta(days=1))
