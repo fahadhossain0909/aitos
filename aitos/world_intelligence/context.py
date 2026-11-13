@@ -88,4 +88,8 @@ class ClickHouseAssetSnapshotProvider:
         )
 
 
-__all__ = ["AssetSnapshotProvider", "ClickHouseAssetSnapshotProvider", "snapshot_to_dict"]
+__all__ = [
+    "AssetSnapshotProvider",
+    "ClickHouseAssetSnapshotProvider",
+    "snapshot_to_dict",
+]
