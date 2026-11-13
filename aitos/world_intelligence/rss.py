@@ -225,7 +225,7 @@ class RSSFeedAdapter:
                 urljoin(self.feed_url, link) if link else self.feed_url,
                 self.feed_url,
             )
-            origin_id = guid or story_uri
+            origin_id = hashlib.sha256((guid or story_uri).encode("utf-8")).hexdigest()
             event_id = hashlib.sha256(
                 f"{self.source_id}|{origin_id}".encode("utf-8")
             ).hexdigest()
