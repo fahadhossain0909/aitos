@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from math import exp, isfinite
 
 from aitos.world_intelligence.contracts import AssetImpact, IntelligenceEvent
@@ -21,13 +21,20 @@ def estimate_asset_impact(
 
     A missing beta defaults to zero so the model never invents cross-asset links.
     """
-    if horizon_hours <= 0 or half_life_hours <= 0:
-        raise ValueError("horizons and half-life must be positive")
+    if (
+        not isfinite(float(horizon_hours))
+        or not isfinite(float(half_life_hours))
+        or horizon_hours <= 0
+        or half_life_hours <= 0
+    ):
+        raise ValueError("horizons and half-life must be positive and finite")
     if not isfinite(float(beta)) or not -2.0 <= float(beta) <= 2.0:
         raise ValueError("beta must be finite and bounded to [-2, 2]")
     timestamp = now or datetime.now(timezone.utc)
     if timestamp.tzinfo is None:
         raise ValueError("now must be timezone-aware")
+    if event.first_seen_at > timestamp + timedelta(seconds=5):
+        raise ValueError("event was not observable at the requested as-of time")
     age_hours = max(
         0.0,
         (timestamp.astimezone(timezone.utc) - event.published_at).total_seconds()
