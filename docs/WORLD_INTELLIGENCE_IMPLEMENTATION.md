@@ -23,6 +23,7 @@ estimate_asset_impact applies signed sentiment, severity, novelty, model confide
 
 ## Implemented durable ingestion slice
 
+- A bounded RSS/Atom adapter supports conditional ETag/Last-Modified requests, HTTPS host allowlists (including redirects), response-size limits, and DTD/entity rejection. It emits neutral, unverified observations; it does not infer sentiment or facts.
 - ClickHouse event evidence is stored append-only in `world_intelligence_events`, keyed by source plus deterministic source-story identity.
 - Per-source opaque adapter cursors are stored in `world_intelligence_cursors`.
 - Durable ingestion order is **append ClickHouse evidence → publish normalized Redis event → save cursor**. A failed insert or publish leaves the cursor unchanged, so the source page is replayed rather than lost.
@@ -42,4 +43,4 @@ estimate_asset_impact applies signed sentiment, severity, novelty, model confide
 
 ## Not included in this foundation
 
-No provider credentials, scraping bypass, paid API dependency, LLM runtime, external network worker, ClickHouse migration, Redis consumer, scanner/risk wiring, autonomous strategy mutation, paper/live policy change, or automatic model promotion is introduced here. Those require provider-specific contracts, integration tests, and runtime evidence.
+No provider credentials, scraping bypass, paid API dependency, LLM runtime, scheduled external network worker, ClickHouse consumer worker, Redis consumer group, scanner/risk wiring, autonomous strategy mutation, paper/live policy change, or automatic model promotion is introduced here. The RSS adapter is an opt-in library component and must be configured with an operator-approved feed URL and hostname allowlist. Those require provider-specific contracts, integration tests, and runtime evidence.
