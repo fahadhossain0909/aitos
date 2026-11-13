@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from math import fsum, isfinite
+from math import exp, fsum, isfinite
 from typing import Mapping, Sequence
 
 from aitos.world_intelligence.contracts import AssetImpact, IntelligenceEvent
@@ -44,6 +44,7 @@ def build_asset_intelligence_snapshot(
     beta_estimates: Mapping[tuple[str, str], EventBetaEstimate] | None = None,
     horizons: Mapping[str, float] | None = None,
     governor: IntelligenceRiskGovernor | None = None,
+    attention_half_life_hours: float = 6.0,
 ) -> AssetIntelligenceSnapshot:
     """Aggregate only observations and beta estimates available at as_of.
 
@@ -54,6 +55,11 @@ def build_asset_intelligence_snapshot(
         raise ValueError("as_of must be timezone-aware")
     if not asset or not asset.strip():
         raise ValueError("asset is required")
+    if (
+        not isfinite(float(attention_half_life_hours))
+        or attention_half_life_hours <= 0
+    ):
+        raise ValueError("attention half-life must be positive and finite")
     selected_horizons = dict(horizons or {"1h": 1.0, "4h": 4.0, "24h": 24.0})
     if not selected_horizons or any(
         not isinstance(name, str)
@@ -130,7 +136,15 @@ def build_asset_intelligence_snapshot(
 
     attention = (
         fsum(
-            event.severity * event.novelty * event.confidence * event.source.reliability
+            event.severity
+            * event.novelty
+            * event.confidence
+            * event.source.reliability
+            * exp(
+                -0.6931471805599453
+                * max(0.0, (cutoff - event.published_at).total_seconds() / 3600.0)
+                / attention_half_life_hours
+            )
             for event in ordered_events
         )
         / len(ordered_events)
