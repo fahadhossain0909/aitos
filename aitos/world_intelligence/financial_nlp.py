@@ -102,6 +102,12 @@ def _is_negated(text: str, start: int) -> bool:
     return any(token in _NEGATIONS for token in preceding[-3:])
 
 
+def _has_unnegated_match(text: str, phrase: str) -> bool:
+    return any(
+        not _is_negated(text, match.start()) for match in _matches(text, phrase)
+    )
+
+
 def analyze_financial_headline(text: str) -> FinancialNLPResult:
     """Return bounded headline annotations; confidence is capped at 0.55."""
     if not isinstance(text, str) or not text.strip():
