@@ -182,9 +182,9 @@ class GDELTDocAdapter(_JSONSource):
         )
         payload = await self._get_json(url)
         articles = payload.get("articles", [])
-        if not isinstance(articles, list) or len(articles) > self.max_records:
+        if not isinstance(articles, list) or len(articles) >= self.max_records:
             raise ValueError(
-                "GDELT article list is invalid or exceeds configured limit"
+                "GDELT page reached max_records; refusing cursor advance"
             )
         events: list[IntelligenceEvent] = []
         for article in articles:
@@ -263,7 +263,7 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
         cik: str,
         contact_user_agent: str,
         source_id: str | None = None,
-        max_filings: int = 100,
+        max_filings: int = 1000,
         **kwargs,
     ):
         if not contact_user_agent.strip() or "@" not in contact_user_agent:
@@ -300,7 +300,11 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
             )
         if len({len(values) for values in arrays}) != 1:
             raise ValueError("SEC recent filing arrays have inconsistent lengths")
-        count = min(len(accessions), self.max_filings)
+        if len(accessions) > self.max_filings:
+            raise ValueError(
+                "SEC recent filings exceed max_filings; increase limit before checkpoint"
+            )
+        count = len(accessions)
         now = datetime.now(timezone.utc)
         next_cursor = str(accessions[0]) if count else cursor
         events: list[IntelligenceEvent] = []
