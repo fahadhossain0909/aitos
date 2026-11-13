@@ -122,6 +122,53 @@ class IntelligenceEvent:
         result["source"]["first_seen_at"] = self.source.first_seen_at.isoformat()
         return result
 
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> "IntelligenceEvent":
+        """Rehydrate a validated event from its persisted JSON-compatible form."""
+        if not isinstance(payload, Mapping):
+            raise ValueError("event payload must be a mapping")
+        source_payload = payload.get("source")
+        if not isinstance(source_payload, Mapping):
+            raise ValueError("event source payload is required")
+
+        def parse_timestamp(value: Any, name: str) -> datetime:
+            if not isinstance(value, str):
+                raise ValueError(f"{name} must be an ISO timestamp")
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValueError(f"{name} must be an ISO timestamp") from exc
+            return _utc(parsed, name)
+
+        source = SourceEvidence(
+            source_id=str(source_payload["source_id"]),
+            source_kind=str(source_payload["source_kind"]),
+            uri=str(source_payload["uri"]),
+            published_at=parse_timestamp(source_payload["published_at"], "source.published_at"),
+            first_seen_at=parse_timestamp(source_payload["first_seen_at"], "source.first_seen_at"),
+            reliability=source_payload["reliability"],
+            is_primary=bool(source_payload.get("is_primary", False)),
+            original_story_id=source_payload.get("original_story_id"),
+        )
+        return cls(
+            event_id=str(payload["event_id"]),
+            event_type=str(payload["event_type"]),
+            title=str(payload["title"]),
+            entities=tuple(payload.get("entities", ())),
+            published_at=parse_timestamp(payload["published_at"], "published_at"),
+            first_seen_at=parse_timestamp(payload["first_seen_at"], "first_seen_at"),
+            source=source,
+            sentiment=payload["sentiment"],
+            severity=payload["severity"],
+            novelty=payload["novelty"],
+            confidence=payload["confidence"],
+            verification=str(payload.get("verification", "unverified")),
+            impact_horizon=str(payload.get("impact_horizon", "unknown")),
+            narrative_ids=tuple(payload.get("narrative_ids", ())),
+            schema_version=int(payload.get("schema_version", SCHEMA_VERSION)),
+            metadata=payload.get("metadata", {}),
+        )
+
     def to_json(self) -> str:
         return json.dumps(
             self.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
