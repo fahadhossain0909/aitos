@@ -49,9 +49,7 @@ def verify_observations(
         raise ValueError("invalid verification policy")
 
     if not observations:
-        return VerificationResult(
-            "unverified", False, 0, (), ("no_observations",)
-        )
+        return VerificationResult("unverified", False, 0, (), ("no_observations",))
 
     if any(event.verification == "retracted" for event in observations):
         return VerificationResult(
@@ -68,9 +66,7 @@ def verify_observations(
         group = publisher_groups.get(source.source_id)
         if not group or not group.strip():
             continue
-        age = (
-            timestamp.astimezone(timezone.utc) - event.first_seen_at
-        ).total_seconds()
+        age = (timestamp.astimezone(timezone.utc) - event.first_seen_at).total_seconds()
         if age < -5.0 or age > max_age_seconds:
             continue
         if source.reliability < min_source_reliability:
