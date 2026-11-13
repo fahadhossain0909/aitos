@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from math import isfinite
 from typing import Any, Mapping
-import json
 
 SCHEMA_VERSION = 1
 
@@ -41,8 +41,12 @@ class SourceEvidence:
     def __post_init__(self) -> None:
         if not self.source_id.strip() or not self.source_kind.strip():
             raise ValueError("source identity is required")
-        object.__setattr__(self, "published_at", _utc(self.published_at, "published_at"))
-        object.__setattr__(self, "first_seen_at", _utc(self.first_seen_at, "first_seen_at"))
+        object.__setattr__(
+            self, "published_at", _utc(self.published_at, "published_at")
+        )
+        object.__setattr__(
+            self, "first_seen_at", _utc(self.first_seen_at, "first_seen_at")
+        )
         object.__setattr__(self, "reliability", _unit(self.reliability, "reliability"))
         if self.first_seen_at < self.published_at:
             raise ValueError("first_seen_at cannot precede published_at")
@@ -70,10 +74,18 @@ class IntelligenceEvent:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if not self.event_id.strip() or not self.event_type.strip() or not self.title.strip():
+        if (
+            not self.event_id.strip()
+            or not self.event_type.strip()
+            or not self.title.strip()
+        ):
             raise ValueError("event identity, type and title are required")
-        object.__setattr__(self, "published_at", _utc(self.published_at, "published_at"))
-        object.__setattr__(self, "first_seen_at", _utc(self.first_seen_at, "first_seen_at"))
+        object.__setattr__(
+            self, "published_at", _utc(self.published_at, "published_at")
+        )
+        object.__setattr__(
+            self, "first_seen_at", _utc(self.first_seen_at, "first_seen_at")
+        )
         if self.first_seen_at < self.published_at:
             raise ValueError("first_seen_at cannot precede published_at")
         sentiment = float(self.sentiment)
@@ -82,7 +94,15 @@ class IntelligenceEvent:
         object.__setattr__(self, "sentiment", sentiment)
         for name in ("severity", "novelty", "confidence"):
             object.__setattr__(self, name, _unit(getattr(self, name), name))
-        entities = tuple(sorted({str(item).strip().upper() for item in self.entities if str(item).strip()}))
+        entities = tuple(
+            sorted(
+                {
+                    str(item).strip().upper()
+                    for item in self.entities
+                    if str(item).strip()
+                }
+            )
+        )
         object.__setattr__(self, "entities", entities)
         if self.schema_version != SCHEMA_VERSION:
             raise ValueError(f"unsupported schema_version: {self.schema_version}")
@@ -91,7 +111,9 @@ class IntelligenceEvent:
     def deduplication_key(self) -> str:
         """Stable source-story identity; not a semantic event-clustering key."""
         origin = self.source.original_story_id or self.source.uri or self.title
-        raw = "|".join((self.source.source_id, self.event_type, origin.strip().lower()))
+        raw = "|".join(
+            (self.source.source_id, self.event_type, origin.strip().lower())
+        )
         return sha256(raw.encode("utf-8")).hexdigest()
 
     def to_dict(self) -> dict[str, Any]:
@@ -103,7 +125,9 @@ class IntelligenceEvent:
         return result
 
     def to_json(self) -> str:
-        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return json.dumps(
+            self.to_dict(), sort_keys=True, separators=(",", ":"), allow_nan=False
+        )
 
 
 @dataclass(frozen=True, slots=True)
