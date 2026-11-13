@@ -24,6 +24,23 @@ from aitos.world_intelligence.verification import (
     VerificationResult,
     verify_observations,
 )
+from aitos.world_intelligence.entity_resolution import (
+    ResolvedEntity,
+    EntityAliasRegistry,
+    DEFAULT_ENTITY_REGISTRY,
+)
+from aitos.world_intelligence.narratives import NarrativeCluster, cluster_narratives
+from aitos.world_intelligence.pipeline import EnrichmentResult, enrich_event_batch
+from aitos.world_intelligence.providers import (
+    GDELTDocAdapter,
+    SECEdgarSubmissionsAdapter,
+    FREDSeriesAdapter,
+)
+from aitos.world_intelligence.eventbus_adapter import EventBusSink
+from aitos.world_intelligence.worker import (
+    SourceRunResult,
+    IntelligenceIngestionWorker,
+)
 from aitos.world_intelligence.financial_nlp import (
     FinancialNLPResult,
     analyze_financial_headline,
@@ -50,4 +67,17 @@ __all__ = [
     "HorizonImpact",
     "AssetIntelligenceSnapshot",
     "build_asset_intelligence_snapshot",
+    "ResolvedEntity",
+    "EntityAliasRegistry",
+    "DEFAULT_ENTITY_REGISTRY",
+    "NarrativeCluster",
+    "cluster_narratives",
+    "EnrichmentResult",
+    "enrich_event_batch",
+    "GDELTDocAdapter",
+    "SECEdgarSubmissionsAdapter",
+    "FREDSeriesAdapter",
+    "EventBusSink",
+    "SourceRunResult",
+    "IntelligenceIngestionWorker",
 ]
