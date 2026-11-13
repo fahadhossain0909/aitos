@@ -184,3 +184,25 @@ async def test_none_cursor_uses_empty_string_checkpoint_sentinel():
     await store.save_cursor("gdelt", None)
     assert client.inserts[-1][1][0][1] == ""
     assert await store.load_cursor("gdelt") is None
+
+
+@pytest.mark.asyncio
+async def test_load_recent_events_rehydrates_validated_point_in_time_payload():
+    import json
+
+    client = FakeAsyncClickHouse()
+    store = ClickHouseIntelligenceStore(client)
+    event = make_event()
+    client.query = async_query = lambda query, parameters=None: FakeResult(
+        [(event.to_json(),)]
+    )
+    loaded = await store.load_recent_events(as_of=NOW, lookback_hours=24)
+    assert loaded[0].event_id == event.event_id
+    assert loaded[0].source.source_id == event.source.source_id
+
+
+@pytest.mark.asyncio
+async def test_load_recent_events_rejects_naive_as_of():
+    store = ClickHouseIntelligenceStore(FakeAsyncClickHouse())
+    with pytest.raises(ValueError, match="timezone-aware"):
+        await store.load_recent_events(as_of=datetime(2026, 11, 13, 12, 0))
