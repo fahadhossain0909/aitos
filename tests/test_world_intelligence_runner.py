@@ -65,3 +65,47 @@ def test_runner_requires_operator_secrets_and_unique_sources():
             ],
             environ={},
         )
+
+
+def test_runner_builds_licensed_social_source_from_secret_reference():
+    adapters = build_source_adapters(
+        [
+            {
+                "type": "licensed_json",
+                "source_id": "social-feed",
+                "endpoint": "https://api.social.example/search",
+                "allowed_hosts": ["api.social.example"],
+                "records_path": "data.items",
+                "field_map": {
+                    "title": "text",
+                    "published_at": "created_at",
+                    "uri": "url",
+                },
+                "header_env": {"Authorization": "SOCIAL_API_TOKEN"},
+            }
+        ],
+        environ={"SOCIAL_API_TOKEN": "secret-token"},
+    )
+    assert adapters[0].source_id == "social-feed"
+
+
+def test_runner_never_accepts_missing_licensed_api_secret():
+    with pytest.raises(ValueError, match="environment variable"):
+        build_source_adapters(
+            [
+                {
+                    "type": "licensed_json",
+                    "source_id": "social-feed",
+                    "endpoint": "https://api.social.example/search",
+                    "allowed_hosts": ["api.social.example"],
+                    "records_path": "data.items",
+                    "field_map": {
+                        "title": "text",
+                        "published_at": "created_at",
+                        "uri": "url",
+                    },
+                    "header_env": {"Authorization": "MISSING_SOCIAL_TOKEN"},
+                }
+            ],
+            environ={},
+        )
