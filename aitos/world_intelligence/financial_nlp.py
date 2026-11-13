@@ -77,7 +77,16 @@ _HIGH_SEVERITY = {
     "liquidation",
     "production halt",
 }
-_NEGATIONS = {"not", "no", "never", "without", "denies", "denied", "rejects", "rejected"}
+_NEGATIONS = {
+    "not",
+    "no",
+    "never",
+    "without",
+    "denies",
+    "denied",
+    "rejects",
+    "rejected",
+}
 
 
 def _matches(text: str, phrase: str) -> list[re.Match]:
