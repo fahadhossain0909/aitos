@@ -86,7 +86,7 @@ class ClickHouseIntelligenceStore:
         if not source_id or not source_id.strip():
             raise ValueError("source_id is required")
         result = await self.client.query(
-            f"SELECT argMax(cursor, updated_at) FROM {self.cursors_table} "
+            f"SELECT argMax(cursor, updated_at) FROM {self.cursors_table} "  # nosec B608 - database is identifier-validated; table name is fixed
             "WHERE source_id = {source_id:String}",
             parameters={"source_id": source_id},
         )
