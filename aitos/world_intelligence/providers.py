@@ -142,6 +142,7 @@ class GDELTDocAdapter(_JSONSource):
         source_id: str = "gdelt-doc",
         lookback_minutes: int = 15,
         max_records: int = 100,
+        user_agent: str = "AITOS-World-Intelligence/1.0 operator-configured",
         **kwargs,
     ):
         if (
@@ -153,7 +154,7 @@ class GDELTDocAdapter(_JSONSource):
         self.query = query.strip()
         self.lookback_minutes = lookback_minutes
         self.max_records = max_records
-        super().__init__(source_id=source_id, **kwargs)
+        super().__init__(source_id=source_id, user_agent=user_agent, **kwargs)
 
     async def poll(
         self, *, cursor: str | None = None
