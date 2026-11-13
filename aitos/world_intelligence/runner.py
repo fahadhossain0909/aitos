@@ -16,6 +16,7 @@ from typing import Any
 from aitos.eventbus.factory import create_event_bus
 from aitos.world_intelligence.adapters import IntelligenceSourceAdapter
 from aitos.world_intelligence.eventbus_adapter import EventBusSink
+from aitos.world_intelligence.licensed_api import LicensedJSONFeedAdapter
 from aitos.world_intelligence.providers import (
     FREDSeriesAdapter,
     GDELTDocAdapter,
@@ -85,6 +86,36 @@ def build_source_adapters(
                     contact_user_agent=contact,
                     source_id=common["source_id"] or None,
                     max_filings=int(config.get("max_filings", 100)),
+                    timeout_seconds=common["timeout_seconds"],
+                    min_interval_seconds=common["min_interval_seconds"],
+                )
+            )
+        elif kind == "licensed_json":
+            header_env = config.get("header_env", {})
+            if not isinstance(header_env, dict):
+                raise ValueError("licensed JSON header_env must be a JSON object")
+            headers = {}
+            for header_name, env_name in header_env.items():
+                secret = env.get(str(env_name), "")
+                if not secret:
+                    raise ValueError(
+                        f"licensed API header environment variable {env_name!r} is missing"
+                    )
+                headers[str(header_name)] = secret
+            adapters.append(
+                LicensedJSONFeedAdapter(
+                    source_id=common["source_id"],
+                    endpoint=str(config["endpoint"]),
+                    allowed_hosts=set(config["allowed_hosts"]),
+                    records_path=str(config["records_path"]),
+                    field_map=config["field_map"],
+                    query_params=config.get("query_params", {}),
+                    headers=headers,
+                    cursor_param=config.get("cursor_param"),
+                    source_kind=str(config.get("source_kind", "licensed_news_or_social")),
+                    reliability=float(config.get("reliability", 0.4)),
+                    max_records=int(config.get("max_records", 100)),
+                    max_response_bytes=int(config.get("max_response_bytes", 2_000_000)),
                     timeout_seconds=common["timeout_seconds"],
                     min_interval_seconds=common["min_interval_seconds"],
                 )
