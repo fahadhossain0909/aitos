@@ -53,16 +53,17 @@ class IntelligenceRiskGovernor:
                 "invalid", False, False, 1.0, ("naive_timestamp_rejected",)
             )
         age = (
-            timestamp.astimezone(timezone.utc)
-            - observed_at.astimezone(timezone.utc)
+            timestamp.astimezone(timezone.utc) - observed_at.astimezone(timezone.utc)
         ).total_seconds()
         if age < -5.0 or age > self.max_age_seconds:
             return RiskAssessment(
                 "stale", False, False, 1.0, ("stale_or_future_intelligence",)
             )
-        if severity is None or not isfinite(float(severity)) or not 0.0 <= float(
-            severity
-        ) <= 1.0:
+        if (
+            severity is None
+            or not isfinite(float(severity))
+            or not 0.0 <= float(severity) <= 1.0
+        ):
             return RiskAssessment("invalid", False, False, 1.0, ("invalid_severity",))
         if uncertainty is not None and (
             not isfinite(float(uncertainty)) or not 0.0 <= float(uncertainty) <= 1.0
