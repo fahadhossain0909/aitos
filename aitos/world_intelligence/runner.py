@@ -185,10 +185,16 @@ async def _run() -> None:
         database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
         secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true",
     )
-    redis_client = Redis.from_url(
-        os.getenv("REDIS_URL", "redis://localhost:6379/0"),
-        decode_responses=False,
-    )
+    redis_url = os.getenv("REDIS_URL")
+    if redis_url:
+        redis_client = Redis.from_url(redis_url, decode_responses=False)
+    else:
+        redis_client = Redis(
+            host=os.getenv("REDIS_HOST", "localhost"),
+            port=int(os.getenv("REDIS_PORT", "6379")),
+            password=os.getenv("REDIS_PASSWORD") or None,
+            decode_responses=False,
+        )
     event_bus = create_event_bus(
         {
             "backend": "redis",
