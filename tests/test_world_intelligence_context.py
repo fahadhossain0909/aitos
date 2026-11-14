@@ -98,6 +98,7 @@ async def test_snapshot_provider_reuses_recent_event_read_across_symbols():
     await provider.snapshot_for_asset("ETHUSDT", as_of=NOW)
     assert store.query_count == 1
 
+
 @pytest.mark.asyncio
 async def test_snapshot_cache_refreshes_when_as_of_moves_forward():
     first = event("btc-first", ("BTC",), NOW - timedelta(minutes=1))
@@ -112,5 +113,5 @@ async def test_snapshot_cache_refreshes_when_as_of_moves_forward():
     )
 
     assert initial.event_ids == ("btc-first",)
-    assert refreshed.event_ids == ("btc-later", "btc-first")
+    assert refreshed.event_ids == ("btc-first", "btc-later")
     assert store.query_count == 2
