@@ -3,8 +3,7 @@
 The write protocol is deliberately at-least-once: persist the event page first,
 then persist its source cursor. A crash between those operations replays the page;
 the ReplacingMergeTree key makes that replay idempotent after merges/FINAL reads.
-A single writer per source is required because ClickHouse does not provide a
-transaction spanning the event and cursor tables.
+Redis per-source leases coordinate writers; monotonic fencing tokens protect cursor checkpoints even if an expired worker resumes. ClickHouse still does not provide a transaction spanning event persistence and Redis publication, so delivery remains at-least-once.
 """
 
 from __future__ import annotations
@@ -264,7 +263,7 @@ class ClickHouseIntelligenceStore:
             self.dead_letters_table,
             [(
                 failure_id, source_id, cursor_before or "", cursor_after or "",
-                payload, type(error).__name__, str(error)[:500], 1, "pending", now, now,
+                payload, type(error).__name__, type(error).__name__, 1, "pending", now, now,
             )],
             column_names=[
                 "failure_id", "source_id", "cursor_before", "cursor_after",
