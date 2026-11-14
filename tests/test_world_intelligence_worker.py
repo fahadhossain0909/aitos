@@ -10,6 +10,7 @@ class Store:
         self.dead_letters = []
         self.pending = []
         self.replayed = []
+        self.source_runs = []
 
     async def ensure_schema(self):
         self.schema_calls += 1
@@ -32,6 +33,12 @@ class Store:
 
     async def update_dead_letter(self, failure_id, *, status, attempts):
         self.replayed.append((failure_id, status, attempts))
+
+    async def record_source_run(self, **kwargs):
+        self.source_runs.append(kwargs)
+
+    async def load_source_run_summary(self, **kwargs):
+        return [{"source_id": "test", "runs": len(self.source_runs)}]
 
 
 class Adapter:
@@ -57,6 +64,7 @@ async def test_worker_runs_sources_and_initializes_schema():
     assert store.schema_calls == 1
     assert result[0].source_id == "test"
     assert result[0].cursor == "next"
+    assert store.source_runs[0]["status"] == "success"
 
 
 @pytest.mark.asyncio
@@ -112,6 +120,7 @@ async def test_worker_dead_letters_a_fetched_page_when_publish_fails():
     assert len(store.dead_letters) == 1
     assert store.dead_letters[0]["cursor_after"] == "next"
     assert worker.metrics_snapshot()["dead_letters_written"] == 1
+    assert store.source_runs[0]["status"] == "failed"
 
 
 @pytest.mark.asyncio
@@ -202,3 +211,13 @@ async def test_worker_survives_redis_lease_service_outage():
 
     assert result[0].error == "RuntimeError"
     assert worker.metrics_snapshot()["lease_lost"] == 1
+
+
+@pytest.mark.asyncio
+async def test_worker_exposes_durable_source_run_summary():
+    store = Store()
+    worker = IntelligenceIngestionWorker([Adapter()], store, Sink())
+    await worker.run_once()
+
+    summary = await worker.source_run_summary()
+    assert summary == [{"source_id": "test", "runs": 1}]
