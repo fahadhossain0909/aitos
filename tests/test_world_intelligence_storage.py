@@ -84,7 +84,10 @@ async def test_page_persists_events_before_cursor_and_loads_checkpoint():
     assert client.inserts[1][0].endswith("world_intelligence_cursors")
     assert await store.load_cursor("gdelt") == "page-2"
     assert client.inserts[1][2] == [
-        "source_id", "cursor", "fencing_token", "updated_at"
+        "source_id",
+        "cursor",
+        "fencing_token",
+        "updated_at",
     ]
 
 
