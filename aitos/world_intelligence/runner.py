@@ -235,7 +235,8 @@ async def _run() -> None:
         metrics_runner = await start_metrics_server(
             worker,
             host=os.getenv(
-                "AITOS_WORLD_INTELLIGENCE_METRICS_HOST", "0.0.0.0"  # nosec B104 - container-internal Prometheus scrape; no host port published
+                "AITOS_WORLD_INTELLIGENCE_METRICS_HOST",
+                "0.0.0.0",  # nosec B104 - container-internal Prometheus scrape; no host port published
             ),
             port=int(os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_PORT", "8120")),
         )
