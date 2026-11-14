@@ -103,11 +103,12 @@ class IntelligenceIngestionWorker:
                 self._metrics["events_published"] += 1
             if lease is not None:
                 await lease.assert_valid()
-            await self.store.save_cursor(
-                source_id,
-                next_cursor,
-                fencing_token=lease.fencing_token if lease is not None else 0,
-            )
+            if lease is None:
+                await self.store.save_cursor(source_id, next_cursor)
+            else:
+                await self.store.save_cursor(
+                    source_id, next_cursor, fencing_token=lease.fencing_token
+                )
             self._metrics["pages_succeeded"] += 1
             return SourceRunResult(source_id, len(events), next_cursor)
         except Exception as exc:
