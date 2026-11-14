@@ -1,4 +1,5 @@
 """Bounded WIATS ingestion worker with fenced leases and durable failure replay."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +8,10 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from aitos.world_intelligence.adapters import EventSink, IntelligenceSourceAdapter
-from aitos.world_intelligence.entity_resolution import DEFAULT_ENTITY_REGISTRY, EntityAliasRegistry
+from aitos.world_intelligence.entity_resolution import (
+    DEFAULT_ENTITY_REGISTRY,
+    EntityAliasRegistry,
+)
 from aitos.world_intelligence.lease import LeaseUnavailable
 from aitos.world_intelligence.pipeline import enrich_event_batch
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
@@ -36,7 +40,9 @@ class IntelligenceIngestionWorker:
         lease_manager: Any | None = None,
     ):
         if not adapters or poll_interval_seconds < 1.0:
-            raise ValueError("at least one adapter and a poll interval >= 1s are required")
+            raise ValueError(
+                "at least one adapter and a poll interval >= 1s are required"
+            )
         source_ids = [adapter.source_id for adapter in adapters]
         if len(source_ids) != len(set(source_ids)):
             raise ValueError("only one adapter per source_id is allowed")
@@ -162,7 +168,9 @@ class IntelligenceIngestionWorker:
     async def replay_dead_letters(self, *, limit: int = 100) -> int:
         """Explicitly replay pending pages; never polls providers or bypasses leases."""
         if self.lease_manager is None:
-            raise RuntimeError("dead-letter replay requires the distributed lease manager")
+            raise RuntimeError(
+                "dead-letter replay requires the distributed lease manager"
+            )
         replayed = 0
         pending = await self.store.load_pending_dead_letters(limit=limit)
         for item in pending:
