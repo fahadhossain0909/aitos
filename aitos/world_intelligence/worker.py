@@ -172,9 +172,7 @@ class IntelligenceIngestionWorker:
                         adapter.source_id,
                     )
                     results.append(
-                        SourceRunResult(
-                            adapter.source_id, 0, None, type(exc).__name__
-                        )
+                        SourceRunResult(adapter.source_id, 0, None, type(exc).__name__)
                     )
         finally:
             self._running = False
