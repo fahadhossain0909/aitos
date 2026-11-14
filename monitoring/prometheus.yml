@@ -12,3 +12,8 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["aitos-live:8091"]
+
+  - job_name: aitos-world-intelligence
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["aitos-world-intelligence:8120"]
