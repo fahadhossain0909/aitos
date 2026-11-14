@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
 from aitos.world_intelligence.event_study import EventBetaEstimate
@@ -83,24 +83,29 @@ class ClickHouseAssetSnapshotProvider:
         cutoff = as_of.astimezone(timezone.utc)
         normalized = symbol.strip().upper()
         base = _base_asset(normalized)
+        lower_bound = cutoff - timedelta(hours=self.lookback_hours)
         async with self._cache_lock:
             cached = self._event_cache
-            if (
+            cache_covers_cutoff = (
                 cached is not None
                 and time.monotonic() - cached[0] <= self.cache_ttl_seconds
-            ):
-                events = cached[2]
+                and cached[1] >= cutoff
+                and cached[2] <= lower_bound
+            )
+            if cache_covers_cutoff:
+                events = cached[3]
             else:
                 events = await self.store.load_recent_events(
                     as_of=cutoff,
                     lookback_hours=self.lookback_hours,
                     limit=self.max_events,
                 )
-                self._event_cache = (time.monotonic(), cutoff, events)
+                self._event_cache = (time.monotonic(), cutoff, lower_bound, events)
         events = [
             event
             for event in events
-            if event.published_at <= cutoff and event.first_seen_at <= cutoff
+            if lower_bound <= event.first_seen_at <= cutoff
+            and event.published_at <= cutoff
         ]
         matched = [
             event
