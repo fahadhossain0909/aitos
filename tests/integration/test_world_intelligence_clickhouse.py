@@ -79,5 +79,24 @@ async def test_clickhouse_event_and_cursor_round_trip():
         await store.update_dead_letter(failure_id, status="replayed", attempts=2)
         pending = await store.load_pending_dead_letters(limit=10)
         assert failure_id not in {item["failure_id"] for item in pending}
+
+        await store.record_source_run(
+            source_id=source_id,
+            started_at=now - timedelta(seconds=2),
+            finished_at=now,
+            status="success",
+            event_count=1,
+            cursor_before="cursor-newer",
+            cursor_after="cursor-after",
+            fencing_token=20,
+            latency_ms=15.5,
+        )
+        source_summary = await store.load_source_run_summary(as_of=now)
+        source_row = next(
+            item for item in source_summary if item["source_id"] == source_id
+        )
+        assert source_row["runs"] == 1
+        assert source_row["successes"] == 1
+        assert source_row["events"] == 1
     finally:
         await client.close()
