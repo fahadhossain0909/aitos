@@ -1,46 +1,132 @@
 {
-  "annotations": {"list": []},
+  "annotations": {
+    "list": []
+  },
   "editable": false,
   "panels": [
     {
       "title": "WIATS page throughput",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        {"expr": "rate(aitos_wiats_pages_succeeded_total[5m])", "legendFormat": "successful pages/s"},
-        {"expr": "rate(aitos_wiats_pages_failed_total[5m])", "legendFormat": "failed pages/s"}
+        {
+          "expr": "rate(aitos_wiats_pages_succeeded_total[5m])",
+          "legendFormat": "successful pages/s"
+        },
+        {
+          "expr": "rate(aitos_wiats_pages_failed_total[5m])",
+          "legendFormat": "failed pages/s"
+        }
       ],
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      }
     },
     {
       "title": "Normalized event flow",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        {"expr": "rate(aitos_wiats_events_persisted_total[5m])", "legendFormat": "persisted/s"},
-        {"expr": "rate(aitos_wiats_events_published_total[5m])", "legendFormat": "published/s"}
+        {
+          "expr": "rate(aitos_wiats_events_persisted_total[5m])",
+          "legendFormat": "persisted/s"
+        },
+        {
+          "expr": "rate(aitos_wiats_events_published_total[5m])",
+          "legendFormat": "published/s"
+        }
       ],
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      }
     },
     {
       "title": "Dead-letter activity",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        {"expr": "increase(aitos_wiats_dead_letters_written_total[1h])", "legendFormat": "new dead letters"},
-        {"expr": "increase(aitos_wiats_dead_letters_replayed_total[1h])", "legendFormat": "replayed"}
+        {
+          "expr": "increase(aitos_wiats_dead_letters_written_total[1h])",
+          "legendFormat": "new dead letters"
+        },
+        {
+          "expr": "increase(aitos_wiats_dead_letters_replayed_total[1h])",
+          "legendFormat": "replayed"
+        }
       ],
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      }
     },
     {
       "title": "Distributed lease health",
       "type": "timeseries",
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        {"expr": "increase(aitos_wiats_lease_contention_total[5m])", "legendFormat": "lease contention"},
-        {"expr": "increase(aitos_wiats_lease_lost_total[5m])", "legendFormat": "lease lost"}
+        {
+          "expr": "increase(aitos_wiats_lease_contention_total[5m])",
+          "legendFormat": "lease contention"
+        },
+        {
+          "expr": "increase(aitos_wiats_lease_lost_total[5m])",
+          "legendFormat": "lease lost"
+        }
       ],
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      }
+    },
+    {
+      "title": "Per-source ingestion health (24h)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "aitos_wiats_source_failures_24h",
+          "legendFormat": "{{source_id}} failures"
+        },
+        {
+          "expr": "aitos_wiats_source_events_24h",
+          "legendFormat": "{{source_id}} events"
+        },
+        {
+          "expr": "aitos_wiats_source_mean_latency_ms_24h",
+          "legendFormat": "{{source_id}} latency ms"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      }
     }
   ],
   "schemaVersion": 39,
