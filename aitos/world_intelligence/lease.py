@@ -1,4 +1,5 @@
 """Redis-backed per-source leases with monotonic fencing tokens."""
+
 from __future__ import annotations
 
 import asyncio
@@ -42,7 +43,9 @@ class LeaseLost(RuntimeError):
 
 
 class RedisSourceLease:
-    def __init__(self, redis: Any, key: str, owner: str, fencing_token: int, ttl_ms: int):
+    def __init__(
+        self, redis: Any, key: str, owner: str, fencing_token: int, ttl_ms: int
+    ):
         self.redis = redis
         self.key = key
         self.owner = owner
@@ -137,4 +140,9 @@ class RedisSourceLeaseManager:
             await lease.close()
 
 
-__all__ = ["LeaseUnavailable", "LeaseLost", "RedisSourceLease", "RedisSourceLeaseManager"]
+__all__ = [
+    "LeaseUnavailable",
+    "LeaseLost",
+    "RedisSourceLease",
+    "RedisSourceLeaseManager",
+]
