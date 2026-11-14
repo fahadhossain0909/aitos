@@ -12,7 +12,7 @@ from aitos.world_intelligence.entity_resolution import (
     DEFAULT_ENTITY_REGISTRY,
     EntityAliasRegistry,
 )
-from aitos.world_intelligence.lease import LeaseUnavailable
+from aitos.world_intelligence.lease import LeaseLost, LeaseUnavailable
 from aitos.world_intelligence.pipeline import enrich_event_batch
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
 
@@ -119,7 +119,7 @@ class IntelligenceIngestionWorker:
             return SourceRunResult(source_id, len(events), next_cursor)
         except Exception as exc:
             self._metrics["pages_failed"] += 1
-            if type(exc).__name__ == "LeaseLost":
+            if isinstance(exc, LeaseLost):
                 self._metrics["lease_lost"] += 1
             logger.exception("World-intelligence source poll failed: %s", source_id)
             # A provider poll failure has no immutable page to replay. Keep it
@@ -160,6 +160,17 @@ class IntelligenceIngestionWorker:
                     self._metrics["lease_contention"] += 1
                     results.append(
                         SourceRunResult(adapter.source_id, 0, None, "LeaseUnavailable")
+                    )
+                except Exception as exc:
+                    self._metrics["lease_lost"] += 1
+                    logger.exception(
+                        "Unable to acquire or validate WIATS source lease: %s",
+                        adapter.source_id,
+                    )
+                    results.append(
+                        SourceRunResult(
+                            adapter.source_id, 0, None, type(exc).__name__
+                        )
                     )
         finally:
             self._running = False
