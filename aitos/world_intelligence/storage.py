@@ -9,6 +9,7 @@ Redis per-source leases coordinate writers; monotonic fencing tokens protect cur
 from __future__ import annotations
 
 import json
+import math
 import re
 import uuid
 from datetime import datetime, timezone
@@ -281,6 +282,129 @@ class ClickHouseIntelligenceStore:
         count = await self.append_events(source_id, events)
         await self.save_cursor(source_id, next_cursor, fencing_token=fencing_token)
         return count
+
+    async def record_source_run(
+        self,
+        *,
+        source_id: str,
+        started_at: datetime,
+        finished_at: datetime,
+        status: str,
+        event_count: int,
+        cursor_before: str | None = None,
+        cursor_after: str | None = None,
+        error_type: str = "",
+        fencing_token: int = 0,
+        latency_ms: float = 0.0,
+    ) -> str:
+        """Persist bounded per-source operational evidence for 180 days."""
+        if not source_id or not source_id.strip():
+            raise ValueError("source_id is required")
+        if status not in {"success", "failed", "lease_lost", "lease_unavailable"}:
+            raise ValueError("unsupported source run status")
+        if (
+            started_at.tzinfo is None
+            or finished_at.tzinfo is None
+            or finished_at < started_at
+        ):
+            raise ValueError("source run timestamps must be ordered and timezone-aware")
+        if (
+            isinstance(event_count, bool)
+            or not isinstance(event_count, int)
+            or event_count < 0
+        ):
+            raise ValueError("event_count must be a non-negative integer")
+        if (
+            isinstance(fencing_token, bool)
+            or not isinstance(fencing_token, int)
+            or fencing_token < 0
+        ):
+            raise ValueError("fencing_token must be a non-negative integer")
+        latency = float(latency_ms)
+        if not math.isfinite(latency) or latency < 0:
+            raise ValueError("latency_ms must be finite and non-negative")
+        run_id = uuid.uuid4().hex
+        await self.client.insert(
+            self.source_runs_table,
+            [
+                (
+                    run_id,
+                    source_id,
+                    started_at.astimezone(timezone.utc),
+                    finished_at.astimezone(timezone.utc),
+                    status,
+                    event_count,
+                    cursor_before or "",
+                    cursor_after or "",
+                    error_type[:80],
+                    fencing_token,
+                    latency,
+                )
+            ],
+            column_names=[
+                "run_id",
+                "source_id",
+                "started_at",
+                "finished_at",
+                "status",
+                "event_count",
+                "cursor_before",
+                "cursor_after",
+                "error_type",
+                "fencing_token",
+                "latency_ms",
+            ],
+        )
+        return run_id
+
+    async def load_source_run_summary(
+        self,
+        *,
+        as_of: datetime,
+        lookback_hours: float = 24.0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return bounded, point-in-time per-source ingestion health aggregates."""
+        if as_of.tzinfo is None:
+            raise ValueError("as_of must be timezone-aware")
+        if not 0 < lookback_hours <= 24 * 90 or not 1 <= limit <= 1000:
+            raise ValueError("invalid source-run lookback or limit")
+        from datetime import timedelta
+
+        cutoff = as_of.astimezone(timezone.utc)
+        lower_bound = cutoff - timedelta(hours=lookback_hours)
+        result = await self.client.query(
+            f"SELECT source_id, count(), countIf(status = 'success'), "
+            f"countIf(status = 'failed'), countIf(status = 'lease_lost'), "
+            f"countIf(status = 'lease_unavailable'), sum(event_count), "
+            f"avg(latency_ms), argMax(status, finished_at), max(finished_at) "
+            f"FROM {self.source_runs_table} "  # nosec B608 - fixed table property and validated database
+            "WHERE finished_at <= toDateTime64({as_of:String}, 3, 'UTC') "
+            "AND started_at >= toDateTime64({lower_bound:String}, 3, 'UTC') "
+            "GROUP BY source_id ORDER BY source_id LIMIT {limit:UInt32}",
+            parameters={
+                "as_of": cutoff.isoformat(),
+                "lower_bound": lower_bound.isoformat(),
+                "limit": limit,
+            },
+        )
+        return [
+            {
+                "source_id": row[0],
+                "runs": int(row[1]),
+                "successes": int(row[2]),
+                "failures": int(row[3]),
+                "lease_lost": int(row[4]),
+                "lease_contention": int(row[5]),
+                "events": int(row[6] or 0),
+                "mean_latency_ms": round(float(row[7] or 0.0), 3),
+                "latest_status": row[8],
+                "last_finished_at": (
+                    row[9].isoformat() if hasattr(row[9], "isoformat") else str(row[9])
+                ),
+            }
+            for row in result.result_rows
+        ]
 
     async def record_dead_letter(
         self,
