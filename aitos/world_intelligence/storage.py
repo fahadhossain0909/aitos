@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Protocol
 
@@ -75,10 +76,36 @@ class ClickHouseIntelligenceStore:
             (
                 source_id LowCardinality(String),
                 cursor String,
+                fencing_token UInt64 DEFAULT 0,
                 updated_at DateTime64(6, 'UTC')
             )
             ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY source_id
+            """
+        )
+        # Upgrade existing installations without requiring a table rebuild.
+        await self.client.command(
+            f"ALTER TABLE {self.cursors_table} ADD COLUMN IF NOT EXISTS "
+            "fencing_token UInt64 DEFAULT 0"
+        )
+        await self.client.command(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self.dead_letters_table}
+            (
+                failure_id String,
+                source_id LowCardinality(String),
+                cursor_before String,
+                cursor_after String,
+                payload_json String,
+                error_type LowCardinality(String),
+                error_message String,
+                attempts UInt32,
+                status LowCardinality(String),
+                created_at DateTime64(6, 'UTC'),
+                updated_at DateTime64(6, 'UTC')
+            )
+            ENGINE = ReplacingMergeTree(updated_at)
+            ORDER BY (source_id, failure_id)
             """
         )
 
@@ -86,7 +113,7 @@ class ClickHouseIntelligenceStore:
         if not source_id or not source_id.strip():
             raise ValueError("source_id is required")
         result = await self.client.query(
-            f"SELECT argMax(cursor, updated_at) FROM {self.cursors_table} "  # nosec B608 - database is identifier-validated; table name is fixed
+            f"SELECT argMax(cursor, (fencing_token, updated_at)) FROM {self.cursors_table} "  # nosec B608 - database is identifier-validated; table name is fixed
             "WHERE source_id = {source_id:String}",
             parameters={"source_id": source_id},
         )
@@ -139,16 +166,20 @@ class ClickHouseIntelligenceStore:
             )
         return len(rows)
 
-    async def save_cursor(self, source_id: str, cursor: str | None) -> None:
-        """Advance a source cursor after all downstream page work succeeds."""
+    async def save_cursor(
+        self, source_id: str, cursor: str | None, *, fencing_token: int = 0
+    ) -> None:
+        """Advance a cursor; older lease generations cannot supersede newer ones."""
         if not source_id or not source_id.strip():
             raise ValueError("source_id is required")
         if cursor is not None and not isinstance(cursor, str):
             raise ValueError("cursor must be a string or None")
+        if isinstance(fencing_token, bool) or not isinstance(fencing_token, int) or fencing_token < 0:
+            raise ValueError("fencing_token must be a non-negative integer")
         await self.client.insert(
             self.cursors_table,
-            [(source_id, cursor or "", datetime.now(timezone.utc))],
-            column_names=["source_id", "cursor", "updated_at"],
+            [(source_id, cursor or "", fencing_token, datetime.now(timezone.utc))],
+            column_names=["source_id", "cursor", "fencing_token", "updated_at"],
         )
 
     async def load_recent_events(
@@ -195,6 +226,8 @@ class ClickHouseIntelligenceStore:
         source_id: str,
         events: list[IntelligenceEvent],
         next_cursor: str | None,
+        *,
+        fencing_token: int = 0,
     ) -> int:
         """Persist a page before advancing its checkpoint.
 
@@ -203,5 +236,89 @@ class ClickHouseIntelligenceStore:
         save_cursor() so a failed publish cannot lose the page.
         """
         count = await self.append_events(source_id, events)
-        await self.save_cursor(source_id, next_cursor)
+        await self.save_cursor(source_id, next_cursor, fencing_token=fencing_token)
         return count
+
+    async def record_dead_letter(
+        self,
+        *,
+        source_id: str,
+        cursor_before: str | None,
+        cursor_after: str | None,
+        events: list[IntelligenceEvent],
+        error: Exception,
+    ) -> str:
+        """Persist a failed page for operator inspection and explicit replay."""
+        if not source_id or not source_id.strip():
+            raise ValueError("source_id is required")
+        failure_id = uuid.uuid4().hex
+        now = datetime.now(timezone.utc)
+        payload = json.dumps(
+            [event.to_dict() for event in events], separators=(",", ":")
+        )
+        await self.client.insert(
+            self.dead_letters_table,
+            [(
+                failure_id, source_id, cursor_before or "", cursor_after or "",
+                payload, type(error).__name__, str(error)[:500], 1, "pending", now, now,
+            )],
+            column_names=[
+                "failure_id", "source_id", "cursor_before", "cursor_after",
+                "payload_json", "error_type", "error_message", "attempts",
+                "status", "created_at", "updated_at",
+            ],
+        )
+        return failure_id
+
+    async def load_pending_dead_letters(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        if not 1 <= limit <= 1000:
+            raise ValueError("dead-letter limit must be between 1 and 1000")
+        result = await self.client.query(
+            f"SELECT failure_id, source_id, cursor_before, cursor_after, "
+            f"payload_json, attempts FROM {self.dead_letters_table} FINAL "
+            "WHERE status = 'pending' ORDER BY created_at ASC LIMIT {limit:UInt32}",
+            parameters={"limit": limit},
+        )
+        rows: list[dict[str, Any]] = []
+        for row in result.result_rows:
+            try:
+                payload = json.loads(row[4])
+                events = [IntelligenceEvent.from_dict(item) for item in payload]
+            except (TypeError, ValueError, KeyError, json.JSONDecodeError):
+                continue
+            rows.append({
+                "failure_id": row[0], "source_id": row[1],
+                "cursor_before": row[2] or None, "cursor_after": row[3] or None,
+                "events": events, "attempts": int(row[5]),
+            })
+        return rows
+
+    async def update_dead_letter(
+        self, failure_id: str, *, status: str, attempts: int
+    ) -> None:
+        if not failure_id or status not in {"pending", "replayed", "discarded"}:
+            raise ValueError("invalid dead-letter update")
+        if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
+            raise ValueError("attempts must be a positive integer")
+        result = await self.client.query(
+            f"SELECT failure_id, source_id, cursor_before, cursor_after, "
+            f"payload_json, error_type, error_message, created_at "
+            f"FROM {self.dead_letters_table} FINAL WHERE failure_id = {{failure_id:String}} "
+            "LIMIT 1",
+            parameters={"failure_id": failure_id},
+        )
+        if not result.result_rows:
+            raise KeyError(f"dead-letter {failure_id!r} not found")
+        row = result.result_rows[0]
+        await self.client.insert(
+            self.dead_letters_table,
+            [(
+                row[0], row[1], row[2], row[3], row[4], row[5], row[6],
+                attempts, status, row[7], datetime.now(timezone.utc),
+            )],
+            column_names=[
+                "failure_id", "source_id", "cursor_before", "cursor_after",
+                "payload_json", "error_type", "error_message", "attempts",
+                "status", "created_at", "updated_at",
+            ],
+        )
