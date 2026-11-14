@@ -46,6 +46,7 @@ class FakeAsyncClickHouse:
         self.fail_cursor = False
         self.cursor = None
         self.last_query = ""
+        self.pending_count = 0
 
     async def command(self, query):
         self.commands.append(query)
@@ -62,6 +63,8 @@ class FakeAsyncClickHouse:
 
     async def query(self, query, parameters=None):
         self.last_query = query
+        if "count()" in query:
+            return FakeResult([(self.pending_count,)])
         return FakeResult([(self.cursor,)] if self.cursor is not None else [])
 
 
@@ -246,3 +249,28 @@ async def test_dead_letter_page_is_durably_serialized():
     assert rows[0][1:4] == ("gdelt", "page-1", "page-2")
     assert rows[0][5:9] == ("RuntimeError", "RuntimeError", 1, "pending")
     assert "event-1" in rows[0][4]
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_queue_enforces_per_source_pending_limit():
+    client = FakeAsyncClickHouse()
+    client.pending_count = 1
+    store = ClickHouseIntelligenceStore(
+        client, max_pending_dead_letters_per_source=1
+    )
+    with pytest.raises(RuntimeError, match="safety limit"):
+        await store.record_dead_letter(
+            source_id="gdelt",
+            cursor_before="page-1",
+            cursor_after="page-2",
+            events=[make_event()],
+            error=RuntimeError("provider secret must not be persisted"),
+        )
+    assert not client.inserts
+
+
+def test_dead_letter_pending_limit_is_validated():
+    with pytest.raises(ValueError, match="max pending"):
+        ClickHouseIntelligenceStore(
+            FakeAsyncClickHouse(), max_pending_dead_letters_per_source=0
+        )
