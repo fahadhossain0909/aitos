@@ -32,7 +32,7 @@ def render_prometheus_metrics(metrics: Mapping[str, int]) -> str:
     return "\n".join(lines) + "\n"
 
 
-async def start_metrics_server(worker, *, host: str = "0.0.0.0", port: int = 8120):
+async def start_metrics_server(worker, *, host: str = "127.0.0.1", port: int = 8120):
     """Start an internal-only HTTP server; caller owns cleanup via returned runner."""
     if not 1 <= int(port) <= 65535:
         raise ValueError("metrics port must be between 1 and 65535")
