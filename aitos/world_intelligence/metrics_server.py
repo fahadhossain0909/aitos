@@ -1,4 +1,5 @@
 """Minimal Prometheus and health endpoints for the optional WIATS worker."""
+
 from __future__ import annotations
 
 from typing import Mapping
@@ -22,10 +23,12 @@ def render_prometheus_metrics(metrics: Mapping[str, int]) -> str:
         value = int(metrics.get(key, 0))
         if value < 0:
             raise ValueError("Prometheus counters must be non-negative")
-        lines.extend((
-            f"# TYPE {metric_name} counter",
-            f"{metric_name} {value}",
-        ))
+        lines.extend(
+            (
+                f"# TYPE {metric_name} counter",
+                f"{metric_name} {value}",
+            )
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -35,11 +38,13 @@ async def start_metrics_server(worker, *, host: str = "0.0.0.0", port: int = 812
         raise ValueError("metrics port must be between 1 and 65535")
 
     async def health(_request):
-        return web.json_response({
-            "status": "ok",
-            "service": "aitos-world-intelligence",
-            "metrics": worker.metrics_snapshot(),
-        })
+        return web.json_response(
+            {
+                "status": "ok",
+                "service": "aitos-world-intelligence",
+                "metrics": worker.metrics_snapshot(),
+            }
+        )
 
     async def metrics(_request):
         return web.Response(
