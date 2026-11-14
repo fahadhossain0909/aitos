@@ -97,3 +97,20 @@ async def test_snapshot_provider_reuses_recent_event_read_across_symbols():
     await provider.snapshot_for_asset("BTCUSDT", as_of=NOW)
     await provider.snapshot_for_asset("ETHUSDT", as_of=NOW)
     assert store.query_count == 1
+
+@pytest.mark.asyncio
+async def test_snapshot_cache_refreshes_when_as_of_moves_forward():
+    first = event("btc-first", ("BTC",), NOW - timedelta(minutes=1))
+    later = event("btc-later", ("BTC",), NOW + timedelta(minutes=1))
+    store = Store([first])
+    provider = ClickHouseAssetSnapshotProvider(store, cache_ttl_seconds=5)
+
+    initial = await provider.snapshot_for_asset("BTCUSDT", as_of=NOW)
+    store.events.append(later)
+    refreshed = await provider.snapshot_for_asset(
+        "BTCUSDT", as_of=NOW + timedelta(minutes=2)
+    )
+
+    assert initial.event_ids == ("btc-first",)
+    assert refreshed.event_ids == ("btc-later", "btc-first")
+    assert store.query_count == 2
