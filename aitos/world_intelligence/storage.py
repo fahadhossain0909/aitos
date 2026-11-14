@@ -381,8 +381,16 @@ class ClickHouseIntelligenceStore:
                 )
             ],
             column_names=[
-                "failure_id", "source_id", "cursor_before", "cursor_after",
-                "payload_json", "error_type", "error_message", "attempts",
-                "status", "created_at", "updated_at",
+                "failure_id",
+                "source_id",
+                "cursor_before",
+                "cursor_after",
+                "payload_json",
+                "error_type",
+                "error_message",
+                "attempts",
+                "status",
+                "created_at",
+                "updated_at",
             ],
         )
