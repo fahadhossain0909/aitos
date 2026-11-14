@@ -116,18 +116,25 @@ class IntelligenceIngestionWorker:
             if type(exc).__name__ == "LeaseLost":
                 self._metrics["lease_lost"] += 1
             logger.exception("World-intelligence source poll failed: %s", source_id)
-            try:
-                failure_id = await self.store.record_dead_letter(
-                    source_id=source_id,
-                    cursor_before=cursor_before,
-                    cursor_after=next_cursor,
-                    events=events,
-                    error=exc,
-                )
-                self._metrics["dead_letters_written"] += 1
-                logger.error("WIATS page stored in dead-letter queue: %s", failure_id)
-            except Exception:
-                logger.exception("Unable to persist WIATS dead-letter page: %s", source_id)
+            # A provider poll failure has no immutable page to replay. Keep it
+            # in logs/metrics; only persist DLQ entries after a page was fetched.
+            if events or next_cursor is not None:
+                try:
+                    failure_id = await self.store.record_dead_letter(
+                        source_id=source_id,
+                        cursor_before=cursor_before,
+                        cursor_after=next_cursor,
+                        events=events,
+                        error=exc,
+                    )
+                    self._metrics["dead_letters_written"] += 1
+                    logger.error(
+                        "WIATS page stored in dead-letter queue: %s", failure_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "Unable to persist WIATS dead-letter page: %s", source_id
+                    )
             return SourceRunResult(source_id, 0, None, type(exc).__name__)
 
     async def run_once(self) -> tuple[SourceRunResult, ...]:
