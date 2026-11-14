@@ -269,7 +269,8 @@ class ClickHouseIntelligenceStore:
         if not source_id or not source_id.strip():
             raise ValueError("source_id is required")
         pending = await self.client.query(
-            f"SELECT count() FROM {self.dead_letters_table} FINAL "
+            f"SELECT count() FROM {self.dead_letters_table} FINAL "  # nosec B608 - fixed table property; database identifier is validated
+
             "WHERE source_id = {source_id:String} AND status = 'pending'",
             parameters={"source_id": source_id},
         )
@@ -323,7 +324,8 @@ class ClickHouseIntelligenceStore:
             raise ValueError("dead-letter limit must be between 1 and 1000")
         result = await self.client.query(
             f"SELECT failure_id, source_id, cursor_before, cursor_after, "
-            f"payload_json, attempts FROM {self.dead_letters_table} FINAL "
+            f"payload_json, attempts FROM {self.dead_letters_table} FINAL "  # nosec B608 - fixed table property; database identifier is validated
+
             "WHERE status = 'pending' ORDER BY created_at ASC LIMIT {limit:UInt32}",
             parameters={"limit": limit},
         )
@@ -356,7 +358,8 @@ class ClickHouseIntelligenceStore:
         result = await self.client.query(
             f"SELECT failure_id, source_id, cursor_before, cursor_after, "
             f"payload_json, error_type, error_message, created_at "
-            f"FROM {self.dead_letters_table} FINAL WHERE failure_id = {{failure_id:String}} "
+            f"FROM {self.dead_letters_table} FINAL WHERE failure_id = {{failure_id:String}} "  # nosec B608 - fixed table property; database identifier is validated
+
             "LIMIT 1",
             parameters={"failure_id": failure_id},
         )
