@@ -59,3 +59,12 @@ No credentials are bundled, no scraping bypass or paid API dependency is introdu
 - The worker exposes process-local counters at /metrics and a health response at /health (default port 8120). Prometheus scrape configuration, alert rules and a Grafana dashboard are included under monitoring/. These counters reset on process restart; durable operational history remains in ClickHouse.
 - Rejected-candidate markouts now retain WIATS event, narrative and source IDs. CandidateOutcomeStore.world_intelligence_attribution_report() aggregates counterfactual signed returns and missed/correct-rejection rates by those identifiers. The report explicitly labels the result observational, not causal; it is not used for strategy or risk decisions.
 - The paper scanner remains shadow-only. The optional ingestion worker, lease system, replay and metrics endpoint do not grant order execution or model-promotion authority.
+
+
+### Operator safeguards
+
+- The Redis lease namespace defaults to aitos:wiats:lease; AITOS_WORLD_INTELLIGENCE_LEASE_TTL_MS defaults to 30000 and must be at least 3000. Lease/fence keys share a Redis Cluster hash slot. If Redis is unavailable, a source iteration is isolated and reported rather than terminating the whole poll loop.
+- The ClickHouse dead-letter queue is capped at 1000 pending pages per source by default. Replayed/completed records expire after 90 days; pending records are retained until replayed or operator action. Error text is deliberately redacted to the exception class so provider URLs or credentials cannot leak into durable diagnostics.
+- A replay compares the stored before/after cursor boundary with the current source cursor. If the cursor has moved to an unrelated value, replay leaves the record pending and raises an observable conflict instead of rewinding a newer checkpoint.
+- The optional worker exposes health and Prometheus endpoints on port 8120. When using Prometheus/Grafana, enable both the observability and world-intelligence Compose profiles; the scrape target and alert rules are provisioned for the optional worker.
+- Startup replay is disabled by default. Set AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_ON_START=true only after reviewing pending pages; the replay batch is bounded by AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_LIMIT (1–1000).
