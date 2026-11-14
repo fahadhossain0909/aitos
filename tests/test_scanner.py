@@ -412,6 +412,14 @@ async def test_scanner_blocks_ltf_long_when_htf_is_bearish(event_bus):
     )
     await scanner.initialize({})
     assert await scanner.scan_symbol("BTCUSDT") is None
+    with scanner._candidate_outcomes._lock:
+        rows = scanner._candidate_outcomes._conn.execute(
+            "SELECT reason, entry_price, side FROM candidate_rejections"
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["reason"].startswith("mtf_rejected:")
+    assert rows[0]["entry_price"] > 0
+    assert rows[0]["side"] == "LONG"
     await scanner.shutdown()
 
 
