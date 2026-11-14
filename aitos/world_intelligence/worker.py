@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Sequence
 
 from aitos.world_intelligence.adapters import EventSink, IntelligenceSourceAdapter
@@ -74,12 +76,55 @@ class IntelligenceIngestionWorker:
         """Return process-local monotonic counters for scrape/health integration."""
         return dict(self._metrics)
 
+    async def _record_source_run(
+        self,
+        *,
+        source_id: str,
+        started_at: datetime,
+        status: str,
+        event_count: int,
+        cursor_before: str | None,
+        cursor_after: str | None,
+        error_type: str = "",
+        fencing_token: int = 0,
+        latency_ms: float = 0.0,
+    ) -> None:
+        recorder = getattr(self.store, "record_source_run", None)
+        if recorder is None:
+            return
+        try:
+            await recorder(
+                source_id=source_id,
+                started_at=started_at,
+                finished_at=datetime.now(timezone.utc),
+                status=status,
+                event_count=event_count,
+                cursor_before=cursor_before,
+                cursor_after=cursor_after,
+                error_type=error_type,
+                fencing_token=fencing_token,
+                latency_ms=latency_ms,
+            )
+        except Exception:
+            logger.exception("Unable to persist WIATS source-run telemetry: %s", source_id)
+
+    async def source_run_summary(self, *, lookback_hours: float = 24.0):
+        loader = getattr(self.store, "load_source_run_summary", None)
+        if loader is None:
+            return []
+        return await loader(
+            as_of=datetime.now(timezone.utc), lookback_hours=lookback_hours
+        )
+
     async def _process_source(self, adapter: IntelligenceSourceAdapter, lease=None):
         source_id = adapter.source_id
-        cursor_before = await self.store.load_cursor(source_id)
+        started_at = datetime.now(timezone.utc)
+        started_monotonic = time.monotonic()
+        cursor_before = None
         events = []
         next_cursor = None
         try:
+            cursor_before = await self.store.load_cursor(source_id)
             events, next_cursor = await adapter.poll(cursor=cursor_before)
             enriched = enrich_event_batch(
                 events,
@@ -120,12 +165,33 @@ class IntelligenceIngestionWorker:
                     source_id, next_cursor, fencing_token=lease.fencing_token
                 )
             self._metrics["pages_succeeded"] += 1
+            await self._record_source_run(
+                source_id=source_id,
+                started_at=started_at,
+                status="success",
+                event_count=len(events),
+                cursor_before=cursor_before,
+                cursor_after=next_cursor,
+                fencing_token=lease.fencing_token if lease is not None else 0,
+                latency_ms=(time.monotonic() - started_monotonic) * 1000.0,
+            )
             return SourceRunResult(source_id, len(events), next_cursor)
         except Exception as exc:
             self._metrics["pages_failed"] += 1
             if isinstance(exc, LeaseLost):
                 self._metrics["lease_lost"] += 1
             logger.exception("World-intelligence source poll failed: %s", source_id)
+            await self._record_source_run(
+                source_id=source_id,
+                started_at=started_at,
+                status="lease_lost" if isinstance(exc, LeaseLost) else "failed",
+                event_count=len(events),
+                cursor_before=cursor_before,
+                cursor_after=next_cursor,
+                error_type=type(exc).__name__,
+                fencing_token=lease.fencing_token if lease is not None else 0,
+                latency_ms=(time.monotonic() - started_monotonic) * 1000.0,
+            )
             # A provider poll failure has no immutable page to replay. Keep it
             # in logs/metrics; only persist DLQ entries after a page was fetched.
             if events or next_cursor is not None:
@@ -162,11 +228,31 @@ class IntelligenceIngestionWorker:
                         results.append(await self._process_source(adapter, lease))
                 except LeaseUnavailable:
                     self._metrics["lease_contention"] += 1
+                    now = datetime.now(timezone.utc)
+                    await self._record_source_run(
+                        source_id=adapter.source_id,
+                        started_at=now,
+                        status="lease_unavailable",
+                        event_count=0,
+                        cursor_before=None,
+                        cursor_after=None,
+                        error_type="LeaseUnavailable",
+                    )
                     results.append(
                         SourceRunResult(adapter.source_id, 0, None, "LeaseUnavailable")
                     )
                 except Exception as exc:
                     self._metrics["lease_lost"] += 1
+                    now = datetime.now(timezone.utc)
+                    await self._record_source_run(
+                        source_id=adapter.source_id,
+                        started_at=now,
+                        status="lease_lost",
+                        event_count=0,
+                        cursor_before=None,
+                        cursor_after=None,
+                        error_type=type(exc).__name__,
+                    )
                     logger.exception(
                         "Unable to acquire or validate WIATS source lease: %s",
                         adapter.source_id,
