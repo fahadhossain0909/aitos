@@ -34,11 +34,20 @@ class AsyncClickHouseClient(Protocol):
 class ClickHouseIntelligenceStore:
     """Persist normalized intelligence events and durable adapter cursors."""
 
-    def __init__(self, client: AsyncClickHouseClient, database: str = "aitos") -> None:
+    def __init__(
+        self,
+        client: AsyncClickHouseClient,
+        database: str = "aitos",
+        *,
+        max_pending_dead_letters_per_source: int = 1000,
+    ) -> None:
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", database):
             raise ValueError("database must be a simple ClickHouse identifier")
+        if not 1 <= max_pending_dead_letters_per_source <= 10000:
+            raise ValueError("max pending dead letters must be between 1 and 10000")
         self.client = client
         self.database = database
+        self.max_pending_dead_letters_per_source = max_pending_dead_letters_per_source
 
     @property
     def events_table(self) -> str:
@@ -109,6 +118,7 @@ class ClickHouseIntelligenceStore:
             )
             ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY (source_id, failure_id)
+            TTL created_at + INTERVAL 90 DAY DELETE WHERE status != 'pending'
             """
         )
 
@@ -258,6 +268,16 @@ class ClickHouseIntelligenceStore:
         """Persist a failed page for operator inspection and explicit replay."""
         if not source_id or not source_id.strip():
             raise ValueError("source_id is required")
+        pending = await self.client.query(
+            f"SELECT count() FROM {self.dead_letters_table} FINAL "
+            "WHERE source_id = {source_id:String} AND status = 'pending'",
+            parameters={"source_id": source_id},
+        )
+        pending_count = int(pending.result_rows[0][0]) if pending.result_rows else 0
+        if pending_count >= self.max_pending_dead_letters_per_source:
+            raise RuntimeError(
+                "WIATS dead-letter queue is at its per-source safety limit"
+            )
         failure_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc)
         payload = json.dumps(
