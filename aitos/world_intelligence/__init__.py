@@ -59,6 +59,15 @@ from aitos.world_intelligence.context import (
     snapshot_to_dict,
 )
 from aitos.world_intelligence.eventbus_adapter import EventBusSink
+from aitos.world_intelligence.lease import (
+    LeaseLost,
+    LeaseUnavailable,
+    RedisSourceLeaseManager,
+)
+from aitos.world_intelligence.metrics_server import (
+    render_prometheus_metrics,
+    start_metrics_server,
+)
 from aitos.world_intelligence.worker import (
     SourceRunResult,
     IntelligenceIngestionWorker,
@@ -118,4 +127,9 @@ __all__ = [
     "EventBusSink",
     "SourceRunResult",
     "IntelligenceIngestionWorker",
+    "LeaseLost",
+    "LeaseUnavailable",
+    "RedisSourceLeaseManager",
+    "render_prometheus_metrics",
+    "start_metrics_server",
 ]
