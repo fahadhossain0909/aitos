@@ -27,6 +27,10 @@ class SourceRunResult:
     error: str | None = None
 
 
+class CursorReplayConflict(RuntimeError):
+    """The durable source cursor no longer matches a replayable page boundary."""
+
+
 class IntelligenceIngestionWorker:
     def __init__(
         self,
@@ -205,11 +209,17 @@ class IntelligenceIngestionWorker:
                             },
                         )
                     await lease.assert_valid()
-                    await self.store.save_cursor(
-                        source_id,
-                        item["cursor_after"],
-                        fencing_token=lease.fencing_token,
-                    )
+                    current_cursor = await self.store.load_cursor(source_id)
+                    if current_cursor == item["cursor_before"]:
+                        await self.store.save_cursor(
+                            source_id,
+                            item["cursor_after"],
+                            fencing_token=lease.fencing_token,
+                        )
+                    elif current_cursor != item["cursor_after"]:
+                        raise CursorReplayConflict(
+                            "source cursor moved beyond or away from the dead-letter page boundary"
+                        )
                     await self.store.update_dead_letter(
                         item["failure_id"],
                         status="replayed",
@@ -250,4 +260,8 @@ class IntelligenceIngestionWorker:
         self._stop.set()
 
 
-__all__ = ["SourceRunResult", "IntelligenceIngestionWorker"]
+__all__ = [
+    "SourceRunResult",
+    "CursorReplayConflict",
+    "IntelligenceIngestionWorker",
+]
