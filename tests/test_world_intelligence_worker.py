@@ -7,6 +7,9 @@ class Store:
     def __init__(self):
         self.cursor = None
         self.schema_calls = 0
+        self.dead_letters = []
+        self.pending = []
+        self.replayed = []
 
     async def ensure_schema(self):
         self.schema_calls += 1
@@ -17,8 +20,18 @@ class Store:
     async def append_events(self, source_id, events):
         return len(events)
 
-    async def save_cursor(self, source_id, cursor):
+    async def save_cursor(self, source_id, cursor, **kwargs):
         self.cursor = cursor
+
+    async def record_dead_letter(self, **kwargs):
+        self.dead_letters.append(kwargs)
+        return "failure-1"
+
+    async def load_pending_dead_letters(self, *, limit=100):
+        return self.pending[:limit]
+
+    async def update_dead_letter(self, failure_id, *, status, attempts):
+        self.replayed.append((failure_id, status, attempts))
 
 
 class Adapter:
@@ -59,3 +72,28 @@ async def test_worker_run_once_is_non_reentrant():
     worker._running = True
     with pytest.raises(RuntimeError, match="not reentrant"):
         await worker.run_once()
+
+
+@pytest.mark.asyncio
+async def test_worker_records_failed_provider_page_in_dead_letter():
+    class FailingAdapter:
+        source_id = "test"
+
+        async def poll(self, *, cursor=None):
+            raise RuntimeError("provider unavailable")
+
+    store = Store()
+    worker = IntelligenceIngestionWorker([FailingAdapter()], store, Sink())
+    result = await worker.run_once()
+
+    assert result[0].error == "RuntimeError"
+    assert len(store.dead_letters) == 1
+    assert store.dead_letters[0]["cursor_before"] is None
+    assert worker.metrics_snapshot()["dead_letters_written"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_replay_requires_lease_manager():
+    worker = IntelligenceIngestionWorker([Adapter()], Store(), Sink())
+    with pytest.raises(RuntimeError, match="lease manager"):
+        await worker.replay_dead_letters()
