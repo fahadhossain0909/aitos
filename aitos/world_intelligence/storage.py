@@ -61,6 +61,10 @@ class ClickHouseIntelligenceStore:
     def dead_letters_table(self) -> str:
         return f"{self.database}.world_intelligence_dead_letters"
 
+    @property
+    def source_runs_table(self) -> str:
+        return f"{self.database}.world_intelligence_source_runs"
+
     async def ensure_schema(self) -> None:
         await self.client.command(
             f"""
@@ -119,6 +123,28 @@ class ClickHouseIntelligenceStore:
             ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY (source_id, failure_id)
             TTL created_at + INTERVAL 90 DAY DELETE WHERE status != 'pending'
+            """
+        )
+        await self.client.command(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self.source_runs_table}
+            (
+                run_id String,
+                source_id LowCardinality(String),
+                started_at DateTime64(3, 'UTC'),
+                finished_at DateTime64(3, 'UTC'),
+                status LowCardinality(String),
+                event_count UInt32,
+                cursor_before String,
+                cursor_after String,
+                error_type LowCardinality(String),
+                fencing_token UInt64,
+                latency_ms Float64
+            )
+            ENGINE = MergeTree
+            PARTITION BY toYYYYMM(started_at)
+            ORDER BY (source_id, started_at, run_id)
+            TTL started_at + INTERVAL 180 DAY DELETE
             """
         )
 
