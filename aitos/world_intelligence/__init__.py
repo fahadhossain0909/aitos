@@ -70,6 +70,7 @@ from aitos.world_intelligence.metrics_server import (
 )
 from aitos.world_intelligence.worker import (
     SourceRunResult,
+    CursorReplayConflict,
     IntelligenceIngestionWorker,
 )
 from aitos.world_intelligence.financial_nlp import (
@@ -126,6 +127,7 @@ __all__ = [
     "snapshot_to_dict",
     "EventBusSink",
     "SourceRunResult",
+    "CursorReplayConflict",
     "IntelligenceIngestionWorker",
     "LeaseLost",
     "LeaseUnavailable",
