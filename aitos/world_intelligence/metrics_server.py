@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Mapping
+import json
+import math
+from typing import Any, Mapping, Sequence
 
 from aiohttp import web
 
 
-def render_prometheus_metrics(metrics: Mapping[str, int]) -> str:
+def render_prometheus_metrics(
+    metrics: Mapping[str, int],
+    source_summaries: Sequence[Mapping[str, Any]] = (),
+) -> str:
     names = {
         "pages_succeeded": "aitos_wiats_pages_succeeded_total",
         "events_persisted": "aitos_wiats_events_persisted_total",
@@ -29,6 +34,21 @@ def render_prometheus_metrics(metrics: Mapping[str, int]) -> str:
                 f"{metric_name} {value}",
             )
         )
+    source_gauges = {
+        "runs": "aitos_wiats_source_runs_24h",
+        "failures": "aitos_wiats_source_failures_24h",
+        "events": "aitos_wiats_source_events_24h",
+        "lease_contention": "aitos_wiats_source_lease_contention_24h",
+        "mean_latency_ms": "aitos_wiats_source_mean_latency_ms_24h",
+    }
+    for field, metric_name in source_gauges.items():
+        lines.append(f"# TYPE {metric_name} gauge")
+        for summary in source_summaries:
+            source_id = json.dumps(str(summary.get("source_id", "unknown")))[1:-1]
+            value = float(summary.get(field, 0) or 0)
+            if not math.isfinite(value) or value < 0:
+                continue
+            lines.append(f'{metric_name}{{source_id="{source_id}"}} {value}')
     return "\n".join(lines) + "\n"
 
 
@@ -55,8 +75,11 @@ async def start_metrics_server(worker, *, host: str = "127.0.0.1", port: int = 8
         )
 
     async def metrics(_request):
+        source_summaries = await worker.source_run_summary(lookback_hours=24)
         return web.Response(
-            text=render_prometheus_metrics(worker.metrics_snapshot()),
+            text=render_prometheus_metrics(
+                worker.metrics_snapshot(), source_summaries=source_summaries
+            ),
             content_type="text/plain",
             charset="utf-8",
         )
