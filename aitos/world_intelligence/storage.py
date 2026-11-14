@@ -249,8 +249,12 @@ class ClickHouseIntelligenceStore:
             "AND first_seen_at >= toDateTime64({lower_bound:String}, 3, 'UTC') "
             "ORDER BY first_seen_at DESC LIMIT {limit:UInt32}",
             parameters={
-                "as_of": cutoff.isoformat(),
-                "lower_bound": lower_bound.isoformat(),
+                "as_of": cutoff.replace(tzinfo=None).isoformat(
+                    sep=" ", timespec="milliseconds"
+                ),
+                "lower_bound": lower_bound.replace(tzinfo=None).isoformat(
+                    sep=" ", timespec="milliseconds"
+                ),
                 "limit": limit,
             },
         )
