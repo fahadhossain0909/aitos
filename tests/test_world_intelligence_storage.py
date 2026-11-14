@@ -299,9 +299,7 @@ async def test_source_run_history_is_persisted_and_summarized():
     assert rows[0][4:6] == ("success", 7)
     assert rows[0][9:] == (8, 125.5)
 
-    client.source_summary_rows = [
-        ("gdelt", 3, 2, 1, 0, 0, 12, 40.5, "success", NOW)
-    ]
+    client.source_summary_rows = [("gdelt", 3, 2, 1, 0, 0, 12, 40.5, "success", NOW)]
     summary = await store.load_source_run_summary(as_of=NOW)
     assert summary[0]["source_id"] == "gdelt"
     assert summary[0]["runs"] == 3
