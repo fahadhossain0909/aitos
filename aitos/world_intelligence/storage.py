@@ -123,7 +123,7 @@ class ClickHouseIntelligenceStore:
             )
             ENGINE = ReplacingMergeTree(updated_at)
             ORDER BY (source_id, failure_id)
-            TTL created_at + INTERVAL 90 DAY DELETE WHERE status != 'pending'
+            TTL toDateTime(created_at) + INTERVAL 90 DAY DELETE WHERE status != 'pending'
             """
         )
         await self.client.command(
@@ -145,7 +145,7 @@ class ClickHouseIntelligenceStore:
             ENGINE = MergeTree
             PARTITION BY toYYYYMM(started_at)
             ORDER BY (source_id, started_at, run_id)
-            TTL started_at + INTERVAL 180 DAY DELETE
+            TTL toDateTime(started_at) + INTERVAL 180 DAY DELETE
             """
         )
 
