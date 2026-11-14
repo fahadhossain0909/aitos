@@ -1077,7 +1077,9 @@ class OpportunityScanner(AITOSModule):
                         entry_price=float(klines[-1].close),
                         atr=float(atr),
                         regime=str(regime),
-                        score=float(htf_diagnostics.get("ltf_score", structure_strength or 0.0)),
+                        score=float(
+                            htf_diagnostics.get("ltf_score", structure_strength or 0.0)
+                        ),
                         reason=f"mtf_rejected:{mtf_result.decision.reason}",
                     )
                     logger.info(
