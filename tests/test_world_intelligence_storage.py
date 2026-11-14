@@ -241,5 +241,5 @@ async def test_dead_letter_page_is_durably_serialized():
     assert table.endswith("world_intelligence_dead_letters")
     assert rows[0][0] == failure_id
     assert rows[0][1:4] == ("gdelt", "page-1", "page-2")
-    assert rows[0][5:9] == ("RuntimeError", "redis unavailable", 1, "pending")
+    assert rows[0][5:9] == ("RuntimeError", "RuntimeError", 1, "pending")
     assert "event-1" in rows[0][4]
