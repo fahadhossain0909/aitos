@@ -45,6 +45,7 @@ class FakeAsyncClickHouse:
         self.fail_events = False
         self.fail_cursor = False
         self.cursor = None
+        self.last_query = ""
 
     async def command(self, query):
         self.commands.append(query)
@@ -60,6 +61,7 @@ class FakeAsyncClickHouse:
         self.inserts.append((table, data, column_names))
 
     async def query(self, query, parameters=None):
+        self.last_query = query
         return FakeResult([(self.cursor,)] if self.cursor is not None else [])
 
 
@@ -67,7 +69,7 @@ class FakeAsyncClickHouse:
 async def test_schema_creates_event_and_cursor_tables():
     client = FakeAsyncClickHouse()
     await ClickHouseIntelligenceStore(client).ensure_schema()
-    assert len(client.commands) == 2
+    assert len(client.commands) == 4
     assert "ReplacingMergeTree" in client.commands[0]
     assert "world_intelligence_cursors" in client.commands[1]
 
@@ -81,6 +83,9 @@ async def test_page_persists_events_before_cursor_and_loads_checkpoint():
     assert client.inserts[0][0].endswith("world_intelligence_events")
     assert client.inserts[1][0].endswith("world_intelligence_cursors")
     assert await store.load_cursor("gdelt") == "page-2"
+    assert client.inserts[1][2] == [
+        "source_id", "cursor", "fencing_token", "updated_at"
+    ]
 
 
 @pytest.mark.asyncio
@@ -206,3 +211,35 @@ async def test_load_recent_events_rejects_naive_as_of():
     store = ClickHouseIntelligenceStore(FakeAsyncClickHouse())
     with pytest.raises(ValueError, match="timezone-aware"):
         await store.load_recent_events(as_of=datetime(2026, 11, 13, 12, 0))
+
+
+@pytest.mark.asyncio
+async def test_fenced_cursor_checkpoint_uses_monotonic_generation():
+    client = FakeAsyncClickHouse()
+    store = ClickHouseIntelligenceStore(client)
+    await store.save_cursor("gdelt", "newer", fencing_token=9)
+    assert client.inserts[-1][1][0][2] == 9
+    with pytest.raises(ValueError, match="fencing_token"):
+        await store.save_cursor("gdelt", "invalid", fencing_token=-1)
+
+    await store.load_cursor("gdelt")
+    assert "argMax(cursor, (fencing_token, updated_at))" in client.last_query
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_page_is_durably_serialized():
+    client = FakeAsyncClickHouse()
+    store = ClickHouseIntelligenceStore(client)
+    failure_id = await store.record_dead_letter(
+        source_id="gdelt",
+        cursor_before="page-1",
+        cursor_after="page-2",
+        events=[make_event()],
+        error=RuntimeError("redis unavailable"),
+    )
+    table, rows, columns = client.inserts[-1]
+    assert table.endswith("world_intelligence_dead_letters")
+    assert rows[0][0] == failure_id
+    assert rows[0][1:4] == ("gdelt", "page-1", "page-2")
+    assert rows[0][5:9] == ("RuntimeError", "redis unavailable", 1, "pending")
+    assert "event-1" in rows[0][4]
