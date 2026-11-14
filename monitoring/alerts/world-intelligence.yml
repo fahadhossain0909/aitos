@@ -40,3 +40,13 @@ groups:
         annotations:
           summary: "WIATS source lease was lost"
           description: "A worker lost its Redis source lease. Check Redis availability and worker pause/CPU pressure; fencing prevents stale cursor generations from superseding newer ones."
+
+      - alert: AITOSWorldIntelligenceSourceFailures
+        expr: aitos_wiats_source_failures_24h >= 3
+        for: 2m
+        labels:
+          severity: warning
+          service: wiats
+        annotations:
+          summary: "A WIATS source has repeated ingestion failures"
+          description: "Inspect the per-source /sources endpoint and provider configuration for this source_id."
