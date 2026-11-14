@@ -317,8 +317,8 @@ def test_crashed_worker_reservation_expires_after_lease(tmp_path):
 
 def test_reservation_owner_can_renew_lease_but_other_owner_cannot(tmp_path):
     path = tmp_path / "renewable-reservation.sqlite3"
-    first = CapitalReservation(path=path, lease_seconds=0.05)
-    second = CapitalReservation(path=path, lease_seconds=0.05)
+    first = CapitalReservation(path=path, lease_seconds=5.0)
+    second = CapitalReservation(path=path, lease_seconds=5.0)
     try:
         assert first.reserve(
             Reservation("BTCUSDT", 50.0, 5.0),
