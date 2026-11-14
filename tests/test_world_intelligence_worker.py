@@ -87,9 +87,8 @@ async def test_worker_records_failed_provider_page_in_dead_letter():
     result = await worker.run_once()
 
     assert result[0].error == "RuntimeError"
-    assert len(store.dead_letters) == 1
-    assert store.dead_letters[0]["cursor_before"] is None
-    assert worker.metrics_snapshot()["dead_letters_written"] == 1
+    assert store.dead_letters == []
+    assert worker.metrics_snapshot()["dead_letters_written"] == 0
 
 
 @pytest.mark.asyncio
@@ -97,3 +96,19 @@ async def test_dead_letter_replay_requires_lease_manager():
     worker = IntelligenceIngestionWorker([Adapter()], Store(), Sink())
     with pytest.raises(RuntimeError, match="lease manager"):
         await worker.replay_dead_letters()
+
+
+@pytest.mark.asyncio
+async def test_worker_dead_letters_a_fetched_page_when_publish_fails():
+    class FailingSink:
+        async def publish(self, topic, payload):
+            raise RuntimeError("redis unavailable")
+
+    store = Store()
+    worker = IntelligenceIngestionWorker([Adapter()], store, FailingSink())
+    result = await worker.run_once()
+
+    assert result[0].error == "RuntimeError"
+    assert len(store.dead_letters) == 1
+    assert store.dead_letters[0]["cursor_after"] == "next"
+    assert worker.metrics_snapshot()["dead_letters_written"] == 1
