@@ -18,6 +18,7 @@ from aitos.eventbus.factory import create_event_bus
 from aitos.world_intelligence.adapters import IntelligenceSourceAdapter
 from aitos.world_intelligence.eventbus_adapter import EventBusSink
 from aitos.world_intelligence.licensed_api import LicensedJSONFeedAdapter
+from aitos.world_intelligence.lease import RedisSourceLeaseManager
 from aitos.world_intelligence.providers import (
     FREDSeriesAdapter,
     GDELTDocAdapter,
@@ -213,6 +214,11 @@ async def _run() -> None:
             os.getenv("AITOS_WORLD_INTELLIGENCE_POLL_SECONDS", "30")
         ),
         publisher_groups=publisher_groups,
+        lease_manager=RedisSourceLeaseManager(
+            redis_client,
+            namespace=os.getenv("AITOS_WORLD_INTELLIGENCE_LEASE_NAMESPACE", "aitos:wiats:lease"),
+            ttl_ms=int(os.getenv("AITOS_WORLD_INTELLIGENCE_LEASE_TTL_MS", "30000")),
+        ),
     )
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGINT, signal.SIGTERM):
@@ -222,6 +228,10 @@ async def _run() -> None:
             pass
     try:
         await event_bus.initialize({})
+        if os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_ON_START", "false").lower() == "true":
+            limit = int(os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_LIMIT", "100"))
+            replayed = await worker.replay_dead_letters(limit=limit)
+            logger.info("WIATS dead-letter replay completed: %s page(s)", replayed)
         await worker.run_forever()
     finally:
         worker.stop()
