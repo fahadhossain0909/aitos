@@ -200,3 +200,54 @@ def test_decision_ledger_snapshot_reports_resolution_and_provenance_counts(tmp_p
     assert snapshot["by_type"]["GATE"] == {"count": 1, "resolved": 1}
     assert snapshot["by_type"]["REJECTION"] == {"count": 2, "resolved": 1}
     assert snapshot["by_provenance"] == {"COUNTERFACTUAL_REJECTED_CANDIDATE_MARKOUT": 2}
+
+
+def test_executed_trade_world_intelligence_lineage_report(tmp_path):
+    ledger = DecisionOutcomeLedger(tmp_path / "wiats-entry-attribution.sqlite3")
+    entity_id = "trade-attribution-1"
+    ledger.record_decision(
+        "trade-attribution-1:ENTRY",
+        entity_id=entity_id,
+        symbol="BTCUSDT",
+        side="LONG",
+        decision_type="ENTRY",
+        accepted=True,
+        reason="entry filled",
+        payload={
+            "candidate_id": "candidate-1",
+            "world_intelligence_shadow": {
+                "event_ids": ["event-1"],
+                "narrative_ids": ["narrative-1"],
+                "source_ids": ["source-sec"],
+            },
+        },
+    )
+    ledger.resolve_entity(
+        entity_id,
+        outcome_value=0.025,
+        outcome_at="2026-11-14T12:15:00+00:00",
+        outcome={
+            "provenance": "EXECUTED_TRADE_NET_OUTCOME",
+            "net_pnl_usd": 2.5,
+            "fees_paid_usd": 0.2,
+            "funding_pnl_usd": 0.1,
+        },
+        outcome_provenance="EXECUTED_TRADE_NET_OUTCOME",
+    )
+
+    report = ledger.world_intelligence_attribution_report()
+    assert report["scope"] == "executed_trade_outcomes"
+    assert report["interpretation"] == "observational_not_causal"
+    assert report["world_intelligence_attributed_trades"] == 1
+    event = report["dimensions"]["event"]["event-1"]
+    assert event["trades"] == 1
+    assert event["mean_net_return_pct"] == pytest.approx(2.5)
+    assert event["mean_net_pnl_usd"] == pytest.approx(2.5)
+    assert event["mean_fees_paid_usd"] == pytest.approx(0.2)
+    assert event["mean_funding_pnl_usd"] == pytest.approx(0.1)
+
+
+def test_executed_trade_world_intelligence_report_limit_is_bounded(tmp_path):
+    ledger = DecisionOutcomeLedger(tmp_path / "wiats-limit.sqlite3")
+    with pytest.raises(ValueError, match="attribution limit"):
+        ledger.world_intelligence_attribution_report(limit=0)
