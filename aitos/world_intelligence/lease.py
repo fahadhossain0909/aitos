@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator
+
+logger = logging.getLogger(__name__)
 
 
 _ACQUIRE = """
@@ -81,7 +84,11 @@ class RedisSourceLease:
                 await self._heartbeat
             except asyncio.CancelledError:
                 pass
-        await self.redis.eval(_RELEASE, 1, self.key, self.owner)
+        try:
+            await self.redis.eval(_RELEASE, 1, self.key, self.owner)
+        except Exception:
+            # TTL expiry is the safe fallback if Redis is unavailable during cleanup.
+            logger.warning("Unable to release WIATS lease; it will expire by TTL")
 
 
 class RedisSourceLeaseManager:
@@ -101,8 +108,8 @@ class RedisSourceLeaseManager:
             raise ValueError("source_id is required")
         digest = hashlib.sha256(source_id.encode("utf-8")).hexdigest()
         return (
-            f"{self.namespace}:{digest}",
-            f"{self.namespace}:fence:{digest}",
+            f"{self.namespace}:{{{digest}}}:lease",
+            f"{self.namespace}:{{{digest}}}:fence",
         )
 
     @asynccontextmanager
