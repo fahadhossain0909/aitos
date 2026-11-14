@@ -177,7 +177,11 @@ class ClickHouseIntelligenceStore:
             raise ValueError("source_id is required")
         if cursor is not None and not isinstance(cursor, str):
             raise ValueError("cursor must be a string or None")
-        if isinstance(fencing_token, bool) or not isinstance(fencing_token, int) or fencing_token < 0:
+        if (
+            isinstance(fencing_token, bool)
+            or not isinstance(fencing_token, int)
+            or fencing_token < 0
+        ):
             raise ValueError("fencing_token must be a non-negative integer")
         await self.client.insert(
             self.cursors_table,
@@ -261,19 +265,40 @@ class ClickHouseIntelligenceStore:
         )
         await self.client.insert(
             self.dead_letters_table,
-            [(
-                failure_id, source_id, cursor_before or "", cursor_after or "",
-                payload, type(error).__name__, type(error).__name__, 1, "pending", now, now,
-            )],
+            [
+                (
+                    failure_id,
+                    source_id,
+                    cursor_before or "",
+                    cursor_after or "",
+                    payload,
+                    type(error).__name__,
+                    type(error).__name__,
+                    1,
+                    "pending",
+                    now,
+                    now,
+                )
+            ],
             column_names=[
-                "failure_id", "source_id", "cursor_before", "cursor_after",
-                "payload_json", "error_type", "error_message", "attempts",
-                "status", "created_at", "updated_at",
+                "failure_id",
+                "source_id",
+                "cursor_before",
+                "cursor_after",
+                "payload_json",
+                "error_type",
+                "error_message",
+                "attempts",
+                "status",
+                "created_at",
+                "updated_at",
             ],
         )
         return failure_id
 
-    async def load_pending_dead_letters(self, *, limit: int = 100) -> list[dict[str, Any]]:
+    async def load_pending_dead_letters(
+        self, *, limit: int = 100
+    ) -> list[dict[str, Any]]:
         if not 1 <= limit <= 1000:
             raise ValueError("dead-letter limit must be between 1 and 1000")
         result = await self.client.query(
@@ -289,11 +314,16 @@ class ClickHouseIntelligenceStore:
                 events = [IntelligenceEvent.from_dict(item) for item in payload]
             except (TypeError, ValueError, KeyError, json.JSONDecodeError):
                 continue
-            rows.append({
-                "failure_id": row[0], "source_id": row[1],
-                "cursor_before": row[2] or None, "cursor_after": row[3] or None,
-                "events": events, "attempts": int(row[5]),
-            })
+            rows.append(
+                {
+                    "failure_id": row[0],
+                    "source_id": row[1],
+                    "cursor_before": row[2] or None,
+                    "cursor_after": row[3] or None,
+                    "events": events,
+                    "attempts": int(row[5]),
+                }
+            )
         return rows
 
     async def update_dead_letter(
@@ -315,10 +345,21 @@ class ClickHouseIntelligenceStore:
         row = result.result_rows[0]
         await self.client.insert(
             self.dead_letters_table,
-            [(
-                row[0], row[1], row[2], row[3], row[4], row[5], row[6],
-                attempts, status, row[7], datetime.now(timezone.utc),
-            )],
+            [
+                (
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4],
+                    row[5],
+                    row[6],
+                    attempts,
+                    status,
+                    row[7],
+                    datetime.now(timezone.utc),
+                )
+            ],
             column_names=[
                 "failure_id", "source_id", "cursor_before", "cursor_after",
                 "payload_json", "error_type", "error_message", "attempts",
