@@ -1,6 +1,36 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 
+from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.worker import IntelligenceIngestionWorker
+
+
+NOW = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
+
+
+def make_event():
+    source = SourceEvidence(
+        source_id="test",
+        source_kind="news",
+        uri="https://example.test/story",
+        published_at=NOW - timedelta(seconds=1),
+        first_seen_at=NOW,
+        reliability=0.8,
+    )
+    return IntelligenceEvent(
+        event_id="event-1",
+        event_type="news",
+        title="Test event",
+        entities=("BTC",),
+        published_at=source.published_at,
+        first_seen_at=NOW,
+        source=source,
+        sentiment=0.0,
+        severity=0.2,
+        novelty=0.1,
+        confidence=0.5,
+    )
 
 
 class Store:
@@ -108,12 +138,18 @@ async def test_dead_letter_replay_requires_lease_manager():
 
 @pytest.mark.asyncio
 async def test_worker_dead_letters_a_fetched_page_when_publish_fails():
+    class FailingAdapter:
+        source_id = "test"
+
+        async def poll(self, *, cursor=None):
+            return [make_event()], "next"
+
     class FailingSink:
         async def publish(self, topic, payload):
             raise RuntimeError("redis unavailable")
 
     store = Store()
-    worker = IntelligenceIngestionWorker([Adapter()], store, FailingSink())
+    worker = IntelligenceIngestionWorker([FailingAdapter()], store, FailingSink())
     result = await worker.run_once()
 
     assert result[0].error == "RuntimeError"
