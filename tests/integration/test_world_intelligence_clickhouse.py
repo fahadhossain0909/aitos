@@ -59,5 +59,27 @@ async def test_clickhouse_event_and_cursor_round_trip():
         )
         assert cursor == "cursor-round-trip"
         assert rows.result_rows[0][0] == 1
+
+        # A delayed prior owner must not replace a newer fenced checkpoint.
+        await store.save_cursor(source_id, "cursor-newer", fencing_token=20)
+        await store.save_cursor(source_id, "cursor-stale", fencing_token=19)
+        assert await store.load_cursor(source_id) == "cursor-newer"
+
+        failure_id = await store.record_dead_letter(
+            source_id=source_id,
+            cursor_before="cursor-newer",
+            cursor_after="cursor-after-replay",
+            events=[event],
+            error=RuntimeError("redis unavailable"),
+        )
+        pending = await store.load_pending_dead_letters(limit=10)
+        matching = [item for item in pending if item["failure_id"] == failure_id]
+        assert len(matching) == 1
+        assert matching[0]["events"][0].event_id == event.event_id
+        await store.update_dead_letter(
+            failure_id, status="replayed", attempts=2
+        )
+        pending = await store.load_pending_dead_letters(limit=10)
+        assert failure_id not in {item["failure_id"] for item in pending}
     finally:
         await client.close()
