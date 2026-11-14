@@ -268,6 +268,99 @@ class DecisionOutcomeLedger:
             for row in rows
         )
 
+    def world_intelligence_attribution_report(
+        self, *, limit: int = 5000
+    ) -> dict[str, Any]:
+        """Aggregate executed trade outcomes by WIATS event/narrative/source lineage.
+
+        The result is observational attribution, not causal proof or a strategy input.
+        """
+        if not 1 <= limit <= 20000:
+            raise ValueError("attribution limit must be between 1 and 20000")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT payload_json, outcome_value, outcome_json
+                FROM decision_outcomes
+                WHERE decision_type = 'ENTRY'
+                  AND accepted = 1
+                  AND outcome_value IS NOT NULL
+                  AND outcome_provenance = 'EXECUTED_TRADE_NET_OUTCOME'
+                ORDER BY outcome_at ASC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+
+        dimensions = {"event": {}, "narrative": {}, "source": {}}
+        attributed_trades = 0
+        for row in rows:
+            try:
+                payload = json.loads(row["payload_json"])
+                outcome = json.loads(row["outcome_json"] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+            shadow = payload.get("world_intelligence_shadow") or {}
+            references = {
+                "event": shadow.get("event_ids") or [],
+                "narrative": shadow.get("narrative_ids") or [],
+                "source": shadow.get("source_ids") or [],
+            }
+            if any(references.values()):
+                attributed_trades += 1
+            return_pct = float(row["outcome_value"]) * 100.0
+            net_pnl = float(outcome.get("net_pnl_usd") or 0.0)
+            fees = float(outcome.get("fees_paid_usd") or 0.0)
+            funding = float(outcome.get("funding_pnl_usd") or 0.0)
+            for dimension, identifiers in references.items():
+                for identifier in set(str(value) for value in identifiers if value):
+                    bucket = dimensions[dimension].setdefault(
+                        identifier,
+                        {
+                            "trades": 0,
+                            "return_sum_pct": 0.0,
+                            "net_pnl_sum_usd": 0.0,
+                            "fees_sum_usd": 0.0,
+                            "funding_sum_usd": 0.0,
+                            "wins": 0,
+                        },
+                    )
+                    bucket["trades"] += 1
+                    bucket["return_sum_pct"] += return_pct
+                    bucket["net_pnl_sum_usd"] += net_pnl
+                    bucket["fees_sum_usd"] += fees
+                    bucket["funding_sum_usd"] += funding
+                    bucket["wins"] += int(return_pct > 0.0)
+
+        summaries = {}
+        for dimension, buckets in dimensions.items():
+            summaries[dimension] = {}
+            for identifier, bucket in buckets.items():
+                trades = bucket["trades"]
+                summaries[dimension][identifier] = {
+                    "trades": trades,
+                    "mean_net_return_pct": round(
+                        bucket["return_sum_pct"] / trades, 6
+                    ),
+                    "win_rate": round(bucket["wins"] / trades, 4),
+                    "mean_net_pnl_usd": round(
+                        bucket["net_pnl_sum_usd"] / trades, 6
+                    ),
+                    "mean_fees_paid_usd": round(
+                        bucket["fees_sum_usd"] / trades, 6
+                    ),
+                    "mean_funding_pnl_usd": round(
+                        bucket["funding_sum_usd"] / trades, 6
+                    ),
+                }
+        return {
+            "scope": "executed_trade_outcomes",
+            "interpretation": "observational_not_causal",
+            "entry_decisions_scanned": len(rows),
+            "world_intelligence_attributed_trades": attributed_trades,
+            "dimensions": summaries,
+        }
+
     def snapshot(self) -> dict[str, Any]:
         """Return bounded aggregate counts for runtime health and canary evidence."""
         with self._connect() as connection:
