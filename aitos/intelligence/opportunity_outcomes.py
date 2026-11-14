@@ -94,6 +94,9 @@ class CandidateOutcomeStore:
                     else rejection_id
                 )
             ),
+            "world_intelligence_shadow": dict(
+                getattr(candidate, "world_intelligence_shadow", {}) or {}
+            ),
         }
         with self._lock:
             self._conn.execute(
@@ -218,9 +221,90 @@ class CandidateOutcomeStore:
                     "signed_return_pct": row["signed_return_pct"],
                     "mae_pct": row["mae_pct"],
                     "mfe_pct": row["mfe_pct"],
+                    "world_intelligence": {
+                        "event_ids": list(
+                            (features.get("world_intelligence_shadow") or {}).get(
+                                "event_ids", []
+                            )
+                        ),
+                        "narrative_ids": list(
+                            (features.get("world_intelligence_shadow") or {}).get(
+                                "narrative_ids", []
+                            )
+                        ),
+                        "source_ids": list(
+                            (features.get("world_intelligence_shadow") or {}).get(
+                                "source_ids", []
+                            )
+                        ),
+                    },
                 }
             )
         return tuple(results)
+
+
+    def world_intelligence_attribution_report(
+        self, *, horizon_seconds: int = 900, limit: int = 5000
+    ) -> dict[str, Any]:
+        """Summarize rejected-candidate markouts by attached event lineage.
+
+        This is observational attribution, not causal proof or a trading signal.
+        """
+        rows = self.completed_markouts(
+            horizon_seconds=horizon_seconds, limit=limit
+        )
+        dimensions = {
+            "event": {},
+            "narrative": {},
+            "source": {},
+        }
+        attributed_samples = 0
+        for row in rows:
+            lineage = row.get("world_intelligence") or {}
+            refs = {
+                "event": lineage.get("event_ids") or [],
+                "narrative": lineage.get("narrative_ids") or [],
+                "source": lineage.get("source_ids") or [],
+            }
+            if any(refs.values()):
+                attributed_samples += 1
+            for dimension, identifiers in refs.items():
+                for identifier in set(str(value) for value in identifiers if value):
+                    bucket = dimensions[dimension].setdefault(
+                        identifier, {"samples": 0, "signed_return_sum": 0.0,
+                                     "missed": 0, "correctly_rejected": 0}
+                    )
+                    signed_return = float(row["signed_return_pct"])
+                    bucket["samples"] += 1
+                    bucket["signed_return_sum"] += signed_return
+                    bucket["missed"] += int(signed_return > 0.1)
+                    bucket["correctly_rejected"] += int(signed_return < -0.1)
+
+        summaries = {}
+        for dimension, buckets in dimensions.items():
+            summaries[dimension] = {}
+            for identifier, bucket in buckets.items():
+                samples = bucket["samples"]
+                summaries[dimension][identifier] = {
+                    "samples": samples,
+                    "mean_signed_return_pct": round(
+                        bucket["signed_return_sum"] / samples, 6
+                    ),
+                    "missed_opportunity_rate": round(
+                        bucket["missed"] / samples, 4
+                    ),
+                    "correct_rejection_rate": round(
+                        bucket["correctly_rejected"] / samples, 4
+                    ),
+                }
+        return {
+            "scope": "rejected_candidate_counterfactuals",
+            "interpretation": "observational_not_causal",
+            "horizon_seconds": horizon_seconds,
+            "markout_samples": len(rows),
+            "world_intelligence_attributed_samples": attributed_samples,
+            "dimensions": summaries,
+        }
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -264,6 +348,9 @@ class CandidateOutcomeStore:
             "pending_markouts": pending,
             "markouts_recorded": markouts,
             "horizon_summary": horizon_summary,
+            "world_intelligence_attribution": self.world_intelligence_attribution_report(
+                horizon_seconds=900
+            ),
         }
 
     def close(self) -> None:
