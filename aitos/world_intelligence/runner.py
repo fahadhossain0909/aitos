@@ -217,7 +217,9 @@ async def _run() -> None:
         publisher_groups=publisher_groups,
         lease_manager=RedisSourceLeaseManager(
             redis_client,
-            namespace=os.getenv("AITOS_WORLD_INTELLIGENCE_LEASE_NAMESPACE", "aitos:wiats:lease"),
+            namespace=os.getenv(
+                "AITOS_WORLD_INTELLIGENCE_LEASE_NAMESPACE", "aitos:wiats:lease"
+            ),
             ttl_ms=int(os.getenv("AITOS_WORLD_INTELLIGENCE_LEASE_TTL_MS", "30000")),
         ),
     )
@@ -230,13 +232,19 @@ async def _run() -> None:
     metrics_runner = None
     try:
         await event_bus.initialize({})
-        if os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_ENABLED", "true").lower() == "true":
+        if (
+            os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_ENABLED", "true").lower()
+            == "true"
+        ):
             metrics_runner = await start_metrics_server(
                 worker,
                 host=os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_HOST", "0.0.0.0"),
                 port=int(os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_PORT", "8120")),
             )
-        if os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_ON_START", "false").lower() == "true":
+        if (
+            os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_ON_START", "false").lower()
+            == "true"
+        ):
             limit = int(os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_LIMIT", "100"))
             replayed = await worker.replay_dead_letters(limit=limit)
             logger.info("WIATS dead-letter replay completed: %s page(s)", replayed)
