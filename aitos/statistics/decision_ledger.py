@@ -407,4 +407,7 @@ class DecisionOutcomeLedger:
                 str(row["outcome_provenance"]): int(row["count"])
                 for row in by_provenance
             },
+            "world_intelligence_attribution": (
+                self.world_intelligence_attribution_report()
+            ),
         }
