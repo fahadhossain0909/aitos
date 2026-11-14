@@ -232,15 +232,11 @@ async def _run() -> None:
     metrics_runner = None
     try:
         await event_bus.initialize({})
-        if (
-            os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_ENABLED", "true").lower()
-            == "true"
-        ):
-            metrics_runner = await start_metrics_server(
-                worker,
-                host=os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_HOST", "0.0.0.0"),
-                port=int(os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_PORT", "8120")),
-            )
+        metrics_runner = await start_metrics_server(
+            worker,
+            host=os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_HOST", "0.0.0.0"),
+            port=int(os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_PORT", "8120")),
+        )
         if (
             os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_ON_START", "false").lower()
             == "true"
