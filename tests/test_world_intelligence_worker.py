@@ -187,3 +187,18 @@ async def test_dead_letter_replay_never_rewinds_an_advanced_cursor():
     assert await worker.replay_dead_letters() == 0
     assert store.cursor == "cursor-3"
     assert store.replayed == [("stale-failure", "pending", 2)]
+
+
+@pytest.mark.asyncio
+async def test_worker_survives_redis_lease_service_outage():
+    class BrokenLeaseManager:
+        def hold(self, source_id):
+            raise RuntimeError("redis connection unavailable")
+
+    worker = IntelligenceIngestionWorker(
+        [Adapter()], Store(), Sink(), lease_manager=BrokenLeaseManager()
+    )
+    result = await worker.run_once()
+
+    assert result[0].error == "RuntimeError"
+    assert worker.metrics_snapshot()["lease_lost"] == 1
