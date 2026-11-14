@@ -76,9 +76,7 @@ async def test_clickhouse_event_and_cursor_round_trip():
         matching = [item for item in pending if item["failure_id"] == failure_id]
         assert len(matching) == 1
         assert matching[0]["events"][0].event_id == event.event_id
-        await store.update_dead_letter(
-            failure_id, status="replayed", attempts=2
-        )
+        await store.update_dead_letter(failure_id, status="replayed", attempts=2)
         pending = await store.load_pending_dead_letters(limit=10)
         assert failure_id not in {item["failure_id"] for item in pending}
     finally:
