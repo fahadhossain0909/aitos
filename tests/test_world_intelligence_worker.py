@@ -131,14 +131,16 @@ async def test_dead_letter_replay_saves_fenced_cursor_and_marks_page_replayed():
         return None
 
     store = Store()
-    store.pending = [{
-        "failure_id": "failure-1",
-        "source_id": "test",
-        "cursor_before": "cursor-1",
-        "cursor_after": "cursor-2",
-        "events": [],
-        "attempts": 1,
-    }]
+    store.pending = [
+        {
+            "failure_id": "failure-1",
+            "source_id": "test",
+            "cursor_before": "cursor-1",
+            "cursor_after": "cursor-2",
+            "events": [],
+            "attempts": 1,
+        }
+    ]
     worker = IntelligenceIngestionWorker(
         [Adapter()], store, Sink(), lease_manager=LeaseManager()
     )
