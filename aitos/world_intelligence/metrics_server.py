@@ -46,6 +46,14 @@ async def start_metrics_server(worker, *, host: str = "127.0.0.1", port: int = 8
             }
         )
 
+    async def sources(_request):
+        return web.json_response(
+            {
+                "lookback_hours": 24,
+                "sources": await worker.source_run_summary(lookback_hours=24),
+            }
+        )
+
     async def metrics(_request):
         return web.Response(
             text=render_prometheus_metrics(worker.metrics_snapshot()),
@@ -56,6 +64,7 @@ async def start_metrics_server(worker, *, host: str = "127.0.0.1", port: int = 8
     app = web.Application()
     app.router.add_get("/health", health)
     app.router.add_get("/metrics", metrics)
+    app.router.add_get("/sources", sources)
     runner = web.AppRunner(app, access_log=None)
     await runner.setup()
     site = web.TCPSite(runner, host, int(port))
