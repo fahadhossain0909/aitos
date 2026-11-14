@@ -255,9 +255,7 @@ async def test_dead_letter_page_is_durably_serialized():
 async def test_dead_letter_queue_enforces_per_source_pending_limit():
     client = FakeAsyncClickHouse()
     client.pending_count = 1
-    store = ClickHouseIntelligenceStore(
-        client, max_pending_dead_letters_per_source=1
-    )
+    store = ClickHouseIntelligenceStore(client, max_pending_dead_letters_per_source=1)
     with pytest.raises(RuntimeError, match="safety limit"):
         await store.record_dead_letter(
             source_id="gdelt",
