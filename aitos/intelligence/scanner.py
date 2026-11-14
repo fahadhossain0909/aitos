@@ -1071,6 +1071,15 @@ class OpportunityScanner(AITOSModule):
                         reason="mtf_rejected",
                         details={"mtf_reason": mtf_result.decision.reason},
                     )
+                    self._record_terminal_scan_rejection(
+                        symbol=symbol,
+                        direction=direction,
+                        entry_price=float(klines[-1].close),
+                        atr=float(atr),
+                        regime=str(regime),
+                        score=float(htf_diagnostics.get("ltf_score", structure_strength or 0.0)),
+                        reason=f"mtf_rejected:{mtf_result.decision.reason}",
+                    )
                     logger.info(
                         "entry rejected by six-timeframe adaptive policy",
                         extra={
@@ -1104,6 +1113,15 @@ class OpportunityScanner(AITOSModule):
                     stage="scanner_terminal",
                     accepted=False,
                     reason="mtf_analysis_error",
+                )
+                self._record_terminal_scan_rejection(
+                    symbol=symbol,
+                    direction=direction,
+                    entry_price=float(klines[-1].close),
+                    atr=float(atr),
+                    regime=str(regime),
+                    score=float(structure_strength or 0.0),
+                    reason=f"mtf_analysis_error:{type(exc).__name__}",
                 )
                 logger.warning(
                     "entry blocked: multi-timeframe confirmation unavailable: %s",
@@ -1970,6 +1988,39 @@ class OpportunityScanner(AITOSModule):
     @property
     def target_opportunities(self) -> int:
         return self._top_n
+
+    def _record_terminal_scan_rejection(
+        self,
+        *,
+        symbol: str,
+        direction: TradeSide,
+        entry_price: float,
+        atr: float,
+        regime: str,
+        score: float,
+        reason: str,
+    ) -> None:
+        """Persist a rejected directional setup even when no candidate is emitted.
+
+        MTF is a terminal scanner gate. Without this synthetic, evidence-only
+        candidate, the rejected setup never enters counterfactual markout or
+        decision attribution because scan_symbol() returns None before the
+        normal ScanCandidate construction path.
+        """
+        candidate = ScanCandidate(
+            symbol=symbol,
+            direction=direction,
+            composite_score=max(0.0, min(100.0, float(score))),
+            component_scores={},
+            component_availability={},
+            rationale=[f"terminal_scanner_rejection={reason}"],
+            entry_price=float(entry_price),
+            atr=max(0.0, float(atr)),
+            regime=str(regime),
+            scanned_at=_utc_now_iso(),
+            trace_id=_ACTIVE_SCAN_TRACE_ID.get() or None,
+        )
+        self.record_candidate_rejection(candidate, reason)
 
     def record_candidate_rejection(self, candidate: ScanCandidate, reason: str) -> None:
         self._financial_ml.reject_candidate(candidate.candidate_id, reason)
