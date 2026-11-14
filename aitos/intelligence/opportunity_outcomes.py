@@ -242,7 +242,6 @@ class CandidateOutcomeStore:
             )
         return tuple(results)
 
-
     def world_intelligence_attribution_report(
         self, *, horizon_seconds: int = 900, limit: int = 5000
     ) -> dict[str, Any]:
@@ -250,9 +249,7 @@ class CandidateOutcomeStore:
 
         This is observational attribution, not causal proof or a trading signal.
         """
-        rows = self.completed_markouts(
-            horizon_seconds=horizon_seconds, limit=limit
-        )
+        rows = self.completed_markouts(horizon_seconds=horizon_seconds, limit=limit)
         dimensions = {
             "event": {},
             "narrative": {},
@@ -271,8 +268,13 @@ class CandidateOutcomeStore:
             for dimension, identifiers in refs.items():
                 for identifier in set(str(value) for value in identifiers if value):
                     bucket = dimensions[dimension].setdefault(
-                        identifier, {"samples": 0, "signed_return_sum": 0.0,
-                                     "missed": 0, "correctly_rejected": 0}
+                        identifier,
+                        {
+                            "samples": 0,
+                            "signed_return_sum": 0.0,
+                            "missed": 0,
+                            "correctly_rejected": 0,
+                        },
                     )
                     signed_return = float(row["signed_return_pct"])
                     bucket["samples"] += 1
@@ -290,9 +292,7 @@ class CandidateOutcomeStore:
                     "mean_signed_return_pct": round(
                         bucket["signed_return_sum"] / samples, 6
                     ),
-                    "missed_opportunity_rate": round(
-                        bucket["missed"] / samples, 4
-                    ),
+                    "missed_opportunity_rate": round(bucket["missed"] / samples, 4),
                     "correct_rejection_rate": round(
                         bucket["correctly_rejected"] / samples, 4
                     ),
