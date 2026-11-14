@@ -131,6 +131,7 @@ async def test_dead_letter_replay_saves_fenced_cursor_and_marks_page_replayed():
         return None
 
     store = Store()
+    store.cursor = "cursor-1"
     store.pending = [
         {
             "failure_id": "failure-1",
@@ -149,3 +150,40 @@ async def test_dead_letter_replay_saves_fenced_cursor_and_marks_page_replayed():
     assert store.cursor == "cursor-2"
     assert store.replayed == [("failure-1", "replayed", 2)]
     assert worker.metrics_snapshot()["dead_letters_replayed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_replay_never_rewinds_an_advanced_cursor():
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    class LeaseManager:
+        @asynccontextmanager
+        async def hold(self, source_id):
+            yield SimpleNamespace(
+                fencing_token=13,
+                assert_valid=lambda: _valid_lease(),
+            )
+
+    async def _valid_lease():
+        return None
+
+    store = Store()
+    store.cursor = "cursor-3"
+    store.pending = [
+        {
+            "failure_id": "stale-failure",
+            "source_id": "test",
+            "cursor_before": "cursor-1",
+            "cursor_after": "cursor-2",
+            "events": [],
+            "attempts": 1,
+        }
+    ]
+    worker = IntelligenceIngestionWorker(
+        [Adapter()], store, Sink(), lease_manager=LeaseManager()
+    )
+
+    assert await worker.replay_dead_letters() == 0
+    assert store.cursor == "cursor-3"
+    assert store.replayed == [("stale-failure", "pending", 2)]
