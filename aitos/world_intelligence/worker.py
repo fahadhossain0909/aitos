@@ -106,7 +106,9 @@ class IntelligenceIngestionWorker:
                 latency_ms=latency_ms,
             )
         except Exception:
-            logger.exception("Unable to persist WIATS source-run telemetry: %s", source_id)
+            logger.exception(
+                "Unable to persist WIATS source-run telemetry: %s", source_id
+            )
 
     async def source_run_summary(self, *, lookback_hours: float = 24.0):
         loader = getattr(self.store, "load_source_run_summary", None)
