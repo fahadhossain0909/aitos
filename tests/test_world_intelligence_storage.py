@@ -47,6 +47,7 @@ class FakeAsyncClickHouse:
         self.cursor = None
         self.last_query = ""
         self.pending_count = 0
+        self.source_summary_rows = []
 
     async def command(self, query):
         self.commands.append(query)
@@ -65,6 +66,8 @@ class FakeAsyncClickHouse:
         self.last_query = query
         if "count()" in query:
             return FakeResult([(self.pending_count,)])
+        if "GROUP BY source_id" in query:
+            return FakeResult(self.source_summary_rows)
         return FakeResult([(self.cursor,)] if self.cursor is not None else [])
 
 
@@ -72,7 +75,7 @@ class FakeAsyncClickHouse:
 async def test_schema_creates_event_and_cursor_tables():
     client = FakeAsyncClickHouse()
     await ClickHouseIntelligenceStore(client).ensure_schema()
-    assert len(client.commands) == 4
+    assert len(client.commands) == 5
     assert "ReplacingMergeTree" in client.commands[0]
     assert "world_intelligence_cursors" in client.commands[1]
 
@@ -271,4 +274,60 @@ def test_dead_letter_pending_limit_is_validated():
     with pytest.raises(ValueError, match="max pending"):
         ClickHouseIntelligenceStore(
             FakeAsyncClickHouse(), max_pending_dead_letters_per_source=0
+        )
+
+
+@pytest.mark.asyncio
+async def test_source_run_history_is_persisted_and_summarized():
+    client = FakeAsyncClickHouse()
+    store = ClickHouseIntelligenceStore(client)
+    run_id = await store.record_source_run(
+        source_id="gdelt",
+        started_at=NOW - timedelta(seconds=2),
+        finished_at=NOW,
+        status="success",
+        event_count=7,
+        cursor_before="page-1",
+        cursor_after="page-2",
+        fencing_token=8,
+        latency_ms=125.5,
+    )
+    table, rows, columns = client.inserts[-1]
+    assert table.endswith("world_intelligence_source_runs")
+    assert rows[0][0] == run_id
+    assert rows[0][1] == "gdelt"
+    assert rows[0][4:6] == ("success", 7)
+    assert rows[0][9:] == (8, 125.5)
+
+    client.source_summary_rows = [
+        ("gdelt", 3, 2, 1, 0, 0, 12, 40.5, "success", NOW)
+    ]
+    summary = await store.load_source_run_summary(as_of=NOW)
+    assert summary[0]["source_id"] == "gdelt"
+    assert summary[0]["runs"] == 3
+    assert summary[0]["successes"] == 2
+    assert summary[0]["failures"] == 1
+    assert summary[0]["events"] == 12
+    assert summary[0]["mean_latency_ms"] == pytest.approx(40.5)
+
+
+@pytest.mark.asyncio
+async def test_source_run_history_rejects_invalid_status_and_latency():
+    store = ClickHouseIntelligenceStore(FakeAsyncClickHouse())
+    with pytest.raises(ValueError, match="status"):
+        await store.record_source_run(
+            source_id="gdelt",
+            started_at=NOW,
+            finished_at=NOW,
+            status="unknown",
+            event_count=0,
+        )
+    with pytest.raises(ValueError, match="latency_ms"):
+        await store.record_source_run(
+            source_id="gdelt",
+            started_at=NOW,
+            finished_at=NOW,
+            status="success",
+            event_count=0,
+            latency_ms=-1,
         )
