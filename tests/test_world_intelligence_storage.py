@@ -64,10 +64,10 @@ class FakeAsyncClickHouse:
 
     async def query(self, query, parameters=None):
         self.last_query = query
-        if "count()" in query:
-            return FakeResult([(self.pending_count,)])
         if "GROUP BY source_id" in query:
             return FakeResult(self.source_summary_rows)
+        if "count()" in query:
+            return FakeResult([(self.pending_count,)])
         return FakeResult([(self.cursor,)] if self.cursor is not None else [])
 
 
