@@ -49,6 +49,10 @@ class ClickHouseIntelligenceStore:
     def cursors_table(self) -> str:
         return f"{self.database}.world_intelligence_cursors"
 
+    @property
+    def dead_letters_table(self) -> str:
+        return f"{self.database}.world_intelligence_dead_letters"
+
     async def ensure_schema(self) -> None:
         await self.client.command(
             f"""
