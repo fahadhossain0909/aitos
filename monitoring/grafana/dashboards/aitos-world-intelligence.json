@@ -1,0 +1,50 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {
+      "title": "WIATS page throughput",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "rate(aitos_wiats_pages_succeeded_total[5m])", "legendFormat": "successful pages/s"},
+        {"expr": "rate(aitos_wiats_pages_failed_total[5m])", "legendFormat": "failed pages/s"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    },
+    {
+      "title": "Normalized event flow",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "rate(aitos_wiats_events_persisted_total[5m])", "legendFormat": "persisted/s"},
+        {"expr": "rate(aitos_wiats_events_published_total[5m])", "legendFormat": "published/s"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+    },
+    {
+      "title": "Dead-letter activity",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "increase(aitos_wiats_dead_letters_written_total[1h])", "legendFormat": "new dead letters"},
+        {"expr": "increase(aitos_wiats_dead_letters_replayed_total[1h])", "legendFormat": "replayed"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+    },
+    {
+      "title": "Distributed lease health",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "increase(aitos_wiats_lease_contention_total[5m])", "legendFormat": "lease contention"},
+        {"expr": "increase(aitos_wiats_lease_lost_total[5m])", "legendFormat": "lease lost"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "AITOS World Intelligence",
+  "uid": "aitos-world-intelligence",
+  "version": 1
+}
