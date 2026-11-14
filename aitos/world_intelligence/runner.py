@@ -19,6 +19,7 @@ from aitos.world_intelligence.adapters import IntelligenceSourceAdapter
 from aitos.world_intelligence.eventbus_adapter import EventBusSink
 from aitos.world_intelligence.licensed_api import LicensedJSONFeedAdapter
 from aitos.world_intelligence.lease import RedisSourceLeaseManager
+from aitos.world_intelligence.metrics_server import start_metrics_server
 from aitos.world_intelligence.providers import (
     FREDSeriesAdapter,
     GDELTDocAdapter,
@@ -226,8 +227,15 @@ async def _run() -> None:
             loop.add_signal_handler(signum, worker.stop)
         except (NotImplementedError, RuntimeError):
             pass
+    metrics_runner = None
     try:
         await event_bus.initialize({})
+        if os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_ENABLED", "true").lower() == "true":
+            metrics_runner = await start_metrics_server(
+                worker,
+                host=os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_HOST", "0.0.0.0"),
+                port=int(os.getenv("AITOS_WORLD_INTELLIGENCE_METRICS_PORT", "8120")),
+            )
         if os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_ON_START", "false").lower() == "true":
             limit = int(os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_LIMIT", "100"))
             replayed = await worker.replay_dead_letters(limit=limit)
@@ -235,6 +243,8 @@ async def _run() -> None:
         await worker.run_forever()
     finally:
         worker.stop()
+        if metrics_runner is not None:
+            await metrics_runner.cleanup()
         await event_bus.shutdown()
         await redis_client.aclose()
         await clickhouse.close()
