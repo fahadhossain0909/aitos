@@ -112,3 +112,38 @@ async def test_worker_dead_letters_a_fetched_page_when_publish_fails():
     assert len(store.dead_letters) == 1
     assert store.dead_letters[0]["cursor_after"] == "next"
     assert worker.metrics_snapshot()["dead_letters_written"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_replay_saves_fenced_cursor_and_marks_page_replayed():
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    class LeaseManager:
+        @asynccontextmanager
+        async def hold(self, source_id):
+            yield SimpleNamespace(
+                fencing_token=12,
+                assert_valid=lambda: _valid_lease(),
+            )
+
+    async def _valid_lease():
+        return None
+
+    store = Store()
+    store.pending = [{
+        "failure_id": "failure-1",
+        "source_id": "test",
+        "cursor_before": "cursor-1",
+        "cursor_after": "cursor-2",
+        "events": [],
+        "attempts": 1,
+    }]
+    worker = IntelligenceIngestionWorker(
+        [Adapter()], store, Sink(), lease_manager=LeaseManager()
+    )
+
+    assert await worker.replay_dead_letters() == 1
+    assert store.cursor == "cursor-2"
+    assert store.replayed == [("failure-1", "replayed", 2)]
+    assert worker.metrics_snapshot()["dead_letters_replayed"] == 1
