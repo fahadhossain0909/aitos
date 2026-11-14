@@ -1,0 +1,42 @@
+groups:
+  - name: aitos-world-intelligence
+    rules:
+      - alert: AITOSWorldIntelligenceUnavailable
+        expr: up{job="aitos-world-intelligence"} == 0
+        for: 3m
+        labels:
+          severity: critical
+          service: wiats
+        annotations:
+          summary: "WIATS worker metrics endpoint is unavailable"
+          description: "Check the optional WIATS worker container, Redis lease connection, ClickHouse and startup logs."
+
+      - alert: AITOSWorldIntelligenceIngestionFailures
+        expr: increase(aitos_wiats_pages_failed_total[5m]) >= 3
+        for: 2m
+        labels:
+          severity: warning
+          service: wiats
+        annotations:
+          summary: "WIATS ingestion is repeatedly failing"
+          description: "At least three source pages failed within five minutes. Inspect provider rate limits, credentials, Redis and ClickHouse."
+
+      - alert: AITOSWorldIntelligenceDeadLetters
+        expr: increase(aitos_wiats_dead_letters_written_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          service: wiats
+        annotations:
+          summary: "WIATS has new dead-letter pages"
+          description: "A fetched page could not complete persist-publish-checkpoint processing. Inspect and explicitly replay the pending dead-letter records."
+
+      - alert: AITOSWorldIntelligenceLeaseLost
+        expr: increase(aitos_wiats_lease_lost_total[5m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: wiats
+        annotations:
+          summary: "WIATS source lease was lost"
+          description: "A worker lost its Redis source lease. Check Redis availability and worker pause/CPU pressure; fencing prevents stale cursor generations from superseding newer ones."
