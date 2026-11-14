@@ -339,16 +339,10 @@ class DecisionOutcomeLedger:
                 trades = bucket["trades"]
                 summaries[dimension][identifier] = {
                     "trades": trades,
-                    "mean_net_return_pct": round(
-                        bucket["return_sum_pct"] / trades, 6
-                    ),
+                    "mean_net_return_pct": round(bucket["return_sum_pct"] / trades, 6),
                     "win_rate": round(bucket["wins"] / trades, 4),
-                    "mean_net_pnl_usd": round(
-                        bucket["net_pnl_sum_usd"] / trades, 6
-                    ),
-                    "mean_fees_paid_usd": round(
-                        bucket["fees_sum_usd"] / trades, 6
-                    ),
+                    "mean_net_pnl_usd": round(bucket["net_pnl_sum_usd"] / trades, 6),
+                    "mean_fees_paid_usd": round(bucket["fees_sum_usd"] / trades, 6),
                     "mean_funding_pnl_usd": round(
                         bucket["funding_sum_usd"] / trades, 6
                     ),
