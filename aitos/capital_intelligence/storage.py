@@ -239,12 +239,14 @@ class ClickHouseCapitalStore:
         }
         if not canonical or start < 0 or end < start:
             raise ValueError("invalid EVM reorg reconciliation range")
+        query = (
+            f"SELECT payload_json, block_number, block_hash FROM {self.table} "  # nosec B608 - validated database identifier; all values remain bound parameters.
+            "WHERE source_id = %(source_id)s "
+            "AND block_number >= %(from_block)s "
+            "AND block_number <= %(to_block)s"
+        )
         result = await self.client.query(
-            f"""SELECT payload_json, block_number, block_hash
-            FROM {self.table}
-            WHERE source_id = %(source_id)s
-              AND block_number >= %(from_block)s
-              AND block_number <= %(to_block)s""",
+            query,
             parameters={"source_id": source_id, "from_block": start, "to_block": end},
         )
         tombstones = []
