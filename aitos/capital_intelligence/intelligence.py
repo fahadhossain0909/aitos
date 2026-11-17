@@ -47,7 +47,10 @@ def candidate_links_from_shared_funding(events: Iterable[CapitalEvent], *,
         raise ValueError("minimum_repeated_transfers must be >= 2")
     counts: dict[tuple[str, str], list[str]] = {}
     for event in events:
-        if event.event_type not in {"token_transfer", "native_transfer"}:
+        if event.event_type not in {
+            "token_transfer", "native_transfer", "erc20_transfer",
+            "solana_token_transfer", "sol_transfer",
+        }:
             continue
         if not event.actor_id or not event.counterparty_id:
             continue
@@ -70,8 +73,17 @@ def assess_entity_behavior(entity_id: str, events: Iterable[CapitalEvent], *,
     signed = []
     for event in rows:
         direction = event.metadata.get("flow_direction")
+        flow_sign = event.metadata.get("flow_sign")
+        if direction not in {"in", "out"} and flow_sign in (-1, 1):
+            signed.append(float(event.usd_value) * int(flow_sign))
+            continue
         if direction not in {"in", "out"}:
-            direction = "out" if event.event_type in {"exchange_deposit", "distribution"} else "in"
+            # For address-level transfer events, actor_id is the sender.
+            direction = "out" if event.event_type in {
+                "token_transfer", "native_transfer", "erc20_transfer",
+                "solana_token_transfer", "sol_transfer", "exchange_deposit",
+                "distribution",
+            } else "in"
         signed.append(float(event.usd_value) * (1 if direction == "in" else -1))
     net = sum(signed)
     gross = sum(abs(v) for v in signed)
