@@ -42,7 +42,9 @@ async def test_sec_13f_preserves_report_period_and_filing_publication_time():
     cik = "0000320193"
     accession = "0000320193-26-000001"
     submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    directory = "https://www.sec.gov/Archives/edgar/data/320193/2026000001/"
+    directory = (
+        "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/"
+    )
     submissions = {
         "filings": {
             "recent": {
@@ -92,7 +94,7 @@ async def test_sec_form4_emits_reported_transaction_with_direction_and_lag():
     accession = "0000789019-26-000002"
     submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
     document_url = (
-        "https://www.sec.gov/Archives/edgar/data/789019/2026000002/ownership.xml"
+        "https://www.sec.gov/Archives/edgar/data/789019/000078901926000002/ownership.xml"
     )
     submissions = {
         "filings": {
@@ -142,7 +144,9 @@ async def test_sec_form3_is_a_point_in_time_holding_not_a_trade():
     cik = "0000789019"
     accession = "0000789019-26-000003"
     submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    document_url = "https://www.sec.gov/Archives/edgar/data/789019/2026000003/form3.xml"
+    document_url = (
+        "https://www.sec.gov/Archives/edgar/data/789019/000078901926000003/form3.xml"
+    )
     submissions = {
         "filings": {
             "recent": {
@@ -210,8 +214,8 @@ async def test_sec_filing_batch_limit_advances_cursor_without_skipping_filings()
     session = FakeSession(
         {
             submissions_url: submissions,
-            base + "2026000010/old.xml": xml,
-            base + "2026000011/new.xml": xml,
+            base + "000078901926000010/old.xml": xml,
+            base + "000078901926000011/new.xml": xml,
         }
     )
     adapter = SecEdgarFilingsAdapter(
