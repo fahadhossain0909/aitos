@@ -13,8 +13,10 @@ from aitos.world_intelligence.entity_resolution import (
 )
 from aitos.world_intelligence.narratives import NarrativeCluster, cluster_narratives
 from aitos.world_intelligence.source_quality import (
+    CoordinatedAmplificationCluster,
     SourceQualityAssessment,
     assess_source_batch,
+    detect_coordinated_amplification,
 )
 from aitos.world_intelligence.verification import (
     VerificationResult,
@@ -29,6 +31,7 @@ class EnrichmentResult:
     verification: Mapping[str, VerificationResult]
     source_quality: tuple[SourceQualityAssessment, ...]
     as_of: datetime
+    coordination_clusters: tuple[CoordinatedAmplificationCluster, ...] = ()
 
 
 def enrich_event_batch(
@@ -63,6 +66,9 @@ def enrich_event_batch(
     ]
     narratives = cluster_narratives(enriched, as_of=cutoff)
     source_quality = assess_source_batch(enriched, as_of=cutoff)
+    coordination_clusters = detect_coordinated_amplification(
+        enriched, as_of=cutoff, publisher_groups=dict(publisher_groups)
+    )
     narrative_for_event = {
         event_id: narrative.narrative_id
         for narrative in narratives
@@ -107,7 +113,14 @@ def enrich_event_batch(
                 )
             )
     output.sort(key=lambda item: (item.first_seen_at, item.event_id))
-    return EnrichmentResult(tuple(output), narratives, results, source_quality, cutoff)
+    return EnrichmentResult(
+        tuple(output),
+        narratives,
+        results,
+        source_quality,
+        cutoff,
+        coordination_clusters,
+    )
 
 
 __all__ = ["EnrichmentResult", "enrich_event_batch"]
