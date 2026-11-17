@@ -1,0 +1,32 @@
+groups:
+  - name: aitos-capital-intelligence
+    rules:
+      - alert: AITOSCFEIPollErrors
+        expr: increase(aitos_cfei_poll_errors[10m]) > 3
+        for: 2m
+        labels:
+          severity: warning
+          component: capital-intelligence
+        annotations:
+          summary: "CFEI source polling is repeatedly failing"
+          description: "Inspect the observer logs, RPC provider limits and source configuration. Trading execution is not affected."
+
+      - alert: AITOSCFEIStaleObserver
+        expr: time() - aitos_cfei_last_poll_unix_seconds > 180
+        for: 2m
+        labels:
+          severity: warning
+          component: capital-intelligence
+        annotations:
+          summary: "CFEI observer has not completed a poll recently"
+          description: "Check service health, Redis lease contention and RPC availability."
+
+      - alert: AITOSCFEIMetricsMissing
+        expr: up{job="aitos-capital-intelligence"} == 0
+        for: 3m
+        labels:
+          severity: warning
+          component: capital-intelligence
+        annotations:
+          summary: "CFEI metrics endpoint is unavailable"
+          description: "The optional observer profile may be disabled or the service may have stopped."
