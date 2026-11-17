@@ -273,14 +273,16 @@ async def test_dead_letter_retry_limit_moves_poison_page_to_exhausted():
         return None
 
     store = Store()
-    store.pending = [{
-        "failure_id": "poison-page",
-        "source_id": "test",
-        "cursor_before": "cursor-1",
-        "cursor_after": "cursor-2",
-        "events": [],
-        "attempts": 5,
-    }]
+    store.pending = [
+        {
+            "failure_id": "poison-page",
+            "source_id": "test",
+            "cursor_before": "cursor-1",
+            "cursor_after": "cursor-2",
+            "events": [],
+            "attempts": 5,
+        }
+    ]
     worker = IntelligenceIngestionWorker(
         [Adapter()], store, Sink(), lease_manager=LeaseManager()
     )
@@ -305,14 +307,16 @@ async def test_dead_letter_cursor_conflict_is_quarantined_not_retried():
 
     store = Store()
     store.cursor = "cursor-advanced"
-    store.pending = [{
-        "failure_id": "stale-page",
-        "source_id": "test",
-        "cursor_before": "cursor-1",
-        "cursor_after": "cursor-2",
-        "events": [],
-        "attempts": 1,
-    }]
+    store.pending = [
+        {
+            "failure_id": "stale-page",
+            "source_id": "test",
+            "cursor_before": "cursor-1",
+            "cursor_after": "cursor-2",
+            "events": [],
+            "attempts": 1,
+        }
+    ]
     worker = IntelligenceIngestionWorker(
         [Adapter()], store, Sink(), lease_manager=LeaseManager()
     )
