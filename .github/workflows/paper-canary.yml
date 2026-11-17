@@ -216,12 +216,39 @@ jobs:
               str(symbol).upper() for symbol in details.get("live_kline_symbols", [])
           }
           selected_non_btc_books = deep_symbols - {"BTCUSDT"}
-          assert selected_klines, "no ranked candidate received live kline coverage"
-          assert selected_non_btc_books, "no ranked candidate received deep order-book coverage"
-          assert selected_klines & selected_non_btc_books, (
-              "ranked candidate kline/deep-book coverage diverged: "
-              f"klines={sorted(selected_klines)}, books={sorted(deep_symbols)}"
-          )
+          selected_non_btc_klines = selected_klines - {"BTCUSDT"}
+          ranked_candidate_count = int(scanner_details.get("last_candidate_count", 0) or 0)
+          if ranked_candidate_count > 0:
+              assert selected_non_btc_books, (
+                  "ranked non-BTC candidates exist but none received deep order-book coverage: "
+                  f"candidates={ranked_candidate_count}, books={sorted(deep_symbols)}"
+              )
+              assert selected_non_btc_klines, (
+                  "ranked non-BTC candidates exist but none received live kline coverage: "
+                  f"candidates={ranked_candidate_count}, klines={sorted(selected_klines)}"
+              )
+              assert selected_non_btc_klines & selected_non_btc_books, (
+                  "ranked candidate kline/deep-book coverage diverged: "
+                  f"klines={sorted(selected_klines)}, books={sorted(deep_symbols)}"
+              )
+              coverage_verdict = "ranked_candidate_coverage_verified"
+          else:
+              # No candidate is a valid market outcome when the scanner has
+              # persisted decisions and rejected-candidate counterfactuals.
+              # Do not demand candidate-only subscriptions for a candidate
+              # that the strategy correctly declined to promote.
+              assert rejected_candidates > 0, (
+                  "scanner promoted no candidates and persisted no rejection evidence"
+              )
+              assert int(ledger.get("decisions_total", 0) or 0) > 0, (
+                  "scanner promoted no candidates and recorded no decisions"
+              )
+              lifecycle = modules.get("trade-lifecycle", {}).get("details", {})
+              assert int(lifecycle.get("live_submissions", 0) or 0) == 0, (
+                  "no-candidate canary unexpectedly submitted live orders: "
+                  f"{lifecycle}"
+              )
+              coverage_verdict = "valid_no_candidate_market_state"
           hawkes_models = scanner_details.get("hawkes_models", {})
           print(json.dumps({
               "status": health["status"],
@@ -233,6 +260,8 @@ jobs:
               "live_trade_events_by_symbol": trade_events_by_symbol,
               "live_kline_symbols": sorted(selected_klines),
               "deep_orderbook_symbols": sorted(deep_symbols),
+              "ranked_candidate_count": ranked_candidate_count,
+              "coverage_verdict": coverage_verdict,
               "trade_stream_events": trade_stream.get("events"),
               "gateway_dropped_events": gateway_health.get("dropped_events"),
           }, indent=2))
