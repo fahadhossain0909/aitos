@@ -8,6 +8,7 @@ from aitos.capital_intelligence.token_registry import TokenMetadata
 class Response:
     def __init__(self, rows):
         self.rows = rows
+        self.status = 200
 
     async def __aenter__(self):
         return self
