@@ -149,9 +149,7 @@ class SolanaAddressActivityAdapter:
             counterparty = (
                 destination_owner
                 if source_owner == monitored_address
-                else source_owner
-                if destination_owner == monitored_address
-                else None
+                else source_owner if destination_owner == monitored_address else None
             )
             evidence.setdefault(str(mint), []).append(
                 {
