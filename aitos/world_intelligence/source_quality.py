@@ -245,9 +245,9 @@ def detect_coordinated_amplification(
                 for time_b in source_times[source_b]
             )
             if time_gap <= synchronization_window_seconds:
-                story_id = hashlib.sha256(
-                    normalized_title.encode("utf-8")
-                ).hexdigest()[:16]
+                story_id = hashlib.sha256(normalized_title.encode("utf-8")).hexdigest()[
+                    :16
+                ]
                 pair_stories[(source_a, source_b)][story_id] = time_gap
 
     edges: list[CoordinationEdge] = []
@@ -300,9 +300,9 @@ def detect_coordinated_amplification(
         source_ids = tuple(sorted(component))
         publisher_ids = tuple(sorted({groups.get(item, item) for item in source_ids}))
         fingerprint = "|".join((*source_ids, *shared_story_ids))
-        cluster_id = "coord:" + hashlib.sha256(
-            fingerprint.encode("utf-8")
-        ).hexdigest()[:16]
+        cluster_id = (
+            "coord:" + hashlib.sha256(fingerprint.encode("utf-8")).hexdigest()[:16]
+        )
         clusters.append(
             CoordinatedAmplificationCluster(
                 cluster_id=cluster_id,
