@@ -2,6 +2,9 @@
 
 from .behavior import BehaviorAssessment, assess_capital_behavior
 from .binance import BinanceFuturesCapitalAdapter
+from .binance_market import BinanceMarketStructureAdapter
+from .intelligence import (BehavioralProfile, EntityLinkCandidate, IntentHypothesis, assess_entity_behavior, candidate_links_from_shared_funding, evidence_from_candidate)
+from .neo4j_graph import Neo4jEntityGraphStore
 from .binance_price import BinanceHistoricalPriceBook
 from .contracts import CapitalEvent, EntityEvidence, EntityLabel
 from .cftc import CftcCotAdapter
@@ -20,6 +23,11 @@ from .valuation import PointInTimePriceBook, PriceQuote, value_quantity
 __all__ = [
     "BehaviorAssessment",
     "BinanceFuturesCapitalAdapter",
+    "BinanceMarketStructureAdapter",
+    "BehavioralProfile",
+    "EntityLinkCandidate",
+    "IntentHypothesis",
+    "Neo4jEntityGraphStore",
     "BinanceHistoricalPriceBook",
     "CapitalCandidateRank",
     "CapitalEvent",
@@ -40,6 +48,9 @@ __all__ = [
     "TokenMetadata",
     "TokenRegistry",
     "assess_capital_behavior",
+    "assess_entity_behavior",
+    "candidate_links_from_shared_funding",
+    "evidence_from_candidate",
     "enrich_capital_event",
     "rank_capital_candidates",
     "value_quantity",
