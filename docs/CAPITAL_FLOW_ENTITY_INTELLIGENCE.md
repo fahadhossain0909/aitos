@@ -160,11 +160,14 @@ candidate evidence; they cannot establish common ownership. Accumulation and
 distribution scores are deterministic heuristics, not probabilities, trained
 models or execution signals. Reverted events are excluded.
 
-The optional `neo4j_graph.py` adapter persists labels and evidence using
-parameterized Cypher. It intentionally stores evidence nodes instead of
-auto-merging wallet identities. Production activation still requires explicit
-Neo4j connection configuration, deployment wiring, integration tests against
-the deployed Neo4j version, backups and query/resource budgets.
+The optional `neo4j_graph.py` adapter persists event observations, labels and
+relationship evidence using parameterized Cypher. Event nodes are keyed by the
+stable event deduplication key; actor/counterparty references are namespaced
+by venue and do not merge identities across venues. The worker writes ClickHouse
+first, then the optional Neo4j sink, and only then commits the Redis cursor. A
+Neo4j failure therefore causes safe at-least-once replay; ClickHouse uses stable
+deduplication keys and Neo4j uses MERGE constraints. The graph remains an
+evidence/observation graph, not a beneficial-owner graph.
 
 
 ## 11. Bounded EVM token metadata discovery
