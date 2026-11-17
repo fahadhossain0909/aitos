@@ -69,7 +69,9 @@ async def test_enrichment_rejects_future_price_and_keeps_usd_unset():
     )
     quote = PriceQuote("asset:usdc", "USDT", 1.0, now + timedelta(seconds=1), "fixture")
     result = await enrich_capital_event(
-        event, registry=TokenRegistry([token]), price_book=PriceBook(quote),
+        event,
+        registry=TokenRegistry([token]),
+        price_book=PriceBook(quote),
         allow_usdt_usd_proxy=True,
     )
     assert result.usd_value is None

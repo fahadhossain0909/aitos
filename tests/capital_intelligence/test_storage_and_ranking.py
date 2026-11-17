@@ -115,7 +115,6 @@ def test_token_registry_preserves_decimal_precision():
         token.normalize_raw("1.5")
 
 
-
 @pytest.mark.asyncio
 async def test_reorg_reconciliation_appends_reverted_event_version():
     client = FakeClickHouse()
@@ -159,7 +158,6 @@ async def test_reorg_reconciliation_appends_reverted_event_version():
     assert payload["metadata"]["canonical_block_hash"] == "0xnew"
 
 
-
 def test_token_registry_preserves_case_sensitive_solana_mints():
     token = TokenMetadata("solana-mainnet", "AbC123mint", "asset:sol", "TOK", 9)
     registry = TokenRegistry([token])
@@ -173,9 +171,20 @@ def test_address_ranking_excludes_pool_callers_and_non_address_entities():
     for index in range(2):
         events.append(
             CapitalEvent(
-                f"router-{index}", "rpc", "dex_swap", "crypto_spot", "uniswap_v3",
-                "pool", "pool_swap", now, now, 1, "TOK", 10_000,
-                actor_id="0xrouter", metadata={
+                f"router-{index}",
+                "rpc",
+                "dex_swap",
+                "crypto_spot",
+                "uniswap_v3",
+                "pool",
+                "pool_swap",
+                now,
+                now,
+                1,
+                "TOK",
+                10_000,
+                actor_id="0xrouter",
+                metadata={
                     "actor_identity_kind": "evm_pool_caller",
                     "actor_is_pool_caller_not_verified_beneficial_owner": True,
                 },
@@ -183,8 +192,18 @@ def test_address_ranking_excludes_pool_callers_and_non_address_entities():
         )
         events.append(
             CapitalEvent(
-                f"sec-{index}", "sec-edgar", "sec_edgar_13f", "equities", "sec_edgar",
-                "CUSIP", "13f_holding_report", now, now, 100, "shares", 10_000,
+                f"sec-{index}",
+                "sec-edgar",
+                "sec_edgar_13f",
+                "equities",
+                "sec_edgar",
+                "CUSIP",
+                "13f_holding_report",
+                now,
+                now,
+                100,
+                "shares",
+                10_000,
                 actor_id="sec-cik:123",
                 metadata={"actor_identity_kind": "sec_institution"},
             )

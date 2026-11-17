@@ -72,12 +72,24 @@ async def enrich_capital_event(
     if age < 0 or age > max_quote_age_seconds:
         metadata["valuation_status"] = "quote_future_or_stale"
         metadata["quote_observed_at"] = quote_time.isoformat()
-        return replace(event, quantity=quantity, unit=token.symbol, usd_value=None, metadata=metadata)
+        return replace(
+            event,
+            quantity=quantity,
+            unit=token.symbol,
+            usd_value=None,
+            metadata=metadata,
+        )
 
     quote_value = normalized * Decimal(str(quote.price))
     if not quote_value.is_finite():
         metadata["valuation_status"] = "invalid_quote_value"
-        return replace(event, quantity=quantity, unit=token.symbol, usd_value=None, metadata=metadata)
+        return replace(
+            event,
+            quantity=quantity,
+            unit=token.symbol,
+            usd_value=None,
+            metadata=metadata,
+        )
 
     metadata.update(
         {

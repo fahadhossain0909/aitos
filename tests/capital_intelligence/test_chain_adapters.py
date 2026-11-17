@@ -125,7 +125,6 @@ async def test_solana_cursor_is_independent_per_address_and_token_delta_is_signe
     assert all(event.metadata["raw_delta"] == "250" for event in token_events)
 
 
-
 @pytest.mark.asyncio
 async def test_dex_swap_resolves_pool_tokens_and_keeps_signed_raw_deltas():
     pool = "0x" + "1" * 40
@@ -174,7 +173,6 @@ async def test_dex_swap_resolves_pool_tokens_and_keeps_signed_raw_deltas():
     assert events[0].metadata["token1_address"] == token1
     assert events[0].metadata["raw_delta"] == "-1000000"
     assert events[0].metadata["amount1_delta"] == "2000000"
-
 
 
 @pytest.mark.asyncio

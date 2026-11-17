@@ -128,7 +128,7 @@ class SecEdgarFilingsAdapter:
 
     async def _information_table_url(
         self, cik: str, accession: str, primary: str
-    )
+    ) -> str:
         directory = f"{self.ARCHIVES_URL}{int(cik)}/{accession.replace('-', '')}/"
         index = await self._get_json(urljoin(directory, "index.json"))
         items = (index.get("directory") or {}).get("item") or []

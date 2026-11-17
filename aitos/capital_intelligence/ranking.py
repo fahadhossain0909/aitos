@@ -49,9 +49,7 @@ def rank_capital_candidates(
             not event.actor_id
             or event.metadata.get("actor_identity_kind")
             not in {"evm_address", "solana_address"}
-            or event.metadata.get(
-                "actor_is_pool_caller_not_verified_beneficial_owner"
-            )
+            or event.metadata.get("actor_is_pool_caller_not_verified_beneficial_owner")
             is True
             or event.metadata.get("aggregate_only") is True
             or event.source_kind == "exchange_aggregate"
