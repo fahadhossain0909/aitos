@@ -40,7 +40,14 @@ class EvmDexSwapAdapter:
         events=[]; now=datetime.now(timezone.utc); block_times={}
         for log in logs or []:
             topic=log.get("topics",[""])[0].lower(); data=log.get("data","0x")[2:]
-            if len(data)<256: continue
+            pool=self._address(log["address"])
+            protocol=self.pools.get(pool)
+            if protocol is None:
+                continue
+            if topic==V2_SWAP_TOPIC and not protocol.endswith("_v2"):
+                continue
+            if topic==V3_SWAP_TOPIC and not protocol.endswith("_v3"):
+                continue
             words=[data[i:i+64] for i in range(0,len(data),64)]
             signed=lambda w: int(w,16)-(1<<256) if int(w,16)>=(1<<255) else int(w,16)
             if topic==V2_SWAP_TOPIC:
@@ -48,7 +55,7 @@ class EvmDexSwapAdapter:
                 amount0_in,amount1_in,amount0_out,amount1_out=[int(w,16) for w in words[:4]]
                 delta0=amount0_in-amount0_out; delta1=amount1_in-amount1_out
             elif topic==V3_SWAP_TOPIC:
-                if len(words)<2: continue
+                if len(words)<5: continue
                 delta0,delta1=signed(words[0]),signed(words[1])
             else: continue
             block=int(log["blockNumber"],16); tx=log["transactionHash"]; index=int(log["logIndex"],16)
@@ -57,7 +64,7 @@ class EvmDexSwapAdapter:
                 if not block_data or not block_data.get("timestamp"):
                     raise RuntimeError("DEX block timestamp unavailable; refusing bad event")
                 block_times[block] = datetime.fromtimestamp(int(block_data["timestamp"], 16), timezone.utc)
-            pool=self._address(log["address"]); event_id=hashlib.sha256(f"{self.chain_id}|{tx}|{index}".encode()).hexdigest()
+            event_id=hashlib.sha256(f"{self.chain_id}|{tx}|{index}".encode()).hexdigest()
             actor="0x"+log["topics"][1][-40:] if len(log.get("topics",[]))>1 else None
-            events.append(CapitalEvent(event_id,f"evm:{self.chain_id}","dex_swap","crypto_spot",self.pools[pool],pool,"pool_swap",block_times[block],now,abs(delta0)+abs(delta1),"token_base_units_sum",None,actor_id=actor,transaction_id=tx,block_number=block,block_hash=log.get("blockHash"),finality="confirmed",metadata={"amount0_delta":str(delta0),"amount1_delta":str(delta1),"actor_is_pool_caller_not_verified_beneficial_owner":True,"log_index":index,"token0_and_token1_decimals_required":True,"pool":pool}))
+            events.append(CapitalEvent(event_id,f"evm:{self.chain_id}","dex_swap","crypto_spot",self.pools[pool],pool,"pool_swap",block_times[block],now,abs(delta0),"token0_base_units",None,actor_id=actor,transaction_id=tx,block_number=block,block_hash=log.get("blockHash"),finality="confirmed",metadata={"amount0_delta":str(delta0),"amount1_delta":str(delta1),"quantity_semantics":"absolute token0 delta only; token1 kept separately","actor_is_pool_caller_not_verified_beneficial_owner":True,"log_index":index,"token0_and_token1_decimals_required":True,"pool":pool}))
         return events,hex(end)
