@@ -245,7 +245,12 @@ async def _run() -> None:
             == "true"
         ):
             limit = int(os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_LIMIT", "100"))
-            replayed = await worker.replay_dead_letters(limit=limit)
+            max_attempts = int(
+                os.getenv("AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_MAX_ATTEMPTS", "5")
+            )
+            replayed = await worker.replay_dead_letters(
+                limit=limit, max_attempts=max_attempts
+            )
             logger.info("WIATS dead-letter replay completed: %s page(s)", replayed)
         await worker.run_forever()
     finally:
