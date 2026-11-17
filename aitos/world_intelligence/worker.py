@@ -329,6 +329,12 @@ class IntelligenceIngestionWorker:
             except LeaseUnavailable:
                 self._metrics["lease_contention"] += 1
                 continue
+            except LeaseLost:
+                # Lease loss is infrastructure contention, not a poison page.
+                # Keep the retry budget unchanged; any already-published events
+                # are safe to redeliver because consumers deduplicate by event ID.
+                self._metrics["lease_lost"] += 1
+                continue
             except Exception as replay_error:
                 logger.exception(
                     "WIATS dead-letter replay failed: %s", item["failure_id"]
