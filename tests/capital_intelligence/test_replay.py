@@ -33,7 +33,10 @@ def _event(event_id, at, *, direction=1, finality="confirmed", usd_value=1000):
 
 def test_replay_uses_only_point_in_time_prices_and_directional_labels():
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    events = [_event("in", start), _event("out", start + timedelta(seconds=600), direction=-1)]
+    events = [
+        _event("in", start),
+        _event("out", start + timedelta(seconds=600), direction=-1),
+    ]
     prices = [
         PriceObservation("BTCUSDT", start, 100),
         PriceObservation("BTCUSDT", start + timedelta(seconds=300), 110),
