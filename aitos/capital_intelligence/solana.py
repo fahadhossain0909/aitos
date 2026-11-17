@@ -204,6 +204,7 @@ class SolanaAddressActivityAdapter:
                         finality="finalized",
                         metadata={
                             "flow_sign": 1 if delta > 0 else -1,
+                            "actor_identity_kind": "solana_address",
                             "raw_delta": str(delta),
                             "decimals_required": True,
                         },
@@ -241,6 +242,7 @@ class SolanaAddressActivityAdapter:
                             finality="finalized",
                             metadata={
                                 "flow_sign": 1 if lamport_delta > 0 else -1,
+                                "actor_identity_kind": "solana_address",
                                 "raw_delta": str(lamport_delta),
                                 "decimals": 9,
                                 "native_delta_includes_network_fee_and_rent": True,

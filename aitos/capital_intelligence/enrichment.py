@@ -34,7 +34,10 @@ async def enrich_capital_event(
     if token is None:
         return replace(
             event,
-            metadata={**dict(event.metadata), "valuation_status": "token_metadata_missing"},
+            metadata={
+                **dict(event.metadata),
+                "valuation_status": "token_metadata_missing",
+            },
         )
 
     raw = event.metadata.get("raw_amount")
@@ -46,6 +49,7 @@ async def enrich_capital_event(
     quantity = float(normalized)
     metadata: dict[str, Any] = {
         **dict(event.metadata),
+        "asset_id": token.asset_id,
         "token_symbol": token.symbol,
         "token_decimals": token.decimals,
         "normalized_quantity_exact": format(normalized, "f"),
@@ -54,7 +58,13 @@ async def enrich_capital_event(
     quote = await price_book.quote(token.asset_id, event.event_time)
     if quote is None:
         metadata["valuation_status"] = "point_in_time_quote_missing"
-        return replace(event, quantity=quantity, unit=token.symbol, usd_value=None, metadata=metadata)
+        return replace(
+            event,
+            quantity=quantity,
+            unit=token.symbol,
+            usd_value=None,
+            metadata=metadata,
+        )
 
     event_time = event.event_time.astimezone(timezone.utc)
     quote_time = quote.observed_at.astimezone(timezone.utc)
@@ -84,7 +94,9 @@ async def enrich_capital_event(
         metadata["usd_valuation_basis"] = "USD quote"
     elif quote.quote_currency.upper() == "USDT" and allow_usdt_usd_proxy:
         usd_value = float(quote_value)
-        metadata["usd_valuation_basis"] = "USDT proxy; not an independent USD conversion"
+        metadata["usd_valuation_basis"] = (
+            "USDT proxy; not an independent USD conversion"
+        )
     else:
         metadata["usd_valuation_basis"] = "non-USD quote; usd_value intentionally unset"
     return replace(

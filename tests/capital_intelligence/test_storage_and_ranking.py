@@ -4,7 +4,11 @@ from types import SimpleNamespace
 import json
 import pytest
 
-from aitos.capital_intelligence.contracts import CapitalEvent, EntityEvidence, EntityLabel
+from aitos.capital_intelligence.contracts import (
+    CapitalEvent,
+    EntityEvidence,
+    EntityLabel,
+)
 from aitos.capital_intelligence.ranking import rank_capital_candidates
 from aitos.capital_intelligence.storage import ClickHouseCapitalStore
 from aitos.capital_intelligence.token_registry import TokenMetadata, TokenRegistry
@@ -48,10 +52,22 @@ async def test_entity_evidence_and_temporal_labels_are_persisted():
 def event(event_id, actor, usd, sign, source="rpc-a", counterparty="wallet:z"):
     now = datetime.now(timezone.utc)
     return CapitalEvent(
-        event_id, source, "onchain_transfer", "crypto_spot", "1", "USDC",
-        "erc20_transfer", now, now, 100, "USDC", usd,
-        actor_id=actor, counterparty_id=counterparty,
-        confidence=0.9, metadata={"flow_sign": sign},
+        event_id,
+        source,
+        "onchain_transfer",
+        "crypto_spot",
+        "1",
+        "USDC",
+        "erc20_transfer",
+        now,
+        now,
+        100,
+        "USDC",
+        usd,
+        actor_id=actor,
+        counterparty_id=counterparty,
+        confidence=0.9,
+        metadata={"flow_sign": sign, "actor_identity_kind": "evm_address"},
     )
 
 
@@ -63,11 +79,23 @@ def test_ranking_is_explainable_and_excludes_aggregate_cohorts():
         event("4", "wallet:b", 900_000, 1),
     ]
     aggregate = CapitalEvent(
-        "agg", "binance", "exchange_aggregate", "crypto_futures", "binance",
-        "BTCUSDT", "ratio", datetime.now(timezone.utc), datetime.now(timezone.utc),
-        0, "ratio", None, metadata={"aggregate_only": True},
+        "agg",
+        "binance",
+        "exchange_aggregate",
+        "crypto_futures",
+        "binance",
+        "BTCUSDT",
+        "ratio",
+        datetime.now(timezone.utc),
+        datetime.now(timezone.utc),
+        0,
+        "ratio",
+        None,
+        metadata={"aggregate_only": True},
     )
-    ranked = rank_capital_candidates(rows + [aggregate], market_liquidity_usd={"USDC": 1_000_000})
+    ranked = rank_capital_candidates(
+        rows + [aggregate], market_liquidity_usd={"USDC": 1_000_000}
+    )
     assert [item.entity_id for item in ranked] == ["wallet:a"]
     assert ranked[0].event_count == 3
     assert ranked[0].source_count == 3
@@ -80,7 +108,9 @@ def test_ranking_is_explainable_and_excludes_aggregate_cohorts():
 def test_token_registry_preserves_decimal_precision():
     token = TokenMetadata("1", "0x" + "a" * 40, "asset:usdc", "USDC", 6)
     registry = TokenRegistry([token])
-    assert registry.get("1", token.address).normalize_raw("123456789") == Decimal("123.456789")
+    assert registry.get("1", token.address).normalize_raw("123456789") == Decimal(
+        "123.456789"
+    )
     with pytest.raises(ValueError):
         token.normalize_raw("1.5")
 
@@ -127,3 +157,36 @@ async def test_reorg_reconciliation_appends_reverted_event_version():
     payload = json.loads(rows[0][columns.index("payload_json")])
     assert payload["metadata"]["reorg_status"] == "orphaned_log"
     assert payload["metadata"]["canonical_block_hash"] == "0xnew"
+
+
+
+def test_token_registry_preserves_case_sensitive_solana_mints():
+    token = TokenMetadata("solana-mainnet", "AbC123mint", "asset:sol", "TOK", 9)
+    registry = TokenRegistry([token])
+    assert registry.get("solana-mainnet", "AbC123mint") == token
+    assert registry.get("solana-mainnet", "aBc123MINT") is None
+
+
+def test_address_ranking_excludes_pool_callers_and_non_address_entities():
+    now = datetime.now(timezone.utc)
+    events = []
+    for index in range(2):
+        events.append(
+            CapitalEvent(
+                f"router-{index}", "rpc", "dex_swap", "crypto_spot", "uniswap_v3",
+                "pool", "pool_swap", now, now, 1, "TOK", 10_000,
+                actor_id="0xrouter", metadata={
+                    "actor_identity_kind": "evm_pool_caller",
+                    "actor_is_pool_caller_not_verified_beneficial_owner": True,
+                },
+            )
+        )
+        events.append(
+            CapitalEvent(
+                f"sec-{index}", "sec-edgar", "sec_edgar_13f", "equities", "sec_edgar",
+                "CUSIP", "13f_holding_report", now, now, 100, "shares", 10_000,
+                actor_id="sec-cik:123",
+                metadata={"actor_identity_kind": "sec_institution"},
+            )
+        )
+    assert rank_capital_candidates(events) == []

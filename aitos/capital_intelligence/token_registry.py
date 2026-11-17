@@ -18,7 +18,14 @@ class TokenMetadata:
     price_quote_currency: str = "USDT"
 
     def __post_init__(self):
-        if not all((self.chain_id.strip(), self.address.strip(), self.asset_id.strip(), self.symbol.strip())):
+        if not all(
+            (
+                self.chain_id.strip(),
+                self.address.strip(),
+                self.asset_id.strip(),
+                self.symbol.strip(),
+            )
+        ):
             raise ValueError("token identity fields are required")
         if not 0 <= self.decimals <= 36:
             raise ValueError("token decimals must be in [0, 36]")
@@ -28,7 +35,10 @@ class TokenMetadata:
             or self.price_symbol.upper() != self.price_symbol
         ):
             raise ValueError("price symbol must be uppercase alphanumeric")
-        if not self.price_quote_currency.isascii() or not self.price_quote_currency.isalnum():
+        if (
+            not self.price_quote_currency.isascii()
+            or not self.price_quote_currency.isalnum()
+        ):
             raise ValueError("invalid price quote currency")
 
     def normalize_raw(self, raw_amount: str | int) -> Decimal:
@@ -45,10 +55,19 @@ class TokenRegistry:
     def __init__(self, tokens: Iterable[TokenMetadata]):
         self._tokens: dict[tuple[str, str], TokenMetadata] = {}
         for token in tokens:
-            key = (token.chain_id.lower(), token.address.lower())
+            key = self._key(token.chain_id, token.address)
             if key in self._tokens:
                 raise ValueError(f"duplicate token registry entry: {key[0]}:{key[1]}")
             self._tokens[key] = token
 
+    @staticmethod
+    def _key(chain_id: str, address: str) -> tuple[str, str]:
+        chain = chain_id.lower()
+        # Solana public keys are base58 and case-sensitive; EVM addresses are not.
+        normalized_address = (
+            address if chain.startswith("solana") or chain == "sol" else address.lower()
+        )
+        return chain, normalized_address
+
     def get(self, chain_id: str, address: str) -> TokenMetadata | None:
-        return self._tokens.get((chain_id.lower(), address.lower()))
+        return self._tokens.get(self._key(chain_id, address))

@@ -77,20 +77,52 @@ class ClickHouseCapitalStore:
         now = datetime.now(timezone.utc)
         rows = [
             (
-                e.source_id, e.deduplication_key, e.event_id, e.event_time,
-                e.observed_time, e.market, e.venue, e.instrument, e.event_type,
-                e.actor_id or "", e.counterparty_id or "", e.transaction_id or "",
-                e.block_number, e.block_hash or "", e.finality, e.quantity, e.unit,
-                e.usd_value, e.confidence, e.to_json(), now,
+                e.source_id,
+                e.deduplication_key,
+                e.event_id,
+                e.event_time,
+                e.observed_time,
+                e.market,
+                e.venue,
+                e.instrument,
+                e.event_type,
+                e.actor_id or "",
+                e.counterparty_id or "",
+                e.transaction_id or "",
+                e.block_number,
+                e.block_hash or "",
+                e.finality,
+                e.quantity,
+                e.unit,
+                e.usd_value,
+                e.confidence,
+                e.to_json(),
+                now,
             )
             for e in events
         ]
         columns = [
-            "source_id", "deduplication_key", "event_id", "event_time",
-            "observed_time", "market", "venue", "instrument", "event_type",
-            "actor_id", "counterparty_id", "transaction_id", "block_number",
-            "block_hash", "finality", "quantity", "unit", "usd_value",
-            "confidence", "payload_json", "ingested_at",
+            "source_id",
+            "deduplication_key",
+            "event_id",
+            "event_time",
+            "observed_time",
+            "market",
+            "venue",
+            "instrument",
+            "event_type",
+            "actor_id",
+            "counterparty_id",
+            "transaction_id",
+            "block_number",
+            "block_hash",
+            "finality",
+            "quantity",
+            "unit",
+            "usd_value",
+            "confidence",
+            "payload_json",
+            "ingested_at",
         ]
         await self.client.insert(self.table, rows, column_names=columns)
         return len(rows)
@@ -114,17 +146,32 @@ class ClickHouseCapitalStore:
             }
             rows.append(
                 (
-                    _stable_id("evi_", payload), item.subject_id, item.object_id,
-                    item.relation, item.evidence_type, item.evidence_ref,
-                    item.observed_at, item.confidence, item.status, now,
+                    _stable_id("evi_", payload),
+                    item.subject_id,
+                    item.object_id,
+                    item.relation,
+                    item.evidence_type,
+                    item.evidence_ref,
+                    item.observed_at,
+                    item.confidence,
+                    item.status,
+                    now,
                 )
             )
         await self.client.insert(
-            self.evidence_table, rows,
+            self.evidence_table,
+            rows,
             column_names=[
-                "evidence_id", "subject_id", "object_id", "relation",
-                "evidence_type", "evidence_ref", "observed_at", "confidence",
-                "status", "ingested_at",
+                "evidence_id",
+                "subject_id",
+                "object_id",
+                "relation",
+                "evidence_type",
+                "evidence_ref",
+                "observed_at",
+                "confidence",
+                "status",
+                "ingested_at",
             ],
         )
         return len(rows)
@@ -137,23 +184,42 @@ class ClickHouseCapitalStore:
         rows = []
         for item in labels:
             payload = {
-                "entity_id": item.entity_id, "label": item.label,
-                "category": item.category, "source": item.source,
-                "verified": item.verified, "valid_from": item.valid_from.isoformat(),
-                "valid_until": item.valid_until.isoformat() if item.valid_until else None,
+                "entity_id": item.entity_id,
+                "label": item.label,
+                "category": item.category,
+                "source": item.source,
+                "verified": item.verified,
+                "valid_from": item.valid_from.isoformat(),
+                "valid_until": (
+                    item.valid_until.isoformat() if item.valid_until else None
+                ),
             }
             rows.append(
                 (
-                    _stable_id("lbl_", payload), item.entity_id, item.label,
-                    item.category, item.source, int(item.verified),
-                    item.valid_from, item.valid_until, now,
+                    _stable_id("lbl_", payload),
+                    item.entity_id,
+                    item.label,
+                    item.category,
+                    item.source,
+                    int(item.verified),
+                    item.valid_from,
+                    item.valid_until,
+                    now,
                 )
             )
         await self.client.insert(
-            self.labels_table, rows,
+            self.labels_table,
+            rows,
             column_names=[
-                "label_id", "entity_id", "label", "category", "source",
-                "verified", "valid_from", "valid_until", "ingested_at",
+                "label_id",
+                "entity_id",
+                "label",
+                "category",
+                "source",
+                "verified",
+                "valid_from",
+                "valid_until",
+                "ingested_at",
             ],
         )
         return len(rows)
@@ -161,7 +227,9 @@ class ClickHouseCapitalStore:
     async def reconcile_evm_reorg(self, instruction: dict[str, Any]) -> int:
         """Append reverted versions for stored logs whose block hash is no longer canonical."""
         if not hasattr(self.client, "query"):
-            raise RuntimeError("ClickHouse query support is required for EVM reorg recovery")
+            raise RuntimeError(
+                "ClickHouse query support is required for EVM reorg recovery"
+            )
         source_id = str(instruction["source_id"])
         start = int(instruction["from_block"])
         end = int(instruction["to_block"])
@@ -180,7 +248,9 @@ class ClickHouseCapitalStore:
             parameters={"source_id": source_id, "from_block": start, "to_block": end},
         )
         tombstones = []
-        detected_at = instruction.get("detected_at") or datetime.now(timezone.utc).isoformat()
+        detected_at = (
+            instruction.get("detected_at") or datetime.now(timezone.utc).isoformat()
+        )
         for payload_json, block_number, block_hash in result.result_rows:
             number = int(block_number)
             canonical_hash = canonical.get(number)

@@ -47,6 +47,12 @@ def rank_capital_candidates(
     for event in events:
         if (
             not event.actor_id
+            or event.metadata.get("actor_identity_kind")
+            not in {"evm_address", "solana_address"}
+            or event.metadata.get(
+                "actor_is_pool_caller_not_verified_beneficial_owner"
+            )
+            is True
             or event.metadata.get("aggregate_only") is True
             or event.source_kind == "exchange_aggregate"
             or event.usd_value is None
@@ -92,9 +98,7 @@ def rank_capital_candidates(
         confidence = mean(confidences)
 
         components = {
-            "gross_flow": min(
-                log1p(gross) / log1p(gross_flow_reference_usd), 1.0
-            ),
+            "gross_flow": min(log1p(gross) / log1p(gross_flow_reference_usd), 1.0),
             "recurrence": min(len(selected) / 10.0, 1.0),
             "counterparty_breadth": min(len(counterparties) / 5.0, 1.0),
             "source_diversity": min(len(sources) / 3.0, 1.0),
@@ -120,9 +124,18 @@ def rank_capital_candidates(
             "Source identifiers may not represent statistically independent evidence.",
         ]
         if liquidity is None:
-            caveats.append("Market liquidity was unavailable; impact component is zero.")
+            caveats.append(
+                "Market liquidity was unavailable; impact component is zero."
+            )
         if direction_coverage < 1:
-            caveats.append("Some events have unknown direction and are not assigned buy/sell intent.")
+            caveats.append(
+                "Some events have unknown direction and are not assigned buy/sell intent."
+            )
+        if any(
+            "USDT proxy" in str(event.metadata.get("usd_valuation_basis", ""))
+            for event in selected
+        ):
+            caveats.append("Some USD values use an explicitly enabled USDT proxy.")
         ranked.append(
             CapitalCandidateRank(
                 entity_id,

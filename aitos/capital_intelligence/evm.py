@@ -127,7 +127,9 @@ class EVMLogCapitalAdapter:
         try:
             legacy_head = int(cursor, 16)
         except (TypeError, ValueError):
-            raise ValueError("EVM cursor must be a hex block or version-2 JSON") from None
+            raise ValueError(
+                "EVM cursor must be a hex block or version-2 JSON"
+            ) from None
         if legacy_head < 0:
             raise ValueError("invalid EVM cursor")
         return {"version": 1, "head_block": legacy_head, "recent_hashes": {}}
@@ -156,7 +158,7 @@ class EVMLogCapitalAdapter:
                 current_head = await self._header(old_head)
                 if current_head["hash"].lower() != old_head_hash.lower():
                     ancestor = None
-                    lower_bound = max(0, old_head - self.max_reorg_depth + 1)
+                    lower_bound = max(0, old_head - self.max_reorg_depth)
                     for number in range(old_head - 1, lower_bound - 1, -1):
                         known_hash = previous_hashes.get(str(number))
                         if not known_hash:
@@ -191,9 +193,7 @@ class EVMLogCapitalAdapter:
         canonical_hashes: dict[int, str] = {}
         if reorg_start is not None:
             for number in range(reorg_start, end + 1):
-                canonical_hashes[number] = (
-                    await self._header(number)
-                )["hash"].lower()
+                canonical_hashes[number] = (await self._header(number))["hash"].lower()
             self.last_reorg = {
                 "source_id": f"evm:{self.chain_id}",
                 "from_block": reorg_start,
@@ -226,7 +226,9 @@ class EVMLogCapitalAdapter:
             canonical_hash = block_headers[block_number]["hash"].lower()
             log_hash = str(log.get("blockHash") or "").lower()
             if log_hash and log_hash != canonical_hash:
-                raise RuntimeError("EVM log block hash changed during poll; retry required")
+                raise RuntimeError(
+                    "EVM log block hash changed during poll; retry required"
+                )
             if canonical_hashes and block_number in canonical_hashes:
                 if canonical_hashes[block_number] != canonical_hash:
                     raise RuntimeError("EVM canonical hash changed during reorg scan")
@@ -266,6 +268,7 @@ class EVMLogCapitalAdapter:
                     1.0,
                     {
                         "log_index": log_index,
+                        "actor_identity_kind": "evm_address",
                         "raw_amount": str(amount),
                         "decimals_required": True,
                         "direction_semantics": "transfer_only_not_trade_intent",
@@ -274,7 +277,9 @@ class EVMLogCapitalAdapter:
             )
 
         # Retain a contiguous hash window so the next poll can find a common ancestor.
-        window_start = max(0, end - self.max_reorg_depth + 1)
+        # Keep one extra ancestor hash so a reorg exactly at the configured depth
+        # can still be anchored to the last common canonical block.
+        window_start = max(0, end - self.max_reorg_depth)
         retained = {
             str(number): block_hash
             for number, block_hash in previous_hashes.items()
@@ -288,9 +293,7 @@ class EVMLogCapitalAdapter:
             elif number in block_headers:
                 retained[str(number)] = block_headers[number]["hash"].lower()
             else:
-                retained[str(number)] = (
-                    await self._header(number)
-                )["hash"].lower()
+                retained[str(number)] = (await self._header(number))["hash"].lower()
         next_cursor = json.dumps(
             {
                 "version": 2,

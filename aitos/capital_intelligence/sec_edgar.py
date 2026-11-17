@@ -39,10 +39,15 @@ class SecEdgarFilingsAdapter:
         if not normalized or len(normalized) > 500:
             raise ValueError("provide 1-500 SEC CIKs")
         if not user_agent.strip() or "@" not in user_agent:
-            raise ValueError("SEC requires an identifying User-Agent with contact email")
+            raise ValueError(
+                "SEC requires an identifying User-Agent with contact email"
+            )
         if not 0.2 <= timeout_seconds <= 30:
             raise ValueError("invalid timeout")
-        if not 1 <= max_filings_per_poll <= 100 or not 1 <= initial_filings_per_cik <= 100:
+        if (
+            not 1 <= max_filings_per_poll <= 100
+            or not 1 <= initial_filings_per_cik <= 100
+        ):
             raise ValueError("invalid filing bounds")
         self.ciks = normalized
         self.user_agent = user_agent.strip()
@@ -111,7 +116,9 @@ class SecEdgarFilingsAdapter:
         if not value:
             return None
         try:
-            return datetime.combine(date.fromisoformat(value[:10]), datetime.min.time(), timezone.utc)
+            return datetime.combine(
+                date.fromisoformat(value[:10]), datetime.min.time(), timezone.utc
+            )
         except ValueError:
             return None
 
@@ -119,7 +126,9 @@ class SecEdgarFilingsAdapter:
     def _event_id(*parts: str) -> str:
         return hashlib.sha256("|".join(parts).encode()).hexdigest()
 
-    async def _information_table_url(self, cik: str, accession: str, primary: str) -> str:
+    async def _information_table_url(
+        self, cik: str, accession: str, primary: str
+    )
         directory = f"{self.ARCHIVES_URL}{int(cik)}/{accession.replace('-', '')}/"
         index = await self._get_json(urljoin(directory, "index.json"))
         items = (index.get("directory") or {}).get("item") or []
@@ -135,7 +144,13 @@ class SecEdgarFilingsAdapter:
         return urljoin(directory, document)
 
     async def _parse_13f(
-        self, cik: str, accession: str, filing_date: datetime, report_date: str, url: str
+        self,
+        cik: str,
+        accession: str,
+        form: str,
+        filing_date: datetime,
+        report_date: str,
+        url: str,
     ) -> list[CapitalEvent]:
         root = ET.fromstring(await self._get_text(url))
         period = self._day(self._value(root, "periodOfReport") or report_date)
@@ -178,17 +193,21 @@ class SecEdgarFilingsAdapter:
                     transaction_id=accession,
                     finality="confirmed",
                     metadata={
-                        "filing_form": "13F-HR",
+                        "filing_form": form,
                         "accession_number": accession,
                         "filing_url": url,
                         "filing_date": filing_date.isoformat(),
                         "period_of_report": period.isoformat(),
+                        "reporting_lag_days": (filing_date - period).days,
+                        "actor_identity_kind": "sec_institution",
                         "issuer_name": self._value(item, "nameOfIssuer"),
                         "title_of_class": self._value(item, "titleOfClass"),
                         "reported_value_unit": "USD_thousands_as_filed",
                         "reported_value_usd": reported_value,
                         "put_call": self._value(item, "putCall"),
-                        "investment_discretion": self._value(item, "investmentDiscretion"),
+                        "investment_discretion": self._value(
+                            item, "investmentDiscretion"
+                        ),
                         "reported_shares_type": self._value(item, "sshPrnamtType"),
                         "source_semantics": "quarterly_disclosed_holding_not_realtime_position",
                     },
@@ -221,10 +240,21 @@ class SecEdgarFilingsAdapter:
                 raise RuntimeError("Form 4 contains a negative transaction value")
             acquired_disposed = self._value(item, "transactionAcquiredDisposedCode")
             code = self._value(item, "transactionCode")
-            sign = 1 if acquired_disposed == "A" else (-1 if acquired_disposed == "D" else 0)
+            sign = (
+                1
+                if acquired_disposed == "A"
+                else (-1 if acquired_disposed == "D" else 0)
+            )
             event_id = self._event_id(
-                "form4", cik, accession, str(index), transaction_date.isoformat(),
-                shares_raw, price_raw or "", acquired_disposed or "", code or ""
+                "form4",
+                cik,
+                accession,
+                str(index),
+                transaction_date.isoformat(),
+                shares_raw,
+                price_raw or "",
+                acquired_disposed or "",
+                code or "",
             )
             events.append(
                 CapitalEvent(
@@ -255,6 +285,8 @@ class SecEdgarFilingsAdapter:
                         "flow_sign": sign,
                         "price_per_share": price,
                         "reporting_owner_cik": owner_cik,
+                        "reporting_lag_days": (filing_date - transaction_date).days,
+                        "actor_identity_kind": "sec_insider",
                         "issuer_cik": issuer_id,
                         "source_semantics": "reported_insider_transaction_not_a_standalone_signal",
                     },
@@ -271,7 +303,9 @@ class SecEdgarFilingsAdapter:
             try:
                 previous = json.loads(cursor)
             except (TypeError, ValueError):
-                raise ValueError("SEC cursor must be a JSON CIK-to-accession map") from None
+                raise ValueError(
+                    "SEC cursor must be a JSON CIK-to-accession map"
+                ) from None
             if not isinstance(previous, dict) or any(
                 not isinstance(k, str) or not isinstance(v, str)
                 for k, v in previous.items()
@@ -293,7 +327,9 @@ class SecEdgarFilingsAdapter:
             report_dates = recent.get("reportDate") or []
             rows = []
             for index, accession in enumerate(accessions):
-                if index >= min(len(forms), len(dates), len(primary_docs), len(report_dates)):
+                if index >= min(
+                    len(forms), len(dates), len(primary_docs), len(report_dates)
+                ):
                     break
                 rows.append(
                     {
@@ -340,7 +376,12 @@ class SecEdgarFilingsAdapter:
                     )
                     events.extend(
                         await self._parse_13f(
-                            cik, accession, filing_date, row["report_date"], document_url
+                            cik,
+                            accession,
+                            row["form"],
+                            filing_date,
+                            row["report_date"],
+                            document_url,
                         )
                     )
                 elif row["form"] in {"3", "4", "5"}:

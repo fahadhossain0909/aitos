@@ -47,8 +47,8 @@ async def test_evm_uses_block_time_and_preserves_raw_transfer_amount():
     adapter._rpc = fake_rpc
     events, cursor = await adapter.poll(cursor="0x14")
     cursor_state = json.loads(cursor)
-    assert cursor_state["head_block"] == 0x1e
-    assert len(cursor_state["recent_hashes"]) == 0x1e + 1
+    assert cursor_state["head_block"] == 0x1E
+    assert len(cursor_state["recent_hashes"]) == 0x1E + 1
     assert len(events) == 1
     assert events[0].event_time == datetime.fromtimestamp(1_700_000_000, timezone.utc)
     assert events[0].metadata["raw_amount"] == str(raw_amount)
@@ -157,7 +157,11 @@ async def test_dex_swap_resolves_pool_tokens_and_keeps_signed_raw_deltas():
         if method == "eth_getLogs":
             return [log]
         if method == "eth_call":
-            return "0x" + "0" * 24 + (token0 if params[0]["data"] == "0x0dfe1681" else token1)[2:]
+            return (
+                "0x"
+                + "0" * 24
+                + (token0 if params[0]["data"] == "0x0dfe1681" else token1)[2:]
+            )
         if method == "eth_getBlockByNumber":
             return {"timestamp": hex(1_700_000_000)}
         raise AssertionError(method)
@@ -184,9 +188,7 @@ async def test_evm_reorg_rewinds_to_common_ancestor_and_exposes_tombstone_range(
         max_reorg_depth=8,
     )
     old_hashes = {str(number): "0x" + f"{number:064x}" for number in range(93, 101)}
-    cursor = json.dumps(
-        {"version": 2, "head_block": 100, "recent_hashes": old_hashes}
-    )
+    cursor = json.dumps({"version": 2, "head_block": 100, "recent_hashes": old_hashes})
     new_hash = "0x" + "f" * 64
 
     async def fake_rpc(method, params):
@@ -196,8 +198,10 @@ async def test_evm_reorg_rewinds_to_common_ancestor_and_exposes_tombstone_range(
             number = int(params[0], 16)
             return {
                 "timestamp": hex(1_700_000_000 + number),
-                "hash": new_hash if number == 100 else old_hashes.get(
-                    str(number), "0x" + f"{number:064x}"
+                "hash": (
+                    new_hash
+                    if number == 100
+                    else old_hashes.get(str(number), "0x" + f"{number:064x}")
                 ),
             }
         if method == "eth_getLogs":

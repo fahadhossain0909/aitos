@@ -26,9 +26,11 @@ class Session:
     def __init__(self, rows):
         self.rows = rows
         self.params = None
+        self.calls = 0
 
     def get(self, url, params):
         self.params = params
+        self.calls += 1
         return Response(self.rows)
 
 
@@ -49,6 +51,8 @@ async def test_binance_price_book_uses_only_closed_candles_at_or_before_event():
     assert quote.observed_at.timestamp() == 119.999
     assert quote.quote_currency == "USDT"
     assert session.params["endTime"] == "120000"
+    assert await book.quote("asset:btc", at) == quote
+    assert session.calls == 1
 
 
 @pytest.mark.asyncio

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -31,6 +32,8 @@ class BinanceHistoricalPriceBook:
         self.timeout_seconds = timeout_seconds
         self.session = session
         self.owns_session = session is None
+        self._cache: dict[tuple[str, int], PriceQuote | None] = {}
+        self._cache_lock = asyncio.Lock()
 
     async def close(self) -> None:
         if self.owns_session and self.session and not self.session.closed:
@@ -48,6 +51,20 @@ class BinanceHistoricalPriceBook:
             )
         at_utc = at.astimezone(timezone.utc)
         at_ms = int(at_utc.timestamp() * 1000)
+        cache_key = (asset_id, at_ms // 60_000)
+        async with self._cache_lock:
+            if cache_key in self._cache:
+                return self._cache[cache_key]
+            return await self._fetch_quote(token, asset_id, at_utc, at_ms, cache_key)
+
+    async def _fetch_quote(
+        self,
+        token: TokenMetadata,
+        asset_id: str,
+        at_utc: datetime,
+        at_ms: int,
+        cache_key: tuple[str, int],
+    ) -> PriceQuote | None:
         async with self.session.get(
             self.BASE_URL + "/api/v3/klines",
             params={
@@ -62,19 +79,20 @@ class BinanceHistoricalPriceBook:
                 raise RuntimeError("Binance spot kline rate limit reached")
             response.raise_for_status()
             rows: Any = await response.json()
-        eligible = [
-            row
-            for row in rows
-            if len(row) > 6 and int(row[6]) <= at_ms
-        ]
+        eligible = [row for row in rows if len(row) > 6 and int(row[6]) <= at_ms]
         if not eligible:
-            return None
-        row = max(eligible, key=lambda item: int(item[6]))
-        close_time = datetime.fromtimestamp(int(row[6]) / 1000, timezone.utc)
-        return PriceQuote(
-            asset_id=asset_id,
-            quote_currency=token.price_quote_currency,
-            price=float(row[4]),
-            observed_at=close_time,
-            source=f"binance_spot_klines:{token.price_symbol}:1m",
-        )
+            quote = None
+        else:
+            row = max(eligible, key=lambda item: int(item[6]))
+            close_time = datetime.fromtimestamp(int(row[6]) / 1000, timezone.utc)
+            quote = PriceQuote(
+                asset_id=asset_id,
+                quote_currency=token.price_quote_currency,
+                price=float(row[4]),
+                observed_at=close_time,
+                source=f"binance_spot_klines:{token.price_symbol}:1m",
+            )
+        self._cache[cache_key] = quote
+        if len(self._cache) > 10_000:
+            self._cache.pop(next(iter(self._cache)))
+        return quote

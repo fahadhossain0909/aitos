@@ -79,7 +79,10 @@ async def test_sec_13f_preserves_report_period_and_filing_publication_time():
     assert event.usd_value == 2_500_000
     assert event.event_time.date().isoformat() == "2026-03-31"
     assert event.observed_time.date().isoformat() == "2026-05-15"
-    assert event.metadata["source_semantics"] == "quarterly_disclosed_holding_not_realtime_position"
+    assert (
+        event.metadata["source_semantics"]
+        == "quarterly_disclosed_holding_not_realtime_position"
+    )
     assert json.loads(cursor)[cik] == accession
 
 
