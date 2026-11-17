@@ -20,13 +20,3 @@ groups:
         annotations:
           summary: "CFEI observer has not completed a poll recently"
           description: "Check service health, Redis lease contention and RPC availability."
-
-      - alert: AITOSCFEIMetricsMissing
-        expr: up{job="aitos-capital-intelligence"} == 0
-        for: 3m
-        labels:
-          severity: warning
-          component: capital-intelligence
-        annotations:
-          summary: "CFEI metrics endpoint is unavailable"
-          description: "The optional observer profile may be disabled or the service may have stopped."
