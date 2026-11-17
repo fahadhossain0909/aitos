@@ -165,3 +165,43 @@ parameterized Cypher. It intentionally stores evidence nodes instead of
 auto-merging wallet identities. Production activation still requires explicit
 Neo4j connection configuration, deployment wiring, integration tests against
 the deployed Neo4j version, backups and query/resource budgets.
+
+
+## 11. Bounded EVM token metadata discovery
+
+The optional `EvmTokenMetadataResolver` reads ERC-20 `decimals()` and
+`symbol()` from configured contract addresses over HTTPS JSON-RPC. Discovery
+is bounded to 500 addresses per configured chain, uses a bounded concurrency
+limit, validates ABI responses, and refuses unsupported decimal values. It
+does not scan arbitrary contracts or infer token legitimacy. A returned
+symbol is descriptive only and is never promoted to a Binance price-pair
+symbol; price mapping remains an explicit operator decision.
+
+Example:
+
+```dotenv
+AITOS_CFEI_EVM_TOKEN_DISCOVERY=[{"rpc_url":"https://YOUR_PUBLIC_RPC","chain_id":"1","addresses":["0xTOKEN_ADDRESS"],"max_concurrency":4}]
+```
+
+Explicit `AITOS_CFEI_TOKENS` entries override discovered metadata for the same
+chain/address. RPC credentials must be supplied through deployment secrets,
+not committed environment files.
+
+## 12. Point-in-time event replay
+
+The `replay.py` module provides a deterministic research harness:
+- excludes reverted events, unknown flow direction and events observed before
+  their event timestamp;
+- requires a price observation at the event time and at each predeclared
+  forward horizon, with a strict maximum quote-age bound;
+- applies the event's explicit flow sign to forward returns; it does not infer
+  direction from transfers or pool callers;
+- reports sample count, directional hit rate, mean return and median return;
+- offers chronological train/test splitting only; random row splitting is
+  intentionally not provided.
+
+This is a label-generation and descriptive evaluation primitive, not a
+strategy, probability calibration, cost model or proof of predictive lift.
+Production research must add venue-specific fees, funding, spread, slippage,
+latency, partial fills, survivorship controls, regime/time-split validation,
+ablation and confidence intervals before any model-governance review.
