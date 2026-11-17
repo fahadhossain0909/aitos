@@ -114,15 +114,27 @@ class CapitalIngestionWorker:
             await asyncio.gather(heartbeat_task, return_exceptions=True)
             await self.checkpoints.release(lease)
     async def run_forever(self):
+        failures = 0
         while not self._stopping.is_set():
-            started=time.monotonic()
-            try: await self.run_once()
-            except asyncio.CancelledError: raise
+            started = time.monotonic()
+            try:
+                await self.run_once()
+                failures = 0
+                delay = self.poll_interval_seconds
+            except asyncio.CancelledError:
+                raise
             except Exception:
-                log.exception("CFEI source poll failed",extra={"source_id":self.source_id})
-            delay=max(0.0,self.poll_interval_seconds-(time.monotonic()-started))
-            try: await asyncio.wait_for(self._stopping.wait(),timeout=delay)
-            except asyncio.TimeoutError: pass
+                failures = min(failures + 1, 8)
+                delay = min(300.0, self.poll_interval_seconds * (2**failures))
+                log.exception(
+                    "CFEI source poll failed",
+                    extra={"source_id": self.source_id, "retry_delay_seconds": delay},
+                )
+            delay = max(0.0, delay - (time.monotonic() - started))
+            try:
+                await asyncio.wait_for(self._stopping.wait(), timeout=delay)
+            except asyncio.TimeoutError:
+                pass
     async def close(self):
         self.stop()
         await self.source.close()
