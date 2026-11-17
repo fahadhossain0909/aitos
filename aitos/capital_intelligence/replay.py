@@ -3,6 +3,7 @@
 This module builds outcome labels only from prices observed at or after the
 predeclared horizon. It does not emit trading signals or execute orders.
 """
+
 from __future__ import annotations
 
 from bisect import bisect_left
@@ -25,7 +26,9 @@ class PriceObservation:
             raise ValueError("price instrument and timezone-aware timestamp required")
         if not isfinite(self.price) or self.price <= 0:
             raise ValueError("price must be positive and finite")
-        object.__setattr__(self, "observed_at", self.observed_at.astimezone(timezone.utc))
+        object.__setattr__(
+            self, "observed_at", self.observed_at.astimezone(timezone.utc)
+        )
 
 
 @dataclass(frozen=True, slots=True)
