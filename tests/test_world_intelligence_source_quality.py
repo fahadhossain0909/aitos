@@ -4,6 +4,7 @@ from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.source_quality import (
     SourceOutcome,
     assess_source_batch,
+    detect_coordinated_amplification,
     estimate_source_reliability,
 )
 
@@ -89,3 +90,108 @@ def test_source_reliability_uses_only_labels_available_as_of():
     assert estimate.confirmed_count == 1
     assert estimate.status == "calibrated"
     assert 0.0 < estimate.posterior_mean < 1.0
+
+
+def test_coordination_graph_requires_repeated_synchronous_cross_publisher_overlap():
+    titles = (
+        "Central bank unexpectedly signals policy rate change",
+        "Major exchange announces new bitcoin custody partnership",
+    )
+    events = [
+        make_event(index, title=title, source_id=source_id)
+        for index, (source_id, title) in enumerate(
+            (("feed-a", titles[0]), ("feed-b", titles[0]), ("feed-c", titles[0]),
+             ("feed-a", titles[1]), ("feed-b", titles[1]), ("feed-c", titles[1]))
+        )
+    ]
+
+    clusters = detect_coordinated_amplification(
+        events,
+        as_of=NOW,
+        publisher_groups={
+            "feed-a": "publisher-a",
+            "feed-b": "publisher-b",
+            "feed-c": "publisher-c",
+        },
+    )
+
+    assert len(clusters) == 1
+    cluster = clusters[0]
+    assert cluster.source_ids == ("feed-a", "feed-b", "feed-c")
+    assert len(cluster.edges) == 3
+    assert len(cluster.shared_story_ids) == 2
+    assert cluster.reasons == (
+        "repeated_near_synchronous_cross_publisher_story_overlap",
+    )
+    assert cluster.cluster_id.startswith("coord:")
+
+
+def test_coordination_graph_does_not_count_same_publisher_as_independent():
+    titles = (
+        "Central bank unexpectedly signals policy rate change",
+        "Major exchange announces new bitcoin custody partnership",
+    )
+    events = [
+        make_event(index, title=title, source_id=source_id)
+        for index, (source_id, title) in enumerate(
+            (("feed-a", titles[0]), ("feed-b", titles[0]), ("feed-c", titles[0]),
+             ("feed-a", titles[1]), ("feed-b", titles[1]), ("feed-c", titles[1]))
+        )
+    ]
+
+    clusters = detect_coordinated_amplification(
+        events,
+        as_of=NOW,
+        publisher_groups={
+            "feed-a": "same-wire",
+            "feed-b": "same-wire",
+            "feed-c": "same-wire",
+        },
+    )
+
+    assert clusters == ()
+
+
+def test_coordination_graph_excludes_future_and_stale_observations():
+    titles = (
+        "Central bank unexpectedly signals policy rate change",
+        "Major exchange announces new bitcoin custody partnership",
+    )
+    events = [
+        make_event(index, title=title, source_id=source_id)
+        for index, (source_id, title) in enumerate(
+            (("feed-a", titles[0]), ("feed-b", titles[0]), ("feed-c", titles[0]),
+             ("feed-a", titles[1]), ("feed-b", titles[1]), ("feed-c", titles[1]))
+        )
+    ]
+    stale = [
+        make_event(
+            100 + index,
+            title=title,
+            source_id=source_id,
+        )
+        for index, (source_id, title) in enumerate(
+            (("feed-a", titles[0]), ("feed-b", titles[0]), ("feed-c", titles[0]))
+        )
+    ]
+    stale = [
+        event.model_copy(
+            update={
+                "published_at": NOW - timedelta(days=2),
+                "first_seen_at": NOW - timedelta(days=2),
+            }
+        )
+        for event in stale
+    ]
+
+    clusters = detect_coordinated_amplification(
+        events + stale,
+        as_of=NOW,
+        publisher_groups={
+            "feed-a": "publisher-a",
+            "feed-b": "publisher-b",
+            "feed-c": "publisher-c",
+        },
+    )
+
+    assert len(clusters) == 1
