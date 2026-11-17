@@ -1,4 +1,5 @@
 """Read-only Solana finalized address activity and SPL-token balance deltas."""
+
 from __future__ import annotations
 
 import hashlib
@@ -71,10 +72,11 @@ class SolanaAddressActivityAdapter:
         try:
             value = json.loads(cursor)
         except (TypeError, ValueError):
-            raise ValueError("Solana cursor must be a JSON address-to-signature map") from None
+            raise ValueError(
+                "Solana cursor must be a JSON address-to-signature map"
+            ) from None
         if not isinstance(value, dict) or any(
-            not isinstance(k, str) or not isinstance(v, str)
-            for k, v in value.items()
+            not isinstance(k, str) or not isinstance(v, str) for k, v in value.items()
         ):
             raise ValueError("invalid Solana cursor map")
         return value
@@ -140,7 +142,9 @@ class SolanaAddressActivityAdapter:
                 ],
             )
             if not tx:
-                raise RuntimeError("Solana transaction unavailable; cursor not advanced")
+                raise RuntimeError(
+                    "Solana transaction unavailable; cursor not advanced"
+                )
             meta = tx.get("meta") or {}
             if meta.get("err") is not None:
                 continue

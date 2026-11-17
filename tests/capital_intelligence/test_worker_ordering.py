@@ -2,7 +2,6 @@ from datetime import datetime, timezone
 import pytest
 
 from aitos.capital_intelligence.contracts import CapitalEvent
-from aitos.capital_intelligence.runtime import CapitalIngestionWorker, RedisCheckpointStore
 
 
 class FakeRedis:
@@ -36,8 +35,18 @@ class Source:
     async def poll(self, *, cursor=None):
         now = datetime.now(timezone.utc)
         event = CapitalEvent(
-            "event-1", "source-1", "test", "crypto", "test", "BTC",
-            "test_event", now, now, 1, "BTC", None,
+            "event-1",
+            "source-1",
+            "test",
+            "crypto",
+            "test",
+            "BTC",
+            "test_event",
+            now,
+            now,
+            1,
+            "BTC",
+            None,
         )
         return [event], "next"
 

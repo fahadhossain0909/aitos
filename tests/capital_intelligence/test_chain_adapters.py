@@ -72,14 +72,22 @@ async def test_solana_cursor_is_independent_per_address_and_token_delta_is_signe
                     "err": None,
                     "preBalances": [100],
                     "postBalances": [110],
-                    "preTokenBalances": [{
-                        "owner": owner, "mint": "USDC", "accountIndex": 0,
-                        "uiTokenAmount": {"amount": "500", "decimals": 6},
-                    }],
-                    "postTokenBalances": [{
-                        "owner": owner, "mint": "USDC", "accountIndex": 0,
-                        "uiTokenAmount": {"amount": "700", "decimals": 6},
-                    }],
+                    "preTokenBalances": [
+                        {
+                            "owner": owner,
+                            "mint": "USDC",
+                            "accountIndex": 0,
+                            "uiTokenAmount": {"amount": "500", "decimals": 6},
+                        }
+                    ],
+                    "postTokenBalances": [
+                        {
+                            "owner": owner,
+                            "mint": "USDC",
+                            "accountIndex": 0,
+                            "uiTokenAmount": {"amount": "700", "decimals": 6},
+                        }
+                    ],
                 },
             }
         raise AssertionError(method)
@@ -89,6 +97,7 @@ async def test_solana_cursor_is_independent_per_address_and_token_delta_is_signe
         cursor='{"wallet-A":"old-A","wallet-B":"old-B"}'
     )
     import json
+
     assert json.loads(cursor) == {"wallet-A": "new-A", "wallet-B": "new-B"}
     token_events = [event for event in events if event.instrument == "USDC"]
     assert len(token_events) == 2

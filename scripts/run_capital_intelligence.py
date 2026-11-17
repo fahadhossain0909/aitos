@@ -1,4 +1,5 @@
 """Opt-in standalone CFEI observer process. It never imports trading execution."""
+
 from __future__ import annotations
 
 import asyncio
@@ -67,7 +68,9 @@ async def _metrics_server(port: int, counters: dict[str, int]) -> None:
 
 async def main() -> None:
     if os.getenv("AITOS_CFEI_ENABLED", "false").lower() not in {"1", "true", "yes"}:
-        raise SystemExit("CFEI is disabled. Set AITOS_CFEI_ENABLED=true and use the capital-intelligence compose profile.")
+        raise SystemExit(
+            "CFEI is disabled. Set AITOS_CFEI_ENABLED=true and use the capital-intelligence compose profile."
+        )
     logging.basicConfig(
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -88,7 +91,9 @@ async def main() -> None:
         database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
         secure=os.getenv("CLICKHOUSE_SECURE", "false").lower() == "true",
     )
-    store = ClickHouseCapitalStore(clickhouse, os.getenv("CLICKHOUSE_DATABASE", "aitos"))
+    store = ClickHouseCapitalStore(
+        clickhouse, os.getenv("CLICKHOUSE_DATABASE", "aitos")
+    )
     await store.ensure_schema()
     checkpoints = RedisCheckpointStore(redis_client)
     workers: list[CapitalIngestionWorker] = []
@@ -97,7 +102,15 @@ async def main() -> None:
     symbols = _json_env("AITOS_CFEI_BINANCE_SYMBOLS", [])
     if symbols:
         adapter = BinanceFuturesCapitalAdapter(symbols=symbols)
-        workers.append(CapitalIngestionWorker(source_id="binance-usdm-aggregates", source=adapter, checkpoints=checkpoints, store=store, poll_interval_seconds=interval))
+        workers.append(
+            CapitalIngestionWorker(
+                source_id="binance-usdm-aggregates",
+                source=adapter,
+                checkpoints=checkpoints,
+                store=store,
+                poll_interval_seconds=interval,
+            )
+        )
 
     evm_cfg = _json_env("AITOS_CFEI_EVM", [])
     for index, config in enumerate(evm_cfg):
@@ -108,7 +121,15 @@ async def main() -> None:
             confirmations=int(config.get("confirmations", 12)),
             max_block_range=int(config.get("max_block_range", 250)),
         )
-        workers.append(CapitalIngestionWorker(source_id=f"evm-{config['chain_id']}-{index}", source=adapter, checkpoints=checkpoints, store=store, poll_interval_seconds=interval))
+        workers.append(
+            CapitalIngestionWorker(
+                source_id=f"evm-{config['chain_id']}-{index}",
+                source=adapter,
+                checkpoints=checkpoints,
+                store=store,
+                poll_interval_seconds=interval,
+            )
+        )
 
     dex_cfg = _json_env("AITOS_CFEI_DEX_POOLS", [])
     for index, config in enumerate(dex_cfg):
@@ -118,7 +139,15 @@ async def main() -> None:
             pools=config["pools"],
             confirmations=int(config.get("confirmations", 12)),
         )
-        workers.append(CapitalIngestionWorker(source_id=f"dex-{config['chain_id']}-{index}", source=adapter, checkpoints=checkpoints, store=store, poll_interval_seconds=interval))
+        workers.append(
+            CapitalIngestionWorker(
+                source_id=f"dex-{config['chain_id']}-{index}",
+                source=adapter,
+                checkpoints=checkpoints,
+                store=store,
+                poll_interval_seconds=interval,
+            )
+        )
 
     sol_cfg = _json_env("AITOS_CFEI_SOLANA", [])
     for index, config in enumerate(sol_cfg):
@@ -127,10 +156,20 @@ async def main() -> None:
             addresses=config["addresses"],
             page_limit=int(config.get("page_limit", 100)),
         )
-        workers.append(CapitalIngestionWorker(source_id=f"solana-{index}", source=adapter, checkpoints=checkpoints, store=store, poll_interval_seconds=interval))
+        workers.append(
+            CapitalIngestionWorker(
+                source_id=f"solana-{index}",
+                source=adapter,
+                checkpoints=checkpoints,
+                store=store,
+                poll_interval_seconds=interval,
+            )
+        )
 
     if not workers:
-        raise SystemExit("CFEI enabled but no observer sources configured; refusing an idle service.")
+        raise SystemExit(
+            "CFEI enabled but no observer sources configured; refusing an idle service."
+        )
 
     counters = {"events": 0, "errors": 0, "last_poll": 0}
     original_run_once = CapitalIngestionWorker.run_once

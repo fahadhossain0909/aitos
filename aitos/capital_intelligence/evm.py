@@ -1,4 +1,5 @@
 """Bounded EVM ERC-20 Transfer observer over public JSON-RPC."""
+
 from __future__ import annotations
 
 import hashlib
@@ -51,8 +52,10 @@ class EVMLogCapitalAdapter:
     @staticmethod
     def _address(value: str) -> str:
         value = value.lower()
-        if len(value) != 42 or not value.startswith("0x") or any(
-            char not in "0123456789abcdef" for char in value[2:]
+        if (
+            len(value) != 42
+            or not value.startswith("0x")
+            or any(char not in "0123456789abcdef" for char in value[2:])
         ):
             raise ValueError("invalid EVM address")
         return value
@@ -118,9 +121,13 @@ class EVMLogCapitalAdapter:
                 continue
             block_number = int(log["blockNumber"], 16)
             if block_number not in block_times:
-                block = await self._rpc("eth_getBlockByNumber", [hex(block_number), False])
+                block = await self._rpc(
+                    "eth_getBlockByNumber", [hex(block_number), False]
+                )
                 if not block or not block.get("timestamp"):
-                    raise RuntimeError("EVM block timestamp unavailable; refusing bad event")
+                    raise RuntimeError(
+                        "EVM block timestamp unavailable; refusing bad event"
+                    )
                 block_times[block_number] = datetime.fromtimestamp(
                     int(block["timestamp"], 16), timezone.utc
                 )

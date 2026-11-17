@@ -1,4 +1,5 @@
 """AITOS Capital Flow & Entity Intelligence."""
+
 from .behavior import BehaviorAssessment, assess_capital_behavior
 from .binance import BinanceFuturesCapitalAdapter
 from .contracts import CapitalEvent, EntityEvidence, EntityLabel
