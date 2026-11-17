@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Sequence
+from typing import Any
 
 from aitos.world_intelligence.adapters import EventSink, IntelligenceSourceAdapter
 from aitos.world_intelligence.entity_resolution import (
@@ -388,7 +389,7 @@ class IntelligenceIngestionWorker:
 
 
 __all__ = [
-    "SourceRunResult",
     "CursorReplayConflict",
     "IntelligenceIngestionWorker",
+    "SourceRunResult",
 ]

@@ -6,10 +6,10 @@ or activate a model and makes no profitability claim.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from math import isfinite, log
-from typing import Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,11 +207,11 @@ def compare_ablation(
 
 
 __all__ = [
-    "EventPrediction",
-    "EvaluationMetrics",
-    "WalkForwardSplit",
     "AblationComparison",
-    "evaluate_predictions",
+    "EvaluationMetrics",
+    "EventPrediction",
+    "WalkForwardSplit",
     "chronological_walk_forward_splits",
     "compare_ablation",
+    "evaluate_predictions",
 ]

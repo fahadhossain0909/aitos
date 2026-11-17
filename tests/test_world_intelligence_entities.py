@@ -5,7 +5,6 @@ from aitos.world_intelligence.entity_resolution import EntityAliasRegistry
 from aitos.world_intelligence.narratives import cluster_narratives
 from aitos.world_intelligence.pipeline import enrich_event_batch
 
-
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 

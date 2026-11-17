@@ -6,8 +6,9 @@ import asyncio
 import hashlib
 import logging
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -141,8 +142,8 @@ class RedisSourceLeaseManager:
 
 
 __all__ = [
-    "LeaseUnavailable",
     "LeaseLost",
+    "LeaseUnavailable",
     "RedisSourceLease",
     "RedisSourceLeaseManager",
 ]

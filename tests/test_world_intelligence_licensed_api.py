@@ -5,7 +5,6 @@ import pytest
 
 from aitos.world_intelligence.licensed_api import LicensedJSONFeedAdapter
 
-
 PAYLOAD = {
     "data": {
         "items": [

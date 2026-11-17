@@ -5,7 +5,6 @@ import pytest
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
 
-
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 

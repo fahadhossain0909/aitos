@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import fsum, isfinite
-from typing import Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +135,7 @@ def estimate_event_beta(
 
 
 __all__ = [
-    "EventStudyObservation",
     "EventBetaEstimate",
+    "EventStudyObservation",
     "estimate_event_beta",
 ]

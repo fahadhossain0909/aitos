@@ -7,8 +7,8 @@ matches win. Ambiguous aliases should not be registered.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Mapping
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,7 +48,7 @@ class EntityAliasRegistry:
         normalized = " ".join(text.casefold().split())
         matches: list[tuple[int, int, str, str]] = []
         for alias, canonical in self._aliases.items():
-            pattern = re.compile(r"(?<![\w])" + re.escape(alias) + r"(?![\w])", re.I)
+            pattern = re.compile(r"(?<![\w])" + re.escape(alias) + r"(?![\w])", re.IGNORECASE)
             for match in pattern.finditer(normalized):
                 matches.append((match.start(), match.end(), alias, canonical))
         matches.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2]))
@@ -93,4 +93,4 @@ DEFAULT_ENTITY_REGISTRY = EntityAliasRegistry(
 )
 
 
-__all__ = ["ResolvedEntity", "EntityAliasRegistry", "DEFAULT_ENTITY_REGISTRY"]
+__all__ = ["DEFAULT_ENTITY_REGISTRY", "EntityAliasRegistry", "ResolvedEntity"]

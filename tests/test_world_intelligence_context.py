@@ -9,7 +9,6 @@ from aitos.world_intelligence.context import (
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.snapshot import build_asset_intelligence_snapshot
 
-
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 

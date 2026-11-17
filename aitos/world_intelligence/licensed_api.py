@@ -224,7 +224,7 @@ class LicensedJSONFeedAdapter:
             safe_uri = parsed_uri._replace(query="", fragment="").geturl()
             origin_id = str(field("id") or safe_uri)
             digest = hashlib.sha256(
-                f"{self.source_id}|{origin_id}".encode("utf-8")
+                f"{self.source_id}|{origin_id}".encode()
             ).hexdigest()
             analysis = analyze_financial_headline(title[:20_000])
             raw_entities = field("entities", [])

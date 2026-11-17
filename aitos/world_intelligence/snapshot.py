@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import exp, fsum, isfinite
-from typing import Mapping, Sequence
 
 from aitos.world_intelligence.contracts import AssetImpact, IntelligenceEvent
 from aitos.world_intelligence.event_study import EventBetaEstimate
@@ -203,7 +203,7 @@ def build_asset_intelligence_snapshot(
 
 
 __all__ = [
-    "HorizonImpact",
     "AssetIntelligenceSnapshot",
+    "HorizonImpact",
     "build_asset_intelligence_snapshot",
 ]

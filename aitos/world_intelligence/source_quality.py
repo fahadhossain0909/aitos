@@ -9,12 +9,11 @@ from __future__ import annotations
 import hashlib
 import re
 from collections import Counter, defaultdict
-from datetime import timedelta
-from itertools import combinations
+from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from itertools import combinations
 from math import isfinite, sqrt
-from typing import Sequence
 
 from aitos.world_intelligence.contracts import IntelligenceEvent
 
@@ -320,12 +319,12 @@ def detect_coordinated_amplification(
 
 
 __all__ = [
-    "SourceQualityAssessment",
-    "SourceOutcome",
-    "SourceReliabilityEstimate",
-    "CoordinationEdge",
     "CoordinatedAmplificationCluster",
+    "CoordinationEdge",
+    "SourceOutcome",
+    "SourceQualityAssessment",
+    "SourceReliabilityEstimate",
     "assess_source_batch",
-    "estimate_source_reliability",
     "detect_coordinated_amplification",
+    "estimate_source_reliability",
 ]

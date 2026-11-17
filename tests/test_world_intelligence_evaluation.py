@@ -9,7 +9,6 @@ from aitos.world_intelligence.evaluation import (
     evaluate_predictions,
 )
 
-
 BASE = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 

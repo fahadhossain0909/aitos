@@ -1,8 +1,8 @@
 import json
+
 import pytest
 
 from aitos.world_intelligence.rss import RSSFeedAdapter
-
 
 RSS = b"""<?xml version="1.0"?>
 <rss version="2.0"><channel>

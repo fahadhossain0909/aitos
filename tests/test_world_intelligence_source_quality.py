@@ -9,7 +9,6 @@ from aitos.world_intelligence.source_quality import (
     estimate_source_reliability,
 )
 
-
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 

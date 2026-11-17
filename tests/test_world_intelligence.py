@@ -6,7 +6,6 @@ from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.governor import IntelligenceRiskGovernor
 from aitos.world_intelligence.impact import estimate_asset_impact
 
-
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 

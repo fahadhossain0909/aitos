@@ -5,7 +5,6 @@ from aitos.world_intelligence.event_study import (
     estimate_event_beta,
 )
 
-
 AS_OF = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 

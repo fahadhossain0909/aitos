@@ -3,7 +3,6 @@ from datetime import datetime, timedelta, timezone
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.verification import verify_observations
 
-
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 
 

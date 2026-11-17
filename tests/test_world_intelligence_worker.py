@@ -5,7 +5,6 @@ import pytest
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.worker import IntelligenceIngestionWorker
 
-
 NOW = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
 
 

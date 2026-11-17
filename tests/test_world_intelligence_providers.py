@@ -1,6 +1,6 @@
-from datetime import datetime, timezone
 import json
-from urllib.parse import urlsplit, parse_qs
+from datetime import datetime, timezone
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -9,7 +9,6 @@ from aitos.world_intelligence.providers import (
     GDELTDocAdapter,
     SECEdgarSubmissionsAdapter,
 )
-
 
 NOW = datetime(2026, 11, 13, 12, 0, tzinfo=timezone.utc)
 

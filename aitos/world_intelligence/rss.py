@@ -13,15 +13,15 @@ import json
 import re
 import urllib.error
 import urllib.request
-from defusedxml import ElementTree as ET
 from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlsplit
 
+from defusedxml import ElementTree as ET
+
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.financial_nlp import analyze_financial_headline
-
 
 FetchResult = tuple[bytes | None, Mapping[str, str]]
 
@@ -238,7 +238,7 @@ class RSSFeedAdapter:
             )
             origin_id = hashlib.sha256((guid or story_uri).encode("utf-8")).hexdigest()
             event_id = hashlib.sha256(
-                f"{self.source_id}|{origin_id}".encode("utf-8")
+                f"{self.source_id}|{origin_id}".encode()
             ).hexdigest()
             source = SourceEvidence(
                 source_id=self.source_id,

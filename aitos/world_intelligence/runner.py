@@ -17,8 +17,8 @@ from typing import Any
 from aitos.eventbus.factory import create_event_bus
 from aitos.world_intelligence.adapters import IntelligenceSourceAdapter
 from aitos.world_intelligence.eventbus_adapter import EventBusSink
-from aitos.world_intelligence.licensed_api import LicensedJSONFeedAdapter
 from aitos.world_intelligence.lease import RedisSourceLeaseManager
+from aitos.world_intelligence.licensed_api import LicensedJSONFeedAdapter
 from aitos.world_intelligence.metrics_server import start_metrics_server
 from aitos.world_intelligence.providers import (
     FREDSeriesAdapter,

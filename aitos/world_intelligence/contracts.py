@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from math import isfinite
-from typing import Any, Mapping
+from typing import Any
 
 SCHEMA_VERSION = 1
 
@@ -123,7 +124,7 @@ class IntelligenceEvent:
         return result
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> "IntelligenceEvent":
+    def from_dict(cls, payload: Mapping[str, Any]) -> IntelligenceEvent:
         """Rehydrate a validated event from its persisted JSON-compatible form."""
         if not isinstance(payload, Mapping):
             raise ValueError("event payload must be a mapping")

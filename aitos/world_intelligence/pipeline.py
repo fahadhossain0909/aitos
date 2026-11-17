@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Mapping
 
 from aitos.world_intelligence.contracts import IntelligenceEvent
 from aitos.world_intelligence.entity_resolution import (

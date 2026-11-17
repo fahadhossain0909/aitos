@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 import math
-from typing import Any, Mapping, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from aiohttp import web
 

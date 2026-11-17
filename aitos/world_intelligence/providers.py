@@ -327,7 +327,7 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
                 f"{accession_path}/{urllib.parse.quote(document)}"
             )
             event_id = hashlib.sha256(
-                f"{self.cik}|{accession}".encode("utf-8")
+                f"{self.cik}|{accession}".encode()
             ).hexdigest()
             title = f"{company} filed SEC form {form}"
             source = SourceEvidence(
@@ -446,7 +446,7 @@ class FREDSeriesAdapter(_JSONSource):
                 continue
             published = datetime.combine(day, datetime.min.time(), timezone.utc)
             digest = hashlib.sha256(
-                f"{self.series_id}|{observation_date}|{value}".encode("utf-8")
+                f"{self.series_id}|{observation_date}|{value}".encode()
             ).hexdigest()
             uri = f"https://fred.stlouisfed.org/series/{urllib.parse.quote(self.series_id)}"
             source = SourceEvidence(
@@ -485,4 +485,4 @@ class FREDSeriesAdapter(_JSONSource):
         return events, next_cursor or cursor
 
 
-__all__ = ["GDELTDocAdapter", "SECEdgarSubmissionsAdapter", "FREDSeriesAdapter"]
+__all__ = ["FREDSeriesAdapter", "GDELTDocAdapter", "SECEdgarSubmissionsAdapter"]
