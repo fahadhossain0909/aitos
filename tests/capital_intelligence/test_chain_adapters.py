@@ -1,0 +1,95 @@
+from datetime import datetime, timezone
+import pytest
+
+from aitos.capital_intelligence.evm import EVMLogCapitalAdapter, TRANSFER_TOPIC
+from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
+
+
+@pytest.mark.asyncio
+async def test_evm_uses_block_time_and_preserves_raw_transfer_amount():
+    adapter = EVMLogCapitalAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        contracts=["0x" + "1" * 40],
+        confirmations=2,
+        max_block_range=10,
+    )
+    raw_amount = 2**200
+    log = {
+        "topics": [
+            TRANSFER_TOPIC,
+            "0x" + "0" * 24 + "2" * 40,
+            "0x" + "0" * 24 + "3" * 40,
+        ],
+        "data": hex(raw_amount),
+        "blockNumber": "0x19",
+        "transactionHash": "0x" + "a" * 64,
+        "logIndex": "0x0",
+        "blockHash": "0x" + "b" * 64,
+        "address": "0x" + "1" * 40,
+    }
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x20"
+        if method == "eth_getLogs":
+            return [log]
+        if method == "eth_getBlockByNumber":
+            return {"timestamp": hex(1_700_000_000)}
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, cursor = await adapter.poll(cursor="0x14")
+    assert cursor == "0x1e"
+    assert len(events) == 1
+    assert events[0].event_time == datetime.fromtimestamp(1_700_000_000, timezone.utc)
+    assert events[0].metadata["raw_amount"] == str(raw_amount)
+
+
+@pytest.mark.asyncio
+async def test_solana_cursor_is_independent_per_address_and_token_delta_is_signed():
+    address_a = "wallet-A"
+    address_b = "wallet-B"
+    adapter = SolanaAddressActivityAdapter(
+        rpc_url="https://solana.example",
+        addresses=[address_a, address_b],
+    )
+
+    async def fake_rpc(method, params):
+        if method == "getSignaturesForAddress":
+            address, options = params
+            old = "old-A" if address == address_a else "old-B"
+            new = "new-A" if address == address_a else "new-B"
+            return [{"signature": new}, {"signature": old}]
+        if method == "getTransaction":
+            signature = params[0]
+            owner = address_a if signature.endswith("A") else address_b
+            return {
+                "slot": 10,
+                "blockTime": 1_700_000_000,
+                "transaction": {"message": {"accountKeys": [{"pubkey": owner}]}},
+                "meta": {
+                    "err": None,
+                    "preBalances": [100],
+                    "postBalances": [110],
+                    "preTokenBalances": [{
+                        "owner": owner, "mint": "USDC", "accountIndex": 0,
+                        "uiTokenAmount": {"amount": "500", "decimals": 6},
+                    }],
+                    "postTokenBalances": [{
+                        "owner": owner, "mint": "USDC", "accountIndex": 0,
+                        "uiTokenAmount": {"amount": "700", "decimals": 6},
+                    }],
+                },
+            }
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, cursor = await adapter.poll(
+        cursor='{"wallet-A":"old-A","wallet-B":"old-B"}'
+    )
+    import json
+    assert json.loads(cursor) == {"wallet-A": "new-A", "wallet-B": "new-B"}
+    token_events = [event for event in events if event.instrument == "USDC"]
+    assert len(token_events) == 2
+    assert all(event.metadata["flow_sign"] == 1 for event in token_events)
