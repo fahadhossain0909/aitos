@@ -16,10 +16,11 @@ def _utc(value: datetime) -> datetime:
 
 
 def _unit(value: float, name: str) -> float:
-    value=float(value)
+    value = float(value)
     if not math.isfinite(value) or not 0 <= value <= 1:
         raise ValueError(f"{name} must be finite and in [0, 1]")
     return value
+
 
 @dataclass(frozen=True, slots=True)
 class EntityEvidence:

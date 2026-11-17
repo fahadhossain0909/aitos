@@ -48,8 +48,30 @@ def assess_capital_behavior(
         confidence.append(event.confidence)
     total = sum(gross)
     if market_liquidity_usd is not None:
-        liquidity=float(market_liquidity_usd)
-        if not isfinite(liquidity) or liquidity<=0: raise ValueError("market liquidity must be positive")
-        impact=total/liquidity
-    label="accumulation_candidate" if accumulation>=0.6 else "distribution_candidate" if distribution>=0.6 else "mixed_or_unclassified"
-    return BehaviorAssessment(entity_id,net,total,len(selected),accumulation,distribution,impact,mean(confidence),label,("Transfer direction is not equivalent to buy/sell intent.","CEX internal positions and unobserved wallets are not represented.","Descriptive evidence only; not a calibrated forecast or order instruction."))
+        liquidity = float(market_liquidity_usd)
+        if not isfinite(liquidity) or liquidity <= 0:
+            raise ValueError("market liquidity must be positive")
+        impact = total / liquidity
+    label = (
+        "accumulation_candidate"
+        if accumulation >= 0.6
+        else (
+            "distribution_candidate" if distribution >= 0.6 else "mixed_or_unclassified"
+        )
+    )
+    return BehaviorAssessment(
+        entity_id,
+        net,
+        total,
+        len(selected),
+        accumulation,
+        distribution,
+        impact,
+        mean(confidence),
+        label,
+        (
+            "Transfer direction is not equivalent to buy/sell intent.",
+            "CEX internal positions and unobserved wallets are not represented.",
+            "Descriptive evidence only; not a calibrated forecast or order instruction.",
+        ),
+    )
