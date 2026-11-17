@@ -1,10 +1,12 @@
 """Descriptive capital-flow features; never a standalone trading signal."""
 
 from __future__ import annotations
+
 from dataclasses import dataclass
 from math import isfinite
 from statistics import mean
 from typing import Iterable
+
 from .contracts import CapitalEvent
 
 
@@ -31,10 +33,13 @@ def assess_capital_behavior(
     if not entity_id.strip():
         raise ValueError("entity_id is required")
     selected = [
-        e for e in events if e.actor_id == entity_id and e.usd_value is not None
+        event
+        for event in events
+        if event.actor_id == entity_id and event.usd_value is not None
     ]
     if not selected:
         raise ValueError("valued events for entity are required")
+
     signed = []
     gross = []
     confidence = []
@@ -46,17 +51,25 @@ def assess_capital_behavior(
         gross.append(value)
         signed.append(value * sign)
         confidence.append(event.confidence)
+
     total = sum(gross)
+    net = sum(signed)
+    accumulation = max(0.0, net) / total if total else 0.0
+    distribution = max(0.0, -net) / total if total else 0.0
+    impact = None
     if market_liquidity_usd is not None:
         liquidity = float(market_liquidity_usd)
         if not isfinite(liquidity) or liquidity <= 0:
             raise ValueError("market liquidity must be positive")
         impact = total / liquidity
+
     label = (
         "accumulation_candidate"
         if accumulation >= 0.6
         else (
-            "distribution_candidate" if distribution >= 0.6 else "mixed_or_unclassified"
+            "distribution_candidate"
+            if distribution >= 0.6
+            else "mixed_or_unclassified"
         )
     )
     return BehaviorAssessment(
