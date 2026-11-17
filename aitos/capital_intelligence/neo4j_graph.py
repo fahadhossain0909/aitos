@@ -37,9 +37,7 @@ class Neo4jEntityGraphStore:
         """Persist immutable event observations and address references idempotently."""
         rows = []
         for event in events:
-            actor = (
-                f"{event.venue}:{event.actor_id}" if event.actor_id else None
-            )
+            actor = f"{event.venue}:{event.actor_id}" if event.actor_id else None
             counterparty = (
                 f"{event.venue}:{event.counterparty_id}"
                 if event.counterparty_id
