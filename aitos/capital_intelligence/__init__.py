@@ -12,6 +12,7 @@ from .dex import EvmDexSwapAdapter
 from .enrichment import enrich_capital_event
 from .entity_graph import EntityEvidenceGraph, EntityProfile
 from .evm import EVMLogCapitalAdapter
+from .evm_token_metadata import EvmTokenMetadataResolver
 from .ranking import CapitalCandidateRank, rank_capital_candidates
 from .runtime import CapitalIngestionWorker, RedisCheckpointStore
 from .solana import SolanaAddressActivityAdapter
@@ -39,6 +40,7 @@ __all__ = [
     "EntityLabel",
     "EntityProfile",
     "EVMLogCapitalAdapter",
+    "EvmTokenMetadataResolver",
     "EvmDexSwapAdapter",
     "PointInTimePriceBook",
     "PriceQuote",
