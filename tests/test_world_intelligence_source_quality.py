@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
@@ -174,12 +175,17 @@ def test_coordination_graph_excludes_future_and_stale_observations():
             (("feed-a", titles[0]), ("feed-b", titles[0]), ("feed-c", titles[0]))
         )
     ]
+    stale_at = NOW - timedelta(days=2)
     stale = [
-        event.model_copy(
-            update={
-                "published_at": NOW - timedelta(days=2),
-                "first_seen_at": NOW - timedelta(days=2),
-            }
+        replace(
+            event,
+            published_at=stale_at,
+            first_seen_at=stale_at,
+            source=replace(
+                event.source,
+                published_at=stale_at,
+                first_seen_at=stale_at,
+            ),
         )
         for event in stale
     ]
