@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
+import json
 import pytest
 
 from aitos.capital_intelligence.contracts import CapitalEvent, EntityEvidence, EntityLabel
@@ -12,6 +14,10 @@ class FakeClickHouse:
     def __init__(self):
         self.commands = []
         self.inserts = []
+        self.query_rows = []
+
+    async def query(self, sql, parameters):
+        return SimpleNamespace(result_rows=self.query_rows)
 
     async def command(self, sql):
         self.commands.append(sql)
@@ -77,3 +83,47 @@ def test_token_registry_preserves_decimal_precision():
     assert registry.get("1", token.address).normalize_raw("123456789") == Decimal("123.456789")
     with pytest.raises(ValueError):
         token.normalize_raw("1.5")
+
+
+
+@pytest.mark.asyncio
+async def test_reorg_reconciliation_appends_reverted_event_version():
+    client = FakeClickHouse()
+    store = ClickHouseCapitalStore(client)
+    now = datetime.now(timezone.utc)
+    original = CapitalEvent(
+        "evm-event",
+        "evm:1",
+        "onchain_transfer",
+        "crypto_spot",
+        "1",
+        "0x" + "a" * 40,
+        "erc20_transfer",
+        now,
+        now,
+        100,
+        "token_base_units",
+        None,
+        actor_id="0x" + "b" * 40,
+        transaction_id="0x" + "c" * 64,
+        block_number=5,
+        block_hash="0xold",
+        finality="confirmed",
+        metadata={"raw_amount": "100"},
+    )
+    client.query_rows = [(original.to_json(), 5, "0xold")]
+    count = await store.reconcile_evm_reorg(
+        {
+            "source_id": "evm:1",
+            "from_block": 5,
+            "to_block": 5,
+            "canonical_hashes": {5: "0xnew"},
+        }
+    )
+    assert count == 1
+    table, rows, columns = client.inserts[-1]
+    assert table == "aitos.capital_flow_events"
+    assert rows[0][columns.index("finality")] == "reverted"
+    payload = json.loads(rows[0][columns.index("payload_json")])
+    assert payload["metadata"]["reorg_status"] == "orphaned_log"
+    assert payload["metadata"]["canonical_block_hash"] == "0xnew"

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 import pytest
 
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter, TRANSFER_TOPIC
@@ -26,7 +27,7 @@ async def test_evm_uses_block_time_and_preserves_raw_transfer_amount():
         "blockNumber": "0x19",
         "transactionHash": "0x" + "a" * 64,
         "logIndex": "0x0",
-        "blockHash": "0x" + "b" * 64,
+        "blockHash": "0x" + f"{25:064x}",
         "address": "0x" + "1" * 40,
     }
 
@@ -36,12 +37,18 @@ async def test_evm_uses_block_time_and_preserves_raw_transfer_amount():
         if method == "eth_getLogs":
             return [log]
         if method == "eth_getBlockByNumber":
-            return {"timestamp": hex(1_700_000_000)}
+            number = int(params[0], 16)
+            return {
+                "timestamp": hex(1_700_000_000),
+                "hash": "0x" + f"{number:064x}",
+            }
         raise AssertionError(method)
 
     adapter._rpc = fake_rpc
     events, cursor = await adapter.poll(cursor="0x14")
-    assert cursor == "0x1e"
+    cursor_state = json.loads(cursor)
+    assert cursor_state["head_block"] == 0x1e
+    assert len(cursor_state["recent_hashes"]) == 0x1e + 1
     assert len(events) == 1
     assert events[0].event_time == datetime.fromtimestamp(1_700_000_000, timezone.utc)
     assert events[0].metadata["raw_amount"] == str(raw_amount)
@@ -163,3 +170,46 @@ async def test_dex_swap_resolves_pool_tokens_and_keeps_signed_raw_deltas():
     assert events[0].metadata["token1_address"] == token1
     assert events[0].metadata["raw_delta"] == "-1000000"
     assert events[0].metadata["amount1_delta"] == "2000000"
+
+
+
+@pytest.mark.asyncio
+async def test_evm_reorg_rewinds_to_common_ancestor_and_exposes_tombstone_range():
+    adapter = EVMLogCapitalAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        contracts=["0x" + "1" * 40],
+        confirmations=2,
+        max_block_range=10,
+        max_reorg_depth=8,
+    )
+    old_hashes = {str(number): "0x" + f"{number:064x}" for number in range(93, 101)}
+    cursor = json.dumps(
+        {"version": 2, "head_block": 100, "recent_hashes": old_hashes}
+    )
+    new_hash = "0x" + "f" * 64
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x66"
+        if method == "eth_getBlockByNumber":
+            number = int(params[0], 16)
+            return {
+                "timestamp": hex(1_700_000_000 + number),
+                "hash": new_hash if number == 100 else old_hashes.get(
+                    str(number), "0x" + f"{number:064x}"
+                ),
+            }
+        if method == "eth_getLogs":
+            assert params[0]["fromBlock"] == "0x64"
+            assert params[0]["toBlock"] == "0x64"
+            return []
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, next_cursor = await adapter.poll(cursor=cursor)
+    assert events == []
+    assert adapter.last_reorg["from_block"] == 100
+    assert adapter.last_reorg["to_block"] == 100
+    assert adapter.last_reorg["canonical_hashes"] == {100: new_hash}
+    assert json.loads(next_cursor)["head_block"] == 100

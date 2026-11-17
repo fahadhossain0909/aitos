@@ -94,7 +94,7 @@ The optional observer has a conservative default CPU limit of 0.10 cores and mem
 ## Explicitly not complete / production gates
 
 These are not claimed as implemented or validated by this PR:
-- Automated EVM reorg rollback and canonical-chain reconciliation beyond configured confirmation depth. Operators must run conservative confirmation depths; a deep reorg still requires a controlled backfill/rebuild procedure.
+- EVM observers retain a contiguous recent block-hash window, detect head reorgs, search for a common ancestor and rescan the affected range. ClickHouse appends `finality=reverted` versions for orphaned logs before the cursor advances. Reorgs deeper than the configured window (default 64 blocks), RPC inconsistencies or incomplete canonical headers fail closed and still require controlled backfill/rebuild.
 - On-chain token metadata discovery and broad token registry population. The current registry is explicit/operator-configured; unsupported tokens remain unvalued.
 - Complete Solana address attribution across token accounts, CPI, inner instructions, compressed assets, stake accounts and program-specific transfers.
 - Automatic wallet clustering, exchange/custody attribution and beneficial-owner identification. Those require multiple independent evidence sources and human review.

@@ -161,6 +161,7 @@ async def main() -> None:
             contracts=config["contracts"],
             confirmations=int(config.get("confirmations", 12)),
             max_block_range=int(config.get("max_block_range", 250)),
+            max_reorg_depth=int(config.get("max_reorg_depth", 64)),
         )
         workers.append(
             CapitalIngestionWorker(

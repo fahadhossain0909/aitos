@@ -152,6 +152,14 @@ class CapitalIngestionWorker:
             events, next_cursor = await self.source.poll(cursor=cursor)
             if lost.is_set():
                 raise RuntimeError("source lease lost during poll")
+            reorg = getattr(self.source, "last_reorg", None)
+            if reorg:
+                reconcile = getattr(self.store, "reconcile_evm_reorg", None)
+                if not callable(reconcile):
+                    raise RuntimeError(
+                        "source detected an EVM reorg but the store cannot reconcile it"
+                    )
+                await reconcile(reorg)
             if len(events) > self.batch_limit:
                 raise RuntimeError("source batch exceeded configured limit")
             if events and self.event_enricher is not None:
