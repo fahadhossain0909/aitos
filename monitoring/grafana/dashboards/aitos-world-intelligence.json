@@ -135,6 +135,26 @@
         "x": 0,
         "y": 16
       }
+    },
+    {
+      "title": "Cross-publisher coordination candidates",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "increase(aitos_wiats_coordination_candidates_total[1h])",
+          "legendFormat": "coordination candidates"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      }
     }
   ],
   "schemaVersion": 39,
