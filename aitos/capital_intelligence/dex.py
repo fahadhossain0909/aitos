@@ -37,7 +37,7 @@ class EvmDexSwapAdapter:
         if safe<start: return [],cursor
         end=min(safe,start+self.max_block_range-1)
         logs=await self._rpc("eth_getLogs",[{"fromBlock":hex(start),"toBlock":hex(end),"address":list(self.pools),"topics":[[V2_SWAP_TOPIC,V3_SWAP_TOPIC]]}])
-        events=[]; now=datetime.now(timezone.utc)
+        events=[]; now=datetime.now(timezone.utc); block_times={}
         for log in logs or []:
             topic=log.get("topics",[""])[0].lower(); data=log.get("data","0x")[2:]
             if len(data)<256: continue
@@ -52,7 +52,12 @@ class EvmDexSwapAdapter:
                 delta0,delta1=signed(words[0]),signed(words[1])
             else: continue
             block=int(log["blockNumber"],16); tx=log["transactionHash"]; index=int(log["logIndex"],16)
+            if block not in block_times:
+                block_data = await self._rpc("eth_getBlockByNumber", [hex(block), False])
+                if not block_data or not block_data.get("timestamp"):
+                    raise RuntimeError("DEX block timestamp unavailable; refusing bad event")
+                block_times[block] = datetime.fromtimestamp(int(block_data["timestamp"], 16), timezone.utc)
             pool=self._address(log["address"]); event_id=hashlib.sha256(f"{self.chain_id}|{tx}|{index}".encode()).hexdigest()
             actor="0x"+log["topics"][1][-40:] if len(log.get("topics",[]))>1 else None
-            events.append(CapitalEvent(event_id,f"evm:{self.chain_id}","dex_swap","crypto_spot",self.pools[pool],pool,"pool_swap",now,now,abs(delta0)+abs(delta1),"token_base_units_sum",None,actor_id=actor,transaction_id=tx,block_number=block,block_hash=log.get("blockHash"),finality="confirmed",metadata={"amount0_delta":str(delta0),"amount1_delta":str(delta1),"log_index":index,"token0_and_token1_decimals_required":True,"pool":pool}))
+            events.append(CapitalEvent(event_id,f"evm:{self.chain_id}","dex_swap","crypto_spot",self.pools[pool],pool,"pool_swap",block_times[block],now,abs(delta0)+abs(delta1),"token_base_units_sum",None,actor_id=actor,transaction_id=tx,block_number=block,block_hash=log.get("blockHash"),finality="confirmed",metadata={"amount0_delta":str(delta0),"amount1_delta":str(delta1),"actor_is_pool_caller_not_verified_beneficial_owner":True,"log_index":index,"token0_and_token1_decimals_required":True,"pool":pool}))
         return events,hex(end)
