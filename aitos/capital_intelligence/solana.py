@@ -21,16 +21,20 @@ class SolanaAddressActivityAdapter:
         addresses: list[str],
         timeout_seconds: float = 10.0,
         page_limit: int = 100,
+        max_scan_pages: int = 10,
         session: aiohttp.ClientSession | None = None,
     ):
         if not rpc_url.startswith("https://") or not addresses or len(addresses) > 500:
             raise ValueError("HTTPS RPC and 1-500 addresses required")
-        if not 1 <= page_limit <= 1000 or not 0.2 <= timeout_seconds <= 30:
-            raise ValueError("invalid polling bounds")
+        if not 1 <= page_limit <= 1000 or not 1 <= max_scan_pages <= 100:
+            raise ValueError("invalid pagination bounds")
+        if not 0.2 <= timeout_seconds <= 30:
+            raise ValueError("invalid timeout")
         self.rpc_url = rpc_url
         self.addresses = sorted(set(addresses))
         self.timeout_seconds = timeout_seconds
         self.page_limit = page_limit
+        self.max_scan_pages = max_scan_pages
         self.session = session
         self.owns_session = session is None
         self.request_id = 0
@@ -88,7 +92,9 @@ class SolanaAddressActivityAdapter:
         signatures: list[str] = []
         newest = None
         found_cursor = previous is None
-        while True:
+        pages = 0
+        while pages < self.max_scan_pages:
+            pages += 1
             options: dict[str, Any] = {
                 "limit": self.page_limit,
                 "commitment": "finalized",
@@ -110,7 +116,7 @@ class SolanaAddressActivityAdapter:
                 signatures.append(signature)
                 if newest is None:
                     newest = signature
-            if stop or len(rows) < self.page_limit:
+            if stop or previous is None or len(rows) < self.page_limit:
                 break
             before = rows[-1].get("signature")
             if not before:
@@ -118,7 +124,7 @@ class SolanaAddressActivityAdapter:
         if previous is not None and not found_cursor and signatures:
             # A gap larger than the configured page window is not silently skipped.
             raise RuntimeError(
-                f"Solana cursor for {address} fell outside scan window; backfill required"
+                f"Solana cursor for {address} fell outside {self.max_scan_pages} pages; controlled backfill required"
             )
         events: list[CapitalEvent] = []
         for signature in reversed(signatures):
