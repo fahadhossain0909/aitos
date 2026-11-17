@@ -47,4 +47,6 @@ def test_solana_spl_inner_instruction_is_attached_as_evidence_not_extra_flow():
     assert evidence[mint][0]["counterparty_owner"] == counterparty
     assert evidence[mint][0]["raw_amount"] == "1250000"
     assert evidence[mint][0]["is_cpi_or_inner_instruction"] is True
-    assert evidence[mint][0]["ownership_scope"] == "token_account_owner_from_rpc_metadata"
+    assert (
+        evidence[mint][0]["ownership_scope"] == "token_account_owner_from_rpc_metadata"
+    )
