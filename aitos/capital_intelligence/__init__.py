@@ -4,6 +4,7 @@ from .behavior import BehaviorAssessment, assess_capital_behavior
 from .binance import BinanceFuturesCapitalAdapter
 from .binance_price import BinanceHistoricalPriceBook
 from .contracts import CapitalEvent, EntityEvidence, EntityLabel
+from .cftc import CftcCotAdapter
 from .dex import EvmDexSwapAdapter
 from .enrichment import enrich_capital_event
 from .entity_graph import EntityEvidenceGraph, EntityProfile
@@ -22,6 +23,7 @@ __all__ = [
     "BinanceHistoricalPriceBook",
     "CapitalCandidateRank",
     "CapitalEvent",
+    "CftcCotAdapter",
     "CapitalIngestionWorker",
     "ClickHouseCapitalStore",
     "EntityEvidence",

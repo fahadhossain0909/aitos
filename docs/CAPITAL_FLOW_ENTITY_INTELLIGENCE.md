@@ -48,7 +48,21 @@ It is not an identity-discovery service. It does not deanonymize wallet owners, 
 - Binance spot 1-minute historical quotes use only candles whose close time is at or before the event time. Future and stale quotes are rejected. USDT is not silently treated as USD; setting `AITOS_CFEI_ALLOW_USDT_USD_PROXY=true` explicitly permits a labeled USDT proxy, otherwise `usd_value` remains unset for USDT quotes.
 - Flow direction must be explicit in source metadata. An exchange deposit, withdrawal, bridge transfer or LP movement is not inherently a buy or sell.
 
-### 7. Official SEC EDGAR institutional and insider disclosures
+### 7. Official CFTC aggregate positioning
+- The optional adapter reads the official CFTC Public Reporting Socrata endpoint over HTTPS using a required, operator-supplied dataset ID and explicit field mapping.
+- Each row becomes an aggregate market-positioning observation with open interest and long/short/net contracts by report category. These are trader-class aggregates, never individual whales or wallet identities; they are excluded from address-level ranking.
+- The source's report date is retained as event time and local poll time as observation time. If the selected dataset does not expose its publication timestamp, the event is explicitly marked as such; do not treat it as point-in-time tradable information without a verified release calendar.
+- Pagination uses a bounded offset cursor over stable report-date/market-code ordering. Historical corrections/reordering require a controlled refresh; this is not a substitute for a full source revision feed.
+
+Configure a dataset and exact column mapping, for example:
+
+```dotenv
+AITOS_CFEI_CFTC_COT=[{"dataset_id":"<official-dataset-id>","report_type":"legacy_futures_only","field_map":{"report_date":"report_date_as_yyyy_mm_dd","market_code":"cftc_contract_market_code","market_name":"market_and_exchange_names","open_interest":"open_interest_all","categories":{"noncommercial":{"long":"noncomm_positions_long_all","short":"noncomm_positions_short_all"},"commercial":{"long":"comm_positions_long_all","short":"comm_positions_short_all"},"nonreportable":{"long":"nonrept_positions_long_all","short":"nonrept_positions_short_all"}}}}]
+```
+
+The field names vary by CFTC report family; validate them against the selected official dataset before enabling ingestion. Polling is throttled to at least once per hour.
+
+### 8. Official SEC EDGAR institutional and insider disclosures
 - The optional SEC adapter reads official EDGAR submissions, 13F-HR information tables and Forms 3/4/5 ownership XML for an explicit CIK allowlist.
 - 13F holdings retain both the report-period date and the later filing-publication date. The reported value is converted from the filing's USD-thousands unit. A 13F record is a delayed quarterly disclosure, not a current portfolio position.
 - Form 4 records preserve transaction date, filing date, reporting-owner CIK, issuer CIK, transaction code, acquired/disposed code and reported price/shares where available. Amendments remain separately identifiable by form and accession.
@@ -65,7 +79,7 @@ AITOS_CFEI_SEC_MAX_FILINGS_PER_POLL=25
 
 The CIKs above are examples only; replace them with an intentionally selected monitoring list and a real contact address. The SEC adapter is optional and uses the same append-before-checkpoint worker.
 
-### 8. Opt-in isolated runtime
+### 9. Opt-in isolated runtime
 The standalone runner is `scripts/run_capital_intelligence.py`. Docker Compose exposes it only under the `capital-intelligence` profile. It is disabled by default and does not import trading execution modules.
 
 Enable only after configuring the public endpoints and allowlists in a private `.env` file:
@@ -88,7 +102,7 @@ docker compose logs -f aitos-capital-intelligence
 
 Metrics are exposed on the internal container port 8121 at `/metrics`. Do not expose RPC URLs containing secrets or provider keys in public dashboards/logs. Use an RPC URL secret manager in production rather than committing credentials.
 
-### 9. Resource policy
+### 10. Resource policy
 The optional observer has a conservative default CPU limit of 0.10 cores and memory limit of 384 MiB. Keep symbol, pool and address allowlists small; batch and poll budgets should be increased only after measuring RPC latency, rate limits and ClickHouse write load. The observer profile is separate from paper/live services and is not automatically started by the default Compose profile.
 
 ## Explicitly not complete / production gates
@@ -99,7 +113,7 @@ These are not claimed as implemented or validated by this PR:
 - Complete Solana address attribution across token accounts, CPI, inner instructions, compressed assets, stake accounts and program-specific transfers.
 - Automatic wallet clustering, exchange/custody attribution and beneficial-owner identification. Those require multiple independent evidence sources and human review.
 - Full DEX coverage across every protocol, pool factory and chain. Only explicitly configured Uniswap V2/V3-compatible pools are decoded.
-- CFTC COT, forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. SEC 13F-HR and Forms 3/4/5 are implemented, but production-scale CIK coverage and backfill are not yet validated.
+- Forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. The CFTC adapter is schema-mapped and aggregate-only; dataset-specific field mapping, historical refresh and publication-calendar validation remain operator gates. SEC 13F-HR and Forms 3/4/5 are implemented, but production-scale CIK coverage and backfill are not yet validated.
 - Dashboard/API integration, alert routing and integration into World Intelligence context.
 - Historical data backfill, replay, walk-forward evaluation, false-positive analysis, model calibration and measured predictive lift.
 - Production runtime deployment, provider-specific rate-budget tests, ClickHouse/Redis integration tests and operator runbooks for disaster recovery.

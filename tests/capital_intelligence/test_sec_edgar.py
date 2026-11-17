@@ -42,9 +42,7 @@ async def test_sec_13f_preserves_report_period_and_filing_publication_time():
     cik = "0000320193"
     accession = "0000320193-26-000001"
     submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    directory = (
-        "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/"
-    )
+    directory = "https://www.sec.gov/Archives/edgar/data/320193/000032019326000001/"
     submissions = {
         "filings": {
             "recent": {
@@ -93,9 +91,7 @@ async def test_sec_form4_emits_reported_transaction_with_direction_and_lag():
     cik = "0000789019"
     accession = "0000789019-26-000002"
     submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    document_url = (
-        "https://www.sec.gov/Archives/edgar/data/789019/000078901926000002/ownership.xml"
-    )
+    document_url = "https://www.sec.gov/Archives/edgar/data/789019/000078901926000002/ownership.xml"
     submissions = {
         "filings": {
             "recent": {

@@ -13,6 +13,7 @@ import clickhouse_connect
 import redis.asyncio as redis
 
 from aitos.capital_intelligence.binance import BinanceFuturesCapitalAdapter
+from aitos.capital_intelligence.cftc import CftcCotAdapter
 from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook
 from aitos.capital_intelligence.dex import EvmDexSwapAdapter
 from aitos.capital_intelligence.enrichment import enrich_capital_event
@@ -208,6 +209,25 @@ async def main() -> None:
                 store=store,
                 poll_interval_seconds=interval,
                 event_enricher=enricher,
+            )
+        )
+
+    cftc_cfg = _json_env("AITOS_CFEI_CFTC_COT", [])
+    for index, config in enumerate(cftc_cfg):
+        adapter = CftcCotAdapter(
+            dataset_id=config["dataset_id"],
+            field_map=config["field_map"],
+            report_type=config.get("report_type", "configured_cot_report"),
+            market=config.get("market", "futures"),
+            page_limit=int(config.get("page_limit", 1000)),
+        )
+        workers.append(
+            CapitalIngestionWorker(
+                source_id=f"cftc-cot-{config['dataset_id']}-{index}",
+                source=adapter,
+                checkpoints=checkpoints,
+                store=store,
+                poll_interval_seconds=max(interval, 3600.0),
             )
         )
 
