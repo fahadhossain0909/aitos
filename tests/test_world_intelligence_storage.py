@@ -46,6 +46,7 @@ class FakeAsyncClickHouse:
         self.fail_cursor = False
         self.cursor = None
         self.last_query = ""
+        self.last_parameters = {}
         self.pending_count = 0
         self.source_summary_rows = []
 
@@ -64,6 +65,7 @@ class FakeAsyncClickHouse:
 
     async def query(self, query, parameters=None):
         self.last_query = query
+        self.last_parameters = dict(parameters or {})
         if "GROUP BY source_id" in query:
             return FakeResult(self.source_summary_rows)
         if "count()" in query:
@@ -307,6 +309,9 @@ async def test_source_run_history_is_persisted_and_summarized():
     assert summary[0]["failures"] == 1
     assert summary[0]["events"] == 12
     assert summary[0]["mean_latency_ms"] == pytest.approx(40.5)
+    assert "+" not in client.last_parameters["as_of"]
+    assert "T" not in client.last_parameters["as_of"]
+    assert client.last_parameters["as_of"].endswith(".000")
 
 
 @pytest.mark.asyncio
