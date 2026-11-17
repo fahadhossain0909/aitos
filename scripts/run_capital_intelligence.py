@@ -116,7 +116,9 @@ async def main() -> None:
         neo4j_user = os.getenv("NEO4J_USER", "")
         neo4j_password = os.getenv("NEO4J_PASSWORD", "")
         if not all((neo4j_uri, neo4j_user, neo4j_password)):
-            raise SystemExit("CFEI Neo4j enabled but NEO4J_URI/USER/PASSWORD are incomplete.")
+            raise SystemExit(
+                "CFEI Neo4j enabled but NEO4J_URI/USER/PASSWORD are incomplete."
+            )
         graph_driver = AsyncGraphDatabase.driver(
             neo4j_uri, auth=(neo4j_user, neo4j_password)
         )
