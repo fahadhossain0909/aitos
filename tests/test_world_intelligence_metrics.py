@@ -12,6 +12,7 @@ def test_wiats_metrics_are_exported_as_prometheus_counters():
             "dead_letters_written": 1,
             "dead_letters_exhausted": 2,
             "dead_letters_quarantined": 1,
+            "coordination_candidates": 3,
             "lease_lost": 0,
         }
     )
@@ -20,6 +21,7 @@ def test_wiats_metrics_are_exported_as_prometheus_counters():
     assert "aitos_wiats_dead_letters_written_total 1" in rendered
     assert "aitos_wiats_dead_letters_exhausted_total 2" in rendered
     assert "aitos_wiats_dead_letters_quarantined_total 1" in rendered
+    assert "aitos_wiats_coordination_candidates_total 3" in rendered
 
 
 def test_wiats_metrics_reject_negative_counters():
