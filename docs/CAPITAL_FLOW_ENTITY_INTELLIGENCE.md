@@ -39,13 +39,33 @@ It is not an identity-discovery service. It does not deanonymize wallet owners, 
 - Delivery is at-least-once. Consumers and analytics must deduplicate using `deduplication_key`; this is not exactly-once delivery.
 - ClickHouse append-only event store uses a stable replacing key. Queries requiring deduplicated rows should use `FINAL` or an explicit latest-row aggregation.
 
-### 6. Entity evidence and point-in-time valuation
-- Evidence graph retains candidate and verified relations separately.
-- Only direct operator-verified relationships are returned as cluster links; no transitive automatic wallet merging.
-- Price valuation is injected through a point-in-time quote interface. Stale/future quotes are rejected.
+### 6. Entity evidence, candidate ranking and point-in-time valuation
+- Evidence and temporal labels are persisted in dedicated ClickHouse tables. Stable evidence/label identifiers make replay idempotent; the graph never promotes candidate evidence.
+- Only direct operator-attested links are returned as verified cluster links; no transitive automatic wallet merging.
+- Explainable address-level candidate ranking uses gross valued flow, recurrence, counterparty breadth, source diversity, explicit direction coverage, market-liquidity impact and evidence confidence. Each component is exposed with caveats. Aggregate Binance cohort rows are excluded because they do not identify individual traders.
+- The score is a heuristic analyst-prioritization index, not a probability, beneficial-owner attribution, investment recommendation or trading signal.
+- Token decimals and asset identity come only from the configured token registry. Raw integer amounts are retained in metadata and normalized using decimal arithmetic.
+- Binance spot 1-minute historical quotes use only candles whose close time is at or before the event time. Future and stale quotes are rejected. USDT is not silently treated as USD; setting `AITOS_CFEI_ALLOW_USDT_USD_PROXY=true` explicitly permits a labeled USDT proxy, otherwise `usd_value` remains unset for USDT quotes.
 - Flow direction must be explicit in source metadata. An exchange deposit, withdrawal, bridge transfer or LP movement is not inherently a buy or sell.
 
-### 7. Opt-in isolated runtime
+### 7. Official SEC EDGAR institutional and insider disclosures
+- The optional SEC adapter reads official EDGAR submissions, 13F-HR information tables and Forms 3/4/5 ownership XML for an explicit CIK allowlist.
+- 13F holdings retain both the report-period date and the later filing-publication date. The reported value is converted from the filing's USD-thousands unit. A 13F record is a delayed quarterly disclosure, not a current portfolio position.
+- Form 4 records preserve transaction date, filing date, reporting-owner CIK, issuer CIK, transaction code, acquired/disposed code and reported price/shares where available. Amendments remain separately identifiable by form and accession.
+- The adapter requires a contactable SEC User-Agent (including an email address), bounds the number of filings per poll, respects a conservative request interval, rejects oversized/DTD-bearing XML and fails closed if its cursor falls outside the SEC recent-submissions window.
+- No owner is inferred beyond the CIK explicitly present in the filing. Insider transactions and institutional holdings are disclosures, not standalone directional signals.
+
+Configure it with:
+
+```dotenv
+AITOS_CFEI_SEC_CIKS=["0000320193","0000789019"]
+AITOS_CFEI_SEC_USER_AGENT="AITOS research team contact@your-domain.example"
+AITOS_CFEI_SEC_MAX_FILINGS_PER_POLL=25
+```
+
+The CIKs above are examples only; replace them with an intentionally selected monitoring list and a real contact address. The SEC adapter is optional and uses the same append-before-checkpoint worker.
+
+### 8. Opt-in isolated runtime
 The standalone runner is `scripts/run_capital_intelligence.py`. Docker Compose exposes it only under the `capital-intelligence` profile. It is disabled by default and does not import trading execution modules.
 
 Enable only after configuring the public endpoints and allowlists in a private `.env` file:
@@ -68,18 +88,18 @@ docker compose logs -f aitos-capital-intelligence
 
 Metrics are exposed on the internal container port 8121 at `/metrics`. Do not expose RPC URLs containing secrets or provider keys in public dashboards/logs. Use an RPC URL secret manager in production rather than committing credentials.
 
-### 8. Resource policy
+### 9. Resource policy
 The optional observer has a conservative default CPU limit of 0.10 cores and memory limit of 384 MiB. Keep symbol, pool and address allowlists small; batch and poll budgets should be increased only after measuring RPC latency, rate limits and ClickHouse write load. The observer profile is separate from paper/live services and is not automatically started by the default Compose profile.
 
 ## Explicitly not complete / production gates
 
 These are not claimed as implemented or validated by this PR:
-- Reorg rollback and canonical-chain reconciliation beyond configured confirmation depth. Operators must run conservative confirmation depths; a deep reorg requires a backfill/rebuild procedure.
-- Full ERC-20 decimals/token registry, point-in-time FX/USD pricing adapters, bridge and wrapped-asset normalization.
+- Automated EVM reorg rollback and canonical-chain reconciliation beyond configured confirmation depth. Operators must run conservative confirmation depths; a deep reorg still requires a controlled backfill/rebuild procedure.
+- On-chain token metadata discovery and broad token registry population. The current registry is explicit/operator-configured; unsupported tokens remain unvalued.
 - Complete Solana address attribution across token accounts, CPI, inner instructions, compressed assets, stake accounts and program-specific transfers.
 - Automatic wallet clustering, exchange/custody attribution and beneficial-owner identification. Those require multiple independent evidence sources and human review.
 - Full DEX coverage across every protocol, pool factory and chain. Only explicitly configured Uniswap V2/V3-compatible pools are decoded.
-- SEC 13F/Form 4, CFTC COT, forex dealer positioning and global institutional holdings ingestion. The generic contract is market-neutral, but those source adapters and their legal/temporal semantics require a separate implementation.
+- CFTC COT, forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. SEC 13F-HR and Forms 3/4/5 are implemented, but production-scale CIK coverage and backfill are not yet validated.
 - Dashboard/API integration, alert routing and integration into World Intelligence context.
 - Historical data backfill, replay, walk-forward evaluation, false-positive analysis, model calibration and measured predictive lift.
 - Production runtime deployment, provider-specific rate-budget tests, ClickHouse/Redis integration tests and operator runbooks for disaster recovery.

@@ -22,6 +22,7 @@ from aitos.capital_intelligence.runtime import (
     RedisCheckpointStore,
 )
 from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
+from aitos.capital_intelligence.sec_edgar import SecEdgarFilingsAdapter
 from aitos.capital_intelligence.storage import ClickHouseCapitalStore
 from aitos.capital_intelligence.token_registry import TokenMetadata, TokenRegistry
 
@@ -206,6 +207,25 @@ async def main() -> None:
                 store=store,
                 poll_interval_seconds=interval,
                 event_enricher=enricher,
+            )
+        )
+
+    sec_ciks = _json_env("AITOS_CFEI_SEC_CIKS", [])
+    if sec_ciks:
+        adapter = SecEdgarFilingsAdapter(
+            ciks=[str(value) for value in sec_ciks],
+            user_agent=os.getenv("AITOS_CFEI_SEC_USER_AGENT", ""),
+            max_filings_per_poll=int(
+                os.getenv("AITOS_CFEI_SEC_MAX_FILINGS_PER_POLL", "25")
+            ),
+        )
+        workers.append(
+            CapitalIngestionWorker(
+                source_id="sec-edgar-disclosures",
+                source=adapter,
+                checkpoints=checkpoints,
+                store=store,
+                poll_interval_seconds=max(interval, 60.0),
             )
         )
 

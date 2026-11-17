@@ -11,6 +11,7 @@ from .evm import EVMLogCapitalAdapter
 from .ranking import CapitalCandidateRank, rank_capital_candidates
 from .runtime import CapitalIngestionWorker, RedisCheckpointStore
 from .solana import SolanaAddressActivityAdapter
+from .sec_edgar import SecEdgarFilingsAdapter
 from .storage import ClickHouseCapitalStore
 from .token_registry import TokenMetadata, TokenRegistry
 from .valuation import PointInTimePriceBook, PriceQuote, value_quantity
@@ -32,6 +33,7 @@ __all__ = [
     "PointInTimePriceBook",
     "PriceQuote",
     "RedisCheckpointStore",
+    "SecEdgarFilingsAdapter",
     "SolanaAddressActivityAdapter",
     "TokenMetadata",
     "TokenRegistry",
