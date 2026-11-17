@@ -67,9 +67,7 @@ def assess_capital_behavior(
         "accumulation_candidate"
         if accumulation >= 0.6
         else (
-            "distribution_candidate"
-            if distribution >= 0.6
-            else "mixed_or_unclassified"
+            "distribution_candidate" if distribution >= 0.6 else "mixed_or_unclassified"
         )
     )
     return BehaviorAssessment(

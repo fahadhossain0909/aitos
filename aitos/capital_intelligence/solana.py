@@ -166,8 +166,16 @@ class SolanaAddressActivityAdapter:
                     previous_amount, next_amount = balance_deltas.get(mint, (0, 0))
                     raw = int(amount)
                     balance_deltas[mint] = (
-                        previous_amount + raw if field == "preTokenBalances" else previous_amount,
-                        next_amount + raw if field == "postTokenBalances" else next_amount,
+                        (
+                            previous_amount + raw
+                            if field == "preTokenBalances"
+                            else previous_amount
+                        ),
+                        (
+                            next_amount + raw
+                            if field == "postTokenBalances"
+                            else next_amount
+                        ),
                     )
             for mint, (before_amount, after_amount) in balance_deltas.items():
                 delta = after_amount - before_amount
