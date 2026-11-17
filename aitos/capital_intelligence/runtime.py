@@ -76,18 +76,42 @@ class CapitalIngestionWorker:
         self.poll_interval_seconds=poll_interval_seconds; self.batch_limit=batch_limit; self._stopping=asyncio.Event()
     def stop(self): self._stopping.set()
     async def run_once(self) -> int:
-        lease=await self.checkpoints.acquire(self.source_id)
-        if lease is None: return 0
+        lease = await self.checkpoints.acquire(self.source_id, ttl_ms=120_000)
+        if lease is None:
+            return 0
+        lost = asyncio.Event()
+        heartbeat_stop = asyncio.Event()
+
+        async def heartbeat() -> None:
+            while not heartbeat_stop.is_set():
+                try:
+                    await asyncio.wait_for(
+                        heartbeat_stop.wait(), timeout=lease.ttl_ms / 3000
+                    )
+                except asyncio.TimeoutError:
+                    if not await self.checkpoints.renew(lease):
+                        lost.set()
+                        return
+
+        heartbeat_task = asyncio.create_task(heartbeat())
         try:
-            cursor=await self.checkpoints.load_cursor(self.source_id)
-            events,next_cursor=await self.source.poll(cursor=cursor)
-            if len(events)>self.batch_limit: raise RuntimeError("source batch exceeded configured limit")
+            cursor = await self.checkpoints.load_cursor(self.source_id)
+            events, next_cursor = await self.source.poll(cursor=cursor)
+            if lost.is_set():
+                raise RuntimeError("source lease lost during poll")
+            if len(events) > self.batch_limit:
+                raise RuntimeError("source batch exceeded configured limit")
             if events:
                 await self.store.append(events)
+            if lost.is_set():
+                raise RuntimeError("source lease lost before cursor commit")
             if next_cursor is not None and next_cursor != cursor:
-                await self.checkpoints.save_cursor(self.source_id,lease,next_cursor)
+                await self.checkpoints.save_cursor(self.source_id, lease, next_cursor)
             return len(events)
         finally:
+            heartbeat_stop.set()
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
             await self.checkpoints.release(lease)
     async def run_forever(self):
         while not self._stopping.is_set():
