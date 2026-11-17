@@ -201,3 +201,19 @@ def test_coordination_graph_excludes_future_and_stale_observations():
     )
 
     assert len(clusters) == 1
+
+
+def test_coordination_graph_bounds_pairwise_expansion_for_large_story_bursts():
+    title = "Central bank unexpectedly signals policy rate change"
+    events = [
+        make_event(index, title=title, source_id=f"feed-{index:02d}")
+        for index in range(51)
+    ]
+    clusters = detect_coordinated_amplification(
+        events,
+        as_of=NOW,
+        publisher_groups={
+            f"feed-{index:02d}": f"publisher-{index:02d}" for index in range(51)
+        },
+    )
+    assert clusters == ()
