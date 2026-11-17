@@ -90,3 +90,38 @@ def test_rejected_candidate_records_all_forward_markout_horizons(tmp_path):
     markouts.sort(key=lambda row: row["horizon_seconds"])
     assert [row["horizon_seconds"] for row in markouts] == [60, 300, 900]
     assert all(row["signed_return_pct"] == pytest.approx(1.0) for row in markouts)
+
+
+def test_world_intelligence_lineage_is_reported_with_counterfactual_markouts(tmp_path):
+    store = CandidateOutcomeStore(tmp_path / "candidate-outcomes.sqlite3")
+    candidate = SimpleNamespace(
+        entry_price=100.0,
+        direction=TradeSide.LONG,
+        component_scores={"flow": 8.0},
+        component_availability={"flow": True},
+        regime="news_driven",
+        rationale=["verified event context"],
+        symbol="BTCUSDT",
+        composite_score=80.0,
+        trace_id="scan-wiats",
+        candidate_id="candidate-wiats",
+        world_intelligence_shadow={
+            "event_ids": ["event-a", "event-b"],
+            "narrative_ids": ["narrative-a"],
+            "source_ids": ["source-sec", "source-rss"],
+        },
+    )
+    store.record_rejection(candidate, "risk_gate", timestamp=1000)
+    store.update_price("BTCUSDT", 101.0, timestamp=1901)
+
+    report = store.world_intelligence_attribution_report(horizon_seconds=900)
+    assert report["scope"] == "rejected_candidate_counterfactuals"
+    assert report["interpretation"] == "observational_not_causal"
+    assert report["world_intelligence_attributed_samples"] == 1
+    assert report["dimensions"]["event"]["event-a"]["samples"] == 1
+    assert report["dimensions"]["narrative"]["narrative-a"][
+        "mean_signed_return_pct"
+    ] == pytest.approx(1.0)
+    assert report["dimensions"]["source"]["source-sec"][
+        "missed_opportunity_rate"
+    ] == pytest.approx(1.0)

@@ -474,6 +474,29 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
     outcome_classifier.load_state()
     attention_path = str(get_model_data_dir() / "online_ml" / "attention_explainer.pkl")
     attention_explainer = load_attention_model(attention_path) or AttentionExplainer()
+    world_intelligence_provider = None
+    if os.getenv("AITOS_WORLD_INTELLIGENCE_SHADOW_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        from aitos.world_intelligence.context import ClickHouseAssetSnapshotProvider
+        from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
+
+        intelligence_store = ClickHouseIntelligenceStore(market_repo._client)
+        await intelligence_store.ensure_schema()
+        world_intelligence_provider = ClickHouseAssetSnapshotProvider(
+            intelligence_store,
+            lookback_hours=float(
+                os.getenv("AITOS_WORLD_INTELLIGENCE_LOOKBACK_HOURS", "72")
+            ),
+            max_events=int(os.getenv("AITOS_WORLD_INTELLIGENCE_MAX_EVENTS", "5000")),
+            cache_ttl_seconds=float(
+                os.getenv("AITOS_WORLD_INTELLIGENCE_CACHE_TTL_SECONDS", "5")
+            ),
+        )
+        logger.info("WIATS scanner evidence enabled in shadow-only mode")
     components = await build_system(
         event_bus=event_bus,
         exchange=exchange,
@@ -490,6 +513,7 @@ async def _run_paper_trading(cleanup: AsyncExitStack) -> None:
         attention_explainer=attention_explainer,
         min_score_threshold=PAPER_MIN_SCORE_THRESHOLD,
         enable_exit_intelligence=True,
+        world_intelligence_provider=world_intelligence_provider,
     )
     event_bus_cleanup_owner["components"] = True
     cleanup.push_async_callback(shutdown_all, components)

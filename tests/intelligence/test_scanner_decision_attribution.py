@@ -119,6 +119,10 @@ def test_rejected_candidate_markout_has_separate_horizon_entity():
         direction=TradeSide.LONG,
         composite_score=75.0,
         regime="trending",
+        world_intelligence_shadow={
+            "event_ids": ["event-1"],
+            "policy": "shadow_only_no_execution_or_sizing_authority",
+        },
     )
 
     instance.record_candidate_rejection(candidate, "risk_gate")
@@ -126,6 +130,9 @@ def test_rejected_candidate_markout_has_separate_horizon_entity():
         "rejection-1:REJECTION",
         "rejection-1:MARKOUT:900",
     ]
+    assert instance._decision_outcome_ledger.decisions[0][1]["payload"][
+        "world_intelligence_shadow"
+    ]["event_ids"] == ["event-1"]
     assert (
         instance._decision_outcome_ledger.decisions[1][1]["entity_id"]
         == "candidate-1:MARKOUT:900"
