@@ -101,8 +101,14 @@ def test_coordination_graph_requires_repeated_synchronous_cross_publisher_overla
     events = [
         make_event(index, title=title, source_id=source_id)
         for index, (source_id, title) in enumerate(
-            (("feed-a", titles[0]), ("feed-b", titles[0]), ("feed-c", titles[0]),
-             ("feed-a", titles[1]), ("feed-b", titles[1]), ("feed-c", titles[1]))
+            [
+                ("feed-a", titles[0]),
+                ("feed-b", titles[0]),
+                ("feed-c", titles[0]),
+                ("feed-a", titles[1]),
+                ("feed-b", titles[1]),
+                ("feed-c", titles[1]),
+            ]
         )
     ]
 
@@ -135,8 +141,14 @@ def test_coordination_graph_does_not_count_same_publisher_as_independent():
     events = [
         make_event(index, title=title, source_id=source_id)
         for index, (source_id, title) in enumerate(
-            (("feed-a", titles[0]), ("feed-b", titles[0]), ("feed-c", titles[0]),
-             ("feed-a", titles[1]), ("feed-b", titles[1]), ("feed-c", titles[1]))
+            [
+                ("feed-a", titles[0]),
+                ("feed-b", titles[0]),
+                ("feed-c", titles[0]),
+                ("feed-a", titles[1]),
+                ("feed-b", titles[1]),
+                ("feed-c", titles[1]),
+            ]
         )
     ]
 
@@ -161,8 +173,14 @@ def test_coordination_graph_excludes_future_and_stale_observations():
     events = [
         make_event(index, title=title, source_id=source_id)
         for index, (source_id, title) in enumerate(
-            (("feed-a", titles[0]), ("feed-b", titles[0]), ("feed-c", titles[0]),
-             ("feed-a", titles[1]), ("feed-b", titles[1]), ("feed-c", titles[1]))
+            [
+                ("feed-a", titles[0]),
+                ("feed-b", titles[0]),
+                ("feed-c", titles[0]),
+                ("feed-a", titles[1]),
+                ("feed-b", titles[1]),
+                ("feed-c", titles[1]),
+            ]
         )
     ]
     stale = [
