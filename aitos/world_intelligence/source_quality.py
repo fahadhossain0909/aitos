@@ -187,6 +187,7 @@ def detect_coordinated_amplification(
     lookback_hours: float = 24.0,
     min_shared_stories: int = 2,
     min_sources: int = 3,
+    max_sources_per_story: int = 50,
 ) -> tuple[CoordinatedAmplificationCluster, ...]:
     """Build a conservative source-overlap graph for analyst review.
 
@@ -201,8 +202,12 @@ def detect_coordinated_amplification(
         or synchronization_window_seconds <= 0
         or not isfinite(float(lookback_hours))
         or not 0 < lookback_hours <= 24 * 7
+        or isinstance(min_shared_stories, bool)
         or min_shared_stories < 1
+        or isinstance(min_sources, bool)
         or min_sources < 3
+        or isinstance(max_sources_per_story, bool)
+        or not min_sources <= max_sources_per_story <= 500
     ):
         raise ValueError("invalid coordination graph policy")
 
@@ -226,6 +231,9 @@ def detect_coordinated_amplification(
     pair_stories: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
     for normalized_title, source_times in stories.items():
         source_ids = sorted(source_times)
+        # Bound pairwise graph expansion for pathological syndication bursts.
+        if len(source_ids) > max_sources_per_story:
+            continue
         for source_a, source_b in combinations(source_ids, 2):
             group_a = groups.get(source_a, source_a)
             group_b = groups.get(source_b, source_b)
