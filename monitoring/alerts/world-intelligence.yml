@@ -50,3 +50,13 @@ groups:
         annotations:
           summary: "A WIATS source has repeated ingestion failures"
           description: "Inspect the per-source /sources endpoint and provider configuration for this source_id."
+
+      - alert: AITOSWorldIntelligenceDeadLetterQuarantined
+        expr: increase(aitos_wiats_dead_letters_exhausted_total[15m]) > 0 or increase(aitos_wiats_dead_letters_quarantined_total[15m]) > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: wiats
+        annotations:
+          summary: "A WIATS dead-letter page needs operator review"
+          description: "A page exhausted its retry budget or conflicted with the durable source cursor. Inspect the DLQ record; do not rewind the cursor automatically."
