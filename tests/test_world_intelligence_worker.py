@@ -328,3 +328,38 @@ async def test_dead_letter_retry_limit_is_validated():
     worker = IntelligenceIngestionWorker([Adapter()], Store(), Sink())
     with pytest.raises(ValueError, match="max_attempts"):
         await worker.replay_dead_letters(max_attempts=0)
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_lease_loss_does_not_consume_retry_budget():
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    from aitos.world_intelligence.lease import LeaseLost
+
+    class LeaseManager:
+        @asynccontextmanager
+        async def hold(self, source_id):
+            async def _lost():
+                raise LeaseLost("lease heartbeat failed")
+
+            yield SimpleNamespace(fencing_token=16, assert_valid=_lost)
+
+    store = Store()
+    store.pending = [
+        {
+            "failure_id": "lease-interrupted",
+            "source_id": "test",
+            "cursor_before": "cursor-1",
+            "cursor_after": "cursor-2",
+            "events": [],
+            "attempts": 2,
+        }
+    ]
+    worker = IntelligenceIngestionWorker(
+        [Adapter()], store, Sink(), lease_manager=LeaseManager()
+    )
+
+    assert await worker.replay_dead_letters(max_attempts=3) == 0
+    assert store.replayed == []
+    assert worker.metrics_snapshot()["lease_lost"] == 1
