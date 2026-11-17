@@ -13,6 +13,7 @@ import clickhouse_connect
 import redis.asyncio as redis
 
 from aitos.capital_intelligence.binance import BinanceFuturesCapitalAdapter
+from aitos.capital_intelligence.binance_market import BinanceMarketStructureAdapter
 from aitos.capital_intelligence.cftc import CftcCotAdapter
 from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook
 from aitos.capital_intelligence.dex import EvmDexSwapAdapter
@@ -151,6 +152,25 @@ async def main() -> None:
                 checkpoints=checkpoints,
                 store=store,
                 poll_interval_seconds=interval,
+            )
+        )
+
+    # Optional, separately budgeted market microstructure observations.
+    market_symbols = _json_env("AITOS_CFEI_BINANCE_MARKET_SYMBOLS", [])
+    if market_symbols:
+        market_adapter = BinanceMarketStructureAdapter(
+            symbols=market_symbols,
+            min_trade_notional_usd=float(
+                os.getenv("AITOS_CFEI_LARGE_TRADE_USD", "100000")
+            ),
+        )
+        workers.append(
+            CapitalIngestionWorker(
+                source_id="binance-usdm-market-structure",
+                source=market_adapter,
+                checkpoints=checkpoints,
+                store=store,
+                poll_interval_seconds=max(interval, 15.0),
             )
         )
 
