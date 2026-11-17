@@ -3,6 +3,7 @@
 Discovered symbols are descriptive metadata only. They are never used to infer
 asset identity, price symbols, token legitimacy, or beneficial ownership.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -82,8 +83,10 @@ class EvmTokenMetadataResolver:
         if not isinstance(raw, str) or not raw.startswith("0x"):
             raise ValueError("invalid ERC-20 decimals response")
         encoded = raw[2:]
-        if not encoded or len(encoded) > 64 or any(
-            char not in "0123456789abcdefABCDEF" for char in encoded
+        if (
+            not encoded
+            or len(encoded) > 64
+            or any(char not in "0123456789abcdefABCDEF" for char in encoded)
         ):
             raise ValueError("invalid ERC-20 decimals response")
         value = int(encoded, 16)
@@ -145,4 +148,6 @@ class EvmTokenMetadataResolver:
         normalized = [self._address(address) for address in addresses]
         if len(set(normalized)) != len(normalized):
             raise ValueError("duplicate token address in discovery allowlist")
-        return list(await asyncio.gather(*(self.resolve(address) for address in normalized)))
+        return list(
+            await asyncio.gather(*(self.resolve(address) for address in normalized))
+        )
