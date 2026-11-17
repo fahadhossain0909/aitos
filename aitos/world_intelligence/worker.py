@@ -143,6 +143,14 @@ class IntelligenceIngestionWorker:
                         quality.source_id,
                         ",".join(quality.reasons),
                     )
+            for cluster in enriched.coordination_clusters:
+                logger.warning(
+                    "cross-publisher coordination candidate requires review: "
+                    "cluster=%s sources=%s shared_stories=%s",
+                    cluster.cluster_id,
+                    ",".join(cluster.source_ids),
+                    len(cluster.shared_story_ids),
+                )
             if lease is not None:
                 await lease.assert_valid()
             persisted = await self.store.append_events(source_id, events)
