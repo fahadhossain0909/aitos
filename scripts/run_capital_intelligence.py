@@ -21,6 +21,7 @@ from aitos.capital_intelligence.dex import EvmDexSwapAdapter
 from aitos.capital_intelligence.enrichment import enrich_capital_event
 from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter
+from aitos.capital_intelligence.evm_token_metadata import EvmTokenMetadataResolver
 from aitos.capital_intelligence.runtime import (
     CapitalIngestionWorker,
     RedisCheckpointStore,
@@ -141,6 +142,27 @@ async def main() -> None:
         )
         for item in token_config
     ]
+    metadata_resolvers = []
+    discovery_config = _json_env("AITOS_CFEI_EVM_TOKEN_DISCOVERY", [])
+    discovered_tokens = []
+    for config in discovery_config:
+        resolver = EvmTokenMetadataResolver(
+            rpc_url=config["rpc_url"],
+            chain_id=str(config["chain_id"]),
+            max_concurrency=int(config.get("max_concurrency", 4)),
+        )
+        metadata_resolvers.append(resolver)
+        discovered_tokens.extend(await resolver.resolve_many(config["addresses"]))
+    # Explicit registry entries override discovered metadata for the same
+    # chain/address; discovery never supplies a trusted price-pair symbol.
+    token_map = {
+        (item.chain_id.lower(), item.address.lower()): item
+        for item in discovered_tokens
+    }
+    token_map.update(
+        {(item.chain_id.lower(), item.address.lower()): item for item in tokens}
+    )
+    tokens = list(token_map.values())
     registry = TokenRegistry(tokens) if tokens else None
     price_tokens = [item for item in tokens if item.price_symbol]
     price_book = (
@@ -338,6 +360,8 @@ async def main() -> None:
         await worker.close()
     if hasattr(price_book, "close"):
         await price_book.close()
+    for resolver in metadata_resolvers:
+        await resolver.close()
     if graph_store is not None:
         await graph_store.close()
     await clickhouse.close()
