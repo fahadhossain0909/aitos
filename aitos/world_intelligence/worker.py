@@ -70,6 +70,7 @@ class IntelligenceIngestionWorker:
             "dead_letters_replayed": 0,
             "dead_letters_exhausted": 0,
             "dead_letters_quarantined": 0,
+            "coordination_candidates": 0,
             "lease_contention": 0,
             "lease_lost": 0,
         }
@@ -151,6 +152,9 @@ class IntelligenceIngestionWorker:
                     ",".join(cluster.source_ids),
                     len(cluster.shared_story_ids),
                 )
+            self._metrics["coordination_candidates"] += len(
+                enriched.coordination_clusters
+            )
             if lease is not None:
                 await lease.assert_valid()
             persisted = await self.store.append_events(source_id, events)
