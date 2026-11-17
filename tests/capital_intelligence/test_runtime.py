@@ -3,7 +3,10 @@ from datetime import datetime, timezone
 import pytest
 
 from aitos.capital_intelligence.contracts import CapitalEvent
-from aitos.capital_intelligence.runtime import CapitalIngestionWorker, RedisCheckpointStore
+from aitos.capital_intelligence.runtime import (
+    CapitalIngestionWorker,
+    RedisCheckpointStore,
+)
 
 
 class FakeRedis:
@@ -58,8 +61,18 @@ class FakeSource:
     async def poll(self, *, cursor=None):
         now = datetime.now(timezone.utc)
         event = CapitalEvent(
-            "event-1", "fixture", "transfer", "crypto_spot", "venue", "TOKEN",
-            "token_transfer", now, now, 1, "token", 1,
+            "event-1",
+            "fixture",
+            "transfer",
+            "crypto_spot",
+            "venue",
+            "TOKEN",
+            "token_transfer",
+            now,
+            now,
+            1,
+            "token",
+            1,
         )
         return [event], "next-cursor"
 
@@ -85,7 +98,10 @@ async def test_graph_sink_failure_prevents_cursor_commit_and_replays_safely():
     checkpoints = RedisCheckpointStore(FakeRedis())
     clickhouse = FakeClickHouse()
     worker = CapitalIngestionWorker(
-        source_id="fixture", source=FakeSource(), checkpoints=checkpoints, store=clickhouse
+        source_id="fixture",
+        source=FakeSource(),
+        checkpoints=checkpoints,
+        store=clickhouse,
     )
     worker.graph_store = FailingGraph()
 
