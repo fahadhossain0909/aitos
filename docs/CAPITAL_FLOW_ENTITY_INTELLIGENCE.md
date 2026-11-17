@@ -133,3 +133,35 @@ CFEI outputs should first be stored as observations, not strategy signals. Befor
 ## Cross-market architecture
 
 The event schema carries market, venue, instrument, source and entity evidence independently. Future adapters can normalize SEC EDGAR filings (13F and Forms 3/4/5), CFTC reports and official exchange disclosures. Filing publication time, reporting period, amendment status, reporting lag and beneficial-ownership scope must remain explicit. A 13F holding is not a real-time position, and a reported insider transaction is not an automatic directional signal.
+
+
+## Additional market-structure and evidence-graph primitives
+
+The optional `BinanceMarketStructureAdapter` adds public USD-M aggregate-trade,
+open-interest, premium-index/funding and bounded depth-snapshot observations.
+Configure it independently from the aggregate cohort adapter:
+
+```dotenv
+AITOS_CFEI_BINANCE_MARKET_SYMBOLS=["BTCUSDT","ETHUSDT"]
+AITOS_CFEI_LARGE_TRADE_USD=100000
+```
+
+The collector uses per-symbol aggregate-trade IDs for incremental polling after
+its initial bounded snapshot. The first poll is deliberately limited to the
+latest 1,000 aggregate trades per symbol; operators requiring complete history
+must run a separate historical backfill. Depth is an L2 snapshot (not L3 order
+identity/cancel-replenishment telemetry). The USD threshold is quote-notional
+approximation and must not be interpreted as an exact USD conversion for every
+quote asset. API rate budgets must be measured before increasing symbols.
+
+The `intelligence.py` module provides explainable candidate-link suggestions
+and descriptive flow behavior profiles. Shared counterparties only produce
+candidate evidence; they cannot establish common ownership. Accumulation and
+distribution scores are deterministic heuristics, not probabilities, trained
+models or execution signals. Reverted events are excluded.
+
+The optional `neo4j_graph.py` adapter persists labels and evidence using
+parameterized Cypher. It intentionally stores evidence nodes instead of
+auto-merging wallet identities. Production activation still requires explicit
+Neo4j connection configuration, deployment wiring, integration tests against
+the deployed Neo4j version, backups and query/resource budgets.
