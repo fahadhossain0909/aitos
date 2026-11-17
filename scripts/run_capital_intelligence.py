@@ -11,6 +11,7 @@ from typing import Any
 
 import clickhouse_connect
 import redis.asyncio as redis
+from neo4j import AsyncGraphDatabase
 
 from aitos.capital_intelligence.binance import BinanceFuturesCapitalAdapter
 from aitos.capital_intelligence.binance_market import BinanceMarketStructureAdapter
@@ -18,6 +19,7 @@ from aitos.capital_intelligence.cftc import CftcCotAdapter
 from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook
 from aitos.capital_intelligence.dex import EvmDexSwapAdapter
 from aitos.capital_intelligence.enrichment import enrich_capital_event
+from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter
 from aitos.capital_intelligence.runtime import (
     CapitalIngestionWorker,
@@ -107,6 +109,22 @@ async def main() -> None:
     )
     await store.ensure_schema()
     checkpoints = RedisCheckpointStore(redis_client)
+    graph_store = None
+    if os.getenv("AITOS_CFEI_NEO4J_ENABLED", "false").lower() in {"1", "true", "yes"}:
+        neo4j_uri = os.getenv("NEO4J_URI", "")
+        neo4j_user = os.getenv("NEO4J_USER", "")
+        neo4j_password = os.getenv("NEO4J_PASSWORD", "")
+        if not all((neo4j_uri, neo4j_user, neo4j_password)):
+            raise SystemExit("CFEI Neo4j enabled but NEO4J_URI/USER/PASSWORD are incomplete.")
+        graph_driver = AsyncGraphDatabase.driver(
+            neo4j_uri, auth=(neo4j_user, neo4j_password)
+        )
+        await graph_driver.verify_connectivity()
+        graph_store = Neo4jEntityGraphStore(
+            graph_driver, database=os.getenv("NEO4J_DATABASE", "neo4j")
+        )
+        await graph_store.ensure_schema()
+        LOG.info("CFEI Neo4j evidence graph schema is ready")
     workers: list[CapitalIngestionWorker] = []
     interval = float(os.getenv("AITOS_CFEI_POLL_SECONDS", "15"))
 
@@ -320,6 +338,8 @@ async def main() -> None:
         await worker.close()
     if hasattr(price_book, "close"):
         await price_book.close()
+    if graph_store is not None:
+        await graph_store.close()
     await clickhouse.close()
     await redis_client.aclose()
 
