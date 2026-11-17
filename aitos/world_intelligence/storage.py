@@ -387,8 +387,14 @@ class ClickHouseIntelligenceStore:
             "AND started_at >= toDateTime64({lower_bound:String}, 3, 'UTC') "
             "GROUP BY source_id ORDER BY source_id LIMIT {limit:UInt32}",
             parameters={
-                "as_of": cutoff.isoformat(),
-                "lower_bound": lower_bound.isoformat(),
+                # ClickHouse toDateTime64(String) does not accept ISO-8601
+                # UTC offsets. Send explicit UTC wall-clock values instead.
+                "as_of": cutoff.replace(tzinfo=None).isoformat(
+                    sep=" ", timespec="milliseconds"
+                ),
+                "lower_bound": lower_bound.replace(tzinfo=None).isoformat(
+                    sep=" ", timespec="milliseconds"
+                ),
                 "limit": limit,
             },
         )
