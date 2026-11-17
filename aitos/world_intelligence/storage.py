@@ -509,7 +509,13 @@ class ClickHouseIntelligenceStore:
     async def update_dead_letter(
         self, failure_id: str, *, status: str, attempts: int
     ) -> None:
-        if not failure_id or status not in {"pending", "replayed", "discarded", "exhausted", "quarantined"}:
+        if not failure_id or status not in {
+            "pending",
+            "replayed",
+            "discarded",
+            "exhausted",
+            "quarantined",
+        }:
             raise ValueError("invalid dead-letter update")
         if isinstance(attempts, bool) or not isinstance(attempts, int) or attempts < 1:
             raise ValueError("attempts must be a positive integer")
