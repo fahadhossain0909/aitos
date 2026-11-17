@@ -20,6 +20,8 @@ def render_prometheus_metrics(
         "pages_failed": "aitos_wiats_pages_failed_total",
         "dead_letters_written": "aitos_wiats_dead_letters_written_total",
         "dead_letters_replayed": "aitos_wiats_dead_letters_replayed_total",
+        "dead_letters_exhausted": "aitos_wiats_dead_letters_exhausted_total",
+        "dead_letters_quarantined": "aitos_wiats_dead_letters_quarantined_total",
         "lease_contention": "aitos_wiats_lease_contention_total",
         "lease_lost": "aitos_wiats_lease_lost_total",
     }
