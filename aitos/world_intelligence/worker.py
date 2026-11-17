@@ -338,9 +338,7 @@ class IntelligenceIngestionWorker:
                     terminal_status = (
                         "quarantined"
                         if isinstance(replay_error, CursorReplayConflict)
-                        else "exhausted"
-                        if next_attempt >= max_attempts
-                        else "pending"
+                        else "exhausted" if next_attempt >= max_attempts else "pending"
                     )
                     await self.store.update_dead_letter(
                         item["failure_id"],
