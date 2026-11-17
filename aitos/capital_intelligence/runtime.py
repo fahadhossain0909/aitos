@@ -64,7 +64,7 @@ class RedisCheckpointStore:
         if value is None: return None
         return value.decode() if isinstance(value,bytes) else str(value)
     async def save_cursor(self, source_id: str, lease: Lease, cursor: str) -> None:
-        if not cursor or len(cursor)>4096: raise ValueError("invalid cursor")
+        if not cursor or len(cursor)>262144: raise ValueError("invalid cursor")
         ok=await self.redis.eval(self._SAVE,2,lease.key,self._key(source_id)+":cursor",lease.token,cursor)
         if not ok: raise RuntimeError("lease lost; refusing stale cursor commit")
 
