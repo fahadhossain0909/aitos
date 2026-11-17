@@ -231,7 +231,8 @@ async def test_dead_letter_replay_never_rewinds_an_advanced_cursor():
 
     assert await worker.replay_dead_letters() == 0
     assert store.cursor == "cursor-3"
-    assert store.replayed == [("stale-failure", "pending", 2)]
+    assert store.replayed == [("stale-failure", "quarantined", 2)]
+    assert worker.metrics_snapshot()["dead_letters_quarantined"] == 1
 
 
 @pytest.mark.asyncio
