@@ -55,9 +55,8 @@ class CftcCotAdapter:
         if not isinstance(field_map, dict) or not required.issubset(field_map):
             raise ValueError("CFTC field_map is missing required mappings")
         for key in ("report_date", "market_code", "market_name", "open_interest"):
-            if (
-                not isinstance(field_map[key], str)
-                or not _FIELD.fullmatch(field_map[key])
+            if not isinstance(field_map[key], str) or not _FIELD.fullmatch(
+                field_map[key]
             ):
                 raise ValueError(f"invalid CFTC field mapping: {key}")
         categories = field_map["categories"]
@@ -110,9 +109,7 @@ class CftcCotAdapter:
             params={
                 "$limit": str(self.page_limit),
                 "$offset": str(offset),
-                "$order": (
-                    f"{fields['report_date']} ASC, {fields['market_code']} ASC"
-                ),
+                "$order": f"{fields['report_date']} ASC, {fields['market_code']} ASC",
             },
         ) as response:
             if response.status == 429:
