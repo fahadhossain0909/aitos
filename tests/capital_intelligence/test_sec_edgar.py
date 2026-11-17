@@ -180,3 +180,57 @@ async def test_sec_form3_is_a_point_in_time_holding_not_a_trade():
     assert event.metadata["flow_sign"] == 0
     assert event.event_time.date().isoformat() == "2026-08-31"
     assert event.observed_time.date().isoformat() == "2026-09-02"
+
+
+
+@pytest.mark.asyncio
+async def test_sec_filing_batch_limit_advances_cursor_without_skipping_filings():
+    cik = "0000789019"
+    older = "0000789019-26-000010"
+    newer = "0000789019-26-000011"
+    submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+    base = "https://www.sec.gov/Archives/edgar/data/789019/"
+    submissions = {
+        "filings": {
+            "recent": {
+                "accessionNumber": [newer, older],
+                "form": ["4", "4"],
+                "filingDate": ["2026-10-03", "2026-10-02"],
+                "primaryDocument": ["new.xml", "old.xml"],
+                "reportDate": ["2026-10-01", "2026-09-30"],
+            }
+        }
+    }
+    xml = """<ownershipDocument>
+      <issuer><issuerCik>789019</issuerCik><issuerTradingSymbol>MSFT</issuerTradingSymbol></issuer>
+      <reportingOwner><reportingOwnerId><rptOwnerCik>1234567</rptOwnerCik></reportingOwnerId></reportingOwner>
+      <nonDerivativeTable><nonDerivativeTransaction>
+        <transactionDate><value>2026-10-01</value></transactionDate>
+        <transactionCode><value>A</value></transactionCode>
+        <transactionShares><value>1</value></transactionShares>
+        <transactionAcquiredDisposedCode><value>A</value></transactionAcquiredDisposedCode>
+      </nonDerivativeTransaction></nonDerivativeTable>
+    </ownershipDocument>"""
+    session = FakeSession(
+        {
+            submissions_url: submissions,
+            base + "2026000010/old.xml": xml,
+            base + "2026000011/new.xml": xml,
+        }
+    )
+    adapter = SecEdgarFilingsAdapter(
+        ciks=[cik],
+        user_agent="AITOS research contact@example.org",
+        max_filings_per_poll=1,
+        initial_filings_per_cik=2,
+        session=session,
+    )
+    first_events, first_cursor = await adapter.poll()
+    assert len(first_events) == 1
+    assert first_events[0].transaction_id == older
+    assert json.loads(first_cursor)[cik] == older
+
+    second_events, second_cursor = await adapter.poll(cursor=first_cursor)
+    assert len(second_events) == 1
+    assert second_events[0].transaction_id == newer
+    assert json.loads(second_cursor)[cik] == newer

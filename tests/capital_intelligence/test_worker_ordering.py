@@ -81,3 +81,43 @@ async def test_worker_persists_events_before_checkpoint():
     assert await worker.run_once() == 1
     assert store.appended
     assert await checkpoints.load_cursor("source-1") == "next"
+
+
+
+@pytest.mark.asyncio
+async def test_reorg_tombstones_precede_new_events_and_cursor_checkpoint():
+    order = []
+
+    class OrderedRedis(FakeRedis):
+        async def eval(self, script, number_of_keys, *args):
+            if "PEXPIRE" not in script and "DEL" not in script:
+                order.append("checkpoint")
+            return await super().eval(script, number_of_keys, *args)
+
+    class ReorgSource(Source):
+        last_reorg = {
+            "source_id": "evm:1",
+            "from_block": 10,
+            "to_block": 10,
+            "canonical_hashes": {10: "0xcanonical"},
+        }
+
+    class ReorgStore(Store):
+        async def reconcile_evm_reorg(self, instruction):
+            order.append("reorg")
+
+        async def append(self, events):
+            order.append("append")
+            self.appended = True
+
+    redis_client = OrderedRedis()
+    checkpoints = RedisCheckpointStore(redis_client)
+    store = ReorgStore(checkpoints)
+    worker = CapitalIngestionWorker(
+        source_id="evm-source",
+        source=ReorgSource(),
+        checkpoints=checkpoints,
+        store=store,
+    )
+    assert await worker.run_once() == 1
+    assert order.index("reorg") < order.index("append") < order.index("checkpoint")

@@ -419,13 +419,15 @@ class SecEdgarFilingsAdapter:
                     selected = rows[: positions[0]]
             else:
                 selected = rows[: self.initial_filings_per_cik]
-            next_cursor[cik] = latest
+            stop_batch = False
             for row in reversed(selected):
                 if row["form"] not in self.forms:
+                    next_cursor[cik] = row["accession"]
                     continue
+                if processed_filings >= self.max_filings_per_poll:
+                    stop_batch = True
+                    break
                 processed_filings += 1
-                if processed_filings > self.max_filings_per_poll:
-                    raise RuntimeError("SEC filing batch exceeded configured bound")
                 filing_date = self._day(row["filing_date"])
                 if filing_date is None:
                     raise RuntimeError("SEC filing date is invalid")
@@ -454,6 +456,9 @@ class SecEdgarFilingsAdapter:
                             cik, accession, filing_date, row["form"], document_url
                         )
                     )
+                next_cursor[cik] = accession
+            if stop_batch:
+                break
         serialized = json.dumps(next_cursor, sort_keys=True, separators=(",", ":"))
         if len(serialized) > 262144:
             raise ValueError("SEC cursor exceeds safe size")
