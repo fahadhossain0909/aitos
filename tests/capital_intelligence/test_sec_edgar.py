@@ -143,9 +143,7 @@ async def test_sec_form3_is_a_point_in_time_holding_not_a_trade():
     cik = "0000789019"
     accession = "0000789019-26-000003"
     submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
-    document_url = (
-        "https://www.sec.gov/Archives/edgar/data/789019/2026000003/form3.xml"
-    )
+    document_url = "https://www.sec.gov/Archives/edgar/data/789019/2026000003/form3.xml"
     submissions = {
         "filings": {
             "recent": {

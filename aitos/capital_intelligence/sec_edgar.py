@@ -248,7 +248,12 @@ class SecEdgarFilingsAdapter:
                     raise RuntimeError("Form 3 contains a negative holding")
                 security_title = self._value(item, "securityTitle")
                 event_id = self._event_id(
-                    "form3", cik, accession, str(index), shares_raw, security_title or ""
+                    "form3",
+                    cik,
+                    accession,
+                    str(index),
+                    shares_raw,
+                    security_title or "",
                 )
                 events.append(
                     CapitalEvent(
