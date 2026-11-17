@@ -156,6 +156,7 @@ class EVMLogCapitalAdapter:
                     1.0,
                     {
                         "log_index": log_index,
+                        "raw_amount": str(amount),
                         "decimals_required": True,
                         "direction_semantics": "transfer_only_not_trade_intent",
                     },
