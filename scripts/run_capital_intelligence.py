@@ -310,6 +310,11 @@ async def main() -> None:
             )
         )
 
+    # Graph persistence is a replay-safe secondary sink. If it fails, the
+    # Redis cursor is not committed and ClickHouse/Neo4j writes are replayed.
+    for worker in workers:
+        worker.graph_store = graph_store
+
     if not workers:
         raise SystemExit(
             "CFEI enabled but no observer sources configured; refusing an idle service."
