@@ -5,6 +5,7 @@ import pytest
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.worker import IntelligenceIngestionWorker
 
+
 def make_event():
     # Keep the fixture inside the production 72-hour ingestion window.
     now = datetime.now(timezone.utc)
