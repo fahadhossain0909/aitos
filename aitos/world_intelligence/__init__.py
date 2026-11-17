@@ -41,8 +41,11 @@ from aitos.world_intelligence.source_quality import (
     SourceQualityAssessment,
     SourceOutcome,
     SourceReliabilityEstimate,
+    CoordinationEdge,
+    CoordinatedAmplificationCluster,
     assess_source_batch,
     estimate_source_reliability,
+    detect_coordinated_amplification,
 )
 from aitos.world_intelligence.evaluation import (
     EventPrediction,
@@ -113,8 +116,11 @@ __all__ = [
     "SourceQualityAssessment",
     "SourceOutcome",
     "SourceReliabilityEstimate",
+    "CoordinationEdge",
+    "CoordinatedAmplificationCluster",
     "assess_source_batch",
     "estimate_source_reliability",
+    "detect_coordinated_amplification",
     "EventPrediction",
     "EvaluationMetrics",
     "WalkForwardSplit",
