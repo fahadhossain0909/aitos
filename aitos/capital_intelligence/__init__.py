@@ -14,6 +14,7 @@ from .entity_graph import EntityEvidenceGraph, EntityProfile
 from .evm import EVMLogCapitalAdapter
 from .evm_token_metadata import EvmTokenMetadataResolver
 from .ranking import CapitalCandidateRank, rank_capital_candidates
+from .replay import PriceObservation, ReplayRow, ReplaySummary, build_point_in_time_replay, chronological_split, summarize_replay
 from .runtime import CapitalIngestionWorker, RedisCheckpointStore
 from .solana import SolanaAddressActivityAdapter
 from .sec_edgar import SecEdgarFilingsAdapter
@@ -43,6 +44,9 @@ __all__ = [
     "EvmTokenMetadataResolver",
     "EvmDexSwapAdapter",
     "PointInTimePriceBook",
+    "PriceObservation",
+    "ReplayRow",
+    "ReplaySummary",
     "PriceQuote",
     "RedisCheckpointStore",
     "SecEdgarFilingsAdapter",
@@ -50,10 +54,13 @@ __all__ = [
     "TokenMetadata",
     "TokenRegistry",
     "assess_capital_behavior",
+    "build_point_in_time_replay",
+    "chronological_split",
     "assess_entity_behavior",
     "candidate_links_from_shared_funding",
     "evidence_from_candidate",
     "enrich_capital_event",
     "rank_capital_candidates",
+    "summarize_replay",
     "value_quantity",
 ]
