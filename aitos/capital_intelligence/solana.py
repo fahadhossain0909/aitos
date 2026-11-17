@@ -86,7 +86,7 @@ class SolanaAddressActivityAdapter:
     ) -> tuple[list[CapitalEvent], str | None]:
         before = None
         signatures: list[str] = []
-        newest = previous
+        newest = None
         found_cursor = previous is None
         while True:
             options: dict[str, Any] = {
@@ -108,7 +108,8 @@ class SolanaAddressActivityAdapter:
                     stop = True
                     break
                 signatures.append(signature)
-                newest = newest or signature
+                if newest is None:
+                    newest = signature
             if stop or len(rows) < self.page_limit:
                 break
             before = rows[-1].get("signature")
@@ -227,7 +228,7 @@ class SolanaAddressActivityAdapter:
                             },
                         )
                     )
-        return events, newest
+        return events, newest or previous
 
     async def poll(
         self, *, cursor: str | None = None
