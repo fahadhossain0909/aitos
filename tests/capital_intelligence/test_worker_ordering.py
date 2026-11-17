@@ -83,7 +83,6 @@ async def test_worker_persists_events_before_checkpoint():
     assert await checkpoints.load_cursor("source-1") == "next"
 
 
-
 @pytest.mark.asyncio
 async def test_reorg_tombstones_precede_new_events_and_cursor_checkpoint():
     order = []

@@ -137,7 +137,6 @@ def test_sec_adapter_requires_contactable_user_agent():
         SecEdgarFilingsAdapter(ciks=["123"], user_agent="AITOS research")
 
 
-
 @pytest.mark.asyncio
 async def test_sec_form3_is_a_point_in_time_holding_not_a_trade():
     cik = "0000789019"
@@ -178,7 +177,6 @@ async def test_sec_form3_is_a_point_in_time_holding_not_a_trade():
     assert event.metadata["flow_sign"] == 0
     assert event.event_time.date().isoformat() == "2026-08-31"
     assert event.observed_time.date().isoformat() == "2026-09-02"
-
 
 
 @pytest.mark.asyncio
