@@ -123,6 +123,7 @@ class CapitalIngestionWorker:
         self.poll_interval_seconds = poll_interval_seconds
         self.batch_limit = batch_limit
         self.event_enricher = event_enricher
+        self.graph_store = None
         self._stopping = asyncio.Event()
 
     def stop(self):
@@ -169,6 +170,8 @@ class CapitalIngestionWorker:
                 events = enriched
             if events:
                 await self.store.append(events)
+                if self.graph_store is not None:
+                    await self.graph_store.upsert_events(events)
             if lost.is_set():
                 raise RuntimeError("source lease lost before cursor commit")
             if next_cursor is not None and next_cursor != cursor:
