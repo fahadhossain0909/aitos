@@ -68,6 +68,8 @@ class IntelligenceIngestionWorker:
             "pages_failed": 0,
             "dead_letters_written": 0,
             "dead_letters_replayed": 0,
+            "dead_letters_exhausted": 0,
+            "dead_letters_quarantined": 0,
             "lease_contention": 0,
             "lease_lost": 0,
         }
@@ -266,8 +268,12 @@ class IntelligenceIngestionWorker:
             self._running = False
         return tuple(results)
 
-    async def replay_dead_letters(self, *, limit: int = 100) -> int:
-        """Explicitly replay pending pages; never polls providers or bypasses leases."""
+    async def replay_dead_letters(
+        self, *, limit: int = 100, max_attempts: int = 5
+    ) -> int:
+        """Replay bounded pending pages; poison pages become terminal for review."""
+        if not 1 <= max_attempts <= 100:
+            raise ValueError("max_attempts must be between 1 and 100")
         if self.lease_manager is None:
             raise RuntimeError(
                 "dead-letter replay requires the distributed lease manager"
@@ -276,6 +282,13 @@ class IntelligenceIngestionWorker:
         pending = await self.store.load_pending_dead_letters(limit=limit)
         for item in pending:
             source_id = item["source_id"]
+            attempts = int(item["attempts"])
+            if attempts >= max_attempts:
+                await self.store.update_dead_letter(
+                    item["failure_id"], status="exhausted", attempts=attempts
+                )
+                self._metrics["dead_letters_exhausted"] += 1
+                continue
             try:
                 async with self.lease_manager.hold(source_id) as lease:
                     events = item["events"]
@@ -309,23 +322,35 @@ class IntelligenceIngestionWorker:
                     await self.store.update_dead_letter(
                         item["failure_id"],
                         status="replayed",
-                        attempts=item["attempts"] + 1,
+                        attempts=attempts + 1,
                     )
                     replayed += 1
                     self._metrics["dead_letters_replayed"] += 1
             except LeaseUnavailable:
                 self._metrics["lease_contention"] += 1
                 continue
-            except Exception:
+            except Exception as replay_error:
                 logger.exception(
                     "WIATS dead-letter replay failed: %s", item["failure_id"]
                 )
                 try:
+                    next_attempt = attempts + 1
+                    terminal_status = (
+                        "quarantined"
+                        if isinstance(replay_error, CursorReplayConflict)
+                        else "exhausted"
+                        if next_attempt >= max_attempts
+                        else "pending"
+                    )
                     await self.store.update_dead_letter(
                         item["failure_id"],
-                        status="pending",
-                        attempts=item["attempts"] + 1,
+                        status=terminal_status,
+                        attempts=next_attempt,
                     )
+                    if terminal_status == "quarantined":
+                        self._metrics["dead_letters_quarantined"] += 1
+                    elif terminal_status == "exhausted":
+                        self._metrics["dead_letters_exhausted"] += 1
                 except Exception:
                     logger.exception("Unable to update WIATS dead-letter retry state")
         return replayed
