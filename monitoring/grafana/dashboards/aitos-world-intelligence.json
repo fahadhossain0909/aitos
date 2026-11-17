@@ -67,6 +67,14 @@
         {
           "expr": "increase(aitos_wiats_dead_letters_replayed_total[1h])",
           "legendFormat": "replayed"
+        },
+        {
+          "expr": "increase(aitos_wiats_dead_letters_exhausted_total[1h])",
+          "legendFormat": "exhausted"
+        },
+        {
+          "expr": "increase(aitos_wiats_dead_letters_quarantined_total[1h])",
+          "legendFormat": "quarantined"
         }
       ],
       "gridPos": {
