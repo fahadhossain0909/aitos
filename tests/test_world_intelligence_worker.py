@@ -257,3 +257,74 @@ async def test_worker_exposes_durable_source_run_summary():
 
     summary = await worker.source_run_summary()
     assert summary == [{"source_id": "test", "runs": 1}]
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_retry_limit_moves_poison_page_to_exhausted():
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    class LeaseManager:
+        @asynccontextmanager
+        async def hold(self, source_id):
+            yield SimpleNamespace(fencing_token=14, assert_valid=lambda: _valid())
+
+    async def _valid():
+        return None
+
+    store = Store()
+    store.pending = [{
+        "failure_id": "poison-page",
+        "source_id": "test",
+        "cursor_before": "cursor-1",
+        "cursor_after": "cursor-2",
+        "events": [],
+        "attempts": 5,
+    }]
+    worker = IntelligenceIngestionWorker(
+        [Adapter()], store, Sink(), lease_manager=LeaseManager()
+    )
+
+    assert await worker.replay_dead_letters(max_attempts=5) == 0
+    assert store.replayed == [("poison-page", "exhausted", 5)]
+    assert worker.metrics_snapshot()["dead_letters_exhausted"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_cursor_conflict_is_quarantined_not_retried():
+    from contextlib import asynccontextmanager
+    from types import SimpleNamespace
+
+    class LeaseManager:
+        @asynccontextmanager
+        async def hold(self, source_id):
+            yield SimpleNamespace(fencing_token=15, assert_valid=lambda: _valid())
+
+    async def _valid():
+        return None
+
+    store = Store()
+    store.cursor = "cursor-advanced"
+    store.pending = [{
+        "failure_id": "stale-page",
+        "source_id": "test",
+        "cursor_before": "cursor-1",
+        "cursor_after": "cursor-2",
+        "events": [],
+        "attempts": 1,
+    }]
+    worker = IntelligenceIngestionWorker(
+        [Adapter()], store, Sink(), lease_manager=LeaseManager()
+    )
+
+    assert await worker.replay_dead_letters(max_attempts=5) == 0
+    assert store.cursor == "cursor-advanced"
+    assert store.replayed == [("stale-page", "quarantined", 2)]
+    assert worker.metrics_snapshot()["dead_letters_quarantined"] == 1
+
+
+@pytest.mark.asyncio
+async def test_dead_letter_retry_limit_is_validated():
+    worker = IntelligenceIngestionWorker([Adapter()], Store(), Sink())
+    with pytest.raises(ValueError, match="max_attempts"):
+        await worker.replay_dead_letters(max_attempts=0)
