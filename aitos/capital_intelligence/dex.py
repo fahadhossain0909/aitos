@@ -41,6 +41,7 @@ class EvmDexSwapAdapter:
         self.session = session
         self.owns_session = session is None
         self.request_id = 0
+        self._pool_tokens: dict[str, tuple[str, str]] = {}
 
     @staticmethod
     def _address(value: str) -> str:
@@ -77,6 +78,23 @@ class EvmDexSwapAdapter:
         if result.get("error"):
             raise RuntimeError(f"EVM RPC {method} failed")
         return result.get("result")
+
+    async def _token_addresses(self, pool: str) -> tuple[str, str]:
+        cached = self._pool_tokens.get(pool)
+        if cached:
+            return cached
+        values = []
+        for selector in ("0x0dfe1681", "0xd21220a7"):
+            raw = await self._rpc(
+                "eth_call", [{"to": pool, "data": selector}, "latest"]
+            )
+            if not isinstance(raw, str) or len(raw) < 66:
+                raise RuntimeError("DEX pool token metadata unavailable")
+            values.append(self._address("0x" + raw[-40:]))
+        if values[0] == values[1]:
+            raise RuntimeError("DEX pool returned duplicate token addresses")
+        self._pool_tokens[pool] = (values[0], values[1])
+        return values[0], values[1]
 
     async def poll(self, *, cursor: str | None = None):
         latest = int(await self._rpc("eth_blockNumber", []), 16)
@@ -130,6 +148,7 @@ class EvmDexSwapAdapter:
                 delta0, delta1 = signed(words[0]), signed(words[1])
             else:
                 continue
+            token0_address, token1_address = await self._token_addresses(pool)
             block = int(log["blockNumber"], 16)
             tx = log["transactionHash"]
             index = int(log["logIndex"], 16)
@@ -172,6 +191,11 @@ class EvmDexSwapAdapter:
                     block_hash=log.get("blockHash"),
                     finality="confirmed",
                     metadata={
+                        "chain_id": self.chain_id,
+                        "asset_address": token0_address,
+                        "token0_address": token0_address,
+                        "token1_address": token1_address,
+                        "raw_delta": str(delta0),
                         "amount0_delta": str(delta0),
                         "amount1_delta": str(delta1),
                         "quantity_semantics": "absolute token0 delta only; token1 kept separately",

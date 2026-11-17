@@ -13,7 +13,9 @@ import clickhouse_connect
 import redis.asyncio as redis
 
 from aitos.capital_intelligence.binance import BinanceFuturesCapitalAdapter
+from aitos.capital_intelligence.binance_price import BinanceHistoricalPriceBook
 from aitos.capital_intelligence.dex import EvmDexSwapAdapter
+from aitos.capital_intelligence.enrichment import enrich_capital_event
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter
 from aitos.capital_intelligence.runtime import (
     CapitalIngestionWorker,
@@ -21,6 +23,7 @@ from aitos.capital_intelligence.runtime import (
 )
 from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
 from aitos.capital_intelligence.storage import ClickHouseCapitalStore
+from aitos.capital_intelligence.token_registry import TokenMetadata, TokenRegistry
 
 LOG = logging.getLogger("aitos.cfei")
 
@@ -33,6 +36,11 @@ def _json_env(name: str, default: Any) -> Any:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"{name} must contain valid JSON") from exc
+
+
+class _NoPriceBook:
+    async def quote(self, asset_id: str, at):
+        return None
 
 
 async def _metrics_server(port: int, counters: dict[str, int]) -> None:
@@ -99,6 +107,38 @@ async def main() -> None:
     workers: list[CapitalIngestionWorker] = []
     interval = float(os.getenv("AITOS_CFEI_POLL_SECONDS", "15"))
 
+    token_config = _json_env("AITOS_CFEI_TOKENS", [])
+    tokens = [
+        TokenMetadata(
+            chain_id=str(item["chain_id"]),
+            address=str(item["address"]),
+            asset_id=str(item["asset_id"]),
+            symbol=str(item["symbol"]),
+            decimals=int(item["decimals"]),
+            price_symbol=item.get("price_symbol"),
+            price_quote_currency=str(item.get("price_quote_currency", "USDT")),
+        )
+        for item in token_config
+    ]
+    registry = TokenRegistry(tokens) if tokens else None
+    price_tokens = [item for item in tokens if item.price_symbol]
+    price_book = (
+        BinanceHistoricalPriceBook(price_tokens) if price_tokens else _NoPriceBook()
+    )
+    allow_usdt_proxy = os.getenv(
+        "AITOS_CFEI_ALLOW_USDT_USD_PROXY", "false"
+    ).lower() in {"1", "true", "yes"}
+
+    async def event_enricher(event):
+        return await enrich_capital_event(
+            event,
+            registry=registry,
+            price_book=price_book,
+            allow_usdt_usd_proxy=allow_usdt_proxy,
+        )
+
+    enricher = event_enricher if registry else None
+
     symbols = _json_env("AITOS_CFEI_BINANCE_SYMBOLS", [])
     if symbols:
         adapter = BinanceFuturesCapitalAdapter(symbols=symbols)
@@ -128,6 +168,7 @@ async def main() -> None:
                 checkpoints=checkpoints,
                 store=store,
                 poll_interval_seconds=interval,
+                event_enricher=enricher,
             )
         )
 
@@ -146,6 +187,7 @@ async def main() -> None:
                 checkpoints=checkpoints,
                 store=store,
                 poll_interval_seconds=interval,
+                event_enricher=enricher,
             )
         )
 
@@ -163,6 +205,7 @@ async def main() -> None:
                 checkpoints=checkpoints,
                 store=store,
                 poll_interval_seconds=interval,
+                event_enricher=enricher,
             )
         )
 
@@ -199,7 +242,11 @@ async def main() -> None:
         _metrics_server(int(os.getenv("AITOS_CFEI_METRICS_PORT", "8121")), counters)
     )
     tasks = [asyncio.create_task(worker.run_forever()) for worker in workers]
-    LOG.info("CFEI observer started with %s source workers", len(workers))
+    LOG.info(
+        "CFEI observer started with %s source workers and %s token registry entries",
+        len(workers),
+        len(tokens),
+    )
     await stop.wait()
     for worker in workers:
         worker.stop()
@@ -210,6 +257,8 @@ async def main() -> None:
     await asyncio.gather(metrics, return_exceptions=True)
     for worker in workers:
         await worker.close()
+    if hasattr(price_book, "close"):
+        await price_book.close()
     await clickhouse.close()
     await redis_client.aclose()
 

@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 import pytest
 
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter, TRANSFER_TOPIC
+from aitos.capital_intelligence.dex import EvmDexSwapAdapter, V3_SWAP_TOPIC
 from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
 
 
@@ -115,3 +116,50 @@ async def test_solana_cursor_is_independent_per_address_and_token_delta_is_signe
     assert len(token_events) == 2
     assert all(event.metadata["flow_sign"] == 1 for event in token_events)
     assert all(event.metadata["raw_delta"] == "250" for event in token_events)
+
+
+
+@pytest.mark.asyncio
+async def test_dex_swap_resolves_pool_tokens_and_keeps_signed_raw_deltas():
+    pool = "0x" + "1" * 40
+    token0 = "0x" + "2" * 40
+    token1 = "0x" + "3" * 40
+    actor = "0x" + "4" * 40
+    adapter = EvmDexSwapAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        pools={pool: "uniswap_v3"},
+        confirmations=2,
+        max_block_range=10,
+    )
+    negative = (1 << 256) - 1_000_000
+    words = [negative, 2_000_000, 0, 0, 0]
+    log = {
+        "topics": [V3_SWAP_TOPIC, "0x" + "0" * 24 + actor[2:]],
+        "data": "0x" + "".join(f"{value:064x}" for value in words),
+        "blockNumber": "0x20",
+        "transactionHash": "0x" + "a" * 64,
+        "logIndex": "0x0",
+        "blockHash": "0x" + "b" * 64,
+        "address": pool,
+    }
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x22"
+        if method == "eth_getLogs":
+            return [log]
+        if method == "eth_call":
+            return "0x" + "0" * 24 + (token0 if params[0]["data"] == "0x0dfe1681" else token1)[2:]
+        if method == "eth_getBlockByNumber":
+            return {"timestamp": hex(1_700_000_000)}
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, cursor = await adapter.poll(cursor="0x1f")
+    assert cursor == "0x20"
+    assert len(events) == 1
+    assert events[0].metadata["token0_address"] == token0
+    assert events[0].metadata["token1_address"] == token1
+    assert events[0].metadata["raw_delta"] == "-1000000"
+    assert events[0].metadata["amount1_delta"] == "2000000"

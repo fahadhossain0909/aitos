@@ -11,7 +11,7 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Awaitable, Callable, Protocol
 from .contracts import CapitalEvent
 
 log = logging.getLogger(__name__)
@@ -110,6 +110,7 @@ class CapitalIngestionWorker:
         store: Any,
         poll_interval_seconds: float = 15.0,
         batch_limit: int = 10_000,
+        event_enricher: Callable[[CapitalEvent], Awaitable[CapitalEvent]] | None = None,
     ):
         if not 0.5 <= poll_interval_seconds <= 3600:
             raise ValueError("poll interval outside safe bounds")
@@ -121,6 +122,7 @@ class CapitalIngestionWorker:
         self.store = store
         self.poll_interval_seconds = poll_interval_seconds
         self.batch_limit = batch_limit
+        self.event_enricher = event_enricher
         self._stopping = asyncio.Event()
 
     def stop(self):
@@ -152,6 +154,11 @@ class CapitalIngestionWorker:
                 raise RuntimeError("source lease lost during poll")
             if len(events) > self.batch_limit:
                 raise RuntimeError("source batch exceeded configured limit")
+            if events and self.event_enricher is not None:
+                enriched = []
+                for event in events:
+                    enriched.append(await self.event_enricher(event))
+                events = enriched
             if events:
                 await self.store.append(events)
             if lost.is_set():
