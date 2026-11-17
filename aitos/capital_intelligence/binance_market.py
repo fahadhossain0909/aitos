@@ -1,6 +1,7 @@
 """Read-only Binance USD-M market microstructure observations for CFEI."""
 from __future__ import annotations
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 import aiohttp
@@ -46,18 +47,24 @@ class BinanceMarketStructureAdapter:
     async def poll(self, *, cursor: str | None = None) -> tuple[list[CapitalEvent], str | None]:
         now = datetime.now(timezone.utc)
         events: list[CapitalEvent] = []
-        watermark = None
+        last_ids: dict[str, int] = {}
         if cursor:
             try:
-                watermark = int(cursor)
-            except ValueError:
-                raise ValueError("cursor must be a millisecond timestamp") from None
+                parsed = json.loads(cursor)
+                if not isinstance(parsed, dict):
+                    raise ValueError
+                last_ids = {str(k): int(v) for k, v in parsed.items()}
+            except (ValueError, TypeError, json.JSONDecodeError):
+                raise ValueError("cursor must be a JSON object of symbol to aggregate-trade id") from None
         for symbol in self.symbols:
-            trades = await self._get("/fapi/v1/aggTrades", {"symbol": symbol, "limit": "1000"})
+            params = {"symbol": symbol, "limit": "1000"}
+            if symbol in last_ids:
+                params["fromId"] = str(last_ids[symbol] + 1)
+            trades = await self._get("/fapi/v1/aggTrades", params)
+            if isinstance(trades, list) and trades:
+                last_ids[symbol] = max(int(row["a"]) for row in trades)
             for trade in trades if isinstance(trades, list) else []:
                 stamp_ms = int(trade["T"])
-                if watermark is not None and stamp_ms <= watermark:
-                    continue
                 notional = float(trade["p"]) * float(trade["q"])
                 if notional < self.threshold:
                     continue
@@ -106,4 +113,4 @@ class BinanceMarketStructureAdapter:
                 metadata={"bid_notional": bid_notional, "ask_notional": ask_notional,
                           "depth_imbalance": imbalance, "last_update_id": depth["lastUpdateId"],
                           "depth_limit": 100, "is_l3": False}))
-        return events, str(int(now.timestamp() * 1000))
+        return events, json.dumps(last_ids, sort_keys=True, separators=(",", ":"))
