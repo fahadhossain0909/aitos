@@ -29,7 +29,16 @@ class SecEdgarFilingsAdapter:
         *,
         ciks: list[str],
         user_agent: str,
-        forms: tuple[str, ...] = ("13F-HR", "13F-HR/A", "3", "4", "5"),
+        forms: tuple[str, ...] = (
+            "13F-HR",
+            "13F-HR/A",
+            "3",
+            "3/A",
+            "4",
+            "4/A",
+            "5",
+            "5/A",
+        ),
         timeout_seconds: float = 12.0,
         max_filings_per_poll: int = 25,
         initial_filings_per_cik: int = 10,
@@ -223,6 +232,60 @@ class SecEdgarFilingsAdapter:
         issuer_symbol = self._value(root, "issuerTradingSymbol")
         issuer_id = self._value(root, "issuerCik") or cik
         events = []
+        if form in {"3", "3/A"}:
+            period = self._day(self._value(root, "periodOfReport")) or filing_date
+            holdings = [
+                node
+                for node in root.iter()
+                if self._local(node.tag) == "nonDerivativeHolding"
+            ]
+            for index, item in enumerate(holdings):
+                shares_raw = self._value(item, "sharesOwnedFollowingTransaction")
+                if shares_raw is None:
+                    continue
+                shares = float(shares_raw)
+                if shares < 0:
+                    raise RuntimeError("Form 3 contains a negative holding")
+                security_title = self._value(item, "securityTitle")
+                event_id = self._event_id(
+                    "form3", cik, accession, str(index), shares_raw, security_title or ""
+                )
+                events.append(
+                    CapitalEvent(
+                        event_id,
+                        "sec-edgar",
+                        "sec_edgar_form3",
+                        "equities",
+                        "sec_edgar",
+                        issuer_symbol or f"CIK{int(issuer_id):010d}",
+                        "insider_holding_disclosure",
+                        period,
+                        filing_date,
+                        shares,
+                        "shares",
+                        None,
+                        actor_id=f"sec-cik:{int(owner_cik)}" if owner_cik else None,
+                        counterparty_id=f"sec-cik:{int(issuer_id)}",
+                        transaction_id=accession,
+                        finality="confirmed",
+                        metadata={
+                            "filing_form": form,
+                            "accession_number": accession,
+                            "filing_url": url,
+                            "filing_date": filing_date.isoformat(),
+                            "period_of_report": period.isoformat(),
+                            "security_title": security_title,
+                            "direct_or_indirect": self._value(
+                                item, "directOrIndirectOwnership"
+                            ),
+                            "flow_sign": 0,
+                            "actor_identity_kind": "sec_insider",
+                            "source_semantics": "initial_insider_holding_snapshot_not_transaction_flow",
+                        },
+                    )
+                )
+            return events
+
         transaction_nodes = [
             node
             for node in root.iter()
@@ -384,7 +447,7 @@ class SecEdgarFilingsAdapter:
                             document_url,
                         )
                     )
-                elif row["form"] in {"3", "4", "5"}:
+                elif row["form"] in {"3", "3/A", "4", "4/A", "5", "5/A"}:
                     document_url = urljoin(directory, row["primary"])
                     events.extend(
                         await self._parse_form4(

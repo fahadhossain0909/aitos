@@ -135,3 +135,48 @@ async def test_sec_form4_emits_reported_transaction_with_direction_and_lag():
 def test_sec_adapter_requires_contactable_user_agent():
     with pytest.raises(ValueError, match="User-Agent"):
         SecEdgarFilingsAdapter(ciks=["123"], user_agent="AITOS research")
+
+
+
+@pytest.mark.asyncio
+async def test_sec_form3_is_a_point_in_time_holding_not_a_trade():
+    cik = "0000789019"
+    accession = "0000789019-26-000003"
+    submissions_url = f"https://data.sec.gov/submissions/CIK{cik}.json"
+    document_url = (
+        "https://www.sec.gov/Archives/edgar/data/789019/2026000003/form3.xml"
+    )
+    submissions = {
+        "filings": {
+            "recent": {
+                "accessionNumber": [accession],
+                "form": ["3"],
+                "filingDate": ["2026-09-02"],
+                "primaryDocument": ["form3.xml"],
+                "reportDate": ["2026-08-31"],
+            }
+        }
+    }
+    xml = """<ownershipDocument>
+      <periodOfReport>2026-08-31</periodOfReport>
+      <issuer><issuerCik>789019</issuerCik><issuerTradingSymbol>MSFT</issuerTradingSymbol></issuer>
+      <reportingOwner><reportingOwnerId><rptOwnerCik>1234567</rptOwnerCik></reportingOwnerId></reportingOwner>
+      <nonDerivativeTable><nonDerivativeHolding>
+        <securityTitle><value>Common Stock</value></securityTitle>
+        <sharesOwnedFollowingTransaction><value>500</value></sharesOwnedFollowingTransaction>
+        <directOrIndirectOwnership><value>D</value></directOrIndirectOwnership>
+      </nonDerivativeHolding></nonDerivativeTable>
+    </ownershipDocument>"""
+    session = FakeSession({submissions_url: submissions, document_url: xml})
+    adapter = SecEdgarFilingsAdapter(
+        ciks=[cik], user_agent="AITOS research contact@example.org", session=session
+    )
+    events, _ = await adapter.poll()
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "insider_holding_disclosure"
+    assert event.quantity == 500
+    assert event.usd_value is None
+    assert event.metadata["flow_sign"] == 0
+    assert event.event_time.date().isoformat() == "2026-08-31"
+    assert event.observed_time.date().isoformat() == "2026-09-02"
