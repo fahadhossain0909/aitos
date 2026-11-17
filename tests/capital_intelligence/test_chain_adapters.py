@@ -78,7 +78,13 @@ async def test_solana_cursor_is_independent_per_address_and_token_delta_is_signe
                             "mint": "USDC",
                             "accountIndex": 0,
                             "uiTokenAmount": {"amount": "500", "decimals": 6},
-                        }
+                        },
+                        {
+                            "owner": owner,
+                            "mint": "USDC",
+                            "accountIndex": 1,
+                            "uiTokenAmount": {"amount": "200", "decimals": 6},
+                        },
                     ],
                     "postTokenBalances": [
                         {
@@ -86,7 +92,13 @@ async def test_solana_cursor_is_independent_per_address_and_token_delta_is_signe
                             "mint": "USDC",
                             "accountIndex": 0,
                             "uiTokenAmount": {"amount": "700", "decimals": 6},
-                        }
+                        },
+                        {
+                            "owner": owner,
+                            "mint": "USDC",
+                            "accountIndex": 1,
+                            "uiTokenAmount": {"amount": "250", "decimals": 6},
+                        },
                     ],
                 },
             }
@@ -102,3 +114,4 @@ async def test_solana_cursor_is_independent_per_address_and_token_delta_is_signe
     token_events = [event for event in events if event.instrument == "USDC"]
     assert len(token_events) == 2
     assert all(event.metadata["flow_sign"] == 1 for event in token_events)
+    assert all(event.metadata["raw_delta"] == "250" for event in token_events)

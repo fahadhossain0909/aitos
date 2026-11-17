@@ -30,6 +30,13 @@ class EntityEvidenceGraph:
             self._labels.setdefault(label.entity_id, []).append(label)
 
     def add_evidence(self, evidence: EntityEvidence) -> None:
+        if evidence.status == "verified" and not (
+            evidence.relation == "operator_confirmed_link"
+            and evidence.evidence_type in {"operator_attestation", "signed_attestation"}
+        ):
+            raise ValueError(
+                "verified ownership links require an explicit operator attestation"
+            )
         key = (evidence.subject_id, evidence.object_id, evidence.relation)
         prior = self._edges.get(key)
         if prior is None or evidence.observed_at >= prior.observed_at:

@@ -150,9 +150,9 @@ class SolanaAddressActivityAdapter:
                 continue
             message = (tx.get("transaction") or {}).get("message") or {}
             keys = [self._account_key(key) for key in message.get("accountKeys", [])]
-            stamp = datetime.fromtimestamp(
-                tx.get("blockTime") or observed_at.timestamp(), timezone.utc
-            )
+            if tx.get("blockTime") is None:
+                raise RuntimeError("Solana block time unavailable; refusing bad event")
+            stamp = datetime.fromtimestamp(tx["blockTime"], timezone.utc)
             slot = tx.get("slot")
             balance_deltas: dict[str, tuple[int, int]] = {}
             for field in ("preTokenBalances", "postTokenBalances"):
@@ -166,8 +166,8 @@ class SolanaAddressActivityAdapter:
                     previous_amount, next_amount = balance_deltas.get(mint, (0, 0))
                     raw = int(amount)
                     balance_deltas[mint] = (
-                        raw if field == "preTokenBalances" else previous_amount,
-                        raw if field == "postTokenBalances" else next_amount,
+                        previous_amount + raw if field == "preTokenBalances" else previous_amount,
+                        next_amount + raw if field == "postTokenBalances" else next_amount,
                     )
             for mint, (before_amount, after_amount) in balance_deltas.items():
                 delta = after_amount - before_amount
@@ -235,6 +235,7 @@ class SolanaAddressActivityAdapter:
                                 "flow_sign": 1 if lamport_delta > 0 else -1,
                                 "raw_delta": str(lamport_delta),
                                 "decimals": 9,
+                                "native_delta_includes_network_fee_and_rent": True,
                             },
                         )
                     )
