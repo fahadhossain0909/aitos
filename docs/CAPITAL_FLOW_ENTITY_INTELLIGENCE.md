@@ -29,6 +29,8 @@ It is not an identity-discovery service. It does not deanonymize wallet owners, 
 ### 4. Solana address activity
 - Standard finalized JSON-RPC, bounded pagination and a separate signature cursor per configured address.
 - SPL token and native SOL balance deltas are derived from pre/post transaction balances for the configured owner address.
+- Parsed outer and inner/CPI SPL `transfer` / `transferChecked` instructions are attached as counterparty evidence when RPC token-account owner metadata is available. They do not create a second flow event, avoiding double-counting the balance delta.
+- The authority/signer is not assumed to be the beneficial owner. Counterparty owner references are only as strong as the RPC-provided token-account ownership metadata.
 - Failed transactions do not generate capital-flow events.
 - If a stored signature falls outside the bounded scan window, the adapter fails closed and requires a controlled backfill instead of silently skipping history.
 
@@ -110,7 +112,7 @@ The optional observer has a conservative default CPU limit of 0.10 cores and mem
 These are not claimed as implemented or validated by this PR:
 - EVM observers retain a contiguous recent block-hash window, detect head reorgs, search for a common ancestor and rescan the affected range. ClickHouse appends `finality=reverted` versions for orphaned logs before the cursor advances. Reorgs deeper than the configured window (default 64 blocks), RPC inconsistencies or incomplete canonical headers fail closed and still require controlled backfill/rebuild.
 - On-chain token metadata discovery and broad token registry population. The current registry is explicit/operator-configured; unsupported tokens remain unvalued.
-- Complete Solana address attribution across token accounts, CPI, inner instructions, compressed assets, stake accounts and program-specific transfers.
+- Complete Solana attribution across all token-account ownership edge cases, compressed assets, stake accounts, program-specific transfer semantics and historical transaction versions. Current parsed CPI/inner-instruction evidence is limited to SPL transfer instructions where token-account owner metadata is present.
 - Automatic wallet clustering, exchange/custody attribution and beneficial-owner identification. Those require multiple independent evidence sources and human review.
 - Full DEX coverage across every protocol, pool factory and chain. Only explicitly configured Uniswap V2/V3-compatible pools are decoded.
 - Forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. The CFTC adapter is schema-mapped and aggregate-only; dataset-specific field mapping, historical refresh and publication-calendar validation remain operator gates. SEC 13F-HR and Forms 3/4/5 are implemented, but production-scale CIK coverage and backfill are not yet validated.
