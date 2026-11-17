@@ -6,8 +6,11 @@ not label an author as a bot, establish factual truth, or auto-change trust.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import Counter, defaultdict
+from datetime import timedelta
+from itertools import combinations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from math import isfinite, sqrt
@@ -156,10 +159,165 @@ def estimate_source_reliability(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class CoordinationEdge:
+    source_a: str
+    source_b: str
+    shared_story_ids: tuple[str, ...]
+    max_time_gap_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class CoordinatedAmplificationCluster:
+    cluster_id: str
+    source_ids: tuple[str, ...]
+    publisher_groups: tuple[str, ...]
+    edges: tuple[CoordinationEdge, ...]
+    shared_story_ids: tuple[str, ...]
+    max_time_gap_seconds: float
+    reasons: tuple[str, ...]
+
+
+def detect_coordinated_amplification(
+    events: Sequence[IntelligenceEvent],
+    *,
+    as_of: datetime,
+    publisher_groups: dict[str, str] | None = None,
+    synchronization_window_seconds: float = 180.0,
+    lookback_hours: float = 24.0,
+    min_shared_stories: int = 2,
+    min_sources: int = 3,
+) -> tuple[CoordinatedAmplificationCluster, ...]:
+    """Build a conservative source-overlap graph for analyst review.
+
+    Edges require repeated, near-synchronous exact-title observations from
+    different operator-defined publisher groups. This detects coordination
+    candidates, not bots, authorship, collusion, or factual inaccuracy.
+    """
+    if as_of.tzinfo is None:
+        raise ValueError("as_of must be timezone-aware")
+    if (
+        not isfinite(float(synchronization_window_seconds))
+        or synchronization_window_seconds <= 0
+        or not isfinite(float(lookback_hours))
+        or not 0 < lookback_hours <= 24 * 7
+        or min_shared_stories < 1
+        or min_sources < 3
+    ):
+        raise ValueError("invalid coordination graph policy")
+
+    cutoff = as_of.astimezone(timezone.utc)
+    lower_bound = cutoff - timedelta(hours=lookback_hours)
+    groups = dict(publisher_groups or {})
+    stories: dict[str, dict[str, list[datetime]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for event in events:
+        observed = event.first_seen_at.astimezone(timezone.utc)
+        published = event.published_at.astimezone(timezone.utc)
+        if observed > cutoff or published > cutoff or observed < lower_bound:
+            continue
+        normalized = _normalized_title(event.title)
+        # Avoid creating edges from short/generic headlines such as "Market update".
+        if len(normalized.split()) < 5:
+            continue
+        stories[normalized][event.source.source_id].append(observed)
+
+    pair_stories: dict[tuple[str, str], dict[str, float]] = defaultdict(dict)
+    for normalized_title, source_times in stories.items():
+        source_ids = sorted(source_times)
+        for source_a, source_b in combinations(source_ids, 2):
+            group_a = groups.get(source_a, source_a)
+            group_b = groups.get(source_b, source_b)
+            if not group_a or not group_b or group_a == group_b:
+                continue
+            time_gap = min(
+                abs((time_a - time_b).total_seconds())
+                for time_a in source_times[source_a]
+                for time_b in source_times[source_b]
+            )
+            if time_gap <= synchronization_window_seconds:
+                story_id = hashlib.sha256(
+                    normalized_title.encode("utf-8")
+                ).hexdigest()[:16]
+                pair_stories[(source_a, source_b)][story_id] = time_gap
+
+    edges: list[CoordinationEdge] = []
+    adjacency: dict[str, set[str]] = defaultdict(set)
+    for (source_a, source_b), shared in sorted(pair_stories.items()):
+        if len(shared) < min_shared_stories:
+            continue
+        edges.append(
+            CoordinationEdge(
+                source_a=source_a,
+                source_b=source_b,
+                shared_story_ids=tuple(sorted(shared)),
+                max_time_gap_seconds=max(shared.values()),
+            )
+        )
+        adjacency[source_a].add(source_b)
+        adjacency[source_b].add(source_a)
+
+    clusters: list[CoordinatedAmplificationCluster] = []
+    unseen = set(adjacency)
+    while unseen:
+        seed = min(unseen)
+        stack = [seed]
+        component: set[str] = set()
+        while stack:
+            current = stack.pop()
+            if current in component:
+                continue
+            component.add(current)
+            unseen.discard(current)
+            stack.extend(adjacency[current] - component)
+        if len(component) < min_sources:
+            continue
+        component_edges = tuple(
+            edge
+            for edge in edges
+            if edge.source_a in component and edge.source_b in component
+        )
+        shared_story_ids = tuple(
+            sorted(
+                {
+                    story_id
+                    for edge in component_edges
+                    for story_id in edge.shared_story_ids
+                }
+            )
+        )
+        if len(shared_story_ids) < min_shared_stories:
+            continue
+        source_ids = tuple(sorted(component))
+        publisher_ids = tuple(sorted({groups.get(item, item) for item in source_ids}))
+        fingerprint = "|".join((*source_ids, *shared_story_ids))
+        cluster_id = "coord:" + hashlib.sha256(
+            fingerprint.encode("utf-8")
+        ).hexdigest()[:16]
+        clusters.append(
+            CoordinatedAmplificationCluster(
+                cluster_id=cluster_id,
+                source_ids=source_ids,
+                publisher_groups=publisher_ids,
+                edges=component_edges,
+                shared_story_ids=shared_story_ids,
+                max_time_gap_seconds=max(
+                    edge.max_time_gap_seconds for edge in component_edges
+                ),
+                reasons=("repeated_near_synchronous_cross_publisher_story_overlap",),
+            )
+        )
+    return tuple(sorted(clusters, key=lambda item: item.cluster_id))
+
+
 __all__ = [
     "SourceQualityAssessment",
     "SourceOutcome",
     "SourceReliabilityEstimate",
+    "CoordinationEdge",
+    "CoordinatedAmplificationCluster",
     "assess_source_batch",
     "estimate_source_reliability",
+    "detect_coordinated_amplification",
 ]
