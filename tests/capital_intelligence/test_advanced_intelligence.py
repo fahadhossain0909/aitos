@@ -33,3 +33,14 @@ def test_reverted_events_are_excluded():
         500, "token", 500, actor_id="wallet-a", finality="reverted")
     profile = assess_entity_behavior("wallet-a", events + [reverted])
     assert profile.event_count == 2
+
+def test_evm_sender_is_treated_as_outflow_without_explicit_direction():
+    now = datetime.now(timezone.utc)
+    event = CapitalEvent(
+        "evm-out", "evm:1", "onchain_transfer", "crypto_spot", "1", "TOKEN",
+        "erc20_transfer", now, now, 1, "token", 250,
+        actor_id="wallet-a", counterparty_id="wallet-b", finality="confirmed",
+    )
+    profile = assess_entity_behavior("wallet-a", [event])
+    assert profile.net_flow_usd == -250
+    assert profile.distribution_score == 1
