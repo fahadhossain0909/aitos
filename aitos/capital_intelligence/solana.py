@@ -87,6 +87,88 @@ class SolanaAddressActivityAdapter:
             return str(value.get("pubkey", ""))
         return str(value)
 
+    @staticmethod
+    def _spl_transfer_evidence(
+        message: dict[str, Any],
+        meta: dict[str, Any],
+        monitored_address: str,
+        account_keys: list[str],
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Extract parsed outer/CPI SPL transfers as supporting evidence only."""
+        account_owners: dict[str, tuple[str, str]] = {}
+        for field in ("preTokenBalances", "postTokenBalances"):
+            for balance in meta.get(field) or []:
+                index = balance.get("accountIndex")
+                owner = balance.get("owner")
+                mint = balance.get("mint")
+                if (
+                    isinstance(index, int)
+                    and 0 <= index < len(account_keys)
+                    and owner
+                    and mint
+                ):
+                    account_owners[account_keys[index]] = (str(owner), str(mint))
+
+        instructions = list(message.get("instructions") or [])
+        for group in meta.get("innerInstructions") or []:
+            instructions.extend(group.get("instructions") or [])
+
+        evidence: dict[str, list[dict[str, Any]]] = {}
+        for instruction_index, instruction in enumerate(instructions):
+            parsed = instruction.get("parsed")
+            if not isinstance(parsed, dict):
+                continue
+            instruction_type = parsed.get("type")
+            if instruction_type not in {"transfer", "transferChecked"}:
+                continue
+            info = parsed.get("info") or {}
+            source = info.get("source")
+            destination = info.get("destination")
+            if not source or not destination:
+                continue
+            source_meta = account_owners.get(str(source))
+            destination_meta = account_owners.get(str(destination))
+            if not source_meta and not destination_meta:
+                continue
+            mint = (
+                info.get("mint")
+                or (source_meta[1] if source_meta else None)
+                or (destination_meta[1] if destination_meta else None)
+            )
+            if not mint:
+                continue
+            source_owner = source_meta[0] if source_meta else None
+            destination_owner = destination_meta[0] if destination_meta else None
+            if monitored_address not in {source_owner, destination_owner}:
+                continue
+            amount = info.get("amount")
+            if amount is None:
+                amount = (info.get("tokenAmount") or {}).get("amount")
+            if amount is None or not str(amount).isdigit():
+                continue
+            counterparty = (
+                destination_owner
+                if source_owner == monitored_address
+                else source_owner
+                if destination_owner == monitored_address
+                else None
+            )
+            evidence.setdefault(str(mint), []).append(
+                {
+                    "instruction_index": instruction_index,
+                    "instruction_type": instruction_type,
+                    "source_owner": source_owner,
+                    "destination_owner": destination_owner,
+                    "counterparty_owner": counterparty,
+                    "raw_amount": str(amount),
+                    "authority": info.get("authority"),
+                    "ownership_scope": "token_account_owner_from_rpc_metadata",
+                    "is_cpi_or_inner_instruction": instruction_index
+                    >= len(message.get("instructions") or []),
+                }
+            )
+        return evidence
+
     async def _address_events(
         self, address: str, previous: str | None, observed_at: datetime
     ) -> tuple[list[CapitalEvent], str | None]:
@@ -177,6 +259,9 @@ class SolanaAddressActivityAdapter:
                             else next_amount
                         ),
                     )
+            transfer_evidence = self._spl_transfer_evidence(
+                message, meta, address, keys
+            )
             for mint, (before_amount, after_amount) in balance_deltas.items():
                 delta = after_amount - before_amount
                 if delta == 0:
@@ -207,6 +292,10 @@ class SolanaAddressActivityAdapter:
                             "actor_identity_kind": "solana_address",
                             "raw_delta": str(delta),
                             "decimals_required": True,
+                            "transfer_instruction_evidence": transfer_evidence.get(
+                                mint, []
+                            ),
+                            "instruction_evidence_is_not_additional_flow": True,
                         },
                     )
                 )
