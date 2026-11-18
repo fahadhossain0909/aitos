@@ -1,4 +1,5 @@
 """Typed, provider-neutral contracts for AITOS Decision Language (ADL)."""
+
 from __future__ import annotations
 
 import math
@@ -106,7 +107,9 @@ class AgentAssessment:
         if not self.agent:
             raise ValueError("agent name is required")
         if not math.isfinite(self.reliability) or not 0.0 <= self.reliability <= 1.0:
-            raise ValueError("agent reliability must be finite and between zero and one")
+            raise ValueError(
+                "agent reliability must be finite and between zero and one"
+            )
 
 
 @dataclass(frozen=True)
@@ -165,12 +168,16 @@ class DecisionPolicy:
     require_positive_expected_value: bool = True
     shadow_mode: bool = True
     hard_veto_features: tuple[str, ...] = (
-        "risk_veto", "execution_veto", "data_integrity_veto",
+        "risk_veto",
+        "execution_veto",
+        "data_integrity_veto",
     )
 
     def __post_init__(self) -> None:
         values = (
-            self.minimum_probability, self.minimum_margin, self.maximum_disagreement,
+            self.minimum_probability,
+            self.minimum_margin,
+            self.maximum_disagreement,
             self.maximum_snapshot_age_seconds,
         )
         if not all(math.isfinite(value) for value in values):
@@ -206,6 +213,8 @@ class DecisionResult:
 
     def __post_init__(self) -> None:
         if self.execution_eligible:
-            raise ValueError("ADL decisions are advisory and cannot authorize execution")
+            raise ValueError(
+                "ADL decisions are advisory and cannot authorize execution"
+            )
         if self.evaluated_at.tzinfo is None or self.evaluated_at.utcoffset() is None:
             raise ValueError("decision timestamp must be timezone-aware")

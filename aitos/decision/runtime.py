@@ -1,4 +1,5 @@
 """Fail-closed, advisory-only ADL runtime."""
+
 from __future__ import annotations
 
 import hashlib
@@ -10,7 +11,11 @@ from .aggregation import aggregate_assessments
 from .calibration import ProbabilityCalibrator
 from .providers import DecisionProvider
 from .types import (
-    DecisionAction, DecisionPolicy, DecisionResult, DecisionSpec, MarketSnapshot,
+    DecisionAction,
+    DecisionPolicy,
+    DecisionResult,
+    DecisionSpec,
+    MarketSnapshot,
     ModelResponse,
 )
 
@@ -40,7 +45,10 @@ class ADLRuntime:
     """Evaluate a decision specification without placing or authorizing orders."""
 
     def __init__(
-        self, provider: DecisionProvider, *, policy: DecisionPolicy | None = None,
+        self,
+        provider: DecisionProvider,
+        *,
+        policy: DecisionPolicy | None = None,
         calibrator: ProbabilityCalibrator | None = None,
     ) -> None:
         self.provider = provider
@@ -48,7 +56,10 @@ class ADLRuntime:
         self.calibrator = calibrator
 
     def evaluate(
-        self, snapshot: MarketSnapshot, spec: DecisionSpec, *,
+        self,
+        snapshot: MarketSnapshot,
+        spec: DecisionSpec,
+        *,
         now: datetime | None = None,
     ) -> DecisionResult:
         evaluated_at = now or datetime.now(timezone.utc)
@@ -63,19 +74,33 @@ class ADLRuntime:
         proposed = DecisionAction.ABSTAIN
 
         def finish(action: DecisionAction) -> DecisionResult:
-            identity = "|".join((
-                snapshot.symbol, snapshot.snapshot_id or snapshot.timestamp.isoformat(),
-                spec.name, evaluated_at.isoformat(), action.value,
-            ))
+            identity = "|".join(
+                (
+                    snapshot.symbol,
+                    snapshot.snapshot_id or snapshot.timestamp.isoformat(),
+                    spec.name,
+                    evaluated_at.isoformat(),
+                    action.value,
+                )
+            )
             decision_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()
             return DecisionResult(
-                decision_id=decision_id, symbol=snapshot.symbol, action=action,
-                proposed_action=proposed, probabilities=probabilities,
-                raw_probabilities=raw, calibrated=calibrated,
-                evidence_disagreement=disagreement, expected_value=expected_value,
-                reasons=tuple(reasons), model_id=model_id, model_version=model_version,
-                snapshot_id=snapshot.snapshot_id, evaluated_at=evaluated_at,
-                shadow_mode=self.policy.shadow_mode, execution_eligible=False,
+                decision_id=decision_id,
+                symbol=snapshot.symbol,
+                action=action,
+                proposed_action=proposed,
+                probabilities=probabilities,
+                raw_probabilities=raw,
+                calibrated=calibrated,
+                evidence_disagreement=disagreement,
+                expected_value=expected_value,
+                reasons=tuple(reasons),
+                model_id=model_id,
+                model_version=model_version,
+                snapshot_id=snapshot.snapshot_id,
+                evaluated_at=evaluated_at,
+                shadow_mode=self.policy.shadow_mode,
+                execution_eligible=False,
             )
 
         if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
@@ -122,7 +147,8 @@ class ADLRuntime:
                     if total <= 0:
                         raise ValueError("calibrated distribution has no positive mass")
                     probabilities = {
-                        action: value / total for action, value in calibrated_values.items()
+                        action: value / total
+                        for action, value in calibrated_values.items()
                     }
             if response.economics is not None:
                 expected_value = response.economics.expected_value

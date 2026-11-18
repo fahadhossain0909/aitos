@@ -1,16 +1,25 @@
 """ADL parser, calibration, aggregation and fail-closed runtime tests."""
+
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from aitos.decision import (
-    ADLRuntime, AgentAssessment, DecisionAction, DecisionLanguageError,
-    DecisionPolicy, InMemoryDecisionAttributionStore, MarketSnapshot, ModelResponse,
-    ProbabilityCalibrator, TradeEconomics, parse_decision_spec,
+    ADLRuntime,
+    AgentAssessment,
+    DecisionAction,
+    DecisionLanguageError,
+    DecisionPolicy,
+    InMemoryDecisionAttributionStore,
+    MarketSnapshot,
+    ModelResponse,
+    ProbabilityCalibrator,
+    TradeEconomics,
+    parse_decision_spec,
 )
 from aitos.decision.attribution import DecisionOutcome
 
-SPEC_SOURCE = '''
+SPEC_SOURCE = """
 DECISION pretrade:
 STATE:
   - trend
@@ -23,7 +32,7 @@ OUTPUT:
   - decision
   - probabilities
   - reasons
-'''
+"""
 
 
 class StaticProvider:
@@ -37,7 +46,8 @@ class StaticProvider:
 def snapshot(**features):
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
     return MarketSnapshot(
-        "BTCUSDT", now,
+        "BTCUSDT",
+        now,
         {"trend": 0.8, "order_flow": 0.7, "risk_veto": False, **features},
         snapshot_id="snapshot-1",
     )
@@ -47,7 +57,8 @@ def response(**overrides):
     values = dict(
         probabilities={"LONG": 0.75, "SHORT": 0.10, "NO_TRADE": 0.15},
         economics=TradeEconomics(0.65, 100.0, 100.0, 5.0),
-        model_id="native-test", model_version="1",
+        model_id="native-test",
+        model_version="1",
     )
     values.update(overrides)
     return ModelResponse(**values)
@@ -66,11 +77,16 @@ def test_parser_builds_typed_spec(spec):
     assert spec.questions[2].statement.startswith("liquidity sweep")
 
 
-@pytest.mark.parametrize("source", [
-    "", "STATE:\n - trend", "DECISION x:\nRUN arbitrary_python()",
-    "DECISION x:\nASK flag: NOUL unquoted statement",
-    "DECISION x:\nASK side: CHOICE [LONG, LONG]",
-])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "",
+        "STATE:\n - trend",
+        "DECISION x:\nRUN arbitrary_python()",
+        "DECISION x:\nASK flag: NOUL unquoted statement",
+        "DECISION x:\nASK side: CHOICE [LONG, LONG]",
+    ],
+)
 def test_parser_rejects_invalid_or_executable_syntax(source):
     with pytest.raises((DecisionLanguageError, ValueError)):
         parse_decision_spec(source)
@@ -103,7 +119,8 @@ def test_runtime_fails_closed_on_stale_or_missing_state(spec):
     )
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
     stale = MarketSnapshot(
-        "BTCUSDT", now - timedelta(seconds=30),
+        "BTCUSDT",
+        now - timedelta(seconds=30),
         {"trend": 1, "order_flow": 1, "risk_veto": False},
     )
     assert runtime.evaluate(stale, spec, now=now).action == DecisionAction.ABSTAIN
@@ -116,7 +133,10 @@ def test_future_snapshot_is_rejected(spec):
         StaticProvider(response()), policy=DecisionPolicy(require_calibration=False)
     )
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
-    assert runtime.evaluate(snapshot(), spec, now=now - timedelta(seconds=1)).action == DecisionAction.ABSTAIN
+    assert (
+        runtime.evaluate(snapshot(), spec, now=now - timedelta(seconds=1)).action
+        == DecisionAction.ABSTAIN
+    )
 
 
 def test_hard_risk_veto_cannot_be_overridden(spec):
@@ -130,8 +150,12 @@ def test_hard_risk_veto_cannot_be_overridden(spec):
 
 
 def test_invalid_probabilities_abstain(spec):
-    bad = response(probabilities={"LONG": float("nan"), "SHORT": 0.1, "NO_TRADE": 0.9})
-    runtime = ADLRuntime(StaticProvider(bad), policy=DecisionPolicy(require_calibration=False))
+    bad = response(
+        probabilities={"LONG": float("nan"), "SHORT": 0.1, "NO_TRADE": 0.9}
+    )
+    runtime = ADLRuntime(
+        StaticProvider(bad), policy=DecisionPolicy(require_calibration=False)
+    )
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
     assert runtime.evaluate(snapshot(), spec, now=now).action == DecisionAction.ABSTAIN
 
@@ -155,8 +179,16 @@ def test_correlated_agents_share_group_weight_budget():
     from aitos.decision import aggregate_assessments
 
     assessments = (
-        AgentAssessment("a", {"LONG": 0.9, "SHORT": 0.05, "NO_TRADE": 0.05}, correlation_group="shared"),
-        AgentAssessment("b", {"LONG": 0.9, "SHORT": 0.05, "NO_TRADE": 0.05}, correlation_group="shared"),
+        AgentAssessment(
+            "a",
+            {"LONG": 0.9, "SHORT": 0.05, "NO_TRADE": 0.05},
+            correlation_group="shared",
+        ),
+        AgentAssessment(
+            "b",
+            {"LONG": 0.9, "SHORT": 0.05, "NO_TRADE": 0.05},
+            correlation_group="shared",
+        ),
         AgentAssessment("c", {"LONG": 0.1, "SHORT": 0.8, "NO_TRADE": 0.1}),
     )
     result = aggregate_assessments(assessments)
@@ -185,7 +217,14 @@ def test_attribution_store_is_idempotent_and_requires_known_decision(spec):
     store.record_decision(result)
     store.record_decision(result)
     outcome = DecisionOutcome(
-        result.decision_id, "WIN", 20.0, 1.0, 0.2, 0.1, -3.0, 25.0,
+        result.decision_id,
+        "WIN",
+        20.0,
+        1.0,
+        0.2,
+        0.1,
+        -3.0,
+        25.0,
         datetime(2026, 11, 18, 13, 0, tzinfo=timezone.utc),
     )
     store.record_outcome(outcome)
