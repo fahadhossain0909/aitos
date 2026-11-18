@@ -170,13 +170,17 @@ class SolanaAddressActivityAdapter:
     @staticmethod
     def _system_transfer_evidence(
         message: dict[str, Any],
-        meta: dict[str, Any],
-        monitored_address: str,
+        meta: dict[str, Any] | str,
+        monitored_address: str | None = None,
     ) -> list[dict[str, Any]]:
         """Extract parsed System Program transfers as evidence, not extra flow."""
+        if monitored_address is None:
+            monitored_address = str(meta)
+            meta = {}
         outer = list(message.get("instructions") or [])
         instructions = list(outer)
-        for group in meta.get("innerInstructions") or []:
+        inner_groups = meta.get("innerInstructions") or message.get("innerInstructions") or []
+        for group in inner_groups:
             instructions.extend(group.get("instructions") or [])
 
         evidence = []
