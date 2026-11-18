@@ -170,12 +170,13 @@ class SolanaAddressActivityAdapter:
     @staticmethod
     def _system_transfer_evidence(
         message: dict[str, Any],
+        meta: dict[str, Any],
         monitored_address: str,
     ) -> list[dict[str, Any]]:
         """Extract parsed System Program transfers as evidence, not extra flow."""
         outer = list(message.get("instructions") or [])
         instructions = list(outer)
-        for group in message.get("innerInstructions") or []:
+        for group in meta.get("innerInstructions") or []:
             instructions.extend(group.get("instructions") or [])
 
         evidence = []
@@ -217,12 +218,13 @@ class SolanaAddressActivityAdapter:
     @staticmethod
     def _stake_instruction_evidence(
         message: dict[str, Any],
+        meta: dict[str, Any],
         monitored_address: str,
     ) -> list[dict[str, Any]]:
         """Extract parsed Stake Program lifecycle instructions as evidence only."""
         outer = list(message.get("instructions") or [])
         instructions = list(outer)
-        for group in message.get("innerInstructions") or []:
+        for group in meta.get("innerInstructions") or []:
             instructions.extend(group.get("instructions") or [])
         allowed = {
             "initialize",
@@ -422,9 +424,11 @@ class SolanaAddressActivityAdapter:
                         },
                     )
                 )
-            system_transfer_evidence = self._system_transfer_evidence(message, address)
+            system_transfer_evidence = self._system_transfer_evidence(
+                message, meta, address
+            )
             stake_instruction_evidence = self._stake_instruction_evidence(
-                message, address
+                message, meta, address
             )
             if stake_instruction_evidence:
                 evidence_event_id = hashlib.sha256(
