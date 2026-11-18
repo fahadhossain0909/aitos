@@ -184,6 +184,96 @@ class PythonFixedPointOrderBook:
         return (ask * bid_qty + bid * ask_qty) / total
 
 
+
+class NativeOrderBookSession:
+    """Instrument-aware bridge for exchange snapshots and depth deltas.
+
+    This adapter is opt-in and deliberately separate from the existing live
+    LocalOrderBook. It converts decimal exchange values to exact ticks/lots
+    before mutating the selected native/reference engine.
+    """
+
+    def __init__(
+        self,
+        scale: InstrumentScale,
+        snapshot_id: int,
+        bids: Iterable[tuple[str | Decimal, str | Decimal]],
+        asks: Iterable[tuple[str | Decimal, str | Decimal]],
+        *,
+        prefer_native: bool = True,
+    ) -> None:
+        self.scale = scale
+        bid_units = [
+            (scale.price_to_ticks(price), scale.quantity_to_lots(quantity))
+            for price, quantity in bids
+        ]
+        ask_units = [
+            (scale.price_to_ticks(price), scale.quantity_to_lots(quantity))
+            for price, quantity in asks
+        ]
+        self.book = create_order_book(
+            snapshot_id, bid_units, ask_units, prefer_native=prefer_native
+        )
+
+    @classmethod
+    def from_snapshot(cls, snapshot, filters, *, prefer_native: bool = True):
+        """Create a session from AITOS OrderBookSnapshot + SymbolFilters."""
+        scale = InstrumentScale.from_exchange_filters(filters)
+        return cls(
+            scale,
+            snapshot.last_update_id,
+            snapshot.bids,
+            snapshot.asks,
+            prefer_native=prefer_native,
+        )
+
+    def apply_depth_update(self, update) -> bool:
+        """Apply a DepthUpdate only after both sides convert successfully."""
+        bids = [
+            (self.scale.price_to_ticks(price), self.scale.quantity_to_lots(quantity))
+            for price, quantity in update.bids
+        ]
+        asks = [
+            (self.scale.price_to_ticks(price), self.scale.quantity_to_lots(quantity))
+            for price, quantity in update.asks
+        ]
+        return self.book.apply_delta(
+            update.first_update_id,
+            update.final_update_id,
+            bids=bids,
+            asks=asks,
+            previous_update_id=update.previous_update_id,
+        )
+
+    def snapshot(self, depth: int):
+        update_id, bids, asks = self.book.snapshot(depth)
+        return (
+            update_id,
+            [
+                (self.scale.price_from_ticks(price), self.scale.quantity_from_lots(quantity))
+                for price, quantity in bids
+            ],
+            [
+                (self.scale.price_from_ticks(price), self.scale.quantity_from_lots(quantity))
+                for price, quantity in asks
+            ],
+        )
+
+    def metrics(self, depth: int = 5) -> dict[str, float | Decimal | None]:
+        bid, ask = self.book.best_bid_ask()
+        microprice = self.book.microprice_ticks()
+        return {
+            "depth_imbalance": self.book.depth_imbalance(depth),
+            "microprice": (
+                self.scale.price_tick * Decimal(str(microprice))
+                if microprice is not None
+                else None
+            ),
+            "best_bid": self.scale.price_from_ticks(bid) if bid is not None else None,
+            "best_ask": self.scale.price_from_ticks(ask) if ask is not None else None,
+        }
+
+
 def native_available() -> bool:
     """Return whether the optional Rust extension is importable."""
     return _RustOrderBook is not None
