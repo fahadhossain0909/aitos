@@ -38,6 +38,7 @@ from aitos.capital_intelligence.runtime import (
 from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
 from aitos.capital_intelligence.sec_edgar import SecEdgarFilingsAdapter
 from aitos.capital_intelligence.storage import ClickHouseCapitalStore
+from aitos.capital_intelligence.watchlist import RedisEntityWatchlist
 from aitos.capital_intelligence.token_registry import TokenMetadata, TokenRegistry
 from aitos.world_intelligence.capital_flow import CapitalFlowIntelligenceAdapter
 from aitos.world_intelligence.lease import RedisSourceLeaseManager
@@ -263,6 +264,7 @@ async def _metrics_server(
     *,
     explorer: CapitalEntityExplorer,
     api_token: str,
+    watchlist: RedisEntityWatchlist,
 ) -> None:
     async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         status = "200 OK"
@@ -290,7 +292,19 @@ async def _metrics_server(
                     headers[key.strip().lower()] = value.strip()
 
             parsed = urlsplit(target)
-            if method != "GET":
+            request_body = b""
+            if method in {"POST", "DELETE"}:
+                try:
+                    content_length = int(headers.get("content-length", "0"))
+                except ValueError:
+                    raise ValueError("invalid content length") from None
+                if not 0 <= content_length <= 8192:
+                    raise ValueError("request body too large")
+                if content_length:
+                    request_body = await asyncio.wait_for(
+                        reader.readexactly(content_length), timeout=5
+                    )
+            if method not in {"GET", "POST", "DELETE"}:
                 status = "405 Method Not Allowed"
                 content_type = "application/json"
                 body = b'{"error":"method_not_allowed"}'
@@ -299,6 +313,49 @@ async def _metrics_server(
             elif parsed.path == "/entities":
                 content_type = "text/html; charset=utf-8"
                 body = _entity_dashboard_html()
+            elif parsed.path == "/v1/watchlist":
+                content_type = "application/json"
+                supplied = headers.get("authorization", "")
+                expected = f"Bearer {api_token}" if api_token else ""
+                if not api_token:
+                    status = "404 Not Found"
+                    body = b'{"error":"not_found"}'
+                elif not hmac.compare_digest(supplied, expected):
+                    status = "401 Unauthorized"
+                    body = b'{"error":"unauthorized"}'
+                elif method == "GET":
+                    params = parse_qs(parsed.query, strict_parsing=False)
+                    limit = int(params.get("limit", ["500"])[0])
+                    entries = await watchlist.list(limit=limit)
+                    body = json.dumps(
+                        {"watchlist": entries}, separators=(",", ":"), allow_nan=False
+                    ).encode()
+                else:
+                    try:
+                        payload = json.loads(request_body or b"{}")
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        raise ValueError("invalid JSON body") from None
+                    if not isinstance(payload, dict):
+                        raise ValueError("request body must be an object")
+                    chain = payload.get("chain", "")
+                    address = payload.get("address", "")
+                    if method == "POST":
+                        entry = await watchlist.add(
+                            chain, address, payload.get("note", "")
+                        )
+                        body = json.dumps(
+                            {"watchlist_entry": entry},
+                            separators=(",", ":"),
+                            allow_nan=False,
+                        ).encode()
+                        status = "201 Created"
+                    else:
+                        removed = await watchlist.remove(chain, address)
+                        body = json.dumps(
+                            {"removed": removed},
+                            separators=(",", ":"),
+                            allow_nan=False,
+                        ).encode()
             elif parsed.path == "/v1/entities" or parsed.path.startswith(
                 "/v1/entities/"
             ):
@@ -311,6 +368,9 @@ async def _metrics_server(
                 elif not hmac.compare_digest(supplied, expected):
                     status = "401 Unauthorized"
                     body = b'{"error":"unauthorized"}'
+                elif method != "GET":
+                    status = "405 Method Not Allowed"
+                    body = b'{"error":"method_not_allowed"}'
                 elif parsed.path == "/v1/entities":
                     params = parse_qs(parsed.query, strict_parsing=False)
                     limit = int(params.get("limit", ["50"])[0])
@@ -685,12 +745,17 @@ async def main() -> None:
     explorer = CapitalEntityExplorer(
         clickhouse, os.getenv("CLICKHOUSE_DATABASE", "aitos")
     )
+    watchlist = RedisEntityWatchlist(
+        redis_client,
+        max_entries=int(os.getenv("AITOS_CFEI_WATCHLIST_MAX_ENTRIES", "5000")),
+    )
     metrics = asyncio.create_task(
         _metrics_server(
             int(os.getenv("AITOS_CFEI_METRICS_PORT", "8121")),
             counters,
             explorer=explorer,
             api_token=api_token,
+            watchlist=watchlist,
         )
     )
     tasks = [asyncio.create_task(worker.run_forever()) for worker in workers]
