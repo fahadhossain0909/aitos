@@ -46,9 +46,11 @@ from aitos.world_intelligence.financial_nlp import (
 from aitos.world_intelligence.governor import IntelligenceRiskGovernor, RiskAssessment
 from aitos.world_intelligence.impact import estimate_asset_impact
 from aitos.world_intelligence.impact_model import (
+    EventImpactEvaluation,
     EventImpactFeatures,
     EventImpactProbabilityModel,
     EventImpactTrainingRow,
+    evaluate_event_impact_model,
     fit_event_impact_model,
 )
 from aitos.world_intelligence.lease import (
@@ -116,6 +118,7 @@ __all__ = [
     "EventBetaEstimate",
     "EventBusSink",
     "EventPrediction",
+    "EventImpactEvaluation",
     "EventImpactFeatures",
     "EventImpactProbabilityModel",
     "EventImpactTrainingRow",
@@ -154,6 +157,7 @@ __all__ = [
     "detect_coordinated_amplification",
     "enrich_event_batch",
     "estimate_asset_impact",
+    "evaluate_event_impact_model",
     "fit_event_impact_model",
     "estimate_event_beta",
     "estimate_source_reliability",
