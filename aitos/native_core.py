@@ -186,9 +186,25 @@ class PythonFixedPointOrderBook:
         return True
 
     def apply_deltas(self, updates: Iterable[tuple]) -> int:
-        """Apply a batch in order; each event is atomic and gaps fail closed."""
+        """Apply an ordered batch with ABI validation before the first mutation."""
+        prepared = []
+        for update in updates:
+            first, final, bids, asks, previous = update
+            first = self._uint(first, "first_update_id")
+            final = self._uint(final, "final_update_id")
+            previous = (
+                self._uint(previous, "previous_update_id")
+                if previous is not None
+                else None
+            )
+            bid_rows = list(bids)
+            ask_rows = list(asks)
+            self._validate(bid_rows)
+            self._validate(ask_rows)
+            prepared.append((first, final, bid_rows, ask_rows, previous))
+
         applied = 0
-        for first, final, bids, asks, previous in updates:
+        for first, final, bids, asks, previous in prepared:
             if self.apply_delta(first, final, bids, asks, previous):
                 applied += 1
         return applied
