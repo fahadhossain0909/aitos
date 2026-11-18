@@ -52,6 +52,8 @@ async def test_evm_uses_block_time_and_preserves_raw_transfer_amount():
     assert len(events) == 1
     assert events[0].event_time == datetime.fromtimestamp(1_700_000_000, timezone.utc)
     assert events[0].metadata["raw_amount"] == str(raw_amount)
+    assert events[0].metadata["flow_sign"] == -1
+    assert events[0].metadata["counterparty_identity_kind"] == "evm_address"
 
 
 @pytest.mark.asyncio
