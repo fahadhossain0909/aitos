@@ -273,6 +273,15 @@ class EvmDexFactoryDiscoveryAdapter:
                 if len(topics) < 4 or len(words) < 5:
                     continue
                 pool_id = str(topics[1]).lower()
+                if (
+                    len(pool_id) != 66
+                    or not pool_id.startswith("0x")
+                    or any(
+                        char not in "0123456789abcdef"
+                        for char in pool_id[2:]
+                    )
+                ):
+                    continue
                 token0 = self._address("0x" + str(topics[2])[-40:])
                 token1 = self._address("0x" + str(topics[3])[-40:])
                 if token0 >= token1:
@@ -285,6 +294,13 @@ class EvmDexFactoryDiscoveryAdapter:
                     else tick_spacing_raw
                 )
                 hooks = self._address("0x" + words[2][-40:])
+                initial_sqrt_price_x96 = int(words[3], 16)
+                initial_tick_raw = int(words[4], 16)
+                initial_tick = (
+                    initial_tick_raw - (1 << 256)
+                    if initial_tick_raw >= (1 << 255)
+                    else initial_tick_raw
+                )
                 pool = pool_id
             else:
                 if len(topics) < 3:
@@ -344,6 +360,8 @@ class EvmDexFactoryDiscoveryAdapter:
                         "fee_tier": fee,
                         "tick_spacing": tick_spacing,
                         "hooks_address": hooks,
+                        "initial_sqrt_price_x96": initial_sqrt_price_x96,
+                        "initial_tick": initial_tick,
                         "singleton_pool": True,
                         "native_currency_supported": token0
                         == "0x" + "0" * 40
