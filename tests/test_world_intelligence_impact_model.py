@@ -25,8 +25,7 @@ def row(
         regime=regime,
         event_type="macro" if index % 2 else "exchange",
         event_time=event_time,
-        outcome_available_at=event_time
-        + timedelta(hours=1 if available else 100),
+        outcome_available_at=event_time + timedelta(hours=1 if available else 1000),
         sentiment=signal,
         severity=0.7,
         novelty=0.6,
