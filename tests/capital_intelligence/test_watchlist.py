@@ -16,6 +16,9 @@ class FakeRedis:
         values[entity_id] = payload
         return 1
 
+    async def hget(self, key, entity_id):
+        return self.hashes.get(key, {}).get(entity_id)
+
     async def hdel(self, key, entity_id):
         return int(self.hashes.get(key, {}).pop(entity_id, None) is not None)
 
@@ -34,6 +37,7 @@ async def test_watchlist_add_is_idempotent_and_normalizes_evm_address():
     rows = await watchlist.list()
     assert len(rows) == 1
     assert rows[0]["address"] == "0x" + "a" * 40
+    assert await watchlist.get("ethereum", "0x" + "A" * 40) == rows[0]
 
 
 @pytest.mark.asyncio
