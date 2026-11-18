@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 // Prices are integer ticks and quantities are integer lots at this boundary.
 type PriceQuantity = (i64, i64);
+type DepthDelta = (u64, u64, Vec<PriceQuantity>, Vec<PriceQuantity>, Option<u64>);
 type BookSnapshot = (u64, Vec<PriceQuantity>, Vec<PriceQuantity>);
 
 struct Book {
@@ -166,6 +167,16 @@ impl FixedPointOrderBook {
             bids,
             asks,
         )
+    }
+
+    fn apply_deltas(&mut self, updates: Vec<DepthDelta>) -> PyResult<usize> {
+        let mut applied = 0;
+        for (first, final_id, bids, asks, previous) in updates {
+            if self.book.apply(first, final_id, previous, bids, asks)? {
+                applied += 1;
+            }
+        }
+        Ok(applied)
     }
 
     fn snapshot(&self, depth: usize) -> PyResult<BookSnapshot> {
