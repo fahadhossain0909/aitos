@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import json
 
 import pytest
 
@@ -36,10 +37,18 @@ class FakeClickHouse:
             return FakeResult(
                 [
                     (
-                        '{"event_id":"evt-1","finality":"confirmed",'
-                        '"actor_id":"0x' + 'b' * 40 + '",'
-                        '"counterparty_id":"0x' + 'a' * 40 + '",'
-                        '"metadata":{"actor_identity_kind":"evm_address","flow_sign":-1}}',
+                        json.dumps(
+                            {
+                                "event_id": "evt-1",
+                                "finality": "confirmed",
+                                "actor_id": "0x" + "b" * 40,
+                                "counterparty_id": "0x" + "a" * 40,
+                                "metadata": {
+                                    "actor_identity_kind": "evm_address",
+                                    "flow_sign": -1,
+                                },
+                            }
+                        ),
                     )
                 ]
             )
