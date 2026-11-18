@@ -7,6 +7,7 @@ from aitos.capital_intelligence.dex_factory import (
     V2_PAIR_CREATED_TOPIC,
     V3_POOL_CREATED_TOPIC,
     V4_POOL_INITIALIZED_TOPIC,
+    V4_MODIFY_LIQUIDITY_TOPIC,
 )
 
 
@@ -353,3 +354,68 @@ async def test_v4_pool_manager_initialize_discovers_singleton_pool_id():
     assert event.metadata["native_currency_supported"] is True
     assert event.metadata["pool_not_auto_activated"] is True
     assert json.loads(cursor)["head_block"] == 0x20
+
+
+
+@pytest.mark.asyncio
+async def test_v4_modify_liquidity_is_persisted_as_evidence_not_token_flow():
+    manager = "0x" + "1" * 40
+    sender = "0x" + "2" * 40
+    pool_id = "0x" + "a" * 64
+    liquidity_delta = -(10**18)
+    words = [
+        (-120) % (1 << 256),
+        120,
+        liquidity_delta % (1 << 256),
+        int("b" * 64, 16),
+    ]
+    log = {
+        "address": manager,
+        "topics": [
+            V4_MODIFY_LIQUIDITY_TOPIC,
+            pool_id,
+            "0x" + "0" * 24 + sender[2:],
+        ],
+        "data": "0x" + "".join(f"{value:064x}" for value in words),
+        "blockNumber": "0x20",
+        "blockHash": "0x" + "a" * 64,
+        "transactionHash": "0x" + "b" * 64,
+        "logIndex": "0x2",
+    }
+    adapter = EvmDexFactoryDiscoveryAdapter(
+        rpc_url="https://rpc.example",
+        chain_id="1",
+        factories={manager: "uniswap_v4"},
+        confirmations=2,
+        max_block_range=10,
+    )
+
+    async def fake_rpc(method, params):
+        if method == "eth_blockNumber":
+            return "0x22"
+        if method == "eth_getLogs":
+            assert V4_MODIFY_LIQUIDITY_TOPIC in params[0]["topics"][0]
+            return [log]
+        if method == "eth_getBlockByNumber":
+            return {
+                "timestamp": hex(1_700_000_000),
+                "hash": "0x" + "a" * 64,
+            }
+        raise AssertionError(method)
+
+    adapter._rpc = fake_rpc
+    events, _ = await adapter.poll(cursor="0x1f")
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "dex_liquidity_event"
+    assert event.event_kind == "dex_liquidity_modified"
+    assert event.actor_id == sender
+    assert event.quantity == 10**18
+    assert event.quantity_unit == "liquidity_units"
+    assert event.usd_value is None
+    assert event.metadata["pool_id"] == pool_id
+    assert event.metadata["factory_event"] == "ModifyLiquidity"
+    assert event.metadata["liquidity_delta"] == str(liquidity_delta)
+    assert event.metadata["tick_lower"] == -120
+    assert event.metadata["tick_upper"] == 120
+    assert event.metadata["liquidity_event_not_token_flow"] is True
