@@ -70,3 +70,11 @@ No credentials are bundled, no scraping bypass or paid API dependency is introdu
 - Startup replay is disabled by default. Set AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_ON_START=true only after reviewing pending pages; the replay batch is bounded by AITOS_WORLD_INTELLIGENCE_REPLAY_DLQ_LIMIT (1–1000).
 - The decision ledger also aggregates realized executed-trade net returns, win rate, fees and funding by the event/narrative/source IDs attached to accepted ENTRY decisions. The report is surfaced in the existing scanner decision-ledger health snapshot and remains observational, not causal.
 - The worker writes append-only per-source run records to ClickHouse (180-day retention), including success/failure/lease contention, event counts, cursor boundaries, fencing generation and latency. The internal /sources endpoint exposes bounded 24-hour aggregates for operational inspection.
+
+
+## Probability calibration diagnostics
+
+- `aitos.world_intelligence.calibration` adds fixed-width reliability bins, Brier score, clipped log-loss, expected/max calibration error and Wilson 95% intervals for observed event frequencies.
+- Every observation carries an immutable ID, asset, horizon, regime, prediction timestamp and outcome-availability timestamp. Evaluation excludes outcomes not available at the requested `as_of` time and rejects duplicate IDs.
+- `calibration_cohorts` keeps asset/horizon/regime cohorts separate so strong performance in one market cannot hide poor calibration in another.
+- These are evaluation-only diagnostics. They do not fit probabilities, change thresholds, activate a strategy, or promote a model. Production acceptance still requires representative point-in-time historical labels and chronological OOS evidence.
