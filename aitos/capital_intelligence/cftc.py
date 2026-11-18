@@ -230,14 +230,11 @@ class CftcCotAdapter:
                     "incremental_offset": supplied.get("offset"),
                     "refresh_offset": 0,
                 }
-            if (
-                supplied.get("version") != 2
-                or any(
-                    isinstance(supplied.get(key), bool)
-                    or not isinstance(supplied.get(key), int)
-                    or not 0 <= supplied[key] <= 10_000_000
-                    for key in ("incremental_offset", "refresh_offset")
-                )
+            if supplied.get("version") != 2 or any(
+                isinstance(supplied.get(key), bool)
+                or not isinstance(supplied.get(key), int)
+                or not 0 <= supplied[key] <= 10_000_000
+                for key in ("incremental_offset", "refresh_offset")
             ):
                 raise ValueError("invalid CFTC version-2 cursor")
             state.update(supplied)
