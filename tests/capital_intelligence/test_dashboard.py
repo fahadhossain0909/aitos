@@ -23,7 +23,6 @@ def test_entity_dashboard_uses_text_content_for_untrusted_entity_fields():
     assert "detail.textContent=JSON.stringify" in page
 
 
-
 def test_operator_entity_labels_are_chain_scoped_and_time_bounded():
     labels = _configured_entity_labels(
         [
