@@ -80,7 +80,6 @@ def test_governance_allows_canary_only_with_mature_good_oos_metrics():
     assert result.eligible_for_canary is True
 
 
-
 def test_replay_reports_observed_costs_and_partial_fills():
     now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
     spec = parse_decision_spec(
