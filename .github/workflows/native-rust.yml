@@ -38,7 +38,8 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install --upgrade pip pytest
+      - run: python -m pip install --upgrade pip pytest black==25.12.0
+      - run: black --check aitos/native_core.py tests/test_native_core.py benchmarks/native_core_benchmark.py
       - run: PYTHONPATH=. pytest -q tests/test_native_core.py
 
   python-native:
@@ -49,11 +50,11 @@ jobs:
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: "3.12"
-      - run: python -m pip install --upgrade pip maturin pytest
-      - run: maturin develop --manifest-path native/rust/Cargo.toml
-      - name: Verify native extension and contract parity
-        env:
-          PYTHONPATH: .
+      - name: Build extension in isolated virtualenv
         run: |
-          python -c "from aitos.native_core import native_available; assert native_available()"
-          pytest -q tests/test_native_core.py
+          python -m venv .venv-native
+          . .venv-native/bin/activate
+          python -m pip install --upgrade pip maturin pytest
+          maturin develop --manifest-path native/rust/Cargo.toml
+          PYTHONPATH=. python -c "from aitos.native_core import native_available; assert native_available()"
+          PYTHONPATH=. pytest -q tests/test_native_core.py
