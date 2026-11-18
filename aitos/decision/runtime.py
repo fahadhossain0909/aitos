@@ -163,9 +163,19 @@ class ADLRuntime:
 
         try:
             response = self.provider.evaluate(snapshot, spec)
-            if not isinstance(response, ModelResponse):
-                raise ValueError("provider returned an unsupported response type")
-            model_id, model_version = response.model_id, response.model_version
+        except Exception as exc:
+            # Provider exceptions may contain credentials or vendor payloads.
+            reasons.append(f"decision provider/evaluation failed: {type(exc).__name__}")
+            return finish(DecisionAction.ABSTAIN)
+
+        if not isinstance(response, ModelResponse):
+            reasons.append("provider returned an unsupported response type")
+            return finish(DecisionAction.ABSTAIN)
+
+        model_id, model_version = response.model_id, response.model_version
+        try:
+            # Typed contract failures are local and safe to report precisely;
+            # keeping them distinct makes invalid model outputs diagnosable.
             _validate_question_outputs(response, spec)
             choices = dict(response.choices)
             scores = dict(response.scores)
@@ -199,8 +209,11 @@ class ADLRuntime:
                 reasons.append("trade economics unavailable")
             proposed = DecisionAction(max(probabilities, key=probabilities.get))
             reasons.extend(response.rationale)
+        except ValueError as exc:
+            reasons.append(str(exc))
+            return finish(DecisionAction.ABSTAIN)
         except Exception as exc:
-            reasons.append(f"decision provider/evaluation failed: {type(exc).__name__}")
+            reasons.append(f"decision evaluation failed: {type(exc).__name__}")
             return finish(DecisionAction.ABSTAIN)
 
         if self.policy.require_calibration and not calibrated:
