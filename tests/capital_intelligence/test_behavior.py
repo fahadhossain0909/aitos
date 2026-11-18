@@ -33,3 +33,10 @@ def test_explicit_direction_drives_descriptive_score():
     result = assess_capital_behavior("wallet:a", [item("1", 1), item("2", 0)])
     assert result.accumulation_score == 0.5
     assert result.classification == "mixed_or_unclassified"
+
+
+
+def test_behavior_accepts_chain_scoped_entity_identity():
+    result = assess_capital_behavior("chain:wallet:a", [item("1", 1)])
+    assert result.entity_id == "chain:wallet:a"
+    assert result.accumulation_score == 1.0
