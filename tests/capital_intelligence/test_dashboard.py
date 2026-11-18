@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.run_capital_intelligence import (
     _configured_entity_labels,
     _entity_dashboard_html,
