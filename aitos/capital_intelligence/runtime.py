@@ -161,6 +161,15 @@ class CapitalIngestionWorker:
                         "source detected an EVM reorg but the store cannot reconcile it"
                     )
                 await reconcile(reorg)
+                if self.graph_store is not None:
+                    graph_reconcile = getattr(
+                        self.graph_store, "reconcile_evm_reorg", None
+                    )
+                    if not callable(graph_reconcile):
+                        raise RuntimeError(
+                            "EVM reorg detected but graph sink cannot reconcile finality"
+                        )
+                    await graph_reconcile(reorg)
             if len(events) > self.batch_limit:
                 raise RuntimeError("source batch exceeded configured limit")
             if events and self.event_enricher is not None:
