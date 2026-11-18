@@ -116,7 +116,7 @@ These are not claimed as implemented or validated by this PR:
 - Complete Solana attribution across all token-account ownership edge cases, compressed assets, all stake-account lifecycle/authority edge cases, arbitrary program-specific CPI semantics and historical transaction versions. Parsed outer/CPI SPL and System Program transfer evidence plus a bounded set of parsed Stake Program lifecycle instructions are attached as supporting evidence only; balance deltas remain separate and can include fees, rent, mint/burn, swaps or program effects.
 - Automatic wallet clustering, exchange/custody attribution and beneficial-owner identification. Those require multiple independent evidence sources and human review.
 - Full DEX coverage across every protocol, pool factory and chain. V2/V3-compatible factory discovery and configured-pool swaps are implemented; V4 and protocol-specific variants remain unsupported. Discovered pools are never auto-activated.
-- Forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. The CFTC adapter is schema-mapped and aggregate-only; dataset-specific field mapping, bounded historical revision refresh and publication-calendar validation remain operator gates. SEC 13F-HR and Forms 3/4/5 are implemented with recent-filing re-scan and 13F/A row supersession, but production-scale CIK coverage and full historical backfill are not yet validated.
+- Forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. The CFTC adapter is schema-mapped and aggregate-only; dataset-specific field mapping, bounded historical revision refresh and publication-calendar validation remain operator gates. SEC 13F-HR and Forms 3/4/5 support both recent submissions and a separate resumable historical submissions-archive worker. Full-archive completion, large-CIK coverage, source revision reconciliation and production rate-budget validation remain operational gates.
 - A bounded, bearer-token-protected per-entity explorer API and analyst dashboard are implemented alongside the metrics listener. Redis-backed chain-scoped watchlist CRUD and opt-in deduplicated HTTPS webhook alerts are implemented; alert delivery remains operator-configured.
 - The CFEI-to-World-Intelligence bridge is optionally wired into a durable WI ingestion worker using the canonical AITOS Redis EventBus, ClickHouse WI store, Redis source leases and fenced cursor persistence. It remains disabled by default; forwarded events are neutral/advisory and Scanner/AI Kernel feature integration remains deliberately disabled.
 - Historical data backfill, replay, walk-forward evaluation, false-positive analysis, model calibration and measured predictive lift.
@@ -457,3 +457,31 @@ delivery releases its short lease so a later replay can retry. Configure
 `AITOS_CFEI_ALERT_TIMEOUT_SECONDS` to bound network waits. The message explicitly
 states that a watchlist match is not a trading signal. No order, strategy or
 risk path consumes watchlist alerts.
+
+
+## 16. Resumable SEC historical submissions backfill
+
+The optional `SecEdgarArchiveBackfillSource` traverses the official
+`filings.files` submission archive for each configured CIK in chronological
+order. It is a separate source with its own Redis cursor, so historical catch-up
+does not block the low-latency recent-filings poller. Both workers share one
+`SecEdgarFilingsAdapter` instance and therefore share its request pacing,
+session and SEC rate-limit handling.
+
+Enable it explicitly with:
+
+```dotenv
+AITOS_CFEI_SEC_ARCHIVE_BACKFILL_ENABLED=true
+AITOS_CFEI_SEC_ARCHIVE_MAX_FILINGS_PER_POLL=10
+AITOS_CFEI_SEC_ARCHIVE_MAX_ROWS_PER_POLL=500
+```
+
+The archive cursor records the current archive file and row offset per CIK.
+Each poll is bounded by both relevant filing count and scanned row count;
+restart resumes at the exact next row. If the SEC archive file referenced by a
+stored cursor disappears, the worker fails closed and requires operator cursor
+reconciliation rather than silently skipping history. The worker is disabled by
+default and does not imply that a full backfill has completed. Monitor the
+`sec-edgar-archive-backfill` source cursor and event coverage before treating
+historical coverage as complete. Historical amendment/revision reconciliation
+still requires an explicit reconciliation run and independent source checks.
