@@ -39,38 +39,67 @@ class CapitalEntityExplorer:
         if isinstance(offset, bool) or not 0 <= offset <= 10_000:
             raise ValueError("offset must be between 0 and 10000")
         query = f"""
+            WITH address_flows AS (
+                SELECT
+                    venue,
+                    actor_id AS address,
+                    usd_value,
+                    JSONExtractInt(payload_json, 'metadata', 'flow_sign') AS flow_sign,
+                    source_id,
+                    counterparty_id AS counterparty,
+                    observed_time
+                FROM {self.events_table} FINAL
+                WHERE actor_id != ''
+                  AND finality != 'reverted'
+                  AND usd_value IS NOT NULL
+                  AND JSONExtractString(
+                        payload_json, 'metadata', 'actor_identity_kind'
+                      ) IN ('evm_address', 'solana_address')
+                  AND JSONExtractBool(
+                        payload_json, 'metadata',
+                        'actor_is_pool_caller_not_verified_beneficial_owner'
+                      ) = 0
+                  AND JSONExtractBool(
+                        payload_json, 'metadata', 'aggregate_only'
+                      ) = 0
+                UNION ALL
+                SELECT
+                    venue,
+                    counterparty_id AS address,
+                    usd_value,
+                    -JSONExtractInt(payload_json, 'metadata', 'flow_sign') AS flow_sign,
+                    source_id,
+                    actor_id AS counterparty,
+                    observed_time
+                FROM {self.events_table} FINAL
+                WHERE counterparty_id != ''
+                  AND actor_id != ''
+                  AND finality != 'reverted'
+                  AND usd_value IS NOT NULL
+                  AND JSONExtractString(
+                        payload_json, 'metadata', 'actor_identity_kind'
+                      ) IN ('evm_address', 'solana_address')
+                  AND JSONExtractBool(
+                        payload_json, 'metadata',
+                        'actor_is_pool_caller_not_verified_beneficial_owner'
+                      ) = 0
+                  AND JSONExtractBool(
+                        payload_json, 'metadata', 'aggregate_only'
+                      ) = 0
+            )
             SELECT
                 venue,
-                actor_id,
+                address,
                 count() AS event_count,
                 sum(ifNull(usd_value, 0)) AS gross_flow_usd,
-                sumIf(
-                    ifNull(usd_value, 0),
-                    JSONExtractInt(payload_json, 'metadata', 'flow_sign') = 1
-                ) AS inflow_usd,
-                sumIf(
-                    ifNull(usd_value, 0),
-                    JSONExtractInt(payload_json, 'metadata', 'flow_sign') = -1
-                ) AS outflow_usd,
+                sumIf(ifNull(usd_value, 0), flow_sign = 1) AS inflow_usd,
+                sumIf(ifNull(usd_value, 0), flow_sign = -1) AS outflow_usd,
                 uniqExactIf(source_id, source_id != '') AS source_count,
-                uniqExactIf(counterparty_id, counterparty_id != '') AS counterparty_count,
+                uniqExactIf(counterparty, counterparty != '') AS counterparty_count,
                 max(observed_time) AS last_observed_at
-            FROM {self.events_table} FINAL
-            WHERE actor_id != ''
-              AND finality != 'reverted'
-              AND usd_value IS NOT NULL
-              AND JSONExtractString(
-                    payload_json, 'metadata', 'actor_identity_kind'
-                  ) IN ('evm_address', 'solana_address')
-              AND JSONExtractBool(
-                    payload_json, 'metadata',
-                    'actor_is_pool_caller_not_verified_beneficial_owner'
-                  ) = 0
-              AND JSONExtractBool(
-                    payload_json, 'metadata', 'aggregate_only'
-                  ) = 0
-            GROUP BY venue, actor_id
-            ORDER BY gross_flow_usd DESC, venue ASC, actor_id ASC
+            FROM address_flows
+            GROUP BY venue, address
+            ORDER BY gross_flow_usd DESC, venue ASC, address ASC
             LIMIT {{limit:UInt32}} OFFSET {{offset:UInt32}}
         """
         result = await self.clickhouse.query(
@@ -110,7 +139,7 @@ class CapitalEntityExplorer:
             SELECT payload_json
             FROM {self.events_table} FINAL
             WHERE venue = {{chain:String}}
-              AND actor_id = {{address:String}}
+              AND (actor_id = {{address:String}} OR counterparty_id = {{address:String}})
               AND finality != 'reverted'
               AND JSONExtractString(
                     payload_json, 'metadata', 'actor_identity_kind'
@@ -148,7 +177,18 @@ class CapitalEntityExplorer:
         events = []
         for (payload_json,) in events_result.result_rows:
             try:
-                events.append(json.loads(payload_json))
+                event = json.loads(payload_json)
+                if event.get("actor_id") == address:
+                    event["entity_role"] = "actor"
+                    event["entity_flow_sign"] = event.get("metadata", {}).get(
+                        "flow_sign", 0
+                    )
+                elif event.get("counterparty_id") == address:
+                    event["entity_role"] = "counterparty"
+                    event["entity_flow_sign"] = -event.get("metadata", {}).get(
+                        "flow_sign", 0
+                    )
+                events.append(event)
             except (TypeError, ValueError):
                 raise RuntimeError("stored CFEI event payload is invalid") from None
 
