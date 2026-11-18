@@ -3,6 +3,7 @@
 This module evaluates already-produced probabilities. It never fits a model,
 changes a trading policy, or promotes a candidate.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -76,8 +77,7 @@ def _wilson_interval(successes: int, total: int, z: float = 1.959963984540054):
     denominator = 1.0 + z2 / total
     centre = (rate + z2 / (2.0 * total)) / denominator
     margin = (
-        z * sqrt(rate * (1.0 - rate) / total + z2 / (4.0 * total * total))
-        / denominator
+        z * sqrt(rate * (1.0 - rate) / total + z2 / (4.0 * total * total)) / denominator
     )
     return max(0.0, centre - margin), min(1.0, centre + margin)
 
