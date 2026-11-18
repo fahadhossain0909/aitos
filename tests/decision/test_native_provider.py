@@ -39,7 +39,6 @@ def test_native_provider_rejects_missing_or_invalid_direction():
         NativeEvidenceProvider().evaluate(snapshot, spec)
 
 
-
 def test_native_provider_supplies_typed_score_and_neutral_noul_prior():
     spec = parse_decision_spec(
         "DECISION pretrade:\\nSTATE:\\n - direction\\n - composite_score\\n"

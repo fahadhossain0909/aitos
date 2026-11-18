@@ -82,7 +82,6 @@ class JevDecisionProvider:
         )
 
 
-
 class NativeEvidenceProvider:
     """Transparent scanner-evidence baseline, not a trained/calibrated model.
 
@@ -99,7 +98,9 @@ class NativeEvidenceProvider:
     def evaluate(self, snapshot: MarketSnapshot, spec: DecisionSpec) -> ModelResponse:
         direction = str(snapshot.features.get("direction", "")).upper()
         if direction not in {"LONG", "SHORT"}:
-            raise ValueError("native evidence provider requires LONG or SHORT direction")
+            raise ValueError(
+                "native evidence provider requires LONG or SHORT direction"
+            )
         score = snapshot.features.get("composite_score")
         if not isinstance(score, (int, float)) or isinstance(score, bool):
             raise ValueError("scanner composite score must be numeric")
@@ -130,9 +131,14 @@ class NativeEvidenceProvider:
         for question in spec.questions:
             if isinstance(question, ScoreQuestion):
                 supplied = snapshot.features.get(f"score:{question.name}")
-                value = supplied if supplied is not None else (
-                    question.minimum + (float(score) / 100.0)
-                    * (question.maximum - question.minimum)
+                value = (
+                    supplied
+                    if supplied is not None
+                    else (
+                        question.minimum
+                        + (float(score) / 100.0)
+                        * (question.maximum - question.minimum)
+                    )
                 )
                 scores[question.name] = min(
                     question.maximum, max(question.minimum, float(value))

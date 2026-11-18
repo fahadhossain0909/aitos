@@ -1867,11 +1867,22 @@ class OpportunityScanner(AITOSModule):
                 timestamp = timestamp.replace(tzinfo=timezone.utc)
             features = {
                 "composite_score": float(candidate.composite_score),
-                "trend": float(candidate.component_scores.get("trend_strength", 0.0)) / 10.0,
-                "order_flow": float(candidate.component_scores.get("order_flow_bias", 0.0)) / 10.0,
-                "liquidity": float(candidate.component_scores.get("liquidity_quality", 0.0)) / 10.0,
-                "volatility": float(candidate.component_scores.get("volatility", 0.0)) / 10.0,
-                "market_regime": float(candidate.component_scores.get("market_regime", 0.0)) / 10.0,
+                "trend": float(candidate.component_scores.get("trend_strength", 0.0))
+                / 10.0,
+                "order_flow": float(
+                    candidate.component_scores.get("order_flow_bias", 0.0)
+                )
+                / 10.0,
+                "liquidity": float(
+                    candidate.component_scores.get("liquidity_quality", 0.0)
+                )
+                / 10.0,
+                "volatility": float(candidate.component_scores.get("volatility", 0.0))
+                / 10.0,
+                "market_regime": float(
+                    candidate.component_scores.get("market_regime", 0.0)
+                )
+                / 10.0,
                 "component_scores": dict(candidate.component_scores),
                 "component_availability": dict(candidate.component_availability),
                 "regime": str(candidate.regime),
