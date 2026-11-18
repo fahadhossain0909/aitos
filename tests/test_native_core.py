@@ -79,7 +79,9 @@ def test_scale_rejects_non_finite_and_invalid_values():
 
 
 def test_book_microprice_and_depth_imbalance():
-    book = PythonFixedPointOrderBook(10, [(100, 3), (99, 1)], [(102, 1), (103, 3)])
+    book = PythonFixedPointOrderBook(
+        10, [(100, 3), (99, 1)], [(102, 1), (103, 3)]
+    )
     assert book.microprice_ticks() == pytest.approx(101.5)
     assert book.depth_imbalance(2) == pytest.approx(0.0)
     assert book.depth_imbalance(1) == pytest.approx(0.5)
