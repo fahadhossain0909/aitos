@@ -5,6 +5,7 @@ import pytest
 from aitos.world_intelligence.impact_model import (
     EventImpactFeatures,
     EventImpactTrainingRow,
+    evaluate_event_impact_model,
     fit_event_impact_model,
 )
 
@@ -124,3 +125,30 @@ def test_training_row_rejects_invalid_numeric_inputs():
             beta=0,
             forward_return=0.01,
         )
+
+
+def test_oos_evaluation_excludes_training_rows_and_unmatured_labels():
+    training = [row(i) for i in range(40)]
+    model = fit(training)
+    oos = [row(800 + i) for i in range(10)]
+    oos.append(row(820, available=False))
+    report = evaluate_event_impact_model(
+        model, training + oos, as_of=BASE + timedelta(days=40)
+    )
+    assert report.sample_count == 10
+    assert report.excluded_pre_training == 40
+    assert report.excluded_unmatured == 1
+    assert 0.0 <= report.brier_score <= 1.0
+    assert 0.0 <= report.directional_accuracy <= 1.0
+
+
+def test_oos_evaluation_rejects_duplicate_ids_and_earlier_cutoff():
+    model = fit([row(i) for i in range(40)])
+    with pytest.raises(ValueError, match="duplicate"):
+        evaluate_event_impact_model(
+            model,
+            [row(800), row(800)],
+            as_of=BASE + timedelta(days=40),
+        )
+    with pytest.raises(ValueError, match="cannot precede"):
+        evaluate_event_impact_model(model, [], as_of=BASE + timedelta(days=1))
