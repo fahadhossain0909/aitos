@@ -432,9 +432,7 @@ class SecEdgarFilingsAdapter:
             seen_accessions = {row["accession"] for row, _ in work}
             # Re-read a small recent window every poll so corrected/updated
             # filing documents are observed even when their accession is known.
-            for row in reversed(
-                rows[: self.revision_rescan_filings_per_poll]
-            ):
+            for row in reversed(rows[: self.revision_rescan_filings_per_poll]):
                 if row["accession"] not in seen_accessions:
                     work.append((row, False))
                     seen_accessions.add(row["accession"])
