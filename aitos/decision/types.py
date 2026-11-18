@@ -142,6 +142,7 @@ class ModelResponse:
     probabilities: Mapping[str, float]
     scores: Mapping[str, float] = field(default_factory=dict)
     nouls: Mapping[str, float] = field(default_factory=dict)
+    choices: Mapping[str, str] = field(default_factory=dict)
     assessments: tuple[AgentAssessment, ...] = ()
     economics: TradeEconomics | None = None
     model_id: str = "unspecified"
@@ -210,6 +211,9 @@ class DecisionResult:
     evaluated_at: datetime
     shadow_mode: bool = True
     execution_eligible: bool = False
+    choices: Mapping[str, str] = field(default_factory=dict)
+    scores: Mapping[str, float] = field(default_factory=dict)
+    nouls: Mapping[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.execution_eligible:

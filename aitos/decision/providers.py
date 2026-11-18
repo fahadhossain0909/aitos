@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Protocol
 
-from .types import DecisionSpec, MarketSnapshot, ModelResponse
+from .types import DecisionSpec, MarketSnapshot, ModelResponse, TradeEconomics
 
 
 class DecisionProvider(Protocol):
@@ -61,6 +61,13 @@ class JevDecisionProvider:
             probabilities=result.get("probabilities", {}),
             scores=result.get("scores", {}),
             nouls=result.get("nouls", {}),
+            choices=result.get("choices", {}),
+            economics=(
+                TradeEconomics(**result["economics"])
+                if isinstance(result.get("economics"), Mapping)
+                else None
+            ),
+            latency_ms=result.get("latency_ms"),
             model_id=str(result.get("model_id", self.model_id)),
             model_version=str(result.get("model_version", self.model_version)),
             rationale=tuple(result.get("rationale", ())),

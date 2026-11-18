@@ -11,12 +11,15 @@ from .aggregation import aggregate_assessments
 from .calibration import ProbabilityCalibrator
 from .providers import DecisionProvider
 from .types import (
+    ChoiceQuestion,
     DecisionAction,
     DecisionPolicy,
     DecisionResult,
     DecisionSpec,
     MarketSnapshot,
     ModelResponse,
+    NoulQuestion,
+    ScoreQuestion,
 )
 
 _ACTIONS = tuple(
@@ -39,6 +42,35 @@ def _distribution(values: Mapping[str, float]) -> dict[str, float]:
     if total <= 0 or abs(total - 1.0) > 1e-6:
         raise ValueError("probabilities must sum to one")
     return result
+
+
+def _validate_question_outputs(response: ModelResponse, spec: DecisionSpec) -> None:
+    """Validate typed DSL outputs before any policy decision is considered."""
+    for question in spec.questions:
+        if isinstance(question, ChoiceQuestion):
+            if set(question.options) == set(_ACTIONS):
+                continue
+            selected = response.choices.get(question.name)
+            if selected not in question.options:
+                raise ValueError(f"invalid or missing choice output: {question.name}")
+        elif isinstance(question, ScoreQuestion):
+            value = response.scores.get(question.name)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                or not question.minimum <= value <= question.maximum
+            ):
+                raise ValueError(f"invalid or missing score output: {question.name}")
+        elif isinstance(question, NoulQuestion):
+            value = response.nouls.get(question.name)
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+                or not 0.0 <= value <= 1.0
+            ):
+                raise ValueError(f"invalid or missing noul output: {question.name}")
 
 
 class ADLRuntime:
@@ -72,6 +104,9 @@ class ADLRuntime:
         model_id = "unavailable"
         model_version = "unavailable"
         proposed = DecisionAction.ABSTAIN
+        choices: dict[str, str] = {}
+        scores: dict[str, float] = {}
+        nouls: dict[str, float] = {}
 
         def finish(action: DecisionAction) -> DecisionResult:
             identity = "|".join(
@@ -101,6 +136,9 @@ class ADLRuntime:
                 evaluated_at=evaluated_at,
                 shadow_mode=self.policy.shadow_mode,
                 execution_eligible=False,
+                choices=choices,
+                scores=scores,
+                nouls=nouls,
             )
 
         if evaluated_at.tzinfo is None or evaluated_at.utcoffset() is None:
@@ -128,6 +166,10 @@ class ADLRuntime:
             if not isinstance(response, ModelResponse):
                 raise ValueError("provider returned an unsupported response type")
             model_id, model_version = response.model_id, response.model_version
+            _validate_question_outputs(response, spec)
+            choices = dict(response.choices)
+            scores = dict(response.scores)
+            nouls = dict(response.nouls)
             if response.assessments:
                 aggregate = aggregate_assessments(response.assessments)
                 raw = _distribution(aggregate.probabilities)
