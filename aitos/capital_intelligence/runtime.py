@@ -124,15 +124,18 @@ class CapitalIngestionWorker:
         self.batch_limit = batch_limit
         self.event_enricher = event_enricher
         self.graph_store = None
+        self.last_run_acquired_lease = False
         self._stopping = asyncio.Event()
 
     def stop(self):
         self._stopping.set()
 
     async def run_once(self) -> int:
+        self.last_run_acquired_lease = False
         lease = await self.checkpoints.acquire(self.source_id, ttl_ms=120_000)
         if lease is None:
             return 0
+        self.last_run_acquired_lease = True
         lost = asyncio.Event()
         heartbeat_stop = asyncio.Event()
 
