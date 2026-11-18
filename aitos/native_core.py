@@ -277,12 +277,12 @@ class NativeOrderBookSession:
         native_updates = []
         for update in updates:
             bids = [
-            (
-                self.scale.price_to_ticks(price),
-                self.scale.quantity_to_lots(quantity),
-            )
-            for price, quantity in update.bids
-        ]
+                (
+                    self.scale.price_to_ticks(price),
+                    self.scale.quantity_to_lots(quantity),
+                )
+                for price, quantity in update.bids
+            ]
             asks = [
                 (
                     self.scale.price_to_ticks(price),
