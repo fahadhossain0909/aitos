@@ -12,9 +12,7 @@ from aitos.world_intelligence.impact_model import (
 BASE = datetime(2026, 10, 1, tzinfo=timezone.utc)
 
 
-def row(
-    index, *, positive=None, available=True, asset="BTCUSDT", regime="trend"
-):
+def row(index, *, positive=None, available=True, asset="BTCUSDT", regime="trend"):
     signal = (index % 10 - 4.5) / 5.0
     positive = signal > 0 if positive is None else positive
     event_time = BASE + timedelta(hours=index)
@@ -153,3 +151,22 @@ def test_oos_evaluation_rejects_duplicate_ids_and_earlier_cutoff():
         )
     with pytest.raises(ValueError, match="cannot precede"):
         evaluate_event_impact_model(model, [], as_of=BASE + timedelta(days=1))
+
+
+def test_model_rejects_unseen_event_type():
+    model = fit([row(i) for i in range(40)])
+    features = EventImpactFeatures(
+        asset="BTCUSDT",
+        horizon="1h",
+        regime="trend",
+        event_type="unseen",
+        sentiment=0.5,
+        severity=0.5,
+        novelty=0.5,
+        confidence=0.5,
+        source_reliability=0.5,
+        age_hours=1,
+        beta=0.1,
+    )
+    with pytest.raises(ValueError, match="event_type"):
+        model.predict_probability_up(features)
