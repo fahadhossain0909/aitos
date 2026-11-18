@@ -16,6 +16,7 @@ from .binance_price import BinanceHistoricalPriceBook
 from .contracts import CapitalEvent, EntityEvidence, EntityLabel
 from .cftc import CftcCotAdapter
 from .dex import EvmDexSwapAdapter
+from .dex_factory import EvmDexFactoryDiscoveryAdapter
 from .enrichment import enrich_capital_event
 from .entity_graph import EntityEvidenceGraph, EntityProfile
 from .evm import EVMLogCapitalAdapter
@@ -57,6 +58,7 @@ __all__ = [
     "EVMLogCapitalAdapter",
     "EvmTokenMetadataResolver",
     "EvmDexSwapAdapter",
+    "EvmDexFactoryDiscoveryAdapter",
     "PointInTimePriceBook",
     "PriceObservation",
     "ReplayRow",
