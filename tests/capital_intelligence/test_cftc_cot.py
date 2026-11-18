@@ -66,6 +66,7 @@ async def test_cftc_cot_ingests_aggregate_positions_and_advances_offset_cursor()
         dataset_id="6dca-aqww",
         field_map=FIELD_MAP,
         report_type="legacy_futures_only",
+        revision_refresh_pages_per_poll=0,
         session=session,
     )
     events, cursor = await adapter.poll()
@@ -80,7 +81,9 @@ async def test_cftc_cot_ingests_aggregate_positions_and_advances_offset_cursor()
     assert event.metadata["positioning"]["noncommercial"]["net_contracts"] == 1_000
     assert event.metadata["positioning"]["commercial"]["net_contracts"] == -1_000
     assert event.metadata["publication_timestamp_not_supplied"] is True
-    assert cursor == '{"offset":1}'
+    assert cursor == (
+        '{"incremental_offset":1,"refresh_offset":0,"version":2}'
+    )
 
     empty_events, same_cursor = await adapter.poll(cursor=cursor)
     assert empty_events == []
@@ -94,3 +97,65 @@ def test_cftc_cot_rejects_untrusted_dataset_and_field_identifiers():
     unsafe = {**FIELD_MAP, "report_date": "date;DROP_TABLE"}
     with pytest.raises(ValueError, match="field mapping"):
         CftcCotAdapter(dataset_id="6dca-aqww", field_map=unsafe)
+
+
+
+@pytest.mark.asyncio
+async def test_cftc_revision_refresh_replays_historical_rows_idempotently():
+    original = {
+        "report_date_as_yyyy_mm_dd": "2026-11-10T00:00:00.000",
+        "cftc_contract_market_code": "133741",
+        "market_and_exchange_names": "Bitcoin - CME",
+        "open_interest_all": "10000",
+        "noncomm_positions_long_all": "3000",
+        "noncomm_positions_short_all": "2000",
+        "comm_positions_long_all": "1000",
+        "comm_positions_short_all": "2000",
+    }
+    revised = {**original, "noncomm_positions_long_all": "3500"}
+    session = Session(
+        [
+            [original],  # incremental cursor
+            [original],  # historical refresh page 0
+            [],  # end refresh cycle
+            [],  # incremental cursor now at end
+            [revised],  # corrected historical row
+            [],  # end refresh cycle
+        ]
+    )
+    adapter = CftcCotAdapter(
+        dataset_id="6dca-aqww",
+        field_map=FIELD_MAP,
+        page_limit=1,
+        revision_refresh_pages_per_poll=2,
+        session=session,
+    )
+
+    first_events, cursor = await adapter.poll()
+    assert len(first_events) == 1
+    assert first_events[0].metadata["positioning"]["noncommercial"]["long_contracts"] == 3000
+
+    revised_events, next_cursor = await adapter.poll(cursor=cursor)
+    assert len(revised_events) == 1
+    assert revised_events[0].event_id == first_events[0].event_id
+    assert revised_events[0].metadata["positioning"]["noncommercial"]["long_contracts"] == 3500
+    assert next_cursor == cursor
+    assert [params["$offset"] for _, params in session.requests] == [
+        "0", "0", "1", "1", "0", "1"
+    ]
+
+
+def test_cftc_cursor_migrates_legacy_offset_and_validates_revision_cursor():
+    adapter = CftcCotAdapter(
+        dataset_id="6dca-aqww",
+        field_map=FIELD_MAP,
+        revision_refresh_pages_per_poll=0,
+    )
+    state = adapter._events_from_rows([], __import__("datetime").datetime.now(
+        __import__("datetime").timezone.utc
+    ))
+    assert state == []
+    with pytest.raises(ValueError, match="version-2 cursor"):
+        import asyncio
+
+        asyncio.run(adapter.poll(cursor='{"version":2,"incremental_offset":-1,"refresh_offset":0}'))
