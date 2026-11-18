@@ -23,7 +23,7 @@ V3_POOL_CREATED_TOPIC = "0x" + __import__("hashlib").sha3_256(
 # Ethereum event topic hashes use Keccak-256, not standardized SHA3-256.
 # Constants below are the canonical Keccak values.
 V2_PAIR_CREATED_TOPIC = "0x0d3648bd0f6ba80134a33ba9275ac585d9d315f0ad8355cddefde31afa28d0e9"
-V3_POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96a0c9b5e8b7b6f5c7b9f8f3f3f3f3f3f3f3f"
+V3_POOL_CREATED_TOPIC = "0x783cca1c0412dd0d695e784568c96da2e9c22ff989357a2e8b1d9b2b4e6b7118"
 
 
 class EvmDexFactoryDiscoveryAdapter:
@@ -147,7 +147,7 @@ class EvmDexFactoryDiscoveryAdapter:
             words = [data[index:index + 64] for index in range(0, len(data), 64)]
             if len(words) < (2 if is_v2 else 2):
                 continue
-            pool = self._address("0x" + words[-1][-40:])
+            pool_word = words[0] if is_v2 else words[1]\n            pool = self._address("0x" + pool_word[-40:])
             block = int(log["blockNumber"], 16)
             if block not in block_headers:
                 header = await self._rpc(
