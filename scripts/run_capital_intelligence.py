@@ -37,7 +37,10 @@ from aitos.capital_intelligence.runtime import (
     RedisCheckpointStore,
 )
 from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
-from aitos.capital_intelligence.sec_edgar import SecEdgarFilingsAdapter
+from aitos.capital_intelligence.sec_edgar import (
+    SecEdgarArchiveBackfillSource,
+    SecEdgarFilingsAdapter,
+)
 from aitos.capital_intelligence.storage import ClickHouseCapitalStore
 from aitos.capital_intelligence.watchlist import RedisEntityWatchlist
 from aitos.capital_intelligence.token_registry import TokenMetadata, TokenRegistry
@@ -694,6 +697,27 @@ async def main() -> None:
                 poll_interval_seconds=max(interval, 60.0),
             )
         )
+        if os.getenv(
+            "AITOS_CFEI_SEC_ARCHIVE_BACKFILL_ENABLED", "false"
+        ).lower() in {"1", "true", "yes"}:
+            archive_source = SecEdgarArchiveBackfillSource(
+                adapter,
+                max_filings_per_poll=int(
+                    os.getenv("AITOS_CFEI_SEC_ARCHIVE_MAX_FILINGS_PER_POLL", "10")
+                ),
+                max_rows_per_poll=int(
+                    os.getenv("AITOS_CFEI_SEC_ARCHIVE_MAX_ROWS_PER_POLL", "500")
+                ),
+            )
+            workers.append(
+                CapitalIngestionWorker(
+                    source_id="sec-edgar-archive-backfill",
+                    source=archive_source,
+                    checkpoints=checkpoints,
+                    store=store,
+                    poll_interval_seconds=max(interval, 60.0),
+                )
+            )
 
     # Graph persistence is a replay-safe secondary sink. If it fails, the
     # Redis cursor is not committed and ClickHouse/Neo4j writes are replayed.
