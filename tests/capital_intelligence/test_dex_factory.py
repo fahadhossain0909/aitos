@@ -107,7 +107,6 @@ def test_factory_discovery_requires_allowlisted_factories_and_supported_protocol
         )
 
 
-
 @pytest.mark.asyncio
 async def test_factory_discovery_recovers_reorg_within_retained_window():
     factory = "0x" + "1" * 40
@@ -193,7 +192,6 @@ async def test_factory_discovery_fails_closed_when_reorg_exceeds_window():
         await adapter.poll(cursor=cursor)
 
 
-
 @pytest.mark.asyncio
 async def test_factory_discovery_can_resume_bounded_historical_backfill():
     factory = "0x" + "1" * 40
@@ -237,7 +235,6 @@ def test_factory_discovery_validates_historical_start_block():
             factories={"0x" + "1" * 40: "uniswap_v2"},
             start_block=-1,
         )
-
 
 
 @pytest.mark.asyncio
@@ -284,7 +281,6 @@ async def test_factory_reorg_reconciliation_covers_full_rescan_not_only_hash_win
     assert adapter.last_reorg["to_block"] == 19
     assert set(adapter.last_reorg["canonical_hashes"]) == set(range(10, 20))
     assert set(json.loads(next_cursor)["recent_hashes"]) == {"17", "18", "19"}
-
 
 
 @pytest.mark.asyncio
@@ -354,7 +350,6 @@ async def test_v4_pool_manager_initialize_discovers_singleton_pool_id():
     assert event.metadata["native_currency_supported"] is True
     assert event.metadata["pool_not_auto_activated"] is True
     assert json.loads(cursor)["head_block"] == 0x20
-
 
 
 @pytest.mark.asyncio
