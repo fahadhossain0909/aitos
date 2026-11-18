@@ -347,6 +347,8 @@ async def test_v4_pool_manager_initialize_discovers_singleton_pool_id():
     assert event.metadata["fee_tier"] == 3000
     assert event.metadata["tick_spacing"] == 60
     assert event.metadata["hooks_address"] == "0x" + "3" * 40
+    assert event.metadata["initial_sqrt_price_x96"] == 2**96
+    assert event.metadata["initial_tick"] == -12
     assert event.metadata["singleton_pool"] is True
     assert event.metadata["native_currency_supported"] is True
     assert event.metadata["pool_not_auto_activated"] is True
