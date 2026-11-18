@@ -132,9 +132,9 @@ class CapitalEntityExplorer:
                 "outflow_usd": float(row[5]),
                 "source_count": int(row[6]),
                 "counterparty_count": int(row[7]),
-                "last_observed_at": row[8].isoformat()
-                if hasattr(row[8], "isoformat")
-                else str(row[8]),
+                "last_observed_at": (
+                    row[8].isoformat() if hasattr(row[8], "isoformat") else str(row[8])
+                ),
                 "identity_status": "unverified_address",
             }
             for row in result.result_rows
@@ -222,9 +222,11 @@ class CapitalEntityExplorer:
                     "relation": row[2],
                     "evidence_type": row[3],
                     "evidence_ref": row[4],
-                    "observed_at": row[5].isoformat()
-                    if hasattr(row[5], "isoformat")
-                    else str(row[5]),
+                    "observed_at": (
+                        row[5].isoformat()
+                        if hasattr(row[5], "isoformat")
+                        else str(row[5])
+                    ),
                     "confidence": float(row[6]),
                     "status": row[7],
                 }
@@ -236,9 +238,11 @@ class CapitalEntityExplorer:
                     "category": row[1],
                     "source": row[2],
                     "verified": bool(row[3]),
-                    "valid_from": row[4].isoformat()
-                    if hasattr(row[4], "isoformat")
-                    else str(row[4]),
+                    "valid_from": (
+                        row[4].isoformat()
+                        if hasattr(row[4], "isoformat")
+                        else str(row[4])
+                    ),
                     "valid_until": (
                         row[5].isoformat()
                         if hasattr(row[5], "isoformat")
