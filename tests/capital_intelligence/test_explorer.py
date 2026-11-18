@@ -106,6 +106,8 @@ async def test_entity_explorer_returns_events_evidence_and_temporal_labels():
     assert entity["events"][0]["entity_flow_sign"] == 1
     assert entity["evidence"][0]["status"] == "candidate"
     assert entity["labels"][0]["verified"] is True
+    assert client.calls[1][1] == {"entity_id": "1:" + "0x" + "a" * 40}
+    assert client.calls[2][1] == {"entity_id": "1:" + "0x" + "a" * 40}
     assert len(client.calls) == 3
 
 
