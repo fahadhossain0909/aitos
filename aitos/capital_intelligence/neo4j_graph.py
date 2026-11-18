@@ -39,6 +39,10 @@ class Neo4jEntityGraphStore:
                 "CREATE CONSTRAINT cfei_event_key IF NOT EXISTS "
                 "FOR (n:CFEIEvent) REQUIRE n.event_key IS UNIQUE"
             )
+            await session.run(
+                "CREATE INDEX cfei_event_source_block IF NOT EXISTS "
+                "FOR (n:CFEIEvent) ON (n.source_id, n.block_number)"
+            )
 
     async def upsert_events(self, events: Iterable[CapitalEvent]) -> int:
         """Persist immutable event observations and address references idempotently."""
