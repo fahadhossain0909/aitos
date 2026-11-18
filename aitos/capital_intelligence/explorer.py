@@ -7,6 +7,7 @@ ownership, merge identities across chains, or produce strategy decisions.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 
@@ -14,7 +15,9 @@ class CapitalEntityExplorer:
     """Bounded ClickHouse read model for analyst-facing entity inspection."""
 
     def __init__(self, clickhouse: Any, database: str = "aitos"):
-        if not database or not database.replace("_", "").isalnum():
+        if not isinstance(database, str) or not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]{0,63}", database
+        ):
             raise ValueError("invalid ClickHouse database")
         self.clickhouse = clickhouse
         self.database = database
@@ -117,7 +120,7 @@ class CapitalEntityExplorer:
             GROUP BY venue, address
             ORDER BY gross_flow_usd DESC, venue ASC, address ASC
             LIMIT {limit:UInt32} OFFSET {offset:UInt32}
-        """.replace(
+        """.replace(  # nosec B608 - identifier is derived from the validated database name.
             "__EVENTS_TABLE__", self.events_table
         )
         result = await self.clickhouse.query(
@@ -176,7 +179,7 @@ class CapitalEntityExplorer:
                   )
             ORDER BY event_time DESC, observed_time DESC
             LIMIT {limit:UInt32}
-            """.replace(
+            """.replace(  # nosec B608 - identifier is derived from the validated database name.
                 "__EVENTS_TABLE__", self.events_table
             ),
             parameters={"chain": chain, "address": address, "limit": event_limit},
@@ -192,7 +195,7 @@ class CapitalEntityExplorer:
             WHERE subject_id = {entity_id:String} OR object_id = {entity_id:String}
             ORDER BY observed_at DESC
             LIMIT 200
-            """.replace(
+            """.replace(  # nosec B608 - table name is a fixed constant plus validated database.
                 "__EVIDENCE_TABLE__", self.evidence_table
             ),
             parameters={"entity_id": entity_key},
@@ -204,7 +207,7 @@ class CapitalEntityExplorer:
             WHERE entity_id = {entity_id:String}
             ORDER BY valid_from DESC
             LIMIT 100
-            """.replace(
+            """.replace(  # nosec B608 - table name is a fixed constant plus validated database.
                 "__LABELS_TABLE__", self.labels_table
             ),
             parameters={"entity_id": entity_key},
