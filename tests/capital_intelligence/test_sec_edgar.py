@@ -392,6 +392,7 @@ async def test_sec_form3_derivative_holding_is_snapshot_not_trade():
           <underlyingSecurityShares><value>5000</value></underlyingSecurityShares></underlyingSecurity>
       </derivativeHolding></derivativeTable>
     </ownershipDocument>"""
+
     async def get_text(_url):
         return xml
 
