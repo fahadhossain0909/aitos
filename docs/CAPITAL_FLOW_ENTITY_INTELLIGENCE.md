@@ -354,7 +354,15 @@ cross-chain label leakage. Operator-supplied evidence/labels intended for this
 explorer must use that chain-scoped key. The API always marks identity as
 `unverified_address` and `beneficial_owner_verified=false`; a verified
 operator label is not proof of beneficial ownership. The API is read-only:
-watchlist mutation, label editing and evidence promotion are not exposed.
+watchlist mutation, label editing and evidence promotion are not exposed. Operators may
+supply chain-scoped, time-bounded classifications at observer startup through
+AITOS_CFEI_ENTITY_LABELS; allowed categories are exchange, custodian, bridge,
+protocol, market_maker, treasury, staking, burn and other. Each record requires
+an explicit source, timezone-aware valid_from, optional valid_until and an
+operator-controlled verified boolean. These labels classify the observed
+address only; verified does not mean beneficial ownership is proven. Labels
+are append-only in this runtime; expire them with valid_until and maintain
+corrections through a reviewed database maintenance process.
 
 
 ## 18. Walk-forward, calibration and event-family ablation
@@ -411,3 +419,11 @@ ignored by swap decoding. PoolManager sender is a caller or router identity,
 not proof of the ultimate trader. Dynamic hooks, hook-adjusted deltas and
 protocol-specific accounting require separate validation; the observer
 records the PoolManager emitted BalanceDelta and fee as evidence.
+
+
+Example operator-maintained address classification (replace all example
+values and retain the provenance ticket/source):
+
+```dotenv
+AITOS_CFEI_ENTITY_LABELS=[{"chain":"1","address":"0xYOUR_REVIEWED_ADDRESS","label":"Exchange hot wallet","category":"exchange","source":"internal-review-ticket-123","verified":true,"valid_from":"2026-11-18T00:00:00Z","valid_until":"2027-11-18T00:00:00Z"}]
+```
