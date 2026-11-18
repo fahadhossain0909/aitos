@@ -114,7 +114,12 @@ class GovernanceAssessment:
     reasons: tuple[str, ...]
 
 
-def assess_challenger(metrics: CalibrationMetrics, *, abstention_rate: float, thresholds: GovernanceThresholds | None = None) -> GovernanceAssessment:
+def assess_challenger(
+    metrics: CalibrationMetrics,
+    *,
+    abstention_rate: float,
+    thresholds: GovernanceThresholds | None = None,
+) -> GovernanceAssessment:
     """Assess evidence quality; never auto-promotes or enables execution."""
     limits = thresholds or GovernanceThresholds()
     if not 0.0 <= abstention_rate <= 1.0:
@@ -122,10 +127,7 @@ def assess_challenger(metrics: CalibrationMetrics, *, abstention_rate: float, th
     reasons: list[str] = []
     if metrics.samples < limits.minimum_samples:
         reasons.append("insufficient matured out-of-sample observations")
-    if (
-        metrics.brier_score is None
-        or metrics.brier_score > limits.maximum_brier_score
-    ):
+    if metrics.brier_score is None or metrics.brier_score > limits.maximum_brier_score:
         reasons.append("Brier score is unavailable or exceeds governance threshold")
     if (
         metrics.expected_calibration_error is None
