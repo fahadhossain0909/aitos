@@ -41,9 +41,9 @@ def test_native_provider_rejects_missing_or_invalid_direction():
 
 def test_native_provider_supplies_typed_score_and_neutral_noul_prior():
     spec = parse_decision_spec(
-        "DECISION pretrade:\\nSTATE:\\n - direction\\n - composite_score\\n"
-        "ASK direction: CHOICE [LONG, SHORT, NO_TRADE]\\n"
-        "ASK entry_quality: SCORE 1..5\\n"
+        "DECISION pretrade:\nSTATE:\n - direction\n - composite_score\n"
+        "ASK direction: CHOICE [LONG, SHORT, NO_TRADE]\n"
+        "ASK entry_quality: SCORE 1..5\n"
         'ASK reversal: NOUL "a liquidity sweep is a genuine reversal"'
     )
     snapshot = MarketSnapshot(
