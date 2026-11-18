@@ -4,8 +4,13 @@ from decimal import Decimal
 
 import pytest
 
+from aitos.exchange.orderbook import DepthUpdate
+from aitos.exchange.symbol_filters import SymbolFilters
+from aitos.models.market import OrderBookSnapshot
+
 from aitos.native_core import (
     InstrumentScale,
+    NativeOrderBookSession,
     PythonFixedPointOrderBook,
     create_order_book,
     native_available,
@@ -87,3 +92,70 @@ def test_native_reference_parity():
     assert exercise(native) == exercise(reference)
     assert native.depth_imbalance(5) == pytest.approx(reference.depth_imbalance(5))
     assert native.microprice_ticks() == pytest.approx(reference.microprice_ticks())
+
+
+
+def test_instrument_aware_session_converts_snapshot_and_depth_updates():
+    filters = SymbolFilters(
+        symbol="BTCUSDT",
+        step_size=0.001,
+        tick_size=0.01,
+        min_notional=5.0,
+        quantity_precision=3,
+        price_precision=2,
+    )
+    snapshot = OrderBookSnapshot(
+        symbol="BTCUSDT",
+        bids=((65000.12, 0.125),),
+        asks=((65000.14, 0.250),),
+        last_update_id=100,
+        timestamp=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+    )
+    session = NativeOrderBookSession.from_snapshot(
+        snapshot, filters, prefer_native=False
+    )
+    update = DepthUpdate(
+        first_update_id=100,
+        final_update_id=101,
+        previous_update_id=0,
+        bids=((65000.12, 0.200),),
+        asks=(),
+        event_time_ms=1,
+    )
+    assert session.apply_depth_update(update)
+    update_id, bids, asks = session.snapshot(5)
+    assert update_id == 101
+    assert bids == [(Decimal("65000.12"), Decimal("0.200"))]
+    assert asks == [(Decimal("65000.14"), Decimal("0.250"))]
+    metrics = session.metrics()
+    assert metrics["best_bid"] == Decimal("65000.12")
+    assert metrics["best_ask"] == Decimal("65000.14")
+
+
+def test_instrument_aware_session_rejects_off_tick_without_mutation():
+    filters = SymbolFilters(
+        symbol="BTCUSDT",
+        step_size=0.001,
+        tick_size=0.01,
+        min_notional=5.0,
+        quantity_precision=3,
+        price_precision=2,
+    )
+    session = NativeOrderBookSession(
+        InstrumentScale(Decimal("0.01"), Decimal("0.001")),
+        100,
+        [("65000.12", "0.125")],
+        [("65000.14", "0.250")],
+        prefer_native=False,
+    )
+    bad_update = DepthUpdate(
+        first_update_id=100,
+        final_update_id=101,
+        previous_update_id=0,
+        bids=((65000.123, 0.200),),
+        asks=(),
+        event_time_ms=1,
+    )
+    with pytest.raises(ValueError, match="not aligned"):
+        session.apply_depth_update(bad_update)
+    assert session.snapshot(5)[0] == 100
