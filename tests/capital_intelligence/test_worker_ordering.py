@@ -122,7 +122,6 @@ async def test_reorg_tombstones_precede_new_events_and_cursor_checkpoint():
     assert order.index("reorg") < order.index("append") < order.index("checkpoint")
 
 
-
 @pytest.mark.asyncio
 async def test_graph_reorg_reconciliation_precedes_new_events_and_cursor_commit():
     order = []
