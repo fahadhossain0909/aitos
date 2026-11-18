@@ -37,3 +37,21 @@ def test_native_provider_rejects_missing_or_invalid_direction():
     )
     with pytest.raises(ValueError, match="direction"):
         NativeEvidenceProvider().evaluate(snapshot, spec)
+
+
+
+def test_native_provider_supplies_typed_score_and_neutral_noul_prior():
+    spec = parse_decision_spec(
+        "DECISION pretrade:\\nSTATE:\\n - direction\\n - composite_score\\n"
+        "ASK direction: CHOICE [LONG, SHORT, NO_TRADE]\\n"
+        "ASK entry_quality: SCORE 1..5\\n"
+        'ASK reversal: NOUL "a liquidity sweep is a genuine reversal"'
+    )
+    snapshot = MarketSnapshot(
+        "BTCUSDT",
+        datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc),
+        {"direction": "LONG", "composite_score": 80.0},
+    )
+    response = NativeEvidenceProvider().evaluate(snapshot, spec)
+    assert 1.0 <= response.scores["entry_quality"] <= 5.0
+    assert response.nouls["reversal"] == 0.5
