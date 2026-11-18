@@ -318,11 +318,24 @@ class EvmDexFactoryDiscoveryAdapter:
                 )
             )
 
+        reorg_canonical_hashes = {}
+        if reorg_start is not None:
+            for number in range(reorg_start, end + 1):
+                header = block_headers.get(number) or await self._header(number)
+                block_headers[number] = header
+                reorg_canonical_hashes[number] = str(header["hash"]).lower()
+
         # Retain a contiguous window of max_reorg_depth + 1 canonical headers.
-        # The extra ancestor hash allows recovery at the configured depth boundary.
+        # Reuse the prior canonical prefix and fetch only newly scanned blocks.
         window_start = max(0, end - self.max_reorg_depth)
-        recent_hashes = {}
+        recent_hashes = {
+            str(number): block_hash
+            for number, block_hash in previous_hashes.items()
+            if window_start <= int(number) < start
+        }
         for number in range(window_start, end + 1):
+            if str(number) in recent_hashes:
+                continue
             header = block_headers.get(number) or await self._header(number)
             recent_hashes[str(number)] = str(header["hash"]).lower()
 
@@ -331,10 +344,7 @@ class EvmDexFactoryDiscoveryAdapter:
                 "source_id": f"evm:{self.chain_id}",
                 "from_block": reorg_start,
                 "to_block": end,
-                "canonical_hashes": {
-                    number: recent_hashes[str(number)]
-                    for number in range(reorg_start, end + 1)
-                },
+                "canonical_hashes": reorg_canonical_hashes,
                 "detected_at": now.isoformat(),
             }
 
