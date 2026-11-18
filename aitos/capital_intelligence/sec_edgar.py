@@ -600,3 +600,224 @@ class SecEdgarFilingsAdapter:
         if len(serialized) > 262144:
             raise ValueError("SEC cursor exceeds safe size")
         return events, serialized
+
+
+
+class SecEdgarArchiveBackfillSource:
+    """Resumable, bounded traversal of SEC historical submissions archive files.
+
+    Use a separate Redis source ID from the live recent-filings poller. Both sources
+    should share one SecEdgarFilingsAdapter so its global request lock enforces the
+    SEC request pacing across concurrent workers.
+    """
+
+    def __init__(
+        self,
+        adapter: SecEdgarFilingsAdapter,
+        *,
+        max_filings_per_poll: int = 25,
+        max_rows_per_poll: int = 1000,
+    ):
+        if not 1 <= max_filings_per_poll <= 100:
+            raise ValueError("archive filing batch must be between 1 and 100")
+        if not 1 <= max_rows_per_poll <= 5000:
+            raise ValueError("archive row batch must be between 1 and 5000")
+        self.adapter = adapter
+        self.max_filings_per_poll = max_filings_per_poll
+        self.max_rows_per_poll = max_rows_per_poll
+
+    async def close(self) -> None:
+        # The live adapter owns the shared HTTP session and request limiter.
+        return None
+
+    async def poll(
+        self, *, cursor: str | None = None
+    ) -> tuple[list[CapitalEvent], str | None]:
+        if cursor is None:
+            previous: dict[str, Any] = {}
+        else:
+            try:
+                previous = json.loads(cursor)
+            except (TypeError, ValueError):
+                raise ValueError("SEC archive cursor must be a JSON object") from None
+            if not isinstance(previous, dict):
+                raise ValueError("invalid SEC archive cursor")
+
+        state = dict(previous)
+        events: list[CapitalEvent] = []
+        processed_filings = 0
+        processed_rows = 0
+
+        for cik in self.adapter.ciks:
+            if processed_rows >= self.max_rows_per_poll:
+                break
+            current = state.get(cik)
+            if current is not None and (
+                not isinstance(current, dict)
+                or (
+                    current.get("complete") is not True
+                    and (
+                        not isinstance(current.get("file_name"), str)
+                        or isinstance(current.get("row_offset"), bool)
+                        or not isinstance(current.get("row_offset"), int)
+                        or current["row_offset"] < 0
+                    )
+                )
+            ):
+                raise ValueError(f"invalid SEC archive cursor state for CIK {cik}")
+            if isinstance(current, dict) and current.get("complete") is True:
+                continue
+
+            submissions = await self.adapter._get_json(
+                f"{self.adapter.DATA_URL}/submissions/CIK{cik}.json"
+            )
+            archive_files = (submissions.get("filings") or {}).get("files") or []
+            archive_files = sorted(
+                (
+                    item
+                    for item in archive_files
+                    if isinstance(item, dict)
+                    and isinstance(item.get("name"), str)
+                    and item["name"].endswith(".json")
+                ),
+                key=lambda item: (str(item.get("filingFrom", "")), item["name"]),
+            )
+            if not archive_files:
+                state[cik] = {"complete": True}
+                continue
+
+            if current is None:
+                file_index, row_offset = 0, 0
+            else:
+                matches = [
+                    index
+                    for index, item in enumerate(archive_files)
+                    if item["name"] == current["file_name"]
+                ]
+                if not matches:
+                    raise RuntimeError(
+                        f"SEC archive cursor file disappeared for CIK {cik}; "
+                        "controlled cursor reconciliation required"
+                    )
+                file_index, row_offset = matches[0], current["row_offset"]
+
+            while file_index < len(archive_files):
+                file_name = archive_files[file_index]["name"]
+                archive = await self.adapter._get_json(
+                    f"{self.adapter.DATA_URL}/submissions/{file_name}"
+                )
+                accessions = archive.get("accessionNumber") or []
+                forms = archive.get("form") or []
+                dates = archive.get("filingDate") or []
+                primary_docs = archive.get("primaryDocument") or []
+                report_dates = archive.get("reportDate") or []
+                row_count = min(
+                    len(accessions),
+                    len(forms),
+                    len(dates),
+                    len(primary_docs),
+                    len(report_dates),
+                )
+                if any(
+                    len(values) != row_count
+                    for values in (
+                        accessions,
+                        forms,
+                        dates,
+                        primary_docs,
+                        report_dates,
+                    )
+                ):
+                    raise RuntimeError(
+                        f"SEC archive arrays have inconsistent lengths: {file_name}"
+                    )
+                if row_offset > row_count:
+                    raise RuntimeError(
+                        f"SEC archive cursor offset exceeds file length: {file_name}"
+                    )
+
+                while row_offset < row_count:
+                    if (
+                        processed_rows >= self.max_rows_per_poll
+                        or processed_filings >= self.max_filings_per_poll
+                    ):
+                        break
+                    row = {
+                        "accession": str(accessions[row_offset]),
+                        "form": str(forms[row_offset]),
+                        "filing_date": str(dates[row_offset]),
+                        "primary": str(primary_docs[row_offset]),
+                        "report_date": str(report_dates[row_offset]),
+                    }
+                    if row["form"] in self.adapter.forms:
+                        filing_date = self.adapter._day(row["filing_date"])
+                        if filing_date is None:
+                            raise RuntimeError(
+                                "SEC archive filing has an invalid filing date"
+                            )
+                        accession = row["accession"]
+                        directory = (
+                            f"{self.adapter.ARCHIVES_URL}{int(cik)}/"
+                            f"{accession.replace('-', '')}/"
+                        )
+                        if row["form"].startswith("13F-HR"):
+                            document_url = await self.adapter._information_table_url(
+                                cik, accession, row["primary"]
+                            )
+                            events.extend(
+                                await self.adapter._parse_13f(
+                                    cik,
+                                    accession,
+                                    row["form"],
+                                    filing_date,
+                                    row["report_date"],
+                                    document_url,
+                                )
+                            )
+                        elif row["form"] in {
+                            "3",
+                            "3/A",
+                            "4",
+                            "4/A",
+                            "5",
+                            "5/A",
+                        }:
+                            document_url = urljoin(directory, row["primary"])
+                            events.extend(
+                                await self.adapter._parse_form4(
+                                    cik,
+                                    accession,
+                                    filing_date,
+                                    row["form"],
+                                    document_url,
+                                )
+                            )
+                        processed_filings += 1
+
+                    row_offset += 1
+                    processed_rows += 1
+                    state[cik] = {
+                        "file_name": file_name,
+                        "row_offset": row_offset,
+                    }
+
+                if row_offset >= row_count:
+                    file_index += 1
+                    row_offset = 0
+                    if file_index < len(archive_files):
+                        state[cik] = {
+                            "file_name": archive_files[file_index]["name"],
+                            "row_offset": 0,
+                        }
+                    else:
+                        state[cik] = {"complete": True}
+                if (
+                    processed_rows >= self.max_rows_per_poll
+                    or processed_filings >= self.max_filings_per_poll
+                ):
+                    break
+
+        serialized = json.dumps(state, sort_keys=True, separators=(",", ":"))
+        if len(serialized) > 262144:
+            raise ValueError("SEC archive cursor exceeds safe size")
+        return events, serialized
