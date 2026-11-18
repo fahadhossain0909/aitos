@@ -323,8 +323,14 @@ belongs in ClickHouse/Neo4j, not Prometheus.
 
 ## 17. Read-only entity explorer API
 
-The optional observer exposes a bounded entity read model on the same internal
-HTTP listener as `/metrics`. Entity endpoints are disabled unless
+The optional observer exposes a bounded entity read model and a dependency-free
+analyst dashboard on the same internal HTTP listener as `/metrics`. Open
+`/entities` from the trusted internal network, enter the operator bearer token
+in the password field, and load the top 100 observed addresses. Selecting an
+address loads its bounded event/evidence/label history. The browser keeps the
+token only in page memory, sends it only to same-origin API requests, and uses
+text-only DOM rendering for untrusted address/label data. The dashboard does
+not mutate watchlists, labels, evidence or strategy state. Entity endpoints are disabled unless
 `AITOS_CFEI_API_TOKEN` is configured with at least 32 characters. Requests
 must include `Authorization: Bearer <token>`; use a secret manager in
 production and do not expose the observer port publicly without network
