@@ -216,6 +216,72 @@ class SolanaAddressActivityAdapter:
             )
         return evidence
 
+    @staticmethod
+    def _stake_instruction_evidence(
+        message: dict[str, Any],
+        monitored_address: str,
+    ) -> list[dict[str, Any]]:
+        """Extract parsed Stake Program lifecycle instructions as evidence only."""
+        outer = list(message.get("instructions") or [])
+        instructions = list(outer)
+        for group in message.get("innerInstructions") or []:
+            instructions.extend(group.get("instructions") or [])
+        allowed = {
+            "initialize",
+            "initializeChecked",
+            "delegate",
+            "deactivate",
+            "withdraw",
+            "split",
+            "merge",
+            "authorize",
+            "authorizeWithSeed",
+            "setLockup",
+        }
+        evidence = []
+        for index, instruction in enumerate(instructions):
+            if instruction.get("program") not in {"stake", "stake_program"}:
+                continue
+            parsed = instruction.get("parsed")
+            if not isinstance(parsed, dict) or parsed.get("type") not in allowed:
+                continue
+            info = parsed.get("info") or {}
+            addresses = {
+                str(value)
+                for key, value in info.items()
+                if key.lower() in {
+                    "stakeaccount",
+                    "stakeaccountaddress",
+                    "voteaccount",
+                    "source",
+                    "destination",
+                    "authority",
+                    "newauthority",
+                    "withdrawauthority",
+                    "staker",
+                }
+                and isinstance(value, str)
+            }
+            if monitored_address not in addresses:
+                continue
+            lamports = info.get("lamports")
+            evidence.append(
+                {
+                    "instruction_index": index,
+                    "instruction_type": parsed.get("type"),
+                    "account_references": sorted(addresses),
+                    "raw_lamports": (
+                        str(lamports)
+                        if lamports is not None and str(lamports).isdigit()
+                        else None
+                    ),
+                    "is_cpi_or_inner_instruction": index >= len(outer),
+                    "evidence_only": True,
+                    "ownership_scope": "instruction_account_reference_not_beneficial_owner_proof",
+                }
+            )
+        return evidence
+
     async def _address_events(
         self, address: str, previous: str | None, observed_at: datetime
     ) -> tuple[list[CapitalEvent], str | None]:
@@ -360,6 +426,9 @@ class SolanaAddressActivityAdapter:
             system_transfer_evidence = self._system_transfer_evidence(
                 message, address
             )
+            stake_instruction_evidence = self._stake_instruction_evidence(
+                message, address
+            )
             pre = meta.get("preBalances") or []
             post = meta.get("postBalances") or []
             try:
@@ -397,6 +466,7 @@ class SolanaAddressActivityAdapter:
                                 "decimals": 9,
                                 "native_delta_includes_network_fee_and_rent": True,
                                 "system_transfer_evidence": system_transfer_evidence,
+                                "stake_instruction_evidence": stake_instruction_evidence,
                                 "instruction_evidence_is_not_additional_flow": True,
                             },
                         )
