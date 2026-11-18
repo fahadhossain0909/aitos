@@ -51,6 +51,7 @@ def replay_chronologically(
             item.snapshot.symbol,
         ),
     )
+    runtime.calibrator = calibrator
     results: list[DecisionResult] = []
     pending: list[tuple[ReplayObservation, dict[str, float]]] = []
     correct = 0
@@ -75,6 +76,17 @@ def replay_chronologically(
         abstentions += int(result.action == DecisionAction.ABSTAIN)
         correct += int(result.proposed_action.value == item.realized_action)
         pending.append((item, dict(result.raw_probabilities)))
+
+    # Final labels can be scored after the final decision; they cannot affect it.
+    for matured_item, raw_probabilities in pending:
+        for action in ("LONG", "SHORT", "NO_TRADE"):
+            probability = raw_probabilities.get(action)
+            if probability is not None:
+                calibrator.update(
+                    action,
+                    probability,
+                    action == matured_item.realized_action,
+                )
 
     count = len(ordered)
     return ReplayReport(
