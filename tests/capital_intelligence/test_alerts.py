@@ -101,8 +101,7 @@ async def test_webhook_skips_reverted_and_aggregate_events():
     )
     assert await alerter.notify_event(make_event(finality="reverted")) == 0
     assert (
-        await alerter.notify_event(make_event(metadata={"aggregate_only": True}))
-        == 0
+        await alerter.notify_event(make_event(metadata={"aggregate_only": True})) == 0
     )
     assert not session.posts
 
