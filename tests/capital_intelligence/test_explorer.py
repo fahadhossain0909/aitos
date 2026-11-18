@@ -16,7 +16,7 @@ class FakeClickHouse:
 
     async def query(self, query, parameters=None):
         self.calls.append((query, parameters))
-        if "GROUP BY venue, actor_id" in query:
+        if "GROUP BY venue, address" in query:
             return FakeResult(
                 [
                     (
@@ -37,7 +37,9 @@ class FakeClickHouse:
                 [
                     (
                         '{"event_id":"evt-1","finality":"confirmed",'
-                        '"metadata":{"actor_identity_kind":"evm_address"}}',
+                        '"actor_id":"0x' + 'b' * 40 + '",'
+                        '"counterparty_id":"0x' + 'a' * 40 + '",'
+                        '"metadata":{"actor_identity_kind":"evm_address","flow_sign":-1}}',
                     )
                 ]
             )
@@ -91,6 +93,8 @@ async def test_entity_explorer_returns_events_evidence_and_temporal_labels():
 
     assert entity["beneficial_owner_verified"] is False
     assert entity["events"][0]["event_id"] == "evt-1"
+    assert entity["events"][0]["entity_role"] == "counterparty"
+    assert entity["events"][0]["entity_flow_sign"] == 1
     assert entity["evidence"][0]["status"] == "candidate"
     assert entity["labels"][0]["verified"] is True
     assert len(client.calls) == 3
