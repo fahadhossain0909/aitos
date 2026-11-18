@@ -96,7 +96,7 @@ def test_ranking_is_explainable_and_excludes_aggregate_cohorts():
     ranked = rank_capital_candidates(
         rows + [aggregate], market_liquidity_usd={"USDC": 1_000_000}
     )
-    assert [item.entity_id for item in ranked] == ["1:wallet:a"]
+    assert [item.entity_id for item in ranked] == ["1:wallet:a", "1:wallet:z"]
     assert ranked[0].event_count == 3
     assert ranked[0].source_count == 3
     assert ranked[0].component_scores["source_diversity"] == 1.0
@@ -213,10 +213,10 @@ def test_address_ranking_excludes_pool_callers_and_non_address_entities():
 
 
 def test_ranking_keeps_same_address_separate_across_chains():
-    first = event("chain-1-a", "0x" + "a" * 40, 1000, 1)
-    second = event("chain-1-b", "0x" + "a" * 40, 2000, 1)
-    third = event("chain-137-a", "0x" + "a" * 40, 3000, 1)
-    fourth = event("chain-137-b", "0x" + "a" * 40, 4000, 1)
+    first = event("chain-1-a", "0x" + "a" * 40, 1000, 1, counterparty="")
+    second = event("chain-1-b", "0x" + "a" * 40, 2000, 1, counterparty="")
+    third = event("chain-137-a", "0x" + "a" * 40, 3000, 1, counterparty="")
+    fourth = event("chain-137-b", "0x" + "a" * 40, 4000, 1, counterparty="")
     third = CapitalEvent(
         third.event_id, third.source_id, third.source_kind, third.market, "137",
         third.instrument, third.event_type, third.event_time, third.observed_time,
@@ -237,3 +237,17 @@ def test_ranking_keeps_same_address_separate_across_chains():
         "137:" + "0x" + "a" * 40,
     }
     assert sorted(item.gross_flow_usd for item in ranked) == [3000, 7000]
+
+
+
+def test_transfer_ranking_accounts_for_sender_and_recipient_flow():
+    sender = event("transfer-1", "wallet:sender", 5000, -1, counterparty="wallet:receiver")
+    receiver = rank_capital_candidates([sender], minimum_events=1)
+    assert {item.entity_id for item in receiver} == {
+        "1:wallet:sender",
+        "1:wallet:receiver",
+    }
+    by_entity = {item.entity_id: item for item in receiver}
+    assert by_entity["1:wallet:sender"].net_flow_usd == -5000
+    assert by_entity["1:wallet:receiver"].net_flow_usd == 5000
+    assert by_entity["1:wallet:receiver"].direction_coverage == 1.0
