@@ -77,6 +77,7 @@ class CapitalEntityExplorer:
                     observed_time
                 FROM {self.events_table} FINAL
                 WHERE counterparty_id != ''
+                  AND counterparty_id != actor_id
                   AND lower(counterparty_id) NOT IN (
                       '0x0000000000000000000000000000000000000000',
                       '0x000000000000000000000000000000000000dead'
@@ -103,7 +104,14 @@ class CapitalEntityExplorer:
                 sumIf(ifNull(usd_value, 0), flow_sign = 1) AS inflow_usd,
                 sumIf(ifNull(usd_value, 0), flow_sign = -1) AS outflow_usd,
                 uniqExactIf(source_id, source_id != '') AS source_count,
-                uniqExactIf(counterparty, counterparty != '') AS counterparty_count,
+                uniqExactIf(
+                    counterparty,
+                    counterparty != ''
+                    AND lower(counterparty) NOT IN (
+                        '0x0000000000000000000000000000000000000000',
+                        '0x000000000000000000000000000000000000dead'
+                    )
+                ) AS counterparty_count,
                 max(observed_time) AS last_observed_at
             FROM address_flows
             GROUP BY venue, address
