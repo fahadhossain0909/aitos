@@ -47,6 +47,7 @@ class EvmDexFactoryDiscoveryAdapter:
         confirmations: int = 12,
         max_block_range: int = 500,
         max_reorg_depth: int = 64,
+        start_block: int | None = None,
         timeout_seconds: float = 10.0,
         session: aiohttp.ClientSession | None = None,
     ):
@@ -58,6 +59,12 @@ class EvmDexFactoryDiscoveryAdapter:
             raise ValueError("invalid factory scan range")
         if not 1 <= max_reorg_depth <= 256:
             raise ValueError("invalid factory reorg depth")
+        if start_block is not None and (
+            isinstance(start_block, bool)
+            or not isinstance(start_block, int)
+            or start_block < 0
+        ):
+            raise ValueError("start_block must be a non-negative integer")
         if not 0.2 <= timeout_seconds <= 30:
             raise ValueError("invalid timeout")
         self.rpc_url = rpc_url
@@ -70,6 +77,7 @@ class EvmDexFactoryDiscoveryAdapter:
         self.confirmations = confirmations
         self.max_block_range = max_block_range
         self.max_reorg_depth = max_reorg_depth
+        self.start_block = start_block
         self.timeout_seconds = timeout_seconds
         self.session = session
         self.owns_session = session is None
@@ -197,7 +205,11 @@ class EvmDexFactoryDiscoveryAdapter:
                 # one successful poll; they cannot prove whether older blocks reorged.
                 start = old_head + 1
         else:
-            start = max(0, safe - self.max_block_range + 1)
+            start = (
+                self.start_block
+                if self.start_block is not None
+                else max(0, safe - self.max_block_range + 1)
+            )
 
         if safe < start:
             return [], cursor
