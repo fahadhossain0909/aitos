@@ -58,6 +58,8 @@ async def test_capital_flow_bridge_preserves_provenance_without_inventing_sentim
     assert item.metadata["strategy_use_approved"] is False
     assert item.metadata["actor_id"] == "0xwallet"
     assert item.source.is_primary is True
+    assert item.source.source_id == adapter.source_id
+    assert item.metadata["cfei_source_id"] == "evm:1"
     assert "capital_flow_events FINAL" in client.query_text
     assert client.parameters["limit"] == 20
     assert client.parameters["observed_after"] < event.observed_time.isoformat()
