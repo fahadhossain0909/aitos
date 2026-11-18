@@ -153,6 +153,7 @@ async def test_cftc_cursor_migrates_legacy_offset_and_validates_revision_cursor(
         dataset_id="6dca-aqww",
         field_map=FIELD_MAP,
         revision_refresh_pages_per_poll=0,
+        session=Session([[]]),
     )
     events, cursor = await adapter.poll(cursor='{"offset":7}')
     assert events == []
