@@ -1,0 +1,42 @@
+groups:
+  - name: aitos-capital-intelligence
+    rules:
+      - alert: AITOSCFEIPollErrors
+        expr: increase(aitos_cfei_poll_errors[10m]) > 3
+        for: 2m
+        labels:
+          severity: warning
+          component: capital-intelligence
+        annotations:
+          summary: "CFEI source polling is repeatedly failing"
+          description: "Inspect the observer logs, RPC provider limits and source configuration. Trading execution is not affected."
+
+      - alert: AITOSCFEIStaleObserver
+        expr: time() - aitos_cfei_last_poll_unix_seconds > 180
+        for: 2m
+        labels:
+          severity: warning
+          component: capital-intelligence
+        annotations:
+          summary: "CFEI observer has not completed a poll recently"
+          description: "Check service health, Redis lease contention and RPC availability."
+
+      - alert: AITOSCFEISourcePollErrors
+        expr: sum by (source_id) (increase(aitos_cfei_source_poll_errors_total[10m])) > 3
+        for: 2m
+        labels:
+          severity: warning
+          component: capital-intelligence
+        annotations:
+          summary: "A CFEI source is repeatedly failing"
+          description: "Inspect the source-specific observer logs, provider limits and cursor recovery state."
+
+      - alert: AITOSCFEISourceStale
+        expr: time() - aitos_cfei_source_last_success_unix_seconds > 180
+        for: 2m
+        labels:
+          severity: warning
+          component: capital-intelligence
+        annotations:
+          summary: "A configured CFEI source is stale"
+          description: "Check the source-specific RPC/SEC/CFTC endpoint, Redis lease and ingestion worker."

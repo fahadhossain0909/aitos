@@ -5,16 +5,16 @@ import pytest
 from aitos.world_intelligence.contracts import IntelligenceEvent, SourceEvidence
 from aitos.world_intelligence.worker import IntelligenceIngestionWorker
 
-NOW = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
-
 
 def make_event():
+    # Keep the fixture inside the production 72-hour ingestion window.
+    now = datetime.now(timezone.utc)
     source = SourceEvidence(
         source_id="test",
         source_kind="news",
         uri="https://example.test/story",
-        published_at=NOW - timedelta(seconds=1),
-        first_seen_at=NOW,
+        published_at=now - timedelta(seconds=1),
+        first_seen_at=now,
         reliability=0.8,
     )
     return IntelligenceEvent(
@@ -23,7 +23,7 @@ def make_event():
         title="Test event",
         entities=("BTC",),
         published_at=source.published_at,
-        first_seen_at=NOW,
+        first_seen_at=now,
         source=source,
         sentiment=0.0,
         severity=0.2,

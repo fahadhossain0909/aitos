@@ -48,7 +48,9 @@ class EntityAliasRegistry:
         normalized = " ".join(text.casefold().split())
         matches: list[tuple[int, int, str, str]] = []
         for alias, canonical in self._aliases.items():
-            pattern = re.compile(r"(?<![\w])" + re.escape(alias) + r"(?![\w])", re.IGNORECASE)
+            pattern = re.compile(
+                r"(?<![\w])" + re.escape(alias) + r"(?![\w])", re.IGNORECASE
+            )
             for match in pattern.finditer(normalized):
                 matches.append((match.start(), match.end(), alias, canonical))
         matches.sort(key=lambda item: (item[0], -(item[1] - item[0]), item[2]))

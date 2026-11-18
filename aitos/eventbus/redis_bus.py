@@ -35,6 +35,7 @@ PENDING_RECLAIM_IDLE_MS = 5_000
 PENDING_RECLAIM_BATCH_SIZE = 100
 
 STREAM_MAXLEN_DEFAULTS = {
+    "intelligence.events.normalized": 25_000,
     "market.trade": 25_000,
     "market.book.delta": 25_000,
     "market.book.snapshot": 5_000,

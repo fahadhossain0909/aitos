@@ -326,9 +326,7 @@ class SECEdgarSubmissionsAdapter(_JSONSource):
                 f"https://www.sec.gov/Archives/edgar/data/{int(self.cik)}/"
                 f"{accession_path}/{urllib.parse.quote(document)}"
             )
-            event_id = hashlib.sha256(
-                f"{self.cik}|{accession}".encode()
-            ).hexdigest()
+            event_id = hashlib.sha256(f"{self.cik}|{accession}".encode()).hexdigest()
             title = f"{company} filed SEC form {form}"
             source = SourceEvidence(
                 source_id=self.source_id,

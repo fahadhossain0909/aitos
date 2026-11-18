@@ -4,6 +4,7 @@ global:
 
 rule_files:
   - alerts/world-intelligence.yml
+  - alerts/capital-intelligence.yml
 
 scrape_configs:
   - job_name: aitos-paper
@@ -20,3 +21,8 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets: ["aitos-world-intelligence:8120"]
+
+  - job_name: aitos-capital-intelligence
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["aitos-capital-intelligence:8121"]

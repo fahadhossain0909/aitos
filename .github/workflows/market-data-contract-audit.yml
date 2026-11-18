@@ -24,7 +24,7 @@ jobs:
       CLICKHOUSE_USER: aitos_test
       CLICKHOUSE_PASSWORD: aitos_test_password
       CLICKHOUSE_DATABASE: aitos
-      REDIS_HOST: localhost
+      REDIS_HOST: 127.0.0.1
       REDIS_PORT: '6379'
       REDIS_PASSWORD: aitos_test_password
       INTEGRATION_REDIS_URL: redis://:aitos_test_password@127.0.0.1:6379/0

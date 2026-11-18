@@ -1,0 +1,48 @@
+{
+  "annotations": {"list": []},
+  "editable": false,
+  "panels": [
+    {
+      "title": "CFEI normalized event throughput",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "rate(aitos_cfei_events_persisted[5m])", "legendFormat": "all sources/s"},
+        {"expr": "sum by (source_id) (rate(aitos_cfei_source_events_persisted_total[5m]))", "legendFormat": "{{source_id}}/s"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+    },
+    {
+      "title": "Source polling errors",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "increase(aitos_cfei_poll_errors[10m])", "legendFormat": "all errors"},
+        {"expr": "sum by (source_id) (increase(aitos_cfei_source_poll_errors_total[10m]))", "legendFormat": "{{source_id}}"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+    },
+    {
+      "title": "Source freshness",
+      "type": "timeseries",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "time() - aitos_cfei_source_last_success_unix_seconds", "legendFormat": "{{source_id}} age seconds"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8}
+    },
+    {
+      "title": "Observer-wide last successful poll",
+      "type": "stat",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {"expr": "time() - aitos_cfei_last_poll_unix_seconds", "legendFormat": "seconds since success"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8}
+    }
+  ],
+  "schemaVersion": 39,
+  "title": "AITOS Capital Flow & Entity Intelligence",
+  "uid": "aitos-capital-intelligence",
+  "version": 1
+}
