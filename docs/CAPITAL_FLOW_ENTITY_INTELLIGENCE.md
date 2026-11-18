@@ -343,3 +343,19 @@ address strings across networks. The API always marks identity as
 `unverified_address` and `beneficial_owner_verified=false`; a verified
 operator label is not proof of beneficial ownership. The API is read-only:
 watchlist mutation, label editing and evidence promotion are not exposed.
+
+
+## 18. Walk-forward, calibration and event-family ablation
+
+The research harness now includes expanding-window `walk_forward_splits`
+with label-horizon purging, maximum quote-age allowance and optional embargo.
+It also exposes `summarize_replay_by_event_type` to compare event families
+under the same explicit fee, spread, slippage and funding assumptions.
+
+`evaluate_probabilistic_predictions` reports Brier score, log loss, expected
+calibration error, precision, recall and F1 at a predeclared threshold. It
+accepts only externally generated probabilities and binary outcomes. The
+CFEI candidate ranking score is a heuristic and must not be passed as a
+probability or described as calibrated. No trained model, predictive lift,
+statistical significance or out-of-sample performance is claimed without
+real point-in-time historical datasets and completed fold reports.
