@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import hashlib
+import json
 from datetime import datetime, timezone
 from typing import Any
 import aiohttp
@@ -22,12 +23,15 @@ class EvmDexSwapAdapter:
         pools: dict[str, str],
         confirmations: int = 12,
         max_block_range: int = 250,
+        max_reorg_depth: int = 64,
         session: aiohttp.ClientSession | None = None,
     ):
         if not rpc_url.startswith("https://") or not pools or len(pools) > 300:
             raise ValueError("HTTPS RPC and 1-300 pools required")
         if not 1 <= confirmations <= 10000 or not 1 <= max_block_range <= 2000:
             raise ValueError("invalid block bounds")
+        if not 1 <= max_reorg_depth <= 256:
+            raise ValueError("invalid reorg depth")
         self.rpc_url = rpc_url
         self.chain_id = chain_id
         self.pools = {self._address(k): v.lower() for k, v in pools.items()}
@@ -38,6 +42,8 @@ class EvmDexSwapAdapter:
             raise ValueError("unsupported pool protocol")
         self.confirmations = confirmations
         self.max_block_range = max_block_range
+        self.max_reorg_depth = max_reorg_depth
+        self.last_reorg: dict[str, Any] | None = None
         self.session = session
         self.owns_session = session is None
         self.request_id = 0
@@ -96,20 +102,105 @@ class EvmDexSwapAdapter:
         self._pool_tokens[pool] = (values[0], values[1])
         return values[0], values[1]
 
+    async def _header(self, number: int) -> dict[str, Any]:
+        block = await self._rpc("eth_getBlockByNumber", [hex(number), False])
+        if not block or not block.get("hash") or not block.get("timestamp"):
+            raise RuntimeError("DEX canonical block header unavailable")
+        return block
+
     async def poll(self, *, cursor: str | None = None):
+        self.last_reorg = None
         latest = int(await self._rpc("eth_blockNumber", []), 16)
         safe = latest - self.confirmations
-        start = (
-            int(cursor, 16) + 1 if cursor else max(0, safe - self.max_block_range + 1)
-        )
-        if safe < start:
+        state = None
+        if cursor and cursor.startswith("{"):
+            try:
+                state = json.loads(cursor)
+            except ValueError:
+                raise ValueError("invalid DEX reorg cursor JSON") from None
+            if (
+                not isinstance(state, dict)
+                or state.get("version") != 2
+                or not isinstance(state.get("head_block"), int)
+                or not isinstance(state.get("recent_hashes"), dict)
+            ):
+                raise ValueError("invalid DEX reorg cursor schema")
+            if any(
+                not str(number).isdigit()
+                or not isinstance(block_hash, str)
+                or not block_hash.startswith("0x")
+                for number, block_hash in state["recent_hashes"].items()
+            ):
+                raise ValueError("invalid DEX cursor block-hash map")
+        elif cursor:
+            try:
+                legacy_head = int(cursor, 16)
+            except ValueError:
+                raise ValueError("DEX cursor must be a hex block or version-2 JSON") from None
+            if legacy_head < 0:
+                raise ValueError("invalid DEX cursor")
+            state = {"version": 1, "head_block": legacy_head, "recent_hashes": {}}
+
+        previous_hashes = dict(state.get("recent_hashes", {})) if state else {}
+        reorg_start = None
+        if state is not None:
+            old_head = state["head_block"]
+            if old_head > safe:
+                raise RuntimeError("DEX safe head regressed below persisted cursor")
+            if state.get("version") == 2:
+                known_head = previous_hashes.get(str(old_head))
+                if not known_head:
+                    raise RuntimeError("DEX cursor missing canonical head hash")
+                current_head = await self._header(old_head)
+                if current_head["hash"].lower() != known_head.lower():
+                    ancestor = None
+                    lower = max(0, old_head - self.max_reorg_depth)
+                    for number in range(old_head - 1, lower - 1, -1):
+                        known = previous_hashes.get(str(number))
+                        if not known:
+                            continue
+                        header = await self._header(number)
+                        if header["hash"].lower() == known.lower():
+                            ancestor = number
+                            break
+                    if ancestor is None:
+                        raise RuntimeError(
+                            "DEX reorg exceeds retained canonical window; controlled backfill required"
+                        )
+                    reorg_start = ancestor + 1
+                    if old_head - ancestor > self.max_reorg_depth:
+                        raise RuntimeError("DEX reorg exceeds configured maximum depth")
+                    start_block = reorg_start
+                else:
+                    start_block = old_head + 1
+            else:
+                start_block = old_head + 1
+        else:
+            start_block = max(0, safe - self.max_block_range + 1)
+
+        if safe < start_block:
             return [], cursor
-        end = min(safe, start + self.max_block_range - 1)
+        end = min(safe, start_block + self.max_block_range - 1)
+        if reorg_start is not None and end < state["head_block"]:
+            raise RuntimeError("DEX reorg recovery range is not fully available")
+
+        canonical_hashes: dict[int, str] = {}
+        if reorg_start is not None:
+            for number in range(reorg_start, end + 1):
+                canonical_hashes[number] = (await self._header(number))["hash"].lower()
+            self.last_reorg = {
+                "source_id": f"evm:{self.chain_id}",
+                "from_block": reorg_start,
+                "to_block": end,
+                "canonical_hashes": canonical_hashes,
+                "detected_at": datetime.now(timezone.utc).isoformat(),
+            }
+
         logs = await self._rpc(
             "eth_getLogs",
             [
                 {
-                    "fromBlock": hex(start),
+                    "fromBlock": hex(start_block),
                     "toBlock": hex(end),
                     "address": list(self.pools),
                     "topics": [[V2_SWAP_TOPIC, V3_SWAP_TOPIC]],
@@ -131,14 +222,16 @@ class EvmDexSwapAdapter:
             if topic == V3_SWAP_TOPIC and not protocol.endswith("_v3"):
                 continue
             words = [data[i : i + 64] for i in range(0, len(data), 64)]
-            signed = lambda w: (
-                int(w, 16) - (1 << 256) if int(w, 16) >= (1 << 255) else int(w, 16)
+            signed = lambda word: (
+                int(word, 16) - (1 << 256)
+                if int(word, 16) >= (1 << 255)
+                else int(word, 16)
             )
             if topic == V2_SWAP_TOPIC:
                 if len(words) < 4:
                     continue
                 amount0_in, amount1_in, amount0_out, amount1_out = [
-                    int(w, 16) for w in words[:4]
+                    int(word, 16) for word in words[:4]
                 ]
                 delta0 = amount0_in - amount0_out
                 delta1 = amount1_in - amount1_out
@@ -153,16 +246,18 @@ class EvmDexSwapAdapter:
             tx = log["transactionHash"]
             index = int(log["logIndex"], 16)
             if block not in block_times:
-                block_data = await self._rpc(
-                    "eth_getBlockByNumber", [hex(block), False]
-                )
-                if not block_data or not block_data.get("timestamp"):
-                    raise RuntimeError(
-                        "DEX block timestamp unavailable; refusing bad event"
-                    )
+                block_data = await self._header(block)
                 block_times[block] = datetime.fromtimestamp(
                     int(block_data["timestamp"], 16), timezone.utc
                 )
+                canonical_hash = block_data["hash"].lower()
+                if canonical_hashes and block in canonical_hashes:
+                    if canonical_hashes[block] != canonical_hash:
+                        raise RuntimeError("DEX canonical hash changed during scan")
+                canonical_hashes[block] = canonical_hash
+            block_hash = str(log.get("blockHash") or "").lower()
+            if block_hash and block_hash != canonical_hashes[block]:
+                raise RuntimeError("DEX log block hash changed during poll; retry")
             event_id = hashlib.sha256(
                 f"{self.chain_id}|{tx}|{index}".encode()
             ).hexdigest()
@@ -188,7 +283,7 @@ class EvmDexSwapAdapter:
                     actor_id=actor,
                     transaction_id=tx,
                     block_number=block,
-                    block_hash=log.get("blockHash"),
+                    block_hash=canonical_hashes[block],
                     finality="confirmed",
                     metadata={
                         "chain_id": self.chain_id,
@@ -206,4 +301,23 @@ class EvmDexSwapAdapter:
                     },
                 )
             )
-        return events, hex(end)
+
+        window_start = max(0, end - self.max_reorg_depth)
+        retained = {
+            str(number): block_hash
+            for number, block_hash in previous_hashes.items()
+            if int(number) >= window_start and int(number) < start_block
+        }
+        for number in range(window_start, end + 1):
+            if str(number) in retained:
+                continue
+            if number in canonical_hashes:
+                retained[str(number)] = canonical_hashes[number]
+            else:
+                retained[str(number)] = (await self._header(number))["hash"].lower()
+        next_cursor = json.dumps(
+            {"version": 2, "head_block": end, "recent_hashes": retained},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return events, next_cursor
