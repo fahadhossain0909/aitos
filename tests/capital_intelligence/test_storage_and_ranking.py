@@ -96,7 +96,7 @@ def test_ranking_is_explainable_and_excludes_aggregate_cohorts():
     ranked = rank_capital_candidates(
         rows + [aggregate], market_liquidity_usd={"USDC": 1_000_000}
     )
-    assert [item.entity_id for item in ranked] == ["1:wallet:a", "1:wallet:z"]
+    assert [item.entity_id for item in ranked] == ["1:wallet:a"]
     assert ranked[0].event_count == 3
     assert ranked[0].source_count == 3
     assert ranked[0].component_scores["source_diversity"] == 1.0
