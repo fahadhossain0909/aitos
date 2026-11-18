@@ -71,7 +71,6 @@ def test_retention_can_be_overridden_per_stream_family(
     assert _stream_maxlen("trade.position_opened") is None
 
 
-
 def test_normalized_intelligence_stream_retention_can_be_overridden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
