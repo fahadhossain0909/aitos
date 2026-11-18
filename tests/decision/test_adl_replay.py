@@ -4,6 +4,7 @@ from aitos.decision.calibration import CalibrationMetrics, ProbabilityCalibrator
 from aitos.decision.dsl import parse_decision_spec
 from aitos.decision.replay import (
     GovernanceThresholds,
+    ReplayExecution,
     ReplayObservation,
     assess_challenger,
     replay_chronologically,
@@ -75,3 +76,72 @@ def test_governance_allows_canary_only_with_mature_good_oos_metrics():
     )
     assert result.eligible_for_shadow is True
     assert result.eligible_for_canary is True
+
+
+
+def test_replay_reports_observed_costs_and_partial_fills():
+    now = datetime(2026, 11, 18, 12, 0, tzinfo=timezone.utc)
+    spec = parse_decision_spec(
+        "DECISION test:\\nSTATE:\\n - x\\nASK side: CHOICE [LONG, SHORT, NO_TRADE]"
+    )
+    observations = [
+        ReplayObservation(
+            MarketSnapshot(
+                "BTCUSDT",
+                now,
+                {"x": 1},
+                snapshot_id="filled",
+            ),
+            "LONG",
+            now + timedelta(minutes=1),
+            execution=ReplayExecution(
+                gross_pnl=12.0,
+                fees=1.0,
+                funding=-0.5,
+                slippage=0.8,
+                latency_cost=0.2,
+                fill_ratio=0.75,
+            ),
+        ),
+        ReplayObservation(
+            MarketSnapshot(
+                "ETHUSDT",
+                now + timedelta(minutes=1),
+                {"x": 1},
+                snapshot_id="complete",
+            ),
+            "SHORT",
+            now + timedelta(minutes=2),
+            execution=ReplayExecution(gross_pnl=-3.0, fees=0.2),
+        ),
+    ]
+    runtime = ADLRuntime(
+        _Provider(),
+        policy=DecisionPolicy(
+            require_calibration=False,
+            require_positive_expected_value=False,
+        ),
+    )
+    report = replay_chronologically(
+        runtime, spec, observations, ProbabilityCalibrator(minimum_samples=1)
+    )
+    summary = report.execution_summary
+    assert summary is not None
+    assert summary.observations == 2
+    assert summary.gross_pnl == 9.0
+    assert summary.fees == 1.2
+    assert summary.funding == -0.5
+    assert summary.slippage == 0.8
+    assert summary.latency_cost == 0.2
+    assert summary.net_pnl == pytest.approx(7.3)
+    assert summary.partial_fill_observations == 1
+    assert summary.mean_fill_ratio == pytest.approx(0.875)
+
+
+def test_replay_execution_rejects_invalid_costs_and_fill_ratios():
+    import pytest
+
+    with pytest.raises(ValueError, match="costs"):
+        ReplayExecution(gross_pnl=1.0, fees=-0.1)
+    with pytest.raises(ValueError, match="fill ratio"):
+        ReplayExecution(gross_pnl=1.0, fill_ratio=1.1)
