@@ -160,7 +160,8 @@ def replay_chronologically(
             latency_cost=sum(item.latency_cost for item in executions),
             net_pnl=sum(item.net_pnl for item in executions),
             partial_fill_observations=sum(item.fill_ratio < 1.0 for item in executions),
-            mean_fill_ratio=sum(item.fill_ratio for item in executions) / len(executions),
+            mean_fill_ratio=sum(item.fill_ratio for item in executions)
+            / len(executions),
         )
     return ReplayReport(
         observations=count,
