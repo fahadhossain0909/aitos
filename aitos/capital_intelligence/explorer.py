@@ -50,6 +50,10 @@ class CapitalEntityExplorer:
                     observed_time
                 FROM {self.events_table} FINAL
                 WHERE actor_id != ''
+                  AND lower(actor_id) NOT IN (
+                      '0x0000000000000000000000000000000000000000',
+                      '0x000000000000000000000000000000000000dead'
+                  )
                   AND finality != 'reverted'
                   AND usd_value IS NOT NULL
                   AND JSONExtractString(
@@ -73,6 +77,10 @@ class CapitalEntityExplorer:
                     observed_time
                 FROM {self.events_table} FINAL
                 WHERE counterparty_id != ''
+                  AND lower(counterparty_id) NOT IN (
+                      '0x0000000000000000000000000000000000000000',
+                      '0x000000000000000000000000000000000000dead'
+                  )
                   AND actor_id != ''
                   AND finality != 'reverted'
                   AND usd_value IS NOT NULL
