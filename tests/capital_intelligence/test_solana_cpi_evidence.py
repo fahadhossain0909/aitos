@@ -101,3 +101,83 @@ def test_solana_native_transfer_evidence_ignores_unrelated_or_unparsed_instructi
     assert SolanaAddressActivityAdapter._system_transfer_evidence(
         message, "wallet"
     ) == []
+
+
+
+def test_solana_stake_delegate_and_withdraw_are_evidence_not_extra_flow():
+    wallet = "wallet-owner"
+    stake_account = "stake-account"
+    vote_account = "vote-account"
+    message = {
+        "instructions": [
+            {
+                "program": "stake",
+                "parsed": {
+                    "type": "delegate",
+                    "info": {
+                        "stakeAccount": stake_account,
+                        "voteAccount": vote_account,
+                        "authority": wallet,
+                    },
+                },
+            }
+        ],
+        "innerInstructions": [
+            {
+                "index": 0,
+                "instructions": [
+                    {
+                        "program": "stake",
+                        "parsed": {
+                            "type": "withdraw",
+                            "info": {
+                                "stakeAccount": stake_account,
+                                "destination": wallet,
+                                "withdrawAuthority": wallet,
+                                "lamports": 5000000,
+                            },
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    evidence = SolanaAddressActivityAdapter._stake_instruction_evidence(
+        message, wallet
+    )
+    assert len(evidence) == 2
+    assert evidence[0]["instruction_type"] == "delegate"
+    assert evidence[1]["instruction_type"] == "withdraw"
+    assert evidence[1]["raw_lamports"] == "5000000"
+    assert evidence[1]["is_cpi_or_inner_instruction"] is True
+    assert all(item["evidence_only"] is True for item in evidence)
+    assert all(
+        item["ownership_scope"]
+        == "instruction_account_reference_not_beneficial_owner_proof"
+        for item in evidence
+    )
+
+
+def test_solana_stake_evidence_ignores_unrelated_wallets_and_unparsed_instructions():
+    message = {
+        "instructions": [
+            {
+                "program": "stake",
+                "parsed": {
+                    "type": "delegate",
+                    "info": {"stakeAccount": "other", "voteAccount": "vote"},
+                },
+            },
+            {"program": "stake", "data": "opaque"},
+            {
+                "program": "system",
+                "parsed": {
+                    "type": "transfer",
+                    "info": {"source": "wallet", "destination": "other", "lamports": 1},
+                },
+            },
+        ]
+    }
+    assert SolanaAddressActivityAdapter._stake_instruction_evidence(
+        message, "wallet"
+    ) == []
