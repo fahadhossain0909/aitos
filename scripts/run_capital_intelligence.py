@@ -15,6 +15,9 @@ import clickhouse_connect
 import redis.asyncio as redis
 from neo4j import AsyncGraphDatabase
 
+from aitos.core.contracts import Event, EventPriority
+from aitos.eventbus.redis_bus import EventBus
+
 from aitos.capital_intelligence.binance import BinanceFuturesCapitalAdapter
 from aitos.capital_intelligence.binance_market import BinanceMarketStructureAdapter
 from aitos.capital_intelligence.cftc import CftcCotAdapter
@@ -34,6 +37,10 @@ from aitos.capital_intelligence.solana import SolanaAddressActivityAdapter
 from aitos.capital_intelligence.sec_edgar import SecEdgarFilingsAdapter
 from aitos.capital_intelligence.storage import ClickHouseCapitalStore
 from aitos.capital_intelligence.token_registry import TokenMetadata, TokenRegistry
+from aitos.world_intelligence.capital_flow import CapitalFlowIntelligenceAdapter
+from aitos.world_intelligence.lease import RedisSourceLeaseManager
+from aitos.world_intelligence.storage import ClickHouseIntelligenceStore
+from aitos.world_intelligence.worker import IntelligenceIngestionWorker
 
 LOG = logging.getLogger("aitos.cfei")
 
@@ -51,6 +58,23 @@ def _json_env(name: str, default: Any) -> Any:
 class _NoPriceBook:
     async def quote(self, asset_id: str, at):
         return None
+
+
+class _WorldIntelligenceEventSink:
+    """Publish normalized WI events through AITOS' canonical Redis EventBus."""
+
+    def __init__(self, event_bus: EventBus):
+        self.event_bus = event_bus
+
+    async def publish(self, topic: str, payload: dict[str, Any]) -> None:
+        await self.event_bus.publish(
+            Event(
+                topic=topic,
+                payload=dict(payload),
+                source_module="world-intelligence-cfei",
+                priority=EventPriority.NORMAL,
+            )
+        )
 
 
 def _render_metrics(counters: dict[str, Any]) -> bytes:
@@ -512,6 +536,48 @@ async def main() -> None:
         )
     )
     tasks = [asyncio.create_task(worker.run_forever()) for worker in workers]
+
+    wi_bridge_worker = None
+    wi_bridge_task = None
+    wi_event_bus = None
+    if os.getenv("AITOS_CFEI_WI_BRIDGE_ENABLED", "false").lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        wi_event_bus = EventBus(redis_client, module_id="cfei-world-intelligence-bus")
+        await wi_event_bus.initialize({})
+        wi_store = ClickHouseIntelligenceStore(
+            clickhouse, os.getenv("CLICKHOUSE_DATABASE", "aitos")
+        )
+        wi_adapter = CapitalFlowIntelligenceAdapter(
+            clickhouse=clickhouse,
+            database=os.getenv("CLICKHOUSE_DATABASE", "aitos"),
+            source_id=os.getenv(
+                "AITOS_CFEI_WI_BRIDGE_SOURCE_ID", "cfei-capital-flow"
+            ),
+            initial_lookback_hours=int(
+                os.getenv("AITOS_CFEI_WI_BRIDGE_INITIAL_LOOKBACK_HOURS", "24")
+            ),
+            max_events=int(os.getenv("AITOS_CFEI_WI_BRIDGE_MAX_EVENTS", "500")),
+        )
+        wi_lease_manager = RedisSourceLeaseManager(
+            redis_client, namespace="aitos:wiats:cfei-bridge:lease"
+        )
+        wi_bridge_worker = IntelligenceIngestionWorker(
+            [wi_adapter],
+            wi_store,
+            _WorldIntelligenceEventSink(wi_event_bus),
+            poll_interval_seconds=max(
+                1.0,
+                float(
+                    os.getenv("AITOS_CFEI_WI_BRIDGE_POLL_SECONDS", "30")
+                ),
+            ),
+            lease_manager=wi_lease_manager,
+        )
+        wi_bridge_task = asyncio.create_task(wi_bridge_worker.run_forever())
+        LOG.info("CFEI-to-World-Intelligence bridge worker enabled")
     LOG.info(
         "CFEI observer started with %s source workers and %s token registry entries",
         len(workers),
@@ -523,6 +589,12 @@ async def main() -> None:
     for task in tasks:
         task.cancel()
     await asyncio.gather(*tasks, return_exceptions=True)
+    if wi_bridge_worker is not None:
+        wi_bridge_worker.stop()
+    if wi_bridge_task is not None:
+        await asyncio.gather(wi_bridge_task, return_exceptions=True)
+    if wi_event_bus is not None:
+        await wi_event_bus.shutdown()
     metrics.cancel()
     await asyncio.gather(metrics, return_exceptions=True)
     for worker in workers:
