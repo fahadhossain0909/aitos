@@ -80,6 +80,13 @@ class LearningExperienceRecorder(AITOSModule):
             )
             self._subscriptions.append(
                 await self._event_bus.subscribe(
+                    "decision.adl_shadow_evaluated",
+                    self._on_adl_shadow,
+                    group=f"learning-{self._source}",
+                )
+            )
+            self._subscriptions.append(
+                await self._event_bus.subscribe(
                     "journal.management_decision_recorded",
                     self._on_management_decision,
                     group=f"learning-{self._source}",
@@ -140,6 +147,57 @@ class LearningExperienceRecorder(AITOSModule):
             await self._repository.save_learning_experience(record)
             self._records_written += 1
         self._seen_experience_ids.add(record.experience_id)
+
+    async def _on_adl_shadow(self, event: Event) -> EventResponse | None:
+        """Persist every ADL shadow observation for replay and later calibration."""
+        p = dict(event.payload)
+        decision_id = str(p.get("decision_id") or "")
+        candidate_id = str(p.get("candidate_id") or "")
+        symbol = str(p.get("symbol") or "unknown")
+        if not decision_id or not candidate_id or symbol == "unknown":
+            return None
+        probabilities = dict(p.get("probabilities") or {})
+        raw_probabilities = dict(p.get("raw_probabilities") or {})
+        record = ExperienceRecord(
+            timestamp=_event_time(event),
+            source=self._source,
+            symbol=symbol,
+            decision=str(p.get("scanner_direction") or "UNKNOWN"),
+            experience_id=self._stable_experience_id("adl_shadow", decision_id),
+            confidence=max(
+                (float(value) for value in probabilities.values()),
+                default=0.0,
+            ),
+            features={
+                "adl_probabilities": probabilities,
+                "adl_raw_probabilities": raw_probabilities,
+            },
+            market_state={
+                "adl_action": p.get("adl_action"),
+                "adl_proposed_action": p.get("adl_proposed_action"),
+                "calibrated": bool(p.get("calibrated", False)),
+                "expected_value": p.get("expected_value"),
+                "evidence_disagreement": p.get("evidence_disagreement"),
+            },
+            strategy_version="adl-shadow-v1",
+            model_version=str(p.get("model_id") or "unknown")
+            + ":"
+            + str(p.get("model_version") or "unknown"),
+            metadata={
+                "event_type": "adl_shadow_decision",
+                "decision_id": decision_id,
+                "candidate_id": candidate_id,
+                "snapshot_id": p.get("snapshot_id"),
+                "trace_id": p.get("trace_id"),
+                "reasons": list(p.get("reasons") or []),
+                "execution_eligible": False,
+                "shadow_mode": True,
+                "source_event_id": str(event.event_id),
+            },
+        )
+        await self._write(record)
+        self._last_event_time = event.created_at
+        return None
 
     async def _on_decision(self, event: Event) -> EventResponse | None:
         self._decision_events_received += 1
