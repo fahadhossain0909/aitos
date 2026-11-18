@@ -142,6 +142,7 @@ class CapitalEntityExplorer:
         if isinstance(event_limit, bool) or not 1 <= event_limit <= 500:
             raise ValueError("event_limit must be between 1 and 500")
 
+        entity_key = f"{chain}:{address}"
         events_result = await self.clickhouse.query(
             f"""
             SELECT payload_json
@@ -165,21 +166,21 @@ class CapitalEntityExplorer:
             SELECT subject_id, object_id, relation, evidence_type, evidence_ref,
                    observed_at, confidence, status
             FROM {self.evidence_table} FINAL
-            WHERE subject_id = {{address:String}} OR object_id = {{address:String}}
+            WHERE subject_id = {{entity_id:String}} OR object_id = {{entity_id:String}}
             ORDER BY observed_at DESC
             LIMIT 200
             """,
-            parameters={"address": address},
+            parameters={"entity_id": entity_key},
         )
         labels_result = await self.clickhouse.query(
             f"""
             SELECT label, category, source, verified, valid_from, valid_until
             FROM {self.labels_table} FINAL
-            WHERE entity_id = {{address:String}}
+            WHERE entity_id = {{entity_id:String}}
             ORDER BY valid_from DESC
             LIMIT 100
             """,
-            parameters={"address": address},
+            parameters={"entity_id": entity_key},
         )
 
         events = []
@@ -202,7 +203,7 @@ class CapitalEntityExplorer:
         return {
             "chain": chain,
             "address": address,
-            "entity_id": f"{chain}:{address}",
+            "entity_id": entity_key,
             "identity_status": "unverified_address",
             "beneficial_owner_verified": False,
             "events": events,
