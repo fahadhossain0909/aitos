@@ -202,7 +202,6 @@ async def test_graph_reorg_failure_blocks_cursor_commit():
     assert await checkpoints.load_cursor("evm-source") is None
 
 
-
 @pytest.mark.asyncio
 async def test_worker_marks_lease_contention_as_not_a_successful_poll():
     redis = FakeRedis()
