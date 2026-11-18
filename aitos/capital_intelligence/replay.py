@@ -9,7 +9,7 @@ from __future__ import annotations
 from bisect import bisect_left
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from math import isfinite
+from math import isfinite, log
 from typing import Iterable, Sequence
 
 from .contracts import CapitalEvent
@@ -235,3 +235,172 @@ def chronological_split(
         < test_start
     ]
     return train, test
+
+
+
+@dataclass(frozen=True, slots=True)
+class ProbabilityEvaluation:
+    sample_count: int
+    brier_score: float
+    log_loss: float
+    expected_calibration_error: float
+    precision: float
+    recall: float
+    f1_score: float
+    threshold: float
+
+
+def evaluate_probabilistic_predictions(
+    labels: Sequence[int],
+    probabilities: Sequence[float],
+    *,
+    threshold: float = 0.5,
+    calibration_bins: int = 10,
+) -> ProbabilityEvaluation:
+    """Evaluate explicitly calibrated predictions; heuristic ranks are not inputs."""
+    if not labels or len(labels) != len(probabilities):
+        raise ValueError("labels and probabilities must be non-empty and aligned")
+    if any(isinstance(label, bool) or label not in (0, 1) for label in labels):
+        raise ValueError("labels must contain only integer 0/1 outcomes")
+    if not isfinite(threshold) or not 0 < threshold < 1:
+        raise ValueError("threshold must be in (0, 1)")
+    if not 2 <= calibration_bins <= 50:
+        raise ValueError("calibration_bins must be between 2 and 50")
+    values = [float(value) for value in probabilities]
+    if any(not isfinite(value) or not 0 <= value <= 1 for value in values):
+        raise ValueError("probabilities must be finite and in [0, 1]")
+
+    epsilon = 1e-12
+    count = len(labels)
+    brier = sum((prob - label) ** 2 for label, prob in zip(labels, values)) / count
+    log_loss = -sum(
+        label * log(max(prob, epsilon))
+        + (1 - label) * log(max(1 - prob, epsilon))
+        for label, prob in zip(labels, values)
+    ) / count
+
+    calibration_error = 0.0
+    for index in range(calibration_bins):
+        lower = index / calibration_bins
+        upper = (index + 1) / calibration_bins
+        members = [
+            (label, prob)
+            for label, prob in zip(labels, values)
+            if lower <= prob < upper or (index == calibration_bins - 1 and prob == 1)
+        ]
+        if members:
+            observed = sum(label for label, _ in members) / len(members)
+            predicted = sum(prob for _, prob in members) / len(members)
+            calibration_error += len(members) / count * abs(observed - predicted)
+
+    predicted_positive = [prob >= threshold for prob in values]
+    true_positive = sum(
+        prediction and label == 1
+        for prediction, label in zip(predicted_positive, labels)
+    )
+    false_positive = sum(
+        prediction and label == 0
+        for prediction, label in zip(predicted_positive, labels)
+    )
+    false_negative = sum(
+        not prediction and label == 1
+        for prediction, label in zip(predicted_positive, labels)
+    )
+    precision = (
+        true_positive / (true_positive + false_positive)
+        if true_positive + false_positive
+        else 0.0
+    )
+    recall = (
+        true_positive / (true_positive + false_negative)
+        if true_positive + false_negative
+        else 0.0
+    )
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if precision + recall
+        else 0.0
+    )
+    return ProbabilityEvaluation(
+        count,
+        brier,
+        log_loss,
+        calibration_error,
+        precision,
+        recall,
+        f1,
+        threshold,
+    )
+
+
+def walk_forward_splits(
+    rows: Iterable[ReplayRow],
+    *,
+    n_splits: int = 3,
+    initial_train_fraction: float = 0.5,
+    embargo_seconds: int = 0,
+    max_quote_age_seconds: int = 30,
+) -> list[tuple[list[ReplayRow], list[ReplayRow]]]:
+    """Build expanding-window folds with horizon-aware purging and embargo."""
+    if not isinstance(n_splits, int) or not 1 <= n_splits <= 10:
+        raise ValueError("n_splits must be between 1 and 10")
+    if not 0.2 <= initial_train_fraction <= 0.8:
+        raise ValueError("initial_train_fraction must be in [0.2, 0.8]")
+    if not isinstance(embargo_seconds, int) or embargo_seconds < 0:
+        raise ValueError("embargo_seconds must be a non-negative integer")
+    if (
+        not isinstance(max_quote_age_seconds, int)
+        or max_quote_age_seconds < 0
+    ):
+        raise ValueError("max_quote_age_seconds must be a non-negative integer")
+    ordered = sorted(rows, key=lambda row: (row.event_time, row.event_id))
+    initial_size = int(len(ordered) * initial_train_fraction)
+    remaining = len(ordered) - initial_size
+    if initial_size < 1 or remaining < n_splits:
+        return []
+    fold_size = remaining // n_splits
+    folds = []
+    for index in range(n_splits):
+        start = initial_size + index * fold_size
+        end = len(ordered) if index == n_splits - 1 else start + fold_size
+        test = ordered[start:end]
+        if not test:
+            continue
+        test_start = test[0].event_time
+        train = [
+            row
+            for row in ordered[:start]
+            if row.forward_returns
+            and row.event_time
+            + timedelta(seconds=max(row.forward_returns))
+            + timedelta(seconds=max_quote_age_seconds + embargo_seconds)
+            < test_start
+        ]
+        folds.append((train, test))
+    return folds
+
+
+def summarize_replay_by_event_type(
+    rows: Iterable[ReplayRow],
+    *,
+    horizon_seconds: int,
+    fee_bps_per_side: float = 0.0,
+    spread_bps_round_trip: float = 0.0,
+    slippage_bps_per_side: float = 0.0,
+    funding_bps_per_8h: float = 0.0,
+) -> dict[str, ReplaySummary]:
+    """Return source-event ablation slices using the same explicit cost model."""
+    grouped: dict[str, list[ReplayRow]] = {}
+    for row in rows:
+        grouped.setdefault(row.event_type, []).append(row)
+    return {
+        event_type: summarize_replay(
+            group,
+            horizon_seconds=horizon_seconds,
+            fee_bps_per_side=fee_bps_per_side,
+            spread_bps_round_trip=spread_bps_round_trip,
+            slippage_bps_per_side=slippage_bps_per_side,
+            funding_bps_per_8h=funding_bps_per_8h,
+        )
+        for event_type, group in sorted(grouped.items())
+    }
