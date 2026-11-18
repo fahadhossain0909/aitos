@@ -9,6 +9,7 @@ import hmac
 import os
 import signal
 from typing import Any
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import clickhouse_connect
@@ -26,6 +27,7 @@ from aitos.capital_intelligence.dex import EvmDexSwapAdapter
 from aitos.capital_intelligence.dex_factory import EvmDexFactoryDiscoveryAdapter
 from aitos.capital_intelligence.enrichment import enrich_capital_event
 from aitos.capital_intelligence.explorer import CapitalEntityExplorer
+from aitos.capital_intelligence.contracts import EntityLabel
 from aitos.capital_intelligence.neo4j_graph import Neo4jEntityGraphStore
 from aitos.capital_intelligence.evm import EVMLogCapitalAdapter
 from aitos.capital_intelligence.evm_token_metadata import EvmTokenMetadataResolver
@@ -53,6 +55,76 @@ def _json_env(name: str, default: Any) -> Any:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
         raise RuntimeError(f"{name} must contain valid JSON") from exc
+
+
+def _configured_entity_labels(raw: Any) -> list[EntityLabel]:
+    """Parse explicit operator classifications without inferring wallet identity."""
+    if not isinstance(raw, list) or len(raw) > 5000:
+        raise ValueError("AITOS_CFEI_ENTITY_LABELS must be a list of at most 5000 items")
+    allowed_categories = {
+        "exchange",
+        "custodian",
+        "bridge",
+        "protocol",
+        "market_maker",
+        "treasury",
+        "staking",
+        "burn",
+        "other",
+    }
+    labels = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("each CFEI entity label must be an object")
+        chain = str(item.get("chain", "")).strip()
+        address = str(item.get("address", "")).strip()
+        category = str(item.get("category", "")).strip().lower()
+        label = str(item.get("label", "")).strip()
+        source = str(item.get("source", "")).strip()
+        verified = item.get("verified", False)
+        if (
+            not chain
+            or len(chain) > 64
+            or any(char.isspace() for char in chain)
+            or not address
+            or len(address) > 128
+            or any(char.isspace() for char in address)
+            or category not in allowed_categories
+            or not label
+            or not source
+            or not isinstance(verified, bool)
+        ):
+            raise ValueError("invalid CFEI operator entity label")
+        try:
+            valid_from = datetime.fromisoformat(
+                str(item["valid_from"]).replace("Z", "+00:00")
+            )
+            valid_until_raw = item.get("valid_until")
+            valid_until = (
+                datetime.fromisoformat(str(valid_until_raw).replace("Z", "+00:00"))
+                if valid_until_raw
+                else None
+            )
+        except (KeyError, TypeError, ValueError):
+            raise ValueError("CFEI entity labels require ISO-8601 validity dates") from None
+        if valid_from.tzinfo is None or (
+            valid_until is not None and valid_until.tzinfo is None
+        ):
+            raise ValueError("CFEI entity label timestamps must include a timezone")
+        labels.append(
+            EntityLabel(
+                entity_id=f"{chain}:{address}",
+                label=label,
+                category=category,
+                source=source,
+                verified=verified,
+                valid_from=valid_from.astimezone(timezone.utc),
+                valid_until=(
+                    valid_until.astimezone(timezone.utc) if valid_until else None
+                ),
+            )
+        )
+    return labels
 
 
 class _NoPriceBook:
@@ -319,6 +391,12 @@ async def main() -> None:
         clickhouse, os.getenv("CLICKHOUSE_DATABASE", "aitos")
     )
     await store.ensure_schema()
+    operator_labels = _configured_entity_labels(
+        _json_env("AITOS_CFEI_ENTITY_LABELS", [])
+    )
+    if operator_labels:
+        await store.append_entity_labels(operator_labels)
+        LOG.info("Loaded %s operator-supplied CFEI entity labels", len(operator_labels))
     checkpoints = RedisCheckpointStore(redis_client)
     graph_store = None
     if os.getenv("AITOS_CFEI_NEO4J_ENABLED", "false").lower() in {"1", "true", "yes"}:
