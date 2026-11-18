@@ -84,13 +84,13 @@ class CapitalFlowIntelligenceAdapter:
         observed_after, event_after = self._parse_cursor(cursor)
         # Use bound parameters for cursor values. FINAL resolves replacing versions
         # so reorg tombstones supersede earlier confirmed event rows.
-        query = f"""SELECT payload_json, observed_time, event_id
-        FROM {self.database}.capital_flow_events FINAL
+        query = """SELECT payload_json, observed_time, event_id
+        FROM __DATABASE__.capital_flow_events FINAL
         WHERE observed_time > parseDateTime64BestEffort(%(observed_after)s)
            OR (observed_time = parseDateTime64BestEffort(%(observed_after)s)
                AND event_id > %(event_after)s)
         ORDER BY observed_time ASC, event_id ASC
-        LIMIT %(limit)s"""
+        LIMIT %(limit)s""".replace("__DATABASE__", self.database)
         result = await self.clickhouse.query(
             query,
             parameters={
