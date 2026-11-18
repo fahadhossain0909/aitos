@@ -32,10 +32,17 @@ def assess_capital_behavior(
 ) -> BehaviorAssessment:
     if not entity_id.strip():
         raise ValueError("entity_id is required")
+    if ":" in entity_id:
+        venue, address = entity_id.split(":", 1)
+        matches_entity = lambda event: event.venue == venue and event.actor_id == address
+    else:
+        # Backward-compatible raw-address lookup; new callers should use
+        # chain-scoped IDs returned by the entity explorer/ranking API.
+        matches_entity = lambda event: event.actor_id == entity_id
     selected = [
         event
         for event in events
-        if event.actor_id == entity_id and event.usd_value is not None
+        if matches_entity(event) and event.usd_value is not None
     ]
     if not selected:
         raise ValueError("valued events for entity are required")
