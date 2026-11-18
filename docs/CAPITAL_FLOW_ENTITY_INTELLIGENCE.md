@@ -117,7 +117,7 @@ These are not claimed as implemented or validated by this PR:
 - Full DEX coverage across every protocol, pool factory and chain. V2/V3-compatible factory discovery and configured-pool swaps are implemented; V4 and protocol-specific variants remain unsupported. Discovered pools are never auto-activated.
 - Forex dealer positioning, exchange-specific institutional holdings and broader global disclosure ingestion. The CFTC adapter is schema-mapped and aggregate-only; dataset-specific field mapping, historical refresh and publication-calendar validation remain operator gates. SEC 13F-HR and Forms 3/4/5 are implemented, but production-scale CIK coverage and backfill are not yet validated.
 - A bounded, read-only, bearer-token-protected per-entity explorer API is implemented alongside the metrics listener. A dedicated entity dashboard, watchlist mutation workflow and external alert delivery remain open.
-- The World Intelligence adapter bridge and tests are implemented, but it is not yet wired into a production WI runtime/consumer. Scanner/AI Kernel feature integration remains deliberately disabled.
+- The CFEI-to-World-Intelligence bridge is optionally wired into a durable WI ingestion worker using the canonical AITOS Redis EventBus, ClickHouse WI store, Redis source leases and fenced cursor persistence. It remains disabled by default; forwarded events are neutral/advisory and Scanner/AI Kernel feature integration remains deliberately disabled.
 - Historical data backfill, replay, walk-forward evaluation, false-positive analysis, model calibration and measured predictive lift.
 - Production runtime deployment, provider-specific rate-budget tests, ClickHouse/Redis integration tests and operator runbooks for disaster recovery.
 
@@ -364,3 +364,21 @@ CFEI candidate ranking score is a heuristic and must not be passed as a
 probability or described as calibrated. No trained model, predictive lift,
 statistical significance or out-of-sample performance is claimed without
 real point-in-time historical datasets and completed fold reports.
+
+
+## 19. Optional World Intelligence bridge runtime
+
+Set `AITOS_CFEI_WI_BRIDGE_ENABLED=true` to start the CFEI-to-WI worker
+inside the observer process. It reads persisted CFEI rows using the adapter's
+observed-time/event-id cursor, writes normalized WI events to the dedicated
+World Intelligence ClickHouse tables, and publishes through the canonical
+AITOS Redis EventBus topic `intelligence.events.normalized`. The worker uses
+a separate Redis lease namespace and fenced cursor checkpoints. The source ID
+on each normalized WI event is stable for the adapter; the original CFEI
+source ID is retained in event metadata.
+
+The bridge is opt-in and does not start Scanner/AI Kernel subscriptions or
+change strategy, risk, sizing or execution. Forwarded sentiment is neutral;
+transfer direction is retained as metadata and is never promoted to news
+sentiment or buy/sell intent. It is safe to disable without affecting CFEI
+collection.
