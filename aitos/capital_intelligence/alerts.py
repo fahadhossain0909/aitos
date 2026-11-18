@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import secrets
 from typing import Any
 from urllib.parse import urlsplit
@@ -54,6 +53,8 @@ class CapitalFlowWebhookAlerter:
         identity_kind = metadata.get("actor_identity_kind")
         if (
             identity_kind not in {"evm_address", "solana_address"}
+            or metadata.get("aggregate_only") is True
+            or metadata.get("actor_is_pool_caller_not_verified_beneficial_owner") is True
             or getattr(event, "finality", "") == "reverted"
         ):
             return 0
