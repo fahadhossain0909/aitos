@@ -335,8 +335,9 @@ controls.
   last observation time. Bounds are 1-100 rows and offset 0-10,000.
 - `GET /v1/entities/{chain}/{address}` returns a bounded recent event history,
   persisted relationship evidence and temporal labels for one chain-scoped
-  address. Event history is capped at 500 rows; evidence and labels are capped
-  independently.
+  address. History includes both actor and counterparty perspectives, with an
+  entity-relative role and flow sign on each event. Event history is capped at
+  500 rows; evidence and labels are capped independently.
 
 The explorer reads ClickHouse with `FINAL`, excludes reverted events and
 filters aggregate cohorts and DEX pool-caller-only observations. Entity IDs
